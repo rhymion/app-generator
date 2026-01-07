@@ -10,3 +10,15 @@ datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
 }
+
+model reviews {
+  id        String    @id
+  title     String　
+  author    String　
+  price     Int　
+  publisher String　
+  published String　
+  image     String　
+  read      DateTime  @default(now())
+  memo      String
+}
