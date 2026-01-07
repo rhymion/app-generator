@@ -39,3 +39,4 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 * URL setting should not be in schema.prisma. It should only be in prisma.config.ts
 * npx prisma db push does not create files in app/generated/prisma. Successfully created with `npm install @prisma/client` and `npx prisma generate`
+* prisma.ts has an error in using PrismaClient. The constructor requires `accelerateUrl` as well as `log`. Unlike the [sample code](https://www.prisma.io/docs/guides/supabase-accelerate#6-send-queries-through-the-connection-pool), DATABASE_URL must be typed with `as string` to avoid error.
