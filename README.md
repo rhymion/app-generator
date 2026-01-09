@@ -45,3 +45,4 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
    * run `npm install @prisma/extension-accelerate` to install the library
    * set `PRISMA_DATABASE_URL` to `accelerateUrl` in prisma.ts (unlike in the [official doc](https://www.prisma.io/docs/accelerate/getting-started#24-extend-your-prisma-client-instance-with-the-accelerate-extension), the parameter is not `DATABASE_URL`. And it is necessary to type the parameter with `as string` to avoid error.)
    * run `npx prisma generate` to generate code for postgresql
+* `experimental.cacheComponents` has been moved to `cacheComponents`. So we updated next.config.ts file accordingly.

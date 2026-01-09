@@ -9,9 +9,7 @@ const nextConfig: NextConfig = {
     ]
   },
   // devIndicators: false,
-  experimental: {
-    cacheComponents: true,
-  },
+  cacheComponents: true,
 };
 
 export default nextConfig;
