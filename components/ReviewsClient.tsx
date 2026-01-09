@@ -1,8 +1,9 @@
-"use client";
+'use client';
 
 import React, { useEffect, useState } from 'react';
 import LinkedBookDetails from './LinkedBookDetails';
 import type { Review } from '@/lib/types';
+import { getAllReviews } from '@/lib/getters';
 
 export default function ReviewsClient() {
   const [reviews, setReviews] = useState<Review[] | null>(null);
@@ -10,12 +11,7 @@ export default function ReviewsClient() {
 
   useEffect(() => {
     let mounted = true;
-    fetch('/api/reviews')
-      .then((res) => {
-        if (!res.ok) throw new Error(`status:${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
+    getAllReviews().then((data) => {
         if (mounted) setReviews(data);
       })
       .catch((err) => {

@@ -1,22 +1,10 @@
+'use server';
+
 import prisma from '@/lib/prisma';
-import type { Book, BookApi, Review } from '@/lib/types';
+import type { Book, Review } from '@/lib/types';
+import { createBook } from '@/lib/createBook';
 
 const API_URL = 'https://www.googleapis.com/books/v1/volumes';
-
-export function createBook(book: BookApi): Book {
-  const authors = book.volumeInfo.authors;
-  const price = book.saleInfo.listPrice;
-  const img = book.volumeInfo.imageLinks;
-  return {
-    id: book.id,
-    title: book.volumeInfo.title,
-    author: authors ? authors.join(',') : '',
-    price: price ? price.amount : 0,
-    publisher: book.volumeInfo.publisher,
-    published: book.volumeInfo.publishedDate,
-    image: img?.smallThumbnail ?? '/vercel.svg',
-  };
-}
 
 export async function getBooksByKeyword(keyword: string): Promise<Book[]> {
   const res = await fetch(`${API_URL}?q=${keyword}&langRestrict=ja&maxResults=20&printType=books`, { cache: 'no-store' });
