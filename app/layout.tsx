@@ -11,9 +11,10 @@ export const metadata: Metadata = {
   description: '自分が読んだ書籍の記録を残すためのアプリ',
 };
 
-export default function RootLayout({ children, header, footer }: Readonly<{
+export default function RootLayout({ children, header, sidebar, footer }: Readonly<{
   children: React.ReactNode;
   header: React.ReactNode;
+  sidebar: React.ReactNode;
   footer: React.ReactNode;
 }>) 
 {
@@ -21,8 +22,11 @@ export default function RootLayout({ children, header, footer }: Readonly<{
     <html lang="ja">
       <body className={fnt.className}>
         <div>{ header }</div>
-        <div className="ml-2">
-          {children}
+        <div className="flex">
+          <div>{ sidebar }</div>
+          <div className="ml-2">
+            {children}
+          </div>
         </div>
         <div>{ footer }</div>
       </body>
