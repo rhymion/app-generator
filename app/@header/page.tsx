@@ -1,8 +1,32 @@
+"use client";
 import Link from "next/link";
+import { useSession, signOut } from "next-auth/react";
+
 export default function HeaderPage() {
+  const { data: session } = useSession();
   return <>
-    <h1 className="text-4xl text-indigo-800 font-bold my-2">
-      Reading Recorder</h1>
+    <div className="flex justify-between mx-2">
+      <h1 className="text-4xl text-indigo-800 font-bold my-2">
+        Reading Recorder</h1>
+      <ul className="flex items-center space-x-4">
+        {session?.user ? (
+          <>
+            <li className="block bg-blue-500 text-white px-4 py-2 my-1 hover:bg-blue-600 transition rounded">
+              <button
+                onClick={() => signOut({ callbackUrl: "/login" })}>
+                Sign Out</button></li>
+            <li className="text-sm text-gray-500">
+              {session.user?.name && <div>{session.user.name}</div>}
+              <div>{session.user?.email}</div>
+            </li>
+          </>
+        ) : (
+          <li className="block bg-blue-500 text-white px-4 py-2 my-1 hover:bg-blue-600 transition rounded">
+            <Link className="no-underline" href="/login">
+              Sign In</Link></li>
+        )}
+      </ul>
+    </div>
     <nav>
       <ul className="flex bg-blue-600 mb-4 pl-2">
         <li className="block px-4 py-2 my-1 hover:bg-gray-100 rounded">
@@ -17,9 +41,6 @@ export default function HeaderPage() {
         <li className="block text-blue-300 px-4 py-2 my-1 hover:bg-gray-100 rounded">
           <a className="no-underline text-blue-300"
             href="https://wings.msn.to/" target="_blank">Support</a></li>
-        <li className="block text-blue-300 px-4 py-2 my-1 hover:bg-gray-100 rounded">
-          <Link className="no-underline text-blue-300" href="/login">
-            Sign In</Link></li>
       </ul>
     </nav>
   </>;
