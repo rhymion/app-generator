@@ -1,4 +1,17 @@
+# About my-next
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+
+## Prerequisites
+1. Clone the repository
+   1. Create Github account if you don't
+   1. Generate SSH key pair and upload the public key to your Github account
+   1. Clone the repository with `git clone git@github.com:doreen-admin/my-next.git`
+1. Install npm
+1. Install node.js
+1. Install node modules by `npm install`
+1. Obtain environment information and prepare .env file
+1. Create database by `npx prisma db push` if you don't use existing one
+1. Generate code for database access by `npx prisma generate`
 
 ## Getting Started
 
