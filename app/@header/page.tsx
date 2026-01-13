@@ -4,29 +4,19 @@ import { useSession, signOut } from "next-auth/react";
 
 export default function HeaderPage() {
   const { data: session } = useSession();
-  return <>
-    <div className="flex justify-between mx-2">
-      <h1 className="text-4xl text-indigo-800 font-bold my-2">
-        Reading Recorder</h1>
-      <ul className="flex items-center space-x-4">
-        {session?.user ? (
-          <>
-            <li className="block bg-blue-500 text-white px-4 py-2 my-1 hover:bg-blue-600 transition rounded">
-              <button
-                onClick={() => signOut({ callbackUrl: "/login" })}>
-                Sign Out</button></li>
-            <li className="text-sm text-gray-500">
-              {session.user?.name && <div>{session.user.name}</div>}
-              <div>{session.user?.email}</div>
-            </li>
-          </>
-        ) : (
-          <li className="block bg-blue-500 text-white px-4 py-2 my-1 hover:bg-blue-600 transition rounded">
-            <Link className="no-underline" href="/login">
-              Sign In</Link></li>
-        )}
-      </ul>
-    </div>
+  const skeleton = function(session_components : React.ReactNode, menus : React.ReactNode) { 
+    return <>
+      <div className="flex justify-between mx-2">
+        <h1 className="text-4xl text-indigo-800 font-bold my-2">
+          Reading Recorder</h1>
+        <ul className="flex items-center space-x-4">
+          {session_components}
+        </ul>
+      </div>
+      {menus}
+    </>; 
+  };
+  const links = 
     <nav>
       <ul className="flex bg-blue-600 mb-4 pl-2">
         <li className="block px-4 py-2 my-1 hover:bg-gray-100 rounded">
@@ -42,6 +32,24 @@ export default function HeaderPage() {
           <a className="no-underline text-blue-300"
             href="https://wings.msn.to/" target="_blank">Support</a></li>
       </ul>
-    </nav>
+    </nav>;
+  const with_session = function(user: { name?: string | null; email?: string | null; }) {
+    return <><li className="block bg-blue-500 text-white px-4 py-2 my-1 hover:bg-blue-600 transition rounded">
+        <button
+          onClick={() => signOut({ callbackUrl: "/login" })}>
+          Sign Out</button></li>
+      <li className="text-sm text-gray-500">
+        {user.name && <div>{user.name}</div>}
+        <div>{user.email}</div>
+      </li>
+    </>;
+  };
+  const without_session = <li className="block bg-blue-500 text-white px-4 py-2 my-1 hover:bg-blue-600 transition rounded">
+    <Link className="no-underline" href="/login">
+      Sign In</Link></li>;
+
+  return <>
+    {session?.user ? skeleton(with_session(session.user), links) 
+    : skeleton(without_session, null)}
   </>;
 }
