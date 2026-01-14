@@ -10,21 +10,62 @@ datasource db {
   provider = "postgresql"
 }
 
-model User {
+model users {
   id       String  @id @default(cuid())
   name     String?
   email    String  @unique
   password String
+  api_key   String?
+  avatar   String?
+  reviews  reviews[]
+  assigned_issues issues[] @relation("AssignedTo")
+  created_issues  issues[] @relation("CreatedBy")
+  comments comments[]
+}
+
+model books {
+  id        String   @id @default(cuid())
+  title     String
+  author    String
+  price     Int
+  publisher String
+  published String
+  image     String
+  reviews   reviews[]
 }
 
 model reviews {
-  id        String    @id
-  title     String　
-  author    String　
-  price     Int　
-  publisher String　
-  published String　
-  image     String　
-  read      DateTime  @default(now())
+  id        String   @id @default(cuid())
   memo      String
+  read      DateTime @default(now())
+  book_id    String
+  book       books     @relation(fields: [book_id], references: [id])
+  author_id  String
+  author     users     @relation(fields: [author_id], references: [id])
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model issues {
+  id           String     @id @default(cuid())
+  title        String
+  description  String 
+  assigned_to_id String?
+  assigned_to    users?      @relation("AssignedTo", fields: [assigned_to_id], references: [id])
+  created_by_id  String
+  created_by   users       @relation("CreatedBy", fields: [created_by_id], references: [id])
+  created_at   DateTime   @default(now())
+  updated_at   DateTime   @updatedAt
+  comments     comments[]
+}
+
+model comments {
+  id        String   @id @default(cuid())
+  comment   String
+  issue_id   String
+  issue     issues   @relation(fields: [issue_id], references: [id])
+  created_by_id String
+  created_by    users   @relation(fields: [created_by_id], references: [id])
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
 }

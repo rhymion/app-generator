@@ -17,17 +17,27 @@ export async function getBooksByKeyword(keyword: string): Promise<Book[]> {
 }
 
 export async function getAllReviews(): Promise<Review[]> {
-  return await prisma.reviews.findMany({
+  const reviewsData = await prisma.reviews.findMany({
+    include: {
+      book: true,
+      author: true,
+    },
     orderBy: {
       read: 'desc'
     },
-    // where: {
-    //   OR: [
-    //     { title: { contains: '入門' } },
-    //     { price: { lt: 5000 } },
-    //   ],
-    // }
   });
+
+  return reviewsData.map((review) => ({
+    id: review.id,
+    title: review.book.title,
+    author: review.book.author,
+    price: review.book.price,
+    publisher: review.book.publisher,
+    published: review.book.published,
+    image: review.book.image,
+    read: review.read,
+    memo: review.memo,
+  }));
 }
 
 export async function getBookById(id: string): Promise<Book> {
@@ -37,9 +47,26 @@ export async function getBookById(id: string): Promise<Book> {
 }
 
 export async function getReviewById(id: string): Promise<Review | null> {
-  return await prisma.reviews.findUnique({
+  const review = await prisma.reviews.findUnique({
     where: {
       id: id
-    }
+    },
+    include: {
+      book: true,
+    },
   });
+
+  if (!review) return null;
+
+  return {
+    id: review.id,
+    title: review.book.title,
+    author: review.book.author,
+    price: review.book.price,
+    publisher: review.book.publisher,
+    published: review.book.published,
+    image: review.book.image,
+    read: review.read,
+    memo: review.memo,
+  };
 }
