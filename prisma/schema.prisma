@@ -19,9 +19,6 @@ model users {
   api_key   String?
   avatar   String?
   reviews  reviews[]
-  assigned_issues issues[] @relation("AssignedTo")
-  created_issues  issues[] @relation("CreatedBy")
-  comments comments[]
 }
 
 model books {
@@ -45,28 +42,4 @@ model reviews {
   author     users     @relation(fields: [author_id], references: [id])
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
-}
-
-model issues {
-  id           String     @id @default(cuid())
-  title        String
-  description  String 
-  assigned_to_id String?
-  assigned_to    users?      @relation("AssignedTo", fields: [assigned_to_id], references: [id])
-  created_by_id  String
-  created_by   users       @relation("CreatedBy", fields: [created_by_id], references: [id])
-  created_at   DateTime   @default(now())
-  updated_at   DateTime   @updatedAt
-  comments     comments[]
-}
-
-model comments {
-  id        String   @id @default(cuid())
-  comment   String
-  issue_id   String
-  issue     issues   @relation(fields: [issue_id], references: [id])
-  created_by_id String
-  created_by    users   @relation(fields: [created_by_id], references: [id])
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
 }
