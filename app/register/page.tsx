@@ -19,7 +19,7 @@ export default function RegisterPage() {
       });
 
       if (signInResult?.error) {
-        setError("Failed to sign in after registration");
+        setError("Email address is already in use");
         return;
       }
 

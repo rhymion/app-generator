@@ -139,7 +139,7 @@ describe("RegisterPage", () => {
 
     // Should show error message
     await waitFor(() => {
-      expect(screen.getByText("Failed to sign in after registration")).toBeInTheDocument();
+      expect(screen.getByText("Email address is already in use")).toBeInTheDocument();
     });
 
     // Should not navigate
