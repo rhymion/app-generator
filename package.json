@@ -39,7 +39,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.1-canary.15",
     "jsdom": "^27.4.0",
-    "prisma": "^6.19.2",
+    "prisma": "^7.2.0",
     "tailwindcss": "^4.1.18",
     "typescript": "^5",
     "vitest": "^4.0.17"
