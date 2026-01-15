@@ -37,6 +37,7 @@ export async function getAllReviews(): Promise<Review[]> {
     image: review.book.image,
     read: review.read,
     memo: review.memo,
+    bookId: review.book.id,
   }));
 }
 
@@ -68,5 +69,6 @@ export async function getReviewById(id: string): Promise<Review | null> {
     image: review.book.image,
     read: review.read,
     memo: review.memo,
+    bookId: review.book.id,
   };
 }

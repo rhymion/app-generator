@@ -6,12 +6,18 @@ import type { EditPageProps } from '@/lib/types';
 
 export default async function EditPage({ params }: EditPageProps) {
   const { id } = await params;
-  const book = await getBookById(id);
   const review = await getReviewById(id);
+  const book = review ? {
+    id: review.bookId,
+    title: review.title,
+    author: review.author,
+    price: review.price,
+    publisher: review.publisher,
+    published: review.published,
+    image: review.image,
+  } : await getBookById(id);
+
   const read = (review?.read || new Date()).toLocaleDateString('sv-SE');
-  // const read = (review?.read || new Date()).toLocaleDateString('ja-JP',
-  //   { year: 'numeric', month: '2-digit', day: '2-digit' }
-  // ).replaceAll('/', '-')
   return (
     <div id="form">
       <BookDetails book={book} />

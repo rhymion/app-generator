@@ -21,6 +21,7 @@ export type BookApi = {
 export type Review = Book & {
   read: Date;
   memo: string;
+  bookId: string;
 };
 
 export type Book = {
