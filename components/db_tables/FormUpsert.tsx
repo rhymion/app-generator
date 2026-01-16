@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { DataGrid, GridColDef, GridRowsProp, useGridApiRef } from '@mui/x-data-grid';
+import { useState } from 'react';
+import { DataGrid, GridColDef, GridRowsProp, useGridApiRef, GridRowId } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
@@ -24,6 +24,11 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const [fields, setFields] = useState<GridRowsProp>(src.fields.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` })));
   const apiRef = useGridApiRef();
 
+  const processRowUpdate = (newRow: any, oldRow: any) => {
+    setFields(prev => prev.map(row => row.id === newRow.id ? newRow : row));
+    return newRow;
+  };
+
   const columns: GridColDef[] = [
     { field: 'name', headerName: 'Name', width: 150, editable: true },
     { field: 'max_length', headerName: 'Max Length', width: 120, editable: true, type: 'number' },
@@ -33,6 +38,14 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   ];
 
   const addField = () => {
+    // Commit any pending row edit
+    const api = apiRef.current;
+    if (api) {
+      const editingRowId = api.getAllRowIds().find(id => api.getRowMode(id) === 'edit');
+      if (editingRowId) {
+        api.stopRowEditMode({ id: editingRowId, ignoreModifications: false });
+      }
+    }
     const newField = {
       id: `temp-${Date.now()}-${Math.random()}`,
       name: '',
@@ -75,14 +88,6 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     await removeDbTable(formData);
   };
 
-  const handleCellEditStop = (params: any) => {
-    const { id, field } = params;
-    if (apiRef.current) {
-      const value = apiRef.current.getCellValue(id, field);
-      setFields(prev => prev.map(row => row.id === id ? { ...row, [field]: value } : row));
-    }
-  };
-
   return (
     <div>
       <h1>{isEdit ? 'Edit' : 'Add'} DB Table</h1>
@@ -109,7 +114,8 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
             apiRef={apiRef}
             rows={fields}
             columns={columns}
-            onCellEditStop={handleCellEditStop}
+            editMode="row"
+            processRowUpdate={processRowUpdate}
             checkboxSelection
           />
         </Paper>
