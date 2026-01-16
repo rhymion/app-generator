@@ -1,0 +1,127 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { DataGrid, GridColDef, GridRowsProp, useGridApiRef } from '@mui/x-data-grid';
+import Paper from '@mui/material/Paper';
+import Button from '@mui/material/Button';
+import TextField from '@mui/material/TextField';
+import { upsertDbTable, removeDbTable } from '@/lib/db_tables/actions';
+import type { Field } from '@/lib/db_tables/types';
+
+interface FormUpsertProps {
+  src: {
+    id: string;
+    name: string;
+    description: string | null;
+    fields: Field[];
+  };
+  isEdit: boolean;
+}
+
+export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
+  const [name, setName] = useState(src.name);
+  const [description, setDescription] = useState(src.description || '');
+  const [fields, setFields] = useState<GridRowsProp>(src.fields.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` })));
+  const apiRef = useGridApiRef();
+
+  const columns: GridColDef[] = [
+    { field: 'name', headerName: 'Name', width: 150, editable: true },
+    { field: 'max_length', headerName: 'Max Length', width: 120, editable: true, type: 'number' },
+    { field: 'max', headerName: 'Max', width: 100, editable: true, type: 'number' },
+    { field: 'regex', headerName: 'Regex', width: 150, editable: true },
+    { field: 'required', headerName: 'Required', width: 100, editable: true, type: 'boolean' },
+  ];
+
+  const addField = () => {
+    const newField = {
+      id: `temp-${Date.now()}-${Math.random()}`,
+      name: '',
+      table_id: src.id,
+      max_length: null,
+      max: null,
+      regex: null,
+      required: false,
+    };
+    setFields(prev => [...prev, newField]);
+  };
+
+  const removeField = (id: string) => {
+    setFields(prev => prev.filter(row => row.id !== id));
+  };
+
+  const handleSubmit = async (formData: FormData) => {
+    formData.set('name', name);
+    formData.set('description', description);
+    if (isEdit) {
+      formData.set('id', src.id);
+    }
+    // Serialize fields
+    fields.forEach((field, index) => {
+      formData.append('fields[]', JSON.stringify({
+        id: field.id.startsWith('temp-') ? undefined : field.id,
+        name: field.name,
+        max_length: field.max_length,
+        max: field.max,
+        regex: field.regex,
+        required: field.required,
+      }));
+    });
+    await upsertDbTable(formData);
+  };
+
+  const handleDelete = async () => {
+    const formData = new FormData();
+    formData.set('id', src.id);
+    await removeDbTable(formData);
+  };
+
+  const handleCellEditStop = (params: any) => {
+    const { id, field } = params;
+    if (apiRef.current) {
+      const value = apiRef.current.getCellValue(id, field);
+      setFields(prev => prev.map(row => row.id === id ? { ...row, [field]: value } : row));
+    }
+  };
+
+  return (
+    <div>
+      <h1>{isEdit ? 'Edit' : 'Add'} DB Table</h1>
+      <form action={handleSubmit}>
+        <TextField
+          label="Name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          fullWidth
+          margin="normal"
+          required
+        />
+        <TextField
+          label="Description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          fullWidth
+          margin="normal"
+        />
+        <h2>Fields</h2>
+        <Button onClick={addField} variant="contained" sx={{ mb: 2 }}>Add Field</Button>
+        <Paper sx={{ height: 400, width: '100%' }}>
+          <DataGrid
+            apiRef={apiRef}
+            rows={fields}
+            columns={columns}
+            onCellEditStop={handleCellEditStop}
+            checkboxSelection
+          />
+        </Paper>
+        <Button type="submit" variant="contained" sx={{ mt: 2, mr: 2 }}>
+          {isEdit ? 'Update' : 'Create'}
+        </Button>
+        {isEdit && (
+          <Button onClick={handleDelete} variant="contained" color="error" sx={{ mt: 2 }}>
+            Delete
+          </Button>
+        )}
+      </form>
+    </div>
+  );
+}

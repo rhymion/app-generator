@@ -29,3 +29,13 @@ export type DbTableDetailPageProps = Readonly<{
     id: string;
   }>
 }>;
+
+export type FormUpsertProps = Readonly<{
+  src: {
+    id: string;
+    name: string;
+    description: string | null;
+    fields: Field[];
+  };
+  isEdit: boolean;
+}>;
