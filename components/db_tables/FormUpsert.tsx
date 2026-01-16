@@ -24,9 +24,30 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const [fields, setFields] = useState<GridRowsProp>(src.fields.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` })));
   const apiRef = useGridApiRef();
 
-  const processRowUpdate = (newRow: any, oldRow: any) => {
+  function processRowUpdate(newRow: any, oldRow: any) {
     setFields(prev => prev.map(row => row.id === newRow.id ? newRow : row));
     return newRow;
+  }
+
+  function moveRowUp(index: number) {
+    setFields(prev => {
+      const newFields = [...prev];
+      [newFields[index - 1], newFields[index]] = [newFields[index], newFields[index - 1]];
+      return newFields;
+    });
+  }
+
+  function moveRowDown(index: number) {
+    setFields(prev => {
+      const newFields = [...prev];
+      [newFields[index], newFields[index + 1]] = [newFields[index + 1], newFields[index]];
+      return newFields;
+    });
+  }
+
+  const deleteSelected = () => {
+    const selectedRows = apiRef.current?.getSelectedRows() || new Map();
+    setFields(prev => prev.filter(row => !selectedRows.has(row.id)));
   };
 
   const columns: GridColDef[] = [
@@ -35,6 +56,24 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     { field: 'max', headerName: 'Max', width: 100, editable: true, type: 'number' },
     { field: 'regex', headerName: 'Regex', width: 150, editable: true },
     { field: 'required', headerName: 'Required', width: 100, editable: true, type: 'boolean' },
+    {
+      field: 'actions',
+      headerName: 'Actions',
+      width: 120,
+      renderCell: (params) => {
+        const index = fields.findIndex(f => f.id === params.id);
+        return (
+          <>
+            {index > 0 && (
+              <Button size="small" onClick={() => moveRowUp(index)}>↑</Button>
+            )}
+            {index < fields.length - 1 && (
+              <Button size="small" onClick={() => moveRowDown(index)}>↓</Button>
+            )}
+          </>
+        );
+      },
+    },
   ];
 
   const addField = () => {
@@ -108,7 +147,8 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
           margin="normal"
         />
         <h2>Fields</h2>
-        <Button onClick={addField} variant="contained" sx={{ mb: 2 }}>Add Field</Button>
+        <Button onClick={addField} variant="contained" sx={{ mb: 2, mr: 2 }}>Add Field</Button>
+        <Button onClick={deleteSelected} variant="contained" color="error" sx={{ mb: 2 }}>Delete Selected</Button>
         <Paper sx={{ height: 400, width: '100%' }}>
           <DataGrid
             apiRef={apiRef}
