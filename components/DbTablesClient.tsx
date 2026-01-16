@@ -13,7 +13,7 @@ const columns: GridColDef<DbTable>[] = [
   {
     field: 'description',
     headerName: 'Description',
-    width: 300,
+    width: 600,
   },
 ];
 
@@ -25,12 +25,12 @@ interface DbTablesClientProps {
 
 export default function DbTablesClient({ dbTables }: DbTablesClientProps) {
   return (
-    <Paper sx={{ height: 400, width: '100%' }}>
+    <Paper sx={{ height: 500, width: '100%' }}>
       <DataGrid
         rows={dbTables}
         columns={columns}
         initialState={{ pagination: { paginationModel } }}
-        pageSizeOptions={[5, 10]}
+        pageSizeOptions={[10, 20]}
         checkboxSelection
         sx={{ border: 0 }}
       />
