@@ -106,23 +106,34 @@ async function updateDbTable(id: string, name: string, description: string | nul
   });
 }
 
-export async function removeDbTable(data: FormData) {
+export async function removeDbTable(data: FormData | string[]) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
     throw new Error('User not authenticated');
   }
 
-  const id = data.get('id') as string;
-
-  await prisma.$transaction(async (tx) => {
-    await tx.fields.deleteMany({
-      where: { table_id: id },
+  if (Array.isArray(data)) {
+    for (const id of data) {
+      await prisma.$transaction(async (tx) => {
+        await tx.fields.deleteMany({
+          where: { table_id: id },
+        });
+        await tx.db_tables.delete({
+          where: { id },
+        });
+      });
+    }
+  } else {
+    const id = data.get('id') as string;
+    await prisma.$transaction(async (tx) => {
+      await tx.fields.deleteMany({
+        where: { table_id: id },
+      });
+      await tx.db_tables.delete({
+        where: { id },
+      });
     });
-
-    await tx.db_tables.delete({
-      where: { id },
-    });
-  });
+  }
 
   revalidatePath('/');
   redirect('/db_tables');
