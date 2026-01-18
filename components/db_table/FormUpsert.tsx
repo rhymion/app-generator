@@ -5,8 +5,8 @@ import { DataGrid, GridColDef, GridRowsProp, useGridApiRef, GridRowId } from '@m
 import Paper from '@mui/material/Paper';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
-import { upsertDbTable, removeDbTable } from '@/lib/db_tables/actions';
-import type { Field } from '@/lib/db_tables/types';
+import { upsertDbTable, removeDbTable } from '@/lib/db_table/actions';
+import type { Field } from '@/lib/db_table/types';
 
 interface FormUpsertProps {
   src: {
@@ -52,6 +52,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
 
   const columns: GridColDef[] = [
     { field: 'name', headerName: 'Name', width: 150, editable: true },
+    { field: 'type', headerName: 'Type', width: 100, editable: true },
     { field: 'max_length', headerName: 'Max Length', width: 120, editable: true, type: 'number' },
     { field: 'max', headerName: 'Max', width: 100, editable: true, type: 'number' },
     { field: 'regex', headerName: 'Regex', width: 150, editable: true },
@@ -88,6 +89,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     const newField = {
       id: `temp-${Date.now()}-${Math.random()}`,
       name: '',
+      type: 'string',
       table_id: src.id,
       max_length: null,
       max: null,
@@ -112,6 +114,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
       formData.append('fields[]', JSON.stringify({
         id: field.id.startsWith('temp-') ? undefined : field.id,
         name: field.name,
+        type: field.type,
         max_length: field.max_length,
         max: field.max,
         regex: field.regex,

@@ -16,7 +16,7 @@ export async function upsertDbTable(data: FormData) {
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
   const fieldsRaw = data.getAll('fields[]') as string[];
-  const fields = fieldsRaw.map(f => JSON.parse(f) as { id?: string; name: string; table_id?: string; max_length?: number | null; max?: number | null; regex?: string | null; required: boolean });
+  const fields = fieldsRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string;table_id?: string; max_length?: number | null; max?: number | null; regex?: string | null; required: boolean });
 
   if (id) {
     await updateDbTable(id, name, description, fields);
@@ -25,20 +25,21 @@ export async function upsertDbTable(data: FormData) {
   }
 
   revalidatePath('/');
-  redirect('/db_tables');
+  redirect('/db_table');
 }
 
-async function addDbTable(name: string, description: string | null, fields: { name: string; max_length?: number | null; max?: number | null; regex?: string | null; required: boolean }[]) {
+async function addDbTable(name: string, description: string | null, fields: { name: string; type: string; max_length?: number | null; max?: number | null; regex?: string | null; required: boolean }[]) {
   await prisma.$transaction(async (tx) => {
-    const newTable = await tx.db_tables.create({
+    const newTable = await tx.db_table.create({
       data: { name, description },
     });
     const tableId = newTable.id;
 
     if (fields.length > 0) {
-      await tx.fields.createMany({
+      await tx.field.createMany({
         data: fields.map(f => ({
           name: f.name,
+          type: f.type,
           table_id: tableId,
           max_length: f.max_length,
           max: f.max,
@@ -50,16 +51,16 @@ async function addDbTable(name: string, description: string | null, fields: { na
   });
 }
 
-async function updateDbTable(id: string, name: string, description: string | null, fields: { id?: string; name: string; max_length?: number | null; max?: number | null; regex?: string | null; required: boolean }[]) {
+async function updateDbTable(id: string, name: string, description: string | null, fields: { id?: string; name: string; type: string; max_length?: number | null; max?: number | null; regex?: string | null; required: boolean }[]) {
   await prisma.$transaction(async (tx) => {
     // Update db_table
-    await tx.db_tables.update({
+    await tx.db_table.update({
       where: { id },
       data: { name, description },
     });
 
     // Get existing fields
-    const existingFields = await tx.fields.findMany({
+    const existingFields = await tx.field.findMany({
       where: { table_id: id },
     });
 
@@ -69,7 +70,7 @@ async function updateDbTable(id: string, name: string, description: string | nul
 
     // Update existing fields
     for (const field of fieldsToUpsert) {
-      await tx.fields.update({
+      await tx.field.update({
         where: { id: field.id! },
         data: {
           name: field.name,
@@ -83,9 +84,10 @@ async function updateDbTable(id: string, name: string, description: string | nul
 
     // Create new fields
     if (fieldsToCreate.length > 0) {
-      await tx.fields.createMany({
+      await tx.field.createMany({
         data: fieldsToCreate.map(f => ({
           name: f.name,
+          type: f.type,
           table_id: id,
           max_length: f.max_length,
           max: f.max,
@@ -99,7 +101,7 @@ async function updateDbTable(id: string, name: string, description: string | nul
     const newFieldIds = fields.filter(f => f.id).map(f => f.id!);
     const fieldsToDelete = existingFields.filter(ef => !newFieldIds.includes(ef.id));
     if (fieldsToDelete.length > 0) {
-      await tx.fields.deleteMany({
+      await tx.field.deleteMany({
         where: { id: { in: fieldsToDelete.map(f => f.id) } },
       });
     }
@@ -115,10 +117,10 @@ export async function removeDbTable(data: FormData | string[]) {
   if (Array.isArray(data)) {
     for (const id of data) {
       await prisma.$transaction(async (tx) => {
-        await tx.fields.deleteMany({
+        await tx.field.deleteMany({
           where: { table_id: id },
         });
-        await tx.db_tables.delete({
+        await tx.db_table.delete({
           where: { id },
         });
       });
@@ -126,15 +128,15 @@ export async function removeDbTable(data: FormData | string[]) {
   } else {
     const id = data.get('id') as string;
     await prisma.$transaction(async (tx) => {
-      await tx.fields.deleteMany({
+      await tx.field.deleteMany({
         where: { table_id: id },
       });
-      await tx.db_tables.delete({
+      await tx.db_table.delete({
         where: { id },
       });
     });
   }
 
   revalidatePath('/');
-  redirect('/db_tables');
+  redirect('/db_table');
 }

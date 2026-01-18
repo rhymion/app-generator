@@ -3,17 +3,17 @@ import { useState, useTransition } from 'react';
 import { DataGrid, GridColDef, useGridApiRef } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
 import Button from '@mui/material/Button';
-import { removeDbTable } from '@/lib/db_tables/actions';
-import type { DbTable } from '@/lib/db_tables/types';
+import { removeDbTable } from '@/lib/db_table/actions';
+import type { DbTable } from '@/lib/db_table/types';
 
 const paginationModel = { page: 0, pageSize: 5 };
 
-interface DbTablesClientProps {
-  dbTables: DbTable[];
+interface DbTableClientProps {
+  src: DbTable[];
 }
 
-export default function DbTablesClient({ dbTables }: DbTablesClientProps) {
-  const [tables, setTables] = useState(dbTables);
+export default function DbTableClient({ src }: DbTableClientProps) {
+  const [tables, setTables] = useState(src);
   const [isPending, startTransition] = useTransition();
   const apiRef = useGridApiRef();
 

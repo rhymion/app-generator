@@ -1,4 +1,4 @@
-import FormUpsert from '@/components/db_tables/FormUpsert';
+import FormUpsert from '@/components/db_table/FormUpsert';
 
 export default function AddDbTablePage() {
   const src = {

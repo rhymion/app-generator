@@ -43,20 +43,25 @@ model reviews {
   updated_at DateTime @updatedAt
 }
 
-model db_tables {
+model db_table {
   id           String   @id @default(cuid())
   name         String   @unique
   description  String? 
-  fields       fields[]
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  fields       field[]
 }
 
-model fields {
+model field {
   id          String   @id @default(cuid())
   name        String
+  type        String
   table_id    String     
-  table       db_tables @relation(fields: [table_id], references: [id])
+  table       db_table @relation(fields: [table_id], references: [id])
   max_length  Int?
   max         Int?
   regex       String?
   required    Boolean   @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 }

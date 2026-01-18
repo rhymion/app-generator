@@ -1,5 +1,5 @@
-import FormUpsert from '@/components/db_tables/FormUpsert';
-import { getDbTableDetail } from '@/lib/db_tables/getters';
+import FormUpsert from '@/components/db_table/FormUpsert';
+import { getDbTableDetail } from '@/lib/db_table/getters';
 import { notFound } from 'next/navigation';
 
 interface EditPageProps {

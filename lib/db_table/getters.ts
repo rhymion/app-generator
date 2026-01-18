@@ -1,10 +1,10 @@
 'use server';
 
 import prisma from '@/lib/prisma';
-import type { DbTable, DbTableDetail, Field } from '@/lib/db_tables/types';
+import type { DbTable, DbTableDetail, Field } from '@/lib/db_table/types';
 
 export async function getAllDbTables(): Promise<DbTable[]> {
-  const dbTables = await prisma.db_tables.findMany();
+  const dbTables = await prisma.db_table.findMany();
   return dbTables.map((dbTable) => ({
     id: dbTable.id,
     name: dbTable.name,
@@ -13,7 +13,7 @@ export async function getAllDbTables(): Promise<DbTable[]> {
 }
 
 export async function getDbTableDetail(id: string): Promise<DbTableDetail | null> {
-  const dbTable = await prisma.db_tables.findUnique({
+  const dbTable = await prisma.db_table.findUnique({
     where: { id },
     include: { fields: true },
   });
@@ -29,6 +29,7 @@ export async function getDbTableDetail(id: string): Promise<DbTableDetail | null
     fields: dbTable.fields.map((field) => ({
       id: field.id,
       name: field.name,
+      type: field.type,
       table_id: field.table_id,
       max_length: field.max_length,
       max: field.max,
