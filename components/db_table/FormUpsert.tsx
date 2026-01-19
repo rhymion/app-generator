@@ -5,6 +5,11 @@ import { DataGrid, GridColDef, GridRowsProp, useGridApiRef, GridRowId } from '@m
 import Paper from '@mui/material/Paper';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogContentText from '@mui/material/DialogContentText';
+import DialogActions from '@mui/material/DialogActions';
 import { upsertDbTable, removeDbTable } from '@/lib/db_table/actions';
 import type { FormUpsertProps } from '@/lib/db_table/types';
 import Link from '@mui/material/Link';
@@ -18,6 +23,9 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     pageSize: 10,
     page: 0,
   });
+  const [openDeleteSelectedDialog, setOpenDeleteSelectedDialog] = useState(false);
+  const [openDeleteTableDialog, setOpenDeleteTableDialog] = useState(false);
+  const [openBackDialog, setOpenBackDialog] = useState(false);
 
   function processRowUpdate(newRow: any, oldRow: any) {
     setFields(prev => prev.map(row => row.id === newRow.id ? newRow : row));
@@ -40,9 +48,16 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     });
   }
 
-  const deleteSelected = () => {
+  const deleteSelectedConfirmed = () => {
     const selectedRows = apiRef.current?.getSelectedRows() || new Map();
     setFields(prev => prev.filter(row => !selectedRows.has(row.id)));
+    setOpenDeleteSelectedDialog(false);
+  };
+
+  const deleteSelected = () => {
+    const selectedRows = apiRef.current?.getSelectedRows() || new Map();
+    if (selectedRows.size === 0) return;
+    setOpenDeleteSelectedDialog(true);
   };
 
   const columns: GridColDef[] = [
@@ -115,17 +130,23 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     await upsertDbTable(formData);
   };
 
-  const handleDelete = async () => {
+  const handleDeleteConfirmed = async () => {
     const formData = new FormData();
     formData.set('id', src.id);
     await removeDbTable(formData);
+    setOpenDeleteTableDialog(false);
+  };
+
+  const handleBackConfirmed = () => {
+    setOpenBackDialog(false);
+    window.location.href = '/db_table';
   };
 
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <h1>{isEdit ? 'Edit' : 'Add'} DB Table</h1>
-        <Link href="/db_table"><Button variant="outlined">Back to List</Button></Link>
+        <Button variant="outlined" onClick={() => setOpenBackDialog(true)}>Back to List</Button>
       </div>
       <form action={handleSubmit}>
         <TextField
@@ -163,11 +184,65 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
           Save
         </Button>
         {isEdit && (
-          <Button onClick={handleDelete} variant="contained" color="error" sx={{ mt: 2 }}>
+          <Button onClick={() => setOpenDeleteTableDialog(true)} variant="contained" color="error" sx={{ mt: 2 }}>
             Delete Table
           </Button>
         )}
       </form>
+
+      {/* Delete Selected Dialog */}
+      <Dialog
+        open={openDeleteSelectedDialog}
+        onClose={() => setOpenDeleteSelectedDialog(false)}
+        aria-labelledby="delete-selected-dialog-title"
+      >
+        <DialogTitle id="delete-selected-dialog-title">Delete Selected Fields?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to delete the selected field(s)? This action cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenDeleteSelectedDialog(false)} color="inherit">Cancel</Button>
+          <Button onClick={deleteSelectedConfirmed} color="error" variant="contained">Delete</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Table Dialog */}
+      <Dialog
+        open={openDeleteTableDialog}
+        onClose={() => setOpenDeleteTableDialog(false)}
+        aria-labelledby="delete-table-dialog-title"
+      >
+        <DialogTitle id="delete-table-dialog-title">Delete Table?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to delete this table? This action cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenDeleteTableDialog(false)} color="inherit">Cancel</Button>
+          <Button onClick={handleDeleteConfirmed} color="error" variant="contained">Delete</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Back to List Dialog */}
+      <Dialog
+        open={openBackDialog}
+        onClose={() => setOpenBackDialog(false)}
+        aria-labelledby="back-dialog-title"
+      >
+        <DialogTitle id="back-dialog-title">Go Back?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Any unsaved changes will be lost. Are you sure you want to go back to the list?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenBackDialog(false)} color="inherit">Cancel</Button>
+          <Button onClick={handleBackConfirmed} color="primary" variant="contained">Go Back</Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }
