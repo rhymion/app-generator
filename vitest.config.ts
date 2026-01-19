@@ -13,6 +13,7 @@ export default defineConfig({
         inline: ["@mui/material", "@mui/x-data-grid"],
       },
     },
+    exclude: ["**/node_modules/**", "**/dist/**", "**/utils/templates/**"],
   },
   resolve: {
     alias: {
