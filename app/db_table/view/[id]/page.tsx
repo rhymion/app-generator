@@ -1,13 +1,13 @@
-import FormUpsert from '@/components/db_table/FormUpsert';
+import FormView from '@/components/db_table/FormView';
 import { getDbTableDetail } from '@/lib/db_table/getters';
 import { DbTableDetailPageProps } from '@/lib/db_table/types';
 import { notFound } from 'next/navigation';
 
-export default async function EditDbTablePage({ params }: DbTableDetailPageProps) {
+export default async function ViewDbTablePage({ params }: DbTableDetailPageProps) {
   const { id } = await params;
   const dbTable = await getDbTableDetail(id);
   if (!dbTable) {
     notFound();
   }
-  return <FormUpsert src={dbTable} isEdit={true} />;
+  return <FormView src={dbTable} />;
 }

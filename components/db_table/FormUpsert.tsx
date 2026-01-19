@@ -6,18 +6,8 @@ import Paper from '@mui/material/Paper';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import { upsertDbTable, removeDbTable } from '@/lib/db_table/actions';
-import type { Field } from '@/lib/db_table/types';
+import type { FormUpsertProps } from '@/lib/db_table/types';
 import Link from '@mui/material/Link';
-
-interface FormUpsertProps {
-  src: {
-    id: string;
-    name: string;
-    description: string | null;
-    fields: Field[];
-  };
-  isEdit: boolean;
-}
 
 export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const [name, setName] = useState(src.name);
@@ -66,12 +56,8 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         const index = fields.findIndex(f => f.id === params.id);
         return (
           <>
-            {index > 0 && (
-              <Button size="small" onClick={() => moveRowUp(index)}>↑</Button>
-            )}
-            {index < fields.length - 1 && (
-              <Button size="small" onClick={() => moveRowDown(index)}>↓</Button>
-            )}
+            <Button size="small" disabled={index === 0} onClick={() => moveRowUp(index)}>↑</Button>
+            <Button size="small" disabled={index === fields.length - 1} onClick={() => moveRowDown(index)}>↓</Button>
           </>
         );
       },

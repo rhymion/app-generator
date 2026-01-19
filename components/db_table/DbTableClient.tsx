@@ -66,7 +66,7 @@ export default function DbTableClient({ src }: DbTableClientProps) {
       headerName: 'Name',
       width: 150,
       renderCell: (params) => {
-        return <Link href={`/db_table/edit/${params.id}`}>{params.row.name}</Link>;
+        return <Link href={`/db_table/view/${params.id}`}>{params.row.name}</Link>;
       },
     },
     {

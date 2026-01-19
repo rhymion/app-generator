@@ -1,7 +1,7 @@
 'use server';
 
 import prisma from '@/lib/prisma';
-import type { DbTable, DbTableDetail, Field } from '@/lib/db_table/types';
+import type { DbTable, DbTableDetail } from '@/lib/db_table/types';
 
 export async function getAllDbTables(): Promise<DbTable[]> {
   const dbTables = await prisma.db_table.findMany();

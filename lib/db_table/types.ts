@@ -1,5 +1,3 @@
-import type { ReactNode } from 'react';
-
 export type DbTable = {
   id: string,
   name: string;
@@ -14,15 +12,12 @@ export type Field = {
   id: string;
   name: string;
   table_id: string;
+  type: string;
   max_length: number | null;
   max: number | null;
   regex: string | null;
   required: boolean;
 };
-
-export type LayoutProps = Readonly<{
-  children: ReactNode
-}>;
 
 export type DbTableDetailPageProps = Readonly<{
   params: Promise<{
@@ -30,12 +25,15 @@ export type DbTableDetailPageProps = Readonly<{
   }>
 }>;
 
-export type FormUpsertProps = Readonly<{
+export type FormViewProps = Readonly<{
   src: {
     id: string;
     name: string;
     description: string | null;
     fields: Field[];
   };
+}>;
+
+export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
 }>;
