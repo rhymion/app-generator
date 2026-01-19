@@ -7,6 +7,7 @@ import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import { upsertDbTable, removeDbTable } from '@/lib/db_table/actions';
 import type { Field } from '@/lib/db_table/types';
+import Link from '@mui/material/Link';
 
 interface FormUpsertProps {
   src: {
@@ -132,7 +133,10 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
 
   return (
     <div>
-      <h1>{isEdit ? 'Edit' : 'Add'} DB Table</h1>
+      <div className="flex justify-between items-center mb-4">
+        <h1>{isEdit ? 'Edit' : 'Add'} DB Table</h1>
+        <Link href="/db_table"><Button variant="outlined">Back to List</Button></Link>
+      </div>
       <form action={handleSubmit}>
         <TextField
           label="Name"
@@ -163,11 +167,11 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
           />
         </Paper>
         <Button type="submit" variant="contained" sx={{ mt: 2, mr: 2 }}>
-          {isEdit ? 'Update' : 'Create'}
+          Save
         </Button>
         {isEdit && (
           <Button onClick={handleDelete} variant="contained" color="error" sx={{ mt: 2 }}>
-            Delete
+            Delete Table
           </Button>
         )}
       </form>
