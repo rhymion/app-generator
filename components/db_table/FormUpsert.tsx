@@ -14,6 +14,10 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const [description, setDescription] = useState(src.description || '');
   const [fields, setFields] = useState<GridRowsProp>(src.fields.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` })));
   const apiRef = useGridApiRef();
+  const [paginationModel, setPaginationModel] = useState({
+    pageSize: 10,
+    page: 0,
+  });
 
   function processRowUpdate(newRow: any, oldRow: any) {
     setFields(prev => prev.map(row => row.id === newRow.id ? newRow : row));
@@ -149,6 +153,9 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
             columns={columns}
             editMode="row"
             processRowUpdate={processRowUpdate}
+            paginationModel={paginationModel}
+            onPaginationModelChange={setPaginationModel}
+            pageSizeOptions={[10, 20, 50]}
             checkboxSelection
           />
         </Paper>
