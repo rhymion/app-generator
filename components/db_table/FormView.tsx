@@ -6,8 +6,13 @@ import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/db_table/types';
 import Link from '@mui/material/Link';
+import { useState } from 'react';
 
 export default function FormView({ src }: FormViewProps) {
+  const [paginationModel, setPaginationModel] = useState({
+    pageSize: 10,
+    page: 0,
+  });
 
   const columns: GridColDef[] = [
     { field: 'name', headerName: 'Name', width: 150 },
@@ -45,7 +50,9 @@ export default function FormView({ src }: FormViewProps) {
           <DataGrid
             rows={src.fields}
             columns={columns}
-            editMode="row"
+            paginationModel={paginationModel}
+            onPaginationModelChange={setPaginationModel}
+            pageSizeOptions={[10, 20, 50]}
           />
         </Paper>
       </form>
