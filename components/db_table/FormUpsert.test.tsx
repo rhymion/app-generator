@@ -4,6 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FormUpsert from './FormUpsert';
+import { DeleteTestUtils } from '@/utils/test/operations/delete';
+import { TickTestUtils } from '@/utils/test/operations/tick';
 
 // Mock the actions
 vi.mock('@/lib/db_table/actions', () => ({
@@ -24,6 +26,26 @@ describe('FormUpsert', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('has Add, Delete Selected, Save and Back to List buttons for non-edit mode', async () => {
+    render(<FormUpsert src={mockSrc} isEdit={false} />);
+    expect(screen.getByRole('button', { name: /add/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /delete selected/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /back to list/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /delete table/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /edit/i })).not.toBeInTheDocument();
+  });
+
+  it('has Add, Delete Selected, Save, Delete Table and Back to List buttons for edit mode', async () => {
+    render(<FormUpsert src={mockSrc} isEdit={true} />);
+    expect(screen.getByRole('button', { name: /add/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /delete selected/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /back to list/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /delete table/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /edit/i })).not.toBeInTheDocument();
   });
 
   it('adds a new record (field) successfully', async () => {
@@ -78,12 +100,12 @@ describe('FormUpsert', () => {
     const checkboxes = screen.getAllByRole('checkbox');
     await userEvent.click(checkboxes[1]);
     const deleteButton = screen.getByRole('button', { name: /delete selected/i });
-    await userEvent.click(deleteButton);
-    await waitFor(() => expect(screen.getByRole('dialog', { hidden: true })).toBeInTheDocument());
+    await DeleteTestUtils.deleteSelectedRows(deleteButton);
+    await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(2)); // Header + 1 remaining
   });
 
   it('keeps edited rows after add, move, and delete', async () => {
-    render(<FormUpsert src={mockSrc} isEdit={false} />);
+    render(<FormUpsert src={mockSrc} isEdit={true} />);
     await userEvent.dblClick(screen.getByText('field1'));
     const editCell = screen.getByDisplayValue('field1');
     await userEvent.clear(editCell);
@@ -94,9 +116,10 @@ describe('FormUpsert', () => {
     const upButtons = screen.getAllByRole('button', { name: '↑' });
     await userEvent.click(upButtons[1]);
     const checkboxes = screen.getAllByRole('checkbox');
-    await userEvent.click(checkboxes[2]);
+    await TickTestUtils.tickRows([1]);
     const deleteButton = screen.getByRole('button', { name: /delete selected/i });
-    await userEvent.click(deleteButton);
+    await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(4));
+    await DeleteTestUtils.deleteSelectedRows(deleteButton);
     await waitFor(() => expect(screen.getByText('editedField1')).toBeInTheDocument());
   });
 
@@ -129,10 +152,7 @@ describe('FormUpsert', () => {
     const checkboxes = screen.getAllByRole('checkbox');
     await userEvent.click(checkboxes[1]); // Select first field
     const deleteButton = screen.getByRole('button', { name: /delete selected/i });
-    await userEvent.click(deleteButton);
-    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
-    const confirmDeleteButton = screen.getAllByRole('button', { name: /delete/i }).find(btn => btn.closest('[role="dialog"]'));
-    await userEvent.click(confirmDeleteButton!);
+    await DeleteTestUtils.deleteSelectedRows(deleteButton);
     await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(2)); // Header + 1 remaining
   });
 
