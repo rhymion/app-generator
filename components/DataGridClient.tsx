@@ -1,11 +1,14 @@
 'use client';
 import { useState, useTransition } from 'react';
-import { DataGrid, GridColDef, useGridApiRef } from '@mui/x-data-grid';
+import { DataGrid, GridColDef, gridRowSelectionManagerSelector, useGridApiRef } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
 import Button from '@mui/material/Button';
 import Link from '@mui/material/Link';
-
-const paginationModel = { page: 0, pageSize: 5 };
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogContentText from '@mui/material/DialogContentText';
+import DialogActions from '@mui/material/DialogActions';
 
 interface BaseEntity {
   id: string;
@@ -32,6 +35,7 @@ export default function DataGridClient<T extends BaseEntity>({
     pageSize: 10,
     page: 0,
   });
+  const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const apiRef = useGridApiRef();
 
   function moveRowUp(index: number) {
@@ -51,18 +55,21 @@ export default function DataGridClient<T extends BaseEntity>({
   }
 
   const deleteSelected = () => {
+    setOpenDeleteDialog(true);
+  };
+
+  const deleteConfirmed = () => {
     const selectedRows = apiRef.current?.getSelectedRows() || new Map();
     const selectedIds = Array.from(selectedRows.keys());
     if (selectedIds.length > 0) {
       startTransition(() => removeAction(selectedIds));
     }
+    setOpenDeleteDialog(false);
   };
 
-  const deleteItem = (id: string) => {
-    const formData = new FormData();
-    formData.set('id', id);
-    startTransition(() => removeAction(formData));
-  };
+//   const deleteItem = (id: string) => {
+//     startTransition(() => removeAction([id]));
+//   };
 
   const renderActions = (params: any) => {
     const index = items.findIndex(t => t.id === params.id);
@@ -70,7 +77,7 @@ export default function DataGridClient<T extends BaseEntity>({
       <>
         <Button size="small" disabled={index === 0} onClick={() => moveRowUp(index)}>↑</Button>
         <Button size="small" disabled={index === items.length - 1} onClick={() => moveRowDown(index)}>↓</Button>
-        <Button size="small" color="error" onClick={() => deleteItem(params.id)}>Delete</Button>
+        {/* <Button size="small" color="error" onClick={() => deleteItem(params.id)}>Delete</Button> */}
       </>
     );
   };
@@ -119,6 +126,23 @@ export default function DataGridClient<T extends BaseEntity>({
           sx={{ border: 0 }}
         />
       </Paper>
+      {/* Delete Table Dialog */}
+      <Dialog
+        open={openDeleteDialog}
+        onClose={() => setOpenDeleteDialog(false)}
+        aria-labelledby="delete-dialog-title"
+      >
+        <DialogTitle id="delete-dialog-title">Delete {entityLabel}(s)?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to delete the {entityLabel}(s)? This action cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenDeleteDialog(false)} color="inherit">Cancel</Button>
+          <Button onClick={deleteConfirmed} color="error" variant="contained">Delete</Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }

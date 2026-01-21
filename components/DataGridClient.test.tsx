@@ -413,6 +413,26 @@ describe('DataGridClient', () => {
       expect(screen.getByRole('button', { name: /delete selected/i })).toBeInTheDocument();
     });
 
+    it('cancel delete selected dialog', async () => {
+      const mockData = createMockData(2);
+      render(
+        <DataGridClient
+          src={mockData}
+          basePath="/test"
+          removeAction={mockRemoveAction}
+          entityLabel="Test"
+        />
+      );
+      
+      const deleteButton = screen.getByRole('button', { name: /delete selected/i });
+      await userEvent.click(deleteButton);
+      await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
+      const cancelButton = screen.getByRole('button', { name: /cancel/i });
+      await userEvent.click(cancelButton);
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(3)); // Header + 2 original fields
+    });
+
     it('displays correct number of rows', async () => {
       const mockData = createMockData(5);
       render(
