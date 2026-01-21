@@ -1,8 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { DataGrid, GridColDef, GridRowsProp, useGridApiRef, GridRowId, GridRowSelectionModel } from '@mui/x-data-grid';
-import Paper from '@mui/material/Paper';
+import { GridColDef, GridRowsProp } from '@mui/x-data-grid';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import Dialog from '@mui/material/Dialog';
@@ -12,54 +11,14 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import { upsertDbTable, removeDbTable } from '@/lib/db_table/actions';
 import type { FormUpsertProps } from '@/lib/db_table/types';
-import Link from '@mui/material/Link';
+import FieldsDataGrid from './FieldsDataGrid';
 
 export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const [name, setName] = useState(src.name);
   const [description, setDescription] = useState(src.description || '');
   const [fields, setFields] = useState<GridRowsProp>(src.fields.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` })));
-  const apiRef = useGridApiRef();
-  const [paginationModel, setPaginationModel] = useState({
-    pageSize: 10,
-    page: 0,
-  });
-  const [openDeleteSelectedDialog, setOpenDeleteSelectedDialog] = useState(false);
   const [openDeleteTableDialog, setOpenDeleteTableDialog] = useState(false);
   const [openBackDialog, setOpenBackDialog] = useState(false);
-  const [selectedRowIds, setSelectedRowIds] = useState<GridRowSelectionModel>({ type: 'include', ids: new Set() });
-
-  function processRowUpdate(newRow: any, oldRow: any) {
-    setFields(prev => prev.map(row => row.id === newRow.id ? newRow : row));
-    return newRow;
-  }
-
-  function moveRowUp(index: number) {
-    setFields(prev => {
-      const newFields = [...prev];
-      [newFields[index - 1], newFields[index]] = [newFields[index], newFields[index - 1]];
-      return newFields;
-    });
-  }
-
-  function moveRowDown(index: number) {
-    setFields(prev => {
-      const newFields = [...prev];
-      [newFields[index], newFields[index + 1]] = [newFields[index + 1], newFields[index]];
-      return newFields;
-    });
-  }
-
-  const deleteSelectedConfirmed = () => {
-    const selectedRows = apiRef.current?.getSelectedRows() || new Map();
-    setFields(prev => prev.filter(row => !selectedRows.has(row.id)));
-    setOpenDeleteSelectedDialog(false);
-  };
-
-  const deleteSelected = () => {
-    const selectedRows = apiRef.current?.getSelectedRows() || new Map();
-    if (selectedRows.size === 0) return;
-    setOpenDeleteSelectedDialog(true);
-  };
 
   const columns: GridColDef[] = [
     { field: 'name', headerName: 'Name', width: 150, editable: true },
@@ -68,31 +27,9 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     { field: 'max', headerName: 'Max', width: 100, editable: true, type: 'number' },
     { field: 'regex', headerName: 'Regex', width: 150, editable: true },
     { field: 'required', headerName: 'Required', width: 100, editable: true, type: 'boolean' },
-    {
-      field: 'actions',
-      headerName: 'Actions',
-      width: 120,
-      renderCell: (params) => {
-        const index = fields.findIndex(f => f.id === params.id);
-        return (
-          <>
-            <Button size="small" disabled={index === 0} onClick={() => moveRowUp(index)}>↑</Button>
-            <Button size="small" disabled={index === fields.length - 1} onClick={() => moveRowDown(index)}>↓</Button>
-          </>
-        );
-      },
-    },
   ];
 
   const addField = () => {
-    // Commit any pending row edit
-    const api = apiRef.current;
-    if (api) {
-      const editingRowId = api.getAllRowIds().find(id => api.getRowMode(id) === 'edit');
-      if (editingRowId) {
-        api.stopRowEditMode({ id: editingRowId, ignoreModifications: false });
-      }
-    }
     const newField = {
       id: `temp-${Date.now()}-${Math.random()}`,
       name: '',
@@ -104,10 +41,6 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
       required: false,
     };
     setFields(prev => [...prev, newField]);
-  };
-
-  const removeField = (id: string) => {
-    setFields(prev => prev.filter(row => row.id !== id));
   };
 
   const handleSubmit = async (formData: FormData) => {
@@ -165,23 +98,15 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
           fullWidth
           margin="normal"
         />
-        <h2>Fields</h2>
-        <Button onClick={addField} variant="contained" sx={{ mb: 2, mr: 2 }}>Add Field</Button>
-        <Button onClick={deleteSelected} variant="contained" color="error" sx={{ mb: 2 }} disabled={selectedRowIds.ids.size === 0}>Delete Selected</Button>
-        <Paper sx={{ height: 400, width: '100%' }}>
-          <DataGrid
-            apiRef={apiRef}
-            rows={fields}
-            columns={columns}
-            editMode="row"
-            processRowUpdate={processRowUpdate}
-            paginationModel={paginationModel}
-            onPaginationModelChange={setPaginationModel}
-            onRowSelectionModelChange={setSelectedRowIds}
-            pageSizeOptions={[10, 20, 50]}
-            checkboxSelection
-          />
-        </Paper>
+        <FieldsDataGrid
+          fields={fields}
+          onFieldsChange={setFields}
+          columns={columns}
+          onAddField={addField}
+          addButtonLabel="Add Field"
+          deleteDialogTitle="Delete Selected Fields?"
+          deleteDialogMessage="Are you sure you want to delete the selected field(s)? This action cannot be undone."
+        />
         <Button type="submit" variant="contained" sx={{ mt: 2, mr: 2 }}>
           Save
         </Button>
@@ -191,24 +116,6 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
           </Button>
         )}
       </form>
-
-      {/* Delete Selected Dialog */}
-      <Dialog
-        open={openDeleteSelectedDialog}
-        onClose={() => setOpenDeleteSelectedDialog(false)}
-        aria-labelledby="delete-selected-dialog-title"
-      >
-        <DialogTitle id="delete-selected-dialog-title">Delete Selected Fields?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Are you sure you want to delete the selected field(s)? This action cannot be undone.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenDeleteSelectedDialog(false)} color="inherit">Cancel</Button>
-          <Button onClick={deleteSelectedConfirmed} color="error" variant="contained">Delete</Button>
-        </DialogActions>
-      </Dialog>
 
       {/* Delete Table Dialog */}
       <Dialog
