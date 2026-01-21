@@ -1,19 +1,13 @@
 'use client';
 
-import { DataGrid, GridColDef } from '@mui/x-data-grid';
-import Paper from '@mui/material/Paper';
+import { GridColDef } from '@mui/x-data-grid';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/db_table/types';
 import Link from '@mui/material/Link';
-import { useState } from 'react';
+import FieldsViewGrid from './FieldsViewGrid';
 
 export default function FormView({ src }: FormViewProps) {
-  const [paginationModel, setPaginationModel] = useState({
-    pageSize: 10,
-    page: 0,
-  });
-
   const columns: GridColDef[] = [
     { field: 'name', headerName: 'Name', width: 150 },
     { field: 'type', headerName: 'Type', width: 100 },
@@ -46,15 +40,7 @@ export default function FormView({ src }: FormViewProps) {
           margin="normal"
         />
         <h2>Fields</h2>
-        <Paper sx={{ height: 400, width: '100%' }}>
-          <DataGrid
-            rows={src.fields}
-            columns={columns}
-            paginationModel={paginationModel}
-            onPaginationModelChange={setPaginationModel}
-            pageSizeOptions={[10, 20, 50]}
-          />
-        </Paper>
+        <FieldsViewGrid fields={src.fields} columns={columns} />
       </form>
     </div>
   );
