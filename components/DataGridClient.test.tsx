@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import DataGridClient from './DataGridClient';
+import { TickTestUtils } from '../utils/test/operations/tick';
 
 // Mock Next.js Link component
 vi.mock('next/link', () => ({
@@ -414,7 +415,7 @@ describe('DataGridClient', () => {
     });
 
     it('cancel delete selected dialog', async () => {
-      const mockData = createMockData(2);
+      const mockData = createMockData(3);
       render(
         <DataGridClient
           src={mockData}
@@ -424,13 +425,17 @@ describe('DataGridClient', () => {
         />
       );
       
+      TickTestUtils.tickRows([1, 3]); // Select both rows
+      await waitFor(() => {
+        expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(2); // 2 rows + header
+      });
       const deleteButton = screen.getByRole('button', { name: /delete selected/i });
       await userEvent.click(deleteButton);
       await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
       const cancelButton = screen.getByRole('button', { name: /cancel/i });
       await userEvent.click(cancelButton);
       await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-      await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(3)); // Header + 2 original fields
+      await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(4)); // Header + 3 original fields
     });
 
     it('displays correct number of rows', async () => {

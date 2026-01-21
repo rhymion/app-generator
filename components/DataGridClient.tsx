@@ -1,6 +1,6 @@
 'use client';
 import { useState, useTransition } from 'react';
-import { DataGrid, GridColDef, gridRowSelectionManagerSelector, useGridApiRef } from '@mui/x-data-grid';
+import { DataGrid, GridColDef, gridRowSelectionManagerSelector, useGridApiRef, GridRowSelectionModel } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
 import Button from '@mui/material/Button';
 import Link from '@mui/material/Link';
@@ -36,6 +36,7 @@ export default function DataGridClient<T extends BaseEntity>({
     page: 0,
   });
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
+  const [selectedRowIds, setSelectedRowIds] = useState<GridRowSelectionModel>({ type: 'include', ids: new Set() });
   const apiRef = useGridApiRef();
 
   function moveRowUp(index: number) {
@@ -112,7 +113,7 @@ export default function DataGridClient<T extends BaseEntity>({
         <Link href={`${basePath}/new`}>
           <Button variant="contained">Create New {entityLabel}</Button>
         </Link>
-        <Button onClick={deleteSelected} variant="contained" color="error" sx={{ mx: 2 }}>Delete Selected</Button>
+        <Button onClick={deleteSelected} variant="contained" color="error" sx={{ mx: 2 }} disabled={selectedRowIds.ids.size === 0}>Delete Selected</Button>
       </div>
       <Paper sx={{ height: 500, width: '100%' }}>
         <DataGrid
@@ -121,6 +122,7 @@ export default function DataGridClient<T extends BaseEntity>({
           columns={columns}
           paginationModel={paginationModel}
           onPaginationModelChange={setPaginationModel}
+          onRowSelectionModelChange={setSelectedRowIds}
           pageSizeOptions={[10, 20, 50]}
           checkboxSelection
           sx={{ border: 0 }}

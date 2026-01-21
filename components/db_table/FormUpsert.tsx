@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { DataGrid, GridColDef, GridRowsProp, useGridApiRef, GridRowId } from '@mui/x-data-grid';
+import { DataGrid, GridColDef, GridRowsProp, useGridApiRef, GridRowId, GridRowSelectionModel } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
@@ -26,6 +26,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const [openDeleteSelectedDialog, setOpenDeleteSelectedDialog] = useState(false);
   const [openDeleteTableDialog, setOpenDeleteTableDialog] = useState(false);
   const [openBackDialog, setOpenBackDialog] = useState(false);
+  const [selectedRowIds, setSelectedRowIds] = useState<GridRowSelectionModel>({ type: 'include', ids: new Set() });
 
   function processRowUpdate(newRow: any, oldRow: any) {
     setFields(prev => prev.map(row => row.id === newRow.id ? newRow : row));
@@ -166,7 +167,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         />
         <h2>Fields</h2>
         <Button onClick={addField} variant="contained" sx={{ mb: 2, mr: 2 }}>Add Field</Button>
-        <Button onClick={deleteSelected} variant="contained" color="error" sx={{ mb: 2 }}>Delete Selected</Button>
+        <Button onClick={deleteSelected} variant="contained" color="error" sx={{ mb: 2 }} disabled={selectedRowIds.ids.size === 0}>Delete Selected</Button>
         <Paper sx={{ height: 400, width: '100%' }}>
           <DataGrid
             apiRef={apiRef}
@@ -176,6 +177,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
             processRowUpdate={processRowUpdate}
             paginationModel={paginationModel}
             onPaginationModelChange={setPaginationModel}
+            onRowSelectionModelChange={setSelectedRowIds}
             pageSizeOptions={[10, 20, 50]}
             checkboxSelection
           />
