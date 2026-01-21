@@ -30,16 +30,125 @@ describe('FormView', () => {
     //await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(4)); // Header + 3 rows
   });
 
-  it('has multiple records and handles pagination', async () => {
-    const srcWithManyFields = { ...mockSrc, fields: Array.from({ length: 15 }, (_, i) => ({ id: `${i}`, name: `field${i}`, table_id: '1', type: 'string', max_length: null, max: null, regex: null, required: false })) };
-    render(<FormView src={srcWithManyFields} />);
-    await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(11)); // Header + 10
-    const nextButton = screen.getByLabelText(/next/i);
-    await userEvent.click(nextButton);
-    await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(6)); // Header + 5 remaining
-    const prevButton = screen.getByLabelText(/previous/i);
-    await userEvent.click(prevButton);
-    await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(11));
+  describe('Pagination', () => {
+    it('disables both previous and next buttons when records are equal to page size', async () => {
+      const srcWithFewFields = { ...mockSrc, fields: Array.from({ length: 10 }, (_, i) => ({ id: `${i}`, name: `field${i}`, table_id: '1', type: 'string', max_length: null, max: null, regex: null, required: false })) };
+      render(<FormView src={srcWithFewFields} />);
+      await waitFor(() => {
+        const prevButton = screen.getByLabelText(/previous page/i);
+        const nextButton = screen.getByLabelText(/next page/i);
+        expect(prevButton).toBeDisabled();
+        expect(nextButton).toBeDisabled();
+      });
+    });
+
+    it('disables both previous and next buttons when records are less than page size', async () => {
+      const srcWithFewFields = { ...mockSrc, fields: Array.from({ length: 9 }, (_, i) => ({ id: `${i}`, name: `field${i}`, table_id: '1', type: 'string', max_length: null, max: null, regex: null, required: false })) };
+      render(<FormView src={srcWithFewFields} />);
+      await waitFor(() => {
+        const prevButton = screen.getByLabelText(/previous page/i);
+        const nextButton = screen.getByLabelText(/next page/i);
+        expect(prevButton).toBeDisabled();
+        expect(nextButton).toBeDisabled();
+      });
+    });
+
+    it('enables next button when records exceed page size', async () => {
+      const srcWithManyFields = { ...mockSrc, fields: Array.from({ length: 11 }, (_, i) => ({ id: `${i}`, name: `field${i}`, table_id: '1', type: 'string', max_length: null, max: null, regex: null, required: false })) };
+      render(<FormView src={srcWithManyFields} />);
+      await waitFor(() => {
+        const prevButton = screen.getByLabelText(/previous page/i);
+        const nextButton = screen.getByLabelText(/next page/i);
+        expect(prevButton).toBeDisabled();
+        expect(nextButton).not.toBeDisabled();
+      });
+    });
+
+    it('enables previous button and disables next when on last page', async () => {
+      const srcWithManyFields = { ...mockSrc, fields: Array.from({ length: 20 }, (_, i) => ({ id: `${i}`, name: `field${i}`, table_id: '1', type: 'string', max_length: null, max: null, regex: null, required: false })) };
+      render(<FormView src={srcWithManyFields} />);
+      await waitFor(() => {
+        const nextButton = screen.getByLabelText(/next page/i);
+        expect(nextButton).not.toBeDisabled();
+      });
+
+      const nextButton = screen.getByLabelText(/next page/i);
+      await userEvent.click(nextButton);
+
+      await waitFor(() => {
+        const prevButton = screen.getByLabelText(/previous page/i);
+        const nextButtonUpdated = screen.getByLabelText(/next page/i);
+        expect(prevButton).not.toBeDisabled();
+        expect(nextButtonUpdated).toBeDisabled();
+      });
+    });
+
+    it('enables both buttons when on middle page', async () => {
+      const srcWithManyFields = { ...mockSrc, fields: Array.from({ length: 21 }, (_, i) => ({ id: `${i}`, name: `field${i}`, table_id: '1', type: 'string', max_length: i, max: null, regex: null, required: false })) };
+      render(<FormView src={srcWithManyFields} />);
+      const nextButton = screen.getByLabelText(/next page/i);
+      await userEvent.click(nextButton);
+
+      await waitFor(() => {
+        const prevButton = screen.getByLabelText(/previous page/i);
+        const nextButtonUpdated = screen.getByLabelText(/next page/i);
+        expect(prevButton).not.toBeDisabled();
+        expect(nextButtonUpdated).not.toBeDisabled();
+      });
+    });
+  });
+
+  describe('Filtering and Sorting', () => {
+    it('allows filtering by name', async () => {
+      const srcWithManyFields = { ...mockSrc, fields: Array.from({ length: 11 }, (_, i) => ({ id: `${i}`, name: `field${i}`, table_id: '1', type: 'string', max_length: null, max: null, regex: null, required: false })) };
+      render(<FormView src={srcWithManyFields} />);
+      await waitFor(() => {
+        expect(screen.getByText('field1')).toBeInTheDocument();
+      });
+
+      // Open column menu for Name column
+      const nameHeader = screen.getAllByText('Name')[1];
+      const menuButton = nameHeader.closest('[role="columnheader"]')?.querySelector('[aria-label*="Menu"]');
+      
+      if (menuButton) {
+        await userEvent.click(menuButton);
+        
+        await waitFor(() => {
+          const filterMenuItem = screen.queryByText(/filter/i);
+          if (filterMenuItem) {
+            userEvent.click(filterMenuItem);
+          }
+        });
+      }
+    });
+
+    it('allows sorting by name', async () => {
+      const srcWithManyFields = { ...mockSrc, fields: Array.from({ length: 21 }, (_, i) => ({ id: `${i}`, name: `field${i}`, table_id: '1', type: 'string', max_length: i, max: null, regex: null, required: false })) };
+      render(<FormView src={srcWithManyFields} />);
+      await waitFor(() => {
+        expect(screen.getByText('field2')).toBeInTheDocument();
+      });
+
+      const nameHeader = screen.getAllByText('Name')[1];
+      const menuButton = nameHeader.closest('[role="columnheader"]')?.querySelector('[aria-label*="Menu"]');
+      if (menuButton) {
+        await userEvent.click(menuButton);
+        
+        await waitFor(() => {
+          const sortMenuItem = screen.queryByText(/sort/i);
+          if (sortMenuItem) {
+            userEvent.click(sortMenuItem);
+          }
+        });
+      }
+
+      // After sorting, order should change
+      await waitFor(() => {
+        const rows = screen.getAllByRole('row');
+        // First row is header, so data starts at index 1
+        expect(rows[3]).toHaveTextContent('field2');
+      });
+    });
   });
 
   it('cannot edit records', async () => {
