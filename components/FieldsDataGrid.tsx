@@ -13,6 +13,7 @@ import DialogActions from '@mui/material/DialogActions';
 interface FieldsDataGridProps {
   initialFields?: GridRowsProp;
   columns: GridColDef[];
+  createNewRow: () => any;
   addButtonLabel?: string;
   deleteDialogTitle?: string;
   deleteDialogMessage?: string;
@@ -28,6 +29,7 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
   ({
     initialFields = [],
     columns,
+    createNewRow,
     addButtonLabel = 'Add Field',
     deleteDialogTitle = 'Delete Selected Fields?',
     deleteDialogMessage = 'Are you sure you want to delete the selected field(s)? This action cannot be undone.',
@@ -66,16 +68,8 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
     }
 
     const addField = () => {
-      const newField = {
-        id: `temp-${Date.now()}-${Math.random()}`,
-        name: '',
-        type: 'string',
-        max_length: null,
-        max: null,
-        regex: null,
-        required: false,
-      };
-      setFields(prev => [...prev, newField]);
+      const newRow = createNewRow();
+      setFields(prev => [...prev, newRow]);
     };
 
     const deleteSelectedConfirmed = () => {

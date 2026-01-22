@@ -30,6 +30,17 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
 
   const initialFields = src.fields.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
 
+  const createNewField = () => ({
+    id: `temp-${Date.now()}-${Math.random()}`,
+    name: '',
+    type: 'string',
+    table_id: src.id,
+    max_length: null,
+    max: null,
+    regex: null,
+    required: false,
+  });
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     
@@ -102,6 +113,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         ref={fieldsGridRef}
         initialFields={initialFields}
         columns={columns}
+        createNewRow={createNewField}
         addButtonLabel="Add Field"
         deleteDialogTitle="Delete Selected Fields?"
         deleteDialogMessage="Are you sure you want to delete the selected field(s)? This action cannot be undone."
