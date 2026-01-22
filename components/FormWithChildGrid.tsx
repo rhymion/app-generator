@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useState } from 'react';
+import { ReactNode, useState, forwardRef } from 'react';
 import { GridColDef, GridRowsProp } from '@mui/x-data-grid';
 import Button from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
@@ -8,16 +8,18 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
+import FieldsDataGrid from './FieldsDataGrid';
 
 interface FormWithChildGridProps {
   title: string;
   isEdit: boolean;
   formFields: ReactNode;
-  onSubmit: (formData: FormData) => Promise<void>;
+  onSubmit: (e: React.FormEvent<HTMLFormElement>) => Promise<void>;
   onDelete?: () => Promise<void>;
   onBack: () => void;
   deleteEntityLabel?: string;
   submitButtonLabel?: string;
+  error?: string | null;
 }
 
 export default function FormWithChildGrid({
@@ -29,13 +31,10 @@ export default function FormWithChildGrid({
   onBack,
   deleteEntityLabel = 'Item',
   submitButtonLabel = 'Save',
+  error,
 }: FormWithChildGridProps) {
   const [openDeleteEntityDialog, setOpenDeleteEntityDialog] = useState(false);
   const [openBackDialog, setOpenBackDialog] = useState(false);
-
-  const handleSubmit = async (formData: FormData) => {
-    await onSubmit(formData);
-  };
 
   const handleDeleteConfirmed = async () => {
     if (onDelete) {
@@ -57,7 +56,12 @@ export default function FormWithChildGrid({
           Back to List
         </Button>
       </div>
-      <form action={handleSubmit}>
+      {error && (
+        <div style={{ color: 'red', marginBottom: '1rem' }}>
+          {error}
+        </div>
+      )}
+      <form onSubmit={onSubmit}>
         {formFields}
         <Button type="submit" variant="contained" sx={{ mt: 2, mr: 2 }}>
           {submitButtonLabel}
