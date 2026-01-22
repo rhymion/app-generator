@@ -1,11 +1,9 @@
-'use client';
-
 import { GridColDef } from '@mui/x-data-grid';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/db_table/types';
 import Link from '@mui/material/Link';
-import FieldsViewGrid from './FieldsViewGrid';
+import FieldsViewGrid from '../FieldsViewGrid';
 
 export default function FormView({ src }: FormViewProps) {
   const columns: GridColDef[] = [
