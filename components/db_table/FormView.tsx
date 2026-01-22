@@ -4,16 +4,10 @@ import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/db_table/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
+import { field_columns } from '../db_table/column_def';
 
 export default function FormView({ src }: FormViewProps) {
-  const columns: GridColDef[] = [
-    { field: 'name', headerName: 'Name', width: 150 },
-    { field: 'type', headerName: 'Type', width: 100 },
-    { field: 'max_length', headerName: 'Max Length', width: 120, type: 'number' },
-    { field: 'max', headerName: 'Max', width: 100, type: 'number' },
-    { field: 'regex', headerName: 'Regex', width: 150},
-    { field: 'required', headerName: 'Required', width: 100, type: 'boolean' },
-  ];
+  const columns: GridColDef[] = field_columns(false);
 
   return (
     <div>
@@ -24,22 +18,24 @@ export default function FormView({ src }: FormViewProps) {
           <Link href="/db_table"><Button variant="outlined">Back to List</Button></Link>
         </div>
       </div>
-      <form>
-        <TextField
-          label="Name"
-          value={src.name}
-          fullWidth
-          margin="normal"
-        />
-        <TextField
-          label="Description"
-          value={src.description}
-          fullWidth
-          margin="normal"
-        />
+      <TextField
+        label="Name"
+        value={src.name}
+        fullWidth
+        margin="normal"
+        disabled
+      />
+      <TextField
+        label="Description"
+        value={src.description || ''}
+        fullWidth
+        margin="normal"
+        disabled
+      />
+      <div>
         <h2>Fields</h2>
         <FieldsViewGrid fields={src.fields} columns={columns} />
-      </form>
+      </div>
     </div>
   );
 }

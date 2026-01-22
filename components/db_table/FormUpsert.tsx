@@ -3,12 +3,13 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
-import { GridColDef, GridRowsProp } from '@mui/x-data-grid';
+import { GridRowsProp } from '@mui/x-data-grid';
 import TextField from '@mui/material/TextField';
 import { upsertDbTable, removeDbTable } from '@/lib/db_table/actions';
 import type { FormUpsertProps } from '@/lib/db_table/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import FieldsDataGrid from '../FieldsDataGrid';
+import { field_columns } from '../db_table/column_def';
 
 export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const router = useRouter();
@@ -19,14 +20,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
 
-  const columns: GridColDef[] = [
-    { field: 'name', headerName: 'Name', width: 150, editable: true },
-    { field: 'type', headerName: 'Type', width: 100, editable: true },
-    { field: 'max_length', headerName: 'Max Length', width: 120, editable: true, type: 'number' },
-    { field: 'max', headerName: 'Max', width: 100, editable: true, type: 'number' },
-    { field: 'regex', headerName: 'Regex', width: 150, editable: true },
-    { field: 'required', headerName: 'Required', width: 100, editable: true, type: 'boolean' },
-  ];
+  const columns = field_columns(true);
 
   const initialFields = src.fields.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
 
