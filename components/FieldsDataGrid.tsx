@@ -18,6 +18,8 @@ interface FieldsDataGridProps {
   addButtonLabel?: string;
   deleteDialogTitle?: string;
   deleteDialogMessage?: string;
+  showTitle?: boolean;
+  title?: string;
 }
 
 export default function FieldsDataGrid({
@@ -28,6 +30,8 @@ export default function FieldsDataGrid({
   addButtonLabel = 'Add Field',
   deleteDialogTitle = 'Delete Selected Fields?',
   deleteDialogMessage = 'Are you sure you want to delete the selected field(s)? This action cannot be undone.',
+  showTitle = true,
+  title = 'Fields',
 }: FieldsDataGridProps) {
   const apiRef = useGridApiRef();
   const [paginationModel, setPaginationModel] = useState({
@@ -91,7 +95,7 @@ export default function FieldsDataGrid({
 
   return (
     <div>
-      <h2>Fields</h2>
+      {showTitle && <h2>{title}</h2>}
       <Button onClick={onAddField} variant="contained" sx={{ mb: 2, mr: 2 }}>{addButtonLabel}</Button>
       <Button onClick={deleteSelected} variant="contained" color="error" sx={{ mb: 2 }} disabled={selectedRowIds.ids.size === 0}>Delete Selected</Button>
       <Paper sx={{ height: 400, width: '100%' }}>
