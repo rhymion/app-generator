@@ -11,6 +11,15 @@ vi.mock('@/lib/db_table/actions', () => ({
   removeDbTable: vi.fn(),
 }));
 
+// Mock Next.js router
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    back: vi.fn(),
+    refresh: vi.fn(),
+  }),
+}));
+
 describe('FormUpsert', () => {
   const mockSrc = {
     id: '1',
