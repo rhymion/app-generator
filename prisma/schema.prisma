@@ -57,7 +57,7 @@ model field {
   name        String
   type        String
   table_id    String     
-  table       db_table @relation(fields: [table_id], references: [id])
+  table       db_table @relation(fields: [table_id], references: [id], onDelete: Cascade)
   max_length  Int?
   max         Int?
   regex       String?

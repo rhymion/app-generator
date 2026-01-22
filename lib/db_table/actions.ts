@@ -115,25 +115,13 @@ export async function removeDbTable(data: FormData | string[]) {
   }
 
   if (Array.isArray(data)) {
-    for (const id of data) {
-      await prisma.$transaction(async (tx) => {
-        await tx.field.deleteMany({
-          where: { table_id: id },
-        });
-        await tx.db_table.delete({
-          where: { id },
-        });
-      });
-    }
+    await prisma.db_table.deleteMany({
+      where: { id: { in: data } },
+    });
   } else {
     const id = data.get('id') as string;
-    await prisma.$transaction(async (tx) => {
-      await tx.field.deleteMany({
-        where: { table_id: id },
-      });
-      await tx.db_table.delete({
-        where: { id },
-      });
+    await prisma.db_table.delete({
+      where: { id },
     });
   }
 
