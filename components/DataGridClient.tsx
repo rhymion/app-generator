@@ -76,8 +76,8 @@ export default function DataGridClient<T extends BaseEntity>({
     const index = items.findIndex(t => t.id === params.id);
     return (
       <>
-        <Button size="small" disabled={index === 0} onClick={() => moveRowUp(index)}>↑</Button>
-        <Button size="small" disabled={index === items.length - 1} onClick={() => moveRowDown(index)}>↓</Button>
+        <Button size="small" disabled={index === 0} onClick={() => moveRowUp(index)} variant="outlined">↑</Button>
+        <Button size="small" disabled={index === items.length - 1} onClick={() => moveRowDown(index)} variant="outlined">↓</Button>
         {/* <Button size="small" color="error" onClick={() => deleteItem(params.id)}>Delete</Button> */}
       </>
     );
@@ -100,7 +100,7 @@ export default function DataGridClient<T extends BaseEntity>({
     {
       field: 'actions',
       headerName: 'Actions',
-      width: 300,
+      width: 150,
       sortable: false,
       filterable: false,
       renderCell: renderActions,

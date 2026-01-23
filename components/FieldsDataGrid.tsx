@@ -91,15 +91,15 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
       {
         field: 'actions',
         headerName: 'Actions',
-        width: 120,
+        width: 150,
         sortable: false,
         filterable: false,
         renderCell: (params) => {
           const index = fields.findIndex(f => f.id === params.id);
           return (
             <>
-              <Button size="small" disabled={index === 0} onClick={() => moveRowUp(index)}>↑</Button>
-              <Button size="small" disabled={index === fields.length - 1} onClick={() => moveRowDown(index)}>↓</Button>
+              <Button size="small" disabled={index === 0} onClick={() => moveRowUp(index)} variant="outlined">↑</Button>
+              <Button size="small" disabled={index === fields.length - 1} onClick={() => moveRowDown(index)} variant="outlined">↓</Button>
             </>
           );
         },
