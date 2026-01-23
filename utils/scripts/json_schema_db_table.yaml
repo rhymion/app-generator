@@ -37,6 +37,7 @@ definitions:
     required:
       - id
       - name
+      - type
       - xxxxx_xxxxx_id
       - required
       - written_by
@@ -50,9 +51,7 @@ definitions:
         description: Yyyyy yyyyy name
         minLength: 1
       type:
-        type: 
-          - string
-          - "null"
+        type: string
         description: Yyyyy yyyyy data type
         enum:
           - string
@@ -94,7 +93,7 @@ definitions:
     required:
       - id
       - name
-      - yyyyy_yyyyy
+      - yyyyy_yyyyys
     properties:
       id:
         type: string
@@ -114,7 +113,7 @@ definitions:
           - string
           - "null"
         description: Optional team in charge of the xxxxx xxxxx
-      yyyyy_yyyyy:
+      yyyyy_yyyyys:
         type: array
         description: Array of yyyyy yyyyy definitions
         items:
