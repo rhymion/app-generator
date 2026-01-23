@@ -16,7 +16,7 @@ export async function getAllXxxxxXxxxxs(): Promise<XxxxxXxxxx[]> {
 export async function getXxxxxXxxxxDetail(id: string): Promise<XxxxxXxxxxDetail | null> {
   const xxxxxXxxxx = await prisma.xxxxx_xxxxx.findUnique({
     where: { id },
-    include: { yyyyyYyyyy: true },
+    include: { yyyyy_yyyyys: true },
   });
 
   if (!xxxxxXxxxx) {
@@ -28,7 +28,7 @@ export async function getXxxxxXxxxxDetail(id: string): Promise<XxxxxXxxxxDetail 
     name: xxxxxXxxxx.name,
     description: xxxxxXxxxx.description,
     team: xxxxxXxxxx.team,
-    yyyyyYyyyy: xxxxxXxxxx.yyyyyYyyyy.map((item) => ({
+    yyyyy_yyyyys: xxxxxXxxxx.yyyyy_yyyyys.map((item) => ({
       id: item.id,
       name: item.name,
       type: item.type,

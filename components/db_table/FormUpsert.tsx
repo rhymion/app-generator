@@ -76,12 +76,13 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     const formData = new FormData();
     formData.set('id', src.id);
     await removeDbTable(formData);
-    router.push('/db_tables');
+    router.push('/db_table');
     router.refresh();
   };
 
   const handleBack = () => {
-    router.back();
+    router.push('/db_table');
+    router.refresh();
   };
 
   const formFields = (

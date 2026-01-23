@@ -6,7 +6,7 @@ export default function AddXxxxxXxxxxPage() {
     name: '',
     description: '',
     team: '',
-    yyyyyYyyyy: [],
+    yyyyy_yyyyys: [],
   };
   return <FormUpsert src={src} isEdit={false} />;
 }

@@ -41,7 +41,7 @@ export default function FormView({ src }: FormViewProps) {
       />
       <div>
         <h2>YyyyyYyyyy</h2>
-        <FieldsViewGrid fields={src.yyyyyYyyyy} columns={columns} />
+        <FieldsViewGrid fields={src.yyyyy_yyyyys} columns={columns} />
       </div>
     </div>
   );

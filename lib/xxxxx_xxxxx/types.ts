@@ -6,13 +6,13 @@ export type XxxxxXxxxx = {
 };
 
 export type XxxxxXxxxxDetail = XxxxxXxxxx & {
-  yyyyyYyyyy: YyyyyYyyyy[];
+  yyyyy_yyyyys: YyyyyYyyyy[];
 };
 
 export type YyyyyYyyyy = {
   id: string;
   name: string;
-  type: string | null;
+  type: string;
   xxxxx_xxxxx_id: string;
   max_length: number | null;
   max: number | null;
@@ -33,7 +33,7 @@ export type FormViewProps = Readonly<{
     name: string;
     description: string | null;
     team: string | null;
-    yyyyyYyyyy: YyyyyYyyyy[];
+    yyyyy_yyyyys: YyyyyYyyyy[];
   };
 }>;
 

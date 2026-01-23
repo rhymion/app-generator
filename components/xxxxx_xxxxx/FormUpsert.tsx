@@ -23,7 +23,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
 
   const columns = field_columns(true);
 
-  const initialYyyyyYyyyy = src.yyyyyYyyyy.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
+  const initialYyyyyYyyyy = src.yyyyy_yyyyys.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
 
   const createNewYyyyyYyyyy = () => ({
     id: `temp-${Date.now()}-${Math.random()}`,
@@ -82,7 +82,8 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   };
 
   const handleBack = () => {
-    router.back();
+    router.push('/xxxxx_xxxxx');
+    router.refresh();
   };
 
   const formFields = (

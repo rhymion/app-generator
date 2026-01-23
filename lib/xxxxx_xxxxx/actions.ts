@@ -16,20 +16,20 @@ export async function upsertXxxxxXxxxx(data: FormData) {
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
   const team = data.get('team') as string | null;
-  const yyyyyYyyyyRaw = data.getAll('yyyyyYyyyy[]') as string[];
-  const yyyyyYyyyy = yyyyyYyyyyRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });
+  const yyyyyYyyyysRaw = data.getAll('yyyyyYyyyy[]') as string[];
+  const yyyyyYyyyys = yyyyyYyyyysRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string; xxxxx_xxxxx_id?: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });
 
   if (id) {
-    await updateXxxxxXxxxx(id, name, description, team, yyyyyYyyyy);
+    await updateXxxxxXxxxx(id, name, description, team, yyyyyYyyyys);
   } else {
-    await addXxxxxXxxxx(name, description, team, yyyyyYyyyy);
+    await addXxxxxXxxxx(name, description, team, yyyyyYyyyys);
   }
 
   revalidatePath('/');
   redirect('/xxxxx_xxxxx');
 }
 
-async function addXxxxxXxxxx(name: string, description: string | null, team: string | null, yyyyyYyyyy: { name: string; type: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]) {
+async function addXxxxxXxxxx(name: string, description: string | null, team: string | null, yyyyyYyyyys: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]) {
   await prisma.$transaction(async (tx) => {
     const newRecord = await tx.xxxxx_xxxxx.create({
       data: {
@@ -40,9 +40,9 @@ async function addXxxxxXxxxx(name: string, description: string | null, team: str
     });
     const recordId = newRecord.id;
 
-    if (yyyyyYyyyy.length > 0) {
+    if (yyyyyYyyyys.length > 0) {
       await tx.yyyyy_yyyyy.createMany({
-        data: yyyyyYyyyy.map(f => ({
+        data: yyyyyYyyyys.map(f => ({
           name: f.name,
           type: f.type,
           max_length: f.max_length,
@@ -57,7 +57,7 @@ async function addXxxxxXxxxx(name: string, description: string | null, team: str
   });
 }
 
-async function updateXxxxxXxxxx(id: string, name: string, description: string | null, team: string | null, yyyyyYyyyy: { id?: string; name: string; type: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]) {
+async function updateXxxxxXxxxx(id: string, name: string, description: string | null, team: string | null, yyyyyYyyyys: { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]) {
   await prisma.$transaction(async (tx) => {
     await tx.xxxxx_xxxxx.update({
       where: { id },
@@ -72,20 +72,20 @@ async function updateXxxxxXxxxx(id: string, name: string, description: string | 
       where: { xxxxx_xxxxx_id: id },
     });
 
-    const toUpsert = yyyyyYyyyy.filter(f => f.id);
-    const toCreate = yyyyyYyyyy.filter(f => !f.id);
+    const toUpsert = yyyyyYyyyys.filter(f => f.id);
+    const toCreate = yyyyyYyyyys.filter(f => !f.id);
 
     for (const item of toUpsert) {
       await tx.yyyyy_yyyyy.update({
         where: { id: item.id! },
         data: {
-          name: field.name,
-          type: field.type,
-          max_length: field.max_length,
-          max: field.max,
-          regex: field.regex,
-          required: field.required,
-          written_by: field.written_by,
+          name: item.name,
+          type: item.type,
+          max_length: item.max_length,
+          max: item.max,
+          regex: item.regex,
+          required: item.required,
+          written_by: item.written_by,
         },
       });
     }
@@ -105,7 +105,7 @@ async function updateXxxxxXxxxx(id: string, name: string, description: string | 
       });
     }
 
-    const newIds = yyyyyYyyyy.filter(f => f.id).map(f => f.id!);
+    const newIds = yyyyyYyyyys.filter(f => f.id).map(f => f.id!);
     const toDelete = existingYyyyyYyyyy.filter(ef => !newIds.includes(ef.id));
     if (toDelete.length > 0) {
       await tx.yyyyy_yyyyy.deleteMany({
