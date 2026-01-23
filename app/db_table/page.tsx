@@ -1,8 +1,6 @@
 import { getAllDbTables } from '@/lib/db_table/getters';
 import DataGridClient from '@/components/DataGridClient';
 import { removeDbTable } from '@/lib/db_table/actions';
-import Link from 'next/link';
-import Button from '@mui/material/Button';
 
 export default async function DbTablesPage() {
   const db_tables = await getAllDbTables();
