@@ -1,0 +1,121 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+title: Database Table Schema
+description: JSON Schema for database table definitions and fields
+
+definitions:
+  xxxxx_xxxxx:
+    type: object
+    title: Xxxxx Xxxxx
+    description: Xxxxx xxxxx information
+    required:
+      - id
+      - name
+    properties:
+      id:
+        type: string
+        description: Unique identifier (CUID)
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        description: Unique xxxxx xxxxx name
+        minLength: 1
+      description:
+        type:
+          - string
+          - "null"
+        description: Optional xxxxx xxxxx description
+      team:
+        type:
+          - string
+          - "null"
+        description: Optional team in charge of the xxxxx xxxxx
+
+  yyyyy_yyyyy:
+    type: object
+    title: Yyyyy Yyyyy
+    description: Yyyyy yyyyy information
+    required:
+      - id
+      - name
+      - xxxxx_xxxxx_id
+      - required
+      - written_by
+    properties:
+      id:
+        type: string
+        description: Unique identifier (CUID)
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        description: Yyyyy yyyyy name
+        minLength: 1
+      type:
+        type: 
+          - string
+          - "null"
+        description: Yyyyy yyyyy data type
+        enum:
+          - string
+          - number
+          - boolean
+          - date
+      xxxxx_xxxxx_id:
+        type: string
+        description: Reference to parent xxxxx xxxxx ID
+        pattern: "^c[a-z0-9]{24,}$"
+      max_length:
+        type:
+          - integer
+          - "null"
+        description: Maximum length for string fields
+        minimum: 1
+      max:
+        type:
+          - integer
+          - "null"
+        description: Maximum value for number fields
+      regex:
+        type:
+          - string
+          - "null"
+        description: Regular expression pattern for validation
+      required:
+        type: boolean
+        description: Whether the field is required
+        default: true
+      written_by:
+        type: string
+        description: User who wrote the field
+
+  xxxxx_xxxxx_detail:
+    type: object
+    title: Xxxxx Xxxxx with Yyyyy Yyyyy
+    description: Complete xxxxx xxxxx information including yyyyy yyyyy
+    required:
+      - id
+      - name
+      - yyyyy_yyyyy
+    properties:
+      id:
+        type: string
+        description: Unique identifier (CUID)
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        description: Unique xxxxx xxxxx name
+        minLength: 1
+      description:
+        type:
+          - string
+          - "null"
+        description: Optional xxxxx xxxxx description
+      team:
+        type:
+          - string
+          - "null"
+        description: Optional team in charge of the xxxxx xxxxx
+      yyyyy_yyyyy:
+        type: array
+        description: Array of yyyyy yyyyy definitions
+        items:
+          $ref: "#/definitions/yyyyy_yyyyy"
