@@ -1,15 +1,21 @@
 import { PrismaClient } from '@/app/generated/prisma/client'
 import { withAccelerate } from '@prisma/extension-accelerate';
-// import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 
-// const adapter = new PrismaBetterSqlite3({
-//   url: process.env.DATABASE_URL
-// });
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 
-const prisma =
-  globalForPrisma.prisma || new PrismaClient({ accelerateUrl: process.env.PRISMA_DATABASE_URL as string, log: ['query'] })
-  .$extends(withAccelerate());
+// Use Accelerate URL if available, otherwise fall back to direct connection
+const createPrismaClient = () => {
+  const accelerateUrl = process.env.PRISMA_DATABASE_URL || process.env.DATABASE_URL || '';
+  
+  const client = new PrismaClient({
+    accelerateUrl,
+    log: process.env.NODE_ENV === 'development' ? ['query'] : [],
+  }).$extends(withAccelerate());
+
+  return client;
+};
+
+const prisma = globalForPrisma.prisma || createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
