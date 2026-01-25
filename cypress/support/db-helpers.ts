@@ -1,7 +1,6 @@
 import 'dotenv/config'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/app/generated/prisma/client';
-import { withAccelerate } from '@prisma/extension-accelerate';
 import { TEST_CREDENTIALS, getTestPasswordHash } from './test-credentials';
 
 // Use direct database connection for tests

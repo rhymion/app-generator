@@ -1,15 +1,17 @@
-beforeEach(() => {
-  cy.login('sean@doreenslab.com', 'password123');
-});
+import { TEST_CREDENTIALS } from '../support/test-credentials';
 
-describe('View xxxxx xxxxx list page', () => {
-  it('passes', () => {
+describe('Testing xxxxx xxxxx pages and their behavior', () => {
+  beforeEach(() => {
+    cy.task('db:reset');
+    cy.task('db:seed');
+    cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+  });
+
+  it('View xxxxx xxxxx list page', () => {
     cy.visit('/xxxxx_xxxxx');
-  })
-})
+  });
 
-describe('View new xxxxx xxxxx page', () => {
-  it('passes', () => {
+  it('View new xxxxx xxxxx page', () => {
     cy.visit('/xxxxx_xxxxx/new');
   })
-})
+});

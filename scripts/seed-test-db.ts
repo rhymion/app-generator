@@ -1,13 +1,15 @@
 // Script to seed test database
 import { PrismaClient } from '@/app/generated/prisma/client';
-import { withAccelerate } from '@prisma/extension-accelerate';
+import { PrismaPg } from '@prisma/adapter-pg'
 import * as bcrypt from 'bcryptjs';
 
 // Use direct database connection for seeding
 // Accelerate extension is required but will use direct connection for non-Accelerate URLs
-const prisma = new PrismaClient({
-  accelerateUrl: process.env.DATABASE_URL || '',
-}).$extends(withAccelerate());
+const connectionString = `${process.env.DATABASE_URL}`;
+const adapter = new PrismaPg(
+  { connectionString },
+);
+const prisma = new PrismaClient({ adapter })
 
 async function main() {
   console.log('Seeding test database...');
