@@ -32,7 +32,7 @@ export async function proxy(req: NextRequest) {
   }
 
   // Check token (works in Edge runtime)
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+  const token = await getToken({ req, secret: process.env.AUTH_SECRET });
   if (!token) {
     const url = req.nextUrl.clone();
     url.pathname = '/login';
