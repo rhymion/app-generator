@@ -123,24 +123,24 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         initialFields={initialYyyyyYyyyy}
         columns={columns}
         createNewRow={createNewYyyyyYyyyy}
-        addButtonLabel="Add YyyyyYyyyy"
-        deleteDialogTitle="Delete Selected YyyyyYyyyy?"
+        addButtonLabel="Add Yyyyy Yyyyy"
+        deleteDialogTitle="Delete Selected Yyyyy Yyyyy?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="YyyyyYyyyy"
+        title="Yyyyy Yyyyy"
       />
     </>
   );
 
   return (
     <FormWithChildGrid
-      title={`${isEdit ? 'Edit' : 'Add'} XxxxxXxxxx`}
+      title={`${isEdit ? 'Edit' : 'Add'} Xxxxx Xxxxx`}
       isEdit={isEdit}
       formFields={formFields}
       onSubmit={handleSubmit}
       onDelete={isEdit ? handleDelete : undefined}
       onBack={handleBack}
-      deleteEntityLabel="XxxxxXxxxx"
+      deleteEntityLabel="Xxxxx Xxxxx"
       submitButtonLabel="Save"
       error={error}
     />
