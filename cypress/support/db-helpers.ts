@@ -1,10 +1,21 @@
+import 'dotenv/config'
+import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/app/generated/prisma/client';
 import { withAccelerate } from '@prisma/extension-accelerate';
+import { TEST_CREDENTIALS, getTestPasswordHash } from './test-credentials';
 
 // Use direct database connection for tests
-const prisma = new PrismaClient({
-  accelerateUrl: process.env.DATABASE_URL || '',
-}).$extends(withAccelerate());
+// Accelerate extension is required but will use direct connection for non-Accelerate URLs
+const connectionString = `${process.env.DATABASE_URL}`;
+
+const adapter = new PrismaPg(
+  { connectionString },
+);
+
+const prisma = new PrismaClient({ adapter })
+// const prisma = new PrismaClient({
+//   accelerateUrl: process.env.DATABASE_URL || '',
+// }).$extends(withAccelerate());
 
 /**
  * Reset test database to clean state
@@ -24,12 +35,15 @@ export async function resetTestDatabase() {
  * Seed test database with minimal data
  */
 export async function seedTestDatabase() {
+  // Hash password - consistent across all environments
+  const hashedPassword = await getTestPasswordHash();
+  
   // Create test user
   const user = await prisma.users.create({
     data: {
-      email: 'test@example.com',
-      name: 'Test User',
-      password: 'hashed_password_here',
+      email: TEST_CREDENTIALS.email,
+      name: TEST_CREDENTIALS.name,
+      password: hashedPassword,
     },
   });
 

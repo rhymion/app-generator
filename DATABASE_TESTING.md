@@ -106,19 +106,40 @@ npm run db:use:postgres
 ### In Cypress Tests
 
 ```typescript
+import { TEST_CREDENTIALS } from '../support/test-credentials';
+
 describe('My Feature', () => {
   beforeEach(() => {
     // Reset database to clean state
     cy.task('db:reset');
-    // Optional: seed with test data
+    // Seed with test data (creates test user with known credentials)
     cy.task('db:seed');
   });
 
-  it('should work correctly', () => {
-    // Your test
+  it('should login with test user', () => {
+    cy.visit('/login');
+    cy.get('input[name="email"]').type(TEST_CREDENTIALS.email);
+    cy.get('input[name="password"]').type(TEST_CREDENTIALS.password);
+    cy.get('button[type="submit"]').click();
+    // Test user is now logged in
   });
 });
 ```
+
+### Test Credentials
+
+All test environments use the same credentials (defined in `cypress/support/test-credentials.ts`):
+
+- **Email**: `test@example.com`
+- **Password**: `password123` (plain text)
+- **Hashed**: Generated with bcrypt, salt rounds = 10
+
+The password hash is **consistent across all environments** because:
+- Same bcrypt version
+- Same salt rounds (10)
+- Same password input
+
+This means you can use `TEST_CREDENTIALS` in your tests without worrying about environment-specific hashes.
 
 ### Manual Database Reset
 
@@ -194,19 +215,40 @@ DATABASE_URL="postgresql://postgres:postgres@localhost:5433/my_next_test"
 
 ## Architecture Notes
 
+### Prisma 7 Configuration
+
+This project uses **Prisma 7**, which has important changes from Prisma 6:
+
+**Database URL Configuration**:
+- ❌ No longer in `schema.prisma` (`url = env("DATABASE_URL")`)
+- ✅ Now in `prisma.config.ts` (`datasource.url`)
+- ✅ Environment variables loaded via `dotenv/config`
+
+**PrismaClient Configuration**:
+- Must provide `accelerateUrl` to constructor (required by `@prisma/extension-accelerate`)
+- The extension handles both direct connections and Accelerate connections
+- Use `DATABASE_URL` for direct connections
+- Use `PRISMA_DATABASE_URL` for Accelerate connections
+
 ### How Prisma Accelerate Works
 
 With `@prisma/extension-accelerate` installed, the PrismaClient requires an `accelerateUrl`:
 
-**Development/Testing**:
-- Pass `DATABASE_URL` as `accelerateUrl` 
-- Accelerate extension handles it as a direct connection (not cached)
+**Development/Production** (lib/prisma.ts):
+- Uses `accelerateUrl: process.env.PRISMA_DATABASE_URL || process.env.DATABASE_URL || ''`
+- Falls back to direct connection if `PRISMA_DATABASE_URL` is not set
+- Accelerate extension detects URL format and uses caching only for `prisma+postgres://` URLs
 
-**Production**:
-- Pass `PRISMA_DATABASE_URL` (Accelerate connection string) as `accelerateUrl`
-- Accelerate extension provides connection pooling and caching
+**Testing** (cypress/support/db-helpers.ts, scripts/seed-test-db.ts):
+- Uses `new PrismaClient()` without Accelerate extension
+- Direct connection to local test database via `DATABASE_URL` from `.env.test`
+- No `accelerateUrl` parameter needed
+- Faster and simpler for local testing
 
-The extension is smart enough to detect the URL format and use Accelerate features only when appropriate.
+**Why no Accelerate in tests?**
+- Test database is local (localhost), no need for connection pooling
+- Direct connections are faster for local databases
+- Accelerate URLs (`prisma+postgres://...`) are for remote production databases
 
 ### Why Separate Test Database?
 

@@ -7,15 +7,16 @@ export default defineConfig({
       // Load test environment variables
       require('dotenv').config({ path: '.env.test' });
       
-      // Task to reset database before tests
+      // Task to reset and seed database before tests
       on('task', {
         async 'db:reset'() {
-          const { execSync } = require('child_process');
-          execSync('npm run db:reset:test', { stdio: 'inherit' });
+          const { resetTestDatabase } = require('./cypress/support/db-helpers');
+          await resetTestDatabase();
           return null;
         },
         async 'db:seed'() {
-          // Optional: Add seeding logic here
+          const { seedTestDatabase } = require('./cypress/support/db-helpers');
+          await seedTestDatabase();
           return null;
         }
       });

@@ -9,9 +9,20 @@ npm run docker:test:up
 # 2. Setup test database
 npm run db:reset:test
 
-# 3. Run e2e tests
+# 3. Run e2e tests (automatically starts dev server)
+npm run cy:test
+```
+
+**Manual approach** (if you want to keep dev server running):
+```bash
+# Terminal 1: Start dev server with test database
+npm run dev:test
+
+# Terminal 2: Run tests
 npm run cy:run
 ```
+
+**Note**: `npm run dev` uses your production database (Vercel), `npm run dev:test` uses the test database.
 
 Alternative (plain Docker):
 ```bash
@@ -26,8 +37,11 @@ docker run --name postgres-test -e POSTGRES_PASSWORD=postgres \
 npm run docker:test:up
 npm run docker:test:down
 
-# Development with PostgreSQL (default)
+# Development with PostgreSQL (production/Vercel)
 npm run dev
+
+# Development with test database
+npm run dev:test
 
 # Switch to SQLite for quick experimentation  
 npm run db:use:sqlite
@@ -49,7 +63,10 @@ npm run db:studio
 |-------------|----------|--------------|
 | Development | PostgreSQL (Vercel) | `DATABASE_URL` in `.env` |
 | E2E Testing | PostgreSQL (Local) | `DATABASE_URL` in `.env.test` |
-| Local Experimentation | SQLite | `file:./dev.db` |
+| Production | PostgreSQL (Vercel) | `DATABASE_URL` + `PRISMA_DATABASE_URL` |
+| Local Experimentation | SQLite | `DATABASE_URL="file:./dev.db"` |
+
+**Note**: Always use `DATABASE_URL` - it's used by both schema.prisma and prisma.config.ts
 
 ## Workflow
 
@@ -67,9 +84,13 @@ npm run db:studio
 5. Apply migrations properly: `npm run db:migrate`
 
 ### E2E Testing
-1. Ensure test database is running (Docker or local PostgreSQL)
+1. Ensure test database is running: `npm run docker:test:up`
 2. Reset test DB: `npm run db:reset:test`
-3. Run tests: `npm run cy:run`
+3. Run tests: `npm run cy:test` (auto-starts dev server with test DB)
+
+Or manually:
+1. Terminal 1: `npm run dev:test` (uses test DB)
+2. Terminal 2: `npm run cy:run`
 
 ## Files to Update
 
