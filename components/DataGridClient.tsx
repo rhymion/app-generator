@@ -89,7 +89,7 @@ export default function DataGridClient<T extends BaseEntity>({
     {
       field: 'actions',
       headerName: 'Actions',
-      width: 150,
+      width: 250,
       sortable: false,
       filterable: false,
       renderCell: (params) => {
@@ -118,6 +118,9 @@ export default function DataGridClient<T extends BaseEntity>({
             >
               ↓
             </Button>
+            <Link href={`${basePath}/edit/${params.id}`}>
+              <Button size="small" sx={{ mx: 1 }} variant="contained">Edit</Button>
+            </Link>
             {/* <Button size="small" color="error" onClick={() => deleteItem(params.id)}>Delete</Button> */}
           </>
         );
