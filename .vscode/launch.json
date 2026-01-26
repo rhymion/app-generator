@@ -10,6 +10,16 @@
             "name": "Launch Chrome against localhost",
             "url": "http://localhost:3000",
             "webRoot": "${workspaceFolder}"
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Debug generate.ts",
+            "runtimeExecutable": "npx",
+            "runtimeArgs": ["tsx", "utils/scripts/generate.ts", "utils/scripts/json_schema_db_table.yaml", "."],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "skipFiles": ["<node_internals>/**"]
         }
     ]
 }
