@@ -40,6 +40,8 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     
+    if (isPending) return; // Prevent duplicate submissions
+    
     const formData = new FormData();
     const yyyyyYyyyy = fieldsGridRef.current?.getFields?.() || [];
 
