@@ -27,8 +27,8 @@ function extractEntities(schema: Schema): { parent: string; child: string } | nu
   const parent = defs.find(def => 
     !def.endsWith('_detail') && 
     !def.endsWith('_input') &&
-    schema.definitions[def].properties.id &&
-    schema.definitions[def].properties.name
+    schema.definitions[def].properties?.id &&
+    schema.definitions[def].properties?.name
   );
   
   if (!parent) return null;
@@ -39,9 +39,22 @@ function extractEntities(schema: Schema): { parent: string; child: string } | nu
   
   const detailDef = schema.definitions[detailKey];
   
+  // Get properties - support both allOf style and explicit properties
+  let properties = detailDef.properties;
+  
+  if (!properties && detailDef.allOf) {
+    // New style using allOf - find the object with properties
+    const propsObj = detailDef.allOf.find((item: any) => item.properties);
+    if (propsObj) {
+      properties = propsObj.properties;
+    }
+  }
+  
+  if (!properties) return null;
+  
   // Find child entity from the detail properties (array of refs)
-  const arrayProp = Object.entries(detailDef.properties).find(([key, prop]) => 
-    prop.type === 'array' && prop.items?.$ref
+  const arrayProp = Object.entries(properties).find(([key, prop]) => 
+    (prop as any).type === 'array' && (prop as any).items?.$ref
   );
   
   if (!arrayProp) return null;

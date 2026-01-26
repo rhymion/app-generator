@@ -11,11 +11,17 @@ export interface SchemaProperty {
 }
 
 export interface SchemaDefinition {
-  type: string;
-  title: string;
-  description: string;
-  required: string[];
-  properties: Record<string, SchemaProperty>;
+  type?: string;
+  title?: string;
+  description?: string;
+  required?: string[];
+  properties?: Record<string, SchemaProperty>;
+  allOf?: Array<{
+    $ref?: string;
+    type?: string;
+    required?: string[];
+    properties?: Record<string, SchemaProperty>;
+  }>;
 }
 
 export interface Schema {
