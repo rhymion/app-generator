@@ -18,6 +18,17 @@ export default defineConfig({
           const { seedTestDatabase } = require('./cypress/support/db-helpers');
           await seedTestDatabase();
           return null;
+        },
+        async 'db:populateXxxxxXxxxx'(length: number) {
+          const { populateXxxxxXxxxxData } = require('./cypress/support/db-helpers');
+          const records = await populateXxxxxXxxxxData(length);
+          return records;
+        },
+        async 'db:populateYyyyyYyyyy'(params: { xxxxxXxxxxId: string; length?: number; Length?: number }) {
+          const { populateYyyyyYyyyyData } = require('./cypress/support/db-helpers');
+          const length = params.length || params.Length || 1;
+          const records = await populateYyyyyYyyyyData(params.xxxxxXxxxxId, length);
+          return records;
         }
       });
       

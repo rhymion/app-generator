@@ -39,4 +39,34 @@ describe('Testing xxxxx xxxxx pages and their behavior', () => {
     cy.contains('Test Xxxxx').should('be.visible');
   });
 
+  it('Edit existing xxxxx xxxxx', () => {
+    // Populate data using Cypress tasks (runs in Node.js context)
+    cy.task<any[]>('db:populateXxxxxXxxxx', 1).then((records) => {
+      const xxxxxXxxxx = records[0];
+      cy.task('db:populateYyyyyYyyyy', { xxxxxXxxxxId: xxxxxXxxxx.id, length: 1 });
+    });
+    
+    cy.visit('/xxxxx_xxxxx');
+    cy.contains('Xxxxx Xxxxx 1').click();
+    cy.contains('Edit').click();
+    cy.url().should('include', '/xxxxx_xxxxx/edit');
+
+    // Update form fields
+    cy.fillField('Description', 'Updated description for test xxxxx xxxxx.');
+    
+    // Update child row
+    fillDataGridRow(0, {
+      name: 'field1_updated',
+      type: 'number',
+      max: 100,
+      required: false,
+    });
+
+    // Save and verify
+    cy.clickButton('Save');
+    cy.url().should('include', '/xxxxx_xxxxx');
+    cy.contains('Xxxxx Xxxxx 1').should('be.visible');
+    cy.contains('Updated description for test xxxxx xxxxx.').should('be.visible');
+  });
+
 });
