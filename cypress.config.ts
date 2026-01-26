@@ -20,12 +20,12 @@ export default defineConfig({
           return null;
         },
         async 'db:populateXxxxxXxxxx'(length: number) {
-          const { populateXxxxxXxxxxData } = require('./cypress/support/db-helpers');
+          const { populateXxxxxXxxxxData } = require('./cypress/support/xxxxx_xxxxx/helper');
           const records = await populateXxxxxXxxxxData(length);
           return records;
         },
         async 'db:populateYyyyyYyyyy'(params: { xxxxxXxxxxId: string; length?: number; Length?: number }) {
-          const { populateYyyyyYyyyyData } = require('./cypress/support/db-helpers');
+          const { populateYyyyyYyyyyData } = require('./cypress/support/xxxxx_xxxxx/helper');
           const length = params.length || params.Length || 1;
           const records = await populateYyyyyYyyyyData(params.xxxxxXxxxxId, length);
           return records;
