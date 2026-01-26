@@ -98,8 +98,28 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
           const index = fields.findIndex(f => f.id === params.id);
           return (
             <>
-              <Button size="small" disabled={index === 0} onClick={() => moveRowUp(index)} variant="outlined">↑</Button>
-              <Button size="small" disabled={index === fields.length - 1} onClick={() => moveRowDown(index)} variant="outlined">↓</Button>
+              <Button 
+                size="small" 
+                disabled={index === 0} 
+                onClick={() => {
+                  const idx = fields.findIndex(f => f.id === params.id);
+                  if (idx > 0) moveRowUp(idx);
+                }} 
+                variant="outlined"
+              >
+                ↑
+              </Button>
+              <Button 
+                size="small" 
+                disabled={index === fields.length - 1} 
+                onClick={() => {
+                  const idx = fields.findIndex(f => f.id === params.id);
+                  if (idx < fields.length - 1) moveRowDown(idx);
+                }} 
+                variant="outlined"
+              >
+                ↓
+              </Button>
             </>
           );
         },

@@ -72,17 +72,6 @@ export default function DataGridClient<T extends BaseEntity>({
 //     startTransition(() => removeAction([id]));
 //   };
 
-  const renderActions = (params: any) => {
-    const index = items.findIndex(t => t.id === params.id);
-    return (
-      <>
-        <Button size="small" disabled={index === 0} onClick={() => moveRowUp(index)} variant="outlined">↑</Button>
-        <Button size="small" disabled={index === items.length - 1} onClick={() => moveRowDown(index)} variant="outlined">↓</Button>
-        {/* <Button size="small" color="error" onClick={() => deleteItem(params.id)}>Delete</Button> */}
-      </>
-    );
-  };
-
   const columns: GridColDef<T>[] = [
     {
       field: 'name',
@@ -103,7 +92,36 @@ export default function DataGridClient<T extends BaseEntity>({
       width: 150,
       sortable: false,
       filterable: false,
-      renderCell: renderActions,
+      renderCell: (params) => {
+        const index = items.findIndex(t => t.id === params.id);
+        return (
+          <>
+            <Button 
+              size="small" 
+              disabled={index === 0} 
+              onClick={() => {
+                const idx = items.findIndex(t => t.id === params.id);
+                if (idx > 0) moveRowUp(idx);
+              }} 
+              variant="outlined"
+            >
+              ↑
+            </Button>
+            <Button 
+              size="small" 
+              disabled={index === items.length - 1} 
+              onClick={() => {
+                const idx = items.findIndex(t => t.id === params.id);
+                if (idx < items.length - 1) moveRowDown(idx);
+              }} 
+              variant="outlined"
+            >
+              ↓
+            </Button>
+            {/* <Button size="small" color="error" onClick={() => deleteItem(params.id)}>Delete</Button> */}
+          </>
+        );
+      },
     },
   ];
 
