@@ -108,3 +108,48 @@ export function assertDataGridEmpty() {
 export function getDataGridRowCount() {
   return cy.get('div[role="row"][data-rowindex]').its('length');
 }
+
+/**
+ * Assert the value of a specific cell in DataGrid
+ * @param rowIndex - 0-based row index
+ * @param field - Field name (column)
+ * @param expectedValue - Expected cell value
+ */
+export function assertDataGridCellValue(
+  rowIndex: number,
+  field: string,
+  expectedValue: string | number | boolean
+) {
+  if (typeof expectedValue === 'boolean') {
+    // For boolean fields, check checkbox state
+    const assertion = expectedValue ? 'be.checked' : 'not.be.checked';
+    getDataGridCell(rowIndex, field).find('input[type="checkbox"]').should(assertion);
+  } else {
+    // For text/number fields, check the text content
+    getDataGridCell(rowIndex, field).should('contain.text', String(expectedValue));
+  }
+}
+
+/**
+ * Assert multiple cell values in a DataGrid row
+ * @param rowIndex - 0-based row index
+ * @param expectedData - Object with field names as keys and expected values
+ */
+export function assertDataGridRowData(
+  rowIndex: number,
+  expectedData: Record<string, string | number | boolean>
+) {
+  Object.entries(expectedData).forEach(([field, expectedValue]) => {
+    assertDataGridCellValue(rowIndex, field, expectedValue);
+  });
+}
+
+/**
+ * Get text content from a DataGrid cell
+ * @param rowIndex - 0-based row index
+ * @param field - Field name (column)
+ * @returns Chainable with cell text
+ */
+export function getDataGridCellText(rowIndex: number, field: string) {
+  return getDataGridCell(rowIndex, field).invoke('text');
+}

@@ -38,4 +38,5 @@ describe('Testing xxxxx xxxxx pages and their behavior', () => {
     cy.url().should('include', '/xxxxx_xxxxx');
     cy.contains('Test Xxxxx').should('be.visible');
   });
+
 });

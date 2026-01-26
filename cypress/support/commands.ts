@@ -44,6 +44,25 @@ Cypress.Commands.add('clickButton', (text: string) => {
   cy.contains('button', text).click();
 });
 
+/**
+ * Check a labeled form field value
+ * Handles both associated labels (using 'for' attribute) and wrapped labels
+ */
+Cypress.Commands.add('checkField', (label: string, expectedValue: string) => {
+  cy.get('body').then(($body) => {
+    const $label = $body.find(`label:contains("${label}")`).first();
+    const forAttr = $label.attr('for');
+    
+    if (forAttr) {
+      // Use the 'for' attribute to find the specific input/textarea
+      cy.get(`#${forAttr}`).should('have.value', expectedValue);
+    } else {
+      // Fall back to finding within parent (for wrapped labels)
+      cy.contains('label', label).parent().find('input, textarea').first().should('have.value', expectedValue);
+    }
+  });
+});
+
 // TypeScript definitions
 declare global {
   namespace Cypress {
@@ -70,6 +89,14 @@ declare global {
        * @example cy.clickButton('Save')
        */
       clickButton(text: string): Chainable<void>;
+      
+      /**
+       * Check a form field value by label
+       * @param label - Label text
+       * @param expectedValue - Expected value
+       * @example cy.checkField('Name', 'John Doe')
+       */
+      checkField(label: string, expectedValue: string): Chainable<void>;
     }
   }
 }
