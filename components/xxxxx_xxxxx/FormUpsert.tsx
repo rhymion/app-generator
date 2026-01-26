@@ -39,9 +39,9 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    
+
     if (isPending) return; // Prevent duplicate submissions
-    
+
     const formData = new FormData();
     const yyyyyYyyyy = fieldsGridRef.current?.getFields?.() || [];
 
@@ -79,7 +79,6 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     const formData = new FormData();
     formData.set('id', src.id);
     await removeXxxxxXxxxx(formData);
-    // redirect() in the server action will handle navigation
   };
 
   const handleBack = () => {

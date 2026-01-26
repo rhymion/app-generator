@@ -33,6 +33,10 @@ function toPascalCase(str: string): string {
   return camel.charAt(0).toUpperCase() + camel.slice(1);
 }
 
+function toTitleCase(str: string): string {
+  return str.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+}
+
 export function generateTypes(parent: string, child: string, schema: Schema): string {
   const parentPascal = toPascalCase(parent);
   const childPascal = toPascalCase(child);
@@ -341,8 +345,10 @@ ${columns.join('\n')}
 
 export function generateFormUpsert(parent: string, child: string, schema: Schema): string {
   const parentPascal = toPascalCase(parent);
+  const parentTitle = toTitleCase(parent);
   const childPascal = toPascalCase(child);
   const childCamel = toCamelCase(child);
+  const childTitle = toTitleCase(child);
   const parentDef = schema.definitions[parent];
   const childDef = schema.definitions[child];
   
@@ -430,7 +436,9 @@ ${createNewChildProps}
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    
+
+    if (isPending) return; // Prevent duplicate submissions
+
     const formData = new FormData();
     const ${childCamel} = fieldsGridRef.current?.getFields?.() || [];
 
@@ -460,8 +468,6 @@ ${childSerialize}
     const formData = new FormData();
     formData.set('id', src.id);
     await remove${parentPascal}(formData);
-    router.push('/${parent}');
-    router.refresh();
   };
 
   const handleBack = () => {
@@ -477,24 +483,24 @@ ${parentTextFields}
         initialFields={initial${childPascal}}
         columns={columns}
         createNewRow={createNew${childPascal}}
-        addButtonLabel="Add ${childPascal}"
-        deleteDialogTitle="Delete Selected ${childPascal}?"
+        addButtonLabel="Add ${childTitle}"
+        deleteDialogTitle="Delete Selected ${childTitle}?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="${childPascal}"
+        title="${childTitle}"
       />
     </>
   );
 
   return (
     <FormWithChildGrid
-      title={\`\${isEdit ? 'Edit' : 'Add'} ${parentPascal}\`}
+      title={\`\${isEdit ? 'Edit' : 'Add'} ${parentTitle}\`}
       isEdit={isEdit}
       formFields={formFields}
       onSubmit={handleSubmit}
       onDelete={isEdit ? handleDelete : undefined}
       onBack={handleBack}
-      deleteEntityLabel="${parentPascal}"
+      deleteEntityLabel="${parentTitle}"
       submitButtonLabel="Save"
       error={error}
     />
@@ -558,6 +564,7 @@ ${parentTextFields}
 
 export function generatePageList(parent: string): string {
   const parentPascal = toPascalCase(parent);
+  const parentTitle = toTitleCase(parent);
   
   return `import { getAll${parentPascal}s } from '@/lib/${parent}/getters';
 import DataGridClient from '@/components/DataGridClient';
@@ -565,7 +572,7 @@ import { remove${parentPascal} } from '@/lib/${parent}/actions';
 
 export default async function ${parentPascal}sPage() {
   const ${parent}s = await getAll${parentPascal}s();
-  return <DataGridClient src={${parent}s} basePath="/${parent}" removeAction={remove${parentPascal}} entityLabel="${parentPascal}" />;
+  return <DataGridClient src={${parent}s} basePath="/${parent}" removeAction={remove${parentPascal}} entityLabel="${parentTitle}" />;
 }
 `;
 }
