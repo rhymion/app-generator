@@ -20,94 +20,133 @@ function parseSchema(filePath: string): Schema {
   return yaml.load(content) as Schema;
 }
 
-function extractEntities(schema: Schema): { parent: string; child: string } | null {
+interface EntityRelation {
+  parent: string;
+  children: Array<{
+    name: string;
+    propertyName: string;
+  }>;
+}
+
+function extractEntities(schema: Schema): EntityRelation[] {
   const defs = Object.keys(schema.definitions);
+  const results: EntityRelation[] = [];
   
-  // Find parent entity (should have basic properties)
-  const parent = defs.find(def => 
+  // Find all parent entities (should have basic properties)
+  const parents = defs.filter(def => 
     !def.endsWith('_detail') && 
     !def.endsWith('_input') &&
     schema.definitions[def].properties?.id &&
     schema.definitions[def].properties?.name
   );
   
-  if (!parent) return null;
+  // Collect all child entity names
+  const allChildren = new Set<string>();
   
-  // Find detail entity
-  const detailKey = defs.find(def => def.endsWith('_detail'));
-  if (!detailKey) return null;
-  
-  const detailDef = schema.definitions[detailKey];
-  
-  // Get properties - support both allOf style and explicit properties
-  let properties = detailDef.properties;
-  
-  if (!properties && detailDef.allOf) {
-    // New style using allOf - find the object with properties
-    const propsObj = detailDef.allOf.find((item: any) => item.properties);
-    if (propsObj) {
-      properties = propsObj.properties;
+  for (const parent of parents) {
+    const children: Array<{ name: string; propertyName: string }> = [];
+    
+    // Find detail entity for this parent
+    const detailKey = `${parent}_detail`;
+    const detailDef = schema.definitions[detailKey];
+    
+    if (detailDef) {
+      // Get properties - support both allOf style and explicit properties
+      let properties = detailDef.properties;
+      
+      if (!properties && detailDef.allOf) {
+        // New style using allOf - find the object with properties
+        const propsObj = detailDef.allOf.find((item: any) => item.properties);
+        if (propsObj) {
+          properties = propsObj.properties;
+        }
+      }
+      
+      if (properties) {
+        // Find all child entities from array properties with $ref
+        for (const [propName, prop] of Object.entries(properties)) {
+          const propAny = prop as any;
+          if (propAny.type === 'array' && propAny.items?.$ref) {
+            // Extract child entity name from the $ref (e.g., "#/definitions/yyyyy_yyyyy")
+            const ref = propAny.items.$ref as string;
+            const childName = ref.split('/').pop();
+            if (childName) {
+              children.push({ name: childName, propertyName: propName });
+              allChildren.add(childName);
+            }
+          }
+        }
+      }
     }
+    
+    results.push({ parent, children });
   }
   
-  if (!properties) return null;
-  
-  // Find child entity from the detail properties (array of refs)
-  const arrayProp = Object.entries(properties).find(([key, prop]) => 
-    (prop as any).type === 'array' && (prop as any).items?.$ref
-  );
-  
-  if (!arrayProp) return null;
-  
-  // Extract child entity name from the $ref (e.g., "#/definitions/yyyyy_yyyyy")
-  const ref = (arrayProp[1] as any).items.$ref as string;
-  const child = ref.split('/').pop();
-  
-  if (!child) return null;
-  
-  return { parent, child };
+  // Filter out parents that are actually children of other entities
+  return results.filter(r => !allChildren.has(r.parent));
 }
 
 function generate(inputPath: string, outputDir: string) {
   const schema = parseSchema(inputPath);
-  const entities = extractEntities(schema);
+  const entityRelations = extractEntities(schema);
   
-  if (!entities) {
-    console.error('Could not extract entities from schema');
+  if (entityRelations.length === 0) {
+    console.error('Could not extract any entities from schema');
     return;
   }
   
-  const { parent, child } = entities;
+  console.log(`Found ${entityRelations.length} parent entity(ies)`);
   
-  console.log(`Generating code for parent: ${parent}, child: ${child}`);
+  for (const { parent, children } of entityRelations) {
+    console.log(`\nGenerating code for parent: ${parent}`);
+    
+    if (children.length === 0) {
+      console.log(`  No children (parent-only case)`);
+    } else {
+      console.log(`  Children: ${children.map(c => `${c.name} (${c.propertyName})`).join(', ')}`);
+    }
+    
+    // For backward compatibility, use first child if exists
+    // TODO: Update templates to handle multiple children
+    const primaryChild = children.length > 0 ? children[0].name : '';
+    const hasChildren = children.length > 0;
+    
+    // Create directories
+    const libDir = path.join(outputDir, 'lib', parent);
+    const componentsDir = path.join(outputDir, 'components', parent);
+    const appDir = path.join(outputDir, 'app', parent);
+    
+    fs.mkdirSync(libDir, { recursive: true });
+    fs.mkdirSync(componentsDir, { recursive: true });
+    fs.mkdirSync(appDir, { recursive: true });
+    
+    if (hasChildren) {
+      fs.mkdirSync(path.join(appDir, 'new'), { recursive: true });
+      fs.mkdirSync(path.join(appDir, 'edit', '[id]'), { recursive: true });
+      fs.mkdirSync(path.join(appDir, 'view', '[id]'), { recursive: true });
+    }
+    
+    // Generate files
+    fs.writeFileSync(path.join(libDir, 'types.ts'), generateTypes(parent, primaryChild, schema));
+    fs.writeFileSync(path.join(libDir, 'getters.ts'), generateGetters(parent, primaryChild, schema));
+    fs.writeFileSync(path.join(libDir, 'actions.ts'), generateActions(parent, primaryChild, schema));
+    
+    // Only generate child-dependent components if there are children
+    if (hasChildren) {
+      fs.writeFileSync(path.join(componentsDir, 'column_def.tsx'), generateColumnDef(parent, primaryChild, schema));
+      fs.writeFileSync(path.join(componentsDir, 'FormUpsert.tsx'), generateFormUpsert(parent, primaryChild, schema));
+      fs.writeFileSync(path.join(componentsDir, 'FormView.tsx'), generateFormView(parent, primaryChild, schema));
+      
+      fs.writeFileSync(path.join(appDir, 'page.tsx'), generatePageList(parent));
+      fs.writeFileSync(path.join(appDir, 'new', 'page.tsx'), generatePageNew(parent, primaryChild, schema));
+      fs.writeFileSync(path.join(appDir, 'edit', '[id]', 'page.tsx'), generatePageEdit(parent));
+      fs.writeFileSync(path.join(appDir, 'view', '[id]', 'page.tsx'), generatePageView(parent));
+    } else {
+      console.log(`  Skipping child-dependent components (parent-only entity)`);
+    }
+  }
   
-  // Create directories
-  const libDir = path.join(outputDir, 'lib', parent);
-  const componentsDir = path.join(outputDir, 'components', parent);
-  const appDir = path.join(outputDir, 'app', parent);
-  
-  fs.mkdirSync(libDir, { recursive: true });
-  fs.mkdirSync(componentsDir, { recursive: true });
-  fs.mkdirSync(appDir, { recursive: true });
-  fs.mkdirSync(path.join(appDir, 'new'), { recursive: true });
-  fs.mkdirSync(path.join(appDir, 'edit', '[id]'), { recursive: true });
-  fs.mkdirSync(path.join(appDir, 'view', '[id]'), { recursive: true });
-  
-  // Generate files
-  fs.writeFileSync(path.join(libDir, 'types.ts'), generateTypes(parent, child, schema));
-  fs.writeFileSync(path.join(libDir, 'getters.ts'), generateGetters(parent, child, schema));
-  fs.writeFileSync(path.join(libDir, 'actions.ts'), generateActions(parent, child, schema));
-  
-  fs.writeFileSync(path.join(componentsDir, 'column_def.tsx'), generateColumnDef(parent, child, schema));
-  fs.writeFileSync(path.join(componentsDir, 'FormUpsert.tsx'), generateFormUpsert(parent, child, schema));
-  fs.writeFileSync(path.join(componentsDir, 'FormView.tsx'), generateFormView(parent, child, schema));
-  
-  fs.writeFileSync(path.join(appDir, 'page.tsx'), generatePageList(parent));
-  fs.writeFileSync(path.join(appDir, 'new', 'page.tsx'), generatePageNew(parent, child, schema));
-  fs.writeFileSync(path.join(appDir, 'edit', '[id]', 'page.tsx'), generatePageEdit(parent));
-  fs.writeFileSync(path.join(appDir, 'view', '[id]', 'page.tsx'), generatePageView(parent));
-  
-  console.log('Code generation complete!');
+  console.log('\nCode generation complete!');
 }
 
 // CLI usage

@@ -39,38 +39,49 @@ function toTitleCase(str: string): string {
 
 export function generateTypes(parent: string, child: string, schema: Schema): string {
   const parentPascal = toPascalCase(parent);
-  const childPascal = toPascalCase(child);
-  const childCamel = toCamelCase(child);
+  const childPascal = child ? toPascalCase(child) : '';
+  const childCamel = child ? toCamelCase(child) : '';
   
   const parentDef = schema.definitions[parent];
-  const childDef = schema.definitions[child];
+  const childDef = child ? schema.definitions[child] : null;
   
   const parentProps: string[] = [];
   const childProps: string[] = [];
   
   // Generate parent type
-  for (const [key, prop] of Object.entries(parentDef.properties)) {
-    const tsType = getTsType(prop);
-    parentProps.push(`  ${key}: ${tsType};`);
+  if (parentDef.properties) {
+    for (const [key, prop] of Object.entries(parentDef.properties)) {
+      const tsType = getTsType(prop);
+      parentProps.push(`  ${key}: ${tsType};`);
+    }
   }
   
-  // Generate child type
-  for (const [key, prop] of Object.entries(childDef.properties)) {
-    const tsType = getTsType(prop);
-    childProps.push(`  ${key}: ${tsType};`);
+  // Generate child type if exists
+  if (childDef?.properties) {
+    for (const [key, prop] of Object.entries(childDef.properties)) {
+      const tsType = getTsType(prop);
+      childProps.push(`  ${key}: ${tsType};`);
+    }
   }
   
   // Get parent properties for FormViewProps (excluding timestamps)
-  const formViewParentProps = Object.entries(parentDef.properties)
-    .filter(([key]) => key !== 'created_at' && key !== 'updated_at')
-    .map(([key, prop]) => `    ${key}: ${getTsType(prop)};`)
-    .join('\n');
+  const formViewParentProps = parentDef.properties
+    ? Object.entries(parentDef.properties)
+        .filter(([key]) => key !== 'created_at' && key !== 'updated_at')
+        .map(([key, prop]) => `    ${key}: ${getTsType(prop)};`)
+        .join('\n')
+    : '';
   
-  return `export type ${parentPascal} = {
+  // Build type definitions
+  let result = `export type ${parentPascal} = {
 ${parentProps.join('\n')}
 };
 
-export type ${parentPascal}Detail = ${parentPascal} & {
+`;
+  
+  // Add Detail type and child type if child exists
+  if (child && childProps.length > 0) {
+    result += `export type ${parentPascal}Detail = ${parentPascal} & {
   ${child}s: ${childPascal}[];
 };
 
@@ -78,7 +89,16 @@ export type ${childPascal} = {
 ${childProps.join('\n')}
 };
 
-export type ${parentPascal}DetailPageProps = Readonly<{
+`;
+  } else {
+    // Parent-only case
+    result += `export type ${parentPascal}Detail = ${parentPascal};
+
+`;
+  }
+  
+  // Add page props and form props
+  result += `export type ${parentPascal}DetailPageProps = Readonly<{
   params: Promise<{
     id: string;
   }>
@@ -86,8 +106,14 @@ export type ${parentPascal}DetailPageProps = Readonly<{
 
 export type FormViewProps = Readonly<{
   src: {
-${formViewParentProps}
-    ${child}s: ${childPascal}[];
+${formViewParentProps}`;
+  
+  if (child) {
+    result += `
+    ${child}s: ${childPascal}[];`;
+  }
+  
+  result += `
   };
 }>;
 
@@ -95,25 +121,31 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
 }>;
 `;
+
+  return result;
 }
 
 export function generateGetters(parent: string, child: string, schema: Schema): string {
   const parentPascal = toPascalCase(parent);
-  const childCamel = toCamelCase(child);
+  const childCamel = child ? toCamelCase(child) : '';
   const parentCamel = toCamelCase(parent);
   
   const parentDef = schema.definitions[parent];
-  const childDef = schema.definitions[child];
+  const childDef = child ? schema.definitions[child] : null;
   
   // Get all parent properties except timestamps
-  const parentProps = Object.keys(parentDef.properties).filter(k => 
-    k !== 'created_at' && k !== 'updated_at'
-  );
+  const parentProps = parentDef.properties 
+    ? Object.keys(parentDef.properties).filter(k => 
+        k !== 'created_at' && k !== 'updated_at'
+      )
+    : [];
   
   // Get all child properties except timestamps
-  const childProps = Object.keys(childDef.properties).filter(k => 
-    k !== 'created_at' && k !== 'updated_at'
-  );
+  const childProps = childDef?.properties
+    ? Object.keys(childDef.properties).filter(k => 
+        k !== 'created_at' && k !== 'updated_at'
+      )
+    : [];
   
   const parentMapping = parentProps.map(p => `    ${p}: ${parentCamel}.${p},`).join('\n');
   const childMapping = childProps.map(p => `      ${p}: item.${p},`).join('\n');
@@ -132,8 +164,8 @@ ${parentMapping}
 
 export async function get${parentPascal}Detail(id: string): Promise<${parentPascal}Detail | null> {
   const ${parentCamel} = await prisma.${parent}.findUnique({
-    where: { id },
-    include: { ${child}s: true },
+    where: { id },${child ? `
+    include: { ${child}s: true },` : ''}
   });
 
   if (!${parentCamel}) {
@@ -141,10 +173,10 @@ export async function get${parentPascal}Detail(id: string): Promise<${parentPasc
   }
 
   return {
-${parentMapping}
+${parentMapping}${child ? `
     ${child}s: ${parentCamel}.${child}s.map((item) => ({
 ${childMapping}
-    })),
+    })),` : ''}
   };
 }
 `;
@@ -152,48 +184,64 @@ ${childMapping}
 
 export function generateActions(parent: string, child: string, schema: Schema): string {
   const parentPascal = toPascalCase(parent);
-  const childPascal = toPascalCase(child);
-  const childCamel = toCamelCase(child);
+  const childPascal = child ? toPascalCase(child) : '';
+  const childCamel = child ? toCamelCase(child) : '';
   const parentDef = schema.definitions[parent];
-  const childDef = schema.definitions[child];
+  const childDef = child ? schema.definitions[child] : null;
   
   // Get parent properties (excluding id and timestamps)
-  const parentProps = Object.keys(parentDef.properties).filter(k => 
-    k !== 'id' && k !== 'created_at' && k !== 'updated_at'
-  );
+  const parentProps = parentDef.properties
+    ? Object.keys(parentDef.properties).filter(k => 
+        k !== 'id' && k !== 'created_at' && k !== 'updated_at'
+      )
+    : [];
   
   // Get child properties (excluding id, foreign key, and timestamps)
-  const childProps = Object.keys(childDef.properties).filter(k => 
-    k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at'
-  );
+  const childProps = childDef?.properties
+    ? Object.keys(childDef.properties).filter(k => 
+        k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at'
+      )
+    : [];
   
-  const childPropsWithId = Object.keys(childDef.properties).filter(k => 
-    k !== 'created_at' && k !== 'updated_at'
-  );
+  const childPropsWithId = childDef?.properties
+    ? Object.keys(childDef.properties).filter(k => 
+        k !== 'created_at' && k !== 'updated_at'
+      )
+    : [];
   
-  const fieldType = `{ ${childProps.map(p => `${p}: ${getTsType(childDef.properties[p])}`).join('; ')} }`;
-  const fieldTypeWithId = `{ ${childPropsWithId.map(p => `${p.replace(/id/, 'id?')}: ${getTsType(childDef.properties[p])}`).join('; ')} }`;
-  const fieldTypeWithParentId = `{ id?: string; ${childProps.map(p => `${p}: ${getTsType(childDef.properties[p])}`).join('; ')} }`;
+  const fieldType = child && childDef?.properties 
+    ? `{ ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`
+    : 'never';
+  const fieldTypeWithId = child && childDef?.properties
+    ? `{ ${childPropsWithId.map(p => `${p.replace(/id/, 'id?')}: ${getTsType(childDef.properties![p])}`).join('; ')} }`
+    : 'never';
+  const fieldTypeWithParentId = child && childDef?.properties
+    ? `{ id?: string; ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`
+    : 'never';
   
-  const fieldMapCreate = childProps.map(p => `          ${p}: f.${p},`).join('\n');
-  const fieldDataUpdate = childProps.map(p => `          ${p}: item.${p},`).join('\n');
+  const fieldMapCreate = child ? childProps.map(p => `          ${p}: f.${p},`).join('\n') : '';
+  const fieldDataUpdate = child ? childProps.map(p => `          ${p}: item.${p},`).join('\n') : '';
   
   // Generate FormData.get statements for parent properties
-  const formDataGets = parentProps.map(p => {
-    const prop = parentDef.properties[p];
-    const isNullable = Array.isArray(prop.type) && prop.type.includes('null');
-    return `  const ${p} = data.get('${p}') as string${isNullable ? ' | null' : ''};`;
-  }).join('\n');
+  const formDataGets = parentDef.properties
+    ? parentProps.map(p => {
+        const prop = parentDef.properties![p];
+        const isNullable = Array.isArray(prop.type) && prop.type.includes('null');
+        return `  const ${p} = data.get('${p}') as string${isNullable ? ' | null' : ''};`;
+      }).join('\n')
+    : '';
   
   const parentParams = parentProps.map(p => p).join(', ');
-  const parentParamsWithTypes = parentProps.map(p => {
-    const tsType = getTsType(parentDef.properties[p]);
-    return `${p}: ${tsType}`;
-  }).join(', ');
+  const parentParamsWithTypes = parentDef.properties
+    ? parentProps.map(p => {
+        const tsType = getTsType(parentDef.properties![p]);
+        return `${p}: ${tsType}`;
+      }).join(', ')
+    : '';
   
   const parentDataObj = parentProps.map(p => `      ${p},`).join('\n');
   
-  return `'use server';
+  let actionCode = `'use server';
 
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
@@ -208,7 +256,10 @@ export async function upsert${parentPascal}(data: FormData) {
   }
 
   const id = data.get('id') as string | null;
-${formDataGets}
+${formDataGets}`;
+
+  if (child) {
+    actionCode += `
   const ${childCamel}sRaw = data.getAll('${childCamel}[]') as string[];
   const ${childCamel}s = ${childCamel}sRaw.map(f => JSON.parse(f) as ${fieldTypeWithId});
 
@@ -216,13 +267,27 @@ ${formDataGets}
     await update${parentPascal}(id, ${parentParams}, ${childCamel}s);
   } else {
     await add${parentPascal}(${parentParams}, ${childCamel}s);
+  }`;
+  } else {
+    actionCode += `
+
+  if (id) {
+    await update${parentPascal}(id, ${parentParams});
+  } else {
+    await add${parentPascal}(${parentParams});
+  }`;
   }
+
+  actionCode += `
 
   revalidatePath('/');
   redirect('/${parent}');
 }
 
-async function add${parentPascal}(${parentParamsWithTypes}, ${childCamel}s: ${fieldType}[]) {
+`;
+
+  if (child) {
+    actionCode += `async function add${parentPascal}(${parentParamsWithTypes}, ${childCamel}s: ${fieldType}[]) {
   await prisma.$transaction(async (tx) => {
     const newRecord = await tx.${parent}.create({
       data: {
@@ -285,7 +350,28 @@ ${fieldMapCreate}
     }
   });
 }
+`;
+  } else {
+    actionCode += `async function add${parentPascal}(${parentParamsWithTypes}) {
+  await prisma.${parent}.create({
+    data: {
+${parentDataObj}
+    },
+  });
+}
 
+async function update${parentPascal}(id: string, ${parentParamsWithTypes}) {
+  await prisma.${parent}.update({
+    where: { id },
+    data: {
+${parentDataObj}
+    },
+  });
+}
+`;
+  }
+
+  actionCode += `
 export async function remove${parentPascal}(data: FormData | string[]) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
@@ -307,10 +393,30 @@ export async function remove${parentPascal}(data: FormData | string[]) {
   redirect('/${parent}');
 }
 `;
+
+  return actionCode;
 }
 
 export function generateColumnDef(parent: string, child: string, schema: Schema): string {
+  if (!child) {
+    return `import { GridColDef } from '@mui/x-data-grid';
+
+export function field_columns(editable: boolean = false): GridColDef[] {
+  return [];
+}
+`;
+  }
+  
   const childDef = schema.definitions[child];
+  if (!childDef?.properties) {
+    return `import { GridColDef } from '@mui/x-data-grid';
+
+export function field_columns(editable: boolean = false): GridColDef[] {
+  return [];
+}
+`;
+  }
+  
   const columns: string[] = [];
   
   for (const [key, prop] of Object.entries(childDef.properties)) {
@@ -352,10 +458,18 @@ export function generateFormUpsert(parent: string, child: string, schema: Schema
   const parentDef = schema.definitions[parent];
   const childDef = schema.definitions[child];
   
+  if (!parentDef.properties) {
+    throw new Error(`Parent definition ${parent} has no properties`);
+  }
+  
   // Get parent properties (excluding id and timestamps)
   const parentProps = Object.keys(parentDef.properties).filter(k => 
     k !== 'id' && k !== 'created_at' && k !== 'updated_at'
   );
+  
+  if (!childDef?.properties) {
+    throw new Error(`Child definition ${child} has no properties`);
+  }
   
   // Get child properties (excluding id, foreign key, and timestamps)
   const childProps = Object.keys(childDef.properties).filter(k => 
@@ -366,7 +480,7 @@ export function generateFormUpsert(parent: string, child: string, schema: Schema
   const parentRefs = parentProps.map(p => `  const ${p}Ref = useRef<HTMLInputElement>(null);`).join('\n');
   
   const parentTextFields = parentProps.map(p => {
-    const prop = parentDef.properties[p];
+    const prop = parentDef.properties![p];
     const isRequired = parentDef.required?.includes(p);
     const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     
@@ -387,7 +501,7 @@ export function generateFormUpsert(parent: string, child: string, schema: Schema
   ).join('\n');
   
   const createNewChildProps = childProps.map(p => {
-    const prop = childDef.properties[p];
+    const prop = childDef.properties![p];
     
     // Handle default values based on property name and type
     if (p === 'name') return `    name: '',`;
@@ -515,6 +629,10 @@ export function generateFormView(parent: string, child: string, schema: Schema):
   const childPascal = toPascalCase(child);
   const parentDef = schema.definitions[parent];
   
+  if (!parentDef.properties) {
+    throw new Error(`Parent definition ${parent} has no properties`);
+  }
+  
   // Get parent properties (excluding id and timestamps)
   const parentProps = Object.keys(parentDef.properties).filter(k => 
     k !== 'id' && k !== 'created_at' && k !== 'updated_at'
@@ -580,6 +698,10 @@ export default async function ${parentPascal}sPage() {
 export function generatePageNew(parent: string, child: string, schema: Schema): string {
   const parentPascal = toPascalCase(parent);
   const parentDef = schema.definitions[parent];
+  
+  if (!parentDef.properties) {
+    throw new Error(`Parent definition ${parent} has no properties`);
+  }
   
   // Get parent properties (excluding id and timestamps) and set default values
   const parentDefaultProps = Object.entries(parentDef.properties)
