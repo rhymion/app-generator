@@ -69,4 +69,20 @@ describe('Testing xxxxx xxxxx pages and their behavior', () => {
     cy.contains('Updated description for test xxxxx xxxxx.').should('be.visible');
   });
 
+  it('Delete existing xxxxx xxxxx', () => {
+    cy.task<any[]>('db:populateXxxxxXxxxx', 1).then((records) => {
+      const xxxxxXxxxx = records[0];
+      cy.task('db:populateYyyyyYyyyy', { xxxxxXxxxxId: xxxxxXxxxx.id, length: 1 });
+    });
+    cy.visit('/xxxxx_xxxxx');
+    cy.contains('Xxxxx Xxxxx 1').click();
+    cy.contains('Edit').click();
+    cy.url().should('include', '/xxxxx_xxxxx/edit');
+
+    // Delete and verify
+    cy.clickButton('Delete Xxxxx Xxxxx');
+    cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+    cy.url().should('include', '/xxxxx_xxxxx');
+    cy.contains('Xxxxx Xxxxx 1').should('not.exist');
+  });
 });
