@@ -79,8 +79,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     const formData = new FormData();
     formData.set('id', src.id);
     await removeXxxxxXxxxx(formData);
-    router.push('/xxxxx_xxxxx');
-    router.refresh();
+    // redirect() in the server action will handle navigation
   };
 
   const handleBack = () => {

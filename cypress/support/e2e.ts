@@ -15,3 +15,14 @@
 
 // Import commands.js using ES2015 syntax:
 import './commands'
+
+// Handle Next.js redirect errors during tests
+// These are expected when server actions use redirect()
+Cypress.on('uncaught:exception', (err) => {
+  // Ignore Next.js redirect errors - they're expected behavior
+  if (err.message.includes('NEXT_REDIRECT')) {
+    return false;
+  }
+  // Let other errors fail the test
+  return true;
+});
