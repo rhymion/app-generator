@@ -3,7 +3,7 @@ export type Parent1 = {
   name: string;
   description: string | null;
   price: number;
-  due_date: string;
+  due_date: Date;
   image_url: string | null;
 };
 
@@ -28,8 +28,8 @@ export type Parent1Child2 = {
   id: string;
   name: string;
   required: boolean;
-  start_date: string | null;
-  end_date: string;
+  start_date: Date | null;
+  end_date: Date;
 };
 export type Parent1DetailPageProps = Readonly<{
   params: Promise<{
@@ -43,7 +43,7 @@ export type FormViewProps = Readonly<{
     name: string;
     description: string | null;
     price: number;
-    due_date: string;
+    due_date: Date;
     image_url: string | null;
     parent1_child1s: Parent1Child1[];
     parent1_child2s: Parent1Child2[];

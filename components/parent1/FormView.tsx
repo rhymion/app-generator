@@ -5,6 +5,8 @@ import type { FormViewProps } from '@/lib/parent1/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
 import { parent1_child1_columns, parent1_child2_columns } from '../parent1/column_def';
+import NumberField from '../NumberField';
+import DateTimeWrapper from '../DateTimeWrapper';
 
 export default function FormView({ src }: FormViewProps) {
   const parent1_child1Columns: GridColDef[] = parent1_child1_columns(false);
@@ -24,35 +26,29 @@ export default function FormView({ src }: FormViewProps) {
         value={src.name || ''}
         fullWidth
         margin="normal"
-        disabled
+        aria-readonly
       />
       <TextField
         label="Description"
         value={src.description || ''}
         fullWidth
         margin="normal"
-        disabled
+        aria-readonly
       />
       <TextField
         label="Price"
         value={src.price || ''}
         fullWidth
         margin="normal"
-        disabled
+        aria-readonly
       />
-      <TextField
-        label="Due Date"
-        value={src.due_date || ''}
-        fullWidth
-        margin="normal"
-        disabled
-      />
+      <DateTimeWrapper label="Due Date" date_time={src.due_date} show_time={false} readOnly />
       <TextField
         label="Image Url"
         value={src.image_url || ''}
         fullWidth
         margin="normal"
-        disabled
+        aria-readonly
       />
       <div>
         <h2>Parent1Child1</h2>

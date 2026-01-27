@@ -15,13 +15,13 @@ export async function upsertParent1(data: FormData) {
   const id = data.get('id') as string | null;
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
-  const price = data.get('price') as string;
-  const due_date = data.get('due_date') as string;
+  const price = Number(data.get('price'));
+  const due_date = new Date(data.get('due_date') as string);
   const image_url = data.get('image_url') as string | null;
   const parent1Child1sRaw = data.getAll('parent1Child1[]') as string[];
   const parent1Child1s = parent1Child1sRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string; parent1_id?: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });
   const parent1Child2sRaw = data.getAll('parent1Child2[]') as string[];
-  const parent1Child2s = parent1Child2sRaw.map(f => JSON.parse(f) as { id?: string; name: string; required: boolean; start_date: string | null; end_date: string });
+  const parent1Child2s = parent1Child2sRaw.map(f => JSON.parse(f) as { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date });
 
   if (id) {
     await updateParent1(id, name, description, price, due_date, image_url, parent1Child1s, parent1Child2s);
@@ -33,7 +33,7 @@ export async function upsertParent1(data: FormData) {
   redirect('/parent1');
 }
 
-async function addParent1(name: string, description: string | null, price: number, due_date: string, image_url: string | null, parent1Child1s: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { name: string; required: boolean; start_date: string | null; end_date: string }[]) {
+async function addParent1(name: string, description: string | null, price: number, due_date: Date, image_url: string | null, parent1Child1s: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { name: string; required: boolean; start_date: Date | null; end_date: Date }[]) {
   await prisma.$transaction(async (tx) => {
     const newRecord = await tx.parent1.create({
       data: {
@@ -74,7 +74,7 @@ async function addParent1(name: string, description: string | null, price: numbe
   });
 }
 
-async function updateParent1(id: string, name: string, description: string | null, price: number, due_date: string, image_url: string | null, parent1Child1s: { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { id?: string; name: string; required: boolean; start_date: string | null; end_date: string }[]) {
+async function updateParent1(id: string, name: string, description: string | null, price: number, due_date: Date, image_url: string | null, parent1Child1s: { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date }[]) {
   await prisma.$transaction(async (tx) => {
     await tx.parent1.update({
       where: { id },

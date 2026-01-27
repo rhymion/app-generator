@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { SetStateAction, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
@@ -11,6 +11,7 @@ import dayjs, { Dayjs } from 'dayjs';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
+import DateTimeWrapper from '../DateTimeWrapper';
 
 export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const router = useRouter();
@@ -77,26 +78,16 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         multiline={true}
         rows={4}
       />
-      <div>
-        <LocalizationProvider dateAdapter={AdapterDayjs}>
-          <DateTimePicker
-            label="Login Time"
-            value={loginTime}
-            onChange={(newValue) => setLoginTime(newValue)}
-            slotProps={{ textField: { margin: 'normal' } }}
-          />
-        </LocalizationProvider>
-      </div>
-      <div>
-        <LocalizationProvider dateAdapter={AdapterDayjs}>
-          <DateTimePicker
-            label="Logout Time"
-            value={logoutTime}
-            onChange={(newValue) => setLogoutTime(newValue)}
-            slotProps={{ textField: { margin: 'normal' } }}
-          />
-        </LocalizationProvider>
-      </div>
+      <DateTimeWrapper 
+        label="Login Time" 
+        date_time={loginTime ? loginTime.toDate() : null}
+        onChange={(newValue: SetStateAction<dayjs.Dayjs | null>) => setLoginTime(newValue)}
+      />
+      <DateTimeWrapper 
+        label="Logout Time" 
+        date_time={logoutTime ? logoutTime.toDate() : null} 
+        onChange={(newValue: SetStateAction<dayjs.Dayjs | null>) => setLogoutTime(newValue)}
+      />
     </>
   );
 

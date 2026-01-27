@@ -1,20 +1,28 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { SetStateAction, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
+import NumberField from '../NumberField';
 import { upsertParent1, removeParent1 } from '@/lib/parent1/actions';
 import type { FormUpsertProps } from '@/lib/parent1/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import { GridRowsProp } from '@mui/x-data-grid';
 import FieldsDataGrid from '../FieldsDataGrid';
 import { parent1_child1_columns, parent1_child2_columns } from '../parent1/column_def';
+import dayjs, { Dayjs } from 'dayjs';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
+import DateTimeWrapper from '../DateTimeWrapper';
 
 export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [dueDate, setDueDate] = useState<Dayjs | null>(src.due_date ? dayjs(src.due_date) : null);
+  
 
   const parent1_child1GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const parent1_child2GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
@@ -61,7 +69,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     formData.set('name', nameRef.current?.value || '');
     formData.set('description', descriptionRef.current?.value || '');
     formData.set('price', priceRef.current?.value || '');
-    formData.set('due_date', due_dateRef.current?.value || '');
+    formData.set('due_date', dueDate?.toISOString() || '');
     formData.set('image_url', image_urlRef.current?.value || '');
     const parent1Child1 = parent1_child1GridRef.current?.getFields?.() || [];
 
@@ -137,25 +145,17 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         multiline={true}
         rows={4}
       />
-      <TextField
-        label="Price"
-        inputRef={priceRef}
-        defaultValue={src.price || ''}
-        fullWidth
-        margin="normal"
-        required
-        multiline={false}
-        rows={undefined}
+      <NumberField 
+        label="Price" 
+        inputRef={priceRef} 
+        defaultValue={src.price || 0} 
+        min={0}
+        max={1000000}
       />
-      <TextField
-        label="Due Date"
-        inputRef={due_dateRef}
-        defaultValue={src.due_date || ''}
-        fullWidth
-        margin="normal"
-        required
-        multiline={false}
-        rows={undefined}
+      <DateTimeWrapper 
+        label="Due Date" 
+        date_time={dueDate ? dueDate.toDate() : null}
+        onChange={(newValue: SetStateAction<dayjs.Dayjs | null>) => setDueDate(newValue)}
       />
       <TextField
         label="Image Url"

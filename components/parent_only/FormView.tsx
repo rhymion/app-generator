@@ -19,17 +19,17 @@ export default function FormView({ src }: FormViewProps) {
         value={src.name || ''}
         fullWidth
         margin="normal"
-        disabled
+        aria-readonly
       />
       <TextField
         label="Description"
         value={src.description || ''}
         fullWidth
         margin="normal"
-        disabled
+        aria-readonly
       />
-      <DateTimeWrapper label="Login Time" date_time={src.login_time} />
-      <DateTimeWrapper label="Logout Time" date_time={src.logout_time} />
+      <DateTimeWrapper label="Login Time" date_time={src.login_time} readOnly/>
+      <DateTimeWrapper label="Logout Time" date_time={src.logout_time} readOnly />
     </div>
   );
 }
