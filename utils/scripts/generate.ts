@@ -107,7 +107,6 @@ function generate(inputPath: string, outputDir: string) {
     }
     
     // For backward compatibility, use first child if exists
-    // TODO: Update templates to handle multiple children
     const primaryChild = children.length > 0 ? children[0].name : '';
     const hasChildren = children.length > 0;
     
@@ -119,31 +118,28 @@ function generate(inputPath: string, outputDir: string) {
     fs.mkdirSync(libDir, { recursive: true });
     fs.mkdirSync(componentsDir, { recursive: true });
     fs.mkdirSync(appDir, { recursive: true });
+    fs.mkdirSync(path.join(appDir, 'new'), { recursive: true });
+    fs.mkdirSync(path.join(appDir, 'edit', '[id]'), { recursive: true });
+    fs.mkdirSync(path.join(appDir, 'view', '[id]'), { recursive: true });
     
+    // Generate files - pass full children array to support multiple children
+    fs.writeFileSync(path.join(libDir, 'types.ts'), generateTypes(parent, children, schema));
+    fs.writeFileSync(path.join(libDir, 'getters.ts'), generateGetters(parent, children, schema));
+    fs.writeFileSync(path.join(libDir, 'actions.ts'), generateActions(parent, children, schema));
+    
+    // Generate column_def only if there are children
     if (hasChildren) {
-      fs.mkdirSync(path.join(appDir, 'new'), { recursive: true });
-      fs.mkdirSync(path.join(appDir, 'edit', '[id]'), { recursive: true });
-      fs.mkdirSync(path.join(appDir, 'view', '[id]'), { recursive: true });
+      fs.writeFileSync(path.join(componentsDir, 'column_def.tsx'), generateColumnDef(parent, children, schema));
     }
     
-    // Generate files
-    fs.writeFileSync(path.join(libDir, 'types.ts'), generateTypes(parent, primaryChild, schema));
-    fs.writeFileSync(path.join(libDir, 'getters.ts'), generateGetters(parent, primaryChild, schema));
-    fs.writeFileSync(path.join(libDir, 'actions.ts'), generateActions(parent, primaryChild, schema));
+    // Always generate forms and pages
+    fs.writeFileSync(path.join(componentsDir, 'FormUpsert.tsx'), generateFormUpsert(parent, children, schema));
+    fs.writeFileSync(path.join(componentsDir, 'FormView.tsx'), generateFormView(parent, children, schema));
     
-    // Only generate child-dependent components if there are children
-    if (hasChildren) {
-      fs.writeFileSync(path.join(componentsDir, 'column_def.tsx'), generateColumnDef(parent, primaryChild, schema));
-      fs.writeFileSync(path.join(componentsDir, 'FormUpsert.tsx'), generateFormUpsert(parent, primaryChild, schema));
-      fs.writeFileSync(path.join(componentsDir, 'FormView.tsx'), generateFormView(parent, primaryChild, schema));
-      
-      fs.writeFileSync(path.join(appDir, 'page.tsx'), generatePageList(parent));
-      fs.writeFileSync(path.join(appDir, 'new', 'page.tsx'), generatePageNew(parent, primaryChild, schema));
-      fs.writeFileSync(path.join(appDir, 'edit', '[id]', 'page.tsx'), generatePageEdit(parent));
-      fs.writeFileSync(path.join(appDir, 'view', '[id]', 'page.tsx'), generatePageView(parent));
-    } else {
-      console.log(`  Skipping child-dependent components (parent-only entity)`);
-    }
+    fs.writeFileSync(path.join(appDir, 'page.tsx'), generatePageList(parent));
+    fs.writeFileSync(path.join(appDir, 'new', 'page.tsx'), generatePageNew(parent, children, schema));
+    fs.writeFileSync(path.join(appDir, 'edit', '[id]', 'page.tsx'), generatePageEdit(parent));
+    fs.writeFileSync(path.join(appDir, 'view', '[id]', 'page.tsx'), generatePageView(parent));
   }
   
   console.log('\nCode generation complete!');
