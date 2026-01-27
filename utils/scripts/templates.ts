@@ -302,31 +302,62 @@ export async function remove${parentPascal}(data: FormData | string[]) {
 `;
   }
   
-  // For single child (backward compatibility), use existing pattern
-  const primaryChild = children[0];
-  const child = primaryChild.name;
-  const childCamel = toCamelCase(child);
-  const childPascal = toPascalCase(child);
-  const childDef = schema.definitions[child];
+  // For with-children cases, handle all children
+  const allChildrenData = children.map(childInfo => {
+    const child = childInfo.name;
+    const childCamel = toCamelCase(child);
+    const childPascal = toPascalCase(child);
+    const childDef = schema.definitions[child];
+    
+    if (!childDef?.properties) {
+      throw new Error(`Child definition ${child} has no properties`);
+    }
+    
+    const childProps = Object.keys(childDef.properties).filter(k => 
+      k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at'
+    );
+    
+    const childPropsWithId = Object.keys(childDef.properties).filter(k => 
+      k !== 'created_at' && k !== 'updated_at'
+    );
+    
+    const fieldType = `{ ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
+    const fieldTypeWithId = `{ ${childPropsWithId.map(p => `${p.replace(/id/, 'id?')}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
+    const fieldTypeWithParentId = `{ id?: string; ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
+    
+    const fieldMapCreate = childProps.map(p => `          ${p}: f.${p},`).join('\n');
+    const fieldDataUpdate = childProps.map(p => `          ${p}: item.${p},`).join('\n');
+    
+    return {
+      child,
+      childCamel,
+      childPascal,
+      fieldType,
+      fieldTypeWithId,
+      fieldTypeWithParentId,
+      fieldMapCreate,
+      fieldDataUpdate
+    };
+  });
   
-  if (!childDef?.properties) {
-    throw new Error(`Child definition ${child} has no properties`);
-  }
+  // Generate FormData extraction for all children
+  const childFormDataExtractions = allChildrenData.map(({ childCamel, fieldTypeWithId }) => 
+    `  const ${childCamel}sRaw = data.getAll('${childCamel}[]') as string[];\n  const ${childCamel}s = ${childCamel}sRaw.map(f => JSON.parse(f) as ${fieldTypeWithId});`
+  ).join('\n');
   
-  const childProps = Object.keys(childDef.properties).filter(k => 
-    k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at'
-  );
+  const childParamsForAdd = allChildrenData.map(({ childCamel, fieldType }) => `${childCamel}s: ${fieldType}[]`).join(', ');
+  const childParamsForUpdate = allChildrenData.map(({ childCamel, fieldTypeWithParentId }) => `${childCamel}s: ${fieldTypeWithParentId}[]`).join(', ');
+  const childArgsForCall = allChildrenData.map(({ childCamel }) => `${childCamel}s`).join(', ');
   
-  const childPropsWithId = Object.keys(childDef.properties).filter(k => 
-    k !== 'created_at' && k !== 'updated_at'
-  );
+  // Generate createMany calls for all children in addParent
+  const childCreateManyCalls = allChildrenData.map(({ child, childCamel, fieldMapCreate }) => 
+    `    if (${childCamel}s.length > 0) {\n      await tx.${child}.createMany({\n        data: ${childCamel}s.map(f => ({\n${fieldMapCreate}\n          ${parent}_id: recordId,\n        })),\n      });\n    }`
+  ).join('\n');
   
-  const fieldType = `{ ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
-  const fieldTypeWithId = `{ ${childPropsWithId.map(p => `${p.replace(/id/, 'id?')}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
-  const fieldTypeWithParentId = `{ id?: string; ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
-  
-  const fieldMapCreate = childProps.map(p => `          ${p}: f.${p},`).join('\n');
-  const fieldDataUpdate = childProps.map(p => `          ${p}: item.${p},`).join('\n');
+  // Generate full CRUD operations for all children in updateParent
+  const childUpdateOperations = allChildrenData.map(({ child, childCamel, childPascal, fieldMapCreate, fieldDataUpdate }) => 
+    `    const existing${childPascal} = await tx.${child}.findMany({\n      where: { ${parent}_id: id },\n    });\n\n    const ${childCamel}ToUpsert = ${childCamel}s.filter(f => f.id);\n    const ${childCamel}ToCreate = ${childCamel}s.filter(f => !f.id);\n\n    for (const item of ${childCamel}ToUpsert) {\n      await tx.${child}.update({\n        where: { id: item.id! },\n        data: {\n${fieldDataUpdate}\n        },\n      });\n    }\n\n    if (${childCamel}ToCreate.length > 0) {\n      await tx.${child}.createMany({\n        data: ${childCamel}ToCreate.map(f => ({\n${fieldMapCreate}\n          ${parent}_id: id,\n        })),\n      });\n    }\n\n    const ${childCamel}NewIds = ${childCamel}s.filter(f => f.id).map(f => f.id!);\n    const ${childCamel}ToDelete = existing${childPascal}.filter(ef => !${childCamel}NewIds.includes(ef.id));\n    if (${childCamel}ToDelete.length > 0) {\n      await tx.${child}.deleteMany({\n        where: { id: { in: ${childCamel}ToDelete.map(f => f.id) } },\n      });\n    }`
+  ).join('\n\n');
   
   return `'use server';
 
@@ -344,20 +375,19 @@ export async function upsert${parentPascal}(data: FormData) {
 
   const id = data.get('id') as string | null;
 ${formDataGets}
-  const ${childCamel}sRaw = data.getAll('${childCamel}[]') as string[];
-  const ${childCamel}s = ${childCamel}sRaw.map(f => JSON.parse(f) as ${fieldTypeWithId});
+${childFormDataExtractions}
 
   if (id) {
-    await update${parentPascal}(id, ${parentParams}, ${childCamel}s);
+    await update${parentPascal}(id, ${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall});
   } else {
-    await add${parentPascal}(${parentParams}, ${childCamel}s);
+    await add${parentPascal}(${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall});
   }
 
   revalidatePath('/');
   redirect('/${parent}');
 }
 
-async function add${parentPascal}(${parentParamsWithTypes}, ${childCamel}s: ${fieldType}[]) {
+async function add${parentPascal}(${parentParamsWithTypes}${parentParamsWithTypes && childParamsForAdd ? ', ' : ''}${childParamsForAdd}) {
   await prisma.$transaction(async (tx) => {
     const newRecord = await tx.${parent}.create({
       data: {
@@ -366,18 +396,11 @@ ${parentDataObj}
     });
     const recordId = newRecord.id;
 
-    if (${childCamel}s.length > 0) {
-      await tx.${child}.createMany({
-        data: ${childCamel}s.map(f => ({
-${fieldMapCreate}
-          ${parent}_id: recordId,
-        })),
-      });
-    }
+${childCreateManyCalls}
   });
 }
 
-async function update${parentPascal}(id: string, ${parentParamsWithTypes}, ${childCamel}s: ${fieldTypeWithParentId}[]) {
+async function update${parentPascal}(id: string${parentParamsWithTypes ? ', ' : ''}${parentParamsWithTypes}${parentParamsWithTypes && childParamsForUpdate ? ', ' : ''}${childParamsForUpdate}) {
   await prisma.$transaction(async (tx) => {
     await tx.${parent}.update({
       where: { id },
@@ -386,38 +409,7 @@ ${parentDataObj}
       },
     });
 
-    const existing${childPascal} = await tx.${child}.findMany({
-      where: { ${parent}_id: id },
-    });
-
-    const toUpsert = ${childCamel}s.filter(f => f.id);
-    const toCreate = ${childCamel}s.filter(f => !f.id);
-
-    for (const item of toUpsert) {
-      await tx.${child}.update({
-        where: { id: item.id! },
-        data: {
-${fieldDataUpdate}
-        },
-      });
-    }
-
-    if (toCreate.length > 0) {
-      await tx.${child}.createMany({
-        data: toCreate.map(f => ({
-${fieldMapCreate}
-          ${parent}_id: id,
-        })),
-      });
-    }
-
-    const newIds = ${childCamel}s.filter(f => f.id).map(f => f.id!);
-    const toDelete = existing${childPascal}.filter(ef => !newIds.includes(ef.id));
-    if (toDelete.length > 0) {
-      await tx.${child}.deleteMany({
-        where: { id: { in: toDelete.map(f => f.id) } },
-      });
-    }
+${childUpdateOperations}
   });
 }
 
