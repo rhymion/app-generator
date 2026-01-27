@@ -22,6 +22,8 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [dueDate, setDueDate] = useState<Dayjs | null>(src.due_date ? dayjs(src.due_date) : null);
+  const [imageUrl, setImageUrl] = useState<string>(src.image_url || '');
+  const [uploading, setUploading] = useState(false);
   
 
   const parent1_child1GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
@@ -30,7 +32,6 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const descriptionRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
   const due_dateRef = useRef<HTMLInputElement>(null);
-  const image_urlRef = useRef<HTMLInputElement>(null);
   const parent1_child1Columns = parent1_child1_columns(true);
 
   const initialParent1Child1 = src.parent1_child1s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
@@ -59,6 +60,36 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     parent1_id: src.id,
   });
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Upload failed');
+      }
+
+      const data = await response.json();
+      setImageUrl(data.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
@@ -70,7 +101,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     formData.set('description', descriptionRef.current?.value || '');
     formData.set('price', priceRef.current?.value || '');
     formData.set('due_date', dueDate?.toISOString() || '');
-    formData.set('image_url', image_urlRef.current?.value || '');
+    formData.set('image_url', imageUrl);
     const parent1Child1 = parent1_child1GridRef.current?.getFields?.() || [];
 
     (parent1Child1 as any[]).forEach((field) => {
@@ -157,16 +188,63 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         date_time={dueDate ? dueDate.toDate() : null}
         onChange={(newValue: SetStateAction<dayjs.Dayjs | null>) => setDueDate(newValue)}
       />
-      <TextField
-        label="Image Url"
-        inputRef={image_urlRef}
-        defaultValue={src.image_url || ''}
-        fullWidth
-        margin="normal"
-        
-        multiline={false}
-        rows={undefined}
-      />      <FieldsDataGrid
+      <div style={{ margin: '16px 0' }}>
+        <input
+          accept="image/*"
+          style={{ display: 'none' }}
+          id="image-upload-button"
+          type="file"
+          onChange={handleFileUpload}
+          disabled={uploading}
+        />
+        <label htmlFor="image-upload-button">
+          <TextField
+            label="Image URL"
+            value={imageUrl}
+            onChange={(e) => setImageUrl(e.target.value)}
+            fullWidth
+            margin="normal"
+            helperText="You can paste a URL or upload a file"
+            InputProps={{
+              endAdornment: (
+                <span style={{ marginLeft: '8px', whiteSpace: 'nowrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById('image-upload-button')?.click()}
+                    disabled={uploading}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: uploading ? '#ccc' : '#1976d2',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: uploading ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {uploading ? 'Uploading...' : 'Upload'}
+                  </button>
+                </span>
+              ),
+            }}
+          />
+        </label>
+        {imageUrl && (
+          <div style={{ marginTop: '8px' }}>
+            <img 
+              src={imageUrl} 
+              alt="Preview" 
+              style={{ 
+                maxWidth: '200px', 
+                maxHeight: '200px', 
+                objectFit: 'contain',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                padding: '4px'
+              }} 
+            />
+          </div>
+        )}
+      </div>      <FieldsDataGrid
         ref={parent1_child1GridRef}
         initialFields={initialParent1Child1}
         columns={parent1_child1Columns}

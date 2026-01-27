@@ -55,3 +55,5 @@ next-env.d.ts
 *.db
 *.db-journal
 /prisma/schema.postgres.backup
+# Uploaded files
+/public/uploads/
