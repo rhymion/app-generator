@@ -2,6 +2,7 @@ import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/parent_only/types';
 import Link from '@mui/material/Link';
+import DateTimeWrapper from '../DateTimeWrapper';
 
 export default function FormView({ src }: FormViewProps) {
   return (
@@ -27,20 +28,8 @@ export default function FormView({ src }: FormViewProps) {
         margin="normal"
         disabled
       />
-      <TextField
-        label="Login Time"
-        value={src.login_time || ''}
-        fullWidth
-        margin="normal"
-        disabled
-      />
-      <TextField
-        label="Logout Time"
-        value={src.logout_time || ''}
-        fullWidth
-        margin="normal"
-        disabled
-      />
+      <DateTimeWrapper label="Login Time" date_time={src.login_time} />
+      <DateTimeWrapper label="Logout Time" date_time={src.logout_time} />
     </div>
   );
 }

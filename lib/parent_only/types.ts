@@ -2,8 +2,8 @@ export type ParentOnly = {
   id: string;
   name: string;
   description: string | null;
-  login_time: string | null;
-  logout_time: string | null;
+  login_time: Date | null;
+  logout_time: Date | null;
 };
 
 export type ParentOnlyDetail = ParentOnly;
@@ -19,8 +19,8 @@ export type FormViewProps = Readonly<{
     id: string;
     name: string;
     description: string | null;
-    login_time: string | null;
-    logout_time: string | null;
+    login_time: Date | null;
+    logout_time: Date | null;
   };
 }>;
 

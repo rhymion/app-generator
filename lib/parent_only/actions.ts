@@ -15,8 +15,11 @@ export async function upsertParentOnly(data: FormData) {
   const id = data.get('id') as string | null;
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
-  const login_time = data.get('login_time') as string | null;
-  const logout_time = data.get('logout_time') as string | null;
+  const login_time_str = data.get('login_time') as string | null;
+  const logout_time_str = data.get('logout_time') as string | null;
+  
+  const login_time = login_time_str ? new Date(login_time_str) : null;
+  const logout_time = logout_time_str ? new Date(logout_time_str) : null;
 
   if (id) {
     await updateParentOnly(id, name, description, login_time, logout_time);
@@ -28,7 +31,7 @@ export async function upsertParentOnly(data: FormData) {
   redirect('/parent_only');
 }
 
-async function addParentOnly(name: string, description: string | null, login_time: string | null, logout_time: string | null) {
+async function addParentOnly(name: string, description: string | null, login_time: Date | null, logout_time: Date | null) {
   await prisma.parent_only.create({
     data: {
       name,
@@ -39,7 +42,7 @@ async function addParentOnly(name: string, description: string | null, login_tim
   });
 }
 
-async function updateParentOnly(id: string, name: string, description: string | null, login_time: string | null, logout_time: string | null) {
+async function updateParentOnly(id: string, name: string, description: string | null, login_time: Date | null, logout_time: Date | null) {
   await prisma.parent_only.update({
     where: { id },
     data: {

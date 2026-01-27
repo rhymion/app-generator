@@ -7,7 +7,10 @@ import TextField from '@mui/material/TextField';
 import { upsertParentOnly, removeParentOnly } from '@/lib/parent_only/actions';
 import type { FormUpsertProps } from '@/lib/parent_only/types';
 import FormWithChildGrid from '../FormWithChildGrid';
-
+import dayjs, { Dayjs } from 'dayjs';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 
 export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const router = useRouter();
@@ -17,8 +20,8 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
 
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
-  const login_timeRef = useRef<HTMLInputElement>(null);
-  const logout_timeRef = useRef<HTMLInputElement>(null);
+  const [loginTime, setLoginTime] = useState<Dayjs | null>(src.login_time ? dayjs(src.login_time) : null);
+  const [logoutTime, setLogoutTime] = useState<Dayjs | null>(src.logout_time ? dayjs(src.logout_time) : null);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -29,8 +32,8 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     formData.set('id', src.id);
     formData.set('name', nameRef.current?.value || '');
     formData.set('description', descriptionRef.current?.value || '');
-    formData.set('login_time', login_timeRef.current?.value || '');
-    formData.set('logout_time', logout_timeRef.current?.value || '');
+    formData.set('login_time', loginTime?.toISOString() || '');
+    formData.set('logout_time', logoutTime?.toISOString() || '');
 
     try {
       startTransition(async () => {
@@ -74,26 +77,26 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         multiline={true}
         rows={4}
       />
-      <TextField
-        label="Login Time"
-        inputRef={login_timeRef}
-        defaultValue={src.login_time || ''}
-        fullWidth
-        margin="normal"
-        
-        multiline={false}
-        rows={undefined}
-      />
-      <TextField
-        label="Logout Time"
-        inputRef={logout_timeRef}
-        defaultValue={src.logout_time || ''}
-        fullWidth
-        margin="normal"
-        
-        multiline={false}
-        rows={undefined}
-      />
+      <div>
+        <LocalizationProvider dateAdapter={AdapterDayjs}>
+          <DateTimePicker
+            label="Login Time"
+            value={loginTime}
+            onChange={(newValue) => setLoginTime(newValue)}
+            slotProps={{ textField: { margin: 'normal' } }}
+          />
+        </LocalizationProvider>
+      </div>
+      <div>
+        <LocalizationProvider dateAdapter={AdapterDayjs}>
+          <DateTimePicker
+            label="Logout Time"
+            value={logoutTime}
+            onChange={(newValue) => setLogoutTime(newValue)}
+            slotProps={{ textField: { margin: 'normal' } }}
+          />
+        </LocalizationProvider>
+      </div>
     </>
   );
 
