@@ -84,6 +84,8 @@ definitions:
     required:
       - id
       - name
+      - price
+      - due_date
     properties:
       id:
         type: string
@@ -91,14 +93,23 @@ definitions:
       name:
         type: string
         minLength: 1
+        maxLength: 100
       description:
         type:
           - string
           - "null"
-      team:
+      price:
+        type: integer
+        minimum: 0
+        maximum: 1000000
+      due_date:
+        type: string
+        format: date-time
+      image_url:
         type:
           - string
           - "null"
+        format: uri
 
   parent1_child1:
     type: object
@@ -139,11 +150,13 @@ definitions:
         type:
           - string
           - "null"
+        format: regex
       required:
         type: boolean
         default: true
       written_by:
         type: string
+        maxLength: 100
 
   parent1_child2:
     type: object
@@ -151,6 +164,7 @@ definitions:
       - id
       - name
       - required
+      - end_date
     properties:
       id:
         type: string
@@ -161,6 +175,14 @@ definitions:
       required:
         type: boolean
         default: true
+      start_date:
+        type:
+          - string
+          - "null"
+        format: date
+      end_date:
+        type: string
+        format: date
 
   parent1_detail:
     allOf:
@@ -195,7 +217,13 @@ definitions:
         type:
           - string
           - "null"
-      team:
+      login_time:
         type:
           - string
           - "null"
+        format: date-time
+      logout_time:
+        type:
+          - string
+          - "null"
+        format: date-time

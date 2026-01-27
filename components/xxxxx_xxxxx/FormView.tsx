@@ -4,10 +4,10 @@ import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/xxxxx_xxxxx/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
-import { field_columns } from '../xxxxx_xxxxx/column_def';
+import { yyyyy_yyyyy_columns } from '../xxxxx_xxxxx/column_def';
 
 export default function FormView({ src }: FormViewProps) {
-  const columns: GridColDef[] = field_columns(false);
+  const yyyyy_yyyyyColumns: GridColDef[] = yyyyy_yyyyy_columns(false);
 
   return (
     <div>
@@ -41,7 +41,7 @@ export default function FormView({ src }: FormViewProps) {
       />
       <div>
         <h2>YyyyyYyyyy</h2>
-        <FieldsViewGrid fields={src.yyyyy_yyyyys} columns={columns} />
+        <FieldsViewGrid fields={src.yyyyy_yyyyys} columns={yyyyy_yyyyyColumns} />
       </div>
     </div>
   );

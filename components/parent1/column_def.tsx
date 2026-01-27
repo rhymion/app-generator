@@ -1,6 +1,6 @@
 import { GridColDef } from '@mui/x-data-grid';
 
-export function yyyyy_yyyyy_columns(editable: boolean = false): GridColDef[] {
+export function parent1_child1_columns(editable: boolean = false): GridColDef[] {
   return [
     { field: 'name', headerName: 'Name', width: 150, editable: editable },
     { field: 'type', headerName: 'Type', width: 150, editable: editable },
@@ -9,5 +9,14 @@ export function yyyyy_yyyyy_columns(editable: boolean = false): GridColDef[] {
     { field: 'regex', headerName: 'Regex', width: 150, editable: editable },
     { field: 'required', headerName: 'Required', width: 100, editable: editable, type: 'boolean' },
     { field: 'written_by', headerName: 'Written By', width: 150, editable: editable },
+  ];
+}
+
+export function parent1_child2_columns(editable: boolean = false): GridColDef[] {
+  return [
+    { field: 'name', headerName: 'Name', width: 150, editable: editable },
+    { field: 'required', headerName: 'Required', width: 100, editable: editable, type: 'boolean' },
+    { field: 'start_date', headerName: 'Start Date', width: 150, editable: editable },
+    { field: 'end_date', headerName: 'End Date', width: 150, editable: editable },
   ];
 }

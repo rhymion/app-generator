@@ -20,7 +20,6 @@ export type YyyyyYyyyy = {
   required: boolean;
   written_by: string;
 };
-
 export type XxxxxXxxxxDetailPageProps = Readonly<{
   params: Promise<{
     id: string;

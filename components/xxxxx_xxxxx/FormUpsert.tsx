@@ -3,25 +3,24 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
-import { GridRowsProp } from '@mui/x-data-grid';
 import TextField from '@mui/material/TextField';
 import { upsertXxxxxXxxxx, removeXxxxxXxxxx } from '@/lib/xxxxx_xxxxx/actions';
 import type { FormUpsertProps } from '@/lib/xxxxx_xxxxx/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import { GridRowsProp } from '@mui/x-data-grid';
 import FieldsDataGrid from '../FieldsDataGrid';
-import { field_columns } from '../xxxxx_xxxxx/column_def';
+import { yyyyy_yyyyy_columns } from '../xxxxx_xxxxx/column_def';
 
 export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const fieldsGridRef = useRef<{ getFields: () => GridRowsProp }>(null);
+  const yyyyy_yyyyyGridRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const teamRef = useRef<HTMLInputElement>(null);
-
-  const columns = field_columns(true);
+  const yyyyy_yyyyyColumns = yyyyy_yyyyy_columns(true);
 
   const initialYyyyyYyyyy = src.yyyyy_yyyyys.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
 
@@ -40,15 +39,14 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (isPending) return; // Prevent duplicate submissions
+    if (isPending) return;
 
     const formData = new FormData();
-    const yyyyyYyyyy = fieldsGridRef.current?.getFields?.() || [];
-
     formData.set('id', src.id);
     formData.set('name', nameRef.current?.value || '');
     formData.set('description', descriptionRef.current?.value || '');
     formData.set('team', teamRef.current?.value || '');
+    const yyyyyYyyyy = yyyyy_yyyyyGridRef.current?.getFields?.() || [];
 
     (yyyyyYyyyy as any[]).forEach((field) => {
       formData.append(
@@ -117,11 +115,10 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         
         multiline={false}
         rows={undefined}
-      />
-      <FieldsDataGrid
-        ref={fieldsGridRef}
+      />      <FieldsDataGrid
+        ref={yyyyy_yyyyyGridRef}
         initialFields={initialYyyyyYyyyy}
-        columns={columns}
+        columns={yyyyy_yyyyyColumns}
         createNewRow={createNewYyyyyYyyyy}
         addButtonLabel="Add Yyyyy Yyyyy"
         deleteDialogTitle="Delete Selected Yyyyy Yyyyy?"

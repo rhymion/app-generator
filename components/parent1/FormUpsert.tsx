@@ -1,0 +1,207 @@
+'use client';
+
+import { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useTransition } from 'react';
+import TextField from '@mui/material/TextField';
+import { upsertParent1, removeParent1 } from '@/lib/parent1/actions';
+import type { FormUpsertProps } from '@/lib/parent1/types';
+import FormWithChildGrid from '../FormWithChildGrid';
+import { GridRowsProp } from '@mui/x-data-grid';
+import FieldsDataGrid from '../FieldsDataGrid';
+import { parent1_child1_columns, parent1_child2_columns } from '../parent1/column_def';
+
+export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  const parent1_child1GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
+  const parent1_child2GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLInputElement>(null);
+  const priceRef = useRef<HTMLInputElement>(null);
+  const due_dateRef = useRef<HTMLInputElement>(null);
+  const image_urlRef = useRef<HTMLInputElement>(null);
+  const parent1_child1Columns = parent1_child1_columns(true);
+
+  const initialParent1Child1 = src.parent1_child1s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
+
+  const createNewParent1Child1 = () => ({
+    id: `temp-${Date.now()}-${Math.random()}`,
+    name: '',
+    type: 'string',
+    max_length: null,
+    max: null,
+    regex: '',
+    required: true,
+    written_by: '',
+    parent1_id: src.id,
+  });
+  const parent1_child2Columns = parent1_child2_columns(true);
+
+  const initialParent1Child2 = src.parent1_child2s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
+
+  const createNewParent1Child2 = () => ({
+    id: `temp-${Date.now()}-${Math.random()}`,
+    name: '',
+    required: true,
+    start_date: '',
+    end_date: '',
+    parent1_id: src.id,
+  });
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (isPending) return;
+
+    const formData = new FormData();
+    formData.set('id', src.id);
+    formData.set('name', nameRef.current?.value || '');
+    formData.set('description', descriptionRef.current?.value || '');
+    formData.set('price', priceRef.current?.value || '');
+    formData.set('due_date', due_dateRef.current?.value || '');
+    formData.set('image_url', image_urlRef.current?.value || '');
+    const parent1Child1 = parent1_child1GridRef.current?.getFields?.() || [];
+
+    (parent1Child1 as any[]).forEach((field) => {
+      formData.append(
+        'parent1Child1[]',
+        JSON.stringify({
+          id: field.id.startsWith('temp-') ? undefined : field.id,
+          name: field.name,
+          type: field.type,
+          max_length: field.max_length,
+          max: field.max,
+          regex: field.regex,
+          required: field.required,
+          written_by: field.written_by,
+        })
+      );
+    });
+    const parent1Child2 = parent1_child2GridRef.current?.getFields?.() || [];
+
+    (parent1Child2 as any[]).forEach((field) => {
+      formData.append(
+        'parent1Child2[]',
+        JSON.stringify({
+          id: field.id.startsWith('temp-') ? undefined : field.id,
+          name: field.name,
+          required: field.required,
+          start_date: field.start_date,
+          end_date: field.end_date,
+        })
+      );
+    });
+
+    try {
+      startTransition(async () => {
+        await upsertParent1(formData);
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+    }
+  };
+
+  const handleDelete = async () => {
+    const formData = new FormData();
+    formData.set('id', src.id);
+    await removeParent1(formData);
+  };
+
+  const handleBack = () => {
+    router.push('/parent1');
+    router.refresh();
+  };
+
+  const formFields = (
+    <>
+      <TextField
+        label="Name"
+        inputRef={nameRef}
+        defaultValue={src.name || ''}
+        fullWidth
+        margin="normal"
+        required
+        multiline={false}
+        rows={undefined}
+      />
+      <TextField
+        label="Description"
+        inputRef={descriptionRef}
+        defaultValue={src.description || ''}
+        fullWidth
+        margin="normal"
+        
+        multiline={true}
+        rows={4}
+      />
+      <TextField
+        label="Price"
+        inputRef={priceRef}
+        defaultValue={src.price || ''}
+        fullWidth
+        margin="normal"
+        required
+        multiline={false}
+        rows={undefined}
+      />
+      <TextField
+        label="Due Date"
+        inputRef={due_dateRef}
+        defaultValue={src.due_date || ''}
+        fullWidth
+        margin="normal"
+        required
+        multiline={false}
+        rows={undefined}
+      />
+      <TextField
+        label="Image Url"
+        inputRef={image_urlRef}
+        defaultValue={src.image_url || ''}
+        fullWidth
+        margin="normal"
+        
+        multiline={false}
+        rows={undefined}
+      />      <FieldsDataGrid
+        ref={parent1_child1GridRef}
+        initialFields={initialParent1Child1}
+        columns={parent1_child1Columns}
+        createNewRow={createNewParent1Child1}
+        addButtonLabel="Add Parent1 Child1"
+        deleteDialogTitle="Delete Selected Parent1 Child1?"
+        deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
+        showTitle={true}
+        title="Parent1 Child1"
+      />
+      <FieldsDataGrid
+        ref={parent1_child2GridRef}
+        initialFields={initialParent1Child2}
+        columns={parent1_child2Columns}
+        createNewRow={createNewParent1Child2}
+        addButtonLabel="Add Parent1 Child2"
+        deleteDialogTitle="Delete Selected Parent1 Child2?"
+        deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
+        showTitle={true}
+        title="Parent1 Child2"
+      />
+    </>
+  );
+
+  return (
+    <FormWithChildGrid
+      title={`${isEdit ? 'Edit' : 'Add'} Parent1`}
+      isEdit={isEdit}
+      formFields={formFields}
+      onSubmit={handleSubmit}
+      onDelete={isEdit ? handleDelete : undefined}
+      onBack={handleBack}
+      deleteEntityLabel="Parent1"
+      submitButtonLabel="Save"
+      error={error}
+    />
+  );
+}

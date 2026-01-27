@@ -90,3 +90,53 @@ model yyyyy_yyyyy {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 }
+
+model parent1 {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String? 
+  price        Int
+  due_date     DateTime
+  image_url    String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  parent1_child1s parent1_child1[]
+  parent1_child2s parent1_child2[]
+}
+
+model parent1_child1 {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  parent1_id    String     
+  parent1       parent1 @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
+  max_length  Int?
+  max         Int?
+  regex       String?
+  required    Boolean   @default(true)
+  written_by  String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model parent1_child2 {
+  id          String   @id @default(cuid())
+  name        String
+  parent1_id    String     
+  parent1       parent1 @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
+  required    Boolean   @default(true)
+  start_date  DateTime?
+  end_date    DateTime
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model parent_only {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String? 
+  login_time   DateTime?
+  logout_time  DateTime?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}

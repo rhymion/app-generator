@@ -12,6 +12,12 @@ export default function HeaderPage() {
         <li className="block text-blue-300 px-4 py-2 my-1 hover:bg-gray-100 rounded">
           <Link className="no-underline text-blue-300" href="/xxxxx_xxxxx">
             Xxxxx Xxxxx</Link></li>
+        <li className="block text-blue-300 px-4 py-2 my-1 hover:bg-gray-100 rounded">
+          <Link className="no-underline text-blue-300" href="/parent_only">
+            Parent Only</Link></li>
+        <li className="block text-blue-300 px-4 py-2 my-1 hover:bg-gray-100 rounded">
+          <Link className="no-underline text-blue-300" href="/parent1">
+            Parent1</Link></li>
       </ul>
     </nav>
   </>;

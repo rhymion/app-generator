@@ -72,10 +72,10 @@ async function updateXxxxxXxxxx(id: string, name: string, description: string | 
       where: { xxxxx_xxxxx_id: id },
     });
 
-    const toUpsert = yyyyyYyyyys.filter(f => f.id);
-    const toCreate = yyyyyYyyyys.filter(f => !f.id);
+    const yyyyyYyyyyToUpsert = yyyyyYyyyys.filter(f => f.id);
+    const yyyyyYyyyyToCreate = yyyyyYyyyys.filter(f => !f.id);
 
-    for (const item of toUpsert) {
+    for (const item of yyyyyYyyyyToUpsert) {
       await tx.yyyyy_yyyyy.update({
         where: { id: item.id! },
         data: {
@@ -90,9 +90,9 @@ async function updateXxxxxXxxxx(id: string, name: string, description: string | 
       });
     }
 
-    if (toCreate.length > 0) {
+    if (yyyyyYyyyyToCreate.length > 0) {
       await tx.yyyyy_yyyyy.createMany({
-        data: toCreate.map(f => ({
+        data: yyyyyYyyyyToCreate.map(f => ({
           name: f.name,
           type: f.type,
           max_length: f.max_length,
@@ -105,11 +105,11 @@ async function updateXxxxxXxxxx(id: string, name: string, description: string | 
       });
     }
 
-    const newIds = yyyyyYyyyys.filter(f => f.id).map(f => f.id!);
-    const toDelete = existingYyyyyYyyyy.filter(ef => !newIds.includes(ef.id));
-    if (toDelete.length > 0) {
+    const yyyyyYyyyyNewIds = yyyyyYyyyys.filter(f => f.id).map(f => f.id!);
+    const yyyyyYyyyyToDelete = existingYyyyyYyyyy.filter(ef => !yyyyyYyyyyNewIds.includes(ef.id));
+    if (yyyyyYyyyyToDelete.length > 0) {
       await tx.yyyyy_yyyyy.deleteMany({
-        where: { id: { in: toDelete.map(f => f.id) } },
+        where: { id: { in: yyyyyYyyyyToDelete.map(f => f.id) } },
       });
     }
   });
