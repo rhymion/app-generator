@@ -27,7 +27,6 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
-  const due_dateRef = useRef<HTMLInputElement>(null);
   const parent1_child1Columns = parent1_child1_columns(true);
 
   const initialParent1Child1 = src.parent1_child1s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
@@ -51,8 +50,8 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     id: `temp-${Date.now()}-${Math.random()}`,
     name: '',
     required: true,
-    start_date: '',
-    end_date: '',
+    start_date: dayjs().toISOString(),
+    end_date: dayjs().toISOString(),
     parent1_id: src.id,
   });
 
