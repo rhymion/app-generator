@@ -32,17 +32,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'File size exceeds 5MB limit' }, { status: 400 });
     }
 
-    // Generate unique filename
+    // Generate unique directory path while preserving original filename
     const timestamp = Date.now();
     const randomString = Math.random().toString(36).substring(2, 15);
-    const ext = path.extname(file.name);
-    const filename = `${timestamp}-${randomString}${ext}`;
+    const uniqueDir = `${timestamp}-${randomString}`;
+    const originalFilename = file.name;
 
     let url: string;
 
     // Use Vercel Blob Storage if BLOB_READ_WRITE_TOKEN is set (production)
     if (process.env.BLOB_READ_WRITE_TOKEN) {
-      const blob = await put(filename, file, {
+      const blobPath = `${uniqueDir}/${originalFilename}`;
+      const blob = await put(blobPath, file, {
         access: 'public',
         addRandomSuffix: false,
       });
@@ -52,20 +53,20 @@ export async function POST(request: NextRequest) {
       const bytes = await file.arrayBuffer();
       const buffer = Buffer.from(bytes);
 
-      // Create uploads directory if it doesn't exist
-      const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+      // Create unique directory under uploads
+      const uploadsDir = path.join(process.cwd(), 'public', 'uploads', uniqueDir);
       try {
         await mkdir(uploadsDir, { recursive: true });
       } catch (err) {
         // Directory might already exist, ignore error
       }
 
-      // Save file
-      const filepath = path.join(uploadsDir, filename);
+      // Save file with original filename
+      const filepath = path.join(uploadsDir, originalFilename);
       await writeFile(filepath, buffer);
 
       // Return the public URL
-      url = `/uploads/${filename}`;
+      url = `/uploads/${uniqueDir}/${originalFilename}`;
     }
 
     return NextResponse.json({ url }, { status: 200 });
