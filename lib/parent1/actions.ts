@@ -16,7 +16,8 @@ export async function upsertParent1(data: FormData) {
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
   const price = Number(data.get('price'));
-  const due_date = new Date(data.get('due_date') as string);
+  const due_date_str = data.get('due_date') as string;
+  const due_date = new Date(due_date_str);
   const image_url = data.get('image_url') as string | null;
   const parent1Child1sRaw = data.getAll('parent1Child1[]') as string[];
   const parent1Child1s = parent1Child1sRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string; parent1_id?: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });

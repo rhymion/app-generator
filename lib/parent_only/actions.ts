@@ -16,9 +16,8 @@ export async function upsertParentOnly(data: FormData) {
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
   const login_time_str = data.get('login_time') as string | null;
-  const logout_time_str = data.get('logout_time') as string | null;
-  
   const login_time = login_time_str ? new Date(login_time_str) : null;
+  const logout_time_str = data.get('logout_time') as string | null;
   const logout_time = logout_time_str ? new Date(logout_time_str) : null;
 
   if (id) {
