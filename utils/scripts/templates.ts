@@ -453,6 +453,8 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
     }
     
     const columns: string[] = [];
+    const dateTimeFields: string[] = [];
+    let needsDateTimeImports = false;
     
     for (const [key, prop] of Object.entries(childDef.properties)) {
       if (key === 'id' || key === `${parent}_id` || key === 'created_at' || key === 'updated_at') {
@@ -463,12 +465,45 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
       let width = 150;
       let typeStr = '';
       
+      const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
+      const format = (prop as any).format;
+      
       if (prop.type === 'boolean' || (Array.isArray(prop.type) && prop.type.includes('boolean'))) {
         typeStr = ", type: 'boolean'";
         width = 100;
       } else if (prop.type === 'integer' || (Array.isArray(prop.type) && prop.type.includes('integer'))) {
         typeStr = ", type: 'number'";
         width = 100;
+      } else if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
+        // DateTime field - needs custom renderEditCell
+        needsDateTimeImports = true;
+        dateTimeFields.push(key);
+        width = 250;
+        
+        columns.push(`    { 
+      field: '${key}', 
+      headerName: '${headerName}', 
+      width: ${width}, 
+      editable: editable,
+      renderEditCell: (params: GridRenderEditCellParams) => (
+        <DateTimeWrapper
+          label="${headerName}"
+          date_time={params.value ? new Date(params.value) : null}
+          onChange={(newValue: dayjs.Dayjs | null) => {
+            params.api.setEditCellValue({ 
+              id: params.id, 
+              field: params.field, 
+              value: newValue ? newValue.toISOString() : '' 
+            });
+          }}
+        />
+      ),
+      valueFormatter: (value) => {
+        if (!value) return '';
+        return dayjs(value).format('YYYY-MM-DD HH:mm');
+      },
+    },`);
+        continue;
       }
       
       columns.push(`    { field: '${key}', headerName: '${headerName}', width: ${width}, editable: editable${typeStr} },`);
@@ -481,7 +516,20 @@ ${columns.join('\n')}
 }`;
   }).join('\n\n');
   
-  return `import { GridColDef } from '@mui/x-data-grid';
+  // Check if any child has DateTime fields
+  const needsDateTimeImports = children.some(childInfo => {
+    const child = childInfo.name;
+    const childDef = schema.definitions[child];
+    if (!childDef?.properties) return false;
+    
+    return Object.entries(childDef.properties).some(([key, prop]) => {
+      const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
+      const format = (prop as any).format;
+      return propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time');
+    });
+  });
+  
+  return `import { GridColDef${needsDateTimeImports ? ', GridRenderEditCellParams' : ''} } from '@mui/x-data-grid';${needsDateTimeImports ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';\nimport dayjs from \'dayjs\';' : ''}
 
 ${columnFunctions}
 `;
@@ -535,6 +583,16 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     const prop = parentDef.properties![p];
     const isRequired = parentDef.required?.includes(p);
     const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const minLength = (prop as any).minLength;
+    const maxLength = (prop as any).maxLength;
+    
+    let slotPropsStr = '';
+    if (minLength !== undefined || maxLength !== undefined) {
+      const constraints: string[] = [];
+      if (minLength !== undefined) constraints.push(`minLength: ${minLength}`);
+      if (maxLength !== undefined) constraints.push(`maxLength: ${maxLength}`);
+      slotPropsStr = `\n        slotProps={ { htmlInput: { ${constraints.join(', ')} } } }`;
+    }
     
     return `      <TextField
         label="${label}"
@@ -542,7 +600,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
         defaultValue={src.${p} || ''}
         fullWidth
         margin="normal"
-        ${isRequired ? 'required' : ''}
+        ${isRequired ? 'required' : ''}${slotPropsStr}
         multiline={${p === 'description'}}
         rows={${p === 'description' ? '4' : 'undefined'}}
       />`;
@@ -798,6 +856,19 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
       />`;
   }).join('\n');
   
+  // Check if any child has DateTime fields
+  const needsClientDirective = children.some(childInfo => {
+    const child = childInfo.name;
+    const childDef = schema.definitions[child];
+    if (!childDef?.properties) return false;
+    
+    return Object.entries(childDef.properties).some(([key, prop]) => {
+      const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
+      const format = (prop as any).format;
+      return propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time');
+    });
+  });
+
   // For parent-only case
   if (children.length === 0) {
     return `import Button from '@mui/material/Button';
@@ -840,7 +911,7 @@ ${parentTextFields}
     return `  const ${child}Columns: GridColDef[] = ${child}_columns(false);`;
   }).join('\n');
   
-  return `import { GridColDef } from '@mui/x-data-grid';
+  return `${needsClientDirective ? "'use client';\n\n" : ''}import { GridColDef } from '@mui/x-data-grid';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';

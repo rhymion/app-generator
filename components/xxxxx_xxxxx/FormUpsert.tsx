@@ -16,6 +16,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+
   const yyyyy_yyyyyGridRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
@@ -93,6 +94,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         fullWidth
         margin="normal"
         required
+        slotProps={ { htmlInput: { minLength: 1 } } }
         multiline={false}
         rows={undefined}
       />

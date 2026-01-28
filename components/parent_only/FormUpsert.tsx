@@ -7,6 +7,7 @@ import TextField from '@mui/material/TextField';
 import { upsertParentOnly, removeParentOnly } from '@/lib/parent_only/actions';
 import type { FormUpsertProps } from '@/lib/parent_only/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
 
@@ -15,11 +16,12 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  const [loginTime, setLoginTime] = useState<Dayjs | null>(src.login_time ? dayjs(src.login_time) : null);
+  const [logoutTime, setLogoutTime] = useState<Dayjs | null>(src.logout_time ? dayjs(src.logout_time) : null);
+
 
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
-  const [loginTime, setLoginTime] = useState<Dayjs | null>(src.login_time ? dayjs(src.login_time) : null);
-  const [logoutTime, setLogoutTime] = useState<Dayjs | null>(src.logout_time ? dayjs(src.logout_time) : null);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -62,6 +64,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         fullWidth
         margin="normal"
         required
+        slotProps={ { htmlInput: { minLength: 1 } } }
         multiline={false}
         rows={undefined}
       />
@@ -82,7 +85,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
       />
       <DateTimeWrapper 
         label="Logout Time" 
-        date_time={logoutTime ? logoutTime.toDate() : null} 
+        date_time={logoutTime ? logoutTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setLogoutTime(newValue)}
       />
     </>
