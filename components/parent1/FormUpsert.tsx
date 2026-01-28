@@ -12,10 +12,8 @@ import { GridRowsProp } from '@mui/x-data-grid';
 import FieldsDataGrid from '../FieldsDataGrid';
 import { parent1_child1_columns, parent1_child2_columns } from '../parent1/column_def';
 import dayjs, { Dayjs } from 'dayjs';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
-import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import DateTimeWrapper from '../DateTimeWrapper';
+import ImageUpload from '../ImageUpload';
 
 export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const router = useRouter();
@@ -23,8 +21,6 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const [error, setError] = useState<string | null>(null);
   const [dueDate, setDueDate] = useState<Dayjs | null>(src.due_date ? dayjs(src.due_date) : null);
   const [imageUrl, setImageUrl] = useState<string>(src.image_url || '');
-  const [uploading, setUploading] = useState(false);
-  
 
   const parent1_child1GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const parent1_child2GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
@@ -59,36 +55,6 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     end_date: '',
     parent1_id: src.id,
   });
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    setError(null);
-
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Upload failed');
-      }
-
-      const data = await response.json();
-      setImageUrl(data.url);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
-    } finally {
-      setUploading(false);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -188,63 +154,11 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         date_time={dueDate ? dueDate.toDate() : null}
         onChange={(newValue: SetStateAction<dayjs.Dayjs | null>) => setDueDate(newValue)}
       />
-      <div style={{ margin: '16px 0' }}>
-        <input
-          accept="image/*"
-          style={{ display: 'none' }}
-          id="image-upload-button"
-          type="file"
-          onChange={handleFileUpload}
-          disabled={uploading}
-        />
-        <label htmlFor="image-upload-button">
-          <TextField
-            label="Image URL"
-            value={imageUrl}
-            onChange={(e) => setImageUrl(e.target.value)}
-            fullWidth
-            margin="normal"
-            helperText="You can paste a URL or upload a file"
-            InputProps={{
-              endAdornment: (
-                <span style={{ marginLeft: '8px', whiteSpace: 'nowrap' }}>
-                  <button
-                    type="button"
-                    onClick={() => document.getElementById('image-upload-button')?.click()}
-                    disabled={uploading}
-                    style={{
-                      padding: '8px 16px',
-                      backgroundColor: uploading ? '#ccc' : '#1976d2',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: uploading ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {uploading ? 'Uploading...' : 'Upload'}
-                  </button>
-                </span>
-              ),
-            }}
-          />
-        </label>
-        {imageUrl && (
-          <div style={{ marginTop: '8px' }}>
-            <img 
-              src={imageUrl} 
-              alt="Preview" 
-              style={{ 
-                maxWidth: '200px', 
-                maxHeight: '200px', 
-                objectFit: 'contain',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                padding: '4px'
-              }} 
-            />
-          </div>
-        )}
-      </div>      <FieldsDataGrid
+      <ImageUpload
+        value={imageUrl}
+        onChange={setImageUrl}
+      />
+      <FieldsDataGrid
         ref={parent1_child1GridRef}
         initialFields={initialParent1Child1}
         columns={parent1_child1Columns}
