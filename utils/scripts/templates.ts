@@ -716,14 +716,22 @@ import { ${columnImports} } from '../${parent}/column_def';`;
       
       const createNewChildProps = childProps.map(p => {
         const prop = childDef.properties![p];
+        const format = (prop as any).format;
+        const isDateType = format === 'date' || format === 'date-time' || format === 'time';
         
-        if (p === 'name') return `    name: '',`;
-        if (p === 'type' && prop.enum) return `    type: '${prop.enum[0]}',`;
+        // if (p === 'name') return `    name: '',`;
+        // if (p === 'type' && prop.enum) return `    type: '${prop.enum[0]}',`;
         if (prop.type === 'boolean' || (Array.isArray(prop.type) && prop.type.includes('boolean'))) {
           return `    ${p}: ${prop.default ?? false},`;
         }
         if (prop.type === 'string' || (Array.isArray(prop.type) && prop.type.includes('string'))) {
+          if (isDateType) {
+            return `    ${p}: dayjs().toISOString(),`;
+          }
           return `    ${p}: '',`;
+        }
+        if (prop.type === 'integer' || prop.type === 'number') {
+          return `    ${p}: 0,`;
         }
         return `    ${p}: null,`;
       }).join('\n');
