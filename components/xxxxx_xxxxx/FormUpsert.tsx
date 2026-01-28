@@ -28,7 +28,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const createNewYyyyyYyyyy = () => ({
     id: `temp-${Date.now()}-${Math.random()}`,
     name: '',
-    type: 'string',
+    type: '',
     max_length: null,
     max: null,
     regex: '',
