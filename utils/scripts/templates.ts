@@ -582,6 +582,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   // Categorize parent properties by type
   const dateTimeProps: string[] = [];
   const numberProps: string[] = [];
+  const imageProps: string[] = [];
   const textProps: string[] = [];
   
   parentProps.forEach(p => {
@@ -593,6 +594,8 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       dateTimeProps.push(p);
     } else if (propType === 'integer' || propType === 'number') {
       numberProps.push(p);
+    } else if (propType === 'string' && format === 'uri') {
+      imageProps.push(p);
     } else {
       textProps.push(p);
     }
@@ -603,10 +606,16 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const numberRefs = numberProps.map(p => `  const ${p}Ref = useRef<HTMLInputElement>(null);`).join('\n');
   const parentRefs = [textRefs, numberRefs].filter(r => r).join('\n');
   
-  // Generate state for DateTime fields
+  // Generate state for DateTime and Image fields
   const dateTimeStates = dateTimeProps.map(p => 
     `  const [${toCamelCase(p)}, set${toPascalCase(p)}] = useState<Dayjs | null>(src.${p} ? dayjs(src.${p}) : null);`
   ).join('\n');
+  
+  const imageStates = imageProps.map(p => 
+    `  const [${toCamelCase(p)}, set${toPascalCase(p)}] = useState<string>(src.${p} || '');`
+  ).join('\n');
+  
+  const allStates = [dateTimeStates, imageStates].filter(s => s).join('\n');
   
   // Generate form fields
   const textFields = textProps.map(p => {
@@ -663,7 +672,17 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       />`;
   }).join('\n');
   
-  const parentTextFields = [textFields, numberFields, dateTimeFields].filter(f => f).join('\n');
+  const imageFields = imageProps.map(p => {
+    const camelCase = toCamelCase(p);
+    const pascalCase = toPascalCase(p);
+    
+    return `      <ImageUpload
+        value={${camelCase}}
+        onChange={set${pascalCase}}
+      />`;
+  }).join('\n');
+  
+  const parentTextFields = [textFields, numberFields, dateTimeFields, imageFields].filter(f => f).join('\n');
   
   // Generate FormData sets
   const textFormDataSets = textProps.map(p => 
@@ -679,7 +698,12 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     return `    formData.set('${p}', ${camelCase}?.toISOString() || '');`;
   }).join('\n');
   
-  const parentFormDataSets = [textFormDataSets, numberFormDataSets, dateTimeFormDataSets].filter(s => s).join('\n');
+  const imageFormDataSets = imageProps.map(p => {
+    const camelCase = toCamelCase(p);
+    return `    formData.set('${p}', ${camelCase});`;
+  }).join('\n');
+  
+  const parentFormDataSets = [textFormDataSets, numberFormDataSets, dateTimeFormDataSets, imageFormDataSets].filter(s => s).join('\n');
   
   // Determine if we have children
   const hasChildren = children.length > 0;
@@ -807,13 +831,13 @@ import TextField from '@mui/material/TextField';${numberProps.length > 0 ? '\nim
 import { upsert${parentPascal}, remove${parentPascal} } from '@/lib/${parent}/actions';
 import type { FormUpsertProps } from '@/lib/${parent}/types';
 import FormWithChildGrid from '../FormWithChildGrid';
-${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}
+${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${imageProps.length > 0 ? '\nimport ImageUpload from \'../ImageUpload\';' : ''}
 
 export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-${dateTimeStates ? '\n' + dateTimeStates : ''}
+${allStates ? '\n' + allStates : ''}
 
 ${childVariables}
 ${parentRefs}${childGridSetup}
@@ -849,7 +873,7 @@ ${parentFormDataSets}${childFormDataHandling}
 
   const formFields = (
     <>
-${parentTextFields}${childGridComponents}
+${parentTextFields}${childGridComponents.length > 0 ? '\n' + childGridComponents : '' }
     </>
   );
 
@@ -883,8 +907,9 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
     k !== 'id' && k !== 'created_at' && k !== 'updated_at'
   );
   
-  // Separate Date fields from other fields
+  // Separate Date and Image fields from other fields
   const dateTimeFields: string[] = [];
+  const imageFields: string[] = [];
   const otherFields: string[] = [];
   
   parentProps.forEach(p => {
@@ -894,13 +919,16 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
     
     if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
       dateTimeFields.push(p);
+    } else if (propType === 'string' && format === 'uri') {
+      imageFields.push(p);
     } else {
       otherFields.push(p);
     }
   });
   
-  // Check if we need DateTimeWrapper import
+  // Check if we need DateTimeWrapper or ImageDisplay imports
   const needsDateTimeWrapper = dateTimeFields.length > 0;
+  const needsImageDisplay = imageFields.length > 0;
   
   const textFields = otherFields.map(p => {
     const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -922,7 +950,13 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
     return `      <DateTimeWrapper label="${label}" date_time={src.${p}}${showTime ? '' : ' show_time={false}'} readOnly />`;
   }).join('\n');
   
-  const parentTextFields = [textFields, dateTimeFieldsJsx].filter(f => f).join('\n');
+  const imageFieldsJsx = imageFields.map(p => {
+    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    
+    return `      <ImageDisplay url={src.${p}} alt="${label}" maxWidth="400px" maxHeight="400px" />`;
+  }).join('\n');
+  
+  const parentTextFields = [textFields, dateTimeFieldsJsx, imageFieldsJsx].filter(f => f).join('\n');
   
   // Check if any child has DateTime fields
   const needsClientDirective = children.some(childInfo => {
@@ -942,7 +976,7 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
     return `import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';
-import Link from '@mui/material/Link';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}
+import Link from '@mui/material/Link';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}
 
 export default function FormView({ src }: FormViewProps) {
   return (
@@ -985,7 +1019,7 @@ import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
-import { ${columnImports} } from '../${parent}/column_def';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}
+import { ${columnImports} } from '../${parent}/column_def';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}
 
 export default function FormView({ src }: FormViewProps) {
 ${columnVariables}

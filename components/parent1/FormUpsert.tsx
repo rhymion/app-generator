@@ -1,6 +1,6 @@
 'use client';
 
-import { SetStateAction, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
@@ -19,6 +19,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
   const [dueDate, setDueDate] = useState<Dayjs | null>(src.due_date ? dayjs(src.due_date) : null);
   const [imageUrl, setImageUrl] = useState<string>(src.image_url || '');
 
@@ -34,7 +35,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const createNewParent1Child1 = () => ({
     id: `temp-${Date.now()}-${Math.random()}`,
     name: '',
-    type: 'string',
+    type: '',
     max_length: null,
     max: null,
     regex: '',
@@ -128,7 +129,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         fullWidth
         margin="normal"
         required
-        slotProps={ { htmlInput: { minLength: 1, maxLength: 50 } } }
+        slotProps={ { htmlInput: { minLength: 1, maxLength: 100 } } }
         multiline={false}
         rows={undefined}
       />
@@ -152,7 +153,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
       <DateTimeWrapper 
         label="Due Date" 
         date_time={dueDate ? dueDate.toDate() : null}
-        onChange={(newValue: SetStateAction<dayjs.Dayjs | null>) => setDueDate(newValue)}
+        onChange={(newValue: dayjs.Dayjs | null) => setDueDate(newValue)}
       />
       <ImageUpload
         value={imageUrl}

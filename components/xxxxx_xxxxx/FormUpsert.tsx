@@ -117,7 +117,8 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         
         multiline={false}
         rows={undefined}
-      />      <FieldsDataGrid
+      />
+      <FieldsDataGrid
         ref={yyyyy_yyyyyGridRef}
         initialFields={initialYyyyyYyyyy}
         columns={yyyyy_yyyyyColumns}

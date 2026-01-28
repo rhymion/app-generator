@@ -44,8 +44,8 @@ export default function FormView({ src }: FormViewProps) {
         margin="normal"
         aria-readonly
       />
-      <DateTimeWrapper label="Due Date" date_time={src.due_date} show_time={false} readOnly />
-      <ImageDisplay url={src.image_url} alt="Image" maxWidth="400px" maxHeight="400px" />
+      <DateTimeWrapper label="Due Date" date_time={src.due_date} readOnly />
+      <ImageDisplay url={src.image_url} alt="Image Url" maxWidth="400px" maxHeight="400px" />
       <div>
         <h2>Parent1Child1</h2>
         <FieldsViewGrid fields={src.parent1_child1s} columns={parent1_child1Columns} />
