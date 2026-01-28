@@ -23,21 +23,21 @@ export default function FormView({ src }: FormViewProps) {
         value={src.name || ''}
         fullWidth
         margin="normal"
-        disabled
+        aria-readonly
       />
       <TextField
         label="Description"
         value={src.description || ''}
         fullWidth
         margin="normal"
-        disabled
+        aria-readonly
       />
       <TextField
         label="Team"
         value={src.team || ''}
         fullWidth
         margin="normal"
-        disabled
+        aria-readonly
       />
       <div>
         <h2>YyyyyYyyyy</h2>
