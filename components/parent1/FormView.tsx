@@ -5,8 +5,8 @@ import type { FormViewProps } from '@/lib/parent1/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
 import { parent1_child1_columns, parent1_child2_columns } from '../parent1/column_def';
-import NumberField from '../NumberField';
 import DateTimeWrapper from '../DateTimeWrapper';
+import ImageDisplay from '../ImageDisplay';
 
 export default function FormView({ src }: FormViewProps) {
   const parent1_child1Columns: GridColDef[] = parent1_child1_columns(false);
@@ -43,13 +43,7 @@ export default function FormView({ src }: FormViewProps) {
         aria-readonly
       />
       <DateTimeWrapper label="Due Date" date_time={src.due_date} show_time={false} readOnly />
-      <TextField
-        label="Image Url"
-        value={src.image_url || ''}
-        fullWidth
-        margin="normal"
-        aria-readonly
-      />
+      <ImageDisplay url={src.image_url} alt="Image" maxWidth="400px" maxHeight="400px" />
       <div>
         <h2>Parent1Child1</h2>
         <FieldsViewGrid fields={src.parent1_child1s} columns={parent1_child1Columns} />
