@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { put } from '@vercel/blob';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { getServerSession } from 'next-auth/next';
@@ -31,29 +32,41 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'File size exceeds 5MB limit' }, { status: 400 });
     }
 
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-
     // Generate unique filename
     const timestamp = Date.now();
     const randomString = Math.random().toString(36).substring(2, 15);
     const ext = path.extname(file.name);
     const filename = `${timestamp}-${randomString}${ext}`;
 
-    // Create uploads directory if it doesn't exist
-    const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-    try {
-      await mkdir(uploadsDir, { recursive: true });
-    } catch (err) {
-      // Directory might already exist, ignore error
+    let url: string;
+
+    // Use Vercel Blob Storage if BLOB_READ_WRITE_TOKEN is set (production)
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      const blob = await put(filename, file, {
+        access: 'public',
+        addRandomSuffix: false,
+      });
+      url = blob.url;
+    } else {
+      // Fallback to local filesystem (development)
+      const bytes = await file.arrayBuffer();
+      const buffer = Buffer.from(bytes);
+
+      // Create uploads directory if it doesn't exist
+      const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+      try {
+        await mkdir(uploadsDir, { recursive: true });
+      } catch (err) {
+        // Directory might already exist, ignore error
+      }
+
+      // Save file
+      const filepath = path.join(uploadsDir, filename);
+      await writeFile(filepath, buffer);
+
+      // Return the public URL
+      url = `/uploads/${filename}`;
     }
-
-    // Save file
-    const filepath = path.join(uploadsDir, filename);
-    await writeFile(filepath, buffer);
-
-    // Return the public URL
-    const url = `/uploads/${filename}`;
 
     return NextResponse.json({ url }, { status: 200 });
   } catch (error) {
