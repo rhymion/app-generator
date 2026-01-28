@@ -6,13 +6,25 @@ interface ChildInfo {
 }
 
 function getTsType(prop: SchemaProperty): string {
+  // Check for date/datetime/time format
+  const format = (prop as any).format;
+  const isDateType = format === 'date' || format === 'date-time' || format === 'time';
+  
   if (Array.isArray(prop.type)) {
     // Union type for nullable
+    if (isDateType) {
+      // For nullable date types
+      return prop.type.includes('null') ? 'Date | null' : 'Date';
+    }
     return prop.type.map(t => t === 'null' ? 'null' : mapJsonTypeToTs(t)).join(' | ');
   }
   
   if (prop.type === 'array') {
     return 'any[]'; // Simplified
+  }
+  
+  if (isDateType && prop.type === 'string') {
+    return 'Date';
   }
   
   return mapJsonTypeToTs(prop.type);
@@ -966,9 +978,27 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
   const parentDefaultProps = Object.entries(parentDef.properties)
     .filter(([key]) => key !== 'id' && key !== 'created_at' && key !== 'updated_at')
     .map(([key, prop]) => {
-      if (prop.type === 'string' || (Array.isArray(prop.type) && prop.type.includes('string'))) {
+      const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
+      const format = (prop as any).format;
+      const isRequired = parentDef.required?.includes(key);
+      const isNullable = Array.isArray(prop.type) && prop.type.includes('null');
+      
+      // Date/DateTime/Time fields
+      if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
+        return isRequired ? `    ${key}: new Date(),` : `    ${key}: null,`;
+      }
+      
+      // Number/Integer fields
+      if (propType === 'integer' || propType === 'number') {
+        return isRequired ? `    ${key}: 0,` : `    ${key}: null,`;
+      }
+      
+      // String fields
+      if (propType === 'string') {
         return `    ${key}: '',`;
       }
+      
+      // Default to null for other types
       return `    ${key}: null,`;
     })
     .join('\n');
