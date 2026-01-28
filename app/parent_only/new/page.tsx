@@ -5,8 +5,8 @@ export default function AddParentOnlyPage() {
     id: '',
     name: '',
     description: '',
-    login_time: '',
-    logout_time: '',
+    login_time: null,
+    logout_time: null,
   };
   return <FormUpsert src={src} isEdit={false} />;
 }
