@@ -1,6 +1,6 @@
 'use client';
 
-import { SetStateAction, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
@@ -78,12 +78,12 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
       <DateTimeWrapper 
         label="Login Time" 
         date_time={loginTime ? loginTime.toDate() : null}
-        onChange={(newValue: SetStateAction<dayjs.Dayjs | null>) => setLoginTime(newValue)}
+        onChange={(newValue: dayjs.Dayjs | null) => setLoginTime(newValue)}
       />
       <DateTimeWrapper 
         label="Logout Time" 
         date_time={logoutTime ? logoutTime.toDate() : null} 
-        onChange={(newValue: SetStateAction<dayjs.Dayjs | null>) => setLogoutTime(newValue)}
+        onChange={(newValue: dayjs.Dayjs | null) => setLogoutTime(newValue)}
       />
     </>
   );
