@@ -230,7 +230,25 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
   const formDataGets = parentDef.properties
     ? parentProps.map(p => {
         const prop = parentDef.properties![p];
+        const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
         const isNullable = Array.isArray(prop.type) && prop.type.includes('null');
+        const format = (prop as any).format;
+        
+        // Handle Date/DateTime/Time fields
+        if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
+          if (isNullable) {
+            return `  const ${p}_str = data.get('${p}') as string | null;\n  const ${p} = ${p}_str ? new Date(${p}_str) : null;`;
+          } else {
+            return `  const ${p}_str = data.get('${p}') as string;\n  const ${p} = new Date(${p}_str);`;
+          }
+        }
+        
+        // Handle number fields
+        if (propType === 'integer' || propType === 'number') {
+          return `  const ${p} = Number(data.get('${p}'));`;
+        }
+        
+        // Handle string and other fields
         return `  const ${p} = data.get('${p}') as string${isNullable ? ' | null' : ''};`;
       }).join('\n')
     : '';
@@ -864,7 +882,7 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
         value={src.${p} || ''}
         fullWidth
         margin="normal"
-        disabled
+        aria-readonly
       />`;
   }).join('\n');
   
