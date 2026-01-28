@@ -128,6 +128,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         fullWidth
         margin="normal"
         required
+        slotProps={ { htmlInput: { minLength: 1, maxLength: 50 } } }
         multiline={false}
         rows={undefined}
       />
