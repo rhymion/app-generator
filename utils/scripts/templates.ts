@@ -875,7 +875,26 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
     k !== 'id' && k !== 'created_at' && k !== 'updated_at'
   );
   
-  const parentTextFields = parentProps.map(p => {
+  // Separate Date fields from other fields
+  const dateTimeFields: string[] = [];
+  const otherFields: string[] = [];
+  
+  parentProps.forEach(p => {
+    const prop = parentDef.properties![p];
+    const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
+    const format = (prop as any).format;
+    
+    if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
+      dateTimeFields.push(p);
+    } else {
+      otherFields.push(p);
+    }
+  });
+  
+  // Check if we need DateTimeWrapper import
+  const needsDateTimeWrapper = dateTimeFields.length > 0;
+  
+  const textFields = otherFields.map(p => {
     const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     return `      <TextField
         label="${label}"
@@ -885,6 +904,17 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
         aria-readonly
       />`;
   }).join('\n');
+  
+  const dateTimeFieldsJsx = dateTimeFields.map(p => {
+    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const prop = parentDef.properties![p];
+    const format = (prop as any).format;
+    const showTime = format === 'date-time' || format === 'time';
+    
+    return `      <DateTimeWrapper label="${label}" date_time={src.${p}}${showTime ? '' : ' show_time={false}'} readOnly />`;
+  }).join('\n');
+  
+  const parentTextFields = [textFields, dateTimeFieldsJsx].filter(f => f).join('\n');
   
   // Check if any child has DateTime fields
   const needsClientDirective = children.some(childInfo => {
@@ -904,7 +934,7 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
     return `import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';
-import Link from '@mui/material/Link';
+import Link from '@mui/material/Link';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}
 
 export default function FormView({ src }: FormViewProps) {
   return (
@@ -947,7 +977,7 @@ import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
-import { ${columnImports} } from '../${parent}/column_def';
+import { ${columnImports} } from '../${parent}/column_def';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}
 
 export default function FormView({ src }: FormViewProps) {
 ${columnVariables}

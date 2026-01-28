@@ -28,7 +28,7 @@ export default function FormView({ src }: FormViewProps) {
         margin="normal"
         aria-readonly
       />
-      <DateTimeWrapper label="Login Time" date_time={src.login_time} readOnly/>
+      <DateTimeWrapper label="Login Time" date_time={src.login_time} readOnly />
       <DateTimeWrapper label="Logout Time" date_time={src.logout_time} readOnly />
     </div>
   );
