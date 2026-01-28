@@ -501,10 +501,37 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     k !== 'id' && k !== 'created_at' && k !== 'updated_at'
   );
   
-  // Generate refs and TextFields for parent properties
-  const parentRefs = parentProps.map(p => `  const ${p}Ref = useRef<HTMLInputElement>(null);`).join('\n');
+  // Categorize parent properties by type
+  const dateTimeProps: string[] = [];
+  const numberProps: string[] = [];
+  const textProps: string[] = [];
   
-  const parentTextFields = parentProps.map(p => {
+  parentProps.forEach(p => {
+    const prop = parentDef.properties![p];
+    const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
+    const format = (prop as any).format;
+    
+    if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
+      dateTimeProps.push(p);
+    } else if (propType === 'integer' || propType === 'number') {
+      numberProps.push(p);
+    } else {
+      textProps.push(p);
+    }
+  });
+  
+  // Generate refs for text and number fields
+  const textRefs = textProps.map(p => `  const ${p}Ref = useRef<HTMLInputElement>(null);`).join('\n');
+  const numberRefs = numberProps.map(p => `  const ${p}Ref = useRef<HTMLInputElement>(null);`).join('\n');
+  const parentRefs = [textRefs, numberRefs].filter(r => r).join('\n');
+  
+  // Generate state for DateTime fields
+  const dateTimeStates = dateTimeProps.map(p => 
+    `  const [${toCamelCase(p)}, set${toPascalCase(p)}] = useState<Dayjs | null>(src.${p} ? dayjs(src.${p}) : null);`
+  ).join('\n');
+  
+  // Generate form fields
+  const textFields = textProps.map(p => {
     const prop = parentDef.properties![p];
     const isRequired = parentDef.required?.includes(p);
     const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -521,9 +548,50 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       />`;
   }).join('\n');
   
-  const parentFormDataSets = parentProps.map(p => 
+  const numberFields = numberProps.map(p => {
+    const prop = parentDef.properties![p];
+    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const min = (prop as any).minimum ?? 0;
+    const max = (prop as any).maximum ?? 1000000;
+    
+    return `      <NumberField 
+        label="${label}" 
+        inputRef={${p}Ref} 
+        defaultValue={src.${p} || 0} 
+        min={${min}}
+        max={${max}}
+      />`;
+  }).join('\n');
+  
+  const dateTimeFields = dateTimeProps.map(p => {
+    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const camelCase = toCamelCase(p);
+    const pascalCase = toPascalCase(p);
+    
+    return `      <DateTimeWrapper 
+        label="${label}" 
+        date_time={${camelCase} ? ${camelCase}.toDate() : null}
+        onChange={(newValue: dayjs.Dayjs | null) => set${pascalCase}(newValue)}
+      />`;
+  }).join('\n');
+  
+  const parentTextFields = [textFields, numberFields, dateTimeFields].filter(f => f).join('\n');
+  
+  // Generate FormData sets
+  const textFormDataSets = textProps.map(p => 
     `    formData.set('${p}', ${p}Ref.current?.value || '');`
   ).join('\n');
+  
+  const numberFormDataSets = numberProps.map(p => 
+    `    formData.set('${p}', ${p}Ref.current?.value || '');`
+  ).join('\n');
+  
+  const dateTimeFormDataSets = dateTimeProps.map(p => {
+    const camelCase = toCamelCase(p);
+    return `    formData.set('${p}', ${camelCase}?.toISOString() || '');`;
+  }).join('\n');
+  
+  const parentFormDataSets = [textFormDataSets, numberFormDataSets, dateTimeFormDataSets].filter(s => s).join('\n');
   
   // Determine if we have children
   const hasChildren = children.length > 0;
@@ -639,16 +707,17 @@ ${childSerialize}
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
-import TextField from '@mui/material/TextField';
+import TextField from '@mui/material/TextField';${numberProps.length > 0 ? '\nimport NumberField from \'../NumberField\';' : ''}
 import { upsert${parentPascal}, remove${parentPascal} } from '@/lib/${parent}/actions';
 import type { FormUpsertProps } from '@/lib/${parent}/types';
 import FormWithChildGrid from '../FormWithChildGrid';
-${childImports}
+${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}
 
 export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+${dateTimeStates ? '\n' + dateTimeStates : ''}
 
 ${childVariables}
 ${parentRefs}${childGridSetup}
