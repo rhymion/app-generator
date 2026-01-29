@@ -6,13 +6,14 @@ import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/parent1/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
-import { parent1_child1_columns, parent1_child2_columns } from '../parent1/column_def';
+import { parent1_child1_columns, parent1_child2_columns, parent1_list_columns } from '../parent1/column_def';
 import DateTimeWrapper from '../DateTimeWrapper';
 import ImageDisplay from '../ImageDisplay';
 
 export default function FormView({ src }: FormViewProps) {
   const parent1_child1Columns: GridColDef[] = parent1_child1_columns(false);
   const parent1_child2Columns: GridColDef[] = parent1_child2_columns(false);
+  const parent1_listColumns: GridColDef[] = parent1_list_columns(false);
 
   return (
     <div>
@@ -53,6 +54,10 @@ export default function FormView({ src }: FormViewProps) {
       <div>
         <h2>Parent1Child2</h2>
         <FieldsViewGrid fields={src.parent1_child2s} columns={parent1_child2Columns} />
+      </div>
+      <div>
+        <h2>Parent1List</h2>
+        <FieldsViewGrid fields={src.parent1_list} columns={parent1_listColumns} />
       </div>
     </div>
   );

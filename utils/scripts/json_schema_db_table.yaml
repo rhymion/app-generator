@@ -188,6 +188,20 @@ definitions:
         type: string
         format: date
 
+  parent1_list:
+    type: object
+    required:
+      - id
+      - name
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+        maxLength: 100
+
   parent1_detail:
     allOf:
       - $ref: "#/definitions/parent1"
@@ -195,6 +209,7 @@ definitions:
         required:
           - parent1_child1s
           - parent1_child2s
+          - parent1_list
         properties:
           parent1_child1s:
             type: array
@@ -204,6 +219,10 @@ definitions:
             type: array
             items:
               $ref: "#/definitions/parent1_child2"
+          parent1_list:
+            type: array
+            items:
+              $ref: "#/definitions/parent1_list"
 
   parent_only:
     type: object

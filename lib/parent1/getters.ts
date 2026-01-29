@@ -18,7 +18,7 @@ export async function getAllParent1s(): Promise<Parent1[]> {
 export async function getParent1Detail(id: string): Promise<Parent1Detail | null> {
   const parent1 = await prisma.parent1.findUnique({
     where: { id },
-    include: { parent1_child1s: true, parent1_child2s: true },
+    include: { parent1_child1s: true, parent1_child2s: true, parent1_list: true },
   });
 
   if (!parent1) {
@@ -50,6 +50,10 @@ export async function getParent1Detail(id: string): Promise<Parent1Detail | null
       required: item.required,
       start_date: item.start_date,
       end_date: item.end_date,
+    })),
+    parent1_list: parent1.parent1_list.map((item) => ({
+      id: item.id,
+      name: item.name,
     })),
   };
 }

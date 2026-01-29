@@ -10,6 +10,7 @@ export default function AddParent1Page() {
     image_url: '',
     parent1_child1s: [],
     parent1_child2s: [],
+    parent1_list: [],
   };
   return <FormUpsert src={src} isEdit={false} />;
 }

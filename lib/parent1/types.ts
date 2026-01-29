@@ -10,6 +10,7 @@ export type Parent1 = {
 export type Parent1Detail = Parent1 & {
   parent1_child1s: Parent1Child1[];
   parent1_child2s: Parent1Child2[];
+  parent1_list: Parent1List[];
 };
 
 export type Parent1Child1 = {
@@ -32,6 +33,11 @@ export type Parent1Child2 = {
   start_date: Date | null;
   end_date: Date;
 };
+
+export type Parent1List = {
+  id: string;
+  name: string;
+};
 export type Parent1DetailPageProps = Readonly<{
   params: Promise<{
     id: string;
@@ -48,6 +54,7 @@ export type FormViewProps = Readonly<{
     image_url: string | null;
     parent1_child1s: Parent1Child1[];
     parent1_child2s: Parent1Child2[];
+    parent1_list: Parent1List[];
   };
 }>;
 

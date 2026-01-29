@@ -23,18 +23,20 @@ export async function upsertParent1(data: FormData) {
   const parent1Child1s = parent1Child1sRaw.map(f => JSON.parse(f) as { id?: string; order: number; name: string; type: string; parent1_id?: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });
   const parent1Child2sRaw = data.getAll('parent1Child2[]') as string[];
   const parent1Child2s = parent1Child2sRaw.map(f => JSON.parse(f) as { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date });
+  const parent1ListsRaw = data.getAll('parent1List[]') as string[];
+  const parent1Lists = parent1ListsRaw.map(f => JSON.parse(f) as { id?: string; name: string });
 
   if (id) {
-    await updateParent1(id, name, description, price, due_date, image_url, parent1Child1s, parent1Child2s);
+    await updateParent1(id, name, description, price, due_date, image_url, parent1Child1s, parent1Child2s, parent1Lists);
   } else {
-    await addParent1(name, description, price, due_date, image_url, parent1Child1s, parent1Child2s);
+    await addParent1(name, description, price, due_date, image_url, parent1Child1s, parent1Child2s, parent1Lists);
   }
 
   revalidatePath('/');
   redirect('/parent1');
 }
 
-async function addParent1(name: string, description: string | null, price: number, due_date: Date, image_url: string | null, parent1Child1s: { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { name: string; required: boolean; start_date: Date | null; end_date: Date }[]) {
+async function addParent1(name: string, description: string | null, price: number, due_date: Date, image_url: string | null, parent1Child1s: { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1Lists: { name: string }[]) {
   await prisma.$transaction(async (tx) => {
     const newRecord = await tx.parent1.create({
       data: {
@@ -73,10 +75,18 @@ async function addParent1(name: string, description: string | null, price: numbe
         })),
       });
     }
+    if (parent1Lists.length > 0) {
+      await tx.parent1_list.createMany({
+        data: parent1Lists.map(f => ({
+          name: f.name,
+          parent1_id: recordId,
+        })),
+      });
+    }
   });
 }
 
-async function updateParent1(id: string, name: string, description: string | null, price: number, due_date: Date, image_url: string | null, parent1Child1s: { id?: string; order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date }[]) {
+async function updateParent1(id: string, name: string, description: string | null, price: number, due_date: Date, image_url: string | null, parent1Child1s: { id?: string; order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1Lists: { id?: string; name: string }[]) {
   await prisma.$transaction(async (tx) => {
     await tx.parent1.update({
       where: { id },
@@ -172,6 +182,39 @@ async function updateParent1(id: string, name: string, description: string | nul
     if (parent1Child2ToDelete.length > 0) {
       await tx.parent1_child2.deleteMany({
         where: { id: { in: parent1Child2ToDelete.map(f => f.id) } },
+      });
+    }
+
+    const existingParent1List = await tx.parent1_list.findMany({
+      where: { parent1_id: id },
+    });
+
+    const parent1ListToUpsert = parent1Lists.filter(f => f.id);
+    const parent1ListToCreate = parent1Lists.filter(f => !f.id);
+
+    for (const item of parent1ListToUpsert) {
+      await tx.parent1_list.update({
+        where: { id: item.id! },
+        data: {
+          name: item.name,
+        },
+      });
+    }
+
+    if (parent1ListToCreate.length > 0) {
+      await tx.parent1_list.createMany({
+        data: parent1ListToCreate.map(f => ({
+          name: f.name,
+          parent1_id: id,
+        })),
+      });
+    }
+
+    const parent1ListNewIds = parent1Lists.filter(f => f.id).map(f => f.id!);
+    const parent1ListToDelete = existingParent1List.filter(ef => !parent1ListNewIds.includes(ef.id));
+    if (parent1ListToDelete.length > 0) {
+      await tx.parent1_list.deleteMany({
+        where: { id: { in: parent1ListToDelete.map(f => f.id) } },
       });
     }
   });

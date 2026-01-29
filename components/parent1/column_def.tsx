@@ -67,3 +67,9 @@ export function parent1_child2_columns(editable: boolean = false): GridColDef[] 
     },
   ];
 }
+
+export function parent1_list_columns(editable: boolean = false): GridColDef[] {
+  return [
+    { field: 'name', headerName: 'Name', width: 150, editable: editable },
+  ];
+}

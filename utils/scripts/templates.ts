@@ -498,6 +498,14 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
       const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
       const format = (prop as any).format;
       
+      // Special handling for 'order' field - always read-only
+      if (key === 'order') {
+        typeStr = ", type: 'number'";
+        width = 100;
+        columns.push(`    { field: '${key}', headerName: '${headerName}', width: ${width}, editable: false${typeStr} },`);
+        continue;
+      }
+      
       if (prop.type === 'boolean' || (Array.isArray(prop.type) && prop.type.includes('boolean'))) {
         typeStr = ", type: 'boolean'";
         width = 100;
@@ -717,8 +725,19 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   
   if (hasChildren) {
     const columnImports = children.map(c => `${c.name}_columns`).join(', ');
+    
+    // Check if any child has 'order' field
+    const hasOrderedChildren = children.some(childInfo => {
+      const childDef = schema.definitions[childInfo.name];
+      return childDef?.properties && 'order' in childDef.properties;
+    });
+    
+    const dataGridImports = hasOrderedChildren 
+      ? `import FieldsDataGrid from '../FieldsDataGrid';\nimport OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';`
+      : `import FieldsDataGrid from '../FieldsDataGrid';`;
+    
     childImports = `import { GridRowsProp } from '@mui/x-data-grid';
-import FieldsDataGrid from '../FieldsDataGrid';
+${dataGridImports}
 import { ${columnImports} } from '../${parent}/column_def';`;
     
     childVariables = children.map(childInfo => {
@@ -807,8 +826,13 @@ ${childSerialize}
       const child = childInfo.name;
       const childPascal = toPascalCase(child);
       const childTitle = toTitleCase(child);
+      const childDef = schema.definitions[child];
       
-      return `      <FieldsDataGrid
+      // Check if child has 'order' field
+      const hasOrderField = childDef?.properties && 'order' in childDef.properties;
+      const gridComponent = hasOrderField ? 'OrderedFieldsDataGrid' : 'FieldsDataGrid';
+      
+      return `      <${gridComponent}
         ref={${child}GridRef}
         initialFields={initial${childPascal}}
         columns={${child}Columns}

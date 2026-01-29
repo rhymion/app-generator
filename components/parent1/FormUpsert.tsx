@@ -11,7 +11,7 @@ import FormWithChildGrid from '../FormWithChildGrid';
 import { GridRowsProp } from '@mui/x-data-grid';
 import FieldsDataGrid from '../FieldsDataGrid';
 import OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';
-import { parent1_child1_columns, parent1_child2_columns } from '../parent1/column_def';
+import { parent1_child1_columns, parent1_child2_columns, parent1_list_columns } from '../parent1/column_def';
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
 import ImageUpload from '../ImageUpload';
@@ -26,6 +26,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
 
   const parent1_child1GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const parent1_child2GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
+  const parent1_listGridRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
@@ -55,6 +56,15 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     required: true,
     start_date: dayjs().toISOString(),
     end_date: dayjs().toISOString(),
+    parent1_id: src.id,
+  });
+  const parent1_listColumns = parent1_list_columns(true);
+
+  const initialParent1List = src.parent1_list.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
+
+  const createNewParent1List = () => ({
+    id: `temp-${Date.now()}-${Math.random()}`,
+    name: '',
     parent1_id: src.id,
   });
 
@@ -99,6 +109,17 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
           required: field.required,
           start_date: field.start_date,
           end_date: field.end_date,
+        })
+      );
+    });
+    const parent1List = parent1_listGridRef.current?.getFields?.() || [];
+
+    (parent1List as any[]).forEach((field) => {
+      formData.append(
+        'parent1List[]',
+        JSON.stringify({
+          id: field.id.startsWith('temp-') ? undefined : field.id,
+          name: field.name,
         })
       );
     });
@@ -183,6 +204,17 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
         title="Parent1 Child2"
+      />
+      <FieldsDataGrid
+        ref={parent1_listGridRef}
+        initialFields={initialParent1List}
+        columns={parent1_listColumns}
+        createNewRow={createNewParent1List}
+        addButtonLabel="Add Parent1 List"
+        deleteDialogTitle="Delete Selected Parent1 List?"
+        deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
+        showTitle={true}
+        title="Parent1 List"
       />
     </>
   );

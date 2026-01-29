@@ -102,6 +102,7 @@ model parent1 {
   updated_at DateTime @updatedAt
   parent1_child1s parent1_child1[]
   parent1_child2s parent1_child2[]
+  parent1_lists   parent1_list[]
 }
 
 model parent1_child1 {
@@ -130,6 +131,13 @@ model parent1_child2 {
   end_date    DateTime
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+}
+
+model parent1_list {
+  id          String   @id @default(cuid())
+  name        String
+  parent1_id    String     
+  parent1       parent1 @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
 }
 
 model parent_only {
