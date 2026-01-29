@@ -14,6 +14,7 @@ export type Parent1Detail = Parent1 & {
 
 export type Parent1Child1 = {
   id: string;
+  order: number;
   name: string;
   type: string;
   parent1_id: string;

@@ -106,6 +106,7 @@ model parent1 {
 
 model parent1_child1 {
   id          String   @id @default(cuid())
+  order       Int      @default(0)
   name        String
   type        String
   parent1_id    String     

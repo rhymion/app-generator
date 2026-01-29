@@ -34,6 +34,7 @@ export async function getParent1Detail(id: string): Promise<Parent1Detail | null
     image_url: parent1.image_url,
     parent1_child1s: parent1.parent1_child1s.map((item) => ({
       id: item.id,
+      order: item.order,
       name: item.name,
       type: item.type,
       parent1_id: item.parent1_id,

@@ -20,7 +20,7 @@ export async function upsertParent1(data: FormData) {
   const due_date = new Date(due_date_str);
   const image_url = data.get('image_url') as string | null;
   const parent1Child1sRaw = data.getAll('parent1Child1[]') as string[];
-  const parent1Child1s = parent1Child1sRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string; parent1_id?: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });
+  const parent1Child1s = parent1Child1sRaw.map(f => JSON.parse(f) as { id?: string; order: number; name: string; type: string; parent1_id?: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });
   const parent1Child2sRaw = data.getAll('parent1Child2[]') as string[];
   const parent1Child2s = parent1Child2sRaw.map(f => JSON.parse(f) as { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date });
 
@@ -34,7 +34,7 @@ export async function upsertParent1(data: FormData) {
   redirect('/parent1');
 }
 
-async function addParent1(name: string, description: string | null, price: number, due_date: Date, image_url: string | null, parent1Child1s: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { name: string; required: boolean; start_date: Date | null; end_date: Date }[]) {
+async function addParent1(name: string, description: string | null, price: number, due_date: Date, image_url: string | null, parent1Child1s: { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { name: string; required: boolean; start_date: Date | null; end_date: Date }[]) {
   await prisma.$transaction(async (tx) => {
     const newRecord = await tx.parent1.create({
       data: {
@@ -50,6 +50,7 @@ async function addParent1(name: string, description: string | null, price: numbe
     if (parent1Child1s.length > 0) {
       await tx.parent1_child1.createMany({
         data: parent1Child1s.map(f => ({
+          order: f.order,
           name: f.name,
           type: f.type,
           max_length: f.max_length,
@@ -75,7 +76,7 @@ async function addParent1(name: string, description: string | null, price: numbe
   });
 }
 
-async function updateParent1(id: string, name: string, description: string | null, price: number, due_date: Date, image_url: string | null, parent1Child1s: { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date }[]) {
+async function updateParent1(id: string, name: string, description: string | null, price: number, due_date: Date, image_url: string | null, parent1Child1s: { id?: string; order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date }[]) {
   await prisma.$transaction(async (tx) => {
     await tx.parent1.update({
       where: { id },
@@ -99,6 +100,7 @@ async function updateParent1(id: string, name: string, description: string | nul
       await tx.parent1_child1.update({
         where: { id: item.id! },
         data: {
+          order: item.order,
           name: item.name,
           type: item.type,
           max_length: item.max_length,
@@ -113,6 +115,7 @@ async function updateParent1(id: string, name: string, description: string | nul
     if (parent1Child1ToCreate.length > 0) {
       await tx.parent1_child1.createMany({
         data: parent1Child1ToCreate.map(f => ({
+          order: f.order,
           name: f.name,
           type: f.type,
           max_length: f.max_length,

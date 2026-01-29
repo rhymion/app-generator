@@ -4,6 +4,7 @@ import dayjs from 'dayjs';
 
 export function parent1_child1_columns(editable: boolean = false): GridColDef[] {
   return [
+    { field: 'order', headerName: 'Order', width: 100, editable: false, type: 'number' },
     { field: 'name', headerName: 'Name', width: 150, editable: editable },
     { field: 'type', headerName: 'Type', width: 150, editable: editable },
     { field: 'max_length', headerName: 'Max Length', width: 100, editable: editable, type: 'number' },

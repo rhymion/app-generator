@@ -10,6 +10,7 @@ import type { FormUpsertProps } from '@/lib/parent1/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import { GridRowsProp } from '@mui/x-data-grid';
 import FieldsDataGrid from '../FieldsDataGrid';
+import OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';
 import { parent1_child1_columns, parent1_child2_columns } from '../parent1/column_def';
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
@@ -34,6 +35,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
 
   const createNewParent1Child1 = () => ({
     id: `temp-${Date.now()}-${Math.random()}`,
+    order: 0,
     name: '',
     type: '',
     max_length: null,
@@ -75,6 +77,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         'parent1Child1[]',
         JSON.stringify({
           id: field.id.startsWith('temp-') ? undefined : field.id,
+          order: field.order,
           name: field.name,
           type: field.type,
           max_length: field.max_length,
@@ -159,7 +162,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         value={imageUrl}
         onChange={setImageUrl}
       />
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         ref={parent1_child1GridRef}
         initialFields={initialParent1Child1}
         columns={parent1_child1Columns}
