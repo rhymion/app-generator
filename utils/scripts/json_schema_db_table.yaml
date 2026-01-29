@@ -209,7 +209,7 @@ definitions:
         required:
           - parent1_child1s
           - parent1_child2s
-          - parent1_list
+          - parent1_lists
         properties:
           parent1_child1s:
             type: array
