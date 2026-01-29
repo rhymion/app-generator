@@ -11,6 +11,7 @@ import FormWithChildGrid from '../FormWithChildGrid';
 import { GridRowsProp } from '@mui/x-data-grid';
 import FieldsDataGrid from '../FieldsDataGrid';
 import OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';
+import EditableList, { EditableListItem } from '../EditableList';
 import { parent1_child1_columns, parent1_child2_columns, parent1_list_columns } from '../parent1/column_def';
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
@@ -26,7 +27,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
 
   const parent1_child1GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const parent1_child2GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
-  const parent1_listGridRef = useRef<{ getFields: () => GridRowsProp }>(null);
+  const parent1_listRef = useRef<{ getItems: () => EditableListItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
@@ -58,15 +59,12 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     end_date: dayjs().toISOString(),
     parent1_id: src.id,
   });
-  const parent1_listColumns = parent1_list_columns(true);
-
-  const initialParent1List = src.parent1_list.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
-
-  const createNewParent1List = () => ({
-    id: `temp-${Date.now()}-${Math.random()}`,
-    name: '',
-    parent1_id: src.id,
-  });
+  const initialParent1List: EditableListItem[] = src.parent1_lists.map(f => ({
+    id: f.id || `temp-${Date.now()}-${Math.random()}`,
+    value: f.name,
+    label: f.name,
+    originalId: f.id,
+  }));
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -112,14 +110,15 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         })
       );
     });
-    const parent1List = parent1_listGridRef.current?.getFields?.() || [];
+    const parent1List = parent1_listRef.current?.getItems?.() || [];
 
-    (parent1List as any[]).forEach((field) => {
+    parent1List.forEach((item) => {
+      const itemId = item.originalId || (typeof item.id === 'string' && item.id.startsWith('temp-') ? undefined : item.id);
       formData.append(
         'parent1List[]',
         JSON.stringify({
-          id: field.id.startsWith('temp-') ? undefined : field.id,
-          name: field.name,
+          id: itemId,
+          name: item.value,
         })
       );
     });
@@ -205,16 +204,15 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         showTitle={true}
         title="Parent1 Child2"
       />
-      <FieldsDataGrid
-        ref={parent1_listGridRef}
-        initialFields={initialParent1List}
-        columns={parent1_listColumns}
-        createNewRow={createNewParent1List}
+      <EditableList
+        ref={parent1_listRef}
+        initialItems={initialParent1List}
+        itemType="text"
         addButtonLabel="Add Parent1 List"
-        deleteDialogTitle="Delete Selected Parent1 List?"
-        deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
         title="Parent1 List"
+        textFieldLabel="Name"
+        textFieldPlaceholder="Enter name"
       />
     </>
   );
