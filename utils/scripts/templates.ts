@@ -736,10 +736,16 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     const dataGridImports = hasOrderedChildren 
       ? `import FieldsDataGrid from '../FieldsDataGrid';\nimport OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';`
       : `import FieldsDataGrid from '../FieldsDataGrid';`;
-    
+
+    const hasListChildren = children.some(c => c.outputType === 'list');
+
     childImports = `import { GridRowsProp } from '@mui/x-data-grid';
 ${dataGridImports}
 import { ${columnImports} } from '../${parent}/column_def';`;
+    
+    if (hasListChildren) {
+      childImports = `import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';\n` + childImports;
+    }
     
     childVariables = children.map(childInfo => {
       const refType = childInfo.outputType === 'list'
