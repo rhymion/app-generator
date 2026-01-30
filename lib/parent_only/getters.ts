@@ -24,10 +24,6 @@ export async function getParentOnlyDetail(id: string): Promise<ParentOnlyDetail 
   }
 
   return {
-    id: parentOnly.id,
-    name: parentOnly.name,
-    description: parentOnly.description,
-    login_time: parentOnly.login_time,
-    logout_time: parentOnly.logout_time,
+    ...parentOnly,
   };
 }

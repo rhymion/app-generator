@@ -172,20 +172,9 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
     ? children.map(c => `${c.propertyName}: true`).join(', ')
     : '';
   
-  const childMappings: string[] = [];
-  for (const child of children) {
-    const childDef = schema.definitions[child.name];
-    const childProps = childDef?.properties
-      ? Object.keys(childDef.properties).filter(k => 
-          k !== 'created_at' && k !== 'updated_at'
-        )
-      : [];
-    
-    const childMapping = childProps.map(p => `      ${p}: item.${p},`).join('\n');
-    childMappings.push(`    ${child.propertyName}: ${parentCamel}.${child.propertyName}.map((item) => ({
-${childMapping}
-    })),`);
-  }
+  const childMappings = children.length > 0
+    ? children.map(c => `    ${c.propertyName}: ${parentCamel}.${c.propertyName},`).join('\n')
+    : '';
   
   return `'use server';
 
@@ -202,7 +191,9 @@ ${parentMapping}
 export async function get${parentPascal}Detail(id: string): Promise<${parentPascal}Detail | null> {
   const ${parentCamel} = await prisma.${parent}.findUnique({
     where: { id },${includeProps ? `
-    include: { ${includeProps} },` : ''}
+    include: { 
+      ${includeProps.split(', ').join(', \n      ')} 
+    },` : ''}
   });
 
   if (!${parentCamel}) {
@@ -210,7 +201,8 @@ export async function get${parentPascal}Detail(id: string): Promise<${parentPasc
   }
 
   return {
-${parentMapping}${childMappings.length > 0 ? `\n${childMappings.join('\n')}` : ''}
+    ...${parentCamel},${childMappings ? `
+${childMappings}` : ''}
   };
 }
 `;
@@ -355,10 +347,8 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     
     const fieldType = `{ ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
     const fieldTypeWithId = `{ ${childPropsWithId.map(p => `${p.replace(/id/, 'id?')}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
-    const fieldTypeWithParentId = `{ id?: string; ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
     
     const fieldMapCreate = childProps.map(p => `          ${p}: f.${p},`).join('\n');
-    const fieldDataUpdate = childProps.map(p => `          ${p}: item.${p},`).join('\n');
     
     return {
       child,
@@ -366,9 +356,7 @@ export async function remove${parentPascal}(data: FormData | string[]) {
       childPascal,
       fieldType,
       fieldTypeWithId,
-      fieldTypeWithParentId,
       fieldMapCreate,
-      fieldDataUpdate
     };
   });
   
@@ -378,18 +366,18 @@ export async function remove${parentPascal}(data: FormData | string[]) {
   ).join('\n');
   
   const childParamsForAdd = allChildrenData.map(({ childCamel, fieldType }) => `${childCamel}s: ${fieldType}[]`).join(', ');
-  const childParamsForUpdate = allChildrenData.map(({ childCamel, fieldTypeWithParentId }) => `${childCamel}s: ${fieldTypeWithParentId}[]`).join(', ');
+  const childParamsForUpdate = allChildrenData.map(({ childCamel, fieldTypeWithId }) => `${childCamel}s: ${fieldTypeWithId}[]`).join(', ');
   const childArgsForCall = allChildrenData.map(({ childCamel }) => `${childCamel}s`).join(', ');
   
-  // Generate createMany calls for all children in addParent
-  const childCreateManyCalls = allChildrenData.map(({ child, childCamel, fieldMapCreate }) => 
-    `    if (${childCamel}s.length > 0) {\n      await tx.${child}.createMany({\n        data: ${childCamel}s.map(f => ({\n${fieldMapCreate}\n          ${parent}_id: recordId,\n        })),\n      });\n    }`
+  // Generate nested create for all children
+  const childNestedCreate = allChildrenData.map(({ child, childCamel, fieldMapCreate }) => 
+    `      ${child}s: {\n        create: ${childCamel}s.map(f => ({\n${fieldMapCreate}\n        })),\n      },`
   ).join('\n');
   
-  // Generate full CRUD operations for all children in updateParent
-  const childUpdateOperations = allChildrenData.map(({ child, childCamel, childPascal, fieldMapCreate, fieldDataUpdate }) => 
-    `    const existing${childPascal} = await tx.${child}.findMany({\n      where: { ${parent}_id: id },\n    });\n\n    const ${childCamel}ToUpsert = ${childCamel}s.filter(f => f.id);\n    const ${childCamel}ToCreate = ${childCamel}s.filter(f => !f.id);\n\n    for (const item of ${childCamel}ToUpsert) {\n      await tx.${child}.update({\n        where: { id: item.id! },\n        data: {\n${fieldDataUpdate}\n        },\n      });\n    }\n\n    if (${childCamel}ToCreate.length > 0) {\n      await tx.${child}.createMany({\n        data: ${childCamel}ToCreate.map(f => ({\n${fieldMapCreate}\n          ${parent}_id: id,\n        })),\n      });\n    }\n\n    const ${childCamel}NewIds = ${childCamel}s.filter(f => f.id).map(f => f.id!);\n    const ${childCamel}ToDelete = existing${childPascal}.filter(ef => !${childCamel}NewIds.includes(ef.id));\n    if (${childCamel}ToDelete.length > 0) {\n      await tx.${child}.deleteMany({\n        where: { id: { in: ${childCamel}ToDelete.map(f => f.id) } },\n      });\n    }`
-  ).join('\n\n');
+  // Generate nested update (deleteMany + create) for all children
+  const childNestedUpdate = allChildrenData.map(({ child, childCamel, fieldMapCreate }) => 
+    `      ${child}s: {\n        deleteMany: {},\n        create: ${childCamel}s.map(f => ({\n${fieldMapCreate}\n        })),\n      },`
+  ).join('\n');
   
   return `'use server';
 
@@ -420,28 +408,21 @@ ${childFormDataExtractions}
 }
 
 async function add${parentPascal}(${parentParamsWithTypes}${parentParamsWithTypes && childParamsForAdd ? ', ' : ''}${childParamsForAdd}) {
-  await prisma.$transaction(async (tx) => {
-    const newRecord = await tx.${parent}.create({
-      data: {
+  await prisma.${parent}.create({
+    data: {
 ${parentDataObj}
-      },
-    });
-    const recordId = newRecord.id;
-
-${childCreateManyCalls}
+${childNestedCreate}
+    },
   });
 }
 
 async function update${parentPascal}(id: string${parentParamsWithTypes ? ', ' : ''}${parentParamsWithTypes}${parentParamsWithTypes && childParamsForUpdate ? ', ' : ''}${childParamsForUpdate}) {
-  await prisma.$transaction(async (tx) => {
-    await tx.${parent}.update({
-      where: { id },
-      data: {
+  await prisma.${parent}.update({
+    where: { id },
+    data: {
 ${parentDataObj}
-      },
-    });
-
-${childUpdateOperations}
+${childNestedUpdate}
+    },
   });
 }
 ${canDelete ? `
