@@ -13,7 +13,7 @@ import DialogActions from '@mui/material/DialogActions';
 interface BaseEntity {
   id: string;
   name: string;
-  description: string | null;
+  [key: string]: unknown;
 }
 
 interface DataGridClientProps<T extends BaseEntity> {
@@ -21,13 +21,17 @@ interface DataGridClientProps<T extends BaseEntity> {
   basePath: string;
   removeAction: (formDataOrIds: FormData | string[]) => Promise<void>;
   entityLabel?: string;
+  displayField?: keyof T;
+  displayFieldLabel?: string;
 }
 
 export default function DataGridClient<T extends BaseEntity>({ 
   src, 
   basePath,
   removeAction,
-  entityLabel = 'Item'
+  entityLabel = 'Item',
+  displayField = 'description' as keyof T,
+  displayFieldLabel = 'Description'
 }: DataGridClientProps<T>) {
   const [items, setItems] = useState(src);
   const [isPending, startTransition] = useTransition();
@@ -82,9 +86,13 @@ export default function DataGridClient<T extends BaseEntity>({
       },
     },
     {
-      field: 'description',
-      headerName: 'Description',
+      field: displayField as string,
+      headerName: displayFieldLabel,
       width: 400,
+      valueGetter: (value, row) => {
+        const fieldValue = row[displayField];
+        return fieldValue !== null && fieldValue !== undefined ? String(fieldValue) : '';
+      },
     },
     {
       field: 'actions',
