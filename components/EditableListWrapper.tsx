@@ -20,7 +20,7 @@ import Box from '@mui/material/Box';
 
 export type ItemType = 'text' | 'autocomplete' | 'file';
 
-export interface EditableListItem {
+export interface EditableListWrapperItem {
   id: string | number;
   value: any;
   label?: string;
@@ -33,8 +33,8 @@ export interface AutocompleteOption {
   [key: string]: any;
 }
 
-interface EditableListProps {
-  initialItems?: EditableListItem[];
+interface EditableListWrapperProps {
+  initialItems?: EditableListWrapperItem[];
   itemType: ItemType;
   addButtonLabel?: string;
   title?: string;
@@ -50,16 +50,16 @@ interface EditableListProps {
   acceptedFileTypes?: string;
   maxFileSize?: number; // in bytes
   // Custom rendering
-  renderItem?: (item: EditableListItem) => React.ReactNode;
+  renderItem?: (item: EditableListWrapperItem) => React.ReactNode;
   // Validation
   validateItem?: (value: any) => string | null; // returns error message or null
 }
 
-interface EditableListHandle {
-  getItems: () => EditableListItem[];
+interface EditableListWrapperHandle {
+  getItems: () => EditableListWrapperItem[];
 }
 
-const EditableList = forwardRef<EditableListHandle, EditableListProps>(
+const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWrapperProps>(
   ({
     initialItems = [],
     itemType,
@@ -76,10 +76,10 @@ const EditableList = forwardRef<EditableListHandle, EditableListProps>(
     renderItem,
     validateItem,
   }, ref) => {
-    const [items, setItems] = useState<EditableListItem[]>(initialItems);
+    const [items, setItems] = useState<EditableListWrapperItem[]>(initialItems);
     const [openAddDialog, setOpenAddDialog] = useState(false);
     const [openEditDialog, setOpenEditDialog] = useState(false);
-    const [editingItem, setEditingItem] = useState<EditableListItem | null>(null);
+    const [editingItem, setEditingItem] = useState<EditableListWrapperItem | null>(null);
     const [inputValue, setInputValue] = useState('');
     const [selectedAutocomplete, setSelectedAutocomplete] = useState<AutocompleteOption | null>(null);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -97,7 +97,7 @@ const EditableList = forwardRef<EditableListHandle, EditableListProps>(
       setOpenAddDialog(true);
     };
 
-    const handleOpenEditDialog = (item: EditableListItem) => {
+    const handleOpenEditDialog = (item: EditableListWrapperItem) => {
       if (itemType !== 'text') return; // Only text items are editable
       setEditingItem(item);
       setInputValue(item.value || '');
@@ -164,7 +164,7 @@ const EditableList = forwardRef<EditableListHandle, EditableListProps>(
         }
       }
 
-      const newItem: EditableListItem = {
+      const newItem: EditableListWrapperItem = {
         id: `temp-${Date.now()}-${Math.random()}`,
         value,
         label,
@@ -214,7 +214,7 @@ const EditableList = forwardRef<EditableListHandle, EditableListProps>(
       }
     };
 
-    const defaultRenderItem = (item: EditableListItem) => {
+    const defaultRenderItem = (item: EditableListWrapperItem) => {
       return (
         <ListItemText
           primary={item.label || item.value}
@@ -375,6 +375,6 @@ const EditableList = forwardRef<EditableListHandle, EditableListProps>(
   }
 );
 
-EditableList.displayName = 'EditableList';
+EditableListWrapper.displayName = 'EditableListWrapper';
 
-export default EditableList;
+export default EditableListWrapper;

@@ -11,7 +11,7 @@ import FormWithChildGrid from '../FormWithChildGrid';
 import { GridRowsProp } from '@mui/x-data-grid';
 import FieldsDataGrid from '../FieldsDataGrid';
 import OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';
-import EditableList, { EditableListItem } from '../EditableList';
+import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { parent1_child1_columns, parent1_child2_columns, parent1_list_columns } from '../parent1/column_def';
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
@@ -27,7 +27,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
 
   const parent1_child1GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const parent1_child2GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
-  const parent1_listRef = useRef<{ getItems: () => EditableListItem[] }>(null);
+  const parent1_listRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
@@ -59,7 +59,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     end_date: dayjs().toISOString(),
     parent1_id: src.id,
   });
-  const initialParent1List: EditableListItem[] = src.parent1_lists.map(f => ({
+  const initialParent1List: EditableListWrapperItem[] = src.parent1_lists.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.name,
     label: f.name,
@@ -204,7 +204,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         showTitle={true}
         title="Parent1 Child2"
       />
-      <EditableList
+      <EditableListWrapper
         ref={parent1_listRef}
         initialItems={initialParent1List}
         itemType="text"
