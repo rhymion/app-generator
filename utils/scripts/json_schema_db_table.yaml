@@ -219,8 +219,9 @@ definitions:
             type: array
             items:
               $ref: "#/definitions/parent1_child2"
-          parent1_list:
+          parent1_lists:
             type: array
+            x-outputType: list
             items:
               $ref: "#/definitions/parent1_list"
 

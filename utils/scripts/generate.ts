@@ -44,7 +44,7 @@ function extractEntities(schema: Schema): EntityRelation[] {
   const allChildren = new Set<string>();
   
   for (const parent of parents) {
-    const children: Array<{ name: string; propertyName: string }> = [];
+    const children: Array<{ name: string; propertyName: string; outputType?: string; }> = [];
     
     // Find detail entity for this parent
     const detailKey = `${parent}_detail`;
@@ -71,7 +71,9 @@ function extractEntities(schema: Schema): EntityRelation[] {
             const ref = propAny.items.$ref as string;
             const childName = ref.split('/').pop();
             if (childName) {
-              children.push({ name: childName, propertyName: propName });
+              // Check for x-outputType custom property
+              const outputType = propAny['x-outputType'] || propAny.outputType;
+              children.push({ name: childName, propertyName: propName, outputType });
               allChildren.add(childName);
             }
           }

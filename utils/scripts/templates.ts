@@ -3,6 +3,7 @@ import type { Schema, SchemaProperty } from './types';
 interface ChildInfo {
   name: string;
   propertyName: string;
+  outputType?: string;
 }
 
 function getTsType(prop: SchemaProperty): string {
@@ -741,7 +742,10 @@ ${dataGridImports}
 import { ${columnImports} } from '../${parent}/column_def';`;
     
     childVariables = children.map(childInfo => {
-      return `  const ${childInfo.name}GridRef = useRef<{ getFields: () => GridRowsProp }>(null);`;
+      const refType = childInfo.outputType === 'list'
+        ? '{ getItems: () => EditableListWrapperItem[] }'
+        : '{ getFields: () => GridRowsProp }';
+      return `  const ${childInfo.name}Ref = useRef<${refType}>(null);`;
     }).join('\n');
     
     const allChildSetups = children.map(childInfo => {
@@ -756,6 +760,17 @@ import { ${columnImports} } from '../${parent}/column_def';`;
       const childProps = Object.keys(childDef.properties).filter(k => 
         k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at'
       );
+      
+      // For list output type, generate different initialization
+      if (childInfo.outputType === 'list') {
+        // Assuming list items have a 'name' field as the primary value
+        return `  const initial${childPascal}: EditableListWrapperItem[] = src.${childInfo.propertyName}.map(f => ({
+    id: f.id || \`temp-\${Date.now()}-\${Math.random()}\`,
+    value: f.name,
+    label: f.name,
+    originalId: f.id,
+  }));`;
+      }
       
       const createNewChildProps = childProps.map(p => {
         const prop = childDef.properties![p];
@@ -779,6 +794,11 @@ import { ${columnImports} } from '../${parent}/column_def';`;
         return `    ${p}: null,`;
       }).join('\n');
       
+      // Skip column and createNew function for list output type
+      if (childInfo.outputType === 'list') {
+        return '';
+      }
+      
       return `  const ${child}Columns = ${child}_columns(true);
 
   const initial${childPascal} = src.${childInfo.propertyName}.map(f => ({ ...f, id: f.id || \`temp-\${Date.now()}-\${Math.random()}\` }));
@@ -801,13 +821,29 @@ ${createNewChildProps}
         throw new Error(`Child definition ${child} has no properties`);
       }
       
+      // For list output type
+      if (childInfo.outputType === 'list') {
+        return `    const ${childCamel} = ${child}Ref.current?.getItems?.() || [];
+
+    ${childCamel}.forEach((item) => {
+      const itemId = item.originalId || (typeof item.id === 'string' && item.id.startsWith('temp-') ? undefined : item.id);
+      formData.append(
+        '${childCamel}[]',
+        JSON.stringify({
+          id: itemId,
+          name: item.value,
+        })
+      );
+    });`;
+      }
+      
       const childProps = Object.keys(childDef.properties).filter(k => 
         k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at'
       );
       
       const childSerialize = childProps.map(p => `          ${p}: field.${p},`).join('\n');
       
-      return `    const ${childCamel} = ${child}GridRef.current?.getFields?.() || [];
+      return `    const ${childCamel} = ${child}Ref.current?.getFields?.() || [];
 
     (${childCamel} as any[]).forEach((field) => {
       formData.append(
@@ -828,12 +864,26 @@ ${childSerialize}
       const childTitle = toTitleCase(child);
       const childDef = schema.definitions[child];
       
+      // For list output type, use EditableListWrapper
+      if (childInfo.outputType === 'list') {
+        return `      <EditableListWrapper
+        ref={${child}Ref}
+        initialItems={initial${childPascal}}
+        itemType="text"
+        addButtonLabel="Add ${childTitle}"
+        showTitle={true}
+        title="${childTitle}"
+        textFieldLabel="Name"
+        textFieldPlaceholder="Enter name"
+      />`;
+      }
+      
       // Check if child has 'order' field
       const hasOrderField = childDef?.properties && 'order' in childDef.properties;
       const gridComponent = hasOrderField ? 'OrderedFieldsDataGrid' : 'FieldsDataGrid';
       
       return `      <${gridComponent}
-        ref={${child}GridRef}
+        ref={${child}Ref}
         initialFields={initial${childPascal}}
         columns={${child}Columns}
         createNewRow={createNew${childPascal}}
@@ -1020,11 +1070,32 @@ ${parentTextFields}
   }
   
   // For with-children case - generate view grids for all children
-  const columnImports = children.map(c => `${c.name}_columns`).join(', ');
+  const hasListChildren = children.some(c => c.outputType === 'list');
+  const listImport = hasListChildren ? '\nimport ListWrapper from \'../ListWrapper\';' : '';
+  
+  const gridChildren = children.filter(c => c.outputType !== 'list');
+  const columnImports = gridChildren.map(c => `${c.name}_columns`).join(', ');
   
   const childViewGrids = children.map(childInfo => {
     const child = childInfo.name;
     const childPascal = toPascalCase(child);
+    const childTitle = toTitleCase(child);
+    
+    // For list output type, use ListWrapper
+    if (childInfo.outputType === 'list') {
+      return `      <div>
+        <ListWrapper
+          items={src.${childInfo.propertyName}.map(f => ({
+            id: f.id,
+            value: f.name,
+            label: f.name,
+          }))}
+          itemType="text"
+          showTitle={true}
+          title="${childTitle}"
+        />
+      </div>`;
+    }
     
     return `      <div>
         <h2>${childPascal}</h2>
@@ -1032,18 +1103,19 @@ ${parentTextFields}
       </div>`;
   }).join('\n');
   
-  const columnVariables = children.map(childInfo => {
+  const columnVariables = gridChildren.map(childInfo => {
     const child = childInfo.name;
     return `  const ${child}Columns: GridColDef[] = ${child}_columns(false);`;
   }).join('\n');
+  
+  const columnImportLine = columnImports ? `\nimport { ${columnImports} } from '../${parent}/column_def';` : '';
   
   return `${needsClientDirective ? "'use client';\n\n" : ''}import { GridColDef } from '@mui/x-data-grid';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';
 import Link from '@mui/material/Link';
-import FieldsViewGrid from '../FieldsViewGrid';
-import { ${columnImports} } from '../${parent}/column_def';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}
+import FieldsViewGrid from '../FieldsViewGrid';${columnImportLine}${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}${listImport}
 
 export default function FormView({ src }: FormViewProps) {
 ${columnVariables}

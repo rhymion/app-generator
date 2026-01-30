@@ -25,8 +25,8 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const [dueDate, setDueDate] = useState<Dayjs | null>(src.due_date ? dayjs(src.due_date) : null);
   const [imageUrl, setImageUrl] = useState<string>(src.image_url || '');
 
-  const parent1_child1GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
-  const parent1_child2GridRef = useRef<{ getFields: () => GridRowsProp }>(null);
+  const parent1_child1Ref = useRef<{ getFields: () => GridRowsProp }>(null);
+  const parent1_child2Ref = useRef<{ getFields: () => GridRowsProp }>(null);
   const parent1_listRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
@@ -78,7 +78,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     formData.set('price', priceRef.current?.value || '');
     formData.set('due_date', dueDate?.toISOString() || '');
     formData.set('image_url', imageUrl);
-    const parent1Child1 = parent1_child1GridRef.current?.getFields?.() || [];
+    const parent1Child1 = parent1_child1Ref.current?.getFields?.() || [];
 
     (parent1Child1 as any[]).forEach((field) => {
       formData.append(
@@ -96,7 +96,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         })
       );
     });
-    const parent1Child2 = parent1_child2GridRef.current?.getFields?.() || [];
+    const parent1Child2 = parent1_child2Ref.current?.getFields?.() || [];
 
     (parent1Child2 as any[]).forEach((field) => {
       formData.append(
@@ -183,7 +183,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         onChange={setImageUrl}
       />
       <OrderedFieldsDataGrid
-        ref={parent1_child1GridRef}
+        ref={parent1_child1Ref}
         initialFields={initialParent1Child1}
         columns={parent1_child1Columns}
         createNewRow={createNewParent1Child1}
@@ -194,7 +194,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         title="Parent1 Child1"
       />
       <FieldsDataGrid
-        ref={parent1_child2GridRef}
+        ref={parent1_child2Ref}
         initialFields={initialParent1Child2}
         columns={parent1_child2Columns}
         createNewRow={createNewParent1Child2}

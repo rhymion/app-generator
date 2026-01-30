@@ -17,7 +17,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const [error, setError] = useState<string | null>(null);
 
 
-  const yyyyy_yyyyyGridRef = useRef<{ getFields: () => GridRowsProp }>(null);
+  const yyyyy_yyyyyRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const teamRef = useRef<HTMLInputElement>(null);
@@ -47,7 +47,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     formData.set('name', nameRef.current?.value || '');
     formData.set('description', descriptionRef.current?.value || '');
     formData.set('team', teamRef.current?.value || '');
-    const yyyyyYyyyy = yyyyy_yyyyyGridRef.current?.getFields?.() || [];
+    const yyyyyYyyyy = yyyyy_yyyyyRef.current?.getFields?.() || [];
 
     (yyyyyYyyyy as any[]).forEach((field) => {
       formData.append(
@@ -119,7 +119,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         rows={undefined}
       />
       <FieldsDataGrid
-        ref={yyyyy_yyyyyGridRef}
+        ref={yyyyy_yyyyyRef}
         initialFields={initialYyyyyYyyyy}
         columns={yyyyy_yyyyyColumns}
         createNewRow={createNewYyyyyYyyyy}
