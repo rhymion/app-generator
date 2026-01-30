@@ -10,6 +10,15 @@ export interface SchemaProperty {
   $ref?: string;
 }
 
+export interface GenerateConfig {
+  list?: boolean;
+  view?: boolean;
+  new?: boolean;
+  edit?: boolean;
+  delete?: boolean;
+  invalidate?: boolean;
+}
+
 export interface SchemaDefinition {
   type?: string;
   title?: string;
@@ -22,6 +31,7 @@ export interface SchemaDefinition {
     required?: string[];
     properties?: Record<string, SchemaProperty>;
   }>;
+  'x-generate'?: GenerateConfig;
 }
 
 export interface Schema {

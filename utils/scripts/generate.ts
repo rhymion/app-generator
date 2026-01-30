@@ -25,7 +25,15 @@ interface EntityRelation {
   children: Array<{
     name: string;
     propertyName: string;
+    outputType?: string;
   }>;
+  generateConfig: {
+    list: boolean;
+    view: boolean;
+    new: boolean;
+    edit: boolean;
+    delete: boolean;
+  };
 }
 
 function extractEntities(schema: Schema): EntityRelation[] {
@@ -81,7 +89,17 @@ function extractEntities(schema: Schema): EntityRelation[] {
       }
     }
     
-    results.push({ parent, children });
+    // Extract x-generate configuration from detail definition
+    const xGenerate = (detailDef as any)?.['x-generate'] || {};
+    const generateConfig = {
+      list: xGenerate.list !== false,
+      view: xGenerate.view !== false,
+      new: xGenerate.new !== false,
+      edit: xGenerate.edit !== false,
+      delete: xGenerate.delete !== false,
+    };
+    
+    results.push({ parent, children, generateConfig });
   }
   
   // Filter out parents that are actually children of other entities
@@ -99,8 +117,9 @@ function generate(inputPath: string, outputDir: string) {
   
   console.log(`Found ${entityRelations.length} parent entity(ies)`);
   
-  for (const { parent, children } of entityRelations) {
+  for (const { parent, children, generateConfig } of entityRelations) {
     console.log(`\nGenerating code for parent: ${parent}`);
+    console.log(`  Generate config: list=${generateConfig.list}, view=${generateConfig.view}, new=${generateConfig.new}, edit=${generateConfig.edit}, delete=${generateConfig.delete}`);
     
     if (children.length === 0) {
       console.log(`  No children (parent-only case)`);
@@ -119,29 +138,55 @@ function generate(inputPath: string, outputDir: string) {
     
     fs.mkdirSync(libDir, { recursive: true });
     fs.mkdirSync(componentsDir, { recursive: true });
-    fs.mkdirSync(appDir, { recursive: true });
-    fs.mkdirSync(path.join(appDir, 'new'), { recursive: true });
-    fs.mkdirSync(path.join(appDir, 'edit', '[id]'), { recursive: true });
-    fs.mkdirSync(path.join(appDir, 'view', '[id]'), { recursive: true });
     
     // Generate files - pass full children array to support multiple children
     fs.writeFileSync(path.join(libDir, 'types.ts'), generateTypes(parent, children, schema));
-    fs.writeFileSync(path.join(libDir, 'getters.ts'), generateGetters(parent, children, schema));
-    fs.writeFileSync(path.join(libDir, 'actions.ts'), generateActions(parent, children, schema));
     
-    // Generate column_def only if there are children
-    if (hasChildren) {
+    // Generate getters only if list or view is enabled
+    if (generateConfig.list || generateConfig.view) {
+      fs.writeFileSync(path.join(libDir, 'getters.ts'), generateGetters(parent, children, schema, generateConfig));
+    }
+    
+    // Generate actions only if new, edit, or delete is enabled
+    if (generateConfig.new || generateConfig.edit || generateConfig.delete) {
+      fs.writeFileSync(path.join(libDir, 'actions.ts'), generateActions(parent, children, schema, generateConfig));
+    }
+    
+    // Generate column_def only if there are children and list is enabled
+    if (hasChildren && generateConfig.list) {
       fs.writeFileSync(path.join(componentsDir, 'column_def.tsx'), generateColumnDef(parent, children, schema));
     }
     
-    // Always generate forms and pages
-    fs.writeFileSync(path.join(componentsDir, 'FormUpsert.tsx'), generateFormUpsert(parent, children, schema));
-    fs.writeFileSync(path.join(componentsDir, 'FormView.tsx'), generateFormView(parent, children, schema));
+    // Generate FormUpsert only if new or edit is enabled
+    if (generateConfig.new || generateConfig.edit) {
+      fs.writeFileSync(path.join(componentsDir, 'FormUpsert.tsx'), generateFormUpsert(parent, children, schema, generateConfig));
+    }
     
-    fs.writeFileSync(path.join(appDir, 'page.tsx'), generatePageList(parent));
-    fs.writeFileSync(path.join(appDir, 'new', 'page.tsx'), generatePageNew(parent, children, schema));
-    fs.writeFileSync(path.join(appDir, 'edit', '[id]', 'page.tsx'), generatePageEdit(parent));
-    fs.writeFileSync(path.join(appDir, 'view', '[id]', 'page.tsx'), generatePageView(parent));
+    // Generate FormView only if view is enabled
+    if (generateConfig.view) {
+      fs.writeFileSync(path.join(componentsDir, 'FormView.tsx'), generateFormView(parent, children, schema));
+    }
+    
+    // Conditionally generate pages based on config
+    if (generateConfig.list) {
+      fs.mkdirSync(appDir, { recursive: true });
+      fs.writeFileSync(path.join(appDir, 'page.tsx'), generatePageList(parent));
+    }
+    
+    if (generateConfig.new) {
+      fs.mkdirSync(path.join(appDir, 'new'), { recursive: true });
+      fs.writeFileSync(path.join(appDir, 'new', 'page.tsx'), generatePageNew(parent, children, schema));
+    }
+    
+    if (generateConfig.edit) {
+      fs.mkdirSync(path.join(appDir, 'edit', '[id]'), { recursive: true });
+      fs.writeFileSync(path.join(appDir, 'edit', '[id]', 'page.tsx'), generatePageEdit(parent));
+    }
+    
+    if (generateConfig.view) {
+      fs.mkdirSync(path.join(appDir, 'view', '[id]'), { recursive: true });
+      fs.writeFileSync(path.join(appDir, 'view', '[id]', 'page.tsx'), generatePageView(parent));
+    }
   }
   
   console.log('\nCode generation complete!');

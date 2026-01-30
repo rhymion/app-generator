@@ -68,6 +68,13 @@ definitions:
         type: string
 
   xxxxx_xxxxx_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
     allOf:
       - $ref: "#/definitions/xxxxx_xxxxx"
       - type: object
@@ -203,6 +210,13 @@ definitions:
         maxLength: 100
 
   parent1_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
     allOf:
       - $ref: "#/definitions/parent1"
       - type: object
@@ -226,6 +240,13 @@ definitions:
               $ref: "#/definitions/parent1_list"
 
   parent_only:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
     type: object
     required:
       - id

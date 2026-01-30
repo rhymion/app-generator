@@ -1,4 +1,4 @@
-import type { Schema, SchemaProperty } from './types';
+import type { Schema, SchemaProperty, GenerateConfig } from './types';
 
 interface ChildInfo {
   name: string;
@@ -152,7 +152,7 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   return result;
 }
 
-export function generateGetters(parent: string, children: ChildInfo[], schema: Schema): string {
+export function generateGetters(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any): string {
   const parentPascal = toPascalCase(parent);
   const parentCamel = toCamelCase(parent);
   
@@ -216,9 +216,10 @@ ${parentMapping}${childMappings.length > 0 ? `\n${childMappings.join('\n')}` : '
 `;
 }
 
-export function generateActions(parent: string, children: ChildInfo[], schema: Schema): string {
+export function generateActions(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any): string {
   const parentPascal = toPascalCase(parent);
   const parentDef = schema.definitions[parent];
+  const canDelete = generateConfig?.delete !== false;
   
   // Get parent properties (excluding id and timestamps)
   const parentProps = parentDef.properties
@@ -309,7 +310,7 @@ ${parentDataObj}
     },
   });
 }
-
+${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
@@ -330,7 +331,7 @@ export async function remove${parentPascal}(data: FormData | string[]) {
   revalidatePath('/');
   redirect('/${parent}');
 }
-`;
+` : ''}`;
   }
   
   // For with-children cases, handle all children
@@ -443,7 +444,7 @@ ${parentDataObj}
 ${childUpdateOperations}
   });
 }
-
+${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
@@ -464,7 +465,7 @@ export async function remove${parentPascal}(data: FormData | string[]) {
   revalidatePath('/');
   redirect('/${parent}');
 }
-`;
+` : ''}`;
 }
 
 export function generateColumnDef(parent: string, children: ChildInfo[], schema: Schema): string {
@@ -574,10 +575,11 @@ ${columnFunctions}
 `;
 }
 
-export function generateFormUpsert(parent: string, children: ChildInfo[], schema: Schema): string {
+export function generateFormUpsert(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any): string {
   const parentPascal = toPascalCase(parent);
   const parentTitle = toTitleCase(parent);
   const parentDef = schema.definitions[parent];
+  const canDelete = generateConfig?.delete !== false;
   
   if (!parentDef.properties) {
     throw new Error(`Parent definition ${parent} has no properties`);
@@ -908,7 +910,7 @@ import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';${numberProps.length > 0 ? '\nimport NumberField from \'../NumberField\';' : ''}
-import { upsert${parentPascal}, remove${parentPascal} } from '@/lib/${parent}/actions';
+import { upsert${parentPascal}${canDelete ? `, remove${parentPascal}` : ''} } from '@/lib/${parent}/actions';
 import type { FormUpsertProps } from '@/lib/${parent}/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 ${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${imageProps.length > 0 ? '\nimport ImageUpload from \'../ImageUpload\';' : ''}
@@ -939,13 +941,13 @@ ${parentFormDataSets}${childFormDataHandling}
       setError(err instanceof Error ? err.message : 'An error occurred');
     }
   };
-
+${canDelete ? `
   const handleDelete = async () => {
     const formData = new FormData();
     formData.set('id', src.id);
     await remove${parentPascal}(formData);
   };
-
+` : ''}
   const handleBack = () => {
     router.push('/${parent}');
     router.refresh();
@@ -963,7 +965,7 @@ ${parentTextFields}${childGridComponents.length > 0 ? '\n' + childGridComponents
       isEdit={isEdit}
       formFields={formFields}
       onSubmit={handleSubmit}
-      onDelete={isEdit ? handleDelete : undefined}
+      onDelete={${canDelete ? 'isEdit ? handleDelete : undefined' : 'undefined'}}
       onBack={handleBack}
       deleteEntityLabel="${parentTitle}"
       submitButtonLabel="Save"
