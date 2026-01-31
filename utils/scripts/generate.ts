@@ -48,8 +48,9 @@ function extractEntities(schema: Schema): EntityRelation[] {
     schema.definitions[def].properties?.name
   );
   
-  // Collect all child entity names
+  // Collect all child entity names and track relationships
   const allChildren = new Set<string>();
+  const childToParents = new Map<string, string[]>();
   
   for (const parent of parents) {
     const children: Array<{ name: string; propertyName: string; outputType?: string; }> = [];
@@ -83,6 +84,12 @@ function extractEntities(schema: Schema): EntityRelation[] {
               const outputType = propAny['x-outputType'] || propAny.outputType;
               children.push({ name: childName, propertyName: propName, outputType });
               allChildren.add(childName);
+              
+              // Track parent-child relationships
+              if (!childToParents.has(childName)) {
+                childToParents.set(childName, []);
+              }
+              childToParents.get(childName)!.push(parent);
             }
           }
         }
@@ -102,8 +109,38 @@ function extractEntities(schema: Schema): EntityRelation[] {
     results.push({ parent, children, generateConfig });
   }
   
-  // Filter out parents that are actually children of other entities
-  return results.filter(r => !allChildren.has(r.parent));
+  // Detect many-to-many relationships: A references B AND B references A
+  const manyToManyPairs = new Set<string>();
+  for (const [child, parentsList] of childToParents) {
+    for (const parent of parentsList) {
+      // Check if parent also appears as a child of this child
+      const childParents = childToParents.get(parent) || [];
+      if (childParents.includes(child)) {
+        // Many-to-many relationship detected
+        const pair = [parent, child].sort().join('<->');
+        manyToManyPairs.add(pair);
+      }
+    }
+  }
+  
+  // Filter out entities that are ONLY children (not in many-to-many)
+  return results.filter(r => {
+    if (!allChildren.has(r.parent)) {
+      // Not a child of anyone, include it
+      return true;
+    }
+    
+    // Check if this parent is part of a many-to-many relationship
+    for (const pair of manyToManyPairs) {
+      if (pair.includes(r.parent)) {
+        console.log(`  Many-to-many detected: ${pair}`);
+        return true; // Include entities in many-to-many relationships
+      }
+    }
+    
+    // This is a pure child entity, exclude it
+    return false;
+  });
 }
 
 function generate(inputPath: string, outputDir: string) {
