@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
@@ -8,12 +8,9 @@ import { upsertUserAccount, removeUserAccount } from '@/lib/user_account/actions
 import type { FormUpsertProps } from '@/lib/user_account/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
-import { GridRowsProp } from '@mui/x-data-grid';
-import FieldsDataGrid from '../FieldsDataGrid';
-import { role_columns } from '../user_account/column_def';
 import ImageUpload from '../ImageUpload';
 
-export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -27,11 +24,25 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const api_keyRef = useRef<HTMLInputElement>(null);
   const initialRole: EditableListWrapperItem[] = src.roles.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
-    value: f.name,
+    value: f.id,
     label: f.name,
     originalId: f.id,
   }));
-
+  const [selectedRoles, setSelectedRoles] = useState<EditableListWrapperItem[]>(initialRole);
+  const autocompleteOptions = useMemo(() => {
+    const assignedRoleIds = new Set(
+      selectedRoles
+        .map((role) => role.originalId ?? role.value)
+        .filter((roleId): roleId is string => typeof roleId === 'string')
+    );
+    return allRoles
+      .filter((role) => !assignedRoleIds.has(role.id))
+      .map((role) => ({
+        id: role.id,
+        label: role.name,
+        value: role.name,
+      }));
+  }, [allRoles, selectedRoles]);
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
@@ -47,12 +58,14 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     const role = roleRef.current?.getItems?.() || [];
 
     role.forEach((item) => {
-      const itemId = item.originalId || (typeof item.id === 'string' && item.id.startsWith('temp-') ? undefined : item.id);
+      const itemId =
+        item.originalId ??
+        (typeof item.value === 'string' || typeof item.value === 'number' ? item.value : undefined);
       formData.append(
         'role[]',
         JSON.stringify({
           id: itemId,
-          name: item.value,
+          name: item.label ?? item.value,
         })
       );
     });
@@ -127,12 +140,14 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
       <EditableListWrapper
         ref={roleRef}
         initialItems={initialRole}
-        itemType="text"
+        itemType="autocomplete"
         addButtonLabel="Add Role"
         showTitle={true}
         title="Role"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
+        autocompleteOptions={autocompleteOptions}
+        onItemsChange={setSelectedRoles}
       />
     </>
   );

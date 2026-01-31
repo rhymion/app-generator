@@ -53,6 +53,8 @@ interface EditableListWrapperProps {
   renderItem?: (item: EditableListWrapperItem) => React.ReactNode;
   // Validation
   validateItem?: (value: any) => string | null; // returns error message or null
+  // Change callback
+  onItemsChange?: (items: EditableListWrapperItem[]) => void;
 }
 
 interface EditableListWrapperHandle {
@@ -75,6 +77,7 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
     maxFileSize = 10 * 1024 * 1024, // 10MB default
     renderItem,
     validateItem,
+    onItemsChange,
   }, ref) => {
     const [items, setItems] = useState<EditableListWrapperItem[]>(initialItems);
     const [openAddDialog, setOpenAddDialog] = useState(false);
@@ -118,6 +121,11 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
       setEditingItem(null);
       setInputValue('');
       setError(null);
+    };
+
+    const updateItems = (nextItems: EditableListWrapperItem[]) => {
+      setItems(nextItems);
+      onItemsChange?.(nextItems);
     };
 
     const handleAdd = () => {
@@ -171,7 +179,7 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
         type: itemType,
       };
 
-      setItems([...items, newItem]);
+      updateItems([...items, newItem]);
       handleCloseAddDialog();
     };
 
@@ -198,12 +206,12 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
           ? { ...item, value, label: value }
           : item
       );
-      setItems(updatedItems);
+      updateItems(updatedItems);
       handleCloseEditDialog();
     };
 
     const handleDelete = (id: string | number) => {
-      setItems(items.filter(item => item.id !== id));
+      updateItems(items.filter(item => item.id !== id));
     };
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
