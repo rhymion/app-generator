@@ -16,51 +16,41 @@ export async function upsertRole(data: FormData) {
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
   const userAccountsRaw = data.getAll('userAccount[]') as string[];
-  const userAccounts = userAccountsRaw.map(f => JSON.parse(f) as { id?: string; name: string; email: string; password: string; api_key: string | null; avatar: string | null });
+  const userAccounts = userAccountsRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
+  const userAccountIds = userAccounts
+    .map((userAccount) => userAccount.id)
+    .filter((userAccountId): userAccountId is string => Boolean(userAccountId));
 
   if (id) {
-    await updateRole(id, name, description, userAccounts);
+    await updateRole(id, name, description, userAccountIds);
   } else {
-    await addRole(name, description, userAccounts);
+    await addRole(name, description, userAccountIds);
   }
 
   revalidatePath('/');
   redirect('/role');
 }
 
-async function addRole(name: string, description: string | null, userAccounts: { name: string; email: string; password: string; api_key: string | null; avatar: string | null }[]) {
+async function addRole(name: string, description: string | null, userAccountIds: string[]) {
   await prisma.role.create({
     data: {
       name,
       description,
       user_accounts: {
-        create: userAccounts.map(f => ({
-          name: f.name,
-          email: f.email,
-          password: f.password,
-          api_key: f.api_key,
-          avatar: f.avatar,
-        })),
+        connect: userAccountIds.map((id) => ({ id })),
       },
     },
   });
 }
 
-async function updateRole(id: string, name: string, description: string | null, userAccounts: { id?: string; name: string; email: string; password: string; api_key: string | null; avatar: string | null }[]) {
+async function updateRole(id: string, name: string, description: string | null, userAccountIds: string[]) {
   await prisma.role.update({
     where: { id },
     data: {
       name,
       description,
       user_accounts: {
-        deleteMany: {},
-        create: userAccounts.map(f => ({
-          name: f.name,
-          email: f.email,
-          password: f.password,
-          api_key: f.api_key,
-          avatar: f.avatar,
-        })),
+        set: userAccountIds.map((id) => ({ id })),
       },
     },
   });

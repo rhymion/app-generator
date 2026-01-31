@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
@@ -8,11 +8,7 @@ import { upsertRole, removeRole } from '@/lib/role/actions';
 import type { FormUpsertProps } from '@/lib/role/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
-import { GridRowsProp } from '@mui/x-data-grid';
-import FieldsDataGrid from '../FieldsDataGrid';
-import { user_account_columns } from '../role/column_def';
-
-export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, allUserAccounts = [] }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -23,10 +19,25 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
   const descriptionRef = useRef<HTMLInputElement>(null);
   const initialUserAccount: EditableListWrapperItem[] = src.user_accounts.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
-    value: f.name,
+    value: f.id,
     label: f.name,
     originalId: f.id,
   }));
+  const [selectedUserAccounts, setSelectedUserAccounts] = useState<EditableListWrapperItem[]>(initialUserAccount);
+  const autocompleteOptions = useMemo(() => {
+    const assignedUserAccountIds = new Set(
+      selectedUserAccounts
+        .map((userAccount) => userAccount.originalId ?? userAccount.value)
+        .filter((userAccountId): userAccountId is string => typeof userAccountId === 'string')
+    );
+    return allUserAccounts
+      .filter((userAccount) => !assignedUserAccountIds.has(userAccount.id))
+      .map((userAccount) => ({
+        id: userAccount.id,
+        label: userAccount.name,
+        value: userAccount.name,
+      }));
+  }, [allUserAccounts, selectedUserAccounts]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -40,12 +51,14 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     const userAccount = user_accountRef.current?.getItems?.() || [];
 
     userAccount.forEach((item) => {
-      const itemId = item.originalId || (typeof item.id === 'string' && item.id.startsWith('temp-') ? undefined : item.id);
+      const itemId =
+        item.originalId ??
+        (typeof item.value === 'string' || typeof item.value === 'number' ? item.value : undefined);
       formData.append(
         'userAccount[]',
         JSON.stringify({
           id: itemId,
-          name: item.value,
+          name: item.label ?? item.value,
         })
       );
     });
@@ -96,12 +109,14 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
       <EditableListWrapper
         ref={user_accountRef}
         initialItems={initialUserAccount}
-        itemType="text"
+        itemType="autocomplete"
         addButtonLabel="Add User Account"
         showTitle={true}
         title="User Account"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
+        autocompleteOptions={autocompleteOptions}
+        onItemsChange={setSelectedUserAccounts}
       />
     </>
   );
