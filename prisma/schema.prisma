@@ -149,3 +149,20 @@ model parent_only {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 }
+
+model user_account {
+  id       String  @id @default(cuid())
+  name     String
+  email    String  @unique
+  password String
+  api_key  String?
+  avatar   String?
+  roles    role[]
+}
+
+model role {
+  id       String  @id @default(cuid())
+  name     String
+  description String?
+  user_accounts user_account[]
+}
