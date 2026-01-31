@@ -326,6 +326,10 @@ definitions:
       edit: true
       delete: true
       invalidate: false
+    x-relationships:
+      roles:
+        type: many-to-many
+        target: role
     allOf:
       - $ref: "#/definitions/user_account"
       - type: object
@@ -346,6 +350,10 @@ definitions:
       edit: true
       delete: true
       invalidate: false
+    x-relationships:
+      user_accounts:
+        type: many-to-many
+        target: user_account
     allOf:
       - $ref: "#/definitions/role"
       - type: object

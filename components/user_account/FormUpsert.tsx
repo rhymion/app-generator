@@ -7,7 +7,11 @@ import TextField from '@mui/material/TextField';
 import { upsertUserAccount, removeUserAccount } from '@/lib/user_account/actions';
 import type { FormUpsertProps } from '@/lib/user_account/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import type { Role } from '@/lib/role/types';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
+import { GridRowsProp } from '@mui/x-data-grid';
+import FieldsDataGrid from '../FieldsDataGrid';
+import { role_columns } from '../user_account/column_def';
 import ImageUpload from '../ImageUpload';
 
 export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertProps) {
@@ -29,7 +33,7 @@ export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertPro
     originalId: f.id,
   }));
   const [selectedRoles, setSelectedRoles] = useState<EditableListWrapperItem[]>(initialRole);
-  const autocompleteOptions = useMemo(() => {
+  const autocompleteOptionsRole = useMemo(() => {
     const assignedRoleIds = new Set(
       selectedRoles
         .map((role) => role.originalId ?? role.value)
@@ -43,6 +47,7 @@ export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertPro
         value: role.name,
       }));
   }, [allRoles, selectedRoles]);
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
@@ -146,7 +151,7 @@ export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertPro
         title="Role"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
-        autocompleteOptions={autocompleteOptions}
+        autocompleteOptions={autocompleteOptionsRole}
         onItemsChange={setSelectedRoles}
       />
     </>

@@ -1,9 +1,15 @@
 import type { Schema, SchemaProperty, GenerateConfig } from './types';
 
+interface RelationshipInfo {
+  type: 'many-to-many' | 'one-to-many';
+  target: string;
+}
+
 interface ChildInfo {
   name: string;
   propertyName: string;
   outputType?: string;
+  relationship?: RelationshipInfo;
 }
 
 function getTsType(prop: SchemaProperty): string {
@@ -145,7 +151,10 @@ ${formViewParentProps}`;
 }>;
 
 export type FormUpsertProps = Readonly<FormViewProps & {
-  isEdit: boolean;
+  isEdit: boolean;${children.filter(c => c.relationship?.type === 'many-to-many').map(c => {
+    const targetPascal = toPascalCase(c.relationship!.target);
+    return `\n  all${targetPascal}s?: ${targetPascal}[];`;
+  }).join('')}
 }>;
 `;
 
@@ -332,6 +341,7 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     const childCamel = toCamelCase(child);
     const childPascal = toPascalCase(child);
     const childDef = schema.definitions[child];
+    const isManyToMany = childInfo.relationship?.type === 'many-to-many';
     
     if (!childDef?.properties) {
       throw new Error(`Child definition ${child} has no properties`);
@@ -357,27 +367,48 @@ export async function remove${parentPascal}(data: FormData | string[]) {
       fieldType,
       fieldTypeWithId,
       fieldMapCreate,
+      isManyToMany,
+      propertyName: childInfo.propertyName,
     };
   });
   
   // Generate FormData extraction for all children
-  const childFormDataExtractions = allChildrenData.map(({ childCamel, fieldTypeWithId }) => 
-    `  const ${childCamel}sRaw = data.getAll('${childCamel}[]') as string[];\n  const ${childCamel}s = ${childCamel}sRaw.map(f => JSON.parse(f) as ${fieldTypeWithId});`
-  ).join('\n');
+  const childFormDataExtractions = allChildrenData.map(({ childCamel, fieldTypeWithId, isManyToMany }) => {
+    if (isManyToMany) {
+      // For many-to-many, extract IDs
+      return `  const ${childCamel}sRaw = data.getAll('${childCamel}[]') as string[];\n  const ${childCamel}s = ${childCamel}sRaw.map(f => JSON.parse(f) as ${fieldTypeWithId});\n  const ${childCamel}Ids = ${childCamel}s\n    .map((${childCamel}) => ${childCamel}.id)\n    .filter((${childCamel}Id): ${childCamel}Id is string => Boolean(${childCamel}Id));`;
+    } else {
+      return `  const ${childCamel}sRaw = data.getAll('${childCamel}[]') as string[];\n  const ${childCamel}s = ${childCamel}sRaw.map(f => JSON.parse(f) as ${fieldTypeWithId});`;
+    }
+  }).join('\n');
   
-  const childParamsForAdd = allChildrenData.map(({ childCamel, fieldType }) => `${childCamel}s: ${fieldType}[]`).join(', ');
-  const childParamsForUpdate = allChildrenData.map(({ childCamel, fieldTypeWithId }) => `${childCamel}s: ${fieldTypeWithId}[]`).join(', ');
-  const childArgsForCall = allChildrenData.map(({ childCamel }) => `${childCamel}s`).join(', ');
+  const childParamsForAdd = allChildrenData.map(({ childCamel, fieldType, isManyToMany }) => 
+    isManyToMany ? `${childCamel}Ids: string[]` : `${childCamel}s: ${fieldType}[]`
+  ).join(', ');
+  const childParamsForUpdate = allChildrenData.map(({ childCamel, fieldTypeWithId, isManyToMany }) => 
+    isManyToMany ? `${childCamel}Ids: string[]` : `${childCamel}s: ${fieldTypeWithId}[]`
+  ).join(', ');
+  const childArgsForCall = allChildrenData.map(({ childCamel, isManyToMany }) => 
+    isManyToMany ? `${childCamel}Ids` : `${childCamel}s`
+  ).join(', ');
   
   // Generate nested create for all children
-  const childNestedCreate = allChildrenData.map(({ child, childCamel, fieldMapCreate }) => 
-    `      ${child}s: {\n        create: ${childCamel}s.map(f => ({\n${fieldMapCreate}\n        })),\n      },`
-  ).join('\n');
+  const childNestedCreate = allChildrenData.map(({ propertyName, childCamel, fieldMapCreate, isManyToMany }) => {
+    if (isManyToMany) {
+      return `      ${propertyName}: {\n        connect: ${childCamel}Ids.map((id) => ({ id })),\n      },`;
+    } else {
+      return `      ${propertyName}: {\n        create: ${childCamel}s.map(f => ({\n${fieldMapCreate}\n        })),\n      },`;
+    }
+  }).join('\n');
   
-  // Generate nested update (deleteMany + create) for all children
-  const childNestedUpdate = allChildrenData.map(({ child, childCamel, fieldMapCreate }) => 
-    `      ${child}s: {\n        deleteMany: {},\n        create: ${childCamel}s.map(f => ({\n${fieldMapCreate}\n        })),\n      },`
-  ).join('\n');
+  // Generate nested update (deleteMany + create for one-to-many, set for many-to-many)
+  const childNestedUpdate = allChildrenData.map(({ propertyName, childCamel, fieldMapCreate, isManyToMany }) => {
+    if (isManyToMany) {
+      return `      ${propertyName}: {\n        set: ${childCamel}Ids.map((id) => ({ id })),\n      },`;
+    } else {
+      return `      ${propertyName}: {\n        deleteMany: {},\n        create: ${childCamel}s.map(f => ({\n${fieldMapCreate}\n        })),\n      },`;
+    }
+  }).join('\n');
   
   return `'use server';
 
@@ -720,7 +751,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       ? `import FieldsDataGrid from '../FieldsDataGrid';\nimport OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';`
       : `import FieldsDataGrid from '../FieldsDataGrid';`;
 
-    const hasListChildren = children.some(c => c.outputType === 'list');
+    const hasListChildren = children.some(c => c.outputType === 'list' || c.relationship?.type === 'many-to-many');
 
     childImports = `import { GridRowsProp } from '@mui/x-data-grid';
 ${dataGridImports}
@@ -730,8 +761,20 @@ import { ${columnImports} } from '../${parent}/column_def';`;
       childImports = `import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';\n` + childImports;
     }
     
+    // Add imports for many-to-many target types
+    const manyToManyImports = children
+      .filter(c => c.relationship?.type === 'many-to-many')
+      .map(c => c.relationship!.target)
+      .filter((target, index, self) => self.indexOf(target) === index) // unique
+      .map(target => `import type { ${toPascalCase(target)} } from '@/lib/${target}/types';`)
+      .join('\n');
+    
+    if (manyToManyImports) {
+      childImports = manyToManyImports + '\n' + childImports;
+    }
+    
     childVariables = children.map(childInfo => {
-      const refType = childInfo.outputType === 'list'
+      const refType = (childInfo.outputType === 'list' || childInfo.relationship?.type === 'many-to-many')
         ? '{ getItems: () => EditableListWrapperItem[] }'
         : '{ getFields: () => GridRowsProp }';
       return `  const ${childInfo.name}Ref = useRef<${refType}>(null);`;
@@ -749,6 +792,33 @@ import { ${columnImports} } from '../${parent}/column_def';`;
       const childProps = Object.keys(childDef.properties).filter(k => 
         k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at'
       );
+      
+      // For many-to-many relationships
+      if (childInfo.relationship?.type === 'many-to-many') {
+        const targetPascal = toPascalCase(childInfo.relationship.target);
+        const childCamel = toCamelCase(child);
+        return `  const initial${childPascal}: EditableListWrapperItem[] = src.${childInfo.propertyName}.map(f => ({
+    id: f.id || \`temp-\${Date.now()}-\${Math.random()}\`,
+    value: f.id,
+    label: f.name,
+    originalId: f.id,
+  }));
+  const [selected${childPascal}s, setSelected${childPascal}s] = useState<EditableListWrapperItem[]>(initial${childPascal});
+  const autocompleteOptions${childPascal} = useMemo(() => {
+    const assigned${childPascal}Ids = new Set(
+      selected${childPascal}s
+        .map((${childCamel}) => ${childCamel}.originalId ?? ${childCamel}.value)
+        .filter((${childCamel}Id): ${childCamel}Id is string => typeof ${childCamel}Id === 'string')
+    );
+    return all${targetPascal}s
+      .filter((${childCamel}) => !assigned${childPascal}Ids.has(${childCamel}.id))
+      .map((${childCamel}) => ({
+        id: ${childCamel}.id,
+        label: ${childCamel}.name,
+        value: ${childCamel}.name,
+      }));
+  }, [all${targetPascal}s, selected${childPascal}s]);`;
+      }
       
       // For list output type, generate different initialization
       if (childInfo.outputType === 'list') {
@@ -810,6 +880,24 @@ ${createNewChildProps}
         throw new Error(`Child definition ${child} has no properties`);
       }
       
+      // For many-to-many relationships
+      if (childInfo.relationship?.type === 'many-to-many') {
+        return `    const ${childCamel} = ${child}Ref.current?.getItems?.() || [];
+
+    ${childCamel}.forEach((item) => {
+      const itemId =
+        item.originalId ??
+        (typeof item.value === 'string' || typeof item.value === 'number' ? item.value : undefined);
+      formData.append(
+        '${childCamel}[]',
+        JSON.stringify({
+          id: itemId,
+          name: item.label ?? item.value,
+        })
+      );
+    });`;
+      }
+      
       // For list output type
       if (childInfo.outputType === 'list') {
         return `    const ${childCamel} = ${child}Ref.current?.getItems?.() || [];
@@ -853,6 +941,22 @@ ${childSerialize}
       const childTitle = toTitleCase(child);
       const childDef = schema.definitions[child];
       
+      // For many-to-many relationships, use EditableListWrapper with autocomplete
+      if (childInfo.relationship?.type === 'many-to-many') {
+        return `      <EditableListWrapper
+        ref={${child}Ref}
+        initialItems={initial${childPascal}}
+        itemType="autocomplete"
+        addButtonLabel="Add ${childTitle}"
+        showTitle={true}
+        title="${childTitle}"
+        textFieldLabel="Name"
+        textFieldPlaceholder="Enter name"
+        autocompleteOptions={autocompleteOptions${childPascal}}
+        onItemsChange={setSelected${childPascal}s}
+      />`;
+      }
+      
       // For list output type, use EditableListWrapper
       if (childInfo.outputType === 'list') {
         return `      <EditableListWrapper
@@ -885,9 +989,21 @@ ${childSerialize}
     }).join('\n');
   }
   
+  const hasManyToMany = children.some(c => c.relationship?.type === 'many-to-many');
+  
+  // Generate FormUpsert props destructuring
+  const manyToManyProps = children
+    .filter(c => c.relationship?.type === 'many-to-many')
+    .map(c => `all${toPascalCase(c.relationship!.target)}s = []`)
+    .join(', ');
+  
+  const formUpsertParams = manyToManyProps 
+    ? `{ src, isEdit, ${manyToManyProps} }: FormUpsertProps`
+    : `{ src, isEdit }: FormUpsertProps`;
+  
   return `'use client';
 
-import { useRef, useState } from 'react';
+import { ${hasManyToMany ? 'useMemo, ' : ''}useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';${numberProps.length > 0 ? '\nimport NumberField from \'../NumberField\';' : ''}
@@ -896,7 +1012,7 @@ import type { FormUpsertProps } from '@/lib/${parent}/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 ${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${imageProps.length > 0 ? '\nimport ImageUpload from \'../ImageUpload\';' : ''}
 
-export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
+export default function FormUpsert(${formUpsertParams}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -1181,33 +1297,90 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
   // Build children properties
   const childrenProps = children.map(c => `    ${c.propertyName}: [],`).join('\n');
   
-  return `import FormUpsert from '@/components/${parent}/FormUpsert';
+  // Generate imports and fetching for many-to-many relationships
+  const manyToManyChildren = children.filter(c => c.relationship?.type === 'many-to-many');
+  const manyToManyImports = manyToManyChildren.length > 0
+    ? manyToManyChildren
+        .map(c => c.relationship!.target)
+        .filter((target, index, self) => self.indexOf(target) === index) // unique
+        .map(target => `import { getAll${toPascalCase(target)}s } from '@/lib/${target}/getters';`)
+        .join('\n')
+    : '';
+  
+  const manyToManyFetches = manyToManyChildren.length > 0
+    ? manyToManyChildren
+        .map(c => c.relationship!.target)
+        .filter((target, index, self) => self.indexOf(target) === index) // unique
+        .map(target => `  const all${toPascalCase(target)}s = await getAll${toPascalCase(target)}s();`)
+        .join('\n')
+    : '';
+  
+  const manyToManyProps = manyToManyChildren.length > 0
+    ? ' ' + manyToManyChildren
+        .map(c => c.relationship!.target)
+        .filter((target, index, self) => self.indexOf(target) === index) // unique
+        .map(target => `all${toPascalCase(target)}s={all${toPascalCase(target)}s}`)
+        .join(' ')
+    : '';
+  
+  return `import FormUpsert from '@/components/${parent}/FormUpsert';${manyToManyImports ? '\n' + manyToManyImports : ''}
 
-export default function Add${parentPascal}Page() {
+export default async function Add${parentPascal}Page() {${manyToManyFetches ? '\n' + manyToManyFetches : ''}
   const src = {
     id: '',
 ${parentDefaultProps}${childrenProps ? `\n${childrenProps}` : ''}
   };
-  return <FormUpsert src={src} isEdit={false} />;
+  return <FormUpsert src={src} isEdit={false}${manyToManyProps} />;
 }
 `;
 }
 
-export function generatePageEdit(parent: string): string {
+export function generatePageEdit(parent: string, children: ChildInfo[]): string {
   const parentPascal = toPascalCase(parent);
   
+  // Generate imports and fetching for many-to-many relationships
+  const manyToManyChildren = children.filter(c => c.relationship?.type === 'many-to-many');
+  const manyToManyImports = manyToManyChildren.length > 0
+    ? '\n' + manyToManyChildren
+        .map(c => c.relationship!.target)
+        .filter((target, index, self) => self.indexOf(target) === index) // unique
+        .map(target => `import { getAll${toPascalCase(target)}s } from '@/lib/${target}/getters';`)
+        .join('\n')
+    : '';
+  
+  const manyToManyTargets = manyToManyChildren.length > 0
+    ? manyToManyChildren
+        .map(c => c.relationship!.target)
+        .filter((target, index, self) => self.indexOf(target) === index) // unique
+    : [];
+  
+  const hasManyToMany = manyToManyTargets.length > 0;
+  
+  const promiseAllFetches = hasManyToMany
+    ? `  const [${parent}, ${manyToManyTargets.map(t => `all${toPascalCase(t)}s`).join(', ')}] = await Promise.all([
+    get${parentPascal}Detail(id),
+    ${manyToManyTargets.map(t => `getAll${toPascalCase(t)}s()`).join(',\n    ')},
+  ]);`
+    : `  const ${parent} = await get${parentPascal}Detail(id);`;
+  
+  const manyToManyProps = hasManyToMany
+    ? ' ' + manyToManyTargets
+        .map(target => `all${toPascalCase(target)}s={all${toPascalCase(target)}s}`)
+        .join(' ')
+    : '';
+  
   return `import FormUpsert from '@/components/${parent}/FormUpsert';
-import { get${parentPascal}Detail } from '@/lib/${parent}/getters';
+import { get${parentPascal}Detail } from '@/lib/${parent}/getters';${manyToManyImports}
 import { ${parentPascal}DetailPageProps } from '@/lib/${parent}/types';
 import { notFound } from 'next/navigation';
 
 export default async function Edit${parentPascal}Page({ params }: ${parentPascal}DetailPageProps) {
   const { id } = await params;
-  const ${parent} = await get${parentPascal}Detail(id);
+${promiseAllFetches}
   if (!${parent}) {
     notFound();
   }
-  return <FormUpsert src={${parent}} isEdit={true} />;
+  return <FormUpsert src={${parent}} isEdit={true}${manyToManyProps} />;
 }
 `;
 }

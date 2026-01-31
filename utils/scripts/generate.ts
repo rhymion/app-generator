@@ -26,6 +26,10 @@ interface EntityRelation {
     name: string;
     propertyName: string;
     outputType?: string;
+    relationship?: {
+      type: 'many-to-many' | 'one-to-many';
+      target: string;
+    };
   }>;
   generateConfig: {
     list: boolean;
@@ -53,7 +57,8 @@ function extractEntities(schema: Schema): EntityRelation[] {
   const childToParents = new Map<string, string[]>();
   
   for (const parent of parents) {
-    const children: Array<{ name: string; propertyName: string; outputType?: string; }> = [];
+    const children: Array<{ name: string; propertyName: string; outputType?: string; 
+      relationship?: { type: 'many-to-many' | 'one-to-many'; target: string } }> = [];
     
     // Find detail entity for this parent
     const detailKey = `${parent}_detail`;
@@ -71,6 +76,9 @@ function extractEntities(schema: Schema): EntityRelation[] {
         }
       }
       
+      // Get x-relationships if defined
+      const xRelationships = (detailDef as any)?.['x-relationships'] || {};
+      
       if (properties) {
         // Find all child entities from array properties with $ref
         for (const [propName, prop] of Object.entries(properties)) {
@@ -82,7 +90,18 @@ function extractEntities(schema: Schema): EntityRelation[] {
             if (childName) {
               // Check for x-outputType custom property
               const outputType = propAny['x-outputType'] || propAny.outputType;
-              children.push({ name: childName, propertyName: propName, outputType });
+              
+              // Check for x-relationships to determine relationship type
+              let relationship = undefined;
+              if (xRelationships[propName]) {
+                const relInfo = xRelationships[propName];
+                relationship = {
+                  type: relInfo.type as 'many-to-many' | 'one-to-many',
+                  target: relInfo.target || childName,
+                };
+              }
+              
+              children.push({ name: childName, propertyName: propName, outputType, relationship });
               allChildren.add(childName);
               
               // Track parent-child relationships
@@ -217,7 +236,7 @@ function generate(inputPath: string, outputDir: string) {
     
     if (generateConfig.edit) {
       fs.mkdirSync(path.join(appDir, 'edit', '[id]'), { recursive: true });
-      fs.writeFileSync(path.join(appDir, 'edit', '[id]', 'page.tsx'), generatePageEdit(parent));
+      fs.writeFileSync(path.join(appDir, 'edit', '[id]', 'page.tsx'), generatePageEdit(parent, children));
     }
     
     if (generateConfig.view) {

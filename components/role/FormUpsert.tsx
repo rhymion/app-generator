@@ -7,7 +7,12 @@ import TextField from '@mui/material/TextField';
 import { upsertRole, removeRole } from '@/lib/role/actions';
 import type { FormUpsertProps } from '@/lib/role/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import type { UserAccount } from '@/lib/user_account/types';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
+import { GridRowsProp } from '@mui/x-data-grid';
+import FieldsDataGrid from '../FieldsDataGrid';
+import { user_account_columns } from '../role/column_def';
+
 export default function FormUpsert({ src, isEdit, allUserAccounts = [] }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -24,7 +29,7 @@ export default function FormUpsert({ src, isEdit, allUserAccounts = [] }: FormUp
     originalId: f.id,
   }));
   const [selectedUserAccounts, setSelectedUserAccounts] = useState<EditableListWrapperItem[]>(initialUserAccount);
-  const autocompleteOptions = useMemo(() => {
+  const autocompleteOptionsUserAccount = useMemo(() => {
     const assignedUserAccountIds = new Set(
       selectedUserAccounts
         .map((userAccount) => userAccount.originalId ?? userAccount.value)
@@ -115,7 +120,7 @@ export default function FormUpsert({ src, isEdit, allUserAccounts = [] }: FormUp
         title="User Account"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
-        autocompleteOptions={autocompleteOptions}
+        autocompleteOptions={autocompleteOptionsUserAccount}
         onItemsChange={setSelectedUserAccounts}
       />
     </>
