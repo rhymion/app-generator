@@ -1,6 +1,6 @@
 import FormUpsert from '@/components/parent1/FormUpsert';
 
-export default function AddParent1Page() {
+export default async function AddParent1Page() {
   const src = {
     id: '',
     name: '',

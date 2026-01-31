@@ -375,8 +375,8 @@ export async function remove${parentPascal}(data: FormData | string[]) {
   // Generate FormData extraction for all children
   const childFormDataExtractions = allChildrenData.map(({ childCamel, fieldTypeWithId, isManyToMany }) => {
     if (isManyToMany) {
-      // For many-to-many, extract IDs
-      return `  const ${childCamel}sRaw = data.getAll('${childCamel}[]') as string[];\n  const ${childCamel}s = ${childCamel}sRaw.map(f => JSON.parse(f) as ${fieldTypeWithId});\n  const ${childCamel}Ids = ${childCamel}s\n    .map((${childCamel}) => ${childCamel}.id)\n    .filter((${childCamel}Id): ${childCamel}Id is string => Boolean(${childCamel}Id));`;
+      // For many-to-many, extract IDs (only type id and name fields)
+      return `  const ${childCamel}sRaw = data.getAll('${childCamel}[]') as string[];\n  const ${childCamel}s = ${childCamel}sRaw.map(f => JSON.parse(f) as { id?: string; name?: string });\n  const ${childCamel}Ids = ${childCamel}s\n    .map((${childCamel}) => ${childCamel}.id)\n    .filter((${childCamel}Id): ${childCamel}Id is string => Boolean(${childCamel}Id));`;
     } else {
       return `  const ${childCamel}sRaw = data.getAll('${childCamel}[]') as string[];\n  const ${childCamel}s = ${childCamel}sRaw.map(f => JSON.parse(f) as ${fieldTypeWithId});`;
     }

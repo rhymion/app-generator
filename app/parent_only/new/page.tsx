@@ -1,6 +1,6 @@
 import FormUpsert from '@/components/parent_only/FormUpsert';
 
-export default function AddParentOnlyPage() {
+export default async function AddParentOnlyPage() {
   const src = {
     id: '',
     name: '',

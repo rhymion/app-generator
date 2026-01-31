@@ -1,6 +1,6 @@
 import FormUpsert from '@/components/xxxxx_xxxxx/FormUpsert';
 
-export default function AddXxxxxXxxxxPage() {
+export default async function AddXxxxxXxxxxPage() {
   const src = {
     id: '',
     name: '',
