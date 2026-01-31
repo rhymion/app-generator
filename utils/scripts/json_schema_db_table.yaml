@@ -338,3 +338,22 @@ definitions:
             items:
               $ref: "#/definitions/role"
 
+  role_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+    allOf:
+      - $ref: "#/definitions/role"
+      - type: object
+        required:
+          - user_accounts
+        properties:
+          user_accounts:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/user_account"
