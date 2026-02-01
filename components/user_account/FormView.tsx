@@ -47,7 +47,7 @@ export default function FormView({ src }: FormViewProps) {
         margin="normal"
         aria-readonly
       />
-      <ImageDisplay url={src.avatar} alt="Avatar" maxWidth="400px" maxHeight="400px" />
+      <ImageDisplay url={src.avatar} alt="Avatar" />
       <div>
         <ListWrapper
           items={src.roles.map(f => ({

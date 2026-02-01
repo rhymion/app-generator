@@ -1132,7 +1132,7 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   const imageFieldsJsx = imageFields.map(p => {
     const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     
-    return `      <ImageDisplay url={src.${p}} alt="${label}" maxWidth="400px" maxHeight="400px" />`;
+    return `      <ImageDisplay url={src.${p}} alt="${label}" />`;
   }).join('\n');
   
   const parentTextFields = [textFields, dateTimeFieldsJsx, imageFieldsJsx].filter(f => f).join('\n');
