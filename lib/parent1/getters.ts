@@ -8,6 +8,7 @@ export async function getAllParent1s(): Promise<Parent1[]> {
   return parent1s.map((parent1) => ({
     id: parent1.id,
     name: parent1.name,
+    organization_id: parent1.organization_id,
     description: parent1.description,
     price: parent1.price,
     due_date: parent1.due_date,

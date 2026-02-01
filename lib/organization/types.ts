@@ -1,10 +1,10 @@
-export type Role = {
+export type Organization = {
   id: string;
   name: string;
   description: string | null;
 };
 
-export type RoleDetail = Role & {
+export type OrganizationDetail = Organization & {
   user_accounts: UserAccount[];
 };
 
@@ -16,7 +16,7 @@ export type UserAccount = {
   api_key: string | null;
   avatar: string | null;
 };
-export type RoleDetailPageProps = Readonly<{
+export type OrganizationDetailPageProps = Readonly<{
   params: Promise<{
     id: string;
   }>

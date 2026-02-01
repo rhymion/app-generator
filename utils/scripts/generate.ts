@@ -236,7 +236,7 @@ function generate(inputPath: string, outputDir: string) {
     
     if (generateConfig.edit) {
       fs.mkdirSync(path.join(appDir, 'edit', '[id]'), { recursive: true });
-      fs.writeFileSync(path.join(appDir, 'edit', '[id]', 'page.tsx'), generatePageEdit(parent, children));
+      fs.writeFileSync(path.join(appDir, 'edit', '[id]', 'page.tsx'), generatePageEdit(parent, children, schema));
     }
     
     if (generateConfig.view) {

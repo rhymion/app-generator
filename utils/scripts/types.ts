@@ -8,6 +8,12 @@ export interface SchemaProperty {
   enum?: string[];
   items?: any;
   $ref?: string;
+  'x-relationship'?: {
+    type: 'many-to-one';
+    target: string;
+    labelField?: string;
+    scope?: string;
+  };
 }
 
 export interface GenerateConfig {

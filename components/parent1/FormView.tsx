@@ -32,6 +32,13 @@ export default function FormView({ src }: FormViewProps) {
         aria-readonly
       />
       <TextField
+        label="Organization Id"
+        value={src.organization_id || ''}
+        fullWidth
+        margin="normal"
+        aria-readonly
+      />
+      <TextField
         label="Description"
         value={src.description || ''}
         fullWidth

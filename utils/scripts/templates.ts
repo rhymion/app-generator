@@ -1,4 +1,4 @@
-import type { Schema, SchemaProperty, GenerateConfig } from './types';
+import type { Schema, SchemaProperty, SchemaDefinition, GenerateConfig } from './types';
 
 interface RelationshipInfo {
   type: 'many-to-many' | 'one-to-many';
@@ -61,10 +61,39 @@ function toTitleCase(str: string): string {
   return str.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
+type ParentRelationshipMeta = {
+  propName: string;
+  target: string;
+  labelField?: string;
+  required?: boolean;
+};
+
+function getParentRelationships(parentDef?: SchemaDefinition): ParentRelationshipMeta[] {
+  if (!parentDef?.properties) return [];
+
+  return Object.entries(parentDef.properties).flatMap(([propName, prop]) => {
+    const rel = (prop as any)['x-relationship'] as SchemaProperty['x-relationship'] | undefined;
+    if (!rel || rel.type !== 'many-to-one' || !rel.target) {
+      return [];
+    }
+
+    return [{
+      propName,
+      target: rel.target,
+      labelField: rel.labelField,
+      required: parentDef.required?.includes(propName),
+    }];
+  });
+}
+
 export function generateTypes(parent: string, children: ChildInfo[], schema: Schema): string {
   const parentPascal = toPascalCase(parent);
   
   const parentDef = schema.definitions[parent];
+  const parentRelationships = getParentRelationships(parentDef);
+  const relationshipTargets = Array.from(
+    new Map(parentRelationships.map(r => [r.target, r])).values()
+  );
   
   const parentProps: string[] = [];
   
@@ -90,6 +119,17 @@ ${parentProps.join('\n')}
 };
 
 `;
+
+  // Add option types for many-to-one relationships
+  if (relationshipTargets.length > 0) {
+    const optionTypes = relationshipTargets.map(r => {
+      const targetPascal = toPascalCase(r.target);
+      const labelField = r.labelField ?? 'name';
+      return `export type ${targetPascal}Option = {\n  id: string;\n  ${labelField}: string;\n};`;
+    }).join('\n\n');
+
+    result += `${optionTypes}\n\n`;
+  }
   
   // Generate child types
   const childTypeDeclarations: string[] = [];
@@ -154,6 +194,10 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;${children.filter(c => c.relationship?.type === 'many-to-many').map(c => {
     const targetPascal = toPascalCase(c.relationship!.target);
     return `\n  all${targetPascal}s?: ${targetPascal}[];`;
+  }).join('')}
+${relationshipTargets.map(r => {
+    const targetPascal = toPascalCase(r.target);
+    return `\n  all${targetPascal}s?: ${targetPascal}Option[];`;
   }).join('')}
 }>;
 `;
@@ -592,6 +636,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const parentTitle = toTitleCase(parent);
   const parentDef = schema.definitions[parent];
   const canDelete = generateConfig?.delete !== false;
+  const parentRelationships = getParentRelationships(parentDef);
   
   if (!parentDef.properties) {
     throw new Error(`Parent definition ${parent} has no properties`);
@@ -601,6 +646,8 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const parentProps = Object.keys(parentDef.properties).filter(k => 
     k !== 'id' && k !== 'created_at' && k !== 'updated_at'
   );
+  const relationshipProps = parentRelationships.map(r => r.propName);
+  const nonRelationshipProps = parentProps.filter(p => !relationshipProps.includes(p));
   
   // Categorize parent properties by type
   const dateTimeProps: string[] = [];
@@ -608,7 +655,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const imageProps: string[] = [];
   const textProps: string[] = [];
   
-  parentProps.forEach(p => {
+  nonRelationshipProps.forEach(p => {
     const prop = parentDef.properties![p];
     const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
     const format = (prop as any).format;
@@ -638,7 +685,13 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     `  const [${toCamelCase(p)}, set${toPascalCase(p)}] = useState<string>(src.${p} || '');`
   ).join('\n');
   
-  const allStates = [dateTimeStates, imageStates].filter(s => s).join('\n');
+  const relationshipStates = parentRelationships.map(r => {
+    const stateName = toCamelCase(r.propName);
+    const stateSetter = toPascalCase(r.propName);
+    return `  const [${stateName}, set${stateSetter}] = useState<string | null>(src.${r.propName} || null);`;
+  }).join('\n');
+
+  const allStates = [dateTimeStates, imageStates, relationshipStates].filter(s => s).join('\n');
   
   // Generate form fields
   const textFields = textProps.map(p => {
@@ -665,6 +718,30 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
         ${isRequired ? 'required' : ''}${slotPropsStr}
         multiline={${p === 'description'}}
         rows={${p === 'description' ? '4' : 'undefined'}}
+      />`;
+  }).join('\n');
+
+  const relationshipFields = parentRelationships.map(r => {
+    const labelBase = r.propName.replace(/_id$/, '');
+    const label = toTitleCase(labelBase);
+    const stateName = toCamelCase(r.propName);
+    const stateSetter = toPascalCase(r.propName);
+    const targetPascal = toPascalCase(r.target);
+    const labelField = r.labelField ?? 'name';
+    const optionsVar = `${stateName}Options`;
+
+    return `      <Autocomplete
+        options={${optionsVar}}
+        value={${optionsVar}.find((option) => option.id === ${stateName}) || null}
+        onChange={(_, newValue) => set${stateSetter}(newValue?.id ?? null)}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="${label}"
+            margin="normal"
+            ${r.required ? 'required' : ''}
+          />
+        )}
       />`;
   }).join('\n');
   
@@ -705,7 +782,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       />`;
   }).join('\n');
   
-  const parentTextFields = [textFields, numberFields, dateTimeFields, imageFields].filter(f => f).join('\n');
+  const parentTextFields = [textFields, relationshipFields, numberFields, dateTimeFields, imageFields].filter(f => f).join('\n');
   
   // Generate FormData sets
   const textFormDataSets = textProps.map(p => 
@@ -726,11 +803,31 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     return `    formData.set('${p}', ${camelCase});`;
   }).join('\n');
   
-  const parentFormDataSets = [textFormDataSets, numberFormDataSets, dateTimeFormDataSets, imageFormDataSets].filter(s => s).join('\n');
+  const relationshipFormDataSets = parentRelationships.map(r => {
+    const stateName = toCamelCase(r.propName);
+    return `    formData.set('${r.propName}', ${stateName} || '');`;
+  }).join('\n');
+
+  const parentFormDataSets = [textFormDataSets, relationshipFormDataSets, numberFormDataSets, dateTimeFormDataSets, imageFormDataSets].filter(s => s).join('\n');
   
   // Determine if we have children
   const hasChildren = children.length > 0;
+  const hasManyToOne = parentRelationships.length > 0;
   
+  const relationshipOptionSetups = parentRelationships.map(r => {
+    const targetPascal = toPascalCase(r.target);
+    const labelField = r.labelField ?? 'name';
+    const stateName = toCamelCase(r.propName);
+    const optionsVar = `${stateName}Options`;
+
+    return `  const ${optionsVar} = useMemo(() => {
+    return all${targetPascal}s.map((item) => ({
+      id: item.id,
+      label: item.${labelField},
+    }));
+  }, [all${targetPascal}s]);`;
+  }).join('\n');
+
   // Generate code for all children
   let childVariables = '';
   let childImports = '';
@@ -752,7 +849,6 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       : `import FieldsDataGrid from '../FieldsDataGrid';`;
 
     const hasListChildren = children.some(c => c.outputType === 'list' || c.relationship?.type === 'many-to-many');
-
     childImports = `import { GridRowsProp } from '@mui/x-data-grid';
 ${dataGridImports}
 import { ${columnImports} } from '../${parent}/column_def';`;
@@ -992,21 +1088,25 @@ ${childSerialize}
   const hasManyToMany = children.some(c => c.relationship?.type === 'many-to-many');
   
   // Generate FormUpsert props destructuring
-  const manyToManyProps = children
+  const manyToManyTargets = children
     .filter(c => c.relationship?.type === 'many-to-many')
-    .map(c => `all${toPascalCase(c.relationship!.target)}s = []`)
+    .map(c => c.relationship!.target);
+  const manyToOneTargets = parentRelationships.map(r => r.target);
+  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets]));
+  const extraProps = selectionTargets
+    .map(target => `all${toPascalCase(target)}s = []`)
     .join(', ');
   
-  const formUpsertParams = manyToManyProps 
-    ? `{ src, isEdit, ${manyToManyProps} }: FormUpsertProps`
+  const formUpsertParams = extraProps 
+    ? `{ src, isEdit, ${extraProps} }: FormUpsertProps`
     : `{ src, isEdit }: FormUpsertProps`;
   
   return `'use client';
 
-import { ${hasManyToMany ? 'useMemo, ' : ''}useRef, useState } from 'react';
+import { ${hasManyToMany || hasManyToOne ? 'useMemo, ' : ''}useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
-import TextField from '@mui/material/TextField';${numberProps.length > 0 ? '\nimport NumberField from \'../NumberField\';' : ''}
+import TextField from '@mui/material/TextField';${hasManyToOne ? "\nimport Autocomplete from '@mui/material/Autocomplete';" : ''}${numberProps.length > 0 ? '\nimport NumberField from \'../NumberField\';' : ''}
 import { upsert${parentPascal}${canDelete ? `, remove${parentPascal}` : ''} } from '@/lib/${parent}/actions';
 import type { FormUpsertProps } from '@/lib/${parent}/types';
 import FormWithChildGrid from '../FormWithChildGrid';
@@ -1019,7 +1119,7 @@ export default function FormUpsert(${formUpsertParams}) {
 ${allStates ? '\n' + allStates : ''}
 
 ${childVariables}
-${parentRefs}${childGridSetup}
+${parentRefs}${childGridSetup}${relationshipOptionSetups ? `\n${relationshipOptionSetups}` : ''}
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1280,6 +1380,7 @@ export default async function ${parentPascal}sPage() {
 export function generatePageNew(parent: string, children: ChildInfo[], schema: Schema): string {
   const parentPascal = toPascalCase(parent);
   const parentDef = schema.definitions[parent];
+  const parentRelationships = getParentRelationships(parentDef);
   
   if (!parentDef.properties) {
     throw new Error(`Parent definition ${parent} has no properties`);
@@ -1317,80 +1418,88 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
   // Build children properties
   const childrenProps = children.map(c => `    ${c.propertyName}: [],`).join('\n');
   
-  // Generate imports and fetching for many-to-many relationships
+  // Generate imports and fetching for relationship selections (many-to-many and many-to-one)
   const manyToManyChildren = children.filter(c => c.relationship?.type === 'many-to-many');
-  const manyToManyImports = manyToManyChildren.length > 0
-    ? manyToManyChildren
-        .map(c => c.relationship!.target)
-        .filter((target, index, self) => self.indexOf(target) === index) // unique
+  const manyToManyTargets = manyToManyChildren
+    .map(c => c.relationship!.target)
+    .filter((target, index, self) => self.indexOf(target) === index);
+
+  const manyToOneTargets = parentRelationships
+    .map(r => r.target)
+    .filter((target, index, self) => self.indexOf(target) === index);
+
+  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets]));
+
+  const selectionImports = selectionTargets.length > 0
+    ? selectionTargets
         .map(target => `import { getAll${toPascalCase(target)}s } from '@/lib/${target}/getters';`)
         .join('\n')
     : '';
   
-  const manyToManyFetches = manyToManyChildren.length > 0
-    ? manyToManyChildren
-        .map(c => c.relationship!.target)
-        .filter((target, index, self) => self.indexOf(target) === index) // unique
+  const selectionFetches = selectionTargets.length > 0
+    ? selectionTargets
         .map(target => `  const all${toPascalCase(target)}s = await getAll${toPascalCase(target)}s();`)
         .join('\n')
     : '';
   
-  const manyToManyProps = manyToManyChildren.length > 0
-    ? ' ' + manyToManyChildren
-        .map(c => c.relationship!.target)
-        .filter((target, index, self) => self.indexOf(target) === index) // unique
+  const selectionProps = selectionTargets.length > 0
+    ? ' ' + selectionTargets
         .map(target => `all${toPascalCase(target)}s={all${toPascalCase(target)}s}`)
         .join(' ')
     : '';
   
-  return `import FormUpsert from '@/components/${parent}/FormUpsert';${manyToManyImports ? '\n' + manyToManyImports : ''}
+  return `import FormUpsert from '@/components/${parent}/FormUpsert';${selectionImports ? '\n' + selectionImports : ''}
 
-export default async function Add${parentPascal}Page() {${manyToManyFetches ? '\n' + manyToManyFetches : ''}
+export default async function Add${parentPascal}Page() {${selectionFetches ? '\n' + selectionFetches : ''}
   const src = {
     id: '',
 ${parentDefaultProps}${childrenProps ? `\n${childrenProps}` : ''}
   };
-  return <FormUpsert src={src} isEdit={false}${manyToManyProps} />;
+  return <FormUpsert src={src} isEdit={false}${selectionProps} />;
 }
 `;
 }
 
-export function generatePageEdit(parent: string, children: ChildInfo[]): string {
+export function generatePageEdit(parent: string, children: ChildInfo[], schema: Schema): string {
   const parentPascal = toPascalCase(parent);
+  const parentDef = schema.definitions[parent];
+  const parentRelationships = getParentRelationships(parentDef);
   
   // Generate imports and fetching for many-to-many relationships
   const manyToManyChildren = children.filter(c => c.relationship?.type === 'many-to-many');
-  const manyToManyImports = manyToManyChildren.length > 0
-    ? '\n' + manyToManyChildren
-        .map(c => c.relationship!.target)
-        .filter((target, index, self) => self.indexOf(target) === index) // unique
+  const manyToManyTargets = manyToManyChildren
+    .map(c => c.relationship!.target)
+    .filter((target, index, self) => self.indexOf(target) === index);
+
+  const manyToOneTargets = parentRelationships
+    .map(r => r.target)
+    .filter((target, index, self) => self.indexOf(target) === index);
+
+  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets]));
+
+  const selectionImports = selectionTargets.length > 0
+    ? '\n' + selectionTargets
         .map(target => `import { getAll${toPascalCase(target)}s } from '@/lib/${target}/getters';`)
         .join('\n')
     : '';
   
-  const manyToManyTargets = manyToManyChildren.length > 0
-    ? manyToManyChildren
-        .map(c => c.relationship!.target)
-        .filter((target, index, self) => self.indexOf(target) === index) // unique
-    : [];
+  const hasSelections = selectionTargets.length > 0;
   
-  const hasManyToMany = manyToManyTargets.length > 0;
-  
-  const promiseAllFetches = hasManyToMany
-    ? `  const [${parent}, ${manyToManyTargets.map(t => `all${toPascalCase(t)}s`).join(', ')}] = await Promise.all([
+  const promiseAllFetches = hasSelections
+    ? `  const [${parent}, ${selectionTargets.map(t => `all${toPascalCase(t)}s`).join(', ')}] = await Promise.all([
     get${parentPascal}Detail(id),
-    ${manyToManyTargets.map(t => `getAll${toPascalCase(t)}s()`).join(',\n    ')},
+    ${selectionTargets.map(t => `getAll${toPascalCase(t)}s()`).join(',\n    ')},
   ]);`
     : `  const ${parent} = await get${parentPascal}Detail(id);`;
   
-  const manyToManyProps = hasManyToMany
-    ? ' ' + manyToManyTargets
+  const selectionProps = hasSelections
+    ? ' ' + selectionTargets
         .map(target => `all${toPascalCase(target)}s={all${toPascalCase(target)}s}`)
         .join(' ')
     : '';
   
   return `import FormUpsert from '@/components/${parent}/FormUpsert';
-import { get${parentPascal}Detail } from '@/lib/${parent}/getters';${manyToManyImports}
+import { get${parentPascal}Detail } from '@/lib/${parent}/getters';${selectionImports}
 import { ${parentPascal}DetailPageProps } from '@/lib/${parent}/types';
 import { notFound } from 'next/navigation';
 
@@ -1400,7 +1509,7 @@ ${promiseAllFetches}
   if (!${parent}) {
     notFound();
   }
-  return <FormUpsert src={${parent}} isEdit={true}${manyToManyProps} />;
+  return <FormUpsert src={${parent}} isEdit={true}${selectionProps} />;
 }
 `;
 }

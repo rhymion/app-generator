@@ -1,10 +1,16 @@
 export type Parent1 = {
   id: string;
   name: string;
+  organization_id: string;
   description: string | null;
   price: number;
   due_date: Date;
   image_url: string | null;
+};
+
+export type OrganizationOption = {
+  id: string;
+  name: string;
 };
 
 export type Parent1Detail = Parent1 & {
@@ -48,6 +54,7 @@ export type FormViewProps = Readonly<{
   src: {
     id: string;
     name: string;
+    organization_id: string;
     description: string | null;
     price: number;
     due_date: Date;
@@ -60,4 +67,6 @@ export type FormViewProps = Readonly<{
 
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
+
+  allOrganizations?: OrganizationOption[];
 }>;

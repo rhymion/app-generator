@@ -94,6 +94,8 @@ model yyyyy_yyyyy {
 model parent1 {
   id           String   @id @default(cuid())
   name         String   @unique
+  organization_id    String?     
+  organization       organization? @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   description  String? 
   price        Int
   due_date     DateTime
@@ -158,6 +160,7 @@ model user_account {
   api_key  String?
   avatar   String?
   roles    role[]
+  organizations organization[]
 }
 
 model role {
@@ -165,4 +168,12 @@ model role {
   name     String
   description String?
   user_accounts user_account[]
+}
+
+model organization {
+  id       String  @id @default(cuid())
+  name     String
+  description String?
+  user_accounts user_account[]
+  parent1s parent1[]
 }

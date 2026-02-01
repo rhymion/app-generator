@@ -1,9 +1,10 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
+import Autocomplete from '@mui/material/Autocomplete';
 import NumberField from '../NumberField';
 import { upsertParent1, removeParent1 } from '@/lib/parent1/actions';
 import type { FormUpsertProps } from '@/lib/parent1/types';
@@ -17,13 +18,14 @@ import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
 import ImageUpload from '../ImageUpload';
 
-export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, allOrganizations = [] }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   const [dueDate, setDueDate] = useState<Dayjs | null>(src.due_date ? dayjs(src.due_date) : null);
   const [imageUrl, setImageUrl] = useState<string>(src.image_url || '');
+  const [organizationId, setOrganizationId] = useState<string | null>(src.organization_id || null);
 
   const parent1_child1Ref = useRef<{ getFields: () => GridRowsProp }>(null);
   const parent1_child2Ref = useRef<{ getFields: () => GridRowsProp }>(null);
@@ -65,6 +67,12 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     label: f.name,
     originalId: f.id,
   }));
+  const organizationIdOptions = useMemo(() => {
+    return allOrganizations.map((item) => ({
+      id: item.id,
+      label: item.name,
+    }));
+  }, [allOrganizations]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -75,6 +83,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     formData.set('id', src.id);
     formData.set('name', nameRef.current?.value || '');
     formData.set('description', descriptionRef.current?.value || '');
+    formData.set('organization_id', organizationId || '');
     formData.set('price', priceRef.current?.value || '');
     formData.set('due_date', dueDate?.toISOString() || '');
     formData.set('image_url', imageUrl);
@@ -165,6 +174,19 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         
         multiline={true}
         rows={4}
+      />
+      <Autocomplete
+        options={organizationIdOptions}
+        value={organizationIdOptions.find((option) => option.id === organizationId) || null}
+        onChange={(_, newValue) => setOrganizationId(newValue?.id ?? null)}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Organization"
+            margin="normal"
+            required
+          />
+        )}
       />
       <NumberField 
         label="Price" 
