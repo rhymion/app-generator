@@ -26,6 +26,7 @@ export async function resetTestDatabase() {
   await prisma.reviews.deleteMany();
   await prisma.books.deleteMany();
   await prisma.users.deleteMany();
+  await prisma.user_account.deleteMany();
 }
 
 /**
@@ -36,7 +37,7 @@ export async function seedTestDatabase() {
   const hashedPassword = await getTestPasswordHash();
   
   // Create test user
-  const user = await prisma.users.create({
+  const user = await prisma.user_account.create({
     data: {
       email: TEST_CREDENTIALS.email,
       name: TEST_CREDENTIALS.name,

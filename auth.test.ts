@@ -5,7 +5,7 @@ import fs from "fs";
 
 // Mock the Prisma client
 const mockPrisma = {
-  users: {
+  user_account: {
     findUnique: vi.fn(),
     create: vi.fn(),
     deleteMany: vi.fn(),
@@ -44,13 +44,13 @@ async function simulateAuthorize(credentials: {
   }
 
   // Check if user exists in the mock database
-  const user = await mockPrisma.users.findUnique({
+  const user = await mockPrisma.user_account.findUnique({
     where: { email: credentials.email },
   });
 
   if (!user) {
     // Create new user
-    return await mockPrisma.users.create({
+    return await mockPrisma.user_account.create({
       data: {
         name: credentials.name ?? credentials.email,
         email: credentials.email,
@@ -145,8 +145,8 @@ describe("Registration Backend Integration Tests", () => {
     };
 
     // Mock the database calls
-    mockPrisma.users.findUnique.mockResolvedValueOnce(null);
-    mockPrisma.users.create.mockResolvedValueOnce(createdUser);
+    mockPrisma.user_account.findUnique.mockResolvedValueOnce(null);
+    mockPrisma.user_account.create.mockResolvedValueOnce(createdUser);
 
     // Call the authorize function
     const user = await simulateAuthorize(credentials);
@@ -165,10 +165,10 @@ describe("Registration Backend Integration Tests", () => {
     expect(isPasswordValid).toBe(true);
 
     // Verify mocks were called
-    expect(mockPrisma.users.findUnique).toHaveBeenCalledWith({
+    expect(mockPrisma.user_account.findUnique).toHaveBeenCalledWith({
       where: { email: credentials.email },
     });
-    expect(mockPrisma.users.create).toHaveBeenCalled();
+    expect(mockPrisma.user_account.create).toHaveBeenCalled();
   });
 
   it("should fail to register with email address same as existing account", async () => {
@@ -194,7 +194,7 @@ describe("Registration Backend Integration Tests", () => {
     };
 
     // Mock the database - user exists with different password
-    mockPrisma.users.findUnique.mockResolvedValueOnce(existingUser);
+    mockPrisma.user_account.findUnique.mockResolvedValueOnce(existingUser);
 
     // Try to register with same email but different password
     try {
@@ -206,7 +206,7 @@ describe("Registration Backend Integration Tests", () => {
     }
 
     // Verify that create was NOT called
-    expect(mockPrisma.users.create).not.toHaveBeenCalled();
+    expect(mockPrisma.user_account.create).not.toHaveBeenCalled();
   });
 
   it("should handle duplicate email correctly when existing user has correct password", async () => {
@@ -227,13 +227,13 @@ describe("Registration Backend Integration Tests", () => {
     };
 
     // Mock the database - user exists with correct password
-    mockPrisma.users.findUnique.mockResolvedValueOnce(existingUser);
+    mockPrisma.user_account.findUnique.mockResolvedValueOnce(existingUser);
 
     // Try to "register" with same email and correct password
     const user = await simulateAuthorize(credentials);
 
     // Should return the existing user without creating a new one
     expect(user.id).toBe(existingUser.id);
-    expect(mockPrisma.users.create).not.toHaveBeenCalled();
+    expect(mockPrisma.user_account.create).not.toHaveBeenCalled();
   });
 });

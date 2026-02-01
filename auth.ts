@@ -18,12 +18,12 @@ export const authOptions = {
           throw new Error("Invalid credentials");
         }
 
-        const user = await prisma.users.findUnique({
+        const user = await prisma.user_account.findUnique({
           where: { email: credentials.email },
         });
 
         if (!user) {
-          return await prisma.users.create({
+          return await prisma.user_account.create({
             data: {
               name: credentials.name ?? credentials.email,
               email: credentials.email,
