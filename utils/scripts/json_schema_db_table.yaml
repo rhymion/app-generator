@@ -280,6 +280,11 @@ definitions:
       - name
       - email
       - password
+    x-display:
+      - name: 
+          width: 150
+      - email: 
+          width: 400
     properties:
       id:
         type: string

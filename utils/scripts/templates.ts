@@ -1242,9 +1242,29 @@ ${childViewGrids}
 `;
 }
 
-export function generatePageList(parent: string): string {
+export function generatePageList(parent: string, schema: Schema): string {
   const parentPascal = toPascalCase(parent);
   const parentTitle = toTitleCase(parent);
+  
+  // Check for x-display configuration in the parent definition
+  const parentDef = schema.definitions[parent];
+  const xDisplay = (parentDef as any)?.['x-display'];
+  
+  let displayFieldsCode = '';
+  if (xDisplay && Array.isArray(xDisplay)) {
+    const fields = xDisplay.map((item: any) => {
+      const fieldName = Object.keys(item)[0];
+      const config = item[fieldName];
+      const headerName = fieldName.split('_').map((word: string) => 
+        word.charAt(0).toUpperCase() + word.slice(1)
+      ).join(' ');
+      const width = config?.width || 200;
+      
+      return `    { field: '${fieldName}', headerName: '${headerName}', width: ${width} }`;
+    }).join(',\n');
+    
+    displayFieldsCode = ` displayFields={[\n${fields}\n  ]}`;
+  }
   
   return `import { getAll${parentPascal}s } from '@/lib/${parent}/getters';
 import DataGridClient from '@/components/DataGridClient';
@@ -1252,7 +1272,7 @@ import { remove${parentPascal} } from '@/lib/${parent}/actions';
 
 export default async function ${parentPascal}sPage() {
   const ${parent}s = await getAll${parentPascal}s();
-  return <DataGridClient src={${parent}s} basePath="/${parent}" removeAction={remove${parentPascal}} entityLabel="${parentTitle}" />;
+  return <DataGridClient src={${parent}s} basePath="/${parent}" removeAction={remove${parentPascal}} entityLabel="${parentTitle}"${displayFieldsCode} />;
 }
 `;
 }
