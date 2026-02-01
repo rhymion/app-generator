@@ -12,8 +12,14 @@ import DialogActions from '@mui/material/DialogActions';
 
 interface BaseEntity {
   id: string;
-  name: string;
+  name?: string;
   [key: string]: unknown;
+}
+
+interface DisplayFieldConfig<T> {
+  field: keyof T;
+  headerName: string;
+  width?: number;
 }
 
 interface DataGridClientProps<T extends BaseEntity> {
@@ -21,8 +27,7 @@ interface DataGridClientProps<T extends BaseEntity> {
   basePath: string;
   removeAction: (formDataOrIds: FormData | string[]) => Promise<void>;
   entityLabel?: string;
-  displayField?: keyof T;
-  displayFieldLabel?: string;
+  displayFields?: DisplayFieldConfig<T>[];
 }
 
 export default function DataGridClient<T extends BaseEntity>({ 
@@ -30,8 +35,7 @@ export default function DataGridClient<T extends BaseEntity>({
   basePath,
   removeAction,
   entityLabel = 'Item',
-  displayField = 'description' as keyof T,
-  displayFieldLabel = 'Description'
+  displayFields
 }: DataGridClientProps<T>) {
   const [items, setItems] = useState(src);
   const [isPending, startTransition] = useTransition();
@@ -76,24 +80,39 @@ export default function DataGridClient<T extends BaseEntity>({
 //     startTransition(() => removeAction([id]));
 //   };
 
-  const columns: GridColDef<T>[] = [
-    {
-      field: 'name',
-      headerName: 'Name',
-      width: 150,
-      renderCell: (params) => {
-        return <Link href={`${basePath}/view/${params.id}`}>{params.row.name}</Link>;
-      },
-    },
-    {
-      field: displayField as string,
-      headerName: displayFieldLabel,
-      width: 400,
+  // Build dynamic columns based on displayFields, with name as default first column
+  const defaultDisplayFields: DisplayFieldConfig<T>[] = displayFields || [
+    { field: 'name' as keyof T, headerName: 'Name', width: 200 },
+    { field: 'description' as keyof T, headerName: 'Description', width: 400 }
+  ];
+
+  const dataColumns: GridColDef<T>[] = defaultDisplayFields.map(fieldConfig => {
+    // Special handling for name field to include link to view page
+    if (fieldConfig.field === 'name') {
+      return {
+        field: fieldConfig.field as string,
+        headerName: fieldConfig.headerName,
+        width: fieldConfig.width || 150,
+        renderCell: (params) => {
+          const nameValue = params.row[fieldConfig.field];
+          return <Link href={`${basePath}/view/${params.id}`}>{String(nameValue || params.id)}</Link>;
+        },
+      };
+    }
+    
+    return {
+      field: fieldConfig.field as string,
+      headerName: fieldConfig.headerName,
+      width: fieldConfig.width || 200,
       valueGetter: (value, row) => {
-        const fieldValue = row[displayField];
+        const fieldValue = row[fieldConfig.field];
         return fieldValue !== null && fieldValue !== undefined ? String(fieldValue) : '';
       },
-    },
+    };
+  });
+
+  const columns: GridColDef<T>[] = [
+    ...dataColumns,
     {
       field: 'actions',
       headerName: 'Actions',
