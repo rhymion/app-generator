@@ -1,12 +1,13 @@
 import FormUpsert from '@/components/parent1/FormUpsert';
-import { getAllOrganizations } from '@/lib/organization/getters';
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 
 export default async function AddParent1Page() {
-  const allOrganizations = await getAllOrganizations();
+  const allOrganizations = await getAssociatedOrganizations();
   const src = {
     id: '',
     name: '',
     organization_id: '',
+    organization: { id: '', name: '', description: '' },
     description: '',
     price: 0,
     due_date: new Date(),
