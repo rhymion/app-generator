@@ -14,6 +14,7 @@ import ListWrapper from '../ListWrapper';
 export default function FormView({ src }: FormViewProps) {
   const parent1_child1Columns: GridColDef[] = parent1_child1_columns(false);
   const parent1_child2Columns: GridColDef[] = parent1_child2_columns(false);
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -32,7 +33,7 @@ export default function FormView({ src }: FormViewProps) {
       />
       <TextField
         label="Organization Id"
-        value={src.organization?.name || ''}
+        value={src.organization?.name || src.organization_id || ''}
         fullWidth
         margin="normal"
         aria-readonly

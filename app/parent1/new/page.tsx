@@ -7,7 +7,6 @@ export default async function AddParent1Page() {
     id: '',
     name: '',
     organization_id: '',
-    organization: { id: '', name: '', description: '' },
     description: '',
     price: 0,
     due_date: new Date(),

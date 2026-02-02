@@ -1,4 +1,4 @@
-import { Organization } from "../organization/types";
+import type { Organization } from '@/lib/organization/types';
 
 export type Parent1 = {
   id: string;
@@ -8,6 +8,7 @@ export type Parent1 = {
   price: number;
   due_date: Date;
   image_url: string | null;
+  organization?: Organization | null;
 };
 
 export type OrganizationOption = {
@@ -19,7 +20,6 @@ export type Parent1Detail = Parent1 & {
   parent1_child1s: Parent1Child1[];
   parent1_child2s: Parent1Child2[];
   parent1_lists: Parent1List[];
-  organization: Organization;
 };
 
 export type Parent1Child1 = {
@@ -58,11 +58,11 @@ export type FormViewProps = Readonly<{
     id: string;
     name: string;
     organization_id: string;
-    organization: Organization;
     description: string | null;
     price: number;
     due_date: Date;
     image_url: string | null;
+    organization?: Organization | null;
     parent1_child1s: Parent1Child1[];
     parent1_child2s: Parent1Child2[];
     parent1_lists: Parent1List[];

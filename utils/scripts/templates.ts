@@ -94,8 +94,16 @@ export function generateTypes(parent: string, children: ChildInfo[], schema: Sch
   const relationshipTargets = Array.from(
     new Map(parentRelationships.map(r => [r.target, r])).values()
   );
+  const hasOrganizationRelationship = parentRelationships.some(r => r.target === 'organization');
   
   const parentProps: string[] = [];
+  const parentExtraProps: string[] = [];
+  const formViewExtraProps: string[] = [];
+
+  if (hasOrganizationRelationship) {
+    parentExtraProps.push('  organization?: Organization | null;');
+    formViewExtraProps.push('    organization?: Organization | null;');
+  }
   
   // Generate parent type
   if (parentDef.properties) {
@@ -114,8 +122,13 @@ export function generateTypes(parent: string, children: ChildInfo[], schema: Sch
     : '';
   
   // Build type definitions
-  let result = `export type ${parentPascal} = {
+  const importLines = hasOrganizationRelationship
+    ? `import type { Organization } from '@/lib/organization/types';\n\n`
+    : '';
+
+  let result = `${importLines}export type ${parentPascal} = {
 ${parentProps.join('\n')}
+${parentExtraProps.join('\n')}
 };
 
 `;
@@ -180,7 +193,7 @@ ${detailChildProps.join('\n')}
 
 export type FormViewProps = Readonly<{
   src: {
-${formViewParentProps}`;
+${formViewParentProps}${formViewExtraProps.length > 0 ? `\n${formViewExtraProps.join('\n')}` : ''}`;
   
   if (children.length > 0) {
     result += `\n${formViewChildProps.join('\n')}`;
@@ -210,6 +223,9 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
   const parentCamel = toCamelCase(parent);
   
   const parentDef = schema.definitions[parent];
+  const parentRelationships = getParentRelationships(parentDef);
+  const hasOrganizationRelationship = parentRelationships.some(r => r.target === 'organization');
+  const shouldFilterByOrganization = hasOrganizationRelationship && parent !== 'organization' && parent !== 'user_account';
   
   // Get all parent properties except timestamps
   const parentProps = parentDef.properties 
@@ -217,13 +233,18 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
         k !== 'created_at' && k !== 'updated_at'
       )
     : [];
+  const parentPropsWithOrganization = hasOrganizationRelationship
+    ? [...parentProps, 'organization']
+    : parentProps;
   
-  const parentMapping = parentProps.map(p => `    ${p}: ${parentCamel}.${p},`).join('\n');
+  const parentMapping = parentPropsWithOrganization.map(p => `    ${p}: ${parentCamel}.${p},`).join('\n');
   
   // Build include and mapping for all children
-  const includeProps = children.length > 0
-    ? children.map(c => `${c.propertyName}: true`).join(', ')
-    : '';
+  const includeEntries = [
+    ...children.map(c => `${c.propertyName}: true`),
+    ...(hasOrganizationRelationship ? ['organization: true'] : []),
+  ].filter(Boolean);
+  const includeProps = includeEntries.length > 0 ? includeEntries.join(', ') : '';
   
   const childMappings = children.length > 0
     ? children.map(c => `    ${c.propertyName}: ${parentCamel}.${c.propertyName},`).join('\n')
@@ -233,17 +254,41 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
 
 import prisma from '@/lib/prisma';
 import type { ${parentPascal}, ${parentPascal}Detail } from '@/lib/${parent}/types';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '@/auth';${shouldFilterByOrganization ? "\nimport { getAssociatedOrganizations } from '@/lib/organization/getters_associated';" : ''}
 
 export async function getAll${parentPascal}s(): Promise<${parentPascal}[]> {
-  const ${parentCamel}s = await prisma.${parent}.findMany();
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    throw new Error('User not authenticated');
+  }
+${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizations();
+  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
+` : ''}
+  const ${parentCamel}s = await prisma.${parent}.findMany({${shouldFilterByOrganization ? `
+    where: {
+      organization_id: { in: associatedOrganizationIds },
+    },` : ''}${hasOrganizationRelationship ? `
+    include: { organization: true },` : ''}
+  });
   return ${parentCamel}s.map((${parentCamel}) => ({
 ${parentMapping}
   }));
 }
 
 export async function get${parentPascal}Detail(id: string): Promise<${parentPascal}Detail | null> {
-  const ${parentCamel} = await prisma.${parent}.findUnique({
-    where: { id },${includeProps ? `
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    throw new Error('User not authenticated');
+  }
+${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizations();
+  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
+` : ''}
+  const ${parentCamel} = await prisma.${parent}.${shouldFilterByOrganization ? 'findFirst' : 'findUnique'}({
+    where: { 
+      id,${shouldFilterByOrganization ? `
+      organization_id: { in: associatedOrganizationIds },` : ''}
+    },${includeProps ? `
     include: { 
       ${includeProps.split(', ').join(', \n      ')} 
     },` : ''}
@@ -1176,6 +1221,8 @@ ${parentTextFields}${childGridComponents.length > 0 ? '\n' + childGridComponents
 export function generateFormView(parent: string, children: ChildInfo[], schema: Schema): string {
   const parentPascal = toPascalCase(parent);
   const parentDef = schema.definitions[parent];
+  const parentRelationships = getParentRelationships(parentDef);
+  const organizationRelationship = parentRelationships.find(r => r.target === 'organization');
   
   if (!parentDef.properties) {
     throw new Error(`Parent definition ${parent} has no properties`);
@@ -1211,6 +1258,15 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   
   const textFields = otherFields.map(p => {
     const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    if (organizationRelationship?.propName === p) {
+      return `      <TextField
+        label="${label}"
+        value={src.organization?.name || src.${p} || ''}
+        fullWidth
+        margin="normal"
+        aria-readonly
+      />`;
+    }
     return `      <TextField
         label="${label}"
         value={src.${p} || ''}
@@ -1432,13 +1488,17 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
 
   const selectionImports = selectionTargets.length > 0
     ? selectionTargets
-        .map(target => `import { getAll${toPascalCase(target)}s } from '@/lib/${target}/getters';`)
+        .map(target => target === 'organization'
+          ? `import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';`
+          : `import { getAll${toPascalCase(target)}s } from '@/lib/${target}/getters';`)
         .join('\n')
     : '';
   
   const selectionFetches = selectionTargets.length > 0
     ? selectionTargets
-        .map(target => `  const all${toPascalCase(target)}s = await getAll${toPascalCase(target)}s();`)
+        .map(target => target === 'organization'
+          ? `  const allOrganizations = await getAssociatedOrganizations();`
+          : `  const all${toPascalCase(target)}s = await getAll${toPascalCase(target)}s();`)
         .join('\n')
     : '';
   
@@ -1479,16 +1539,24 @@ export function generatePageEdit(parent: string, children: ChildInfo[], schema: 
 
   const selectionImports = selectionTargets.length > 0
     ? '\n' + selectionTargets
-        .map(target => `import { getAll${toPascalCase(target)}s } from '@/lib/${target}/getters';`)
+        .map(target => target === 'organization'
+          ? `import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';`
+          : `import { getAll${toPascalCase(target)}s } from '@/lib/${target}/getters';`)
         .join('\n')
     : '';
   
   const hasSelections = selectionTargets.length > 0;
   
+  const selectionFetchCalls = selectionTargets.map((target) =>
+    target === 'organization'
+      ? 'getAssociatedOrganizations()'
+      : `getAll${toPascalCase(target)}s()`
+  );
+
   const promiseAllFetches = hasSelections
     ? `  const [${parent}, ${selectionTargets.map(t => `all${toPascalCase(t)}s`).join(', ')}] = await Promise.all([
     get${parentPascal}Detail(id),
-    ${selectionTargets.map(t => `getAll${toPascalCase(t)}s()`).join(',\n    ')},
+    ${selectionFetchCalls.join(',\n    ')},
   ]);`
     : `  const ${parent} = await get${parentPascal}Detail(id);`;
   

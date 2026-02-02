@@ -229,10 +229,13 @@ definitions:
       - $ref: "#/definitions/parent1"
       - type: object
         required:
+          - organization
           - parent1_child1s
           - parent1_child2s
           - parent1_lists
         properties:
+          organization:
+            $ref: "#/definitions/organization"
           parent1_child1s:
             type: array
             items:

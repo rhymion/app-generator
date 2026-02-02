@@ -5,6 +5,7 @@ export type UserAccount = {
   password: string;
   api_key: string | null;
   avatar: string | null;
+
 };
 
 export type UserAccountDetail = UserAccount & {

@@ -3,6 +3,7 @@ export type XxxxxXxxxx = {
   name: string;
   description: string | null;
   team: string | null;
+
 };
 
 export type XxxxxXxxxxDetail = XxxxxXxxxx & {
