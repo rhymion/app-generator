@@ -21,7 +21,7 @@ interface TestEntity {
 }
 
 describe('DataGridClient', () => {
-  const createMockData = (count: number): TestEntity[] => {
+  const createMockData = (count: number) => {
     return Array.from({ length: count }, (_, i) => ({
       id: `${i + 1}`,
       name: `Item ${i + 1}`,
@@ -137,119 +137,6 @@ describe('DataGridClient', () => {
         const nextButtonUpdated = screen.getByLabelText(/next page/i);
         expect(prevButton).not.toBeDisabled();
         expect(nextButtonUpdated).not.toBeDisabled();
-      });
-    });
-  });
-
-  describe('Up/Down Buttons', () => {
-    it('disables up button for the first record', async () => {
-      const mockData = createMockData(3);
-      render(
-        <DataGridClient
-          src={mockData}
-          basePath="/test"
-          removeAction={mockRemoveAction}
-          entityLabel="Test"
-        />
-      );
-
-      await waitFor(() => {
-        const upButtons = screen.getAllByRole('button', { name: '↑' });
-        expect(upButtons[0]).toBeDisabled();
-      });
-    });
-
-    it('disables down button for the last record', async () => {
-      const mockData = createMockData(3);
-      render(
-        <DataGridClient
-          src={mockData}
-          basePath="/test"
-          removeAction={mockRemoveAction}
-          entityLabel="Test"
-        />
-      );
-
-      await waitFor(() => {
-        const downButtons = screen.getAllByRole('button', { name: '↓' });
-        expect(downButtons[downButtons.length - 1]).toBeDisabled();
-      });
-    });
-
-    it('enables both up and down buttons for middle records', async () => {
-      const mockData = createMockData(5);
-      render(
-        <DataGridClient
-          src={mockData}
-          basePath="/test"
-          removeAction={mockRemoveAction}
-          entityLabel="Test"
-        />
-      );
-
-      await waitFor(() => {
-        const upButtons = screen.getAllByRole('button', { name: '↑' });
-        const downButtons = screen.getAllByRole('button', { name: '↓' });
-        
-        // Middle records (index 1, 2, 3) should have both enabled
-        expect(upButtons[1]).not.toBeDisabled();
-        expect(downButtons[1]).not.toBeDisabled();
-        expect(upButtons[2]).not.toBeDisabled();
-        expect(downButtons[2]).not.toBeDisabled();
-      });
-    });
-
-    it('moves record down when down button is clicked', async () => {
-      const mockData = createMockData(3);
-      render(
-        <DataGridClient
-          src={mockData}
-          basePath="/test"
-          removeAction={mockRemoveAction}
-          entityLabel="Test"
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Item 1')).toBeInTheDocument();
-      });
-
-      const rows = screen.getAllByRole('row');
-      const firstDataRow = rows[1];
-      expect(firstDataRow).toHaveTextContent('Item 1');
-
-      const downButtons = screen.getAllByRole('button', { name: '↓' });
-      await userEvent.click(downButtons[0]);
-
-      await waitFor(() => {
-        const updatedRows = screen.getAllByRole('row');
-        expect(updatedRows[1]).toHaveTextContent('Item 2');
-        expect(updatedRows[2]).toHaveTextContent('Item 1');
-      });
-    });
-
-    it('moves record up when up button is clicked', async () => {
-      const mockData = createMockData(3);
-      render(
-        <DataGridClient
-          src={mockData}
-          basePath="/test"
-          removeAction={mockRemoveAction}
-          entityLabel="Test"
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Item 2')).toBeInTheDocument();
-      });
-
-      const upButtons = screen.getAllByRole('button', { name: '↑' });
-      await userEvent.click(upButtons[1]); // Click up on second item
-
-      await waitFor(() => {
-        const rows = screen.getAllByRole('row');
-        expect(rows[1]).toHaveTextContent('Item 2');
-        expect(rows[2]).toHaveTextContent('Item 1');
       });
     });
   });

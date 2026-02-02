@@ -85,47 +85,6 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
       setOpenDeleteSelectedDialog(true);
     };
 
-    // Add up/down buttons to columns
-    const columnsWithActions: GridColDef[] = [
-      ...columns,
-      {
-        field: 'actions',
-        headerName: 'Actions',
-        width: 150,
-        sortable: false,
-        filterable: false,
-        renderCell: (params) => {
-          const index = fields.findIndex(f => f.id === params.id);
-          return (
-            <>
-              <Button 
-                size="small" 
-                disabled={index === 0} 
-                onClick={() => {
-                  const idx = fields.findIndex(f => f.id === params.id);
-                  if (idx > 0) moveRowUp(idx);
-                }} 
-                variant="outlined"
-              >
-                ↑
-              </Button>
-              <Button 
-                size="small" 
-                disabled={index === fields.length - 1} 
-                onClick={() => {
-                  const idx = fields.findIndex(f => f.id === params.id);
-                  if (idx < fields.length - 1) moveRowDown(idx);
-                }} 
-                variant="outlined"
-              >
-                ↓
-              </Button>
-            </>
-          );
-        },
-      },
-    ];
-
     return (
       <div>
         {showTitle && <h2>{title}</h2>}
@@ -135,7 +94,7 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
           <DataGrid
             apiRef={apiRef}
             rows={fields}
-            columns={columnsWithActions}
+            columns={columns}
             editMode="row"
             processRowUpdate={processRowUpdate}
             paginationModel={paginationModel}

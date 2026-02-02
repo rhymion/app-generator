@@ -604,8 +604,8 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
       // Special handling for 'order' field - always read-only
       if (key === 'order') {
         typeStr = ", type: 'number'";
-        width = 100;
-        columns.push(`    { field: '${key}', headerName: '${headerName}', width: ${width}, editable: false${typeStr} },`);
+        width = 50;
+        columns.push(`    { field: '${key}', headerName: 'No.', width: ${width}, editable: false${typeStr} },`);
         continue;
       }
       

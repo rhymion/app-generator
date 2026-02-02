@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import FieldsDataGrid from './FieldsDataGrid';
+import OrderedFieldsDataGrid from './OrderedFieldsDataGrid';
 import { DeleteTestUtils } from '@/utils/test/operations/delete';
 import { TickTestUtils } from '@/utils/test/operations/tick';
 import { GridColDef } from '@mui/x-data-grid';
 
-describe('FieldsDataGrid', () => {
+describe('OrderedFieldsDataGrid', () => {
   const mockCreateNewRow = vi.fn(() => ({
     id: `temp-${Date.now()}-${Math.random()}`,
     name: '',
@@ -37,7 +37,7 @@ describe('FieldsDataGrid', () => {
 
   it('renders add button with custom label', () => {
     render(
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         initialFields={mockFields}
         columns={mockColumns}
         createNewRow={mockCreateNewRow}
@@ -49,7 +49,7 @@ describe('FieldsDataGrid', () => {
 
   it('renders add button with default label', () => {
     render(
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         initialFields={mockFields}
         columns={mockColumns}
         createNewRow={mockCreateNewRow}
@@ -60,7 +60,7 @@ describe('FieldsDataGrid', () => {
 
   it('calls createNewRow when add button is clicked', async () => {
     render(
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         initialFields={mockFields}
         
         columns={mockColumns}
@@ -74,7 +74,7 @@ describe('FieldsDataGrid', () => {
 
   it('displays all fields in the grid', async () => {
     render(
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         initialFields={mockFields}
         
         columns={mockColumns}
@@ -99,7 +99,7 @@ describe('FieldsDataGrid', () => {
     }));
 
     render(
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         ref={ref as any}
         initialFields={manyFields}
         
@@ -121,7 +121,7 @@ describe('FieldsDataGrid', () => {
   it('edits records successfully', async () => {
     const ref = { current: null as any };
     render(
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         ref={ref}
         initialFields={mockFields}
         
@@ -141,9 +141,68 @@ describe('FieldsDataGrid', () => {
     });
   });
 
+  it('moves field up when up button is clicked', async () => {
+    const ref = { current: null as any };
+    render(
+      <OrderedFieldsDataGrid
+        ref={ref}
+        initialFields={mockFields}
+        
+        columns={mockColumns}
+        createNewRow={mockCreateNewRow}
+      />
+    );
+    const upButtons = screen.getAllByRole('button', { name: '↑' });
+    await userEvent.click(upButtons[1]); // Click up on second field
+
+    await waitFor(() => {
+      const updatedFields = ref.current?.getFields() || [];
+      expect(updatedFields[0].id).toBe('2');
+      expect(updatedFields[1].id).toBe('1');
+    });
+  });
+
+  it('moves field down when down button is clicked', async () => {
+    const ref = { current: null as any };
+    render(
+      <OrderedFieldsDataGrid
+        ref={ref}
+        initialFields={mockFields}
+        
+        columns={mockColumns}
+        createNewRow={mockCreateNewRow}
+      />
+    );
+    const downButtons = screen.getAllByRole('button', { name: '↓' });
+    await userEvent.click(downButtons[0]); // Click down on first field
+
+    await waitFor(() => {
+      const updatedFields = ref.current?.getFields() || [];
+      expect(updatedFields[0].id).toBe('2');
+      expect(updatedFields[1].id).toBe('1');
+    });
+  });
+
+  it('disables up button for first row and down button for last row', async () => {
+    render(
+      <OrderedFieldsDataGrid
+        initialFields={mockFields}
+        
+        columns={mockColumns}
+        createNewRow={mockCreateNewRow}
+      />
+    );
+    const upButtons = screen.getAllByRole('button', { name: '↑' });
+    const downButtons = screen.getAllByRole('button', { name: '↓' });
+    expect(upButtons[0]).toBeDisabled();
+    expect(downButtons[downButtons.length - 1]).toBeDisabled();
+    expect(upButtons[1]).not.toBeDisabled();
+    expect(downButtons[0]).not.toBeDisabled();
+  });
+
   it('disables delete selected button when no row is ticked', async () => {
     render(
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         initialFields={mockFields}
         
         columns={mockColumns}
@@ -161,7 +220,7 @@ describe('FieldsDataGrid', () => {
   it('deletes selected fields when confirmed', async () => {
     const ref = { current: null as any };
     render(
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         ref={ref}
         initialFields={mockFields}
         
@@ -183,7 +242,7 @@ describe('FieldsDataGrid', () => {
 
   it('shows confirmation dialog when clicking Delete Selected with ticked fields', async () => {
     render(
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         initialFields={mockFields}
         
         columns={mockColumns}
@@ -203,7 +262,7 @@ describe('FieldsDataGrid', () => {
   it('cancels deletion when clicking Cancel in Delete Selected dialog', async () => {
     const ref = { current: null as any };
     render(
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         ref={ref}
         initialFields={mockFields}
         
@@ -226,7 +285,7 @@ describe('FieldsDataGrid', () => {
 
   it('displays custom dialog title and message', async () => {
     render(
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         initialFields={mockFields}
         
         columns={mockColumns}
@@ -247,7 +306,7 @@ describe('FieldsDataGrid', () => {
 
   it('handles complex operations: add, move, edit, and delete', async () => {
     const { rerender } = render(
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         initialFields={mockFields}
         
         columns={mockColumns}
@@ -263,13 +322,17 @@ describe('FieldsDataGrid', () => {
     // Simulate field added
     const fieldsWithNew = [...mockFields, { id: '3', name: '', type: 'string', max_length: null, max: null, regex: null, required: false }];
     rerender(
-      <FieldsDataGrid
+      <OrderedFieldsDataGrid
         initialFields={fieldsWithNew}
         
         columns={mockColumns}
         createNewRow={mockCreateNewRow}
       />
     );
+
+    // Move field
+    const upButtons = screen.getAllByRole('button', { name: '↑' });
+    await userEvent.click(upButtons[1]);
 
     // Edit field
     await userEvent.dblClick(screen.getByText('field1'));

@@ -116,35 +116,13 @@ export default function DataGridClient<T extends BaseEntity>({
     {
       field: 'actions',
       headerName: 'Actions',
-      width: 250,
+      width: 100,
       sortable: false,
       filterable: false,
       renderCell: (params) => {
         const index = items.findIndex(t => t.id === params.id);
         return (
           <>
-            <Button 
-              size="small" 
-              disabled={index === 0} 
-              onClick={() => {
-                const idx = items.findIndex(t => t.id === params.id);
-                if (idx > 0) moveRowUp(idx);
-              }} 
-              variant="outlined"
-            >
-              ↑
-            </Button>
-            <Button 
-              size="small" 
-              disabled={index === items.length - 1} 
-              onClick={() => {
-                const idx = items.findIndex(t => t.id === params.id);
-                if (idx < items.length - 1) moveRowDown(idx);
-              }} 
-              variant="outlined"
-            >
-              ↓
-            </Button>
             <Link href={`${basePath}/edit/${params.id}`}>
               <Button size="small" sx={{ mx: 1 }} variant="contained">Edit</Button>
             </Link>
