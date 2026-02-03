@@ -1,13 +1,13 @@
 import FormView from '@/components/role/FormView';
-import { getRoleDetail } from '@/lib/role/getters';
+import { getRoleDetailPageData } from '@/lib/role/getters';
 import { RoleDetailPageProps } from '@/lib/role/types';
 import { notFound } from 'next/navigation';
 
 export default async function ViewRolePage({ params }: RoleDetailPageProps) {
   const { id } = await params;
-  const role = await getRoleDetail(id);
-  if (!role) {
+  const data = await getRoleDetailPageData(id);
+  if (!data) {
     notFound();
   }
-  return <FormView src={role} />;
+  return <FormView src={data.role} permissions={data.permissions} />;
 }

@@ -3,16 +3,15 @@
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';
+import { requirePermission } from '@/lib/authz';
 
 export async function upsertRole(data: FormData) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
-
   const id = data.get('id') as string | null;
+  if (id) {
+    await requirePermission('role', 'update');
+  } else {
+    await requirePermission('role', 'create');
+  }
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
   const userAccountsRaw = data.getAll('userAccount[]') as string[];
@@ -57,10 +56,7 @@ async function updateRole(id: string, name: string, description: string | null, 
 }
 
 export async function removeRole(data: FormData | string[]) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+  await requirePermission('role', 'delete');
 
   if (Array.isArray(data)) {
     await prisma.role.deleteMany({

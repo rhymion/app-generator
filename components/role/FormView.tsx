@@ -1,14 +1,13 @@
-import { GridColDef } from '@mui/x-data-grid';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/role/types';
 import Link from '@mui/material/Link';
-import FieldsViewGrid from '../FieldsViewGrid';
 import ListWrapper from '../ListWrapper';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 
-export default function FormView({ src }: FormViewProps) {
+export default function FormView({ src, permissions }: FormViewProps) {
+  const canEdit = permissions?.update ?? true;
 
 
   return (
@@ -16,7 +15,9 @@ export default function FormView({ src }: FormViewProps) {
       <div className="flex justify-between items-center mb-4">
         <h1>Role</h1>
         <div>
-          <Link href={`/role/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+          {canEdit && (
+            <Link href={`/role/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+          )}
           <Link href="/role"><Button variant="outlined">Back to List</Button></Link>
         </div>
       </div>

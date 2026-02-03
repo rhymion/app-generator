@@ -2,14 +2,11 @@
 
 import prisma from '@/lib/prisma';
 import type { Role, RoleDetail } from '@/lib/role/types';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';
+import { getModelPermissions, requirePermission } from '@/lib/authz';
+import { getAllUserAccounts } from '@/lib/user_account/getters';
 
 export async function getAllRoles(): Promise<Role[]> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+  await requirePermission('role', 'read');
 
   const roles = await prisma.role.findMany({
   });
@@ -21,10 +18,7 @@ export async function getAllRoles(): Promise<Role[]> {
 }
 
 export async function getRoleDetail(id: string): Promise<RoleDetail | null> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+  await requirePermission('role', 'read');
 
   const role = await prisma.role.findUnique({
     where: { 
@@ -43,4 +37,39 @@ export async function getRoleDetail(id: string): Promise<RoleDetail | null> {
     ...role,
     user_accounts: role.user_accounts,
   };
+}
+
+export async function getRoleListPageData() {
+  await requirePermission('role', 'read');
+  const [roles, permissions] = await Promise.all([
+    getAllRoles(),
+    getModelPermissions('role'),
+  ]);
+  return { roles, permissions };
+}
+
+export async function getRoleDetailPageData(id: string) {
+  await requirePermission('role', 'read');
+  const [role, permissions] = await Promise.all([
+    getRoleDetail(id),
+    getModelPermissions('role'),
+  ]);
+  if (!role) return null;
+  return { role, permissions };
+}
+
+export async function getRoleNewPageData() {
+  await requirePermission('role', 'create');
+  const allUserAccounts = await getAllUserAccounts();
+  return { allUserAccounts };
+}
+
+export async function getRoleEditPageData(id: string) {
+  await requirePermission('role', 'update');
+  const [role, allUserAccounts] = await Promise.all([
+    getRoleDetail(id),
+    getAllUserAccounts(),
+  ]);
+  if (!role) return null;
+  return { role, allUserAccounts };
 }

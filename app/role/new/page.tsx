@@ -1,8 +1,8 @@
 import FormUpsert from '@/components/role/FormUpsert';
-import { getAllUserAccounts } from '@/lib/user_account/getters';
+import { getRoleNewPageData } from '@/lib/role/getters';
 
 export default async function AddRolePage() {
-  const allUserAccounts = await getAllUserAccounts();
+  const { allUserAccounts } = await getRoleNewPageData();
   const src = {
     id: '',
     name: '',

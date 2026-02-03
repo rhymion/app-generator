@@ -1,8 +1,8 @@
 import FormUpsert from '@/components/user_account/FormUpsert';
-import { getAllRoles } from '@/lib/role/getters';
+import { getUserAccountNewPageData } from '@/lib/user_account/getters';
 
 export default async function AddUserAccountPage() {
-  const allRoles = await getAllRoles();
+  const { allRoles, canAssignRoles } = await getUserAccountNewPageData();
   const src = {
     id: '',
     name: '',
@@ -12,5 +12,5 @@ export default async function AddUserAccountPage() {
     avatar: '',
     roles: [],
   };
-  return <FormUpsert src={src} isEdit={false} allRoles={allRoles} />;
+  return <FormUpsert src={src} isEdit={false} allRoles={allRoles} allowRoleEdit={canAssignRoles} />;
 }

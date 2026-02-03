@@ -3,16 +3,17 @@
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';
+import { canAccess, requirePermission } from '@/lib/authz';
 
 export async function upsertUserAccount(data: FormData) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
+  const id = data.get('id') as string | null;
+  if (id) {
+    await requirePermission('user_account', 'update');
+  } else {
+    await requirePermission('user_account', 'create');
   }
 
-  const id = data.get('id') as string | null;
+  const canAssignRoles = await canAccess('role', 'update');
   const name = data.get('name') as string;
   const email = data.get('email') as string;
   const password = data.get('password') as string;
@@ -25,16 +26,16 @@ export async function upsertUserAccount(data: FormData) {
     .filter((roleId): roleId is string => Boolean(roleId));
 
   if (id) {
-    await updateUserAccount(id, name, email, password, apiKey, avatar, roleIds);
+    await updateUserAccount(id, name, email, password, apiKey, avatar, roleIds, canAssignRoles);
   } else {
-    await addUserAccount(name, email, password, apiKey, avatar, roleIds);
+    await addUserAccount(name, email, password, apiKey, avatar, roleIds, canAssignRoles);
   }
 
   revalidatePath('/');
   redirect('/user_account');
 }
 
-async function addUserAccount(name: string, email: string, password: string, apiKey: string | null, avatar: string | null, roleIds: string[]) {
+async function addUserAccount(name: string, email: string, password: string, apiKey: string | null, avatar: string | null, roleIds: string[], canAssignRoles: boolean) {
   await prisma.user_account.create({
     data: {
       name: name,
@@ -49,7 +50,7 @@ async function addUserAccount(name: string, email: string, password: string, api
   });
 }
 
-async function updateUserAccount(id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, roleIds: string[]) {
+async function updateUserAccount(id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, roleIds: string[], canAssignRoles: boolean) {
   await prisma.user_account.update({
     where: { id },
     data: {
@@ -66,10 +67,7 @@ async function updateUserAccount(id: string, name: string, email: string, passwo
 }
 
 export async function removeUserAccount(data: FormData | string[]) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+  await requirePermission('user_account', 'delete');
 
   if (Array.isArray(data)) {
     await prisma.user_account.deleteMany({

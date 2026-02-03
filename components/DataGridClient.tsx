@@ -28,6 +28,9 @@ interface DataGridClientProps<T extends BaseEntity> {
   removeAction: (formDataOrIds: FormData | string[]) => Promise<void>;
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];
+  canCreate?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }
 
 export default function DataGridClient<T extends BaseEntity>({ 
@@ -35,7 +38,10 @@ export default function DataGridClient<T extends BaseEntity>({
   basePath,
   removeAction,
   entityLabel = 'Item',
-  displayFields
+  displayFields,
+  canCreate = true,
+  canEdit = true,
+  canDelete = true,
 }: DataGridClientProps<T>) {
   const [items, setItems] = useState(src);
   const [isPending, startTransition] = useTransition();
@@ -112,8 +118,8 @@ export default function DataGridClient<T extends BaseEntity>({
     };
   });
 
-  const columns: GridColDef<T>[] = [
-    ...dataColumns,
+  const columns: GridColDef<T>[] = dataColumns;
+  if (canEdit) columns.push(
     {
       field: 'actions',
       headerName: 'Actions',
@@ -132,15 +138,19 @@ export default function DataGridClient<T extends BaseEntity>({
         );
       },
     },
-  ];
+  );
 
   return (
     <div>
       <div className="flex mb-4">
+        {canCreate && (
         <Link href={`${basePath}/new`}>
           <Button variant="contained">Create New {entityLabel}</Button>
         </Link>
+        )}
+        {canDelete && (
         <Button onClick={deleteSelected} variant="contained" color="error" sx={{ mx: 2 }} disabled={selectedRowIds.ids.size === 0}>Delete Selected</Button>
+        )}
       </div>
       <Paper sx={{ height: 500, width: '100%' }}>
         <DataGrid

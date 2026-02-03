@@ -1,3 +1,5 @@
+import type { ModelPermissions } from '@/lib/authz';
+
 export type UserAccount = {
   id: string;
   name: string;
@@ -33,10 +35,13 @@ export type FormViewProps = Readonly<{
     avatar: string | null;
     roles: Role[];
   };
+  permissions?: ModelPermissions;
+  canAssignRoles?: boolean;
 }>;
 
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allRoles?: Role[];
+  allowRoleEdit?: boolean;
 
 }>;
