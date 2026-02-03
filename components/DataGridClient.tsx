@@ -106,7 +106,8 @@ export default function DataGridClient<T extends BaseEntity>({
       width: fieldConfig.width || 200,
       valueGetter: (value, row) => {
         const fieldValue = row[fieldConfig.field];
-        return fieldValue !== null && fieldValue !== undefined ? String(fieldValue) : '';
+        return fieldValue !== null && fieldValue !== undefined ? 
+        (typeof fieldValue === 'object' && 'name' in fieldValue ? fieldValue.name : String(fieldValue)) : '';
       },
     };
   });

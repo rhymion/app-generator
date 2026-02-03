@@ -168,6 +168,7 @@ model role {
   name     String
   description String?
   user_accounts user_account[]
+  permissions permission[]
 }
 
 model organization {
@@ -176,4 +177,16 @@ model organization {
   description String?
   user_accounts user_account[]
   parent1s parent1[]
+}
+
+model permission {
+  id       String @id @default(cuid())
+  name     String
+  role_id  String?
+  role     role? @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  create   Boolean
+  read     Boolean
+  update   Boolean
+  remove   Boolean
+  @@unique([name, role_id])
 }

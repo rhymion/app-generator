@@ -27,6 +27,9 @@ export default function HeaderPage() {
         <li className="block text-blue-300 px-4 py-2 my-1 hover:bg-gray-100 rounded">
           <Link className="no-underline text-blue-300" href="/organization">
             Organization</Link></li>
+        <li className="block text-blue-300 px-4 py-2 my-1 hover:bg-gray-100 rounded">
+          <Link className="no-underline text-blue-300" href="/permission">
+            Permission</Link></li>
       </ul>
     </nav>
   </>;

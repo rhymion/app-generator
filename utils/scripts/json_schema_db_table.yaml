@@ -422,3 +422,52 @@ definitions:
             x-outputType: list
             items:
               $ref: "#/definitions/user_account"
+
+  permission:
+    type: object
+    required:
+      - id
+      - name
+      - create
+      - read
+      - update
+      - delete
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+      create:
+        type: boolean
+      read:
+        type: boolean
+      update:
+        type: boolean
+      remove:
+        type: boolean
+      role_id:
+        type: 
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: role
+          labelField: name
+
+permission_detail:
+  x-generate:
+    list: true
+    view: true
+    new: true
+    edit: true
+    delete: true
+    invalidate: false
+  allOf:
+    - $ref: "#/definitions/permission"
+    - type: object
+      properties:
+        role:
+          $ref: "#/definitions/role"
