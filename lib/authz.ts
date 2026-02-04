@@ -18,7 +18,7 @@ export async function getSessionUserIdOrThrow(): Promise<string> {
 }
 
 export type Operation = 'create' | 'read' | 'update' | 'delete';
-export type ModelName = 'role' | 'user_account';
+export type ModelName = string;
 export type ModelPermissions = Record<Operation, boolean>;
 
 const EMPTY_PERMISSIONS: ModelPermissions = {
@@ -28,61 +28,24 @@ const EMPTY_PERMISSIONS: ModelPermissions = {
   delete: false,
 };
 
-const AUTHENTICATED_DEFAULTS: Record<ModelName, ModelPermissions> = {
-  role: {
-    create: false,
-    read: true,
-    update: false,
-    delete: false,
-  },
-  user_account: {
-    create: true,
-    read: true,
-    update: true,
-    delete: false,
-  },
-};
-
-const ADMIN_OVERRIDES: Partial<Record<ModelName, Partial<ModelPermissions>>> = {
-  role: {
-    create: true,
-    update: true,
-    delete: true,
-  },
-  user_account: {
-    delete: true,
-  },
-};
-
-async function getUserRoles(userId: string): Promise<string[]> {
+async function getUserRoleIds(userId: string): Promise<string[]> {
   const user = await prisma.user_account.findUnique({
     where: { id: userId },
-    select: { roles: { select: { name: true } } },
+    select: { roles: { select: { id: true } } },
   });
-  return user?.roles?.map((role) => role.name) ?? [];
+  return user?.roles?.map((role) => role.id) ?? [];
 }
 
-function buildPermissionsForRoles(roles: string[], isAuthenticated: boolean): Record<ModelName, ModelPermissions> {
-  if (!isAuthenticated) {
-    return {
-      role: { ...EMPTY_PERMISSIONS },
-      user_account: { ...EMPTY_PERMISSIONS },
-    };
-  }
-
-  const permissions: Record<ModelName, ModelPermissions> = {
-    role: { ...AUTHENTICATED_DEFAULTS.role },
-    user_account: { ...AUTHENTICATED_DEFAULTS.user_account },
-  };
-
-  if (roles.includes('Admin')) {
-    for (const [model, overrides] of Object.entries(ADMIN_OVERRIDES)) {
-      const modelName = model as ModelName;
-      Object.assign(permissions[modelName], overrides);
-    }
-  }
-
-  return permissions;
+function mergePermissionRows(rows: { create: boolean; read: boolean; update: boolean; delete: boolean }[]): ModelPermissions {
+  return rows.reduce<ModelPermissions>(
+    (acc, row) => ({
+      create: acc.create || row.create,
+      read: acc.read || row.read,
+      update: acc.update || row.update,
+      delete: acc.delete || row.delete,
+    }),
+    { ...EMPTY_PERMISSIONS }
+  );
 }
 
 export async function getModelPermissions(model: ModelName, userId?: string | null): Promise<ModelPermissions> {
@@ -91,9 +54,34 @@ export async function getModelPermissions(model: ModelName, userId?: string | nu
     return { ...EMPTY_PERMISSIONS };
   }
 
-  const roles = await getUserRoles(resolvedUserId);
-  const allPermissions = buildPermissionsForRoles(roles, true);
-  return { ...allPermissions[model] };
+  const roleIds = await getUserRoleIds(resolvedUserId);
+
+  const permissions = await prisma.permission.findMany({
+    where: {
+      name: model,
+      OR: [
+        { role_id: null },
+        ...(roleIds.length > 0 ? [{ role_id: { in: roleIds } }] : []),
+      ],
+    },
+    select: {
+      create: true,
+      read: true,
+      update: true,
+      delete: true,
+    },
+  });
+
+  if (permissions.length === 0) {
+    return {
+      create: true,
+      read: true,
+      update: true,
+      delete: true,
+    };
+  }
+
+  return mergePermissionRows(permissions);
 }
 
 export async function canAccess(model: ModelName, operation: Operation, userId?: string | null): Promise<boolean> {
