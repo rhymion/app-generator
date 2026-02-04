@@ -18,7 +18,7 @@ export async function upsertPermission(data: FormData) {
   const read = data.get('read') === 'true';
   const update = data.get('update') === 'true';
   const remove = data.get('remove') === 'true';
-  const roleId = data.get('role_id') as string | null;
+  const roleId = (data.get('role_id') as string | null) || null;
 
   if (id) {
     await updatePermission(id, name, create, read, update, remove, roleId);

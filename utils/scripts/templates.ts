@@ -357,6 +357,7 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
         const propType = Array.isArray(def.type) ? def.type.find(t => t !== 'null') : def.type;
         const isNullable = Array.isArray(def.type) && def.type.includes('null');
         const format = (def as any).format;
+        const pattern = (def as any).pattern;
         
         // Handle Date/DateTime/Time fields
         if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
@@ -375,6 +376,10 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
         // Handle number fields
         if (propType === 'integer' || propType === 'number') {
           return `  const ${varName} = Number(data.get('${prop}'));`;
+        }
+        
+        if (propType === 'string' && pattern === '^c[a-z0-9]{24,}$' && isNullable) {
+          return `  const ${varName} = (data.get('${prop}') as string | null) || null;`;
         }
         
         // Handle string and other fields
