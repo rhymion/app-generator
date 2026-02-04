@@ -1557,6 +1557,11 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
         return `    ${key}: '',`;
       }
       
+      // Boolean fields
+      if (propType === 'boolean') {
+        return `    ${key}: false,`;
+      }
+      
       // Default to null for other types
       return `    ${key}: null,`;
     })

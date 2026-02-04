@@ -6,10 +6,10 @@ export default async function AddPermissionPage() {
   const src = {
     id: '',
     name: '',
-    create: null,
-    read: null,
-    update: null,
-    remove: null,
+    create: false,
+    read: false,
+    update: false,
+    remove: false,
     role_id: '',
   };
   return <FormUpsert src={src} isEdit={false} allRoles={allRoles} />;
