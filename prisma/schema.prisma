@@ -187,6 +187,6 @@ model permission {
   create   Boolean
   read     Boolean
   update   Boolean
-  remove   Boolean
+  delete   Boolean
   @@unique([name, role_id])
 }

@@ -9,7 +9,7 @@ export default async function AddPermissionPage() {
     create: false,
     read: false,
     update: false,
-    remove: false,
+    delete: false,
     role_id: '',
   };
   return <FormUpsert src={src} isEdit={false} allRoles={allRoles} />;

@@ -42,8 +42,8 @@ export default function FormView({ src }: FormViewProps) {
         label="Update"
       />
       <FormControlLabel
-        control={<Checkbox checked={Boolean(src.remove)} readOnly />}
-        label="Remove"
+        control={<Checkbox checked={Boolean(src.delete)} readOnly />}
+        label="Delete"
       />
     </div>
   );

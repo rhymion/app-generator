@@ -17,33 +17,33 @@ export async function upsertPermission(data: FormData) {
   const create = data.get('create') === 'true';
   const read = data.get('read') === 'true';
   const update = data.get('update') === 'true';
-  const remove = data.get('remove') === 'true';
+  const deleteValue = data.get('delete') === 'true';
   const roleId = (data.get('role_id') as string | null) || null;
 
   if (id) {
-    await updatePermission(id, name, create, read, update, remove, roleId);
+    await updatePermission(id, name, create, read, update, deleteValue, roleId);
   } else {
-    await addPermission(name, create, read, update, remove, roleId);
+    await addPermission(name, create, read, update, deleteValue, roleId);
   }
 
   revalidatePath('/');
   redirect('/permission');
 }
 
-async function addPermission(name: string, create: boolean, read: boolean, update: boolean, remove: boolean, roleId: string | null) {
+async function addPermission(name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null) {
   await prisma.permission.create({
     data: {
       name: name,
       create: create,
       read: read,
       update: update,
-      remove: remove,
+      delete: deleteValue,
       role_id: roleId,
     },
   });
 }
 
-async function updatePermission(id: string, name: string, create: boolean, read: boolean, update: boolean, remove: boolean, roleId: string | null) {
+async function updatePermission(id: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null) {
   await prisma.permission.update({
     where: { id },
     data: {
@@ -51,7 +51,7 @@ async function updatePermission(id: string, name: string, create: boolean, read:
       create: create,
       read: read,
       update: update,
-      remove: remove,
+      delete: deleteValue,
       role_id: roleId,
     },
   });

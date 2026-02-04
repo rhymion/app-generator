@@ -20,7 +20,7 @@ export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertPro
   const [create, setCreate] = useState<boolean>(Boolean(src.create));
   const [read, setRead] = useState<boolean>(Boolean(src.read));
   const [update, setUpdate] = useState<boolean>(Boolean(src.update));
-  const [remove, setRemove] = useState<boolean>(Boolean(src.remove));
+  const [deleteValue, setDeleteValue] = useState<boolean>(Boolean(src.delete));
   const [roleId, setRoleId] = useState<string | null>(src.role_id || null);
 
 
@@ -44,7 +44,7 @@ export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertPro
     formData.set('create', create.toString());
     formData.set('read', read.toString());
     formData.set('update', update.toString());
-    formData.set('remove', remove.toString());
+    formData.set('delete', deleteValue.toString());
 
     try {
       startTransition(async () => {
@@ -105,8 +105,8 @@ export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertPro
         label="Update"
       />
       <FormControlLabel
-        control={<Checkbox checked={remove} onChange={(e) => setRemove(e.target.checked)} />}
-        label="Remove"
+        control={<Checkbox checked={deleteValue} onChange={(e) => setDeleteValue(e.target.checked)} />}
+        label="Delete"
       />
     </>
   );

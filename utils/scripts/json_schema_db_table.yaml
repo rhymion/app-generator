@@ -450,7 +450,7 @@ definitions:
         type: boolean
       update:
         type: boolean
-      remove:
+      delete:
         type: boolean
       role_id:
         type: 

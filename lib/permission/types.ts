@@ -6,7 +6,7 @@ export type Permission = {
   create: boolean;
   read: boolean;
   update: boolean;
-  remove: boolean;
+  delete: boolean;
   role_id: string | null;
   role?: Role | null;
 };
@@ -31,7 +31,7 @@ export type FormViewProps = Readonly<{
     create: boolean;
     read: boolean;
     update: boolean;
-    remove: boolean;
+    delete: boolean;
     role_id: string | null;
     role?: Role | null;
   };

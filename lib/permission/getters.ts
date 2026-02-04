@@ -20,7 +20,7 @@ export async function getAllPermissions(): Promise<Permission[]> {
     create: permission.create,
     read: permission.read,
     update: permission.update,
-    remove: permission.remove,
+    delete: permission.delete,
     role_id: permission.role_id,
     role: permission.role,
   }));
