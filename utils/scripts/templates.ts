@@ -61,6 +61,24 @@ function toTitleCase(str: string): string {
   return str.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
+const RESERVED_WORDS = new Set([
+  'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete',
+  'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for', 'function',
+  'if', 'implements', 'import', 'in', 'instanceof', 'interface', 'let', 'new', 'null',
+  'package', 'private', 'protected', 'public', 'return', 'super', 'switch', 'static',
+  'this', 'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield',
+  'await'
+]);
+
+function safeVarName(name: string): string {
+  const camel = toCamelCase(name);
+  return RESERVED_WORDS.has(camel) ? `${camel}Value` : camel;
+}
+
+function toPascalCaseFromVar(str: string): string {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
 type ParentRelationshipMeta = {
   propName: string;
   target: string;
@@ -94,16 +112,16 @@ export function generateTypes(parent: string, children: ChildInfo[], schema: Sch
   const relationshipTargets = Array.from(
     new Map(parentRelationships.map(r => [r.target, r])).values()
   );
-  const hasOrganizationRelationship = parentRelationships.some(r => r.target === 'organization');
   
   const parentProps: string[] = [];
   const parentExtraProps: string[] = [];
   const formViewExtraProps: string[] = [];
 
-  if (hasOrganizationRelationship) {
-    parentExtraProps.push('  organization?: Organization | null;');
-    formViewExtraProps.push('    organization?: Organization | null;');
-  }
+  relationshipTargets.forEach((rel) => {
+    const targetPascal = toPascalCase(rel.target);
+    parentExtraProps.push(`  ${rel.target}?: ${targetPascal} | null;`);
+    formViewExtraProps.push(`    ${rel.target}?: ${targetPascal} | null;`);
+  });
   
   // Generate parent type
   if (parentDef.properties) {
@@ -122,8 +140,8 @@ export function generateTypes(parent: string, children: ChildInfo[], schema: Sch
     : '';
   
   // Build type definitions
-  const importLines = hasOrganizationRelationship
-    ? `import type { Organization } from '@/lib/organization/types';\n\n`
+  const importLines = relationshipTargets.length > 0
+    ? relationshipTargets.map(r => `import type { ${toPascalCase(r.target)} } from '@/lib/${r.target}/types';`).join('\n') + '\n\n'
     : '';
 
   let result = `${importLines}export type ${parentPascal} = {
@@ -233,16 +251,15 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
         k !== 'created_at' && k !== 'updated_at'
       )
     : [];
-  const parentPropsWithOrganization = hasOrganizationRelationship
-    ? [...parentProps, 'organization']
-    : parentProps;
-  
-  const parentMapping = parentPropsWithOrganization.map(p => `    ${p}: ${parentCamel}.${p},`).join('\n');
+  const parentMapping = parentProps.map(p => `    ${p}: ${parentCamel}.${p},`).join('\n');
+  const relationshipMapping = parentRelationships
+    .map(r => `    ${r.target}: ${parentCamel}.${r.target},`)
+    .join('\n');
   
   // Build include and mapping for all children
   const includeEntries = [
     ...children.map(c => `${c.propertyName}: true`),
-    ...(hasOrganizationRelationship ? ['organization: true'] : []),
+    ...parentRelationships.map(r => `${r.target}: true`),
   ].filter(Boolean);
   const includeProps = includeEntries.length > 0 ? includeEntries.join(', ') : '';
   
@@ -300,7 +317,8 @@ ${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssoc
 
   return {
     ...${parentCamel},${childMappings ? `
-${childMappings}` : ''}
+${childMappings}` : ''}${relationshipMapping ? `
+${relationshipMapping}` : ''}
   };
 }
 `;
@@ -319,41 +337,53 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
     : [];
   
   // Generate FormData.get statements for parent properties
+  const parentPropInfos = parentDef.properties
+    ? parentProps.map(p => ({
+        prop: p,
+        varName: safeVarName(p),
+        def: parentDef.properties![p]
+      }))
+    : [];
+
   const formDataGets = parentDef.properties
-    ? parentProps.map(p => {
-        const prop = parentDef.properties![p];
-        const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
-        const isNullable = Array.isArray(prop.type) && prop.type.includes('null');
-        const format = (prop as any).format;
+    ? parentPropInfos.map(({ prop, varName, def }) => {
+        const propType = Array.isArray(def.type) ? def.type.find(t => t !== 'null') : def.type;
+        const isNullable = Array.isArray(def.type) && def.type.includes('null');
+        const format = (def as any).format;
         
         // Handle Date/DateTime/Time fields
         if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
           if (isNullable) {
-            return `  const ${p}_str = data.get('${p}') as string | null;\n  const ${p} = ${p}_str ? new Date(${p}_str) : null;`;
+            return `  const ${varName}Str = data.get('${prop}') as string | null;\n  const ${varName} = ${varName}Str ? new Date(${varName}Str) : null;`;
           } else {
-            return `  const ${p}_str = data.get('${p}') as string;\n  const ${p} = new Date(${p}_str);`;
+            return `  const ${varName}Str = data.get('${prop}') as string;\n  const ${varName} = new Date(${varName}Str);`;
           }
+        }
+
+        // Handle boolean fields
+        if (propType === 'boolean') {
+          return `  const ${varName} = data.get('${prop}') === 'true';`;
         }
         
         // Handle number fields
         if (propType === 'integer' || propType === 'number') {
-          return `  const ${p} = Number(data.get('${p}'));`;
+          return `  const ${varName} = Number(data.get('${prop}'));`;
         }
         
         // Handle string and other fields
-        return `  const ${p} = data.get('${p}') as string${isNullable ? ' | null' : ''};`;
+        return `  const ${varName} = data.get('${prop}') as string${isNullable ? ' | null' : ''};`;
       }).join('\n')
     : '';
   
-  const parentParams = parentProps.map(p => p).join(', ');
+  const parentParams = parentPropInfos.map(p => p.varName).join(', ');
   const parentParamsWithTypes = parentDef.properties
-    ? parentProps.map(p => {
-        const tsType = getTsType(parentDef.properties![p]);
-        return `${p}: ${tsType}`;
+    ? parentPropInfos.map(p => {
+        const tsType = getTsType(p.def);
+        return `${p.varName}: ${tsType}`;
       }).join(', ')
     : '';
   
-  const parentDataObj = parentProps.map(p => `      ${p},`).join('\n');
+  const parentDataObj = parentPropInfos.map(p => `      ${p.prop}: ${p.varName},`).join('\n');
   
   // For parent-only, generate simple CRUD
   if (children.length === 0) {
@@ -698,6 +728,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const dateTimeProps: string[] = [];
   const numberProps: string[] = [];
   const imageProps: string[] = [];
+  const booleanProps: string[] = [];
   const textProps: string[] = [];
   
   nonRelationshipProps.forEach(p => {
@@ -709,6 +740,8 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       dateTimeProps.push(p);
     } else if (propType === 'integer' || propType === 'number') {
       numberProps.push(p);
+    } else if (propType === 'boolean') {
+      booleanProps.push(p);
     } else if (propType === 'string' && format === 'uri') {
       imageProps.push(p);
     } else {
@@ -722,21 +755,31 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const parentRefs = [textRefs, numberRefs].filter(r => r).join('\n');
   
   // Generate state for DateTime and Image fields
-  const dateTimeStates = dateTimeProps.map(p => 
-    `  const [${toCamelCase(p)}, set${toPascalCase(p)}] = useState<Dayjs | null>(src.${p} ? dayjs(src.${p}) : null);`
-  ).join('\n');
+  const dateTimeStates = dateTimeProps.map(p => {
+    const stateName = safeVarName(p);
+    const stateSetter = toPascalCaseFromVar(stateName);
+    return `  const [${stateName}, set${stateSetter}] = useState<Dayjs | null>(src.${p} ? dayjs(src.${p}) : null);`;
+  }).join('\n');
   
-  const imageStates = imageProps.map(p => 
-    `  const [${toCamelCase(p)}, set${toPascalCase(p)}] = useState<string>(src.${p} || '');`
-  ).join('\n');
+  const imageStates = imageProps.map(p => {
+    const stateName = safeVarName(p);
+    const stateSetter = toPascalCaseFromVar(stateName);
+    return `  const [${stateName}, set${stateSetter}] = useState<string>(src.${p} || '');`;
+  }).join('\n');
+
+  const booleanStates = booleanProps.map(p => {
+    const stateName = safeVarName(p);
+    const stateSetter = toPascalCaseFromVar(stateName);
+    return `  const [${stateName}, set${stateSetter}] = useState<boolean>(Boolean(src.${p}));`;
+  }).join('\n');
   
   const relationshipStates = parentRelationships.map(r => {
-    const stateName = toCamelCase(r.propName);
-    const stateSetter = toPascalCase(r.propName);
+    const stateName = safeVarName(r.propName);
+    const stateSetter = toPascalCaseFromVar(stateName);
     return `  const [${stateName}, set${stateSetter}] = useState<string | null>(src.${r.propName} || null);`;
   }).join('\n');
 
-  const allStates = [dateTimeStates, imageStates, relationshipStates].filter(s => s).join('\n');
+  const allStates = [dateTimeStates, imageStates, booleanStates, relationshipStates].filter(s => s).join('\n');
   
   // Generate form fields
   const textFields = textProps.map(p => {
@@ -769,8 +812,8 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const relationshipFields = parentRelationships.map(r => {
     const labelBase = r.propName.replace(/_id$/, '');
     const label = toTitleCase(labelBase);
-    const stateName = toCamelCase(r.propName);
-    const stateSetter = toPascalCase(r.propName);
+    const stateName = safeVarName(r.propName);
+    const stateSetter = toPascalCaseFromVar(stateName);
     const targetPascal = toPascalCase(r.target);
     const labelField = r.labelField ?? 'name';
     const optionsVar = `${stateName}Options`;
@@ -807,8 +850,8 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   
   const dateTimeFields = dateTimeProps.map(p => {
     const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-    const camelCase = toCamelCase(p);
-    const pascalCase = toPascalCase(p);
+    const camelCase = safeVarName(p);
+    const pascalCase = toPascalCaseFromVar(camelCase);
     
     return `      <DateTimeWrapper 
         label="${label}" 
@@ -818,8 +861,8 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   }).join('\n');
   
   const imageFields = imageProps.map(p => {
-    const camelCase = toCamelCase(p);
-    const pascalCase = toPascalCase(p);
+    const camelCase = safeVarName(p);
+    const pascalCase = toPascalCaseFromVar(camelCase);
     
     return `      <ImageUpload
         value={${camelCase}}
@@ -827,7 +870,17 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       />`;
   }).join('\n');
   
-  const parentTextFields = [textFields, relationshipFields, numberFields, dateTimeFields, imageFields].filter(f => f).join('\n');
+  const booleanFields = booleanProps.map(p => {
+    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const stateName = safeVarName(p);
+    const stateSetter = toPascalCaseFromVar(stateName);
+    return `      <FormControlLabel
+        control={<Checkbox checked={${stateName}} onChange={(e) => set${stateSetter}(e.target.checked)} />}
+        label="${label}"
+      />`;
+  }).join('\n');
+
+  const parentTextFields = [textFields, relationshipFields, numberFields, booleanFields, dateTimeFields, imageFields].filter(f => f).join('\n');
   
   // Generate FormData sets
   const textFormDataSets = textProps.map(p => 
@@ -839,21 +892,26 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   ).join('\n');
   
   const dateTimeFormDataSets = dateTimeProps.map(p => {
-    const camelCase = toCamelCase(p);
+    const camelCase = safeVarName(p);
     return `    formData.set('${p}', ${camelCase}?.toISOString() || '');`;
   }).join('\n');
   
   const imageFormDataSets = imageProps.map(p => {
-    const camelCase = toCamelCase(p);
+    const camelCase = safeVarName(p);
     return `    formData.set('${p}', ${camelCase});`;
   }).join('\n');
   
   const relationshipFormDataSets = parentRelationships.map(r => {
-    const stateName = toCamelCase(r.propName);
+    const stateName = safeVarName(r.propName);
     return `    formData.set('${r.propName}', ${stateName} || '');`;
   }).join('\n');
 
-  const parentFormDataSets = [textFormDataSets, relationshipFormDataSets, numberFormDataSets, dateTimeFormDataSets, imageFormDataSets].filter(s => s).join('\n');
+  const booleanFormDataSets = booleanProps.map(p => {
+    const stateName = safeVarName(p);
+    return `    formData.set('${p}', ${stateName}.toString());`;
+  }).join('\n');
+
+  const parentFormDataSets = [textFormDataSets, relationshipFormDataSets, numberFormDataSets, booleanFormDataSets, dateTimeFormDataSets, imageFormDataSets].filter(s => s).join('\n');
   
   // Determine if we have children
   const hasChildren = children.length > 0;
@@ -862,7 +920,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const relationshipOptionSetups = parentRelationships.map(r => {
     const targetPascal = toPascalCase(r.target);
     const labelField = r.labelField ?? 'name';
-    const stateName = toCamelCase(r.propName);
+    const stateName = safeVarName(r.propName);
     const optionsVar = `${stateName}Options`;
 
     return `  const ${optionsVar} = useMemo(() => {
@@ -1146,6 +1204,10 @@ ${childSerialize}
     ? `{ src, isEdit, ${extraProps} }: FormUpsertProps`
     : `{ src, isEdit }: FormUpsertProps`;
   
+  const booleanImports = booleanProps.length > 0
+    ? "\nimport FormControlLabel from '@mui/material/FormControlLabel';\nimport Checkbox from '@mui/material/Checkbox';"
+    : '';
+
   return `'use client';
 
 import { ${hasManyToMany || hasManyToOne ? 'useMemo, ' : ''}useRef, useState } from 'react';
@@ -1155,7 +1217,7 @@ import TextField from '@mui/material/TextField';${hasManyToOne ? "\nimport Autoc
 import { upsert${parentPascal}${canDelete ? `, remove${parentPascal}` : ''} } from '@/lib/${parent}/actions';
 import type { FormUpsertProps } from '@/lib/${parent}/types';
 import FormWithChildGrid from '../FormWithChildGrid';
-${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${imageProps.length > 0 ? '\nimport ImageUpload from \'../ImageUpload\';' : ''}
+${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${imageProps.length > 0 ? '\nimport ImageUpload from \'../ImageUpload\';' : ''}${booleanImports}
 
 export default function FormUpsert(${formUpsertParams}) {
   const router = useRouter();
@@ -1222,7 +1284,7 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   const parentPascal = toPascalCase(parent);
   const parentDef = schema.definitions[parent];
   const parentRelationships = getParentRelationships(parentDef);
-  const organizationRelationship = parentRelationships.find(r => r.target === 'organization');
+  const relationshipByProp = new Map(parentRelationships.map(r => [r.propName, r] as const));
   
   if (!parentDef.properties) {
     throw new Error(`Parent definition ${parent} has no properties`);
@@ -1258,10 +1320,12 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   
   const textFields = otherFields.map(p => {
     const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-    if (organizationRelationship?.propName === p) {
+    const rel = relationshipByProp.get(p);
+    if (rel) {
+      const labelField = rel.labelField ?? 'name';
       return `      <TextField
         label="${label}"
-        value={src.organization?.name || src.${p} || ''}
+        value={src.${rel.target}?.${labelField} || src.${p} || ''}
         fullWidth
         margin="normal"
         aria-readonly

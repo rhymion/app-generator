@@ -34,8 +34,8 @@ export async function upsertOrganization(data: FormData) {
 async function addOrganization(name: string, description: string | null, userAccountIds: string[]) {
   await prisma.organization.create({
     data: {
-      name,
-      description,
+      name: name,
+      description: description,
       user_accounts: {
         connect: userAccountIds.map((id) => ({ id })),
       },
@@ -47,8 +47,8 @@ async function updateOrganization(id: string, name: string, description: string 
   await prisma.organization.update({
     where: { id },
     data: {
-      name,
-      description,
+      name: name,
+      description: description,
       user_accounts: {
         set: userAccountIds.map((id) => ({ id })),
       },

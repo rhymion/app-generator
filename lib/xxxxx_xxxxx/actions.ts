@@ -32,9 +32,9 @@ export async function upsertXxxxxXxxxx(data: FormData) {
 async function addXxxxxXxxxx(name: string, description: string | null, team: string | null, yyyyyYyyyys: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]) {
   await prisma.xxxxx_xxxxx.create({
     data: {
-      name,
-      description,
-      team,
+      name: name,
+      description: description,
+      team: team,
       yyyyy_yyyyys: {
         create: yyyyyYyyyys.map(f => ({
           name: f.name,
@@ -54,9 +54,9 @@ async function updateXxxxxXxxxx(id: string, name: string, description: string | 
   await prisma.xxxxx_xxxxx.update({
     where: { id },
     data: {
-      name,
-      description,
-      team,
+      name: name,
+      description: description,
+      team: team,
       yyyyy_yyyyys: {
         deleteMany: {},
         create: yyyyyYyyyys.map(f => ({

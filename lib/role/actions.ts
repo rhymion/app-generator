@@ -34,8 +34,8 @@ export async function upsertRole(data: FormData) {
 async function addRole(name: string, description: string | null, userAccountIds: string[]) {
   await prisma.role.create({
     data: {
-      name,
-      description,
+      name: name,
+      description: description,
       user_accounts: {
         connect: userAccountIds.map((id) => ({ id })),
       },
@@ -47,8 +47,8 @@ async function updateRole(id: string, name: string, description: string | null, 
   await prisma.role.update({
     where: { id },
     data: {
-      name,
-      description,
+      name: name,
+      description: description,
       user_accounts: {
         set: userAccountIds.map((id) => ({ id })),
       },

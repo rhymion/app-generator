@@ -8,24 +8,23 @@ import Autocomplete from '@mui/material/Autocomplete';
 import { upsertPermission, removePermission } from '@/lib/permission/actions';
 import type { FormUpsertProps } from '@/lib/permission/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
-import type { Role } from '@/lib/role/types';
-
 
 export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  const [create, setCreate] = useState<boolean>(Boolean(src.create));
+  const [read, setRead] = useState<boolean>(Boolean(src.read));
+  const [update, setUpdate] = useState<boolean>(Boolean(src.update));
+  const [remove, setRemove] = useState<boolean>(Boolean(src.remove));
   const [roleId, setRoleId] = useState<string | null>(src.role_id || null);
 
 
   const nameRef = useRef<HTMLInputElement>(null);
-  const [canCreate, setCanCreate] = useState<boolean>(Boolean(src.create));
-  const [canRead, setCanRead] = useState<boolean>(Boolean(src.read));
-  const [canUpdate, setCanUpdate] = useState<boolean>(Boolean(src.update));
-  const [canRemove, setCanRemove] = useState<boolean>(Boolean(src.remove));
   const roleIdOptions = useMemo(() => {
     return allRoles.map((item) => ({
       id: item.id,
@@ -41,11 +40,11 @@ export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertPro
     const formData = new FormData();
     formData.set('id', src.id);
     formData.set('name', nameRef.current?.value || '');
-    formData.set('create', canCreate.toString());
-    formData.set('read', canRead.toString());
-    formData.set('update', canUpdate.toString());
-    formData.set('remove', canRemove.toString());
     formData.set('role_id', roleId || '');
+    formData.set('create', create.toString());
+    formData.set('read', read.toString());
+    formData.set('update', update.toString());
+    formData.set('remove', remove.toString());
 
     try {
       startTransition(async () => {
@@ -80,22 +79,6 @@ export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertPro
         multiline={false}
         rows={undefined}
       />
-      <FormControlLabel 
-        control={<Checkbox checked={canCreate} onChange={(e) => setCanCreate(e.target.checked)} />} 
-        label="Create" 
-      />
-      <FormControlLabel 
-        control={<Checkbox checked={canRead} onChange={(e) => setCanRead(e.target.checked)} />} 
-        label="Read" 
-      />
-      <FormControlLabel 
-        control={<Checkbox checked={canUpdate} onChange={(e) => setCanUpdate(e.target.checked)} />} 
-        label="Update" 
-      />
-      <FormControlLabel 
-        control={<Checkbox checked={canRemove} onChange={(e) => setCanRemove(e.target.checked)} />} 
-        label="Remove" 
-      />
       <Autocomplete
         options={roleIdOptions}
         value={roleIdOptions.find((option) => option.id === roleId) || null}
@@ -108,6 +91,22 @@ export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertPro
             
           />
         )}
+      />
+      <FormControlLabel
+        control={<Checkbox checked={create} onChange={(e) => setCreate(e.target.checked)} />}
+        label="Create"
+      />
+      <FormControlLabel
+        control={<Checkbox checked={read} onChange={(e) => setRead(e.target.checked)} />}
+        label="Read"
+      />
+      <FormControlLabel
+        control={<Checkbox checked={update} onChange={(e) => setUpdate(e.target.checked)} />}
+        label="Update"
+      />
+      <FormControlLabel
+        control={<Checkbox checked={remove} onChange={(e) => setRemove(e.target.checked)} />}
+        label="Remove"
       />
     </>
   );
