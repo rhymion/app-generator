@@ -36,7 +36,9 @@ export async function getPermissionDetail(id: string): Promise<PermissionDetail 
     where: { 
       id,
     },
-    include: { role: true },
+    include: { 
+      role: true 
+    },
   });
 
   if (!permission) {
@@ -45,5 +47,6 @@ export async function getPermissionDetail(id: string): Promise<PermissionDetail 
 
   return {
     ...permission,
+    role: permission.role,
   };
 }

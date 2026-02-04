@@ -10,6 +10,8 @@ import { parent1_child1_columns, parent1_child2_columns } from '../parent1/colum
 import DateTimeWrapper from '../DateTimeWrapper';
 import ImageDisplay from '../ImageDisplay';
 import ListWrapper from '../ListWrapper';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
 
 export default function FormView({ src }: FormViewProps) {
   const parent1_child1Columns: GridColDef[] = parent1_child1_columns(false);

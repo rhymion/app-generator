@@ -7,5 +7,5 @@ export default async function PermissionsPage() {
   return <DataGridClient src={permissions} basePath="/permission" removeAction={removePermission} entityLabel="Permission" displayFields={[
     { field: 'name', headerName: 'Name', width: 200 },
     { field: 'role', headerName: 'Role', width: 200 }
-  ]}/>;
+  ]} />;
 }

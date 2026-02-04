@@ -3,6 +3,8 @@ import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/parent_only/types';
 import Link from '@mui/material/Link';
 import DateTimeWrapper from '../DateTimeWrapper';
+  import FormControlLabel from '@mui/material/FormControlLabel';
+  import Checkbox from '@mui/material/Checkbox';
 
 export default function FormView({ src }: FormViewProps) {
   return (

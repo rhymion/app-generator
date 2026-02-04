@@ -5,6 +5,8 @@ import type { FormViewProps } from '@/lib/xxxxx_xxxxx/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
 import { yyyyy_yyyyy_columns } from '../xxxxx_xxxxx/column_def';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
 
 export default function FormView({ src }: FormViewProps) {
   const yyyyy_yyyyyColumns: GridColDef[] = yyyyy_yyyyy_columns(false);

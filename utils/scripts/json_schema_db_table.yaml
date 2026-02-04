@@ -432,6 +432,11 @@ definitions:
       - read
       - update
       - delete
+    x-display:
+      - name: 
+          width: 200
+      - role: 
+          width: 200
     properties:
       id:
         type: string

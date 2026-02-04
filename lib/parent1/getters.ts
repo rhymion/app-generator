@@ -62,5 +62,6 @@ export async function getParent1Detail(id: string): Promise<Parent1Detail | null
     parent1_child1s: parent1.parent1_child1s,
     parent1_child2s: parent1.parent1_child2s,
     parent1_lists: parent1.parent1_lists,
+    organization: parent1.organization,
   };
 }

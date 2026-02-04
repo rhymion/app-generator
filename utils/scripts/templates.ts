@@ -256,12 +256,18 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
     .map(r => `    ${r.target}: ${parentCamel}.${r.target},`)
     .join('\n');
   
-  // Build include and mapping for all children
-  const includeEntries = [
+  // Build include for list (many-to-one only)
+  const includeEntriesList = [
+    ...parentRelationships.map(r => `${r.target}: true`),
+  ].filter(Boolean);
+  const includePropsList = includeEntriesList.length > 0 ? includeEntriesList.join(', ') : '';
+
+  // Build include for detail (children + many-to-one)
+  const includeEntriesDetail = [
     ...children.map(c => `${c.propertyName}: true`),
     ...parentRelationships.map(r => `${r.target}: true`),
   ].filter(Boolean);
-  const includeProps = includeEntries.length > 0 ? includeEntries.join(', ') : '';
+  const includePropsDetail = includeEntriesDetail.length > 0 ? includeEntriesDetail.join(', ') : '';
   
   const childMappings = children.length > 0
     ? children.map(c => `    ${c.propertyName}: ${parentCamel}.${c.propertyName},`).join('\n')
@@ -285,11 +291,12 @@ ${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssoc
   const ${parentCamel}s = await prisma.${parent}.findMany({${shouldFilterByOrganization ? `
     where: {
       organization_id: { in: associatedOrganizationIds },
-    },` : ''}${hasOrganizationRelationship ? `
-    include: { organization: true },` : ''}
+    },` : ''}${includePropsList ? `
+    include: { ${includePropsList.split(', ').join(', ')} },` : ''}
   });
   return ${parentCamel}s.map((${parentCamel}) => ({
-${parentMapping}
+${parentMapping}${relationshipMapping ? `
+${relationshipMapping}` : ''}
   }));
 }
 
@@ -305,9 +312,9 @@ ${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssoc
     where: { 
       id,${shouldFilterByOrganization ? `
       organization_id: { in: associatedOrganizationIds },` : ''}
-    },${includeProps ? `
+    },${includePropsDetail ? `
     include: { 
-      ${includeProps.split(', ').join(', \n      ')} 
+      ${includePropsDetail.split(', ').join(', \n      ')} 
     },` : ''}
   });
 
@@ -1298,6 +1305,7 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   // Separate Date and Image fields from other fields
   const dateTimeFields: string[] = [];
   const imageFields: string[] = [];
+  const booleanFields: string[] = [];
   const otherFields: string[] = [];
   
   parentProps.forEach(p => {
@@ -1309,6 +1317,8 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
       dateTimeFields.push(p);
     } else if (propType === 'string' && format === 'uri') {
       imageFields.push(p);
+    } else if (propType === 'boolean') {
+      booleanFields.push(p);
     } else {
       otherFields.push(p);
     }
@@ -1354,8 +1364,16 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
     
     return `      <ImageDisplay url={src.${p}} alt="${label}" />`;
   }).join('\n');
+
+  const booleanFieldsJsx = booleanFields.map(p => {
+    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    return `      <FormControlLabel
+        control={<Checkbox checked={Boolean(src.${p})} readOnly />}
+        label="${label}"
+      />`;
+  }).join('\n');
   
-  const parentTextFields = [textFields, dateTimeFieldsJsx, imageFieldsJsx].filter(f => f).join('\n');
+  const parentTextFields = [textFields, booleanFieldsJsx, dateTimeFieldsJsx, imageFieldsJsx].filter(f => f).join('\n');
   
   // Check if any child has DateTime fields
   const needsClientDirective = children.some(childInfo => {
@@ -1376,6 +1394,8 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';
 import Link from '@mui/material/Link';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}
+  import FormControlLabel from '@mui/material/FormControlLabel';
+  import Checkbox from '@mui/material/Checkbox';
 
 export default function FormView({ src }: FormViewProps) {
   return (
@@ -1441,6 +1461,8 @@ import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';${columnImportLine}${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}${listImport}
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
 
 export default function FormView({ src }: FormViewProps) {
 ${columnVariables}

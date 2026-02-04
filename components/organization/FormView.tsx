@@ -5,6 +5,8 @@ import type { FormViewProps } from '@/lib/organization/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
 import ListWrapper from '../ListWrapper';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
 
 export default function FormView({ src }: FormViewProps) {
 
