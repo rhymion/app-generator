@@ -49,7 +49,7 @@ export default function HeaderPage() {
       Sign In</Link></li>;
 
   return <>
-    {session?.user ? skeleton(with_session(session.user), links) 
+    {session?.user ? skeleton(with_session(session.user), null) 
     : skeleton(without_session, null)}
   </>;
 }
