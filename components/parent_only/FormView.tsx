@@ -6,13 +6,16 @@ import DateTimeWrapper from '../DateTimeWrapper';
   import FormControlLabel from '@mui/material/FormControlLabel';
   import Checkbox from '@mui/material/Checkbox';
 
-export default function FormView({ src }: FormViewProps) {
+export default function FormView({ src, permissions }: FormViewProps) {
+  const canEdit = permissions?.update ?? true;
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <h1>ParentOnly</h1>
         <div>
+        {canEdit && (
           <Link href={`/parent_only/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+        )}
           <Link href="/parent_only"><Button variant="outlined">Back to List</Button></Link>
         </div>
       </div>

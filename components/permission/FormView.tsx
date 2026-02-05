@@ -5,13 +5,16 @@ import Link from '@mui/material/Link';
   import FormControlLabel from '@mui/material/FormControlLabel';
   import Checkbox from '@mui/material/Checkbox';
 
-export default function FormView({ src }: FormViewProps) {
+export default function FormView({ src, permissions }: FormViewProps) {
+  const canEdit = permissions?.update ?? true;
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <h1>Permission</h1>
         <div>
+        {canEdit && (
           <Link href={`/permission/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+        )}
           <Link href="/permission"><Button variant="outlined">Back to List</Button></Link>
         </div>
       </div>

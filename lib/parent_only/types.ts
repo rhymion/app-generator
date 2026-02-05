@@ -1,3 +1,5 @@
+import type { ModelPermissions } from '@/lib/authz';
+
 export type ParentOnly = {
   id: string;
   name: string;
@@ -23,6 +25,7 @@ export type FormViewProps = Readonly<{
     login_time: Date | null;
     logout_time: Date | null;
   };
+  permissions?: ModelPermissions;
 }>;
 
 export type FormUpsertProps = Readonly<FormViewProps & {

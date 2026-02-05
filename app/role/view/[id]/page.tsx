@@ -5,9 +5,9 @@ import { notFound } from 'next/navigation';
 
 export default async function ViewRolePage({ params }: RoleDetailPageProps) {
   const { id } = await params;
-  const data = await getRoleDetailPageData(id);
-  if (!data) {
+  const { role, userPermissions } = await getRoleDetailPageData(id);
+  if (!role) {
     notFound();
   }
-  return <FormView src={data.role} permissions={data.permissions} />;
+  return <FormView src={role} permissions={userPermissions} />;
 }

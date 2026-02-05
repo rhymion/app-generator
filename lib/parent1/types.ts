@@ -1,3 +1,5 @@
+import type { ModelPermissions } from '@/lib/authz';
+
 import type { Organization } from '@/lib/organization/types';
 
 export type Parent1 = {
@@ -67,6 +69,7 @@ export type FormViewProps = Readonly<{
     parent1_child2s: Parent1Child2[];
     parent1_lists: Parent1List[];
   };
+  permissions?: ModelPermissions;
 }>;
 
 export type FormUpsertProps = Readonly<FormViewProps & {

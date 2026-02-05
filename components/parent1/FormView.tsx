@@ -13,16 +13,18 @@ import ListWrapper from '../ListWrapper';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 
-export default function FormView({ src }: FormViewProps) {
+export default function FormView({ src, permissions }: FormViewProps) {
+  const canEdit = permissions?.update ?? true;
   const parent1_child1Columns: GridColDef[] = parent1_child1_columns(false);
   const parent1_child2Columns: GridColDef[] = parent1_child2_columns(false);
-
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <h1>Parent1</h1>
         <div>
-          <Link href={`/parent1/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+          {canEdit && (
+            <Link href={`/parent1/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+          )}
           <Link href="/parent1"><Button variant="outlined">Back to List</Button></Link>
         </div>
       </div>

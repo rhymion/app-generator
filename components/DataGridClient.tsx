@@ -9,6 +9,7 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
+import type { ModelPermissions } from '@/lib/authz';
 
 interface BaseEntity {
   id: string;
@@ -28,9 +29,7 @@ interface DataGridClientProps<T extends BaseEntity> {
   removeAction: (formDataOrIds: FormData | string[]) => Promise<void>;
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];
-  canCreate?: boolean;
-  canEdit?: boolean;
-  canDelete?: boolean;
+  permissions?: ModelPermissions;
 }
 
 export default function DataGridClient<T extends BaseEntity>({ 
@@ -39,9 +38,7 @@ export default function DataGridClient<T extends BaseEntity>({
   removeAction,
   entityLabel = 'Item',
   displayFields,
-  canCreate = true,
-  canEdit = true,
-  canDelete = true,
+  permissions = { create: true, read: true, update: true, delete: true },
 }: DataGridClientProps<T>) {
   const [items, setItems] = useState(src);
   const [isPending, startTransition] = useTransition();
@@ -119,7 +116,7 @@ export default function DataGridClient<T extends BaseEntity>({
   });
 
   const columns: GridColDef<T>[] = dataColumns;
-  if (canEdit) columns.push(
+  if (permissions.update) columns.push(
     {
       field: 'actions',
       headerName: 'Actions',
@@ -143,12 +140,12 @@ export default function DataGridClient<T extends BaseEntity>({
   return (
     <div>
       <div className="flex mb-4">
-        {canCreate && (
+        {permissions.create && (
         <Link href={`${basePath}/new`}>
           <Button variant="contained">Create New {entityLabel}</Button>
         </Link>
         )}
-        {canDelete && (
+        {permissions.delete && (
         <Button onClick={deleteSelected} variant="contained" color="error" sx={{ mx: 2 }} disabled={selectedRowIds.ids.size === 0}>Delete Selected</Button>
         )}
       </div>

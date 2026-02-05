@@ -5,9 +5,9 @@ import { notFound } from 'next/navigation';
 
 export default async function ViewUserAccountPage({ params }: UserAccountDetailPageProps) {
   const { id } = await params;
-  const data = await getUserAccountDetailPageData(id);
-  if (!data) {
+  const { userAccount, userPermissions } = await getUserAccountDetailPageData(id);
+  if (!userAccount) {
     notFound();
   }
-  return <FormView src={data.userAccount} permissions={data.permissions} />;
+  return <FormView src={userAccount} permissions={userPermissions} />;
 }

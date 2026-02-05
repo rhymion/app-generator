@@ -1,14 +1,15 @@
+import { GridColDef } from '@mui/x-data-grid';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/role/types';
 import Link from '@mui/material/Link';
+import FieldsViewGrid from '../FieldsViewGrid';
 import ListWrapper from '../ListWrapper';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
-
 
   return (
     <div>

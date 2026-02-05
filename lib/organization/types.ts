@@ -1,3 +1,5 @@
+import type { ModelPermissions } from '@/lib/authz';
+
 export type Organization = {
   id: string;
   name: string;
@@ -30,6 +32,7 @@ export type FormViewProps = Readonly<{
     description: string | null;
     user_accounts: UserAccount[];
   };
+  permissions?: ModelPermissions;
 }>;
 
 export type FormUpsertProps = Readonly<FormViewProps & {

@@ -144,7 +144,9 @@ export function generateTypes(parent: string, children: ChildInfo[], schema: Sch
     ? relationshipTargets.map(r => `import type { ${toPascalCase(r.target)} } from '@/lib/${r.target}/types';`).join('\n') + '\n\n'
     : '';
 
-  let result = `${importLines}export type ${parentPascal} = {
+  let result = `import type { ModelPermissions } from '@/lib/authz';
+
+${importLines}export type ${parentPascal} = {
 ${parentProps.join('\n')}
 ${parentExtraProps.join('\n')}
 };
@@ -219,6 +221,7 @@ ${formViewParentProps}${formViewExtraProps.length > 0 ? `\n${formViewExtraProps.
   
   result += `
   };
+  permissions?: ModelPermissions;
 }>;
 
 export type FormUpsertProps = Readonly<FormViewProps & {
@@ -277,14 +280,14 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
 
 import prisma from '@/lib/prisma';
 import type { ${parentPascal}, ${parentPascal}Detail } from '@/lib/${parent}/types';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';${shouldFilterByOrganization ? "\nimport { getAssociatedOrganizations } from '@/lib/organization/getters_associated';" : ''}
+import type { ModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { getServerSession } from 'next-auth/next';${shouldFilterByOrganization ? "\nimport { getAssociatedOrganizations } from '@/lib/organization/getters_associated';" : ''}
 
-export async function getAll${parentPascal}s(): Promise<${parentPascal}[]> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+export async function getAll${parentPascal}s(permissions?: ModelPermissions): Promise<${parentPascal}[]> {
+  const resolvedPermissions = permissions ?? (await getModelPermissions('role'));
+  await assertPermission(resolvedPermissions, 'read', '${parent}');
+
 ${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizations();
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 ` : ''}
@@ -300,12 +303,10 @@ ${relationshipMapping}` : ''}
   }));
 }
 
-export async function get${parentPascal}Detail(id: string): Promise<${parentPascal}Detail | null> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
-${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizations();
+export async function get${parentPascal}Detail(id: string, permissions?: ModelPermissions): Promise<${parentPascal}Detail | null> {
+  const resolvedPermissions = permissions ?? (await getModelPermissions('role'));
+  await assertPermission(resolvedPermissions, 'read', '${parent}');
+  ${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizations();
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 ` : ''}
   const ${parentCamel} = await prisma.${parent}.${shouldFilterByOrganization ? 'findFirst' : 'findUnique'}({
@@ -327,6 +328,20 @@ ${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssoc
 ${childMappings}` : ''}${relationshipMapping ? `
 ${relationshipMapping}` : ''}
   };
+}
+
+export async function get${parentPascal}ListPageData() {
+  const userPermissions = await getModelPermissions('${parent}');
+  await assertPermission(userPermissions, 'read', '${parent}');
+  const ${parentCamel}s = await getAll${parentPascal}s(userPermissions);
+  return { ${parentCamel}s, userPermissions };
+}
+
+export async function get${parentPascal}DetailPageData(id: string) {
+  const userPermissions = await getModelPermissions('${parent}');
+  await assertPermission(userPermissions, 'read', '${parent}');
+  const ${parentCamel} = await get${parentPascal}Detail(id, userPermissions);
+  return { ${parentCamel}, userPermissions };
 }
 `;
 }
@@ -1402,13 +1417,16 @@ import Link from '@mui/material/Link';${needsDateTimeWrapper ? '\nimport DateTim
   import FormControlLabel from '@mui/material/FormControlLabel';
   import Checkbox from '@mui/material/Checkbox';
 
-export default function FormView({ src }: FormViewProps) {
+export default function FormView({ src, permissions }: FormViewProps) {
+  const canEdit = permissions?.update ?? true;
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <h1>${parentPascal}</h1>
         <div>
+        {canEdit && (
           <Link href={\`/${parent}/edit/\${src.id}\`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+        )}
           <Link href="/${parent}"><Button variant="outlined">Back to List</Button></Link>
         </div>
       </div>
@@ -1469,15 +1487,17 @@ import FieldsViewGrid from '../FieldsViewGrid';${columnImportLine}${needsDateTim
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 
-export default function FormView({ src }: FormViewProps) {
+export default function FormView({ src, permissions }: FormViewProps) {
+  const canEdit = permissions?.update ?? true;
 ${columnVariables}
-
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <h1>${parentPascal}</h1>
         <div>
-          <Link href={\`/${parent}/edit/\${src.id}\`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+          {canEdit && (
+            <Link href={\`/${parent}/edit/\${src.id}\`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+          )}
           <Link href="/${parent}"><Button variant="outlined">Back to List</Button></Link>
         </div>
       </div>
@@ -1492,6 +1512,7 @@ ${childViewGrids}
 export function generatePageList(parent: string, schema: Schema): string {
   const parentPascal = toPascalCase(parent);
   const parentTitle = toTitleCase(parent);
+  const parentCamel = toCamelCase(parent);
   
   // Check for x-display configuration in the parent definition
   const parentDef = schema.definitions[parent];
@@ -1513,13 +1534,14 @@ export function generatePageList(parent: string, schema: Schema): string {
     displayFieldsCode = ` displayFields={[\n${fields}\n  ]}`;
   }
   
-  return `import { getAll${parentPascal}s } from '@/lib/${parent}/getters';
+  return `import { get${parentPascal}ListPageData } from '@/lib/${parent}/getters';
 import DataGridClient from '@/components/DataGridClient';
 import { remove${parentPascal} } from '@/lib/${parent}/actions';
 
 export default async function ${parentPascal}sPage() {
-  const ${parent}s = await getAll${parentPascal}s();
-  return <DataGridClient src={${parent}s} basePath="/${parent}" removeAction={remove${parentPascal}} entityLabel="${parentTitle}"${displayFieldsCode} />;
+  const { ${parentCamel}s, userPermissions } = await get${parentPascal}ListPageData();
+  return <DataGridClient src={${parentCamel}s} basePath="/${parent}" removeAction={remove${parentPascal}} entityLabel="${parentTitle}"${displayFieldsCode} 
+    permissions={userPermissions} />;
 }
 `;
 }
@@ -1680,19 +1702,20 @@ ${promiseAllFetches}
 
 export function generatePageView(parent: string): string {
   const parentPascal = toPascalCase(parent);
+  const parentCamel = toCamelCase(parent);
   
   return `import FormView from '@/components/${parent}/FormView';
-import { get${parentPascal}Detail } from '@/lib/${parent}/getters';
+import { get${parentPascal}DetailPageData } from '@/lib/${parent}/getters';
 import { ${parentPascal}DetailPageProps } from '@/lib/${parent}/types';
 import { notFound } from 'next/navigation';
 
 export default async function View${parentPascal}Page({ params }: ${parentPascal}DetailPageProps) {
   const { id } = await params;
-  const ${parent} = await get${parentPascal}Detail(id);
-  if (!${parent}) {
+  const { ${parentCamel}, userPermissions } = await get${parentPascal}DetailPageData(id);
+  if (!${parentCamel}) {
     notFound();
   }
-  return <FormView src={${parent}} />;
+  return <FormView src={${parentCamel}} permissions={userPermissions} />;
 }
 `;
 }
