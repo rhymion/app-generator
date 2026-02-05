@@ -3,16 +3,15 @@
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';
+import { requirePermission } from '@/lib/authz';
 
 export async function upsertParentOnly(data: FormData) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
-
   const id = data.get('id') as string | null;
+  if (id) {
+    await requirePermission('parent_only', 'update');
+  } else {
+    await requirePermission('parent_only', 'create');
+  }
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
   const loginTimeStr = data.get('login_time') as string | null;
@@ -54,10 +53,7 @@ async function updateParentOnly(id: string, name: string, description: string | 
 }
 
 export async function removeParentOnly(data: FormData | string[]) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+  await requirePermission('parent_only', 'delete');
 
   if (Array.isArray(data)) {
     await prisma.parent_only.deleteMany({

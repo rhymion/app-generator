@@ -3,16 +3,15 @@
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';
+import { requirePermission } from '@/lib/authz';
 
 export async function upsertParent1(data: FormData) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
-
   const id = data.get('id') as string | null;
+  if (id) {
+    await requirePermission('parent1', 'update');
+  } else {
+    await requirePermission('parent1', 'create');
+  }
   const name = data.get('name') as string;
   const organizationId = data.get('organization_id') as string;
   const description = data.get('description') as string | null;
@@ -118,10 +117,7 @@ async function updateParent1(id: string, name: string, organizationId: string, d
 }
 
 export async function removeParent1(data: FormData | string[]) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+  await requirePermission('parent1', 'delete');
 
   if (Array.isArray(data)) {
     await prisma.parent1.deleteMany({

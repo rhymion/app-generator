@@ -430,16 +430,15 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';
+import { requirePermission } from '@/lib/authz';
 
 export async function upsert${parentPascal}(data: FormData) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
-
   const id = data.get('id') as string | null;
+  if (id) {
+    await requirePermission('${parent}', 'update');
+  } else {
+    await requirePermission('${parent}', 'create');
+  }
 ${formDataGets}
 
   if (id) {
@@ -470,10 +469,7 @@ ${parentDataObj}
 }
 ${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+  await requirePermission('${parent}', 'delete');
 
   if (Array.isArray(data)) {
     await prisma.${parent}.deleteMany({
@@ -572,16 +568,15 @@ export async function remove${parentPascal}(data: FormData | string[]) {
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';
+import { requirePermission } from '@/lib/authz';
 
 export async function upsert${parentPascal}(data: FormData) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
-
   const id = data.get('id') as string | null;
+  if (id) {
+    await requirePermission('${parent}', 'update');
+  } else {
+    await requirePermission('${parent}', 'create');
+  }
 ${formDataGets}
 ${childFormDataExtractions}
 
@@ -615,10 +610,7 @@ ${childNestedUpdate}
 }
 ${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+  await requirePermission('${parent}', 'delete');
 
   if (Array.isArray(data)) {
     await prisma.${parent}.deleteMany({

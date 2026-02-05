@@ -3,16 +3,15 @@
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';
+import { requirePermission } from '@/lib/authz';
 
 export async function upsertPermission(data: FormData) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
-
   const id = data.get('id') as string | null;
+  if (id) {
+    await requirePermission('permission', 'update');
+  } else {
+    await requirePermission('permission', 'create');
+  }
   const name = data.get('name') as string;
   const create = data.get('create') === 'true';
   const read = data.get('read') === 'true';
@@ -58,10 +57,7 @@ async function updatePermission(id: string, name: string, create: boolean, read:
 }
 
 export async function removePermission(data: FormData | string[]) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+  await requirePermission('permission', 'delete');
 
   if (Array.isArray(data)) {
     await prisma.permission.deleteMany({
