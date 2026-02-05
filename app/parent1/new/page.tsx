@@ -1,8 +1,10 @@
 import FormUpsert from '@/components/parent1/FormUpsert';
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';
+import { getParent1NewPageAccessCheck } from '@/lib/parent1/getters';
 
 export default async function AddParent1Page() {
-  const allOrganizations = await getAssociatedOrganizations();
+  const organizationsData = await getAssociatedOrganizationListPageData();
+  await getParent1NewPageAccessCheck();
   const src = {
     id: '',
     name: '',
@@ -15,5 +17,5 @@ export default async function AddParent1Page() {
     parent1_child2s: [],
     parent1_lists: [],
   };
-  return <FormUpsert src={src} isEdit={false} allOrganizations={allOrganizations} />;
+  return <FormUpsert src={src} isEdit={false} allOrganizations={organizationsData.organizations} organizationPermissions={organizationsData.userPermissions} />;
 }

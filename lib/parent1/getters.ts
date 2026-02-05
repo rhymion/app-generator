@@ -2,17 +2,15 @@
 
 import prisma from '@/lib/prisma';
 import type { Parent1, Parent1Detail } from '@/lib/parent1/types';
+import type { ModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions } from '@/lib/authz';
+import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';
 
-export async function getAllParent1s(): Promise<Parent1[]> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
-  const associatedOrganizations = await getAssociatedOrganizations();
-  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
+async function getAllParent1s(): Promise<Parent1[]> {
+  const associatedOrganizations = await getAssociatedOrganizationListPageData();
+  const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
 
   const parent1s = await prisma.parent1.findMany({
     where: {
@@ -32,13 +30,9 @@ export async function getAllParent1s(): Promise<Parent1[]> {
   }));
 }
 
-export async function getParent1Detail(id: string): Promise<Parent1Detail | null> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
-  const associatedOrganizations = await getAssociatedOrganizations();
-  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
+async function getParent1Detail(id: string): Promise<Parent1Detail | null> {
+    const associatedOrganizations = await getAssociatedOrganizationListPageData();
+  const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
 
   const parent1 = await prisma.parent1.findFirst({
     where: { 
@@ -64,4 +58,26 @@ export async function getParent1Detail(id: string): Promise<Parent1Detail | null
     parent1_lists: parent1.parent1_lists,
     organization: parent1.organization,
   };
+}
+
+export async function getParent1ListPageData(isAssertPermission: boolean = true) {
+  const userPermissions = await getModelPermissions('parent1');
+  if (isAssertPermission) {
+    await assertPermission(userPermissions, 'read', 'parent1');
+  }
+  const parent1s = await getAllParent1s();
+  return { parent1s, userPermissions };
+}
+
+export async function getParent1DetailPageData(id: string, operation: Operation = 'read') {
+  const userPermissions = await getModelPermissions('parent1');
+  await assertPermission(userPermissions, operation, 'parent1');
+  const parent1 = await getParent1Detail(id);
+  return { parent1, userPermissions };
+}
+
+export async function getParent1NewPageAccessCheck() {
+  const userPermissions = await getModelPermissions('parent1');
+  await assertPermission(userPermissions, 'create', 'parent1');
+  return userPermissions;
 }

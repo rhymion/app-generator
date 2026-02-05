@@ -4,17 +4,14 @@ import prisma from '@/lib/prisma';
 import type { Organization, OrganizationDetail } from '@/lib/organization/types';
 import { authOptions } from '@/auth';
 import { getServerSession } from 'next-auth';
+import { assertPermission, getModelPermissions, getSessionUserIdOrThrow, Operation } from '../authz';
 
-export async function getAssociatedOrganizations(): Promise<Organization[]> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+async function getAssociatedOrganizations(userId: string): Promise<Organization[]> {
   const organizations = await prisma.organization.findMany({
     where: {
       user_accounts: {
         some: {
-          id: session.user.id
+          id: userId
         }
       }
     },
@@ -26,23 +23,19 @@ export async function getAssociatedOrganizations(): Promise<Organization[]> {
   }));
 }
 
-export async function getAssociatedOrganizationDetail(id: string): Promise<OrganizationDetail | null> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+async function getAssociatedOrganizationDetail(id: string, userId: string): Promise<OrganizationDetail | null> {
   const organization = await prisma.organization.findUnique({
     where: { 
       id,
       user_accounts: {
         some: {
-          id: session.user.id
+          id: userId
         }
       }
     },
     include: { 
       user_accounts: {
-        where: { id: session.user.id }
+        where: { id: userId }
       }
     },
   });
@@ -55,4 +48,22 @@ export async function getAssociatedOrganizationDetail(id: string): Promise<Organ
     ...organization,
     user_accounts: organization.user_accounts,
   };
+}
+
+export async function getAssociatedOrganizationListPageData(isAssertPermission: boolean = true) {
+  const userId = await getSessionUserIdOrThrow();
+  const userPermissions = await getModelPermissions('organization', userId);
+  if (isAssertPermission) {
+    await assertPermission(userPermissions, 'read', 'organization');
+  }
+  const organizations = await getAssociatedOrganizations(userId);
+  return { organizations, userPermissions };
+}
+
+export async function getAssociatedOrganizationDetailPageData(id: string, operation: Operation = 'read') {
+  const userId = await getSessionUserIdOrThrow();
+  const userPermissions = await getModelPermissions('organization', userId);
+  await assertPermission(userPermissions, operation, 'organization');
+  const organization = await getAssociatedOrganizationDetail(id, userId);
+  return { organization, userPermissions };
 }

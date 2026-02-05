@@ -1,6 +1,8 @@
 import FormUpsert from '@/components/parent_only/FormUpsert';
+import { getParentOnlyNewPageAccessCheck } from '@/lib/parent_only/getters';
 
 export default async function AddParentOnlyPage() {
+  await getParentOnlyNewPageAccessCheck();
   const src = {
     id: '',
     name: '',

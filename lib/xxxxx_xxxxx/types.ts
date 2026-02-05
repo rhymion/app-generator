@@ -1,3 +1,5 @@
+import type { ModelPermissions } from '@/lib/authz';
+
 export type XxxxxXxxxx = {
   id: string;
   name: string;
@@ -35,9 +37,11 @@ export type FormViewProps = Readonly<{
     team: string | null;
     yyyyy_yyyyys: YyyyyYyyyy[];
   };
+  permissions?: ModelPermissions;
 }>;
 
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
+
 
 }>;

@@ -12,7 +12,7 @@ import FormWithChildGrid from '../FormWithChildGrid';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 
-export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, allRoles = [], rolePermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);

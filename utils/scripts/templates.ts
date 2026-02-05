@@ -233,6 +233,13 @@ ${relationshipTargets.map(r => {
     const targetPascal = toPascalCase(r.target);
     return `\n  all${targetPascal}s?: ${targetPascal}Option[];`;
   }).join('')}
+${Array.from(new Set([
+  ...children.filter(c => c.relationship?.type === 'many-to-many').map(c => c.relationship!.target),
+  ...relationshipTargets.map(r => r.target)
+])).map(target => {
+    const targetCamel = toCamelCase(target);
+    return `\n  ${targetCamel}Permissions?: ModelPermissions;`;
+  }).join('')}
 }>;
 `;
 
@@ -283,14 +290,11 @@ import type { ${parentPascal}, ${parentPascal}Detail } from '@/lib/${parent}/typ
 import type { ModelPermissions } from '@/lib/authz';
 import { assertPermission, getModelPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';${shouldFilterByOrganization ? "\nimport { getAssociatedOrganizations } from '@/lib/organization/getters_associated';" : ''}
+import { getServerSession } from 'next-auth/next';${shouldFilterByOrganization ? "\nimport { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';" : ''}
 
-export async function getAll${parentPascal}s(permissions?: ModelPermissions): Promise<${parentPascal}[]> {
-  const resolvedPermissions = permissions ?? (await getModelPermissions('role'));
-  await assertPermission(resolvedPermissions, 'read', '${parent}');
-
-${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizations();
-  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
+async function getAll${parentPascal}s(): Promise<${parentPascal}[]> {
+${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizationListPageData();
+  const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
 ` : ''}
   const ${parentCamel}s = await prisma.${parent}.findMany({${shouldFilterByOrganization ? `
     where: {
@@ -304,11 +308,9 @@ ${relationshipMapping}` : ''}
   }));
 }
 
-export async function get${parentPascal}Detail(id: string, permissions?: ModelPermissions): Promise<${parentPascal}Detail | null> {
-  const resolvedPermissions = permissions ?? (await getModelPermissions('role'));
-  await assertPermission(resolvedPermissions, 'read', '${parent}');
-  ${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizations();
-  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
+async function get${parentPascal}Detail(id: string): Promise<${parentPascal}Detail | null> {
+  ${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizationListPageData();
+  const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
 ` : ''}
   const ${parentCamel} = await prisma.${parent}.${shouldFilterByOrganization ? 'findFirst' : 'findUnique'}({
     where: { 
@@ -336,14 +338,14 @@ export async function get${parentPascal}ListPageData(isAssertPermission: boolean
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', '${parent}');
   }
-  const ${parentCamel}s = await getAll${parentPascal}s(userPermissions);
+  const ${parentCamel}s = await getAll${parentPascal}s();
   return { ${parentCamel}s, userPermissions };
 }
 
 export async function get${parentPascal}DetailPageData(id: string, operation: Operation = 'read') {
   const userPermissions = await getModelPermissions('${parent}');
   await assertPermission(userPermissions, operation, '${parent}');
-  const ${parentCamel} = await get${parentPascal}Detail(id, userPermissions);
+  const ${parentCamel} = await get${parentPascal}Detail(id);
   return { ${parentCamel}, userPermissions };
 }
 
@@ -1235,9 +1237,13 @@ ${childSerialize}
   const extraProps = selectionTargets
     .map(target => `all${toPascalCase(target)}s = []`)
     .join(', ');
+
+  const selectionPermissionProps = selectionTargets
+    .map(target => `${toCamelCase(target)}Permissions`)
+    .join(', ');
   
-  const formUpsertParams = extraProps 
-    ? `{ src, isEdit, ${extraProps} }: FormUpsertProps`
+  const formUpsertParams = extraProps || selectionPermissionProps
+    ? `{ src, isEdit${extraProps ? `, ${extraProps}` : ''}${selectionPermissionProps ? `, ${selectionPermissionProps}` : ''} }: FormUpsertProps`
     : `{ src, isEdit }: FormUpsertProps`;
   
   const booleanImports = booleanProps.length > 0
@@ -1616,7 +1622,7 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
   const selectionImports = selectionTargets.length > 0
     ? selectionTargets
         .map(target => target === 'organization'
-          ? `import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';`
+          ? `import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';`
           : `import { get${toPascalCase(target)}ListPageData } from '@/lib/${target}/getters';`)
         .join('\n')
     : '';
@@ -1624,7 +1630,7 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
   const selectionFetches = selectionTargets.length > 0
     ? selectionTargets
         .map(target => target === 'organization'
-          ? `  const organizationsData = await getAssociatedOrganizations();`
+          ? `  const organizationsData = await getAssociatedOrganizationListPageData();`
           : `  const ${toCamelCase(target)}sData = await get${toPascalCase(target)}ListPageData(false);`)
         .join('\n')
     : '';
@@ -1670,7 +1676,7 @@ export function generatePageEdit(parent: string, children: ChildInfo[], schema: 
   const selectionImports = selectionTargets.length > 0
     ? '\n' + selectionTargets
         .map(target => target === 'organization'
-          ? `import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';`
+          ? `import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';`
           : `import { get${toPascalCase(target)}ListPageData } from '@/lib/${target}/getters';`)
         .join('\n')
     : '';
@@ -1679,7 +1685,7 @@ export function generatePageEdit(parent: string, children: ChildInfo[], schema: 
   
   const selectionFetchCalls = selectionTargets.map((target) =>
     target === 'organization'
-      ? 'getAssociatedOrganizations()'
+      ? 'getAssociatedOrganizationListPageData()'
       : `get${toPascalCase(target)}ListPageData(false)`
   );
 

@@ -14,7 +14,7 @@ import FieldsDataGrid from '../FieldsDataGrid';
 import { role_columns } from '../user_account/column_def';
 import ImageUpload from '../ImageUpload';
 
-export default function FormUpsert({ src, isEdit, allRoles = [] }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, allRoles = [], rolePermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);

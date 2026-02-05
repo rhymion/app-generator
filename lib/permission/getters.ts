@@ -2,14 +2,12 @@
 
 import prisma from '@/lib/prisma';
 import type { Permission, PermissionDetail } from '@/lib/permission/types';
+import type { ModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions } from '@/lib/authz';
+import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';
 
-export async function getAllPermissions(): Promise<Permission[]> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+async function getAllPermissions(): Promise<Permission[]> {
 
   const permissions = await prisma.permission.findMany({
     include: { role: true },
@@ -26,12 +24,8 @@ export async function getAllPermissions(): Promise<Permission[]> {
   }));
 }
 
-export async function getPermissionDetail(id: string): Promise<PermissionDetail | null> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
-
+async function getPermissionDetail(id: string): Promise<PermissionDetail | null> {
+  
   const permission = await prisma.permission.findUnique({
     where: { 
       id,
@@ -49,4 +43,26 @@ export async function getPermissionDetail(id: string): Promise<PermissionDetail 
     ...permission,
     role: permission.role,
   };
+}
+
+export async function getPermissionListPageData(isAssertPermission: boolean = true) {
+  const userPermissions = await getModelPermissions('permission');
+  if (isAssertPermission) {
+    await assertPermission(userPermissions, 'read', 'permission');
+  }
+  const permissions = await getAllPermissions();
+  return { permissions, userPermissions };
+}
+
+export async function getPermissionDetailPageData(id: string, operation: Operation = 'read') {
+  const userPermissions = await getModelPermissions('permission');
+  await assertPermission(userPermissions, operation, 'permission');
+  const permission = await getPermissionDetail(id);
+  return { permission, userPermissions };
+}
+
+export async function getPermissionNewPageAccessCheck() {
+  const userPermissions = await getModelPermissions('permission');
+  await assertPermission(userPermissions, 'create', 'permission');
+  return userPermissions;
 }

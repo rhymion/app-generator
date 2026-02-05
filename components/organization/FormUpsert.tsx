@@ -13,7 +13,7 @@ import { GridRowsProp } from '@mui/x-data-grid';
 import FieldsDataGrid from '../FieldsDataGrid';
 import { user_account_columns } from '../organization/column_def';
 
-export default function FormUpsert({ src, isEdit, allUserAccounts = [] }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, allUserAccounts = [], userAccountPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);

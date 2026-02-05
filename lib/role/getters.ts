@@ -4,11 +4,10 @@ import prisma from '@/lib/prisma';
 import type { Role, RoleDetail } from '@/lib/role/types';
 import type { ModelPermissions } from '@/lib/authz';
 import { assertPermission, getModelPermissions } from '@/lib/authz';
-import { getAllUserAccounts } from '@/lib/user_account/getters';
+import type { Operation } from '@/lib/authz';
+import { getServerSession } from 'next-auth/next';
 
-export async function getAllRoles(permissions?: ModelPermissions): Promise<Role[]> {
-  const resolvedPermissions = permissions ?? (await getModelPermissions('role'));
-  await assertPermission(resolvedPermissions, 'read', 'role');
+async function getAllRoles(): Promise<Role[]> {
 
   const roles = await prisma.role.findMany({
   });
@@ -19,10 +18,8 @@ export async function getAllRoles(permissions?: ModelPermissions): Promise<Role[
   }));
 }
 
-export async function getRoleDetail(id: string, permissions?: ModelPermissions): Promise<RoleDetail | null> {
-  const resolvedPermissions = permissions ?? (await getModelPermissions('role'));
-  await assertPermission(resolvedPermissions, 'read', 'role');
-
+async function getRoleDetail(id: string): Promise<RoleDetail | null> {
+  
   const role = await prisma.role.findUnique({
     where: { 
       id,
@@ -42,35 +39,24 @@ export async function getRoleDetail(id: string, permissions?: ModelPermissions):
   };
 }
 
-export async function getRoleListPageData() {
-  const permissions = await getModelPermissions('role');
-  await assertPermission(permissions, 'read', 'role');
-  const roles = await getAllRoles(permissions);
-  return { roles, permissions };
+export async function getRoleListPageData(isAssertPermission: boolean = true) {
+  const userPermissions = await getModelPermissions('role');
+  if (isAssertPermission) {
+    await assertPermission(userPermissions, 'read', 'role');
+  }
+  const roles = await getAllRoles();
+  return { roles, userPermissions };
 }
 
-export async function getRoleDetailPageData(id: string) {
-  const permissions = await getModelPermissions('role');
-  await assertPermission(permissions, 'read', 'role');
-  const role = await getRoleDetail(id, permissions);
-  if (!role) return null;
-  return { role, permissions };
+export async function getRoleDetailPageData(id: string, operation: Operation = 'read') {
+  const userPermissions = await getModelPermissions('role');
+  await assertPermission(userPermissions, operation, 'role');
+  const role = await getRoleDetail(id);
+  return { role, userPermissions };
 }
 
-export async function getRoleNewPageData() {
-  const permissions = await getModelPermissions('role');
-  await assertPermission(permissions, 'create', 'role');
-  const allUserAccounts = await getAllUserAccounts();
-  return { allUserAccounts, permissions };
-}
-
-export async function getRoleEditPageData(id: string) {
-  const permissions = await getModelPermissions('role');
-  await assertPermission(permissions, 'update', 'role');
-  const [role, allUserAccounts] = await Promise.all([
-    getRoleDetail(id, permissions),
-    getAllUserAccounts(),
-  ]);
-  if (!role) return null;
-  return { role, allUserAccounts, permissions };
+export async function getRoleNewPageAccessCheck() {
+  const userPermissions = await getModelPermissions('role');
+  await assertPermission(userPermissions, 'create', 'role');
+  return userPermissions;
 }

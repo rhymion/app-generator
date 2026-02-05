@@ -1,17 +1,17 @@
 import FormUpsert from '@/components/organization/FormUpsert';
-import { getOrganizationDetail } from '@/lib/organization/getters';
-import { getAllUserAccounts } from '@/lib/user_account/getters';
+import { getOrganizationDetailPageData } from '@/lib/organization/getters';
+import { getUserAccountListPageData } from '@/lib/user_account/getters';
 import { OrganizationDetailPageProps } from '@/lib/organization/types';
 import { notFound } from 'next/navigation';
 
 export default async function EditOrganizationPage({ params }: OrganizationDetailPageProps) {
   const { id } = await params;
-  const [organization, allUserAccounts] = await Promise.all([
-    getOrganizationDetail(id),
-    getAllUserAccounts(),
+  const [detail, userAccountsData] = await Promise.all([
+    getOrganizationDetailPageData(id, 'update'),
+    getUserAccountListPageData(false),
   ]);
-  if (!organization) {
+  if (!detail.organization) {
     notFound();
   }
-  return <FormUpsert src={organization} isEdit={true} allUserAccounts={allUserAccounts} />;
+  return <FormUpsert src={detail.organization} isEdit={true} allUserAccounts={userAccountsData.userAccounts} userAccountPermissions={userAccountsData.userPermissions} />;
 }

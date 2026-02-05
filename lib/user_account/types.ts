@@ -36,12 +36,12 @@ export type FormViewProps = Readonly<{
     roles: Role[];
   };
   permissions?: ModelPermissions;
-  canAssignRoles?: boolean;
 }>;
 
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allRoles?: Role[];
-  allowRoleEdit?: boolean;
 
+
+  rolePermissions?: ModelPermissions;
 }>;

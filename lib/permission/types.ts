@@ -44,4 +44,6 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
 
   allRoles?: RoleOption[];
+
+  rolePermissions?: ModelPermissions;
 }>;

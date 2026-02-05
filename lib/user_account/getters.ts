@@ -3,12 +3,11 @@
 import prisma from '@/lib/prisma';
 import type { UserAccount, UserAccountDetail } from '@/lib/user_account/types';
 import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, canAccess, getModelPermissions } from '@/lib/authz';
-import { getAllRoles } from '@/lib/role/getters';
+import { assertPermission, getModelPermissions } from '@/lib/authz';
+import type { Operation } from '@/lib/authz';
+import { getServerSession } from 'next-auth/next';
 
-export async function getAllUserAccounts(permissions?: ModelPermissions): Promise<UserAccount[]> {
-  const resolvedPermissions = permissions ?? (await getModelPermissions('user_account'));
-  await assertPermission(resolvedPermissions, 'read', 'user_account');
+async function getAllUserAccounts(): Promise<UserAccount[]> {
 
   const userAccounts = await prisma.user_account.findMany({
   });
@@ -22,10 +21,8 @@ export async function getAllUserAccounts(permissions?: ModelPermissions): Promis
   }));
 }
 
-export async function getUserAccountDetail(id: string, permissions?: ModelPermissions): Promise<UserAccountDetail | null> {
-  const resolvedPermissions = permissions ?? (await getModelPermissions('user_account'));
-  await assertPermission(resolvedPermissions, 'read', 'user_account');
-
+async function getUserAccountDetail(id: string): Promise<UserAccountDetail | null> {
+  
   const userAccount = await prisma.user_account.findUnique({
     where: { 
       id,
@@ -45,40 +42,24 @@ export async function getUserAccountDetail(id: string, permissions?: ModelPermis
   };
 }
 
-export async function getUserAccountListPageData() {
-  const permissions = await getModelPermissions('user_account');
-  await assertPermission(permissions, 'read', 'user_account');
-  const userAccounts = await getAllUserAccounts(permissions);
-  return { userAccounts, permissions };
+export async function getUserAccountListPageData(isAssertPermission: boolean = true) {
+  const userPermissions = await getModelPermissions('user_account');
+  if (isAssertPermission) {
+    await assertPermission(userPermissions, 'read', 'user_account');
+  }
+  const userAccounts = await getAllUserAccounts();
+  return { userAccounts, userPermissions };
 }
 
-export async function getUserAccountDetailPageData(id: string) {
-  const permissions = await getModelPermissions('user_account');
-  await assertPermission(permissions, 'read', 'user_account');
-  const [userAccount, canAssignRoles] = await Promise.all([
-    getUserAccountDetail(id, permissions),
-    canAccess('role', 'update'),
-  ]);
-  if (!userAccount) return null;
-  return { userAccount, permissions, canAssignRoles };
+export async function getUserAccountDetailPageData(id: string, operation: Operation = 'read') {
+  const userPermissions = await getModelPermissions('user_account');
+  await assertPermission(userPermissions, operation, 'user_account');
+  const userAccount = await getUserAccountDetail(id);
+  return { userAccount, userPermissions };
 }
 
-export async function getUserAccountNewPageData() {
-  const permissions = await getModelPermissions('user_account');
-  await assertPermission(permissions, 'create', 'user_account');
-  const canAssignRoles = await canAccess('role', 'update');
-  const allRoles = canAssignRoles ? await getAllRoles() : [];
-  return { allRoles, canAssignRoles, permissions };
-}
-
-export async function getUserAccountEditPageData(id: string) {
-  const permissions = await getModelPermissions('user_account');
-  await assertPermission(permissions, 'update', 'user_account');
-  const canAssignRoles = await canAccess('role', 'update');
-  const [userAccount, allRoles] = await Promise.all([
-    getUserAccountDetail(id, permissions),
-    canAssignRoles ? getAllRoles() : Promise.resolve([]),
-  ]);
-  if (!userAccount) return null;
-  return { userAccount, allRoles, canAssignRoles, permissions };
+export async function getUserAccountNewPageAccessCheck() {
+  const userPermissions = await getModelPermissions('user_account');
+  await assertPermission(userPermissions, 'create', 'user_account');
+  return userPermissions;
 }

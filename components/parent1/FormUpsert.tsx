@@ -18,7 +18,7 @@ import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
 import ImageUpload from '../ImageUpload';
 
-export default function FormUpsert({ src, isEdit, allOrganizations = [] }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, allOrganizations = [], organizationPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
