@@ -8,7 +8,7 @@ import { getAllRoles } from '@/lib/role/getters';
 
 export async function getAllUserAccounts(permissions?: ModelPermissions): Promise<UserAccount[]> {
   const resolvedPermissions = permissions ?? (await getModelPermissions('user_account'));
-  assertPermission(resolvedPermissions, 'read', 'user_account');
+  await assertPermission(resolvedPermissions, 'read', 'user_account');
 
   const userAccounts = await prisma.user_account.findMany({
   });
@@ -24,7 +24,7 @@ export async function getAllUserAccounts(permissions?: ModelPermissions): Promis
 
 export async function getUserAccountDetail(id: string, permissions?: ModelPermissions): Promise<UserAccountDetail | null> {
   const resolvedPermissions = permissions ?? (await getModelPermissions('user_account'));
-  assertPermission(resolvedPermissions, 'read', 'user_account');
+  await assertPermission(resolvedPermissions, 'read', 'user_account');
 
   const userAccount = await prisma.user_account.findUnique({
     where: { 
@@ -47,14 +47,14 @@ export async function getUserAccountDetail(id: string, permissions?: ModelPermis
 
 export async function getUserAccountListPageData() {
   const permissions = await getModelPermissions('user_account');
-  assertPermission(permissions, 'read', 'user_account');
+  await assertPermission(permissions, 'read', 'user_account');
   const userAccounts = await getAllUserAccounts(permissions);
   return { userAccounts, permissions };
 }
 
 export async function getUserAccountDetailPageData(id: string) {
   const permissions = await getModelPermissions('user_account');
-  assertPermission(permissions, 'read', 'user_account');
+  await assertPermission(permissions, 'read', 'user_account');
   const [userAccount, canAssignRoles] = await Promise.all([
     getUserAccountDetail(id, permissions),
     canAccess('role', 'update'),
@@ -65,7 +65,7 @@ export async function getUserAccountDetailPageData(id: string) {
 
 export async function getUserAccountNewPageData() {
   const permissions = await getModelPermissions('user_account');
-  assertPermission(permissions, 'create', 'user_account');
+  await assertPermission(permissions, 'create', 'user_account');
   const canAssignRoles = await canAccess('role', 'update');
   const allRoles = canAssignRoles ? await getAllRoles() : [];
   return { allRoles, canAssignRoles, permissions };
@@ -73,7 +73,7 @@ export async function getUserAccountNewPageData() {
 
 export async function getUserAccountEditPageData(id: string) {
   const permissions = await getModelPermissions('user_account');
-  assertPermission(permissions, 'update', 'user_account');
+  await assertPermission(permissions, 'update', 'user_account');
   const canAssignRoles = await canAccess('role', 'update');
   const [userAccount, allRoles] = await Promise.all([
     getUserAccountDetail(id, permissions),
