@@ -282,6 +282,7 @@ import prisma from '@/lib/prisma';
 import type { ${parentPascal}, ${parentPascal}Detail } from '@/lib/${parent}/types';
 import type { ModelPermissions } from '@/lib/authz';
 import { assertPermission, getModelPermissions } from '@/lib/authz';
+import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';${shouldFilterByOrganization ? "\nimport { getAssociatedOrganizations } from '@/lib/organization/getters_associated';" : ''}
 
 export async function getAll${parentPascal}s(permissions?: ModelPermissions): Promise<${parentPascal}[]> {
@@ -330,18 +331,26 @@ ${relationshipMapping}` : ''}
   };
 }
 
-export async function get${parentPascal}ListPageData() {
+export async function get${parentPascal}ListPageData(isAssertPermission: boolean = true) {
   const userPermissions = await getModelPermissions('${parent}');
-  await assertPermission(userPermissions, 'read', '${parent}');
+  if (isAssertPermission) {
+    await assertPermission(userPermissions, 'read', '${parent}');
+  }
   const ${parentCamel}s = await getAll${parentPascal}s(userPermissions);
   return { ${parentCamel}s, userPermissions };
 }
 
-export async function get${parentPascal}DetailPageData(id: string) {
+export async function get${parentPascal}DetailPageData(id: string, operation: Operation = 'read') {
   const userPermissions = await getModelPermissions('${parent}');
-  await assertPermission(userPermissions, 'read', '${parent}');
+  await assertPermission(userPermissions, operation, '${parent}');
   const ${parentCamel} = await get${parentPascal}Detail(id, userPermissions);
   return { ${parentCamel}, userPermissions };
+}
+
+export async function get${parentPascal}NewPageAccessCheck() {
+  const userPermissions = await getModelPermissions('${parent}');
+  await assertPermission(userPermissions, 'create', '${parent}');
+  return userPermissions;
 }
 `;
 }
@@ -1608,27 +1617,29 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
     ? selectionTargets
         .map(target => target === 'organization'
           ? `import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';`
-          : `import { getAll${toPascalCase(target)}s } from '@/lib/${target}/getters';`)
+          : `import { get${toPascalCase(target)}ListPageData } from '@/lib/${target}/getters';`)
         .join('\n')
     : '';
   
   const selectionFetches = selectionTargets.length > 0
     ? selectionTargets
         .map(target => target === 'organization'
-          ? `  const allOrganizations = await getAssociatedOrganizations();`
-          : `  const all${toPascalCase(target)}s = await getAll${toPascalCase(target)}s();`)
+          ? `  const organizationsData = await getAssociatedOrganizations();`
+          : `  const ${toCamelCase(target)}sData = await get${toPascalCase(target)}ListPageData(false);`)
         .join('\n')
     : '';
   
   const selectionProps = selectionTargets.length > 0
     ? ' ' + selectionTargets
-        .map(target => `all${toPascalCase(target)}s={all${toPascalCase(target)}s}`)
+        .map(target => `all${toPascalCase(target)}s={${toCamelCase(target)}sData.${toCamelCase(target)}s} ${toCamelCase(target)}Permissions={${toCamelCase(target)}sData.userPermissions}`)
         .join(' ')
     : '';
   
   return `import FormUpsert from '@/components/${parent}/FormUpsert';${selectionImports ? '\n' + selectionImports : ''}
+import { get${parentPascal}NewPageAccessCheck } from '@/lib/${parent}/getters';
 
 export default async function Add${parentPascal}Page() {${selectionFetches ? '\n' + selectionFetches : ''}
+  await get${parentPascal}NewPageAccessCheck();
   const src = {
     id: '',
 ${parentDefaultProps}${childrenProps ? `\n${childrenProps}` : ''}
@@ -1640,6 +1651,7 @@ ${parentDefaultProps}${childrenProps ? `\n${childrenProps}` : ''}
 
 export function generatePageEdit(parent: string, children: ChildInfo[], schema: Schema): string {
   const parentPascal = toPascalCase(parent);
+  const parentCamel = toCamelCase(parent);
   const parentDef = schema.definitions[parent];
   const parentRelationships = getParentRelationships(parentDef);
   
@@ -1659,7 +1671,7 @@ export function generatePageEdit(parent: string, children: ChildInfo[], schema: 
     ? '\n' + selectionTargets
         .map(target => target === 'organization'
           ? `import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';`
-          : `import { getAll${toPascalCase(target)}s } from '@/lib/${target}/getters';`)
+          : `import { get${toPascalCase(target)}ListPageData } from '@/lib/${target}/getters';`)
         .join('\n')
     : '';
   
@@ -1668,34 +1680,34 @@ export function generatePageEdit(parent: string, children: ChildInfo[], schema: 
   const selectionFetchCalls = selectionTargets.map((target) =>
     target === 'organization'
       ? 'getAssociatedOrganizations()'
-      : `getAll${toPascalCase(target)}s()`
+      : `get${toPascalCase(target)}ListPageData(false)`
   );
 
   const promiseAllFetches = hasSelections
-    ? `  const [${parent}, ${selectionTargets.map(t => `all${toPascalCase(t)}s`).join(', ')}] = await Promise.all([
-    get${parentPascal}Detail(id),
+    ? `  const [detail, ${selectionTargets.map(t => `${toCamelCase(t)}sData`).join(', ')}] = await Promise.all([
+    get${parentPascal}DetailPageData(id, 'update'),
     ${selectionFetchCalls.join(',\n    ')},
   ]);`
-    : `  const ${parent} = await get${parentPascal}Detail(id);`;
+    : `  const detail = await get${parentPascal}DetailPageData(id, 'update');`;
   
   const selectionProps = hasSelections
     ? ' ' + selectionTargets
-        .map(target => `all${toPascalCase(target)}s={all${toPascalCase(target)}s}`)
+        .map(target => `all${toPascalCase(target)}s={${toCamelCase(target)}sData.${toCamelCase(target)}s} ${toCamelCase(target)}Permissions={${toCamelCase(target)}sData.userPermissions}`)
         .join(' ')
     : '';
   
   return `import FormUpsert from '@/components/${parent}/FormUpsert';
-import { get${parentPascal}Detail } from '@/lib/${parent}/getters';${selectionImports}
+import { get${parentPascal}DetailPageData } from '@/lib/${parent}/getters';${selectionImports}
 import { ${parentPascal}DetailPageProps } from '@/lib/${parent}/types';
 import { notFound } from 'next/navigation';
 
 export default async function Edit${parentPascal}Page({ params }: ${parentPascal}DetailPageProps) {
   const { id } = await params;
 ${promiseAllFetches}
-  if (!${parent}) {
+  if (!detail.${parentCamel}) {
     notFound();
   }
-  return <FormUpsert src={${parent}} isEdit={true}${selectionProps} />;
+  return <FormUpsert src={detail.${parentCamel}} isEdit={true}${selectionProps} />;
 }
 `;
 }
