@@ -95,3 +95,9 @@ export async function requirePermission(model: ModelName, operation: Operation):
     throw new Error(`Access denied: ${model}.${operation}`);
   }
 }
+
+export async function assertPermission(permissions: ModelPermissions, operation: Operation, model?: ModelName): Promise<void> {
+  if (!permissions[operation]) {
+    throw new Error(`Access denied: ${model ?? 'model'}.${operation}`);
+  }
+}

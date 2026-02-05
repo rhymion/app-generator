@@ -2,11 +2,13 @@
 
 import prisma from '@/lib/prisma';
 import type { UserAccount, UserAccountDetail } from '@/lib/user_account/types';
-import { canAccess, getModelPermissions, requirePermission } from '@/lib/authz';
+import type { ModelPermissions } from '@/lib/authz';
+import { assertPermission, canAccess, getModelPermissions } from '@/lib/authz';
 import { getAllRoles } from '@/lib/role/getters';
 
-export async function getAllUserAccounts(): Promise<UserAccount[]> {
-  await requirePermission('user_account', 'read');
+export async function getAllUserAccounts(permissions?: ModelPermissions): Promise<UserAccount[]> {
+  const resolvedPermissions = permissions ?? (await getModelPermissions('user_account'));
+  assertPermission(resolvedPermissions, 'read', 'user_account');
 
   const userAccounts = await prisma.user_account.findMany({
   });
@@ -20,8 +22,9 @@ export async function getAllUserAccounts(): Promise<UserAccount[]> {
   }));
 }
 
-export async function getUserAccountDetail(id: string): Promise<UserAccountDetail | null> {
-  await requirePermission('user_account', 'read');
+export async function getUserAccountDetail(id: string, permissions?: ModelPermissions): Promise<UserAccountDetail | null> {
+  const resolvedPermissions = permissions ?? (await getModelPermissions('user_account'));
+  assertPermission(resolvedPermissions, 'read', 'user_account');
 
   const userAccount = await prisma.user_account.findUnique({
     where: { 
@@ -43,19 +46,17 @@ export async function getUserAccountDetail(id: string): Promise<UserAccountDetai
 }
 
 export async function getUserAccountListPageData() {
-  await requirePermission('user_account', 'read');
-  const [userAccounts, permissions] = await Promise.all([
-    getAllUserAccounts(),
-    getModelPermissions('user_account'),
-  ]);
+  const permissions = await getModelPermissions('user_account');
+  assertPermission(permissions, 'read', 'user_account');
+  const userAccounts = await getAllUserAccounts(permissions);
   return { userAccounts, permissions };
 }
 
 export async function getUserAccountDetailPageData(id: string) {
-  await requirePermission('user_account', 'read');
-  const [userAccount, permissions, canAssignRoles] = await Promise.all([
-    getUserAccountDetail(id),
-    getModelPermissions('user_account'),
+  const permissions = await getModelPermissions('user_account');
+  assertPermission(permissions, 'read', 'user_account');
+  const [userAccount, canAssignRoles] = await Promise.all([
+    getUserAccountDetail(id, permissions),
     canAccess('role', 'update'),
   ]);
   if (!userAccount) return null;
@@ -63,19 +64,21 @@ export async function getUserAccountDetailPageData(id: string) {
 }
 
 export async function getUserAccountNewPageData() {
-  await requirePermission('user_account', 'create');
+  const permissions = await getModelPermissions('user_account');
+  assertPermission(permissions, 'create', 'user_account');
   const canAssignRoles = await canAccess('role', 'update');
   const allRoles = canAssignRoles ? await getAllRoles() : [];
-  return { allRoles, canAssignRoles };
+  return { allRoles, canAssignRoles, permissions };
 }
 
 export async function getUserAccountEditPageData(id: string) {
-  await requirePermission('user_account', 'update');
+  const permissions = await getModelPermissions('user_account');
+  assertPermission(permissions, 'update', 'user_account');
   const canAssignRoles = await canAccess('role', 'update');
   const [userAccount, allRoles] = await Promise.all([
-    getUserAccountDetail(id),
+    getUserAccountDetail(id, permissions),
     canAssignRoles ? getAllRoles() : Promise.resolve([]),
   ]);
   if (!userAccount) return null;
-  return { userAccount, allRoles, canAssignRoles };
+  return { userAccount, allRoles, canAssignRoles, permissions };
 }
