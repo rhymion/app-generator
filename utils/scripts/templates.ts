@@ -12,6 +12,22 @@ interface ChildInfo {
   relationship?: RelationshipInfo;
 }
 
+function childVarName(child: ChildInfo): string {
+  return safeVarName(child.propertyName);
+}
+
+function childPascalName(child: ChildInfo): string {
+  return toPascalCase(child.propertyName);
+}
+
+function childTitle(child: ChildInfo): string {
+  return toTitleCase(child.propertyName);
+}
+
+function childColumnsFnName(child: ChildInfo): string {
+  return `${child.propertyName}_columns`;
+}
+
 function getTsType(prop: SchemaProperty): string {
   // Check for date/datetime/time format
   const format = (prop as any).format;
@@ -168,6 +184,7 @@ ${parentExtraProps.join('\n')}
   const childTypeDeclarations: string[] = [];
   const detailChildProps: string[] = [];
   const formViewChildProps: string[] = [];
+  const declaredChildTypes = new Set<string>();
   
   for (const child of children) {
     const childPascal = toPascalCase(child.name);
@@ -180,10 +197,13 @@ ${parentExtraProps.join('\n')}
         childProps.push(`  ${key}: ${tsType};`);
       }
       
-      childTypeDeclarations.push(`export type ${childPascal} = {
+      if (!declaredChildTypes.has(child.name) && child.name !== parent) {
+        declaredChildTypes.add(child.name);
+        childTypeDeclarations.push(`export type ${childPascal} = {
 ${childProps.join('\n')}
 };
 `);
+      }
       detailChildProps.push(`  ${child.propertyName}: ${childPascal}[];`);
       formViewChildProps.push(`    ${child.propertyName}: ${childPascal}[];`);
     }
@@ -225,8 +245,8 @@ ${formViewParentProps}${formViewExtraProps.length > 0 ? `\n${formViewExtraProps.
 }>;
 
 export type FormUpsertProps = Readonly<FormViewProps & {
-  isEdit: boolean;${children.filter(c => c.relationship?.type === 'many-to-many').map(c => {
-    const targetPascal = toPascalCase(c.relationship!.target);
+  isEdit: boolean;${Array.from(new Set(children.filter(c => c.relationship?.type === 'many-to-many').map(c => c.relationship!.target))).map(target => {
+    const targetPascal = toPascalCase(target);
     return `\n  all${targetPascal}s?: ${targetPascal}[];`;
   }).join('')}
 ${relationshipTargets.map(r => {
@@ -491,8 +511,8 @@ export async function remove${parentPascal}(data: FormData | string[]) {
   // For with-children cases, handle all children
   const allChildrenData = children.map(childInfo => {
     const child = childInfo.name;
-    const childCamel = toCamelCase(child);
-    const childPascal = toPascalCase(child);
+    const childVar = childVarName(childInfo);
+    const childPascal = childPascalName(childInfo);
     const childDef = schema.definitions[child];
     const isManyToMany = childInfo.relationship?.type === 'many-to-many';
     
@@ -515,7 +535,7 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     
     return {
       child,
-      childCamel,
+      childVar,
       childPascal,
       fieldType,
       fieldTypeWithId,
@@ -526,40 +546,40 @@ export async function remove${parentPascal}(data: FormData | string[]) {
   });
   
   // Generate FormData extraction for all children
-  const childFormDataExtractions = allChildrenData.map(({ childCamel, fieldTypeWithId, isManyToMany }) => {
+  const childFormDataExtractions = allChildrenData.map(({ childVar, fieldTypeWithId, isManyToMany, propertyName }) => {
     if (isManyToMany) {
       // For many-to-many, extract IDs (only type id and name fields)
-      return `  const ${childCamel}sRaw = data.getAll('${childCamel}[]') as string[];\n  const ${childCamel}s = ${childCamel}sRaw.map(f => JSON.parse(f) as { id?: string; name?: string });\n  const ${childCamel}Ids = ${childCamel}s\n    .map((${childCamel}) => ${childCamel}.id)\n    .filter((${childCamel}Id): ${childCamel}Id is string => Boolean(${childCamel}Id));`;
+      return `  const ${childVar}Raw = data.getAll('${propertyName}[]') as string[];\n  const ${childVar}Items = ${childVar}Raw.map(f => JSON.parse(f) as { id?: string; name?: string });\n  const ${childVar}Ids = ${childVar}Items\n    .map((${childVar}) => ${childVar}.id)\n    .filter((${childVar}Id): ${childVar}Id is string => Boolean(${childVar}Id));`;
     } else {
-      return `  const ${childCamel}sRaw = data.getAll('${childCamel}[]') as string[];\n  const ${childCamel}s = ${childCamel}sRaw.map(f => JSON.parse(f) as ${fieldTypeWithId});`;
+      return `  const ${childVar}Raw = data.getAll('${propertyName}[]') as string[];\n  const ${childVar}Items = ${childVar}Raw.map(f => JSON.parse(f) as ${fieldTypeWithId});`;
     }
   }).join('\n');
   
-  const childParamsForAdd = allChildrenData.map(({ childCamel, fieldType, isManyToMany }) => 
-    isManyToMany ? `${childCamel}Ids: string[]` : `${childCamel}s: ${fieldType}[]`
+  const childParamsForAdd = allChildrenData.map(({ childVar, fieldType, isManyToMany }) => 
+    isManyToMany ? `${childVar}Ids: string[]` : `${childVar}Items: ${fieldType}[]`
   ).join(', ');
-  const childParamsForUpdate = allChildrenData.map(({ childCamel, fieldTypeWithId, isManyToMany }) => 
-    isManyToMany ? `${childCamel}Ids: string[]` : `${childCamel}s: ${fieldTypeWithId}[]`
+  const childParamsForUpdate = allChildrenData.map(({ childVar, fieldTypeWithId, isManyToMany }) => 
+    isManyToMany ? `${childVar}Ids: string[]` : `${childVar}Items: ${fieldTypeWithId}[]`
   ).join(', ');
-  const childArgsForCall = allChildrenData.map(({ childCamel, isManyToMany }) => 
-    isManyToMany ? `${childCamel}Ids` : `${childCamel}s`
+  const childArgsForCall = allChildrenData.map(({ childVar, isManyToMany }) => 
+    isManyToMany ? `${childVar}Ids` : `${childVar}Items`
   ).join(', ');
   
   // Generate nested create for all children
-  const childNestedCreate = allChildrenData.map(({ propertyName, childCamel, fieldMapCreate, isManyToMany }) => {
+  const childNestedCreate = allChildrenData.map(({ propertyName, childVar, fieldMapCreate, isManyToMany }) => {
     if (isManyToMany) {
-      return `      ${propertyName}: {\n        connect: ${childCamel}Ids.map((id) => ({ id })),\n      },`;
+      return `      ${propertyName}: {\n        connect: ${childVar}Ids.map((id) => ({ id })),\n      },`;
     } else {
-      return `      ${propertyName}: {\n        create: ${childCamel}s.map(f => ({\n${fieldMapCreate}\n        })),\n      },`;
+      return `      ${propertyName}: {\n        create: ${childVar}Items.map(f => ({\n${fieldMapCreate}\n        })),\n      },`;
     }
   }).join('\n');
   
   // Generate nested update (deleteMany + create for one-to-many, set for many-to-many)
-  const childNestedUpdate = allChildrenData.map(({ propertyName, childCamel, fieldMapCreate, isManyToMany }) => {
+  const childNestedUpdate = allChildrenData.map(({ propertyName, childVar, fieldMapCreate, isManyToMany }) => {
     if (isManyToMany) {
-      return `      ${propertyName}: {\n        set: ${childCamel}Ids.map((id) => ({ id })),\n      },`;
+      return `      ${propertyName}: {\n        set: ${childVar}Ids.map((id) => ({ id })),\n      },`;
     } else {
-      return `      ${propertyName}: {\n        deleteMany: {},\n        create: ${childCamel}s.map(f => ({\n${fieldMapCreate}\n        })),\n      },`;
+      return `      ${propertyName}: {\n        deleteMany: {},\n        create: ${childVar}Items.map(f => ({\n${fieldMapCreate}\n        })),\n      },`;
     }
   }).join('\n');
   
@@ -636,7 +656,7 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
   
   const columnFunctions = children.map(childInfo => {
     const child = childInfo.name;
-    const childSnake = child;
+    const childSnake = childInfo.propertyName;
     const childDef = schema.definitions[child];
     
     if (!childDef?.properties) {
@@ -969,7 +989,10 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   let childGridComponents = '';
   
   if (hasChildren) {
-    const columnImports = children.map(c => `${c.name}_columns`).join(', ');
+    const columnImports = children
+      .filter(c => c.outputType !== 'list' && c.relationship?.type !== 'many-to-many')
+      .map(c => childColumnsFnName(c))
+      .join(', ');
     
     // Check if any child has 'order' field
     const hasOrderedChildren = children.some(childInfo => {
@@ -983,8 +1006,8 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
 
     const hasListChildren = children.some(c => c.outputType === 'list' || c.relationship?.type === 'many-to-many');
     childImports = `import { GridRowsProp } from '@mui/x-data-grid';
-${dataGridImports}
-import { ${columnImports} } from '../${parent}/column_def';`;
+  ${dataGridImports}
+  ${columnImports ? `import { ${columnImports} } from '../${parent}/column_def';` : ''}`;
     
     if (hasListChildren) {
       childImports = `import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';\n` + childImports;
@@ -1003,15 +1026,17 @@ import { ${columnImports} } from '../${parent}/column_def';`;
     }
     
     childVariables = children.map(childInfo => {
+      const childVar = childVarName(childInfo);
       const refType = (childInfo.outputType === 'list' || childInfo.relationship?.type === 'many-to-many')
         ? '{ getItems: () => EditableListWrapperItem[] }'
         : '{ getFields: () => GridRowsProp }';
-      return `  const ${childInfo.name}Ref = useRef<${refType}>(null);`;
+      return `  const ${childVar}Ref = useRef<${refType}>(null);`;
     }).join('\n');
     
     const allChildSetups = children.map(childInfo => {
       const child = childInfo.name;
-      const childPascal = toPascalCase(child);
+      const childVar = childVarName(childInfo);
+      const childPascal = childPascalName(childInfo);
       const childDef = schema.definitions[child];
       
       if (!childDef?.properties) {
@@ -1025,7 +1050,7 @@ import { ${columnImports} } from '../${parent}/column_def';`;
       // For many-to-many relationships
       if (childInfo.relationship?.type === 'many-to-many') {
         const targetPascal = toPascalCase(childInfo.relationship.target);
-        const childCamel = toCamelCase(child);
+        const childCamel = childVar;
         return `  const initial${childPascal}: EditableListWrapperItem[] = src.${childInfo.propertyName}.map(f => ({
     id: f.id || \`temp-\${Date.now()}-\${Math.random()}\`,
     value: f.id,
@@ -1087,7 +1112,7 @@ import { ${columnImports} } from '../${parent}/column_def';`;
         return '';
       }
       
-      return `  const ${child}Columns = ${child}_columns(true);
+      return `  const ${childVar}Columns = ${childColumnsFnName(childInfo)}(true);
 
   const initial${childPascal} = src.${childInfo.propertyName}.map(f => ({ ...f, id: f.id || \`temp-\${Date.now()}-\${Math.random()}\` }));
 
@@ -1100,9 +1125,9 @@ ${createNewChildProps}
     
     childGridSetup = `\n${allChildSetups}`;
     
-    const allChildFormDataHandling = children.map(childInfo => {
-      const child = childInfo.name;
-      const childCamel = toCamelCase(child);
+      const allChildFormDataHandling = children.map(childInfo => {
+        const child = childInfo.name;
+        const childVar = childVarName(childInfo);
       const childDef = schema.definitions[child];
       
       if (!childDef?.properties) {
@@ -1111,14 +1136,14 @@ ${createNewChildProps}
       
       // For many-to-many relationships
       if (childInfo.relationship?.type === 'many-to-many') {
-        return `    const ${childCamel} = ${child}Ref.current?.getItems?.() || [];
+        return `    const ${childVar} = ${childVar}Ref.current?.getItems?.() || [];
 
-    ${childCamel}.forEach((item) => {
+    ${childVar}.forEach((item) => {
       const itemId =
         item.originalId ??
         (typeof item.value === 'string' || typeof item.value === 'number' ? item.value : undefined);
       formData.append(
-        '${childCamel}[]',
+        '${childInfo.propertyName}[]',
         JSON.stringify({
           id: itemId,
           name: item.label ?? item.value,
@@ -1129,12 +1154,12 @@ ${createNewChildProps}
       
       // For list output type
       if (childInfo.outputType === 'list') {
-        return `    const ${childCamel} = ${child}Ref.current?.getItems?.() || [];
+        return `    const ${childVar} = ${childVar}Ref.current?.getItems?.() || [];
 
-    ${childCamel}.forEach((item) => {
+    ${childVar}.forEach((item) => {
       const itemId = item.originalId || (typeof item.id === 'string' && item.id.startsWith('temp-') ? undefined : item.id);
       formData.append(
-        '${childCamel}[]',
+        '${childInfo.propertyName}[]',
         JSON.stringify({
           id: itemId,
           name: item.value,
@@ -1149,11 +1174,11 @@ ${createNewChildProps}
       
       const childSerialize = childProps.map(p => `          ${p}: field.${p},`).join('\n');
       
-      return `    const ${childCamel} = ${child}Ref.current?.getFields?.() || [];
+      return `    const ${childVar} = ${childVar}Ref.current?.getFields?.() || [];
 
-    (${childCamel} as any[]).forEach((field) => {
+    (${childVar} as any[]).forEach((field) => {
       formData.append(
-        '${childCamel}[]',
+        '${childInfo.propertyName}[]',
         JSON.stringify({
           id: field.id.startsWith('temp-') ? undefined : field.id,
 ${childSerialize}
@@ -1166,19 +1191,20 @@ ${childSerialize}
     
     childGridComponents = children.map(childInfo => {
       const child = childInfo.name;
-      const childPascal = toPascalCase(child);
-      const childTitle = toTitleCase(child);
+      const childVar = childVarName(childInfo);
+      const childPascal = childPascalName(childInfo);
+      const childTitleLabel = childTitle(childInfo);
       const childDef = schema.definitions[child];
       
       // For many-to-many relationships, use EditableListWrapper with autocomplete
       if (childInfo.relationship?.type === 'many-to-many') {
         return `      <EditableListWrapper
-        ref={${child}Ref}
+        ref={${childVar}Ref}
         initialItems={initial${childPascal}}
         itemType="autocomplete"
-        addButtonLabel="Add ${childTitle}"
+        addButtonLabel="Add ${childTitleLabel}"
         showTitle={true}
-        title="${childTitle}"
+        title="${childTitleLabel}"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         autocompleteOptions={autocompleteOptions${childPascal}}
@@ -1189,12 +1215,12 @@ ${childSerialize}
       // For list output type, use EditableListWrapper
       if (childInfo.outputType === 'list') {
         return `      <EditableListWrapper
-        ref={${child}Ref}
+        ref={${childVar}Ref}
         initialItems={initial${childPascal}}
         itemType="text"
-        addButtonLabel="Add ${childTitle}"
+        addButtonLabel="Add ${childTitleLabel}"
         showTitle={true}
-        title="${childTitle}"
+        title="${childTitleLabel}"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
       />`;
@@ -1205,15 +1231,15 @@ ${childSerialize}
       const gridComponent = hasOrderField ? 'OrderedFieldsDataGrid' : 'FieldsDataGrid';
       
       return `      <${gridComponent}
-        ref={${child}Ref}
+        ref={${childVar}Ref}
         initialFields={initial${childPascal}}
-        columns={${child}Columns}
+        columns={${childVar}Columns}
         createNewRow={createNew${childPascal}}
-        addButtonLabel="Add ${childTitle}"
-        deleteDialogTitle="Delete Selected ${childTitle}?"
+        addButtonLabel="Add ${childTitleLabel}"
+        deleteDialogTitle="Delete Selected ${childTitleLabel}?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="${childTitle}"
+        title="${childTitleLabel}"
       />`;
     }).join('\n');
   }
@@ -1450,12 +1476,10 @@ ${parentTextFields}
   const listImport = hasListChildren ? '\nimport ListWrapper from \'../ListWrapper\';' : '';
   
   const gridChildren = children.filter(c => c.outputType !== 'list');
-  const columnImports = gridChildren.map(c => `${c.name}_columns`).join(', ');
+  const columnImports = gridChildren.map(c => childColumnsFnName(c)).join(', ');
   
   const childViewGrids = children.map(childInfo => {
-    const child = childInfo.name;
-    const childPascal = toPascalCase(child);
-    const childTitle = toTitleCase(child);
+    const childTitleLabel = childTitle(childInfo);
     
     // For list output type, use ListWrapper
     if (childInfo.outputType === 'list') {
@@ -1468,20 +1492,19 @@ ${parentTextFields}
           }))}
           itemType="text"
           showTitle={true}
-          title="${childTitle}"
+          title="${childTitleLabel}"
         />
       </div>`;
     }
     
     return `      <div>
-        <h2>${childTitle}</h2>
-        <FieldsViewGrid fields={src.${childInfo.propertyName}} columns={${child}Columns} />
+        <h2>${childTitleLabel}</h2>
+        <FieldsViewGrid fields={src.${childInfo.propertyName}} columns={${childVarName(childInfo)}Columns} />
       </div>`;
   }).join('\n');
   
   const columnVariables = gridChildren.map(childInfo => {
-    const child = childInfo.name;
-    return `  const ${child}Columns: GridColDef[] = ${child}_columns(false);`;
+    return `  const ${childVarName(childInfo)}Columns: GridColDef[] = ${childColumnsFnName(childInfo)}(false);`;
   }).join('\n');
   
   const columnImportLine = columnImports ? `\nimport { ${columnImports} } from '../${parent}/column_def';` : '';

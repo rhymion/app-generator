@@ -190,3 +190,11 @@ model permission {
   delete   Boolean
   @@unique([name, role_id])
 }
+
+model procedure {
+  id           String @id @default(cuid())
+  name         String
+  description  String?
+  preceded_by  procedure[] @relation("BeforeAfter")
+  followed_by  procedure[] @relation("BeforeAfter")
+}
