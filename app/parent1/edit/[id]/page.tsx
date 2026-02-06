@@ -13,5 +13,5 @@ export default async function EditParent1Page({ params }: Parent1DetailPageProps
   if (!detail.parent1) {
     notFound();
   }
-  return <FormUpsert src={detail.parent1} isEdit={true} allOrganizations={organizationsData.organizations} organizationPermissions={organizationsData.userPermissions} />;
+  return <FormUpsert src={detail.parent1} isEdit={true} permissions={detail.userPermissions} allOrganizations={organizationsData.organizations} organizationPermissions={organizationsData.userPermissions} />;
 }

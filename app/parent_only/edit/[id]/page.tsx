@@ -9,5 +9,5 @@ export default async function EditParentOnlyPage({ params }: ParentOnlyDetailPag
   if (!detail.parentOnly) {
     notFound();
   }
-  return <FormUpsert src={detail.parentOnly} isEdit={true} />;
+  return <FormUpsert src={detail.parentOnly} isEdit={true} permissions={detail.userPermissions} />;
 }

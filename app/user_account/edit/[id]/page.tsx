@@ -13,5 +13,5 @@ export default async function EditUserAccountPage({ params }: UserAccountDetailP
   if (!detail.userAccount) {
     notFound();
   }
-  return <FormUpsert src={detail.userAccount} isEdit={true} allRoles={rolesData.roles} rolePermissions={rolesData.userPermissions} />;
+  return <FormUpsert src={detail.userAccount} isEdit={true} permissions={detail.userPermissions} allRoles={rolesData.roles} rolePermissions={rolesData.userPermissions} />;
 }

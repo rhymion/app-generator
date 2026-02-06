@@ -12,17 +12,17 @@ import FormWithChildGrid from '../FormWithChildGrid';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 
-export default function FormUpsert({ src, isEdit, allRoles = [], rolePermissions }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, permissions, allRoles = [], rolePermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const canDelete = permissions ? permissions.delete : true;
 
   const [create, setCreate] = useState<boolean>(Boolean(src.create));
   const [read, setRead] = useState<boolean>(Boolean(src.read));
   const [update, setUpdate] = useState<boolean>(Boolean(src.update));
   const [deleteValue, setDeleteValue] = useState<boolean>(Boolean(src.delete));
   const [roleId, setRoleId] = useState<string | null>(src.role_id || null);
-
 
   const nameRef = useRef<HTMLInputElement>(null);
   const roleIdOptions = useMemo(() => {
@@ -117,7 +117,7 @@ export default function FormUpsert({ src, isEdit, allRoles = [], rolePermissions
       isEdit={isEdit}
       formFields={formFields}
       onSubmit={handleSubmit}
-      onDelete={isEdit ? handleDelete : undefined}
+      onDelete={isEdit && canDelete ? handleDelete : undefined}
       onBack={handleBack}
       deleteEntityLabel="Permission"
       submitButtonLabel="Save"

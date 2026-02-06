@@ -1235,8 +1235,8 @@ ${childSerialize}
     .join(', ');
   
   const formUpsertParams = extraProps || selectionPermissionProps
-    ? `{ src, isEdit${extraProps ? `, ${extraProps}` : ''}${selectionPermissionProps ? `, ${selectionPermissionProps}` : ''} }: FormUpsertProps`
-    : `{ src, isEdit }: FormUpsertProps`;
+    ? `{ src, isEdit, permissions${extraProps ? `, ${extraProps}` : ''}${selectionPermissionProps ? `, ${selectionPermissionProps}` : ''} }: FormUpsertProps`
+    : `{ src, isEdit, permissions }: FormUpsertProps`;
   
   const booleanImports = booleanProps.length > 0
     ? "\nimport FormControlLabel from '@mui/material/FormControlLabel';\nimport Checkbox from '@mui/material/Checkbox';"
@@ -1257,8 +1257,8 @@ export default function FormUpsert(${formUpsertParams}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const canDelete = permissions ? permissions.delete : true;
 ${allStates ? '\n' + allStates : ''}
-
 ${childVariables}
 ${parentRefs}${childGridSetup}${relationshipOptionSetups ? `\n${relationshipOptionSetups}` : ''}
 
@@ -1303,7 +1303,7 @@ ${parentTextFields}${childGridComponents.length > 0 ? '\n' + childGridComponents
       isEdit={isEdit}
       formFields={formFields}
       onSubmit={handleSubmit}
-      onDelete={${canDelete ? 'isEdit ? handleDelete : undefined' : 'undefined'}}
+      onDelete={isEdit && canDelete ? handleDelete : undefined}
       onBack={handleBack}
       deleteEntityLabel="${parentTitle}"
       submitButtonLabel="Save"
@@ -1637,12 +1637,12 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
 import { get${parentPascal}NewPageAccessCheck } from '@/lib/${parent}/getters';
 
 export default async function Add${parentPascal}Page() {${selectionFetches ? '\n' + selectionFetches : ''}
-  await get${parentPascal}NewPageAccessCheck();
+  const userPermissions =await get${parentPascal}NewPageAccessCheck();
   const src = {
     id: '',
 ${parentDefaultProps}${childrenProps ? `\n${childrenProps}` : ''}
   };
-  return <FormUpsert src={src} isEdit={false}${selectionProps} />;
+  return <FormUpsert src={src} isEdit={false} permissions={userPermissions}${selectionProps} />;
 }
 `;
 }
@@ -1705,7 +1705,7 @@ ${promiseAllFetches}
   if (!detail.${parentCamel}) {
     notFound();
   }
-  return <FormUpsert src={detail.${parentCamel}} isEdit={true}${selectionProps} />;
+  return <FormUpsert src={detail.${parentCamel}} isEdit={true} permissions={detail.userPermissions}${selectionProps} />;
 }
 `;
 }

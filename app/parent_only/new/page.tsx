@@ -2,7 +2,7 @@ import FormUpsert from '@/components/parent_only/FormUpsert';
 import { getParentOnlyNewPageAccessCheck } from '@/lib/parent_only/getters';
 
 export default async function AddParentOnlyPage() {
-  await getParentOnlyNewPageAccessCheck();
+  const userPermissions =await getParentOnlyNewPageAccessCheck();
   const src = {
     id: '',
     name: '',
@@ -10,5 +10,5 @@ export default async function AddParentOnlyPage() {
     login_time: null,
     logout_time: null,
   };
-  return <FormUpsert src={src} isEdit={false} />;
+  return <FormUpsert src={src} isEdit={false} permissions={userPermissions} />;
 }

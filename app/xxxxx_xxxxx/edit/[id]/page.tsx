@@ -9,5 +9,5 @@ export default async function EditXxxxxXxxxxPage({ params }: XxxxxXxxxxDetailPag
   if (!detail.xxxxxXxxxx) {
     notFound();
   }
-  return <FormUpsert src={detail.xxxxxXxxxx} isEdit={true} />;
+  return <FormUpsert src={detail.xxxxxXxxxx} isEdit={true} permissions={detail.userPermissions} />;
 }

@@ -18,15 +18,15 @@ import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
 import ImageUpload from '../ImageUpload';
 
-export default function FormUpsert({ src, isEdit, allOrganizations = [], organizationPermissions }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, permissions, allOrganizations = [], organizationPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const canDelete = permissions ? permissions.delete : true;
 
   const [dueDate, setDueDate] = useState<Dayjs | null>(src.due_date ? dayjs(src.due_date) : null);
   const [imageUrl, setImageUrl] = useState<string>(src.image_url || '');
   const [organizationId, setOrganizationId] = useState<string | null>(src.organization_id || null);
-
   const parent1_child1Ref = useRef<{ getFields: () => GridRowsProp }>(null);
   const parent1_child2Ref = useRef<{ getFields: () => GridRowsProp }>(null);
   const parent1_listRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
@@ -245,7 +245,7 @@ export default function FormUpsert({ src, isEdit, allOrganizations = [], organiz
       isEdit={isEdit}
       formFields={formFields}
       onSubmit={handleSubmit}
-      onDelete={isEdit ? handleDelete : undefined}
+      onDelete={isEdit && canDelete ? handleDelete : undefined}
       onBack={handleBack}
       deleteEntityLabel="Parent1"
       submitButtonLabel="Save"

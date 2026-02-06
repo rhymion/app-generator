@@ -4,7 +4,7 @@ import { getParent1NewPageAccessCheck } from '@/lib/parent1/getters';
 
 export default async function AddParent1Page() {
   const organizationsData = await getAssociatedOrganizationListPageData();
-  await getParent1NewPageAccessCheck();
+  const userPermissions =await getParent1NewPageAccessCheck();
   const src = {
     id: '',
     name: '',
@@ -17,5 +17,5 @@ export default async function AddParent1Page() {
     parent1_child2s: [],
     parent1_lists: [],
   };
-  return <FormUpsert src={src} isEdit={false} allOrganizations={organizationsData.organizations} organizationPermissions={organizationsData.userPermissions} />;
+  return <FormUpsert src={src} isEdit={false} permissions={userPermissions} allOrganizations={organizationsData.organizations} organizationPermissions={organizationsData.userPermissions} />;
 }

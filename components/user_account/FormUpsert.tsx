@@ -14,13 +14,13 @@ import FieldsDataGrid from '../FieldsDataGrid';
 import { role_columns } from '../user_account/column_def';
 import ImageUpload from '../ImageUpload';
 
-export default function FormUpsert({ src, isEdit, allRoles = [], rolePermissions }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, permissions, allRoles = [], rolePermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const canDelete = permissions ? permissions.delete : true;
 
   const [avatar, setAvatar] = useState<string>(src.avatar || '');
-
   const roleRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
@@ -163,7 +163,7 @@ export default function FormUpsert({ src, isEdit, allRoles = [], rolePermissions
       isEdit={isEdit}
       formFields={formFields}
       onSubmit={handleSubmit}
-      onDelete={isEdit ? handleDelete : undefined}
+      onDelete={isEdit && canDelete ? handleDelete : undefined}
       onBack={handleBack}
       deleteEntityLabel="User Account"
       submitButtonLabel="Save"

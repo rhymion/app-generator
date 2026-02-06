@@ -2,7 +2,7 @@ import FormUpsert from '@/components/xxxxx_xxxxx/FormUpsert';
 import { getXxxxxXxxxxNewPageAccessCheck } from '@/lib/xxxxx_xxxxx/getters';
 
 export default async function AddXxxxxXxxxxPage() {
-  await getXxxxxXxxxxNewPageAccessCheck();
+  const userPermissions =await getXxxxxXxxxxNewPageAccessCheck();
   const src = {
     id: '',
     name: '',
@@ -10,5 +10,5 @@ export default async function AddXxxxxXxxxxPage() {
     team: '',
     yyyyy_yyyyys: [],
   };
-  return <FormUpsert src={src} isEdit={false} />;
+  return <FormUpsert src={src} isEdit={false} permissions={userPermissions} />;
 }

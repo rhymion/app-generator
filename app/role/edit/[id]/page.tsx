@@ -13,5 +13,5 @@ export default async function EditRolePage({ params }: RoleDetailPageProps) {
   if (!detail.role) {
     notFound();
   }
-  return <FormUpsert src={detail.role} isEdit={true} allUserAccounts={userAccountsData.userAccounts} userAccountPermissions={userAccountsData.userPermissions} />;
+  return <FormUpsert src={detail.role} isEdit={true} permissions={detail.userPermissions} allUserAccounts={userAccountsData.userAccounts} userAccountPermissions={userAccountsData.userPermissions} />;
 }

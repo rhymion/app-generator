@@ -11,14 +11,14 @@ import FormWithChildGrid from '../FormWithChildGrid';
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
 
-export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const canDelete = permissions ? permissions.delete : true;
 
   const [loginTime, setLoginTime] = useState<Dayjs | null>(src.login_time ? dayjs(src.login_time) : null);
   const [logoutTime, setLogoutTime] = useState<Dayjs | null>(src.logout_time ? dayjs(src.logout_time) : null);
-
 
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
@@ -97,7 +97,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
       isEdit={isEdit}
       formFields={formFields}
       onSubmit={handleSubmit}
-      onDelete={isEdit ? handleDelete : undefined}
+      onDelete={isEdit && canDelete ? handleDelete : undefined}
       onBack={handleBack}
       deleteEntityLabel="Parent Only"
       submitButtonLabel="Save"

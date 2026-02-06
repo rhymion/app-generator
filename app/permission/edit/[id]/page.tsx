@@ -13,5 +13,5 @@ export default async function EditPermissionPage({ params }: PermissionDetailPag
   if (!detail.permission) {
     notFound();
   }
-  return <FormUpsert src={detail.permission} isEdit={true} allRoles={rolesData.roles} rolePermissions={rolesData.userPermissions} />;
+  return <FormUpsert src={detail.permission} isEdit={true} permissions={detail.userPermissions} allRoles={rolesData.roles} rolePermissions={rolesData.userPermissions} />;
 }

@@ -11,11 +11,11 @@ import { GridRowsProp } from '@mui/x-data-grid';
 import FieldsDataGrid from '../FieldsDataGrid';
 import { yyyyy_yyyyy_columns } from '../xxxxx_xxxxx/column_def';
 
-export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-
+  const canDelete = permissions ? permissions.delete : true;
 
   const yyyyy_yyyyyRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -138,7 +138,7 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
       isEdit={isEdit}
       formFields={formFields}
       onSubmit={handleSubmit}
-      onDelete={isEdit ? handleDelete : undefined}
+      onDelete={isEdit && canDelete ? handleDelete : undefined}
       onBack={handleBack}
       deleteEntityLabel="Xxxxx Xxxxx"
       submitButtonLabel="Save"

@@ -4,7 +4,7 @@ import { getPermissionNewPageAccessCheck } from '@/lib/permission/getters';
 
 export default async function AddPermissionPage() {
   const rolesData = await getRoleListPageData(false);
-  await getPermissionNewPageAccessCheck();
+  const userPermissions =await getPermissionNewPageAccessCheck();
   const src = {
     id: '',
     name: '',
@@ -14,5 +14,5 @@ export default async function AddPermissionPage() {
     delete: false,
     role_id: '',
   };
-  return <FormUpsert src={src} isEdit={false} allRoles={rolesData.roles} rolePermissions={rolesData.userPermissions} />;
+  return <FormUpsert src={src} isEdit={false} permissions={userPermissions} allRoles={rolesData.roles} rolePermissions={rolesData.userPermissions} />;
 }

@@ -13,11 +13,11 @@ import { GridRowsProp } from '@mui/x-data-grid';
 import FieldsDataGrid from '../FieldsDataGrid';
 import { user_account_columns } from '../role/column_def';
 
-export default function FormUpsert({ src, isEdit, allUserAccounts = [], userAccountPermissions }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, permissions, allUserAccounts = [], userAccountPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-
+  const canDelete = permissions ? permissions.delete : true;
 
   const user_accountRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -132,7 +132,7 @@ export default function FormUpsert({ src, isEdit, allUserAccounts = [], userAcco
       isEdit={isEdit}
       formFields={formFields}
       onSubmit={handleSubmit}
-      onDelete={isEdit ? handleDelete : undefined}
+      onDelete={isEdit && canDelete ? handleDelete : undefined}
       onBack={handleBack}
       deleteEntityLabel="Role"
       submitButtonLabel="Save"

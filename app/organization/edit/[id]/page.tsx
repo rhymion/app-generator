@@ -13,5 +13,5 @@ export default async function EditOrganizationPage({ params }: OrganizationDetai
   if (!detail.organization) {
     notFound();
   }
-  return <FormUpsert src={detail.organization} isEdit={true} allUserAccounts={userAccountsData.userAccounts} userAccountPermissions={userAccountsData.userPermissions} />;
+  return <FormUpsert src={detail.organization} isEdit={true} permissions={detail.userPermissions} allUserAccounts={userAccountsData.userAccounts} userAccountPermissions={userAccountsData.userPermissions} />;
 }
