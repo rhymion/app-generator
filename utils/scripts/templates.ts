@@ -1316,6 +1316,7 @@ ${parentTextFields}${childGridComponents.length > 0 ? '\n' + childGridComponents
 
 export function generateFormView(parent: string, children: ChildInfo[], schema: Schema): string {
   const parentPascal = toPascalCase(parent);
+  const parentTitle = toTitleCase(parent);
   const parentDef = schema.definitions[parent];
   const parentRelationships = getParentRelationships(parentDef);
   const relationshipByProp = new Map(parentRelationships.map(r => [r.propName, r] as const));
@@ -1429,7 +1430,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>${parentPascal}</h1>
+        <h1>${parentTitle}</h1>
         <div>
         {canEdit && (
           <Link href={\`/${parent}/edit/\${src.id}\`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
@@ -1473,7 +1474,7 @@ ${parentTextFields}
     }
     
     return `      <div>
-        <h2>${childPascal}</h2>
+        <h2>${childTitle}</h2>
         <FieldsViewGrid fields={src.${childInfo.propertyName}} columns={${child}Columns} />
       </div>`;
   }).join('\n');
@@ -1500,7 +1501,7 @@ ${columnVariables}
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>${parentPascal}</h1>
+        <h1>${parentTitle}</h1>
         <div>
           {canEdit && (
             <Link href={\`/${parent}/edit/\${src.id}\`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>

@@ -14,7 +14,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>XxxxxXxxxx</h1>
+        <h1>Xxxxx Xxxxx</h1>
         <div>
           {canEdit && (
             <Link href={`/xxxxx_xxxxx/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
@@ -44,7 +44,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
         aria-readonly
       />
       <div>
-        <h2>YyyyyYyyyy</h2>
+        <h2>Yyyyy Yyyyy</h2>
         <FieldsViewGrid fields={src.yyyyy_yyyyys} columns={yyyyy_yyyyyColumns} />
       </div>
     </div>

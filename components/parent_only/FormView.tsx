@@ -11,7 +11,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>ParentOnly</h1>
+        <h1>Parent Only</h1>
         <div>
         {canEdit && (
           <Link href={`/parent_only/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>

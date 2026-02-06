@@ -59,11 +59,11 @@ export default function FormView({ src, permissions }: FormViewProps) {
       <DateTimeWrapper label="Due Date" date_time={src.due_date} readOnly />
       <ImageDisplay url={src.image_url} alt="Image Url" />
       <div>
-        <h2>Parent1Child1</h2>
+        <h2>Parent1 Child1</h2>
         <FieldsViewGrid fields={src.parent1_child1s} columns={parent1_child1Columns} />
       </div>
       <div>
-        <h2>Parent1Child2</h2>
+        <h2>Parent1 Child2</h2>
         <FieldsViewGrid fields={src.parent1_child2s} columns={parent1_child2Columns} />
       </div>
       <div>
