@@ -195,6 +195,9 @@ model procedure {
   id           String @id @default(cuid())
   name         String
   description  String?
+  parent_id     String?
+  parent       procedure? @relation("ParentChild", fields: [parent_id], references: [id])
+  children     procedure[] @relation("ParentChild")
   preceded_by  procedure[] @relation("BeforeAfter")
   followed_by  procedure[] @relation("BeforeAfter")
 }

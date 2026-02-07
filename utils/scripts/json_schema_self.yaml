@@ -17,6 +17,13 @@ definitions:
         type: 
           - string
           - "null"
+      parent_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: procedure
+          labelField: name
 
   procedure_detail:
     x-generate:
@@ -37,9 +44,17 @@ definitions:
       - $ref: "#/definitions/procedure"
       - type: object
         required:
+          - children
           - preceded_by
           - followed_by
         properties:
+          parent:
+            $ref: "#/definitions/procedure"
+          children:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/procedure"
           preceded_by:
             type: array
             x-outputType: list
