@@ -28,10 +28,25 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
   const descriptionRef = useRef<HTMLInputElement>(null);
   const initialChildren: EditableListWrapperItem[] = src.children.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
-    value: f.name,
+    value: f.id,
     label: f.name,
     originalId: f.id,
   }));
+  const [selectedChildren, setSelectedChildren] = useState<EditableListWrapperItem[]>(initialChildren);
+  const autocompleteOptionsChildren = useMemo(() => {
+    const assignedChildIds = new Set(
+      selectedChildren
+        .map((child) => child.originalId ?? child.value)
+        .filter((childId): childId is string => typeof childId === 'string')
+    );
+    return allProcedures
+      .filter((child) => !assignedChildIds.has(child.id))
+      .map((child) => ({
+        id: child.id,
+        label: child.name,
+        value: child.name,
+      }));
+  }, [allProcedures, selectedChildren]);
   const initialPrecededBy: EditableListWrapperItem[] = src.preceded_by.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
@@ -94,12 +109,14 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
     const children = childrenRef.current?.getItems?.() || [];
 
     children.forEach((item) => {
-      const itemId = item.originalId || (typeof item.id === 'string' && item.id.startsWith('temp-') ? undefined : item.id);
+      const itemId =
+        item.originalId ??
+        (typeof item.value === 'string' || typeof item.value === 'number' ? item.value : undefined);
       formData.append(
         'children[]',
         JSON.stringify({
           id: itemId,
-          name: item.value,
+          name: item.label ?? item.value,
         })
       );
     });
@@ -191,12 +208,14 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
       <EditableListWrapper
         ref={childrenRef}
         initialItems={initialChildren}
-        itemType="text"
-        addButtonLabel="Add Children"
+        itemType="autocomplete"
+        addButtonLabel="Add Child"
         showTitle={true}
         title="Children"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
+        autocompleteOptions={autocompleteOptionsChildren}
+        onItemsChange={setSelectedChildren}
       />
       <EditableListWrapper
         ref={precededByRef}
