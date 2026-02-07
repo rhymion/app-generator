@@ -427,6 +427,7 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
   const parentPascal = toPascalCase(parent);
   const parentDef = schema.definitions[parent];
   const canDelete = generateConfig?.delete !== false;
+  const parentRelationships = getParentRelationships(parentDef);
   
   // Get parent properties (excluding id and timestamps)
   const parentProps = parentDef.properties
@@ -566,12 +567,21 @@ export async function remove${parentPascal}(data: FormData | string[]) {
       throw new Error(`Child definition ${child} has no properties`);
     }
     
+    const parentIdPropNames = new Set<string>();
+    if (child === parent) {
+      parentRelationships
+        .filter(rel => rel.target === parent)
+        .forEach(rel => parentIdPropNames.add(rel.propName));
+    } else {
+      parentIdPropNames.add(`${parent}_id`);
+    }
+
     const childProps = Object.keys(childDef.properties).filter(k => 
-      k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at'
+      k !== 'id' && !parentIdPropNames.has(k) && k !== 'created_at' && k !== 'updated_at'
     );
     
     const childPropsWithId = Object.keys(childDef.properties).filter(k => 
-      k !== 'created_at' && k !== 'updated_at'
+      !parentIdPropNames.has(k) && k !== 'created_at' && k !== 'updated_at'
     );
     
     const fieldType = `{ ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;

@@ -14,6 +14,9 @@ export async function upsertProcedure(data: FormData) {
   }
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
+  const parentId = (data.get('parent_id') as string | null) || null;
+  const childrenRaw = data.getAll('children[]') as string[];
+  const childrenItems = childrenRaw.map(f => JSON.parse(f) as { id?: string; name: string; description: string | null });
   const precededByRaw = data.getAll('preceded_by[]') as string[];
   const precededByItems = precededByRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
   const precededByIds = precededByItems
@@ -26,20 +29,27 @@ export async function upsertProcedure(data: FormData) {
     .filter((followedById): followedById is string => Boolean(followedById));
 
   if (id) {
-    await updateProcedure(id, name, description, precededByIds, followedByIds);
+    await updateProcedure(id, name, description, parentId, childrenItems, precededByIds, followedByIds);
   } else {
-    await addProcedure(name, description, precededByIds, followedByIds);
+    await addProcedure(name, description, parentId, childrenItems, precededByIds, followedByIds);
   }
 
   revalidatePath('/');
   redirect('/procedure');
 }
 
-async function addProcedure(name: string, description: string | null, precededByIds: string[], followedByIds: string[]) {
+async function addProcedure(name: string, description: string | null, parentId: string | null, childrenItems: { name: string; description: string | null }[], precededByIds: string[], followedByIds: string[]) {
   await prisma.procedure.create({
     data: {
       name: name,
       description: description,
+      parent_id: parentId,
+      children: {
+        create: childrenItems.map(f => ({
+          name: f.name,
+          description: f.description,
+        })),
+      },
       preceded_by: {
         connect: precededByIds.map((id) => ({ id })),
       },
@@ -50,12 +60,20 @@ async function addProcedure(name: string, description: string | null, precededBy
   });
 }
 
-async function updateProcedure(id: string, name: string, description: string | null, precededByIds: string[], followedByIds: string[]) {
+async function updateProcedure(id: string, name: string, description: string | null, parentId: string | null, childrenItems: { id?: string; name: string; description: string | null }[], precededByIds: string[], followedByIds: string[]) {
   await prisma.procedure.update({
     where: { id },
     data: {
       name: name,
       description: description,
+      parent_id: parentId,
+      children: {
+        deleteMany: {},
+        create: childrenItems.map(f => ({
+          name: f.name,
+          description: f.description,
+        })),
+      },
       preceded_by: {
         set: precededByIds.map((id) => ({ id })),
       },
