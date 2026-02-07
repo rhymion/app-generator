@@ -9,6 +9,8 @@ export default async function AddProcedurePage() {
     id: '',
     name: '',
     description: '',
+    parent_id: '',
+    children: [],
     preceded_by: [],
     followed_by: [],
   };

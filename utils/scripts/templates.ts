@@ -102,6 +102,39 @@ type ParentRelationshipMeta = {
   required?: boolean;
 };
 
+type DetailPropertyMap = Record<string, SchemaProperty> | undefined;
+
+function getDetailProperties(parent: string, schema: Schema): DetailPropertyMap {
+  const detailDef = schema.definitions[`${parent}_detail`];
+  if (!detailDef) return undefined;
+
+  if (detailDef.properties) {
+    return detailDef.properties;
+  }
+
+  if (detailDef.allOf) {
+    const propsObj = detailDef.allOf.find((item: any) => item.properties);
+    return propsObj?.properties;
+  }
+
+  return undefined;
+}
+
+function getDetailRelationName(parent: string, target: string, schema: Schema): string {
+  const properties = getDetailProperties(parent, schema);
+  if (!properties) return target;
+
+  for (const [propName, prop] of Object.entries(properties)) {
+    const propAny = prop as any;
+    const ref = propAny.$ref as string | undefined;
+    if (ref && ref.split('/').pop() === target) {
+      return propName;
+    }
+  }
+
+  return target;
+}
+
 function getParentRelationships(parentDef?: SchemaDefinition): ParentRelationshipMeta[] {
   if (!parentDef?.properties) return [];
 
@@ -135,8 +168,9 @@ export function generateTypes(parent: string, children: ChildInfo[], schema: Sch
 
   relationshipTargets.forEach((rel) => {
     const targetPascal = toPascalCase(rel.target);
-    parentExtraProps.push(`  ${rel.target}?: ${targetPascal} | null;`);
-    formViewExtraProps.push(`    ${rel.target}?: ${targetPascal} | null;`);
+    const relationName = getDetailRelationName(parent, rel.target, schema);
+    parentExtraProps.push(`  ${relationName}?: ${targetPascal} | null;`);
+    formViewExtraProps.push(`    ${relationName}?: ${targetPascal} | null;`);
   });
   
   // Generate parent type
@@ -280,7 +314,10 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
   const parentCamel = toCamelCase(parent);
   
   const parentDef = schema.definitions[parent];
-  const parentRelationships = getParentRelationships(parentDef);
+  const parentRelationships = getParentRelationships(parentDef).map((rel) => ({
+    ...rel,
+    relationName: getDetailRelationName(parent, rel.target, schema),
+  }));
   const hasOrganizationRelationship = parentRelationships.some(r => r.target === 'organization');
   const shouldFilterByOrganization = hasOrganizationRelationship && parent !== 'organization' && parent !== 'user_account';
   
@@ -292,19 +329,19 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
     : [];
   const parentMapping = parentProps.map(p => `    ${p}: ${parentCamel}.${p},`).join('\n');
   const relationshipMapping = parentRelationships
-    .map(r => `    ${r.target}: ${parentCamel}.${r.target},`)
+    .map(r => `    ${r.relationName}: ${parentCamel}.${r.relationName},`)
     .join('\n');
   
   // Build include for list (many-to-one only)
   const includeEntriesList = [
-    ...parentRelationships.map(r => `${r.target}: true`),
+    ...parentRelationships.map(r => `${r.relationName}: true`),
   ].filter(Boolean);
   const includePropsList = includeEntriesList.length > 0 ? includeEntriesList.join(', ') : '';
 
   // Build include for detail (children + many-to-one)
   const includeEntriesDetail = [
     ...children.map(c => `${c.propertyName}: true`),
-    ...parentRelationships.map(r => `${r.target}: true`),
+    ...parentRelationships.map(r => `${r.relationName}: true`),
   ].filter(Boolean);
   const includePropsDetail = includeEntriesDetail.length > 0 ? includeEntriesDetail.join(', ') : '';
   
@@ -770,7 +807,10 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const parentTitle = toTitleCase(parent);
   const parentDef = schema.definitions[parent];
   const canDelete = generateConfig?.delete !== false;
-  const parentRelationships = getParentRelationships(parentDef);
+  const parentRelationships = getParentRelationships(parentDef).map((rel) => ({
+    ...rel,
+    relationName: getDetailRelationName(parent, rel.target, schema),
+  }));
   
   if (!parentDef.properties) {
     throw new Error(`Parent definition ${parent} has no properties`);
@@ -1353,7 +1393,10 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   const parentPascal = toPascalCase(parent);
   const parentTitle = toTitleCase(parent);
   const parentDef = schema.definitions[parent];
-  const parentRelationships = getParentRelationships(parentDef);
+  const parentRelationships = getParentRelationships(parentDef).map((rel) => ({
+    ...rel,
+    relationName: getDetailRelationName(parent, rel.target, schema),
+  }));
   const relationshipByProp = new Map(parentRelationships.map(r => [r.propName, r] as const));
   
   if (!parentDef.properties) {
@@ -1398,7 +1441,7 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
       const labelField = rel.labelField ?? 'name';
       return `      <TextField
         label="${label}"
-        value={src.${rel.target}?.${labelField} || src.${p} || ''}
+        value={src.${rel.relationName}?.${labelField} || src.${p} || ''}
         fullWidth
         margin="normal"
         aria-readonly

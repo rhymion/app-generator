@@ -10,11 +10,14 @@ import { getServerSession } from 'next-auth/next';
 async function getAllProcedures(): Promise<Procedure[]> {
 
   const procedures = await prisma.procedure.findMany({
+    include: { parent: true },
   });
   return procedures.map((procedure) => ({
     id: procedure.id,
     name: procedure.name,
     description: procedure.description,
+    parent_id: procedure.parent_id,
+    parent: procedure.parent,
   }));
 }
 
@@ -25,8 +28,10 @@ async function getProcedureDetail(id: string): Promise<ProcedureDetail | null> {
       id,
     },
     include: { 
+      children: true, 
       preceded_by: true, 
-      followed_by: true 
+      followed_by: true, 
+      parent: true 
     },
   });
 
@@ -36,8 +41,10 @@ async function getProcedureDetail(id: string): Promise<ProcedureDetail | null> {
 
   return {
     ...procedure,
+    children: procedure.children,
     preceded_by: procedure.preceded_by,
     followed_by: procedure.followed_by,
+    parent: procedure.parent,
   };
 }
 

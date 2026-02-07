@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
+import Autocomplete from '@mui/material/Autocomplete';
 import { upsertProcedure, removeProcedure } from '@/lib/procedure/actions';
 import type { FormUpsertProps } from '@/lib/procedure/types';
 import FormWithChildGrid from '../FormWithChildGrid';
@@ -19,10 +20,18 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
 
+  const [parentId, setParentId] = useState<string | null>(src.parent_id || null);
+  const childrenRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const precededByRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const followedByRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
+  const initialChildren: EditableListWrapperItem[] = src.children.map(f => ({
+    id: f.id || `temp-${Date.now()}-${Math.random()}`,
+    value: f.name,
+    label: f.name,
+    originalId: f.id,
+  }));
   const initialPrecededBy: EditableListWrapperItem[] = src.preceded_by.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
@@ -65,6 +74,12 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         value: followedBy.name,
       }));
   }, [allProcedures, selectedFollowedBys]);
+  const parentIdOptions = useMemo(() => {
+    return allProcedures.map((item) => ({
+      id: item.id,
+      label: item.name,
+    }));
+  }, [allProcedures]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -75,6 +90,19 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
     formData.set('id', src.id);
     formData.set('name', nameRef.current?.value || '');
     formData.set('description', descriptionRef.current?.value || '');
+    formData.set('parent_id', parentId || '');
+    const children = childrenRef.current?.getItems?.() || [];
+
+    children.forEach((item) => {
+      const itemId = item.originalId || (typeof item.id === 'string' && item.id.startsWith('temp-') ? undefined : item.id);
+      formData.append(
+        'children[]',
+        JSON.stringify({
+          id: itemId,
+          name: item.value,
+        })
+      );
+    });
     const precededBy = precededByRef.current?.getItems?.() || [];
 
     precededBy.forEach((item) => {
@@ -146,6 +174,29 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         
         multiline={true}
         rows={4}
+      />
+      <Autocomplete
+        options={parentIdOptions}
+        value={parentIdOptions.find((option) => option.id === parentId) || null}
+        onChange={(_, newValue) => setParentId(newValue?.id ?? null)}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Parent"
+            margin="normal"
+            
+          />
+        )}
+      />
+      <EditableListWrapper
+        ref={childrenRef}
+        initialItems={initialChildren}
+        itemType="text"
+        addButtonLabel="Add Children"
+        showTitle={true}
+        title="Children"
+        textFieldLabel="Name"
+        textFieldPlaceholder="Enter name"
       />
       <EditableListWrapper
         ref={precededByRef}

@@ -18,7 +18,9 @@ definitions:
           - string
           - "null"
       parent_id:
-        type: string
+        type: 
+          - string
+          - "null"
         pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
           type: many-to-one

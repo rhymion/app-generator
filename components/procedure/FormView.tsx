@@ -36,6 +36,25 @@ export default function FormView({ src, permissions }: FormViewProps) {
         margin="normal"
         aria-readonly
       />
+      <TextField
+        label="Parent Id"
+        value={src.parent?.name || src.parent_id || ''}
+        fullWidth
+        margin="normal"
+        aria-readonly
+      />
+      <div>
+        <ListWrapper
+          items={src.children.map(f => ({
+            id: f.id,
+            value: f.name,
+            label: f.name,
+          }))}
+          itemType="text"
+          showTitle={true}
+          title="Children"
+        />
+      </div>
       <div>
         <ListWrapper
           items={src.preceded_by.map(f => ({
