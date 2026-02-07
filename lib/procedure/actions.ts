@@ -15,8 +15,11 @@ export async function upsertProcedure(data: FormData) {
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
   const parentId = (data.get('parent_id') as string | null) || null;
-  const childrenRaw = data.getAll('children[]') as string[];
-  const childrenItems = childrenRaw.map(f => JSON.parse(f) as { id?: string; name: string; description: string | null });
+  const childrenRaw = data.getAll('child[]') as string[];
+  const childrenItems = childrenRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
+  const childrenIds = childrenItems
+    .map((child) => child.id)
+    .filter((childId): childId is string => Boolean(childId));
   const precededByRaw = data.getAll('preceded_by[]') as string[];
   const precededByItems = precededByRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
   const precededByIds = precededByItems
@@ -29,26 +32,23 @@ export async function upsertProcedure(data: FormData) {
     .filter((followedById): followedById is string => Boolean(followedById));
 
   if (id) {
-    await updateProcedure(id, name, description, parentId, childrenItems, precededByIds, followedByIds);
+    await updateProcedure(id, name, description, parentId, childrenIds, precededByIds, followedByIds);
   } else {
-    await addProcedure(name, description, parentId, childrenItems, precededByIds, followedByIds);
+    await addProcedure(name, description, parentId, childrenIds, precededByIds, followedByIds);
   }
 
   revalidatePath('/');
   redirect('/procedure');
 }
 
-async function addProcedure(name: string, description: string | null, parentId: string | null, childrenItems: { name: string; description: string | null }[], precededByIds: string[], followedByIds: string[]) {
+async function addProcedure(name: string, description: string | null, parentId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[]) {
   await prisma.procedure.create({
     data: {
       name: name,
       description: description,
       parent_id: parentId,
       children: {
-        create: childrenItems.map(f => ({
-          name: f.name,
-          description: f.description,
-        })),
+        connect: childrenIds.map((id) => ({ id })),
       },
       preceded_by: {
         connect: precededByIds.map((id) => ({ id })),
@@ -60,7 +60,7 @@ async function addProcedure(name: string, description: string | null, parentId: 
   });
 }
 
-async function updateProcedure(id: string, name: string, description: string | null, parentId: string | null, childrenItems: { id?: string; name: string; description: string | null }[], precededByIds: string[], followedByIds: string[]) {
+async function updateProcedure(id: string, name: string, description: string | null, parentId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[]) {
   await prisma.procedure.update({
     where: { id },
     data: {
@@ -68,11 +68,7 @@ async function updateProcedure(id: string, name: string, description: string | n
       description: description,
       parent_id: parentId,
       children: {
-        deleteMany: {},
-        create: childrenItems.map(f => ({
-          name: f.name,
-          description: f.description,
-        })),
+        set: childrenIds.map((id) => ({ id })),
       },
       preceded_by: {
         set: precededByIds.map((id) => ({ id })),

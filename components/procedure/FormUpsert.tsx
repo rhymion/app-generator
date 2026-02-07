@@ -113,7 +113,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         item.originalId ??
         (typeof item.value === 'string' || typeof item.value === 'number' ? item.value : undefined);
       formData.append(
-        'children[]',
+        'child[]',
         JSON.stringify({
           id: itemId,
           name: item.label ?? item.value,

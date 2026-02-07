@@ -605,6 +605,7 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     const childPascal = childPascalName(childInfo);
     const childDef = schema.definitions[child];
     const isManyToMany = childInfo.relationship?.type === 'many-to-many';
+    const useConnect = isManyToMany || child === parent;
     
     if (!childDef?.properties) {
       throw new Error(`Child definition ${child} has no properties`);
@@ -640,15 +641,16 @@ export async function remove${parentPascal}(data: FormData | string[]) {
       fieldTypeWithId,
       fieldMapCreate,
       isManyToMany,
+      useConnect,
       propertyName: childInfo.propertyName,
       formKey: childFormKey(childInfo),
     };
   });
   
   // Generate FormData extraction for all children
-  const childFormDataExtractions = allChildrenData.map(({ childVar, fieldTypeWithId, isManyToMany, formKey }) => {
-    if (isManyToMany) {
-      // For many-to-many, extract IDs (only type id and name fields)
+  const childFormDataExtractions = allChildrenData.map(({ childVar, fieldTypeWithId, isManyToMany, useConnect, formKey }) => {
+    if (useConnect) {
+      // For connect-only relationships, extract IDs (only id and name fields)
       const childItemVar = singularize(childVar);
       const childItemId = `${childItemVar}Id`;
       return `  const ${childVar}Raw = data.getAll('${formKey}[]') as string[];\n  const ${childVar}Items = ${childVar}Raw.map(f => JSON.parse(f) as { id?: string; name?: string });\n  const ${childVar}Ids = ${childVar}Items\n    .map((${childItemVar}) => ${childItemVar}.id)\n    .filter((${childItemId}): ${childItemId} is string => Boolean(${childItemId}));`;
@@ -657,19 +659,19 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     }
   }).join('\n');
   
-  const childParamsForAdd = allChildrenData.map(({ childVar, fieldType, isManyToMany }) => 
-    isManyToMany ? `${childVar}Ids: string[]` : `${childVar}Items: ${fieldType}[]`
+  const childParamsForAdd = allChildrenData.map(({ childVar, fieldType, useConnect }) => 
+    useConnect ? `${childVar}Ids: string[]` : `${childVar}Items: ${fieldType}[]`
   ).join(', ');
-  const childParamsForUpdate = allChildrenData.map(({ childVar, fieldTypeWithId, isManyToMany }) => 
-    isManyToMany ? `${childVar}Ids: string[]` : `${childVar}Items: ${fieldTypeWithId}[]`
+  const childParamsForUpdate = allChildrenData.map(({ childVar, fieldTypeWithId, useConnect }) => 
+    useConnect ? `${childVar}Ids: string[]` : `${childVar}Items: ${fieldTypeWithId}[]`
   ).join(', ');
-  const childArgsForCall = allChildrenData.map(({ childVar, isManyToMany }) => 
-    isManyToMany ? `${childVar}Ids` : `${childVar}Items`
+  const childArgsForCall = allChildrenData.map(({ childVar, useConnect }) => 
+    useConnect ? `${childVar}Ids` : `${childVar}Items`
   ).join(', ');
   
   // Generate nested create for all children
-  const childNestedCreate = allChildrenData.map(({ propertyName, childVar, fieldMapCreate, isManyToMany }) => {
-    if (isManyToMany) {
+  const childNestedCreate = allChildrenData.map(({ propertyName, childVar, fieldMapCreate, useConnect }) => {
+    if (useConnect) {
       return `      ${propertyName}: {\n        connect: ${childVar}Ids.map((id) => ({ id })),\n      },`;
     } else {
       return `      ${propertyName}: {\n        create: ${childVar}Items.map(f => ({\n${fieldMapCreate}\n        })),\n      },`;
@@ -677,8 +679,8 @@ export async function remove${parentPascal}(data: FormData | string[]) {
   }).join('\n');
   
   // Generate nested update (deleteMany + create for one-to-many, set for many-to-many)
-  const childNestedUpdate = allChildrenData.map(({ propertyName, childVar, fieldMapCreate, isManyToMany }) => {
-    if (isManyToMany) {
+  const childNestedUpdate = allChildrenData.map(({ propertyName, childVar, fieldMapCreate, useConnect }) => {
+    if (useConnect) {
       return `      ${propertyName}: {\n        set: ${childVar}Ids.map((id) => ({ id })),\n      },`;
     } else {
       return `      ${propertyName}: {\n        deleteMany: {},\n        create: ${childVar}Items.map(f => ({\n${fieldMapCreate}\n        })),\n      },`;
