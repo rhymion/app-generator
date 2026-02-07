@@ -157,7 +157,10 @@ export function generateTypes(parent: string, children: ChildInfo[], schema: Sch
   
   // Build type definitions
   const importLines = relationshipTargets.length > 0
-    ? relationshipTargets.map(r => `import type { ${toPascalCase(r.target)} } from '@/lib/${r.target}/types';`).join('\n') + '\n\n'
+    ? relationshipTargets
+        .filter(r => r.target !== parent)
+        .map(r => `import type { ${toPascalCase(r.target)} } from '@/lib/${r.target}/types';`)
+        .join('\n') + '\n\n'
     : '';
 
   let result = `import type { ModelPermissions } from '@/lib/authz';
@@ -171,13 +174,18 @@ ${parentExtraProps.join('\n')}
 
   // Add option types for many-to-one relationships
   if (relationshipTargets.length > 0) {
-    const optionTypes = relationshipTargets.map(r => {
-      const targetPascal = toPascalCase(r.target);
-      const labelField = r.labelField ?? 'name';
-      return `export type ${targetPascal}Option = {\n  id: string;\n  ${labelField}: string;\n};`;
-    }).join('\n\n');
+    const optionTypes = relationshipTargets
+      .filter(r => r.target !== parent)
+      .map(r => {
+        const targetPascal = toPascalCase(r.target);
+        const labelField = r.labelField ?? 'name';
+        return `export type ${targetPascal}Option = {\n  id: string;\n  ${labelField}: string;\n};`;
+      })
+      .join('\n\n');
 
-    result += `${optionTypes}\n\n`;
+    if (optionTypes) {
+      result += `${optionTypes}\n\n`;
+    }
   }
   
   // Generate child types
@@ -245,14 +253,15 @@ ${formViewParentProps}${formViewExtraProps.length > 0 ? `\n${formViewExtraProps.
 }>;
 
 export type FormUpsertProps = Readonly<FormViewProps & {
-  isEdit: boolean;${Array.from(new Set(children.filter(c => c.relationship?.type === 'many-to-many').map(c => c.relationship!.target))).map(target => {
-    const targetPascal = toPascalCase(target);
-    return `\n  all${targetPascal}s?: ${targetPascal}[];`;
-  }).join('')}
-${relationshipTargets.map(r => {
-    const targetPascal = toPascalCase(r.target);
-    return `\n  all${targetPascal}s?: ${targetPascal}Option[];`;
-  }).join('')}
+  isEdit: boolean;${(() => {
+    const manyToManyTargets = Array.from(new Set(children.filter(c => c.relationship?.type === 'many-to-many').map(c => c.relationship!.target)));
+    const manyToOneTargets = Array.from(new Set(relationshipTargets.map(r => r.target)));
+    const combinedTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets]));
+    return combinedTargets.map(target => {
+      const targetPascal = toPascalCase(target);
+      return `\n  all${targetPascal}s?: ${targetPascal}[];`;
+    }).join('');
+  })()}
 ${Array.from(new Set([
   ...children.filter(c => c.relationship?.type === 'many-to-many').map(c => c.relationship!.target),
   ...relationshipTargets.map(r => r.target)
