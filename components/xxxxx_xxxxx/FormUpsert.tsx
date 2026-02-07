@@ -8,8 +8,8 @@ import { upsertXxxxxXxxxx, removeXxxxxXxxxx } from '@/lib/xxxxx_xxxxx/actions';
 import type { FormUpsertProps } from '@/lib/xxxxx_xxxxx/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import { GridRowsProp } from '@mui/x-data-grid';
-import FieldsDataGrid from '../FieldsDataGrid';
-import { yyyyy_yyyyy_columns } from '../xxxxx_xxxxx/column_def';
+  import FieldsDataGrid from '../FieldsDataGrid';
+  import { yyyyy_yyyyys_columns } from '../xxxxx_xxxxx/column_def';
 
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
   const router = useRouter();
@@ -17,15 +17,15 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
 
-  const yyyyy_yyyyyRef = useRef<{ getFields: () => GridRowsProp }>(null);
+  const yyyyyYyyyysRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const teamRef = useRef<HTMLInputElement>(null);
-  const yyyyy_yyyyyColumns = yyyyy_yyyyy_columns(true);
+  const yyyyyYyyyysColumns = yyyyy_yyyyys_columns(true);
 
-  const initialYyyyyYyyyy = src.yyyyy_yyyyys.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
+  const initialYyyyyYyyyys = src.yyyyy_yyyyys.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
 
-  const createNewYyyyyYyyyy = () => ({
+  const createNewYyyyyYyyyys = () => ({
     id: `temp-${Date.now()}-${Math.random()}`,
     name: '',
     type: '',
@@ -47,11 +47,11 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
     formData.set('name', nameRef.current?.value || '');
     formData.set('description', descriptionRef.current?.value || '');
     formData.set('team', teamRef.current?.value || '');
-    const yyyyyYyyyy = yyyyy_yyyyyRef.current?.getFields?.() || [];
+    const yyyyyYyyyys = yyyyyYyyyysRef.current?.getFields?.() || [];
 
-    (yyyyyYyyyy as any[]).forEach((field) => {
+    (yyyyyYyyyys as any[]).forEach((field) => {
       formData.append(
-        'yyyyyYyyyy[]',
+        'yyyyy_yyyyy[]',
         JSON.stringify({
           id: field.id.startsWith('temp-') ? undefined : field.id,
           name: field.name,
@@ -119,15 +119,15 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         rows={undefined}
       />
       <FieldsDataGrid
-        ref={yyyyy_yyyyyRef}
-        initialFields={initialYyyyyYyyyy}
-        columns={yyyyy_yyyyyColumns}
-        createNewRow={createNewYyyyyYyyyy}
-        addButtonLabel="Add Yyyyy Yyyyy"
-        deleteDialogTitle="Delete Selected Yyyyy Yyyyy?"
+        ref={yyyyyYyyyysRef}
+        initialFields={initialYyyyyYyyyys}
+        columns={yyyyyYyyyysColumns}
+        createNewRow={createNewYyyyyYyyyys}
+        addButtonLabel="Add Yyyyy Yyyyys"
+        deleteDialogTitle="Delete Selected Yyyyy Yyyyys?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="Yyyyy Yyyyy"
+        title="Yyyyy Yyyyys"
       />
     </>
   );

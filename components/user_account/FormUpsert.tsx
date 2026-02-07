@@ -10,8 +10,8 @@ import FormWithChildGrid from '../FormWithChildGrid';
 import type { Role } from '@/lib/role/types';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
-import FieldsDataGrid from '../FieldsDataGrid';
-import { role_columns } from '../user_account/column_def';
+  import FieldsDataGrid from '../FieldsDataGrid';
+  
 import ImageUpload from '../ImageUpload';
 
 export default function FormUpsert({ src, isEdit, permissions, allRoles = [], rolePermissions }: FormUpsertProps) {
@@ -21,26 +21,26 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   const canDelete = permissions ? permissions.delete : true;
 
   const [avatar, setAvatar] = useState<string>(src.avatar || '');
-  const roleRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
+  const rolesRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
   const api_keyRef = useRef<HTMLInputElement>(null);
-  const initialRole: EditableListWrapperItem[] = src.roles.map(f => ({
+  const initialRoles: EditableListWrapperItem[] = src.roles.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
     label: f.name,
     originalId: f.id,
   }));
-  const [selectedRoles, setSelectedRoles] = useState<EditableListWrapperItem[]>(initialRole);
-  const autocompleteOptionsRole = useMemo(() => {
-    const assignedRoleIds = new Set(
+  const [selectedRoles, setSelectedRoles] = useState<EditableListWrapperItem[]>(initialRoles);
+  const autocompleteOptionsRoles = useMemo(() => {
+    const assignedRolesIds = new Set(
       selectedRoles
         .map((role) => role.originalId ?? role.value)
         .filter((roleId): roleId is string => typeof roleId === 'string')
     );
     return allRoles
-      .filter((role) => !assignedRoleIds.has(role.id))
+      .filter((role) => !assignedRolesIds.has(role.id))
       .map((role) => ({
         id: role.id,
         label: role.name,
@@ -60,9 +60,9 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
     formData.set('password', passwordRef.current?.value || '');
     formData.set('api_key', api_keyRef.current?.value || '');
     formData.set('avatar', avatar);
-    const role = roleRef.current?.getItems?.() || [];
+    const roles = rolesRef.current?.getItems?.() || [];
 
-    role.forEach((item) => {
+    roles.forEach((item) => {
       const itemId =
         item.originalId ??
         (typeof item.value === 'string' || typeof item.value === 'number' ? item.value : undefined);
@@ -143,15 +143,15 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         onChange={setAvatar}
       />
       <EditableListWrapper
-        ref={roleRef}
-        initialItems={initialRole}
+        ref={rolesRef}
+        initialItems={initialRoles}
         itemType="autocomplete"
-        addButtonLabel="Add Role"
+        addButtonLabel="Add Roles"
         showTitle={true}
-        title="Role"
+        title="Roles"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
-        autocompleteOptions={autocompleteOptionsRole}
+        autocompleteOptions={autocompleteOptionsRoles}
         onItemsChange={setSelectedRoles}
       />
     </>

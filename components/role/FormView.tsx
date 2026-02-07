@@ -45,7 +45,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           }))}
           itemType="text"
           showTitle={true}
-          title="User Account"
+          title="User Accounts"
         />
       </div>
     </div>

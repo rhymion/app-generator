@@ -11,9 +11,9 @@ import type { FormUpsertProps } from '@/lib/parent1/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
-import FieldsDataGrid from '../FieldsDataGrid';
+  import FieldsDataGrid from '../FieldsDataGrid';
 import OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';
-import { parent1_child1_columns, parent1_child2_columns, parent1_list_columns } from '../parent1/column_def';
+  import { parent1_child1s_columns, parent1_child2s_columns } from '../parent1/column_def';
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
 import ImageUpload from '../ImageUpload';
@@ -27,17 +27,17 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   const [dueDate, setDueDate] = useState<Dayjs | null>(src.due_date ? dayjs(src.due_date) : null);
   const [imageUrl, setImageUrl] = useState<string>(src.image_url || '');
   const [organizationId, setOrganizationId] = useState<string | null>(src.organization_id || null);
-  const parent1_child1Ref = useRef<{ getFields: () => GridRowsProp }>(null);
-  const parent1_child2Ref = useRef<{ getFields: () => GridRowsProp }>(null);
-  const parent1_listRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
+  const parent1Child1sRef = useRef<{ getFields: () => GridRowsProp }>(null);
+  const parent1Child2sRef = useRef<{ getFields: () => GridRowsProp }>(null);
+  const parent1ListsRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
-  const parent1_child1Columns = parent1_child1_columns(true);
+  const parent1Child1sColumns = parent1_child1s_columns(true);
 
-  const initialParent1Child1 = src.parent1_child1s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
+  const initialParent1Child1s = src.parent1_child1s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
 
-  const createNewParent1Child1 = () => ({
+  const createNewParent1Child1s = () => ({
     id: `temp-${Date.now()}-${Math.random()}`,
     order: 0,
     name: '',
@@ -49,11 +49,11 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     written_by: '',
     parent1_id: src.id,
   });
-  const parent1_child2Columns = parent1_child2_columns(true);
+  const parent1Child2sColumns = parent1_child2s_columns(true);
 
-  const initialParent1Child2 = src.parent1_child2s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
+  const initialParent1Child2s = src.parent1_child2s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
 
-  const createNewParent1Child2 = () => ({
+  const createNewParent1Child2s = () => ({
     id: `temp-${Date.now()}-${Math.random()}`,
     name: '',
     required: true,
@@ -61,7 +61,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     end_date: dayjs().toISOString(),
     parent1_id: src.id,
   });
-  const initialParent1List: EditableListWrapperItem[] = src.parent1_lists.map(f => ({
+  const initialParent1Lists: EditableListWrapperItem[] = src.parent1_lists.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.name,
     label: f.name,
@@ -87,11 +87,11 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     formData.set('price', priceRef.current?.value || '');
     formData.set('due_date', dueDate?.toISOString() || '');
     formData.set('image_url', imageUrl);
-    const parent1Child1 = parent1_child1Ref.current?.getFields?.() || [];
+    const parent1Child1s = parent1Child1sRef.current?.getFields?.() || [];
 
-    (parent1Child1 as any[]).forEach((field) => {
+    (parent1Child1s as any[]).forEach((field) => {
       formData.append(
-        'parent1Child1[]',
+        'parent1_child1[]',
         JSON.stringify({
           id: field.id.startsWith('temp-') ? undefined : field.id,
           order: field.order,
@@ -105,11 +105,11 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         })
       );
     });
-    const parent1Child2 = parent1_child2Ref.current?.getFields?.() || [];
+    const parent1Child2s = parent1Child2sRef.current?.getFields?.() || [];
 
-    (parent1Child2 as any[]).forEach((field) => {
+    (parent1Child2s as any[]).forEach((field) => {
       formData.append(
-        'parent1Child2[]',
+        'parent1_child2[]',
         JSON.stringify({
           id: field.id.startsWith('temp-') ? undefined : field.id,
           name: field.name,
@@ -119,12 +119,12 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         })
       );
     });
-    const parent1List = parent1_listRef.current?.getItems?.() || [];
+    const parent1Lists = parent1ListsRef.current?.getItems?.() || [];
 
-    parent1List.forEach((item) => {
+    parent1Lists.forEach((item) => {
       const itemId = item.originalId || (typeof item.id === 'string' && item.id.startsWith('temp-') ? undefined : item.id);
       formData.append(
-        'parent1List[]',
+        'parent1_list[]',
         JSON.stringify({
           id: itemId,
           name: item.value,
@@ -205,34 +205,34 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         onChange={setImageUrl}
       />
       <OrderedFieldsDataGrid
-        ref={parent1_child1Ref}
-        initialFields={initialParent1Child1}
-        columns={parent1_child1Columns}
-        createNewRow={createNewParent1Child1}
-        addButtonLabel="Add Parent1 Child1"
-        deleteDialogTitle="Delete Selected Parent1 Child1?"
+        ref={parent1Child1sRef}
+        initialFields={initialParent1Child1s}
+        columns={parent1Child1sColumns}
+        createNewRow={createNewParent1Child1s}
+        addButtonLabel="Add Parent1 Child1s"
+        deleteDialogTitle="Delete Selected Parent1 Child1s?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="Parent1 Child1"
+        title="Parent1 Child1s"
       />
       <FieldsDataGrid
-        ref={parent1_child2Ref}
-        initialFields={initialParent1Child2}
-        columns={parent1_child2Columns}
-        createNewRow={createNewParent1Child2}
-        addButtonLabel="Add Parent1 Child2"
-        deleteDialogTitle="Delete Selected Parent1 Child2?"
+        ref={parent1Child2sRef}
+        initialFields={initialParent1Child2s}
+        columns={parent1Child2sColumns}
+        createNewRow={createNewParent1Child2s}
+        addButtonLabel="Add Parent1 Child2s"
+        deleteDialogTitle="Delete Selected Parent1 Child2s?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="Parent1 Child2"
+        title="Parent1 Child2s"
       />
       <EditableListWrapper
-        ref={parent1_listRef}
-        initialItems={initialParent1List}
+        ref={parent1ListsRef}
+        initialItems={initialParent1Lists}
         itemType="text"
-        addButtonLabel="Add Parent1 List"
+        addButtonLabel="Add Parent1 Lists"
         showTitle={true}
-        title="Parent1 List"
+        title="Parent1 Lists"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
       />

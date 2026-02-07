@@ -14,42 +14,42 @@ export async function upsertRole(data: FormData) {
   }
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
-  const userAccountsRaw = data.getAll('userAccount[]') as string[];
-  const userAccounts = userAccountsRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
-  const userAccountIds = userAccounts
+  const userAccountsRaw = data.getAll('user_account[]') as string[];
+  const userAccountsItems = userAccountsRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
+  const userAccountsIds = userAccountsItems
     .map((userAccount) => userAccount.id)
     .filter((userAccountId): userAccountId is string => Boolean(userAccountId));
 
   if (id) {
-    await updateRole(id, name, description, userAccountIds);
+    await updateRole(id, name, description, userAccountsIds);
   } else {
-    await addRole(name, description, userAccountIds);
+    await addRole(name, description, userAccountsIds);
   }
 
   revalidatePath('/');
   redirect('/role');
 }
 
-async function addRole(name: string, description: string | null, userAccountIds: string[]) {
+async function addRole(name: string, description: string | null, userAccountsIds: string[]) {
   await prisma.role.create({
     data: {
       name: name,
       description: description,
       user_accounts: {
-        connect: userAccountIds.map((id) => ({ id })),
+        connect: userAccountsIds.map((id) => ({ id })),
       },
     },
   });
 }
 
-async function updateRole(id: string, name: string, description: string | null, userAccountIds: string[]) {
+async function updateRole(id: string, name: string, description: string | null, userAccountsIds: string[]) {
   await prisma.role.update({
     where: { id },
     data: {
       name: name,
       description: description,
       user_accounts: {
-        set: userAccountIds.map((id) => ({ id })),
+        set: userAccountsIds.map((id) => ({ id })),
       },
     },
   });

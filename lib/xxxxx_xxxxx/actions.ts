@@ -15,27 +15,27 @@ export async function upsertXxxxxXxxxx(data: FormData) {
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
   const team = data.get('team') as string | null;
-  const yyyyyYyyyysRaw = data.getAll('yyyyyYyyyy[]') as string[];
-  const yyyyyYyyyys = yyyyyYyyyysRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string; xxxxx_xxxxx_id?: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });
+  const yyyyyYyyyysRaw = data.getAll('yyyyy_yyyyy[]') as string[];
+  const yyyyyYyyyysItems = yyyyyYyyyysRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });
 
   if (id) {
-    await updateXxxxxXxxxx(id, name, description, team, yyyyyYyyyys);
+    await updateXxxxxXxxxx(id, name, description, team, yyyyyYyyyysItems);
   } else {
-    await addXxxxxXxxxx(name, description, team, yyyyyYyyyys);
+    await addXxxxxXxxxx(name, description, team, yyyyyYyyyysItems);
   }
 
   revalidatePath('/');
   redirect('/xxxxx_xxxxx');
 }
 
-async function addXxxxxXxxxx(name: string, description: string | null, team: string | null, yyyyyYyyyys: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]) {
+async function addXxxxxXxxxx(name: string, description: string | null, team: string | null, yyyyyYyyyysItems: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]) {
   await prisma.xxxxx_xxxxx.create({
     data: {
       name: name,
       description: description,
       team: team,
       yyyyy_yyyyys: {
-        create: yyyyyYyyyys.map(f => ({
+        create: yyyyyYyyyysItems.map(f => ({
           name: f.name,
           type: f.type,
           max_length: f.max_length,
@@ -49,7 +49,7 @@ async function addXxxxxXxxxx(name: string, description: string | null, team: str
   });
 }
 
-async function updateXxxxxXxxxx(id: string, name: string, description: string | null, team: string | null, yyyyyYyyyys: { id?: string; name: string; type: string; xxxxx_xxxxx_id?: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]) {
+async function updateXxxxxXxxxx(id: string, name: string, description: string | null, team: string | null, yyyyyYyyyysItems: { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]) {
   await prisma.xxxxx_xxxxx.update({
     where: { id },
     data: {
@@ -58,7 +58,7 @@ async function updateXxxxxXxxxx(id: string, name: string, description: string | 
       team: team,
       yyyyy_yyyyys: {
         deleteMany: {},
-        create: yyyyyYyyyys.map(f => ({
+        create: yyyyyYyyyysItems.map(f => ({
           name: f.name,
           type: f.type,
           max_length: f.max_length,

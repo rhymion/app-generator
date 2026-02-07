@@ -1,6 +1,6 @@
 import { GridColDef } from '@mui/x-data-grid';
 
-export function yyyyy_yyyyy_columns(editable: boolean = false): GridColDef[] {
+export function yyyyy_yyyyys_columns(editable: boolean = false): GridColDef[] {
   return [
     { field: 'name', headerName: 'Name', width: 150, editable: editable },
     { field: 'type', headerName: 'Type', width: 150, editable: editable },

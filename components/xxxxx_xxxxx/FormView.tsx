@@ -4,13 +4,13 @@ import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/xxxxx_xxxxx/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
-import { yyyyy_yyyyy_columns } from '../xxxxx_xxxxx/column_def';
+import { yyyyy_yyyyys_columns } from '../xxxxx_xxxxx/column_def';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
-  const yyyyy_yyyyyColumns: GridColDef[] = yyyyy_yyyyy_columns(false);
+  const yyyyyYyyyysColumns: GridColDef[] = yyyyy_yyyyys_columns(false);
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -44,8 +44,8 @@ export default function FormView({ src, permissions }: FormViewProps) {
         aria-readonly
       />
       <div>
-        <h2>Yyyyy Yyyyy</h2>
-        <FieldsViewGrid fields={src.yyyyy_yyyyys} columns={yyyyy_yyyyyColumns} />
+        <h2>Yyyyy Yyyyys</h2>
+        <FieldsViewGrid fields={src.yyyyy_yyyyys} columns={yyyyyYyyyysColumns} />
       </div>
     </div>
   );

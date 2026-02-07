@@ -2,7 +2,7 @@ import { GridColDef, GridRenderEditCellParams } from '@mui/x-data-grid';
 import DateTimeWrapper from '../DateTimeWrapper';
 import dayjs from 'dayjs';
 
-export function parent1_child1_columns(editable: boolean = false): GridColDef[] {
+export function parent1_child1s_columns(editable: boolean = false): GridColDef[] {
   return [
     { field: 'order', headerName: 'No.', width: 50, editable: false, type: 'number' },
     { field: 'name', headerName: 'Name', width: 150, editable: editable },
@@ -15,7 +15,7 @@ export function parent1_child1_columns(editable: boolean = false): GridColDef[] 
   ];
 }
 
-export function parent1_child2_columns(editable: boolean = false): GridColDef[] {
+export function parent1_child2s_columns(editable: boolean = false): GridColDef[] {
   return [
     { field: 'name', headerName: 'Name', width: 150, editable: editable },
     { field: 'required', headerName: 'Required', width: 100, editable: editable, type: 'boolean' },
@@ -68,7 +68,7 @@ export function parent1_child2_columns(editable: boolean = false): GridColDef[] 
   ];
 }
 
-export function parent1_list_columns(editable: boolean = false): GridColDef[] {
+export function parent1_lists_columns(editable: boolean = false): GridColDef[] {
   return [
     { field: 'name', headerName: 'Name', width: 150, editable: editable },
   ];

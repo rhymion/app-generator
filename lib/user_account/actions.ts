@@ -18,22 +18,22 @@ export async function upsertUserAccount(data: FormData) {
   const apiKey = data.get('api_key') as string | null;
   const avatar = data.get('avatar') as string | null;
   const rolesRaw = data.getAll('role[]') as string[];
-  const roles = rolesRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
-  const roleIds = roles
+  const rolesItems = rolesRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
+  const rolesIds = rolesItems
     .map((role) => role.id)
     .filter((roleId): roleId is string => Boolean(roleId));
 
   if (id) {
-    await updateUserAccount(id, name, email, password, apiKey, avatar, roleIds);
+    await updateUserAccount(id, name, email, password, apiKey, avatar, rolesIds);
   } else {
-    await addUserAccount(name, email, password, apiKey, avatar, roleIds);
+    await addUserAccount(name, email, password, apiKey, avatar, rolesIds);
   }
 
   revalidatePath('/');
   redirect('/user_account');
 }
 
-async function addUserAccount(name: string, email: string, password: string, apiKey: string | null, avatar: string | null, roleIds: string[]) {
+async function addUserAccount(name: string, email: string, password: string, apiKey: string | null, avatar: string | null, rolesIds: string[]) {
   await prisma.user_account.create({
     data: {
       name: name,
@@ -42,13 +42,13 @@ async function addUserAccount(name: string, email: string, password: string, api
       api_key: apiKey,
       avatar: avatar,
       roles: {
-        connect: roleIds.map((id) => ({ id })),
+        connect: rolesIds.map((id) => ({ id })),
       },
     },
   });
 }
 
-async function updateUserAccount(id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, roleIds: string[]) {
+async function updateUserAccount(id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, rolesIds: string[]) {
   await prisma.user_account.update({
     where: { id },
     data: {
@@ -58,7 +58,7 @@ async function updateUserAccount(id: string, name: string, email: string, passwo
       api_key: apiKey,
       avatar: avatar,
       roles: {
-        set: roleIds.map((id) => ({ id })),
+        set: rolesIds.map((id) => ({ id })),
       },
     },
   });

@@ -14,42 +14,42 @@ export async function upsertOrganization(data: FormData) {
   }
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
-  const userAccountsRaw = data.getAll('userAccount[]') as string[];
-  const userAccounts = userAccountsRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
-  const userAccountIds = userAccounts
+  const userAccountsRaw = data.getAll('user_account[]') as string[];
+  const userAccountsItems = userAccountsRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
+  const userAccountsIds = userAccountsItems
     .map((userAccount) => userAccount.id)
     .filter((userAccountId): userAccountId is string => Boolean(userAccountId));
 
   if (id) {
-    await updateOrganization(id, name, description, userAccountIds);
+    await updateOrganization(id, name, description, userAccountsIds);
   } else {
-    await addOrganization(name, description, userAccountIds);
+    await addOrganization(name, description, userAccountsIds);
   }
 
   revalidatePath('/');
   redirect('/organization');
 }
 
-async function addOrganization(name: string, description: string | null, userAccountIds: string[]) {
+async function addOrganization(name: string, description: string | null, userAccountsIds: string[]) {
   await prisma.organization.create({
     data: {
       name: name,
       description: description,
       user_accounts: {
-        connect: userAccountIds.map((id) => ({ id })),
+        connect: userAccountsIds.map((id) => ({ id })),
       },
     },
   });
 }
 
-async function updateOrganization(id: string, name: string, description: string | null, userAccountIds: string[]) {
+async function updateOrganization(id: string, name: string, description: string | null, userAccountsIds: string[]) {
   await prisma.organization.update({
     where: { id },
     data: {
       name: name,
       description: description,
       user_accounts: {
-        set: userAccountIds.map((id) => ({ id })),
+        set: userAccountsIds.map((id) => ({ id })),
       },
     },
   });

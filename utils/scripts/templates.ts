@@ -28,6 +28,49 @@ function childColumnsFnName(child: ChildInfo): string {
   return `${child.propertyName}_columns`;
 }
 
+const IRREGULAR_SINGULAR = new Map<string, string>([
+  ['children', 'child'],
+  ['people', 'person'],
+  ['men', 'man'],
+  ['women', 'woman'],
+]);
+
+function singularize(name: string): string {
+  if (!name) return name;
+  const isPascal = name[0] === name[0].toUpperCase();
+  const lower = name.toLowerCase();
+
+  let base: string | undefined = IRREGULAR_SINGULAR.get(lower);
+
+  if (!base) {
+    if (lower.endsWith('ies') && name.length > 3) {
+      base = name.slice(0, -3) + 'y';
+    } else if (lower.endsWith('s') && !lower.endsWith('ss')) {
+      base = name.slice(0, -1);
+    } else {
+      base = name;
+    }
+  }
+
+  if (isPascal) {
+    return base.charAt(0).toUpperCase() + base.slice(1);
+  }
+
+  return base;
+}
+
+function childSingularVarName(child: ChildInfo): string {
+  return singularize(childVarName(child));
+}
+
+function childSingularPascalName(child: ChildInfo): string {
+  return singularize(childPascalName(child));
+}
+
+function childFormKey(child: ChildInfo): string {
+  return singularize(child.propertyName);
+}
+
 function getTsType(prop: SchemaProperty): string {
   // Check for date/datetime/time format
   const format = (prop as any).format;
@@ -598,16 +641,19 @@ export async function remove${parentPascal}(data: FormData | string[]) {
       fieldMapCreate,
       isManyToMany,
       propertyName: childInfo.propertyName,
+      formKey: childFormKey(childInfo),
     };
   });
   
   // Generate FormData extraction for all children
-  const childFormDataExtractions = allChildrenData.map(({ childVar, fieldTypeWithId, isManyToMany, propertyName }) => {
+  const childFormDataExtractions = allChildrenData.map(({ childVar, fieldTypeWithId, isManyToMany, formKey }) => {
     if (isManyToMany) {
       // For many-to-many, extract IDs (only type id and name fields)
-      return `  const ${childVar}Raw = data.getAll('${propertyName}[]') as string[];\n  const ${childVar}Items = ${childVar}Raw.map(f => JSON.parse(f) as { id?: string; name?: string });\n  const ${childVar}Ids = ${childVar}Items\n    .map((${childVar}) => ${childVar}.id)\n    .filter((${childVar}Id): ${childVar}Id is string => Boolean(${childVar}Id));`;
+      const childItemVar = singularize(childVar);
+      const childItemId = `${childItemVar}Id`;
+      return `  const ${childVar}Raw = data.getAll('${formKey}[]') as string[];\n  const ${childVar}Items = ${childVar}Raw.map(f => JSON.parse(f) as { id?: string; name?: string });\n  const ${childVar}Ids = ${childVar}Items\n    .map((${childItemVar}) => ${childItemVar}.id)\n    .filter((${childItemId}): ${childItemId} is string => Boolean(${childItemId}));`;
     } else {
-      return `  const ${childVar}Raw = data.getAll('${propertyName}[]') as string[];\n  const ${childVar}Items = ${childVar}Raw.map(f => JSON.parse(f) as ${fieldTypeWithId});`;
+      return `  const ${childVar}Raw = data.getAll('${formKey}[]') as string[];\n  const ${childVar}Items = ${childVar}Raw.map(f => JSON.parse(f) as ${fieldTypeWithId});`;
     }
   }).join('\n');
   
@@ -1109,28 +1155,28 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       // For many-to-many relationships
       if (childInfo.relationship?.type === 'many-to-many') {
         const targetPascal = toPascalCase(childInfo.relationship.target);
-        const childCamel = childVar;
+        const childItemVar = childSingularVarName(childInfo);
         return `  const initial${childPascal}: EditableListWrapperItem[] = src.${childInfo.propertyName}.map(f => ({
     id: f.id || \`temp-\${Date.now()}-\${Math.random()}\`,
     value: f.id,
     label: f.name,
     originalId: f.id,
   }));
-  const [selected${childPascal}s, setSelected${childPascal}s] = useState<EditableListWrapperItem[]>(initial${childPascal});
+  const [selected${childPascal}, setSelected${childPascal}] = useState<EditableListWrapperItem[]>(initial${childPascal});
   const autocompleteOptions${childPascal} = useMemo(() => {
     const assigned${childPascal}Ids = new Set(
-      selected${childPascal}s
-        .map((${childCamel}) => ${childCamel}.originalId ?? ${childCamel}.value)
-        .filter((${childCamel}Id): ${childCamel}Id is string => typeof ${childCamel}Id === 'string')
+      selected${childPascal}
+        .map((${childItemVar}) => ${childItemVar}.originalId ?? ${childItemVar}.value)
+        .filter((${childItemVar}Id): ${childItemVar}Id is string => typeof ${childItemVar}Id === 'string')
     );
     return all${targetPascal}s
-      .filter((${childCamel}) => !assigned${childPascal}Ids.has(${childCamel}.id))
-      .map((${childCamel}) => ({
-        id: ${childCamel}.id,
-        label: ${childCamel}.name,
-        value: ${childCamel}.name,
+      .filter((${childItemVar}) => !assigned${childPascal}Ids.has(${childItemVar}.id))
+      .map((${childItemVar}) => ({
+        id: ${childItemVar}.id,
+        label: ${childItemVar}.name,
+        value: ${childItemVar}.name,
       }));
-  }, [all${targetPascal}s, selected${childPascal}s]);`;
+  }, [all${targetPascal}s, selected${childPascal}]);`;
       }
       
       // For list output type, generate different initialization
@@ -1187,6 +1233,7 @@ ${createNewChildProps}
       const allChildFormDataHandling = children.map(childInfo => {
         const child = childInfo.name;
         const childVar = childVarName(childInfo);
+        const formKey = childFormKey(childInfo);
       const childDef = schema.definitions[child];
       
       if (!childDef?.properties) {
@@ -1202,7 +1249,7 @@ ${createNewChildProps}
         item.originalId ??
         (typeof item.value === 'string' || typeof item.value === 'number' ? item.value : undefined);
       formData.append(
-        '${childInfo.propertyName}[]',
+        '${formKey}[]',
         JSON.stringify({
           id: itemId,
           name: item.label ?? item.value,
@@ -1218,7 +1265,7 @@ ${createNewChildProps}
     ${childVar}.forEach((item) => {
       const itemId = item.originalId || (typeof item.id === 'string' && item.id.startsWith('temp-') ? undefined : item.id);
       formData.append(
-        '${childInfo.propertyName}[]',
+        '${formKey}[]',
         JSON.stringify({
           id: itemId,
           name: item.value,
@@ -1237,7 +1284,7 @@ ${createNewChildProps}
 
     (${childVar} as any[]).forEach((field) => {
       formData.append(
-        '${childInfo.propertyName}[]',
+        '${formKey}[]',
         JSON.stringify({
           id: field.id.startsWith('temp-') ? undefined : field.id,
 ${childSerialize}
@@ -1267,7 +1314,7 @@ ${childSerialize}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         autocompleteOptions={autocompleteOptions${childPascal}}
-        onItemsChange={setSelected${childPascal}s}
+        onItemsChange={setSelected${childPascal}}
       />`;
       }
       

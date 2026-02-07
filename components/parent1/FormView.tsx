@@ -6,7 +6,7 @@ import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/parent1/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
-import { parent1_child1_columns, parent1_child2_columns } from '../parent1/column_def';
+import { parent1_child1s_columns, parent1_child2s_columns } from '../parent1/column_def';
 import DateTimeWrapper from '../DateTimeWrapper';
 import ImageDisplay from '../ImageDisplay';
 import ListWrapper from '../ListWrapper';
@@ -15,8 +15,8 @@ import Checkbox from '@mui/material/Checkbox';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
-  const parent1_child1Columns: GridColDef[] = parent1_child1_columns(false);
-  const parent1_child2Columns: GridColDef[] = parent1_child2_columns(false);
+  const parent1Child1sColumns: GridColDef[] = parent1_child1s_columns(false);
+  const parent1Child2sColumns: GridColDef[] = parent1_child2s_columns(false);
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -59,12 +59,12 @@ export default function FormView({ src, permissions }: FormViewProps) {
       <DateTimeWrapper label="Due Date" date_time={src.due_date} readOnly />
       <ImageDisplay url={src.image_url} alt="Image Url" />
       <div>
-        <h2>Parent1 Child1</h2>
-        <FieldsViewGrid fields={src.parent1_child1s} columns={parent1_child1Columns} />
+        <h2>Parent1 Child1s</h2>
+        <FieldsViewGrid fields={src.parent1_child1s} columns={parent1Child1sColumns} />
       </div>
       <div>
-        <h2>Parent1 Child2</h2>
-        <FieldsViewGrid fields={src.parent1_child2s} columns={parent1_child2Columns} />
+        <h2>Parent1 Child2s</h2>
+        <FieldsViewGrid fields={src.parent1_child2s} columns={parent1Child2sColumns} />
       </div>
       <div>
         <ListWrapper
@@ -75,7 +75,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           }))}
           itemType="text"
           showTitle={true}
-          title="Parent1 List"
+          title="Parent1 Lists"
         />
       </div>
     </div>

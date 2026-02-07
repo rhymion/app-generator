@@ -19,24 +19,24 @@ export async function upsertParent1(data: FormData) {
   const dueDateStr = data.get('due_date') as string;
   const dueDate = new Date(dueDateStr);
   const imageUrl = data.get('image_url') as string | null;
-  const parent1Child1sRaw = data.getAll('parent1Child1[]') as string[];
-  const parent1Child1s = parent1Child1sRaw.map(f => JSON.parse(f) as { id?: string; order: number; name: string; type: string; parent1_id?: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });
-  const parent1Child2sRaw = data.getAll('parent1Child2[]') as string[];
-  const parent1Child2s = parent1Child2sRaw.map(f => JSON.parse(f) as { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date });
-  const parent1ListsRaw = data.getAll('parent1List[]') as string[];
-  const parent1Lists = parent1ListsRaw.map(f => JSON.parse(f) as { id?: string; name: string });
+  const parent1Child1sRaw = data.getAll('parent1_child1[]') as string[];
+  const parent1Child1sItems = parent1Child1sRaw.map(f => JSON.parse(f) as { id?: string; order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });
+  const parent1Child2sRaw = data.getAll('parent1_child2[]') as string[];
+  const parent1Child2sItems = parent1Child2sRaw.map(f => JSON.parse(f) as { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date });
+  const parent1ListsRaw = data.getAll('parent1_list[]') as string[];
+  const parent1ListsItems = parent1ListsRaw.map(f => JSON.parse(f) as { id?: string; name: string });
 
   if (id) {
-    await updateParent1(id, name, organizationId, description, price, dueDate, imageUrl, parent1Child1s, parent1Child2s, parent1Lists);
+    await updateParent1(id, name, organizationId, description, price, dueDate, imageUrl, parent1Child1sItems, parent1Child2sItems, parent1ListsItems);
   } else {
-    await addParent1(name, organizationId, description, price, dueDate, imageUrl, parent1Child1s, parent1Child2s, parent1Lists);
+    await addParent1(name, organizationId, description, price, dueDate, imageUrl, parent1Child1sItems, parent1Child2sItems, parent1ListsItems);
   }
 
   revalidatePath('/');
   redirect('/parent1');
 }
 
-async function addParent1(name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1s: { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1Lists: { name: string }[]) {
+async function addParent1(name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { name: string }[]) {
   await prisma.parent1.create({
     data: {
       name: name,
@@ -46,7 +46,7 @@ async function addParent1(name: string, organizationId: string, description: str
       due_date: dueDate,
       image_url: imageUrl,
       parent1_child1s: {
-        create: parent1Child1s.map(f => ({
+        create: parent1Child1sItems.map(f => ({
           order: f.order,
           name: f.name,
           type: f.type,
@@ -58,7 +58,7 @@ async function addParent1(name: string, organizationId: string, description: str
         })),
       },
       parent1_child2s: {
-        create: parent1Child2s.map(f => ({
+        create: parent1Child2sItems.map(f => ({
           name: f.name,
           required: f.required,
           start_date: f.start_date,
@@ -66,7 +66,7 @@ async function addParent1(name: string, organizationId: string, description: str
         })),
       },
       parent1_lists: {
-        create: parent1Lists.map(f => ({
+        create: parent1ListsItems.map(f => ({
           name: f.name,
         })),
       },
@@ -74,7 +74,7 @@ async function addParent1(name: string, organizationId: string, description: str
   });
 }
 
-async function updateParent1(id: string, name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1s: { id?: string; order: number; name: string; type: string; parent1_id?: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2s: { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1Lists: { id?: string; name: string }[]) {
+async function updateParent1(id: string, name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { id?: string; order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { id?: string; name: string }[]) {
   await prisma.parent1.update({
     where: { id },
     data: {
@@ -86,7 +86,7 @@ async function updateParent1(id: string, name: string, organizationId: string, d
       image_url: imageUrl,
       parent1_child1s: {
         deleteMany: {},
-        create: parent1Child1s.map(f => ({
+        create: parent1Child1sItems.map(f => ({
           order: f.order,
           name: f.name,
           type: f.type,
@@ -99,7 +99,7 @@ async function updateParent1(id: string, name: string, organizationId: string, d
       },
       parent1_child2s: {
         deleteMany: {},
-        create: parent1Child2s.map(f => ({
+        create: parent1Child2sItems.map(f => ({
           name: f.name,
           required: f.required,
           start_date: f.start_date,
@@ -108,7 +108,7 @@ async function updateParent1(id: string, name: string, organizationId: string, d
       },
       parent1_lists: {
         deleteMany: {},
-        create: parent1Lists.map(f => ({
+        create: parent1ListsItems.map(f => ({
           name: f.name,
         })),
       },

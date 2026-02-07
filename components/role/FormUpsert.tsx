@@ -10,8 +10,8 @@ import FormWithChildGrid from '../FormWithChildGrid';
 import type { UserAccount } from '@/lib/user_account/types';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
-import FieldsDataGrid from '../FieldsDataGrid';
-import { user_account_columns } from '../role/column_def';
+  import FieldsDataGrid from '../FieldsDataGrid';
+  
 
 export default function FormUpsert({ src, isEdit, permissions, allUserAccounts = [], userAccountPermissions }: FormUpsertProps) {
   const router = useRouter();
@@ -19,24 +19,24 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
 
-  const user_accountRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
+  const userAccountsRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
-  const initialUserAccount: EditableListWrapperItem[] = src.user_accounts.map(f => ({
+  const initialUserAccounts: EditableListWrapperItem[] = src.user_accounts.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
     label: f.name,
     originalId: f.id,
   }));
-  const [selectedUserAccounts, setSelectedUserAccounts] = useState<EditableListWrapperItem[]>(initialUserAccount);
-  const autocompleteOptionsUserAccount = useMemo(() => {
-    const assignedUserAccountIds = new Set(
+  const [selectedUserAccounts, setSelectedUserAccounts] = useState<EditableListWrapperItem[]>(initialUserAccounts);
+  const autocompleteOptionsUserAccounts = useMemo(() => {
+    const assignedUserAccountsIds = new Set(
       selectedUserAccounts
         .map((userAccount) => userAccount.originalId ?? userAccount.value)
         .filter((userAccountId): userAccountId is string => typeof userAccountId === 'string')
     );
     return allUserAccounts
-      .filter((userAccount) => !assignedUserAccountIds.has(userAccount.id))
+      .filter((userAccount) => !assignedUserAccountsIds.has(userAccount.id))
       .map((userAccount) => ({
         id: userAccount.id,
         label: userAccount.name,
@@ -53,14 +53,14 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
     formData.set('id', src.id);
     formData.set('name', nameRef.current?.value || '');
     formData.set('description', descriptionRef.current?.value || '');
-    const userAccount = user_accountRef.current?.getItems?.() || [];
+    const userAccounts = userAccountsRef.current?.getItems?.() || [];
 
-    userAccount.forEach((item) => {
+    userAccounts.forEach((item) => {
       const itemId =
         item.originalId ??
         (typeof item.value === 'string' || typeof item.value === 'number' ? item.value : undefined);
       formData.append(
-        'userAccount[]',
+        'user_account[]',
         JSON.stringify({
           id: itemId,
           name: item.label ?? item.value,
@@ -112,15 +112,15 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         rows={4}
       />
       <EditableListWrapper
-        ref={user_accountRef}
-        initialItems={initialUserAccount}
+        ref={userAccountsRef}
+        initialItems={initialUserAccounts}
         itemType="autocomplete"
-        addButtonLabel="Add User Account"
+        addButtonLabel="Add User Accounts"
         showTitle={true}
-        title="User Account"
+        title="User Accounts"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
-        autocompleteOptions={autocompleteOptionsUserAccount}
+        autocompleteOptions={autocompleteOptionsUserAccounts}
         onItemsChange={setSelectedUserAccounts}
       />
     </>
