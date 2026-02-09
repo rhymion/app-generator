@@ -23,6 +23,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
+  const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
   const [dueDate, setDueDate] = useState<Dayjs | null>(src.due_date ? dayjs(src.due_date) : null);
   const [imageUrl, setImageUrl] = useState<string>(src.image_url || '');
@@ -81,6 +82,9 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
 
     const formData = new FormData();
     formData.set('id', src.id);
+    if (isEdit) {
+      formData.set('__src_snapshot', srcSnapshot);
+    }
     formData.set('name', nameRef.current?.value || '');
     formData.set('description', descriptionRef.current?.value || '');
     formData.set('organization_id', organizationId || '');

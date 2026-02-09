@@ -17,6 +17,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
+  const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
   const [create, setCreate] = useState<boolean>(Boolean(src.create));
   const [read, setRead] = useState<boolean>(Boolean(src.read));
@@ -39,6 +40,9 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
 
     const formData = new FormData();
     formData.set('id', src.id);
+    if (isEdit) {
+      formData.set('__src_snapshot', srcSnapshot);
+    }
     formData.set('name', nameRef.current?.value || '');
     formData.set('role_id', roleId || '');
     formData.set('create', create.toString());

@@ -19,6 +19,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
+  const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
   const [avatar, setAvatar] = useState<string>(src.avatar || '');
   const rolesRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
@@ -56,6 +57,9 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
 
     const formData = new FormData();
     formData.set('id', src.id);
+    if (isEdit) {
+      formData.set('__src_snapshot', srcSnapshot);
+    }
     formData.set('name', nameRef.current?.value || '');
     formData.set('email', emailRef.current?.value || '');
     formData.set('password', passwordRef.current?.value || '');

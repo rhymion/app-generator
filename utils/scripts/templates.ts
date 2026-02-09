@@ -517,6 +517,35 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
     : '';
   
   const parentDataObj = parentPropInfos.map(p => `      ${p.prop}: ${p.varName},`).join('\n');
+
+  const normalizeKind = (def: SchemaProperty): 'date' | 'number' | 'boolean' | 'string' | 'other' => {
+    const propType = Array.isArray(def.type) ? def.type.find(t => t !== 'null') : def.type;
+    const format = (def as any).format;
+
+    if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
+      return 'date';
+    }
+    if (propType === 'integer' || propType === 'number') {
+      return 'number';
+    }
+    if (propType === 'boolean') {
+      return 'boolean';
+    }
+    if (propType === 'string') {
+      return 'string';
+    }
+    return 'other';
+  };
+
+  const snapshotFieldMappings = parentPropInfos
+    .map(({ prop, def }) => `    ${prop}: normalizeValue(safeSnapshot.${prop}, '${normalizeKind(def)}'),`)
+    .join('\n');
+  const snapshotChildMappings = children.length > 0
+    ? children.map(childInfo => `    ${childInfo.propertyName}: normalizeChildRefs(safeSnapshot.${childInfo.propertyName}),`).join('\n')
+    : '';
+  const snapshotIncludeProps = children.length > 0
+    ? `,\n    include: {\n      ${children.map(childInfo => `${childInfo.propertyName}: { select: { id: true } }`).join(',\n      ')}\n    }`
+    : '';
   
   // For parent-only, generate simple CRUD
   if (children.length === 0) {
@@ -527,8 +556,88 @@ import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { requirePermission } from '@/lib/authz';
 
+type NormalizedSnapshot = Record<string, unknown>;
+type TransactionClient = Pick<typeof prisma, '${parent}'>;
+
+function normalizeValue(value: unknown, kind: 'date' | 'number' | 'boolean' | 'string' | 'other') {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  if (kind === 'date') {
+    const date = value instanceof Date ? value : new Date(value as string);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+
+  if (kind === 'number') {
+    const numberValue = Number(value);
+    return Number.isNaN(numberValue) ? null : numberValue;
+  }
+
+  if (kind === 'boolean') {
+    if (typeof value === 'string') {
+      if (value.toLowerCase() === 'true') return true;
+      if (value.toLowerCase() === 'false') return false;
+    }
+    return Boolean(value);
+  }
+
+  if (kind === 'string') {
+    return String(value);
+  }
+
+  return value;
+}
+
+function normalizeChildRefs(items: unknown): string[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => (item && typeof item === 'object' ? (item as { id?: string }).id : undefined))
+    .filter((id): id is string => Boolean(id))
+    .sort();
+}
+
+function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {
+  const safeSnapshot = (snapshot ?? {}) as Record<string, unknown>;
+  return {
+    id: String(safeSnapshot.id ?? ''),
+${snapshotFieldMappings}${snapshotChildMappings ? `\n${snapshotChildMappings}` : ''}
+  };
+}
+
+async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
+  const current = await tx.${parent}.findUnique({
+    where: { id }${snapshotIncludeProps}
+  });
+
+  if (!current) {
+    return null;
+  }
+
+  return normalizeSnapshot(current as Record<string, unknown>);
+}
+
+async function assertNotStale(tx: TransactionClient, id: string, srcSnapshotRaw: string) {
+  let expectedSnapshot: NormalizedSnapshot;
+  try {
+    expectedSnapshot = normalizeSnapshot(JSON.parse(srcSnapshotRaw) as Record<string, unknown>);
+  } catch {
+    throw new Error('Invalid snapshot data. Please reload and try again.');
+  }
+
+  const currentSnapshot = await getCurrentSnapshot(tx, id);
+  if (!currentSnapshot) {
+    throw new Error('This record no longer exists.');
+  }
+
+  if (JSON.stringify(currentSnapshot) !== JSON.stringify(expectedSnapshot)) {
+    throw new Error('This record has been updated since you opened it. Please reload to compare with the latest changes.');
+  }
+}
+
 export async function upsert${parentPascal}(data: FormData) {
   const id = data.get('id') as string | null;
+  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
     await requirePermission('${parent}', 'update');
   } else {
@@ -537,7 +646,12 @@ export async function upsert${parentPascal}(data: FormData) {
 ${formDataGets}
 
   if (id) {
-    await update${parentPascal}(id, ${parentParams});
+    await prisma.$transaction(async (tx) => {
+      if (srcSnapshotRaw) {
+        await assertNotStale(tx, id, srcSnapshotRaw);
+      }
+      await update${parentPascal}(tx, id, ${parentParams});
+    });
   } else {
     await add${parentPascal}(${parentParams});
   }
@@ -554,8 +668,8 @@ ${parentDataObj}
   });
 }
 
-async function update${parentPascal}(id: string, ${parentParamsWithTypes}) {
-  await prisma.${parent}.update({
+async function update${parentPascal}(tx: TransactionClient, id: string, ${parentParamsWithTypes}) {
+  await tx.${parent}.update({
     where: { id },
     data: {
 ${parentDataObj}
@@ -712,8 +826,88 @@ import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { requirePermission } from '@/lib/authz';
 
+type NormalizedSnapshot = Record<string, unknown>;
+type TransactionClient = Pick<typeof prisma, '${parent}'>;
+
+function normalizeValue(value: unknown, kind: 'date' | 'number' | 'boolean' | 'string' | 'other') {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  if (kind === 'date') {
+    const date = value instanceof Date ? value : new Date(value as string);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+
+  if (kind === 'number') {
+    const numberValue = Number(value);
+    return Number.isNaN(numberValue) ? null : numberValue;
+  }
+
+  if (kind === 'boolean') {
+    if (typeof value === 'string') {
+      if (value.toLowerCase() === 'true') return true;
+      if (value.toLowerCase() === 'false') return false;
+    }
+    return Boolean(value);
+  }
+
+  if (kind === 'string') {
+    return String(value);
+  }
+
+  return value;
+}
+
+function normalizeChildRefs(items: unknown): string[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => (item && typeof item === 'object' ? (item as { id?: string }).id : undefined))
+    .filter((id): id is string => Boolean(id))
+    .sort();
+}
+
+function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {
+  const safeSnapshot = (snapshot ?? {}) as Record<string, unknown>;
+  return {
+    id: String(safeSnapshot.id ?? ''),
+${snapshotFieldMappings}${snapshotChildMappings ? `\n${snapshotChildMappings}` : ''}
+  };
+}
+
+async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
+  const current = await tx.${parent}.findUnique({
+    where: { id }${snapshotIncludeProps}
+  });
+
+  if (!current) {
+    return null;
+  }
+
+  return normalizeSnapshot(current as Record<string, unknown>);
+}
+
+async function assertNotStale(tx: TransactionClient, id: string, srcSnapshotRaw: string) {
+  let expectedSnapshot: NormalizedSnapshot;
+  try {
+    expectedSnapshot = normalizeSnapshot(JSON.parse(srcSnapshotRaw) as Record<string, unknown>);
+  } catch {
+    throw new Error('Invalid snapshot data. Please reload and try again.');
+  }
+
+  const currentSnapshot = await getCurrentSnapshot(tx, id);
+  if (!currentSnapshot) {
+    throw new Error('This record no longer exists.');
+  }
+
+  if (JSON.stringify(currentSnapshot) !== JSON.stringify(expectedSnapshot)) {
+    throw new Error('This record has been updated since you opened it. Please reload to compare with the latest changes.');
+  }
+}
+
 export async function upsert${parentPascal}(data: FormData) {
   const id = data.get('id') as string | null;
+  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
     await requirePermission('${parent}', 'update');
   } else {
@@ -724,7 +918,12 @@ ${childFormDataExtractions}
 ${selfChildValidation}
 
   if (id) {
-    await update${parentPascal}(id, ${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall});
+    await prisma.$transaction(async (tx) => {
+      if (srcSnapshotRaw) {
+        await assertNotStale(tx, id, srcSnapshotRaw);
+      }
+      await update${parentPascal}(tx, id, ${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall});
+    });
   } else {
     await add${parentPascal}(${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall});
   }
@@ -742,8 +941,8 @@ ${childNestedCreate}
   });
 }
 
-async function update${parentPascal}(id: string${parentParamsWithTypes ? ', ' : ''}${parentParamsWithTypes}${parentParamsWithTypes && childParamsForUpdate ? ', ' : ''}${childParamsForUpdate}) {
-  await prisma.${parent}.update({
+async function update${parentPascal}(tx: TransactionClient, id: string${parentParamsWithTypes ? ', ' : ''}${parentParamsWithTypes}${parentParamsWithTypes && childParamsForUpdate ? ', ' : ''}${childParamsForUpdate}) {
+  await tx.${parent}.update({
     where: { id },
     data: {
 ${parentDataObj}
@@ -1433,7 +1632,7 @@ ${childSerialize}
 
   return `'use client';
 
-import { ${hasManyToMany || hasManyToOne ? 'useMemo, ' : ''}useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';${hasManyToOne ? "\nimport Autocomplete from '@mui/material/Autocomplete';" : ''}${numberProps.length > 0 ? '\nimport NumberField from \'../NumberField\';' : ''}
@@ -1447,6 +1646,7 @@ export default function FormUpsert(${formUpsertParams}) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
+  const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 ${allStates ? '\n' + allStates : ''}
 ${childVariables}
 ${parentRefs}${childGridSetup}${relationshipOptionSetups ? `\n${relationshipOptionSetups}` : ''}
@@ -1458,6 +1658,9 @@ ${parentRefs}${childGridSetup}${relationshipOptionSetups ? `\n${relationshipOpti
 
     const formData = new FormData();
     formData.set('id', src.id);
+    if (isEdit) {
+      formData.set('__src_snapshot', srcSnapshot);
+    }
 ${parentFormDataSets}${childFormDataHandling}
 
     try {

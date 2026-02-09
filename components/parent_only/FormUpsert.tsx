@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
@@ -16,6 +16,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
+  const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
   const [loginTime, setLoginTime] = useState<Dayjs | null>(src.login_time ? dayjs(src.login_time) : null);
   const [logoutTime, setLogoutTime] = useState<Dayjs | null>(src.logout_time ? dayjs(src.logout_time) : null);
@@ -30,6 +31,9 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
 
     const formData = new FormData();
     formData.set('id', src.id);
+    if (isEdit) {
+      formData.set('__src_snapshot', srcSnapshot);
+    }
     formData.set('name', nameRef.current?.value || '');
     formData.set('description', descriptionRef.current?.value || '');
     formData.set('login_time', loginTime?.toISOString() || '');
