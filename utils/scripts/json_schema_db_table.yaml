@@ -462,20 +462,20 @@ definitions:
           target: role
           labelField: name
 
-permission_detail:
-  x-generate:
-    list: true
-    view: true
-    new: true
-    edit: true
-    delete: true
-    invalidate: false
-  allOf:
-    - $ref: "#/definitions/permission"
-    - type: object
-      properties:
-        role:
-          $ref: "#/definitions/role"
+  permission_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+    allOf:
+      - $ref: "#/definitions/permission"
+      - type: object
+        properties:
+          role:
+            $ref: "#/definitions/role"
 
   procedure:
     type: object

@@ -15,7 +15,7 @@ export async function upsertProcedure(data: FormData) {
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
   const parentId = (data.get('parent_id') as string | null) || null;
-  const childrenRaw = data.getAll('child[]') as string[];
+  const childrenRaw = data.getAll('children[]') as string[];
   const childrenItems = childrenRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
   const childrenIds = childrenItems
     .map((child) => child.id)

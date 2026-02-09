@@ -28,7 +28,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
   const descriptionRef = useRef<HTMLInputElement>(null);
   const initialChildren: EditableListWrapperItem[] = src.children.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
-    value: f.id,
+    value: f.name,
     label: f.name,
     originalId: f.id,
   }));
@@ -49,7 +49,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
   }, [allProcedures, selectedChildren]);
   const initialPrecededBy: EditableListWrapperItem[] = src.preceded_by.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
-    value: f.id,
+    value: f.name,
     label: f.name,
     originalId: f.id,
   }));
@@ -70,7 +70,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
   }, [allProcedures, selectedPrecededBys]);
   const initialFollowedBy: EditableListWrapperItem[] = src.followed_by.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
-    value: f.id,
+    value: f.name,
     label: f.name,
     originalId: f.id,
   }));
@@ -113,7 +113,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         item.originalId ??
         (typeof item.value === 'string' || typeof item.value === 'number' ? item.value : undefined);
       formData.append(
-        'child[]',
+        'children[]',
         JSON.stringify({
           id: itemId,
           name: item.label ?? item.value,
