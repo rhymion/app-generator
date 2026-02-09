@@ -20,6 +20,7 @@ export async function upsertRole(data: FormData) {
     .map((userAccount) => userAccount.id)
     .filter((userAccountId): userAccountId is string => Boolean(userAccountId));
 
+
   if (id) {
     await updateRole(id, name, description, userAccountsIds);
   } else {

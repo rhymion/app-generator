@@ -26,6 +26,7 @@ export async function upsertParent1(data: FormData) {
   const parent1ListsRaw = data.getAll('parent1_list[]') as string[];
   const parent1ListsItems = parent1ListsRaw.map(f => JSON.parse(f) as { id?: string; name: string });
 
+
   if (id) {
     await updateParent1(id, name, organizationId, description, price, dueDate, imageUrl, parent1Child1sItems, parent1Child2sItems, parent1ListsItems);
   } else {

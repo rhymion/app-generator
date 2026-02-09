@@ -20,6 +20,7 @@ export async function upsertOrganization(data: FormData) {
     .map((userAccount) => userAccount.id)
     .filter((userAccountId): userAccountId is string => Boolean(userAccountId));
 
+
   if (id) {
     await updateOrganization(id, name, description, userAccountsIds);
   } else {

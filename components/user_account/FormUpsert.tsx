@@ -41,6 +41,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
     );
     return allRoles
       .filter((role) => !assignedRolesIds.has(role.id))
+      .filter((role) => role.id !== src.id)
       .map((role) => ({
         id: role.id,
         label: role.name,

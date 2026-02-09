@@ -23,6 +23,7 @@ export async function upsertUserAccount(data: FormData) {
     .map((role) => role.id)
     .filter((roleId): roleId is string => Boolean(roleId));
 
+
   if (id) {
     await updateUserAccount(id, name, email, password, apiKey, avatar, rolesIds);
   } else {

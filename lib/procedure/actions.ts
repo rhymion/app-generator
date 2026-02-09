@@ -31,6 +31,32 @@ export async function upsertProcedure(data: FormData) {
     .map((followedBy) => followedBy.id)
     .filter((followedById): followedById is string => Boolean(followedById));
 
+  if (childrenIds.length > 0) {
+    if (id && childrenIds.includes(id)) {
+      throw new Error('Cannot set an item as its own child.');
+    }
+    const invalidChildren = await prisma.procedure.findMany({
+      where: id
+        ? {
+            id: { in: childrenIds },
+            AND: [
+              { parent_id: { not: null } },
+              { NOT: { parent_id: id } },
+            ],
+          }
+        : {
+            id: { in: childrenIds },
+            parent_id: { not: null },
+          },
+      select: { id: true },
+    });
+
+    if (invalidChildren.length > 0) {
+      throw new Error('One or more selected children already belong to another parent.');
+    }
+  }
+
+
   if (id) {
     await updateProcedure(id, name, description, parentId, childrenIds, precededByIds, followedByIds);
   } else {

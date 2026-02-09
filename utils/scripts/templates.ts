@@ -454,6 +454,8 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
   const parentDef = schema.definitions[parent];
   const canDelete = generateConfig?.delete !== false;
   const parentRelationships = getParentRelationships(parentDef);
+  const selfParentRel = parentRelationships.find((rel) => rel.target === parent);
+  const selfParentProp = selfParentRel?.propName ?? null;
   
   // Get parent properties (excluding id and timestamps)
   const parentProps = parentDef.properties
@@ -627,6 +629,7 @@ export async function remove${parentPascal}(data: FormData | string[]) {
       useConnect,
       propertyName: childInfo.propertyName,
       formKey: childFormKey(childInfo),
+      outputType: childInfo.outputType,
     };
   });
   
@@ -641,6 +644,38 @@ export async function remove${parentPascal}(data: FormData | string[]) {
       return `  const ${childVar}Raw = data.getAll('${formKey}[]') as string[];\n  const ${childVar}Items = ${childVar}Raw.map(f => JSON.parse(f) as ${fieldTypeWithId});`;
     }
   }).join('\n');
+
+  const selfChildValidation = selfParentProp
+    ? allChildrenData
+        .filter((childInfo) => childInfo.child === parent && childInfo.outputType === 'list' && !childInfo.isManyToMany)
+        .map((childInfo) => `
+  if (${childInfo.childVar}Ids.length > 0) {
+    if (id && ${childInfo.childVar}Ids.includes(id)) {
+      throw new Error('Cannot set an item as its own child.');
+    }
+    const invalid${childInfo.childPascal} = await prisma.${parent}.findMany({
+      where: id
+        ? {
+            id: { in: ${childInfo.childVar}Ids },
+            AND: [
+              { ${selfParentProp}: { not: null } },
+              { NOT: { ${selfParentProp}: id } },
+            ],
+          }
+        : {
+            id: { in: ${childInfo.childVar}Ids },
+            ${selfParentProp}: { not: null },
+          },
+      select: { id: true },
+    });
+
+    if (invalid${childInfo.childPascal}.length > 0) {
+      throw new Error('One or more selected children already belong to another parent.');
+    }
+  }
+`)
+        .join('')
+    : '';
   
   const childParamsForAdd = allChildrenData.map(({ childVar, fieldType, useConnect }) => 
     useConnect ? `${childVar}Ids: string[]` : `${childVar}Items: ${fieldType}[]`
@@ -686,6 +721,7 @@ export async function upsert${parentPascal}(data: FormData) {
   }
 ${formDataGets}
 ${childFormDataExtractions}
+${selfChildValidation}
 
   if (id) {
     await update${parentPascal}(id, ${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall});
@@ -852,6 +888,8 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     ...rel,
     relationName: getDetailRelationName(parent, rel.target, schema),
   }));
+  const selfParentRel = parentRelationships.find((rel) => rel.target === parent);
+  const selfParentProp = selfParentRel?.propName ?? null;
   
   if (!parentDef.properties) {
     throw new Error(`Parent definition ${parent} has no properties`);
@@ -1159,6 +1197,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     );
     return all${targetPascal}s
       .filter((${childItemVar}) => !assigned${childPascal}Ids.has(${childItemVar}.id))
+      .filter((${childItemVar}) => ${childItemVar}.id !== src.id)
       .map((${childItemVar}) => ({
         id: ${childItemVar}.id,
         label: ${childItemVar}.name,

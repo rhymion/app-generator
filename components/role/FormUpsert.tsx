@@ -37,6 +37,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
     );
     return allUserAccounts
       .filter((userAccount) => !assignedUserAccountsIds.has(userAccount.id))
+      .filter((userAccount) => userAccount.id !== src.id)
       .map((userAccount) => ({
         id: userAccount.id,
         label: userAccount.name,

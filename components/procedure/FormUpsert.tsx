@@ -41,6 +41,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
     );
     return allProcedures
       .filter((children) => !assignedChildrenIds.has(children.id))
+      .filter((children) => children.id !== src.id)
       .map((children) => ({
         id: children.id,
         label: children.name,
@@ -62,6 +63,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
     );
     return allProcedures
       .filter((precededBy) => !assignedPrecededByIds.has(precededBy.id))
+      .filter((precededBy) => precededBy.id !== src.id)
       .map((precededBy) => ({
         id: precededBy.id,
         label: precededBy.name,
@@ -83,6 +85,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
     );
     return allProcedures
       .filter((followedBy) => !assignedFollowedByIds.has(followedBy.id))
+      .filter((followedBy) => followedBy.id !== src.id)
       .map((followedBy) => ({
         id: followedBy.id,
         label: followedBy.name,
