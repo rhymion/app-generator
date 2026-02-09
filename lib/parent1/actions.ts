@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 
 type NormalizedSnapshot = Record<string, unknown>;
 type TransactionClient = Pick<typeof prisma, 'parent1'>;
@@ -128,14 +128,15 @@ export async function upsertParent1(data: FormData) {
       await updateParent1(tx, id, name, organizationId, description, price, dueDate, imageUrl, parent1Child1sItems, parent1Child2sItems, parent1ListsItems);
     });
   } else {
-    await addParent1(name, organizationId, description, price, dueDate, imageUrl, parent1Child1sItems, parent1Child2sItems, parent1ListsItems);
+    const creatorId = await getSessionUserIdOrThrow();
+    await addParent1(creatorId, name, organizationId, description, price, dueDate, imageUrl, parent1Child1sItems, parent1Child2sItems, parent1ListsItems);
   }
 
   revalidatePath('/');
   redirect('/parent1');
 }
 
-async function addParent1(name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { name: string }[]) {
+async function addParent1(creatorId: string, name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { name: string }[]) {
   await prisma.parent1.create({
     data: {
       name: name,
@@ -144,6 +145,7 @@ async function addParent1(name: string, organizationId: string, description: str
       price: price,
       due_date: dueDate,
       image_url: imageUrl,
+      creator_id: creatorId,
       parent1_child1s: {
         create: parent1Child1sItems.map(f => ({
           order: f.order,

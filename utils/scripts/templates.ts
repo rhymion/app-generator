@@ -812,7 +812,7 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     if (useConnect) {
       return `      ${propertyName}: {\n        connect: ${childVar}Ids.map((id) => ({ id })),\n      },`;
     } else {
-      return `      ${propertyName}: {\n        create: ${childVar}Items.map(f => ({\n${fieldMapCreate}\n          creator_id: creatorId,\n        })),\n      },`;
+      return `      ${propertyName}: {\n        create: ${childVar}Items.map(f => ({\n${fieldMapCreate}\n        })),\n      },`;
     }
   }).join('\n');
   

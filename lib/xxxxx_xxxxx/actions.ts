@@ -137,7 +137,6 @@ async function addXxxxxXxxxx(creatorId: string, name: string, description: strin
           regex: f.regex,
           required: f.required,
           written_by: f.written_by,
-          creator_id: creatorId,
         })),
       },
     },

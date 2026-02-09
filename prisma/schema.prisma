@@ -62,8 +62,6 @@ model yyyyy_yyyyy {
   written_by  String
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
-  creator_id String
-  creator    user_account @relation(fields: [creator_id], references: [id])
 }
 
 model parent1 {
@@ -98,8 +96,6 @@ model parent1_child1 {
   written_by  String
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
-  creator_id String
-  creator    user_account @relation(fields: [creator_id], references: [id])
 }
 
 model parent1_child2 {
@@ -112,8 +108,6 @@ model parent1_child2 {
   end_date    DateTime
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
-  creator_id String
-  creator    user_account @relation(fields: [creator_id], references: [id])
 }
 
 model parent1_list {
@@ -121,8 +115,6 @@ model parent1_list {
   name        String
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
-  creator_id String
-  creator    user_account @relation(fields: [creator_id], references: [id])
   parent1_id    String     
   parent1       parent1 @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
 }
@@ -155,11 +147,7 @@ model user_account {
   created_db_tables db_table[]
   created_fields field[]
   created_xxxxx_xxxxxs xxxxx_xxxxx[]
-  created_yyyyy_yyyyys yyyyy_yyyyy[]
   created_parent1s parent1[]
-  created_parent1_child1s parent1_child1[]
-  created_parent1_child2s parent1_child2[]
-  created_parent1_lists parent1_list[]
   created_parent_onlys parent_only[]
   created_permissions permission[]
   created_procedures procedure[]
