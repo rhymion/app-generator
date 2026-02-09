@@ -18,8 +18,8 @@ export async function upsertProcedure(data: FormData) {
   const childrenRaw = data.getAll('children[]') as string[];
   const childrenItems = childrenRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
   const childrenIds = childrenItems
-    .map((child) => child.id)
-    .filter((childId): childId is string => Boolean(childId));
+    .map((children) => children.id)
+    .filter((childrenId): childrenId is string => Boolean(childrenId));
   const precededByRaw = data.getAll('preceded_by[]') as string[];
   const precededByItems = precededByRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
   const precededByIds = precededByItems

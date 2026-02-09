@@ -28,35 +28,35 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
   const descriptionRef = useRef<HTMLInputElement>(null);
   const initialChildren: EditableListWrapperItem[] = src.children.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
-    value: f.name,
+    value: f.id,
     label: f.name,
     originalId: f.id,
   }));
   const [selectedChildren, setSelectedChildren] = useState<EditableListWrapperItem[]>(initialChildren);
   const autocompleteOptionsChildren = useMemo(() => {
-    const assignedChildIds = new Set(
+    const assignedChildrenIds = new Set(
       selectedChildren
-        .map((child) => child.originalId ?? child.value)
-        .filter((childId): childId is string => typeof childId === 'string')
+        .map((children) => children.originalId ?? children.value)
+        .filter((childrenId): childrenId is string => typeof childrenId === 'string')
     );
     return allProcedures
-      .filter((child) => !assignedChildIds.has(child.id))
-      .map((child) => ({
-        id: child.id,
-        label: child.name,
-        value: child.name,
+      .filter((children) => !assignedChildrenIds.has(children.id))
+      .map((children) => ({
+        id: children.id,
+        label: children.name,
+        value: children.name,
       }));
   }, [allProcedures, selectedChildren]);
   const initialPrecededBy: EditableListWrapperItem[] = src.preceded_by.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
-    value: f.name,
+    value: f.id,
     label: f.name,
     originalId: f.id,
   }));
-  const [selectedPrecededBys, setSelectedPrecededBys] = useState<EditableListWrapperItem[]>(initialPrecededBy);
+  const [selectedPrecededBy, setSelectedPrecededBy] = useState<EditableListWrapperItem[]>(initialPrecededBy);
   const autocompleteOptionsPrecededBy = useMemo(() => {
     const assignedPrecededByIds = new Set(
-      selectedPrecededBys
+      selectedPrecededBy
         .map((precededBy) => precededBy.originalId ?? precededBy.value)
         .filter((precededById): precededById is string => typeof precededById === 'string')
     );
@@ -67,17 +67,17 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         label: precededBy.name,
         value: precededBy.name,
       }));
-  }, [allProcedures, selectedPrecededBys]);
+  }, [allProcedures, selectedPrecededBy]);
   const initialFollowedBy: EditableListWrapperItem[] = src.followed_by.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
-    value: f.name,
+    value: f.id,
     label: f.name,
     originalId: f.id,
   }));
-  const [selectedFollowedBys, setSelectedFollowedBys] = useState<EditableListWrapperItem[]>(initialFollowedBy);
+  const [selectedFollowedBy, setSelectedFollowedBy] = useState<EditableListWrapperItem[]>(initialFollowedBy);
   const autocompleteOptionsFollowedBy = useMemo(() => {
     const assignedFollowedByIds = new Set(
-      selectedFollowedBys
+      selectedFollowedBy
         .map((followedBy) => followedBy.originalId ?? followedBy.value)
         .filter((followedById): followedById is string => typeof followedById === 'string')
     );
@@ -88,7 +88,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         label: followedBy.name,
         value: followedBy.name,
       }));
-  }, [allProcedures, selectedFollowedBys]);
+  }, [allProcedures, selectedFollowedBy]);
   const parentIdOptions = useMemo(() => {
     return allProcedures.map((item) => ({
       id: item.id,
@@ -209,7 +209,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         ref={childrenRef}
         initialItems={initialChildren}
         itemType="autocomplete"
-        addButtonLabel="Add Child"
+        addButtonLabel="Add Children"
         showTitle={true}
         title="Children"
         textFieldLabel="Name"
@@ -227,7 +227,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         autocompleteOptions={autocompleteOptionsPrecededBy}
-        onItemsChange={setSelectedPrecededBys}
+        onItemsChange={setSelectedPrecededBy}
       />
       <EditableListWrapper
         ref={followedByRef}
@@ -239,7 +239,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         autocompleteOptions={autocompleteOptionsFollowedBy}
-        onItemsChange={setSelectedFollowedBys}
+        onItemsChange={setSelectedFollowedBy}
       />
     </>
   );

@@ -28,34 +28,17 @@ function childColumnsFnName(child: ChildInfo): string {
   return `${child.propertyName}_columns`;
 }
 
-const IRREGULAR_SINGULAR = new Map<string, string>([
-  ['children', 'child'],
-  ['people', 'person'],
-  ['men', 'man'],
-  ['women', 'woman'],
-]);
-
 function singularize(name: string): string {
   if (!name) return name;
   const isPascal = name[0] === name[0].toUpperCase();
   const lower = name.toLowerCase();
-
-  let base: string | undefined = IRREGULAR_SINGULAR.get(lower);
-
-  if (!base) {
-    if (lower.endsWith('ies') && name.length > 3) {
-      base = name.slice(0, -3) + 'y';
-    } else if (lower.endsWith('s') && !lower.endsWith('ss')) {
-      base = name.slice(0, -1);
-    } else {
-      base = name;
-    }
+  if (!lower.endsWith('s')) {
+    return name;
   }
-
+  const base = name.slice(0, -1);
   if (isPascal) {
     return base.charAt(0).toUpperCase() + base.slice(1);
   }
-
   return base;
 }
 
@@ -1154,9 +1137,12 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
         k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at'
       );
       
-      // For many-to-many relationships
-      if (childInfo.relationship?.type === 'many-to-many') {
-        const targetPascal = toPascalCase(childInfo.relationship.target);
+      const useConnectSelection = childInfo.relationship?.type === 'many-to-many'
+        || (childInfo.outputType === 'list' && childInfo.name === parent);
+
+      // For connect/select relationships (many-to-many or self list)
+      if (useConnectSelection) {
+        const targetPascal = toPascalCase(childInfo.relationship?.target ?? childInfo.name);
         const childItemVar = childSingularVarName(childInfo);
         return `  const initial${childPascal}: EditableListWrapperItem[] = src.${childInfo.propertyName}.map(f => ({
     id: f.id || \`temp-\${Date.now()}-\${Math.random()}\`,
@@ -1262,6 +1248,22 @@ ${createNewChildProps}
       
       // For list output type
       if (childInfo.outputType === 'list') {
+        if (childInfo.name === parent) {
+          return `    const ${childVar} = ${childVar}Ref.current?.getItems?.() || [];
+
+    ${childVar}.forEach((item) => {
+      const itemId =
+        item.originalId ??
+        (typeof item.value === 'string' || typeof item.value === 'number' ? item.value : undefined);
+      formData.append(
+        '${formKey}[]',
+        JSON.stringify({
+          id: itemId,
+          name: item.label ?? item.value,
+        })
+      );
+    });`;
+        }
         return `    const ${childVar} = ${childVar}Ref.current?.getItems?.() || [];
 
     ${childVar}.forEach((item) => {
@@ -1322,6 +1324,20 @@ ${childSerialize}
       
       // For list output type, use EditableListWrapper
       if (childInfo.outputType === 'list') {
+        if (childInfo.name === parent) {
+          return `      <EditableListWrapper
+        ref={${childVar}Ref}
+        initialItems={initial${childPascal}}
+        itemType="autocomplete"
+        addButtonLabel="Add ${childTitleLabel}"
+        showTitle={true}
+        title="${childTitleLabel}"
+        textFieldLabel="Name"
+        textFieldPlaceholder="Enter name"
+        autocompleteOptions={autocompleteOptions${childPascal}}
+        onItemsChange={setSelected${childPascal}}
+      />`;
+        }
         return `      <EditableListWrapper
         ref={${childVar}Ref}
         initialItems={initial${childPascal}}
