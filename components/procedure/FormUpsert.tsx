@@ -44,7 +44,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
       .map((children) => ({
         id: children.id,
         label: children.name,
-        value: children.name,
+        value: children.id,
       }));
   }, [allProcedures, selectedChildren]);
   const initialPrecededBy: EditableListWrapperItem[] = src.preceded_by.map(f => ({
@@ -65,7 +65,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
       .map((precededBy) => ({
         id: precededBy.id,
         label: precededBy.name,
-        value: precededBy.name,
+        value: precededBy.id,
       }));
   }, [allProcedures, selectedPrecededBy]);
   const initialFollowedBy: EditableListWrapperItem[] = src.followed_by.map(f => ({
@@ -86,7 +86,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
       .map((followedBy) => ({
         id: followedBy.id,
         label: followedBy.name,
-        value: followedBy.name,
+        value: followedBy.id,
       }));
   }, [allProcedures, selectedFollowedBy]);
   const parentIdOptions = useMemo(() => {

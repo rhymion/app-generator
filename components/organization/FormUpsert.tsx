@@ -40,7 +40,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
       .map((userAccount) => ({
         id: userAccount.id,
         label: userAccount.name,
-        value: userAccount.name,
+        value: userAccount.id,
       }));
   }, [allUserAccounts, selectedUserAccounts]);
 

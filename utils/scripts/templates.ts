@@ -1162,7 +1162,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       .map((${childItemVar}) => ({
         id: ${childItemVar}.id,
         label: ${childItemVar}.name,
-        value: ${childItemVar}.name,
+        value: ${childItemVar}.id,
       }));
   }, [all${targetPascal}s, selected${childPascal}]);`;
       }

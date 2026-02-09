@@ -44,7 +44,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
       .map((role) => ({
         id: role.id,
         label: role.name,
-        value: role.name,
+        value: role.id,
       }));
   }, [allRoles, selectedRoles]);
 
