@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 
 type NormalizedSnapshot = Record<string, unknown>;
 type TransactionClient = Pick<typeof prisma, 'xxxxx_xxxxx'>;
@@ -113,19 +113,21 @@ export async function upsertXxxxxXxxxx(data: FormData) {
       await updateXxxxxXxxxx(tx, id, name, description, team, yyyyyYyyyysItems);
     });
   } else {
-    await addXxxxxXxxxx(name, description, team, yyyyyYyyyysItems);
+    const creatorId = await getSessionUserIdOrThrow();
+    await addXxxxxXxxxx(creatorId, name, description, team, yyyyyYyyyysItems);
   }
 
   revalidatePath('/');
   redirect('/xxxxx_xxxxx');
 }
 
-async function addXxxxxXxxxx(name: string, description: string | null, team: string | null, yyyyyYyyyysItems: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]) {
+async function addXxxxxXxxxx(creatorId: string, name: string, description: string | null, team: string | null, yyyyyYyyyysItems: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]) {
   await prisma.xxxxx_xxxxx.create({
     data: {
       name: name,
       description: description,
       team: team,
+      creator_id: creatorId,
       yyyyy_yyyyys: {
         create: yyyyyYyyyysItems.map(f => ({
           name: f.name,
@@ -135,6 +137,7 @@ async function addXxxxxXxxxx(name: string, description: string | null, team: str
           regex: f.regex,
           required: f.required,
           written_by: f.written_by,
+          creator_id: creatorId,
         })),
       },
     },

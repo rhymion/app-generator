@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 
 type NormalizedSnapshot = Record<string, unknown>;
 type TransactionClient = Pick<typeof prisma, 'organization'>;
@@ -114,18 +114,20 @@ export async function upsertOrganization(data: FormData) {
       await updateOrganization(tx, id, name, description, userAccountsIds);
     });
   } else {
-    await addOrganization(name, description, userAccountsIds);
+    const creatorId = await getSessionUserIdOrThrow();
+    await addOrganization(creatorId, name, description, userAccountsIds);
   }
 
   revalidatePath('/');
   redirect('/organization');
 }
 
-async function addOrganization(name: string, description: string | null, userAccountsIds: string[]) {
+async function addOrganization(creatorId: string, name: string, description: string | null, userAccountsIds: string[]) {
   await prisma.organization.create({
     data: {
       name: name,
       description: description,
+      creator_id: creatorId,
       user_accounts: {
         connect: userAccountsIds.map((id) => ({ id })),
       },

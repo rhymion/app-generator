@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 
 type NormalizedSnapshot = Record<string, unknown>;
 type TransactionClient = Pick<typeof prisma, 'procedure'>;
@@ -155,19 +155,21 @@ export async function upsertProcedure(data: FormData) {
       await updateProcedure(tx, id, name, description, parentId, childrenIds, precededByIds, followedByIds);
     });
   } else {
-    await addProcedure(name, description, parentId, childrenIds, precededByIds, followedByIds);
+    const creatorId = await getSessionUserIdOrThrow();
+    await addProcedure(creatorId, name, description, parentId, childrenIds, precededByIds, followedByIds);
   }
 
   revalidatePath('/');
   redirect('/procedure');
 }
 
-async function addProcedure(name: string, description: string | null, parentId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[]) {
+async function addProcedure(creatorId: string, name: string, description: string | null, parentId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[]) {
   await prisma.procedure.create({
     data: {
       name: name,
       description: description,
       parent_id: parentId,
+      creator_id: creatorId,
       children: {
         connect: childrenIds.map((id) => ({ id })),
       },

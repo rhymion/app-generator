@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 
 type NormalizedSnapshot = Record<string, unknown>;
 type TransactionClient = Pick<typeof prisma, 'user_account'>;
@@ -120,14 +120,15 @@ export async function upsertUserAccount(data: FormData) {
       await updateUserAccount(tx, id, name, email, password, apiKey, avatar, rolesIds);
     });
   } else {
-    await addUserAccount(name, email, password, apiKey, avatar, rolesIds);
+    const creatorId = await getSessionUserIdOrThrow();
+    await addUserAccount(creatorId, name, email, password, apiKey, avatar, rolesIds);
   }
 
   revalidatePath('/');
   redirect('/user_account');
 }
 
-async function addUserAccount(name: string, email: string, password: string, apiKey: string | null, avatar: string | null, rolesIds: string[]) {
+async function addUserAccount(creatorId: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, rolesIds: string[]) {
   await prisma.user_account.create({
     data: {
       name: name,
@@ -135,6 +136,7 @@ async function addUserAccount(name: string, email: string, password: string, api
       password: password,
       api_key: apiKey,
       avatar: avatar,
+      creator_id: creatorId,
       roles: {
         connect: rolesIds.map((id) => ({ id })),
       },

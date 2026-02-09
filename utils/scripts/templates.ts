@@ -170,6 +170,10 @@ function getParentRelationships(parentDef?: SchemaDefinition): ParentRelationshi
       return [];
     }
 
+    if (propName === 'creator_id') {
+      return [];
+    }
+
     return [{
       propName,
       target: rel.target,
@@ -210,7 +214,7 @@ export function generateTypes(parent: string, children: ChildInfo[], schema: Sch
   // Get parent properties for FormViewProps (excluding timestamps)
   const formViewParentProps = parentDef.properties
     ? Object.entries(parentDef.properties)
-        .filter(([key]) => key !== 'created_at' && key !== 'updated_at')
+          .filter(([key]) => key !== 'created_at' && key !== 'updated_at' && key !== 'creator_id')
         .map(([key, prop]) => `    ${key}: ${getTsType(prop)};`)
         .join('\n')
     : '';
@@ -350,7 +354,7 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
   // Get all parent properties except timestamps
   const parentProps = parentDef.properties 
     ? Object.keys(parentDef.properties).filter(k => 
-        k !== 'created_at' && k !== 'updated_at'
+        k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
       )
     : [];
   const parentMapping = parentProps.map(p => `    ${p}: ${parentCamel}.${p},`).join('\n');
@@ -460,7 +464,7 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
   // Get parent properties (excluding id and timestamps)
   const parentProps = parentDef.properties
     ? Object.keys(parentDef.properties).filter(k => 
-        k !== 'id' && k !== 'created_at' && k !== 'updated_at'
+        k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
       )
     : [];
   
@@ -554,7 +558,7 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 
 type NormalizedSnapshot = Record<string, unknown>;
 type TransactionClient = Pick<typeof prisma, '${parent}'>;
@@ -653,17 +657,19 @@ ${formDataGets}
       await update${parentPascal}(tx, id, ${parentParams});
     });
   } else {
-    await add${parentPascal}(${parentParams});
+    const creatorId = await getSessionUserIdOrThrow();
+    await add${parentPascal}(creatorId, ${parentParams});
   }
 
   revalidatePath('/');
   redirect('/${parent}');
 }
 
-async function add${parentPascal}(${parentParamsWithTypes}) {
+async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}) {
   await prisma.${parent}.create({
     data: {
 ${parentDataObj}
+      creator_id: creatorId,
     },
   });
 }
@@ -720,11 +726,11 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     }
 
     const childProps = Object.keys(childDef.properties).filter(k => 
-      k !== 'id' && !parentIdPropNames.has(k) && k !== 'created_at' && k !== 'updated_at'
+      k !== 'id' && !parentIdPropNames.has(k) && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
     );
     
     const childPropsWithId = Object.keys(childDef.properties).filter(k => 
-      !parentIdPropNames.has(k) && k !== 'created_at' && k !== 'updated_at'
+      !parentIdPropNames.has(k) && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
     );
     
     const fieldType = `{ ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
@@ -806,7 +812,7 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     if (useConnect) {
       return `      ${propertyName}: {\n        connect: ${childVar}Ids.map((id) => ({ id })),\n      },`;
     } else {
-      return `      ${propertyName}: {\n        create: ${childVar}Items.map(f => ({\n${fieldMapCreate}\n        })),\n      },`;
+      return `      ${propertyName}: {\n        create: ${childVar}Items.map(f => ({\n${fieldMapCreate}\n          creator_id: creatorId,\n        })),\n      },`;
     }
   }).join('\n');
   
@@ -824,7 +830,7 @@ export async function remove${parentPascal}(data: FormData | string[]) {
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 
 type NormalizedSnapshot = Record<string, unknown>;
 type TransactionClient = Pick<typeof prisma, '${parent}'>;
@@ -925,17 +931,19 @@ ${selfChildValidation}
       await update${parentPascal}(tx, id, ${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall});
     });
   } else {
-    await add${parentPascal}(${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall});
+    const creatorId = await getSessionUserIdOrThrow();
+    await add${parentPascal}(creatorId, ${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall});
   }
 
   revalidatePath('/');
   redirect('/${parent}');
 }
 
-async function add${parentPascal}(${parentParamsWithTypes}${parentParamsWithTypes && childParamsForAdd ? ', ' : ''}${childParamsForAdd}) {
+async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}${parentParamsWithTypes && childParamsForAdd ? ', ' : ''}${childParamsForAdd}) {
   await prisma.${parent}.create({
     data: {
 ${parentDataObj}
+      creator_id: creatorId,
 ${childNestedCreate}
     },
   });
@@ -992,7 +1000,7 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
     let needsDateTimeImports = false;
     
     for (const [key, prop] of Object.entries(childDef.properties)) {
-      if (key === 'id' || key === `${parent}_id` || key === 'created_at' || key === 'updated_at') {
+      if (key === 'id' || key === `${parent}_id` || key === 'created_at' || key === 'updated_at' || key === 'creator_id') {
         continue;
       }
       
@@ -1096,7 +1104,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   
   // Get parent properties (excluding id and timestamps)
   const parentProps = Object.keys(parentDef.properties).filter(k => 
-    k !== 'id' && k !== 'created_at' && k !== 'updated_at'
+    k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
   );
   const relationshipProps = parentRelationships.map(r => r.propName);
   const nonRelationshipProps = parentProps.filter(p => !relationshipProps.includes(p));
@@ -1371,7 +1379,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       }
       
       const childProps = Object.keys(childDef.properties).filter(k => 
-        k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at'
+        k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
       );
       
       const useConnectSelection = childInfo.relationship?.type === 'many-to-many'
@@ -1517,7 +1525,7 @@ ${createNewChildProps}
       }
       
       const childProps = Object.keys(childDef.properties).filter(k => 
-        k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at'
+        k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
       );
       
       const childSerialize = childProps.map(p => `          ${p}: field.${p},`).join('\n');
@@ -1722,7 +1730,7 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   
   // Get parent properties (excluding id and timestamps)
   const parentProps = Object.keys(parentDef.properties).filter(k => 
-    k !== 'id' && k !== 'created_at' && k !== 'updated_at'
+    k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
   );
   
   // Separate Date and Image fields from other fields
@@ -1957,7 +1965,7 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
   
   // Get parent properties (excluding id and timestamps) and set default values
   const parentDefaultProps = Object.entries(parentDef.properties)
-    .filter(([key]) => key !== 'id' && key !== 'created_at' && key !== 'updated_at')
+    .filter(([key]) => key !== 'id' && key !== 'created_at' && key !== 'updated_at' && key !== 'creator_id')
     .map(([key, prop]) => {
       const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
       const format = (prop as any).format;

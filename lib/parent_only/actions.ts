@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 
 type NormalizedSnapshot = Record<string, unknown>;
 type TransactionClient = Pick<typeof prisma, 'parent_only'>;
@@ -110,20 +110,22 @@ export async function upsertParentOnly(data: FormData) {
       await updateParentOnly(tx, id, name, description, loginTime, logoutTime);
     });
   } else {
-    await addParentOnly(name, description, loginTime, logoutTime);
+    const creatorId = await getSessionUserIdOrThrow();
+    await addParentOnly(creatorId, name, description, loginTime, logoutTime);
   }
 
   revalidatePath('/');
   redirect('/parent_only');
 }
 
-async function addParentOnly(name: string, description: string | null, loginTime: Date | null, logoutTime: Date | null) {
+async function addParentOnly(creatorId: string, name: string, description: string | null, loginTime: Date | null, logoutTime: Date | null) {
   await prisma.parent_only.create({
     data: {
       name: name,
       description: description,
       login_time: loginTime,
       logout_time: logoutTime,
+      creator_id: creatorId,
     },
   });
 }

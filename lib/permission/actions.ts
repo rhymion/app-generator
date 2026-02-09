@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 
 type NormalizedSnapshot = Record<string, unknown>;
 type TransactionClient = Pick<typeof prisma, 'permission'>;
@@ -112,14 +112,15 @@ export async function upsertPermission(data: FormData) {
       await updatePermission(tx, id, name, create, read, update, deleteValue, roleId);
     });
   } else {
-    await addPermission(name, create, read, update, deleteValue, roleId);
+    const creatorId = await getSessionUserIdOrThrow();
+    await addPermission(creatorId, name, create, read, update, deleteValue, roleId);
   }
 
   revalidatePath('/');
   redirect('/permission');
 }
 
-async function addPermission(name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null) {
+async function addPermission(creatorId: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null) {
   await prisma.permission.create({
     data: {
       name: name,
@@ -128,6 +129,7 @@ async function addPermission(name: string, create: boolean, read: boolean, updat
       update: update,
       delete: deleteValue,
       role_id: roleId,
+      creator_id: creatorId,
     },
   });
 }
