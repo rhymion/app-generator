@@ -1236,30 +1236,12 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
 
       // For connect/select relationships (many-to-many or self list)
       if (useConnectSelection) {
-        const targetPascal = toPascalCase(childInfo.relationship?.target ?? childInfo.name);
-        const childItemVar = childSingularVarName(childInfo);
         return `  const initial${childPascal}: EditableListWrapperItem[] = src.${childInfo.propertyName}.map(f => ({
     id: f.id || \`temp-\${Date.now()}-\${Math.random()}\`,
     value: f.id,
     label: f.name,
     originalId: f.id,
-  }));
-  const [selected${childPascal}, setSelected${childPascal}] = useState<EditableListWrapperItem[]>(initial${childPascal});
-  const autocompleteOptions${childPascal} = useMemo(() => {
-    const assigned${childPascal}Ids = new Set(
-      selected${childPascal}
-        .map((${childItemVar}) => ${childItemVar}.originalId ?? ${childItemVar}.value)
-        .filter((${childItemVar}Id): ${childItemVar}Id is string => typeof ${childItemVar}Id === 'string')
-    );
-    return all${targetPascal}s
-      .filter((${childItemVar}) => !assigned${childPascal}Ids.has(${childItemVar}.id))
-      .filter((${childItemVar}) => ${childItemVar}.id !== src.id)
-      .map((${childItemVar}) => ({
-        id: ${childItemVar}.id,
-        label: ${childItemVar}.name,
-        value: ${childItemVar}.id,
-      }));
-  }, [all${targetPascal}s, selected${childPascal}]);`;
+  }));`;
       }
       
       // For list output type, generate different initialization
@@ -1403,6 +1385,7 @@ ${childSerialize}
       
       // For many-to-many relationships, use EditableListWrapper with autocomplete
       if (childInfo.relationship?.type === 'many-to-many') {
+        const targetPascal = toPascalCase(childInfo.relationship.target);
         return `      <EditableListWrapper
         ref={${childVar}Ref}
         initialItems={initial${childPascal}}
@@ -1412,14 +1395,19 @@ ${childSerialize}
         title="${childTitleLabel}"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
-        autocompleteOptions={autocompleteOptions${childPascal}}
-        onItemsChange={setSelected${childPascal}}
+        allAutocompleteOptions={all${targetPascal}s.map(item => ({
+          id: item.id,
+          label: item.name,
+          value: item.id,
+        }))}
+        excludeOptionIds={[src.id]}
       />`;
       }
       
       // For list output type, use EditableListWrapper
       if (childInfo.outputType === 'list') {
         if (childInfo.name === parent) {
+          const targetPascal = toPascalCase(parent);
           return `      <EditableListWrapper
         ref={${childVar}Ref}
         initialItems={initial${childPascal}}
@@ -1429,8 +1417,12 @@ ${childSerialize}
         title="${childTitleLabel}"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
-        autocompleteOptions={autocompleteOptions${childPascal}}
-        onItemsChange={setSelected${childPascal}}
+        allAutocompleteOptions={all${targetPascal}s.map(item => ({
+          id: item.id,
+          label: item.name,
+          value: item.id,
+        }))}
+        excludeOptionIds={[src.id]}
       />`;
         }
         return `      <EditableListWrapper

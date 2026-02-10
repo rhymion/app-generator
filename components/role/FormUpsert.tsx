@@ -29,22 +29,6 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
     label: f.name,
     originalId: f.id,
   }));
-  const [selectedUserAccounts, setSelectedUserAccounts] = useState<EditableListWrapperItem[]>(initialUserAccounts);
-  const autocompleteOptionsUserAccounts = useMemo(() => {
-    const assignedUserAccountsIds = new Set(
-      selectedUserAccounts
-        .map((userAccount) => userAccount.originalId ?? userAccount.value)
-        .filter((userAccountId): userAccountId is string => typeof userAccountId === 'string')
-    );
-    return allUserAccounts
-      .filter((userAccount) => !assignedUserAccountsIds.has(userAccount.id))
-      .filter((userAccount) => userAccount.id !== src.id)
-      .map((userAccount) => ({
-        id: userAccount.id,
-        label: userAccount.name,
-        value: userAccount.id,
-      }));
-  }, [allUserAccounts, selectedUserAccounts]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -125,8 +109,12 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         title="User Accounts"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
-        autocompleteOptions={autocompleteOptionsUserAccounts}
-        onItemsChange={setSelectedUserAccounts}
+        allAutocompleteOptions={allUserAccounts.map(item => ({
+          id: item.id,
+          label: item.name,
+          value: item.id,
+        }))}
+        excludeOptionIds={[src.id]}
       />
     </>
   );

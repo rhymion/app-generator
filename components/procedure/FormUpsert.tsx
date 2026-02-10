@@ -33,66 +33,18 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
     label: f.name,
     originalId: f.id,
   }));
-  const [selectedChildren, setSelectedChildren] = useState<EditableListWrapperItem[]>(initialChildren);
-  const autocompleteOptionsChildren = useMemo(() => {
-    const assignedChildrenIds = new Set(
-      selectedChildren
-        .map((children) => children.originalId ?? children.value)
-        .filter((childrenId): childrenId is string => typeof childrenId === 'string')
-    );
-    return allProcedures
-      .filter((children) => !assignedChildrenIds.has(children.id))
-      .filter((children) => children.id !== src.id)
-      .map((children) => ({
-        id: children.id,
-        label: children.name,
-        value: children.id,
-      }));
-  }, [allProcedures, selectedChildren]);
   const initialPrecededBy: EditableListWrapperItem[] = src.preceded_by.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
     label: f.name,
     originalId: f.id,
   }));
-  const [selectedPrecededBy, setSelectedPrecededBy] = useState<EditableListWrapperItem[]>(initialPrecededBy);
-  const autocompleteOptionsPrecededBy = useMemo(() => {
-    const assignedPrecededByIds = new Set(
-      selectedPrecededBy
-        .map((precededBy) => precededBy.originalId ?? precededBy.value)
-        .filter((precededById): precededById is string => typeof precededById === 'string')
-    );
-    return allProcedures
-      .filter((precededBy) => !assignedPrecededByIds.has(precededBy.id))
-      .filter((precededBy) => precededBy.id !== src.id)
-      .map((precededBy) => ({
-        id: precededBy.id,
-        label: precededBy.name,
-        value: precededBy.id,
-      }));
-  }, [allProcedures, selectedPrecededBy]);
   const initialFollowedBy: EditableListWrapperItem[] = src.followed_by.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
     label: f.name,
     originalId: f.id,
   }));
-  const [selectedFollowedBy, setSelectedFollowedBy] = useState<EditableListWrapperItem[]>(initialFollowedBy);
-  const autocompleteOptionsFollowedBy = useMemo(() => {
-    const assignedFollowedByIds = new Set(
-      selectedFollowedBy
-        .map((followedBy) => followedBy.originalId ?? followedBy.value)
-        .filter((followedById): followedById is string => typeof followedById === 'string')
-    );
-    return allProcedures
-      .filter((followedBy) => !assignedFollowedByIds.has(followedBy.id))
-      .filter((followedBy) => followedBy.id !== src.id)
-      .map((followedBy) => ({
-        id: followedBy.id,
-        label: followedBy.name,
-        value: followedBy.id,
-      }));
-  }, [allProcedures, selectedFollowedBy]);
   const parentIdOptions = useMemo(() => {
     return allProcedures.map((item) => ({
       id: item.id,
@@ -221,8 +173,12 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         title="Children"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
-        autocompleteOptions={autocompleteOptionsChildren}
-        onItemsChange={setSelectedChildren}
+        allAutocompleteOptions={allProcedures.map(item => ({
+          id: item.id,
+          label: item.name,
+          value: item.id,
+        }))}
+        excludeOptionIds={[src.id]}
       />
       <EditableListWrapper
         ref={precededByRef}
@@ -233,8 +189,12 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         title="Preceded By"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
-        autocompleteOptions={autocompleteOptionsPrecededBy}
-        onItemsChange={setSelectedPrecededBy}
+        allAutocompleteOptions={allProcedures.map(item => ({
+          id: item.id,
+          label: item.name,
+          value: item.id,
+        }))}
+        excludeOptionIds={[src.id]}
       />
       <EditableListWrapper
         ref={followedByRef}
@@ -245,8 +205,12 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         title="Followed By"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
-        autocompleteOptions={autocompleteOptionsFollowedBy}
-        onItemsChange={setSelectedFollowedBy}
+        allAutocompleteOptions={allProcedures.map(item => ({
+          id: item.id,
+          label: item.name,
+          value: item.id,
+        }))}
+        excludeOptionIds={[src.id]}
       />
     </>
   );

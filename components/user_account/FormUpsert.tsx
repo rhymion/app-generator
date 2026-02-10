@@ -33,22 +33,6 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
     label: f.name,
     originalId: f.id,
   }));
-  const [selectedRoles, setSelectedRoles] = useState<EditableListWrapperItem[]>(initialRoles);
-  const autocompleteOptionsRoles = useMemo(() => {
-    const assignedRolesIds = new Set(
-      selectedRoles
-        .map((role) => role.originalId ?? role.value)
-        .filter((roleId): roleId is string => typeof roleId === 'string')
-    );
-    return allRoles
-      .filter((role) => !assignedRolesIds.has(role.id))
-      .filter((role) => role.id !== src.id)
-      .map((role) => ({
-        id: role.id,
-        label: role.name,
-        value: role.id,
-      }));
-  }, [allRoles, selectedRoles]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -156,8 +140,12 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         title="Roles"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
-        autocompleteOptions={autocompleteOptionsRoles}
-        onItemsChange={setSelectedRoles}
+        allAutocompleteOptions={allRoles.map(item => ({
+          id: item.id,
+          label: item.name,
+          value: item.id,
+        }))}
+        excludeOptionIds={[src.id]}
       />
     </>
   );

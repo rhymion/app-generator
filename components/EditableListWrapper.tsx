@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, forwardRef, useImperativeHandle } from 'react';
+import { useState, forwardRef, useImperativeHandle, useMemo } from 'react';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
@@ -43,9 +43,13 @@ interface EditableListWrapperProps {
   textFieldLabel?: string;
   textFieldPlaceholder?: string;
   // For autocomplete type
+  /** @deprecated Use allAutocompleteOptions instead for automatic filtering */
   autocompleteOptions?: AutocompleteOption[];
   autocompleteLabel?: string;
   autocompletePlaceholder?: string;
+  // NEW: For autocomplete with internal filtering
+  allAutocompleteOptions?: AutocompleteOption[];  // All available options (unfiltered)
+  excludeOptionIds?: (string | number)[];          // IDs to exclude from options (e.g., [src.id])
   // For file type
   acceptedFileTypes?: string;
   maxFileSize?: number; // in bytes
@@ -54,6 +58,7 @@ interface EditableListWrapperProps {
   // Validation
   validateItem?: (value: any) => string | null; // returns error message or null
   // Change callback
+  /** @deprecated No longer needed when using allAutocompleteOptions */
   onItemsChange?: (items: EditableListWrapperItem[]) => void;
 }
 
@@ -73,6 +78,8 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
     autocompleteOptions = [],
     autocompleteLabel = 'Select',
     autocompletePlaceholder = 'Select an option',
+    allAutocompleteOptions,
+    excludeOptionIds,
     acceptedFileTypes = '*',
     maxFileSize = 10 * 1024 * 1024, // 10MB default
     renderItem,
@@ -87,6 +94,29 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
     const [selectedAutocomplete, setSelectedAutocomplete] = useState<AutocompleteOption | null>(null);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [error, setError] = useState<string | null>(null);
+
+    // Internal filtering for autocomplete options
+    const availableOptions = useMemo(() => {
+      // If allAutocompleteOptions provided, filter internally
+      if (allAutocompleteOptions) {
+        const assignedIds = new Set(
+          items
+            .map((item) => item.originalId ?? item.value)
+            .filter((id): id is string | number =>
+              typeof id === 'string' || typeof id === 'number'
+            )
+        );
+
+        const excludeSet = new Set(excludeOptionIds ?? []);
+
+        return allAutocompleteOptions
+          .filter((option) => !assignedIds.has(option.id))
+          .filter((option) => !excludeSet.has(option.id));
+      }
+
+      // Fallback to old behavior (backward compatible)
+      return autocompleteOptions;
+    }, [allAutocompleteOptions, excludeOptionIds, items, autocompleteOptions]);
 
     useImperativeHandle(ref, () => ({
       getItems: () => items,
@@ -303,7 +333,7 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
 
             {itemType === 'autocomplete' && (
               <Autocomplete
-                options={autocompleteOptions}
+                options={availableOptions}
                 getOptionLabel={(option) => option.label}
                 value={selectedAutocomplete}
                 onChange={(_, newValue) => {
