@@ -3,116 +3,165 @@
 import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 
-export async function upsertDbTable(data: FormData) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
+type NormalizedSnapshot = Record<string, unknown>;
+type TransactionClient = Pick<typeof prisma, 'db_table'>;
+
+function normalizeValue(value: unknown, kind: 'date' | 'number' | 'boolean' | 'string' | 'other') {
+  if (value === null || value === undefined || value === '') {
+    return null;
   }
 
+  if (kind === 'date') {
+    const date = value instanceof Date ? value : new Date(value as string);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+
+  if (kind === 'number') {
+    const numberValue = Number(value);
+    return Number.isNaN(numberValue) ? null : numberValue;
+  }
+
+  if (kind === 'boolean') {
+    if (typeof value === 'string') {
+      if (value.toLowerCase() === 'true') return true;
+      if (value.toLowerCase() === 'false') return false;
+    }
+    return Boolean(value);
+  }
+
+  if (kind === 'string') {
+    return String(value);
+  }
+
+  return value;
+}
+
+function normalizeChildRefs(items: unknown): string[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => (item && typeof item === 'object' ? (item as { id?: string }).id : undefined))
+    .filter((id): id is string => Boolean(id))
+    .sort();
+}
+
+function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {
+  const safeSnapshot = (snapshot ?? {}) as Record<string, unknown>;
+  return {
+    id: String(safeSnapshot.id ?? ''),
+    name: normalizeValue(safeSnapshot.name, 'string'),
+    description: normalizeValue(safeSnapshot.description, 'string'),
+    fields: normalizeChildRefs(safeSnapshot.fields),
+  };
+}
+
+async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
+  const current = await tx.db_table.findUnique({
+    where: { id },
+    include: {
+      fields: { select: { id: true } }
+    }
+  });
+
+  if (!current) {
+    return null;
+  }
+
+  return normalizeSnapshot(current as Record<string, unknown>);
+}
+
+async function assertNotStale(tx: TransactionClient, id: string, srcSnapshotRaw: string) {
+  let expectedSnapshot: NormalizedSnapshot;
+  try {
+    expectedSnapshot = normalizeSnapshot(JSON.parse(srcSnapshotRaw) as Record<string, unknown>);
+  } catch {
+    throw new Error('Invalid snapshot data. Please reload and try again.');
+  }
+
+  const currentSnapshot = await getCurrentSnapshot(tx, id);
+  if (!currentSnapshot) {
+    throw new Error('This record no longer exists.');
+  }
+
+  if (JSON.stringify(currentSnapshot) !== JSON.stringify(expectedSnapshot)) {
+    throw new Error('This record has been updated since you opened it. Please reload to compare with the latest changes.');
+  }
+}
+
+export async function upsertDbTable(data: FormData) {
   const id = data.get('id') as string | null;
+  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
+  if (id) {
+    await requirePermission('db_table', 'update');
+  } else {
+    await requirePermission('db_table', 'create');
+  }
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
-  const fieldsRaw = data.getAll('fields[]') as string[];
-  const fields = fieldsRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string;table_id?: string; max_length?: number | null; max?: number | null; regex?: string | null; required: boolean });
+  const fieldsRaw = data.getAll('field[]') as string[];
+  const fieldsItems = fieldsRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean });
+
 
   if (id) {
-    await updateDbTable(id, name, description, fields);
+    await prisma.$transaction(async (tx) => {
+      if (srcSnapshotRaw) {
+        await assertNotStale(tx, id, srcSnapshotRaw);
+      }
+      await updateDbTable(tx, id, name, description, fieldsItems);
+    });
   } else {
-    await addDbTable(name, description, fields);
+    const creatorId = await getSessionUserIdOrThrow();
+    await addDbTable(creatorId, name, description, fieldsItems);
   }
 
   revalidatePath('/');
   redirect('/db_table');
 }
 
-async function addDbTable(name: string, description: string | null, fields: { name: string; type: string; max_length?: number | null; max?: number | null; regex?: string | null; required: boolean }[]) {
-  await prisma.$transaction(async (tx) => {
-    const newTable = await tx.db_table.create({
-      data: { name, description },
-    });
-    const tableId = newTable.id;
-
-    if (fields.length > 0) {
-      await tx.field.createMany({
-        data: fields.map(f => ({
+async function addDbTable(creatorId: string, name: string, description: string | null, fieldsItems: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean }[]) {
+  await prisma.db_table.create({
+    data: {
+      name: name,
+      description: description,
+      creator_id: creatorId,
+      fields: {
+        create: fieldsItems.map(f => ({
           name: f.name,
           type: f.type,
-          table_id: tableId,
           max_length: f.max_length,
           max: f.max,
           regex: f.regex,
           required: f.required,
         })),
-      });
-    }
+      },
+    },
   });
 }
 
-async function updateDbTable(id: string, name: string, description: string | null, fields: { id?: string; name: string; type: string; max_length?: number | null; max?: number | null; regex?: string | null; required: boolean }[]) {
-  await prisma.$transaction(async (tx) => {
-    // Update db_table
-    await tx.db_table.update({
-      where: { id },
-      data: { name, description },
-    });
-
-    // Get existing fields
-    const existingFields = await tx.field.findMany({
-      where: { table_id: id },
-    });
-
-    // Fields to update or create
-    const fieldsToUpsert = fields.filter(f => f.id);
-    const fieldsToCreate = fields.filter(f => !f.id);
-
-    // Update existing fields
-    for (const field of fieldsToUpsert) {
-      await tx.field.update({
-        where: { id: field.id! },
-        data: {
-          name: field.name,
-          max_length: field.max_length,
-          max: field.max,
-          regex: field.regex,
-          required: field.required,
-        },
-      });
-    }
-
-    // Create new fields
-    if (fieldsToCreate.length > 0) {
-      await tx.field.createMany({
-        data: fieldsToCreate.map(f => ({
+async function updateDbTable(tx: TransactionClient, id: string, name: string, description: string | null, fieldsItems: { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean }[]) {
+  await tx.db_table.update({
+    where: { id },
+    data: {
+      name: name,
+      description: description,
+      fields: {
+        deleteMany: {},
+        create: fieldsItems.map(f => ({
           name: f.name,
           type: f.type,
-          table_id: id,
           max_length: f.max_length,
           max: f.max,
           regex: f.regex,
           required: f.required,
         })),
-      });
-    }
-
-    // Delete fields not in the new list
-    const newFieldIds = fields.filter(f => f.id).map(f => f.id!);
-    const fieldsToDelete = existingFields.filter(ef => !newFieldIds.includes(ef.id));
-    if (fieldsToDelete.length > 0) {
-      await tx.field.deleteMany({
-        where: { id: { in: fieldsToDelete.map(f => f.id) } },
-      });
-    }
+      },
+    },
   });
 }
 
 export async function removeDbTable(data: FormData | string[]) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
+  await requirePermission('db_table', 'delete');
 
   if (Array.isArray(data)) {
     await prisma.db_table.deleteMany({

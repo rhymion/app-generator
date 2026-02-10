@@ -1,58 +1,58 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
-import { GridRowsProp } from '@mui/x-data-grid';
 import TextField from '@mui/material/TextField';
 import { upsertDbTable, removeDbTable } from '@/lib/db_table/actions';
 import type { FormUpsertProps } from '@/lib/db_table/types';
 import FormWithChildGrid from '../FormWithChildGrid';
-import FieldsDataGrid from '../FieldsDataGrid';
-import { field_columns } from '../db_table/column_def';
+import { GridRowsProp } from '@mui/x-data-grid';
+  import FieldsDataGrid from '../FieldsDataGrid';
+  import { fields_columns } from '../db_table/column_def';
 
-export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const canDelete = permissions ? permissions.delete : true;
+  const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
-  const fieldsGridRef = useRef<{ getFields: () => GridRowsProp }>(null);
+  const fieldsRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
-
-  const columns = field_columns(true);
+  const descriptionRef = useRef<HTMLInputElement>(null);
+  const fieldsColumns = fields_columns(true);
 
   const initialFields = src.fields.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
 
-  const createNewField = () => ({
+  const createNewFields = () => ({
     id: `temp-${Date.now()}-${Math.random()}`,
     name: '',
-    type: 'string',
-    table_id: src.id,
+    type: '',
     max_length: null,
     max: null,
-    regex: null,
-    required: false,
+    regex: '',
+    required: true,
+    db_table_id: src.id,
   });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    
-    if (isPending) return; // Prevent duplicate submissions
-    
+
+    if (isPending) return;
+
     const formData = new FormData();
-    const name = nameRef.current?.value || '';
-    const description = descriptionRef.current?.value || '';
-    const fields = fieldsGridRef.current?.getFields?.() || [];
-
     formData.set('id', src.id);
-    formData.set('name', name);
-    formData.set('description', description);
+    if (isEdit) {
+      formData.set('__src_snapshot', srcSnapshot);
+    }
+    formData.set('name', nameRef.current?.value || '');
+    formData.set('description', descriptionRef.current?.value || '');
+    const fields = fieldsRef.current?.getFields?.() || [];
 
-    // Serialize fields
     (fields as any[]).forEach((field) => {
       formData.append(
-        'fields[]',
+        'field[]',
         JSON.stringify({
           id: field.id.startsWith('temp-') ? undefined : field.id,
           name: field.name,
@@ -78,7 +78,6 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
     const formData = new FormData();
     formData.set('id', src.id);
     await removeDbTable(formData);
-    // redirect() in the server action will handle navigation
   };
 
   const handleBack = () => {
@@ -91,10 +90,13 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
       <TextField
         label="Name"
         inputRef={nameRef}
-        defaultValue={src.name}
+        defaultValue={src.name || ''}
         fullWidth
         margin="normal"
         required
+        slotProps={ { htmlInput: { minLength: 1 } } }
+        multiline={false}
+        rows={undefined}
       />
       <TextField
         label="Description"
@@ -102,17 +104,18 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
         defaultValue={src.description || ''}
         fullWidth
         margin="normal"
-        multiline
+        
+        multiline={true}
         rows={4}
       />
       <FieldsDataGrid
-        ref={fieldsGridRef}
+        ref={fieldsRef}
         initialFields={initialFields}
-        columns={columns}
-        createNewRow={createNewField}
-        addButtonLabel="Add Field"
+        columns={fieldsColumns}
+        createNewRow={createNewFields}
+        addButtonLabel="Add Fields"
         deleteDialogTitle="Delete Selected Fields?"
-        deleteDialogMessage="Are you sure you want to delete the selected field(s)? This action cannot be undone."
+        deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
         title="Fields"
       />
@@ -121,13 +124,13 @@ export default function FormUpsert({ src, isEdit }: FormUpsertProps) {
 
   return (
     <FormWithChildGrid
-      title={`${isEdit ? 'Edit' : 'Add'} DB Table`}
+      title={`${isEdit ? 'Edit' : 'Add'} Db Table`}
       isEdit={isEdit}
       formFields={formFields}
       onSubmit={handleSubmit}
-      onDelete={isEdit ? handleDelete : undefined}
+      onDelete={isEdit && canDelete ? handleDelete : undefined}
       onBack={handleBack}
-      deleteEntityLabel="Table"
+      deleteEntityLabel="Db Table"
       submitButtonLabel="Save"
       error={error}
     />

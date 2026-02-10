@@ -25,16 +25,14 @@ model field {
   id          String   @id @default(cuid())
   name        String
   type        String
-  table_id    String     
-  table       db_table @relation(fields: [table_id], references: [id], onDelete: Cascade)
+  db_table_id    String     
+  db_table       db_table @relation(fields: [db_table_id], references: [id], onDelete: Cascade)
   max_length  Int?
   max         Int?
   regex       String?
   required    Boolean   @default(true)
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
-  creator_id String
-  creator    user_account @relation(fields: [creator_id], references: [id])
 }
 
 model xxxxx_xxxxx {
@@ -145,7 +143,6 @@ model user_account {
   roles    role[] @relation("UserRoles")
   organizations organization[] @relation("UserOrganizations")
   created_db_tables db_table[]
-  created_fields field[]
   created_xxxxx_xxxxxs xxxxx_xxxxx[]
   created_parent1s parent1[]
   created_parent_onlys parent_only[]

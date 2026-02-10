@@ -26,8 +26,8 @@ describe('FormUpsert', () => {
     name: 'Test Table',
     description: 'Test Description',
     fields: [
-      { id: '1', name: 'field1', table_id: '1', type: 'string', max_length: 100, max: null, regex: null, required: true },
-      { id: '2', name: 'field2', table_id: '1', type: 'number', max_length: null, max: 100, regex: null, required: false },
+      { id: '1', name: 'field1', db_table_id: '1', type: 'string', max_length: 100, max: null, regex: null, required: true },
+      { id: '2', name: 'field2', db_table_id: '1', type: 'number', max_length: null, max: 100, regex: null, required: false },
     ],
   };
 
@@ -49,7 +49,7 @@ describe('FormUpsert', () => {
     expect(screen.getByRole('button', { name: /delete selected/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /back to list/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /delete table/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /delete db table/i })).not.toBeInTheDocument();
   });
 
   it('has Add, Delete Selected, Save, Delete Table and Back to List buttons for edit mode', () => {
@@ -58,7 +58,7 @@ describe('FormUpsert', () => {
     expect(screen.getByRole('button', { name: /delete selected/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /back to list/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /delete table/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /delete db table/i })).toBeInTheDocument();
   });
 
   it('renders FieldsDataGrid component', () => {
@@ -86,16 +86,16 @@ describe('FormUpsert', () => {
 
   it('shows confirmation dialog when clicking Delete Table button', async () => {
     render(<FormUpsert src={mockSrc} isEdit={true} />);
-    const deleteTableButton = screen.getByRole('button', { name: /delete table/i });
+    const deleteTableButton = screen.getByRole('button', { name: /delete db table/i });
     await userEvent.click(deleteTableButton);
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByRole('heading', { name: /delete table/i })).toBeInTheDocument());
-    //await waitFor(() => expect(screen.getByText(/delete table/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: /delete db table/i })).toBeInTheDocument());
+    //await waitFor(() => expect(screen.getByText(/delete db table/i)).toBeInTheDocument());
   });
 
   it('cancels deletion when clicking Cancel in Delete Table dialog', async () => {
     render(<FormUpsert src={mockSrc} isEdit={true} />);
-    const deleteTableButton = screen.getByRole('button', { name: /delete table/i });
+    const deleteTableButton = screen.getByRole('button', { name: /delete db table/i });
     await userEvent.click(deleteTableButton);
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
     const cancelButton = screen.getByRole('button', { name: /cancel/i });

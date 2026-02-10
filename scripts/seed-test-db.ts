@@ -2,6 +2,7 @@
 import { PrismaClient } from '@/app/generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg'
 import * as bcrypt from 'bcryptjs';
+import { createId } from "@paralleldrive/cuid2";
 
 // Use direct database connection for seeding
 // Accelerate extension is required but will use direct connection for non-Accelerate URLs
@@ -16,11 +17,13 @@ async function main() {
 
   // Create test users
   const hashedPassword = await bcrypt.hash('password123', 10);
-  
+  const userId = createId();
   const user1 = await prisma.user_account.upsert({
     where: { email: 'test@example.com' },
     update: {},
     create: {
+      id: userId,
+      creator_id: userId,
       email: 'test@example.com',
       name: 'Test User',
       password: hashedPassword,
@@ -31,38 +34,10 @@ async function main() {
     where: { email: 'admin@example.com' },
     update: {},
     create: {
+      creator_id: userId,
       email: 'admin@example.com',
       name: 'Admin User',
       password: hashedPassword,
-    },
-  });
-
-  // Create test books
-  const book1 = await prisma.books.upsert({
-    where: { id: 'test-book-1' },
-    update: {},
-    create: {
-      id: 'test-book-1',
-      title: 'Test Book 1',
-      author: 'Test Author 1',
-      price: 1500,
-      publisher: 'Test Publisher',
-      published: '2024-01-01',
-      image: '/images/test-book-1.jpg',
-    },
-  });
-
-  const book2 = await prisma.books.upsert({
-    where: { id: 'test-book-2' },
-    update: {},
-    create: {
-      id: 'test-book-2',
-      title: 'Test Book 2',
-      author: 'Test Author 2',
-      price: 2000,
-      publisher: 'Test Publisher',
-      published: '2024-02-01',
-      image: '/images/test-book-2.jpg',
     },
   });
 
@@ -71,6 +46,7 @@ async function main() {
     data: {
       name: 'test_table',
       description: 'Test table for e2e testing',
+      creator_id: user1.id,
       fields: {
         create: [
           {
@@ -91,7 +67,7 @@ async function main() {
   });
 
   console.log('Test database seeded successfully!');
-  console.log({ user1, user2, book1, book2, dbTable });
+  console.log({ user1, user2, dbTable });
 }
 
 main()
