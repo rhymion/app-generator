@@ -5,9 +5,19 @@ describe('Authentication E2E Tests', () => {
     // Reset and seed database before each test
     cy.task('db:reset');
     cy.task('db:seed');
-    
+
+    // Clear ALL session data including cy.session() cache
+    Cypress.session.clearAllSavedSessions();
+    cy.clearCookies();
+    cy.clearLocalStorage();
+
     // Visit the home page
     cy.visit('/');
+
+    // Now clear session storage (after page is loaded)
+    cy.window().then((win) => {
+      win.sessionStorage.clear();
+    });
   });
 
   it('should login with test credentials', () => {

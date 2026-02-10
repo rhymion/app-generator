@@ -3,6 +3,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { randomUUID } from "crypto";
 import prisma from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { createId } from "@paralleldrive/cuid2";
 
 export const authOptions = {
   secret: process.env.AUTH_SECRET,
@@ -24,7 +25,7 @@ export const authOptions = {
         });
 
         if (!user) {
-          const userId = randomUUID();
+          const userId = createId();
           return await prisma.user_account.create({
             data: {
               id: userId,

@@ -3,8 +3,24 @@ import { fillDataGridRow, assertDataGridEmpty } from '../support/datagrid-helper
 
 describe('Testing xxxxx xxxxx pages and their behavior', () => {
   beforeEach(() => {
+    // Reset and seed database with fresh data
     cy.task('db:reset');
     cy.task('db:seed');
+
+    // Clear ALL session data including cy.session() cache
+    Cypress.session.clearAllSavedSessions();
+    cy.clearCookies();
+    cy.clearLocalStorage();
+
+    // Visit a page first so we can access window
+    cy.visit('/');
+
+    // Now clear session storage
+    cy.window().then((win) => {
+      win.sessionStorage.clear();
+    });
+
+    // Login with seeded user credentials (creates new session)
     cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
   });
 
@@ -31,6 +47,7 @@ describe('Testing xxxxx xxxxx pages and their behavior', () => {
       type: 'string',
       max_length: 255,
       required: true,
+      written_by: 'Test User',
     });
 
     // Save and verify

@@ -1,6 +1,16 @@
 import { prisma } from '../db-helpers'
+import { TEST_CREDENTIALS } from '../test-credentials';
 
 export async function populateXxxxxXxxxxData(length: number) {
+  // Get the test user to use as creator
+  const testUser = await prisma.user_account.findUnique({
+    where: { email: TEST_CREDENTIALS.email },
+  });
+
+  if (!testUser) {
+    throw new Error('Test user not found. Make sure db:seed has run first.');
+  }
+
   // Create sample Xxxxx Xxxxx records
   const records = [];
   for (let i = 1; i <= length; i++) {
@@ -8,6 +18,7 @@ export async function populateXxxxxXxxxxData(length: number) {
       data: {
         name: `Xxxxx Xxxxx ${i}`,
         description: `Description for Xxxxx Xxxxx ${i}`,
+        creator_id: testUser.id,
       },
     });
     records.push(record);
