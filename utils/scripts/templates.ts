@@ -1,187 +1,36 @@
 import type { Schema, SchemaProperty, SchemaDefinition, GenerateConfig } from './types';
 
-interface RelationshipInfo {
-  type: 'many-to-many' | 'one-to-many';
-  target: string;
-}
+// Import helper functions
+import {
+  toCamelCase,
+  toPascalCase,
+  toTitleCase,
+  safeVarName,
+  singularize,
+  toPascalCaseFromVar,
+} from './helpers/naming';
+import { getTsType, mapJsonTypeToTs } from './helpers/type-mapping';
+import {
+  getDetailProperties,
+  getDetailRelationName,
+  getParentRelationships,
+  type ParentRelationshipMeta,
+  type DetailPropertyMap,
+} from './helpers/schema-helpers';
+import {
+  childVarName,
+  childPascalName,
+  childTitle,
+  childColumnsFnName,
+  childSingularVarName,
+  childSingularPascalName,
+  childFormKey,
+  type ChildInfo,
+  type RelationshipInfo,
+} from './helpers/child-helpers';
 
-interface ChildInfo {
-  name: string;
-  propertyName: string;
-  outputType?: string;
-  relationship?: RelationshipInfo;
-}
-
-function childVarName(child: ChildInfo): string {
-  return safeVarName(child.propertyName);
-}
-
-function childPascalName(child: ChildInfo): string {
-  return toPascalCase(child.propertyName);
-}
-
-function childTitle(child: ChildInfo): string {
-  return toTitleCase(child.propertyName);
-}
-
-function childColumnsFnName(child: ChildInfo): string {
-  return `${child.propertyName}_columns`;
-}
-
-function singularize(name: string): string {
-  if (!name) return name;
-  const isPascal = name[0] === name[0].toUpperCase();
-  const lower = name.toLowerCase();
-  if (!lower.endsWith('s')) {
-    return name;
-  }
-  const base = name.slice(0, -1);
-  if (isPascal) {
-    return base.charAt(0).toUpperCase() + base.slice(1);
-  }
-  return base;
-}
-
-function childSingularVarName(child: ChildInfo): string {
-  return singularize(childVarName(child));
-}
-
-function childSingularPascalName(child: ChildInfo): string {
-  return singularize(childPascalName(child));
-}
-
-function childFormKey(child: ChildInfo): string {
-  return singularize(child.propertyName);
-}
-
-function getTsType(prop: SchemaProperty): string {
-  // Check for date/datetime/time format
-  const format = (prop as any).format;
-  const isDateType = format === 'date' || format === 'date-time' || format === 'time';
-  
-  if (Array.isArray(prop.type)) {
-    // Union type for nullable
-    if (isDateType) {
-      // For nullable date types
-      return prop.type.includes('null') ? 'Date | null' : 'Date';
-    }
-    return prop.type.map(t => t === 'null' ? 'null' : mapJsonTypeToTs(t)).join(' | ');
-  }
-  
-  if (prop.type === 'array') {
-    return 'any[]'; // Simplified
-  }
-  
-  if (isDateType && prop.type === 'string') {
-    return 'Date';
-  }
-  
-  return mapJsonTypeToTs(prop.type);
-}
-
-function mapJsonTypeToTs(type: string): string {
-  switch (type) {
-    case 'string': return 'string';
-    case 'integer': return 'number';
-    case 'number': return 'number';
-    case 'boolean': return 'boolean';
-    case 'null': return 'null';
-    default: return 'any';
-  }
-}
-
-function toCamelCase(str: string): string {
-  return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-}
-
-function toPascalCase(str: string): string {
-  const camel = toCamelCase(str);
-  return camel.charAt(0).toUpperCase() + camel.slice(1);
-}
-
-function toTitleCase(str: string): string {
-  return str.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-}
-
-const RESERVED_WORDS = new Set([
-  'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete',
-  'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for', 'function',
-  'if', 'implements', 'import', 'in', 'instanceof', 'interface', 'let', 'new', 'null',
-  'package', 'private', 'protected', 'public', 'return', 'super', 'switch', 'static',
-  'this', 'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield',
-  'await'
-]);
-
-function safeVarName(name: string): string {
-  const camel = toCamelCase(name);
-  return RESERVED_WORDS.has(camel) ? `${camel}Value` : camel;
-}
-
-function toPascalCaseFromVar(str: string): string {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
-type ParentRelationshipMeta = {
-  propName: string;
-  target: string;
-  labelField?: string;
-  required?: boolean;
-};
-
-type DetailPropertyMap = Record<string, SchemaProperty> | undefined;
-
-function getDetailProperties(parent: string, schema: Schema): DetailPropertyMap {
-  const detailDef = schema.definitions[`${parent}_detail`];
-  if (!detailDef) return undefined;
-
-  if (detailDef.properties) {
-    return detailDef.properties;
-  }
-
-  if (detailDef.allOf) {
-    const propsObj = detailDef.allOf.find((item: any) => item.properties);
-    return propsObj?.properties;
-  }
-
-  return undefined;
-}
-
-function getDetailRelationName(parent: string, target: string, schema: Schema): string {
-  const properties = getDetailProperties(parent, schema);
-  if (!properties) return target;
-
-  for (const [propName, prop] of Object.entries(properties)) {
-    const propAny = prop as any;
-    const ref = propAny.$ref as string | undefined;
-    if (ref && ref.split('/').pop() === target) {
-      return propName;
-    }
-  }
-
-  return target;
-}
-
-function getParentRelationships(parentDef?: SchemaDefinition): ParentRelationshipMeta[] {
-  if (!parentDef?.properties) return [];
-
-  return Object.entries(parentDef.properties).flatMap(([propName, prop]) => {
-    const rel = (prop as any)['x-relationship'] as SchemaProperty['x-relationship'] | undefined;
-    if (!rel || rel.type !== 'many-to-one' || !rel.target) {
-      return [];
-    }
-
-    if (propName === 'creator_id') {
-      return [];
-    }
-
-    return [{
-      propName,
-      target: rel.target,
-      labelField: rel.labelField,
-      required: parentDef.required?.includes(propName),
-    }];
-  });
-}
+// Re-export types for backward compatibility
+export type { ChildInfo, RelationshipInfo } from './helpers/child-helpers';
 
 export function generateTypes(parent: string, children: ChildInfo[], schema: Schema): string {
   const parentPascal = toPascalCase(parent);

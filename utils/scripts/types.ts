@@ -23,6 +23,8 @@ export interface GenerateConfig {
   edit?: boolean;
   delete?: boolean;
   invalidate?: boolean;
+  test?: boolean;      // E2E test generation
+  api?: boolean;       // API route generation
 }
 
 export interface SchemaDefinition {
