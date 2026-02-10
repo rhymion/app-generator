@@ -1408,6 +1408,15 @@ ${childSerialize}
       if (childInfo.outputType === 'list') {
         if (childInfo.name === parent) {
           const targetPascal = toPascalCase(parent);
+          // Check if this is a self-referential parent-child relationship
+          const selfParentRel = parentRelationships.find((rel) => rel.target === parent);
+          const hasSelfParentRel = selfParentRel !== undefined;
+
+          // For self-referential relationships with parent_id, filter out items that already have a different parent
+          const filterLogic = hasSelfParentRel
+            ? `.filter(item => !item.${selfParentRel!.propName} || item.${selfParentRel!.propName} === src.id)`
+            : '';
+
           return `      <EditableListWrapper
         ref={${childVar}Ref}
         initialItems={initial${childPascal}}
@@ -1417,7 +1426,7 @@ ${childSerialize}
         title="${childTitleLabel}"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
-        allAutocompleteOptions={all${targetPascal}s.map(item => ({
+        allAutocompleteOptions={all${targetPascal}s${filterLogic}.map(item => ({
           id: item.id,
           label: item.name,
           value: item.id,

@@ -173,7 +173,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         title="Children"
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
-        allAutocompleteOptions={allProcedures.map(item => ({
+        allAutocompleteOptions={allProcedures.filter(item => !item.parent_id || item.parent_id === src.id).map(item => ({
           id: item.id,
           label: item.name,
           value: item.id,
