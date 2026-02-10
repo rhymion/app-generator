@@ -52,13 +52,25 @@ describe('EditableListWrapper', () => {
     );
 
     await user.click(screen.getByRole('button', { name: /add item/i }));
-    const addDialog = screen.getByRole('dialog', { name: /add items/i });
-    const combo = within(addDialog).getByLabelText(/select/i);
+    let addDialog = screen.getByRole('dialog', { name: /add items/i });
+    let combo = within(addDialog).getByLabelText(/select/i);
     await user.click(combo);
     await user.click(screen.getByRole('option', { name: 'Alpha' }));
     await user.click(within(addDialog).getByRole('button', { name: /add/i }));
 
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /add items/i })).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /add item/i }));
+    addDialog = screen.getByRole('dialog', { name: /add items/i });
+    combo = within(addDialog).getByLabelText(/select/i);
+    await user.click(combo);
+    await user.click(screen.getByRole('option', { name: 'Beta' }));
+    await user.click(within(addDialog).getByRole('button', { name: /add/i }));
+
     expect(await screen.findByText('Alpha')).toBeInTheDocument();
+    expect(await screen.findByText('Beta')).toBeInTheDocument();
 
     const itemRow = screen.getByText('Alpha').closest('li');
     expect(itemRow).not.toBeNull();
@@ -76,6 +88,7 @@ describe('EditableListWrapper', () => {
 
     await waitFor(() => {
       expect(screen.queryByText('Alpha')).not.toBeInTheDocument();
+      expect(screen.getByText('Beta')).toBeInTheDocument();
     });
   });
 
@@ -85,11 +98,21 @@ describe('EditableListWrapper', () => {
     render(<EditableListWrapper itemType="text" />);
 
     await user.click(screen.getByRole('button', { name: /add item/i }));
-    const addDialog = screen.getByRole('dialog', { name: /add items/i });
+    let addDialog = screen.getByRole('dialog', { name: /add items/i });
     await user.type(within(addDialog).getByLabelText(/value/i), 'First');
     await user.click(within(addDialog).getByRole('button', { name: /add/i }));
 
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /add items/i })).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /add item/i }));
+    addDialog = screen.getByRole('dialog', { name: /add items/i });
+    await user.type(within(addDialog).getByLabelText(/value/i), 'Second');
+    await user.click(within(addDialog).getByRole('button', { name: /add/i }));
+
     expect(await screen.findByText('First')).toBeInTheDocument();
+    expect(await screen.findByText('Second')).toBeInTheDocument();
 
     const itemRow = screen.getByText('First').closest('li');
     expect(itemRow).not.toBeNull();
@@ -113,6 +136,7 @@ describe('EditableListWrapper', () => {
 
     expect(await screen.findByText('Updated')).toBeInTheDocument();
     expect(screen.queryByText('First')).not.toBeInTheDocument();
+    expect(screen.getByText('Second')).toBeInTheDocument();
 
     const updatedRow = screen.getByText('Updated').closest('li');
     expect(updatedRow).not.toBeNull();
@@ -130,7 +154,7 @@ describe('EditableListWrapper', () => {
 
     await waitFor(() => {
       expect(screen.queryByText('Updated')).not.toBeInTheDocument();
-      expect(screen.getByText('No items yet')).toBeInTheDocument();
+      expect(screen.getByText('Second')).toBeInTheDocument();
     });
   });
 });
