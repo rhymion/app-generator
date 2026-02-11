@@ -4,7 +4,12 @@ import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
-import { upsertUserAccount, removeUserAccount } from '@/lib/user_account/actions';
+import Button from '@mui/material/Button';
+import Box from '@mui/material/Box';
+import InputAdornment from '@mui/material/InputAdornment';
+import IconButton from '@mui/material/IconButton';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import { upsertUserAccount, removeUserAccount, generateApiKey } from '@/lib/user_account/actions';
 import type { FormUpsertProps } from '@/lib/user_account/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import type { Role } from '@/lib/role/types';
@@ -22,11 +27,11 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
   const [avatar, setAvatar] = useState<string>(src.avatar || '');
+  const [currentApiKey, setCurrentApiKey] = useState<string>(src.api_key || '');
   const rolesRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
-  const api_keyRef = useRef<HTMLInputElement>(null);
   const initialRoles: EditableListWrapperItem[] = src.roles.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
@@ -47,7 +52,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
     formData.set('name', nameRef.current?.value || '');
     formData.set('email', emailRef.current?.value || '');
     formData.set('password', passwordRef.current?.value || '');
-    formData.set('api_key', api_keyRef.current?.value || '');
+    formData.set('api_key', currentApiKey || '');
     formData.set('avatar', avatar);
     const roles = rolesRef.current?.getItems?.() || [];
 
@@ -117,16 +122,41 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         multiline={false}
         rows={undefined}
       />
-      <TextField
-        label="Api Key"
-        inputRef={api_keyRef}
-        defaultValue={src.api_key || ''}
-        fullWidth
-        margin="normal"
-        
-        multiline={false}
-        rows={undefined}
-      />
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 2, mb: 1 }}>
+        <TextField
+          label="Api Key"
+          value={currentApiKey}
+          fullWidth
+          slotProps={{
+            input: {
+              readOnly: true,
+              endAdornment: currentApiKey ? (
+                <InputAdornment position="end">
+                  <IconButton
+                    size="small"
+                    onClick={() => navigator.clipboard.writeText(currentApiKey)}
+                    title="Copy to clipboard"
+                  >
+                    <ContentCopyIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ) : undefined,
+            },
+          }}
+        />
+        {isEdit && (
+          <Button
+            variant="outlined"
+            onClick={async () => {
+              const key = await generateApiKey();
+              setCurrentApiKey(key);
+            }}
+            sx={{ whiteSpace: 'nowrap' }}
+          >
+            Generate Key
+          </Button>
+        )}
+      </Box>
       <ImageUpload
         value={avatar}
         onChange={setAvatar}

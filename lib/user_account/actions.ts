@@ -1,10 +1,10 @@
 'use server';
 
+import { randomBytes } from 'crypto';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import { addUserAccount, updateUserAccount, deleteUserAccount } from './service';
-import { randomBytes } from 'crypto';
 import prisma from '@/lib/prisma';
 
 export async function upsertUserAccount(data: FormData) {
@@ -40,10 +40,7 @@ export async function upsertUserAccount(data: FormData) {
 export async function generateApiKey(): Promise<string> {
   const userId = await getSessionUserIdOrThrow();
   const apiKey = `mk_${randomBytes(32).toString('hex')}`;
-  await prisma.user_account.update({
-    where: { id: userId },
-    data: { api_key: apiKey },
-  });
+  await prisma.user_account.update({ where: { id: userId }, data: { api_key: apiKey } });
   revalidatePath('/');
   return apiKey;
 }
