@@ -7,7 +7,7 @@ import { assertPermission, getModelPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
-async function getAllRoles(): Promise<Role[]> {
+export async function getAllRoles(): Promise<Role[]> {
 
   const roles = await prisma.role.findMany({
   });
@@ -18,7 +18,7 @@ async function getAllRoles(): Promise<Role[]> {
   }));
 }
 
-async function getRoleDetail(id: string): Promise<RoleDetail | null> {
+export async function getRoleDetail(id: string): Promise<RoleDetail | null> {
   
   const role = await prisma.role.findUnique({
     where: { 

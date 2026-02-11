@@ -7,7 +7,7 @@ import { assertPermission, getModelPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
-async function getAllParentOnlys(): Promise<ParentOnly[]> {
+export async function getAllParentOnlys(): Promise<ParentOnly[]> {
 
   const parentOnlys = await prisma.parent_only.findMany({
   });
@@ -20,7 +20,7 @@ async function getAllParentOnlys(): Promise<ParentOnly[]> {
   }));
 }
 
-async function getParentOnlyDetail(id: string): Promise<ParentOnlyDetail | null> {
+export async function getParentOnlyDetail(id: string): Promise<ParentOnlyDetail | null> {
   
   const parentOnly = await prisma.parent_only.findUnique({
     where: { 

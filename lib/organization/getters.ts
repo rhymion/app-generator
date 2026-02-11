@@ -7,7 +7,7 @@ import { assertPermission, getModelPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
-async function getAllOrganizations(): Promise<Organization[]> {
+export async function getAllOrganizations(): Promise<Organization[]> {
 
   const organizations = await prisma.organization.findMany({
   });
@@ -18,7 +18,7 @@ async function getAllOrganizations(): Promise<Organization[]> {
   }));
 }
 
-async function getOrganizationDetail(id: string): Promise<OrganizationDetail | null> {
+export async function getOrganizationDetail(id: string): Promise<OrganizationDetail | null> {
   
   const organization = await prisma.organization.findUnique({
     where: { 

@@ -68,6 +68,7 @@ definitions:
       edit: true
       delete: true
       invalidate: false
+      api: true
     allOf:
       - $ref: "#/definitions/db_table"
       - type: object
@@ -153,6 +154,7 @@ definitions:
       edit: true
       delete: true
       invalidate: false
+      api: true
     allOf:
       - $ref: "#/definitions/xxxxx_xxxxx"
       - type: object
@@ -303,6 +305,7 @@ definitions:
       edit: true
       delete: true
       invalidate: false
+      api: true
     allOf:
       - $ref: "#/definitions/parent1"
       - type: object
@@ -336,6 +339,7 @@ definitions:
       edit: true
       delete: true
       invalidate: false
+      api: true
     type: object
     required:
       - id
@@ -420,6 +424,7 @@ definitions:
       edit: true
       delete: true
       invalidate: false
+      api: true
     x-relationships:
       roles:
         type: many-to-many
@@ -444,6 +449,7 @@ definitions:
       edit: true
       delete: true
       invalidate: false
+      api: true
     x-relationships:
       user_accounts:
         type: many-to-many
@@ -485,6 +491,7 @@ definitions:
       edit: true
       delete: true
       invalidate: false
+      api: true
     x-relationships:
       user_accounts:
         type: many-to-many
@@ -548,6 +555,7 @@ definitions:
       edit: true
       delete: true
       invalidate: false
+      api: true
     allOf:
       - $ref: "#/definitions/permission"
       - type: object

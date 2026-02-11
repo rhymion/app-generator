@@ -7,7 +7,7 @@ import { assertPermission, getModelPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
-async function getAllDbTables(): Promise<DbTable[]> {
+export async function getAllDbTables(): Promise<DbTable[]> {
 
   const dbTables = await prisma.db_table.findMany({
   });
@@ -18,7 +18,7 @@ async function getAllDbTables(): Promise<DbTable[]> {
   }));
 }
 
-async function getDbTableDetail(id: string): Promise<DbTableDetail | null> {
+export async function getDbTableDetail(id: string): Promise<DbTableDetail | null> {
   
   const dbTable = await prisma.db_table.findUnique({
     where: { 

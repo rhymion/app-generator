@@ -7,7 +7,7 @@ import { assertPermission, getModelPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
-async function getAllXxxxxXxxxxs(): Promise<XxxxxXxxxx[]> {
+export async function getAllXxxxxXxxxxs(): Promise<XxxxxXxxxx[]> {
 
   const xxxxxXxxxxs = await prisma.xxxxx_xxxxx.findMany({
   });
@@ -19,7 +19,7 @@ async function getAllXxxxxXxxxxs(): Promise<XxxxxXxxxx[]> {
   }));
 }
 
-async function getXxxxxXxxxxDetail(id: string): Promise<XxxxxXxxxxDetail | null> {
+export async function getXxxxxXxxxxDetail(id: string): Promise<XxxxxXxxxxDetail | null> {
   
   const xxxxxXxxxx = await prisma.xxxxx_xxxxx.findUnique({
     where: { 

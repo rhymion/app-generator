@@ -151,6 +151,8 @@ model user_account {
   created_roles    role[] @relation("RoleCreator")
   created_organizations organization[] @relation("OrganizationCreator")
   created_user_accounts user_account[] @relation("UserAccountCreator")
+
+  @@index([api_key])
 }
 
 model role {

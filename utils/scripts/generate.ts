@@ -13,6 +13,9 @@ import {
   generatePageNew,
   generatePageEdit,
   generatePageView,
+  generateService,
+  generateApiRoute,
+  generateApiDetailRoute,
 } from './templates';
 
 function parseSchema(filePath: string): Schema {
@@ -37,6 +40,7 @@ interface EntityRelation {
     new: boolean;
     edit: boolean;
     delete: boolean;
+    api: boolean;
   };
 }
 
@@ -115,14 +119,15 @@ function extractEntities(schema: Schema): EntityRelation[] {
       }
     }
     
-    // Extract x-generate configuration from detail definition
-    const xGenerate = (detailDef as any)?.['x-generate'] || {};
+    // Extract x-generate configuration from detail definition (or parent definition for parent-only entities)
+    const xGenerate = (detailDef as any)?.['x-generate'] || (schema.definitions[parent] as any)?.['x-generate'] || {};
     const generateConfig = {
       list: xGenerate.list !== false,
       view: xGenerate.view !== false,
       new: xGenerate.new !== false,
       edit: xGenerate.edit !== false,
       delete: xGenerate.delete !== false,
+      api: xGenerate.api === true,
     };
     
     results.push({ parent, children, generateConfig });
@@ -175,7 +180,7 @@ function generate(inputPath: string, outputDir: string) {
   
   for (const { parent, children, generateConfig } of entityRelations) {
     console.log(`\nGenerating code for parent: ${parent}`);
-    console.log(`  Generate config: list=${generateConfig.list}, view=${generateConfig.view}, new=${generateConfig.new}, edit=${generateConfig.edit}, delete=${generateConfig.delete}`);
+    console.log(`  Generate config: list=${generateConfig.list}, view=${generateConfig.view}, new=${generateConfig.new}, edit=${generateConfig.edit}, delete=${generateConfig.delete}, api=${generateConfig.api}`);
     
     if (children.length === 0) {
       console.log(`  No children (parent-only case)`);
@@ -203,9 +208,25 @@ function generate(inputPath: string, outputDir: string) {
       fs.writeFileSync(path.join(libDir, 'getters.ts'), generateGetters(parent, children, schema, generateConfig));
     }
     
+    // Generate service layer (shared DB operations for actions and API routes)
+    if (generateConfig.new || generateConfig.edit || generateConfig.delete) {
+      fs.writeFileSync(path.join(libDir, 'service.ts'), generateService(parent, children, schema, generateConfig));
+    }
+
     // Generate actions only if new, edit, or delete is enabled
     if (generateConfig.new || generateConfig.edit || generateConfig.delete) {
       fs.writeFileSync(path.join(libDir, 'actions.ts'), generateActions(parent, children, schema, generateConfig));
+    }
+
+    // Generate API routes if api is enabled
+    if (generateConfig.api) {
+      const apiDir = path.join(outputDir, 'app', 'api', parent);
+      fs.mkdirSync(apiDir, { recursive: true });
+      fs.writeFileSync(path.join(apiDir, 'route.ts'), generateApiRoute(parent, children, schema, generateConfig));
+
+      fs.mkdirSync(path.join(apiDir, '[id]'), { recursive: true });
+      fs.writeFileSync(path.join(apiDir, '[id]', 'route.ts'), generateApiDetailRoute(parent, children, schema, generateConfig));
+      console.log(`  API routes generated at app/api/${parent}/`);
     }
     
     // Generate column_def only if there are children and list is enabled

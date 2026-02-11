@@ -237,7 +237,7 @@ import { assertPermission, getModelPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';${shouldFilterByOrganization ? "\nimport { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';" : ''}
 
-async function getAll${parentPascal}s(): Promise<${parentPascal}[]> {
+export async function getAll${parentPascal}s(): Promise<${parentPascal}[]> {
 ${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizationListPageData();
   const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
 ` : ''}
@@ -253,7 +253,7 @@ ${relationshipMapping}` : ''}
   }));
 }
 
-async function get${parentPascal}Detail(id: string): Promise<${parentPascal}Detail | null> {
+export async function get${parentPascal}Detail(id: string): Promise<${parentPascal}Detail | null> {
   ${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizationListPageData();
   const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
 ` : ''}
@@ -405,88 +405,9 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
     return `'use server';
 
 import { redirect } from 'next/navigation';
-import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
-
-type NormalizedSnapshot = Record<string, unknown>;
-type TransactionClient = Pick<typeof prisma, '${parent}'>;
-
-function normalizeValue(value: unknown, kind: 'date' | 'number' | 'boolean' | 'string' | 'other') {
-  if (value === null || value === undefined || value === '') {
-    return null;
-  }
-
-  if (kind === 'date') {
-    const date = value instanceof Date ? value : new Date(value as string);
-    return Number.isNaN(date.getTime()) ? null : date.toISOString();
-  }
-
-  if (kind === 'number') {
-    const numberValue = Number(value);
-    return Number.isNaN(numberValue) ? null : numberValue;
-  }
-
-  if (kind === 'boolean') {
-    if (typeof value === 'string') {
-      if (value.toLowerCase() === 'true') return true;
-      if (value.toLowerCase() === 'false') return false;
-    }
-    return Boolean(value);
-  }
-
-  if (kind === 'string') {
-    return String(value);
-  }
-
-  return value;
-}
-
-function normalizeChildRefs(items: unknown): string[] {
-  if (!Array.isArray(items)) return [];
-  return items
-    .map((item) => (item && typeof item === 'object' ? (item as { id?: string }).id : undefined))
-    .filter((id): id is string => Boolean(id))
-    .sort();
-}
-
-function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {
-  const safeSnapshot = (snapshot ?? {}) as Record<string, unknown>;
-  return {
-    id: String(safeSnapshot.id ?? ''),
-${snapshotFieldMappings}${snapshotChildMappings ? `\n${snapshotChildMappings}` : ''}
-  };
-}
-
-async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
-  const current = await tx.${parent}.findUnique({
-    where: { id }${snapshotIncludeProps}
-  });
-
-  if (!current) {
-    return null;
-  }
-
-  return normalizeSnapshot(current as Record<string, unknown>);
-}
-
-async function assertNotStale(tx: TransactionClient, id: string, srcSnapshotRaw: string) {
-  let expectedSnapshot: NormalizedSnapshot;
-  try {
-    expectedSnapshot = normalizeSnapshot(JSON.parse(srcSnapshotRaw) as Record<string, unknown>);
-  } catch {
-    throw new Error('Invalid snapshot data. Please reload and try again.');
-  }
-
-  const currentSnapshot = await getCurrentSnapshot(tx, id);
-  if (!currentSnapshot) {
-    throw new Error('This record no longer exists.');
-  }
-
-  if (JSON.stringify(currentSnapshot) !== JSON.stringify(expectedSnapshot)) {
-    throw new Error('This record has been updated since you opened it. Please reload to compare with the latest changes.');
-  }
-}
+import { add${parentPascal}, update${parentPascal}${canDelete ? `, delete${parentPascal}` : ''} } from './service';
 
 export async function upsert${parentPascal}(data: FormData) {
   const id = data.get('id') as string | null;
@@ -499,12 +420,7 @@ export async function upsert${parentPascal}(data: FormData) {
 ${formDataGets}
 
   if (id) {
-    await prisma.$transaction(async (tx) => {
-      if (srcSnapshotRaw) {
-        await assertNotStale(tx, id, srcSnapshotRaw);
-      }
-      await update${parentPascal}(tx, id, ${parentParams});
-    });
+    await update${parentPascal}(id, ${parentParams}, srcSnapshotRaw);
   } else {
     const creatorId = await getSessionUserIdOrThrow();
     await add${parentPascal}(creatorId, ${parentParams});
@@ -513,39 +429,11 @@ ${formDataGets}
   revalidatePath('/');
   redirect('/${parent}');
 }
-
-async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}) {
-  await prisma.${parent}.create({
-    data: {
-${parentDataObj}
-      creator_id: creatorId,
-    },
-  });
-}
-
-async function update${parentPascal}(tx: TransactionClient, id: string, ${parentParamsWithTypes}) {
-  await tx.${parent}.update({
-    where: { id },
-    data: {
-${parentDataObj}
-    },
-  });
-}
 ${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
   await requirePermission('${parent}', 'delete');
-
-  if (Array.isArray(data)) {
-    await prisma.${parent}.deleteMany({
-      where: { id: { in: data } },
-    });
-  } else {
-    const id = data.get('id') as string;
-    await prisma.${parent}.delete({
-      where: { id },
-    });
-  }
-
+  const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  await delete${parentPascal}(ids);
   revalidatePath('/');
   redirect('/${parent}');
 }
@@ -677,88 +565,9 @@ export async function remove${parentPascal}(data: FormData | string[]) {
   return `'use server';
 
 import { redirect } from 'next/navigation';
-import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
-
-type NormalizedSnapshot = Record<string, unknown>;
-type TransactionClient = Pick<typeof prisma, '${parent}'>;
-
-function normalizeValue(value: unknown, kind: 'date' | 'number' | 'boolean' | 'string' | 'other') {
-  if (value === null || value === undefined || value === '') {
-    return null;
-  }
-
-  if (kind === 'date') {
-    const date = value instanceof Date ? value : new Date(value as string);
-    return Number.isNaN(date.getTime()) ? null : date.toISOString();
-  }
-
-  if (kind === 'number') {
-    const numberValue = Number(value);
-    return Number.isNaN(numberValue) ? null : numberValue;
-  }
-
-  if (kind === 'boolean') {
-    if (typeof value === 'string') {
-      if (value.toLowerCase() === 'true') return true;
-      if (value.toLowerCase() === 'false') return false;
-    }
-    return Boolean(value);
-  }
-
-  if (kind === 'string') {
-    return String(value);
-  }
-
-  return value;
-}
-
-function normalizeChildRefs(items: unknown): string[] {
-  if (!Array.isArray(items)) return [];
-  return items
-    .map((item) => (item && typeof item === 'object' ? (item as { id?: string }).id : undefined))
-    .filter((id): id is string => Boolean(id))
-    .sort();
-}
-
-function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {
-  const safeSnapshot = (snapshot ?? {}) as Record<string, unknown>;
-  return {
-    id: String(safeSnapshot.id ?? ''),
-${snapshotFieldMappings}${snapshotChildMappings ? `\n${snapshotChildMappings}` : ''}
-  };
-}
-
-async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
-  const current = await tx.${parent}.findUnique({
-    where: { id }${snapshotIncludeProps}
-  });
-
-  if (!current) {
-    return null;
-  }
-
-  return normalizeSnapshot(current as Record<string, unknown>);
-}
-
-async function assertNotStale(tx: TransactionClient, id: string, srcSnapshotRaw: string) {
-  let expectedSnapshot: NormalizedSnapshot;
-  try {
-    expectedSnapshot = normalizeSnapshot(JSON.parse(srcSnapshotRaw) as Record<string, unknown>);
-  } catch {
-    throw new Error('Invalid snapshot data. Please reload and try again.');
-  }
-
-  const currentSnapshot = await getCurrentSnapshot(tx, id);
-  if (!currentSnapshot) {
-    throw new Error('This record no longer exists.');
-  }
-
-  if (JSON.stringify(currentSnapshot) !== JSON.stringify(expectedSnapshot)) {
-    throw new Error('This record has been updated since you opened it. Please reload to compare with the latest changes.');
-  }
-}
+import { add${parentPascal}, update${parentPascal}${canDelete ? `, delete${parentPascal}` : ''} } from './service';
 
 export async function upsert${parentPascal}(data: FormData) {
   const id = data.get('id') as string | null;
@@ -770,15 +579,9 @@ export async function upsert${parentPascal}(data: FormData) {
   }
 ${formDataGets}
 ${childFormDataExtractions}
-${selfChildValidation}
 
   if (id) {
-    await prisma.$transaction(async (tx) => {
-      if (srcSnapshotRaw) {
-        await assertNotStale(tx, id, srcSnapshotRaw);
-      }
-      await update${parentPascal}(tx, id, ${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall});
-    });
+    await update${parentPascal}(id, ${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall}, srcSnapshotRaw);
   } else {
     const creatorId = await getSessionUserIdOrThrow();
     await add${parentPascal}(creatorId, ${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall});
@@ -787,41 +590,11 @@ ${selfChildValidation}
   revalidatePath('/');
   redirect('/${parent}');
 }
-
-async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}${parentParamsWithTypes && childParamsForAdd ? ', ' : ''}${childParamsForAdd}) {
-  await prisma.${parent}.create({
-    data: {
-${parentDataObj}
-      creator_id: creatorId,
-${childNestedCreate}
-    },
-  });
-}
-
-async function update${parentPascal}(tx: TransactionClient, id: string${parentParamsWithTypes ? ', ' : ''}${parentParamsWithTypes}${parentParamsWithTypes && childParamsForUpdate ? ', ' : ''}${childParamsForUpdate}) {
-  await tx.${parent}.update({
-    where: { id },
-    data: {
-${parentDataObj}
-${childNestedUpdate}
-    },
-  });
-}
 ${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
   await requirePermission('${parent}', 'delete');
-
-  if (Array.isArray(data)) {
-    await prisma.${parent}.deleteMany({
-      where: { id: { in: data } },
-    });
-  } else {
-    const id = data.get('id') as string;
-    await prisma.${parent}.delete({
-      where: { id },
-    });
-  }
-
+  const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  await delete${parentPascal}(ids);
   revalidatePath('/');
   redirect('/${parent}');
 }
@@ -1979,4 +1752,503 @@ export default async function View${parentPascal}Page({ params }: ${parentPascal
   return <FormView src={${parentCamel}} permissions={userPermissions} />;
 }
 `;
+}
+
+export function generateService(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any): string {
+  const parentPascal = toPascalCase(parent);
+  const parentDef = schema.definitions[parent];
+  const canDelete = generateConfig?.delete !== false;
+  const parentRelationships = getParentRelationships(parentDef);
+  const selfParentRel = parentRelationships.find((rel) => rel.target === parent);
+  const selfParentProp = selfParentRel?.propName ?? null;
+
+  // Get parent properties (excluding id and timestamps)
+  const parentProps = parentDef.properties
+    ? Object.keys(parentDef.properties).filter(k =>
+        k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
+      )
+    : [];
+
+  const parentPropInfos = parentDef.properties
+    ? parentProps.map(p => ({
+        prop: p,
+        varName: safeVarName(p),
+        def: parentDef.properties![p]
+      }))
+    : [];
+
+  const parentParamsWithTypes = parentDef.properties
+    ? parentPropInfos.map(p => {
+        const tsType = getTsType(p.def);
+        return `${p.varName}: ${tsType}`;
+      }).join(', ')
+    : '';
+
+  const parentDataObj = parentPropInfos.map(p => `      ${p.prop}: ${p.varName},`).join('\n');
+
+  const normalizeKind = (def: SchemaProperty): 'date' | 'number' | 'boolean' | 'string' | 'other' => {
+    const propType = Array.isArray(def.type) ? def.type.find(t => t !== 'null') : def.type;
+    const format = (def as any).format;
+    if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) return 'date';
+    if (propType === 'integer' || propType === 'number') return 'number';
+    if (propType === 'boolean') return 'boolean';
+    if (propType === 'string') return 'string';
+    return 'other';
+  };
+
+  const snapshotFieldMappings = parentPropInfos
+    .map(({ prop, def }) => `    ${prop}: normalizeValue(safeSnapshot.${prop}, '${normalizeKind(def)}'),`)
+    .join('\n');
+  const snapshotChildMappings = children.length > 0
+    ? children.map(childInfo => `    ${childInfo.propertyName}: normalizeChildRefs(safeSnapshot.${childInfo.propertyName}),`).join('\n')
+    : '';
+  const snapshotIncludeProps = children.length > 0
+    ? `,\n    include: {\n      ${children.map(childInfo => `${childInfo.propertyName}: { select: { id: true } }`).join(',\n      ')}\n    }`
+    : '';
+
+  // Shared utility code
+  const utilityCode = `import prisma from '@/lib/prisma';
+
+type NormalizedSnapshot = Record<string, unknown>;
+type TransactionClient = Pick<typeof prisma, '${parent}'>;
+
+function normalizeValue(value: unknown, kind: 'date' | 'number' | 'boolean' | 'string' | 'other') {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  if (kind === 'date') {
+    const date = value instanceof Date ? value : new Date(value as string);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+
+  if (kind === 'number') {
+    const numberValue = Number(value);
+    return Number.isNaN(numberValue) ? null : numberValue;
+  }
+
+  if (kind === 'boolean') {
+    if (typeof value === 'string') {
+      if (value.toLowerCase() === 'true') return true;
+      if (value.toLowerCase() === 'false') return false;
+    }
+    return Boolean(value);
+  }
+
+  if (kind === 'string') {
+    return String(value);
+  }
+
+  return value;
+}
+
+function normalizeChildRefs(items: unknown): string[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => (item && typeof item === 'object' ? (item as { id?: string }).id : undefined))
+    .filter((id): id is string => Boolean(id))
+    .sort();
+}
+
+function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {
+  const safeSnapshot = (snapshot ?? {}) as Record<string, unknown>;
+  return {
+    id: String(safeSnapshot.id ?? ''),
+${snapshotFieldMappings}${snapshotChildMappings ? `\n${snapshotChildMappings}` : ''}
+  };
+}
+
+async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
+  const current = await tx.${parent}.findUnique({
+    where: { id }${snapshotIncludeProps}
+  });
+
+  if (!current) {
+    return null;
+  }
+
+  return normalizeSnapshot(current as Record<string, unknown>);
+}
+
+async function assertNotStale(tx: TransactionClient, id: string, srcSnapshotRaw: string) {
+  let expectedSnapshot: NormalizedSnapshot;
+  try {
+    expectedSnapshot = normalizeSnapshot(JSON.parse(srcSnapshotRaw) as Record<string, unknown>);
+  } catch {
+    throw new Error('Invalid snapshot data. Please reload and try again.');
+  }
+
+  const currentSnapshot = await getCurrentSnapshot(tx, id);
+  if (!currentSnapshot) {
+    throw new Error('This record no longer exists.');
+  }
+
+  if (JSON.stringify(currentSnapshot) !== JSON.stringify(expectedSnapshot)) {
+    throw new Error('This record has been updated since you opened it. Please reload to compare with the latest changes.');
+  }
+}`;
+
+  // For parent-only case
+  if (children.length === 0) {
+    return `${utilityCode}
+
+export async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}) {
+  return await prisma.${parent}.create({
+    data: {
+${parentDataObj}
+      creator_id: creatorId,
+    },
+  });
+}
+
+export async function update${parentPascal}(id: string, ${parentParamsWithTypes}, srcSnapshotRaw?: string | null) {
+  return await prisma.$transaction(async (tx) => {
+    if (srcSnapshotRaw) {
+      await assertNotStale(tx, id, srcSnapshotRaw);
+    }
+    return await tx.${parent}.update({
+      where: { id },
+      data: {
+${parentDataObj}
+      },
+    });
+  });
+}
+${canDelete ? `
+export async function delete${parentPascal}(ids: string[]) {
+  if (ids.length === 1) {
+    await prisma.${parent}.delete({ where: { id: ids[0] } });
+  } else {
+    await prisma.${parent}.deleteMany({ where: { id: { in: ids } } });
+  }
+}
+` : ''}`;
+  }
+
+  // For with-children cases
+  const allChildrenData = children.map(childInfo => {
+    const child = childInfo.name;
+    const childVar = childVarName(childInfo);
+    const childPascal = childPascalName(childInfo);
+    const childDef = schema.definitions[child];
+    const isManyToMany = childInfo.relationship?.type === 'many-to-many';
+    const useConnect = isManyToMany || child === parent;
+
+    if (!childDef?.properties) {
+      throw new Error(`Child definition ${child} has no properties`);
+    }
+
+    const parentIdPropNames = new Set<string>();
+    if (child === parent) {
+      parentRelationships
+        .filter(rel => rel.target === parent)
+        .forEach(rel => parentIdPropNames.add(rel.propName));
+    } else {
+      parentIdPropNames.add(`${parent}_id`);
+    }
+
+    const childProps = Object.keys(childDef.properties).filter(k =>
+      k !== 'id' && !parentIdPropNames.has(k) && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
+    );
+
+    const fieldType = `{ ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
+    const fieldTypeWithId = `{ ${Object.keys(childDef.properties).filter(k =>
+      !parentIdPropNames.has(k) && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
+    ).map(p => `${p.replace(/id/, 'id?')}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
+
+    const fieldMapCreate = childProps.map(p => `          ${p}: f.${p},`).join('\n');
+
+    return {
+      child,
+      childVar,
+      childPascal,
+      fieldType,
+      fieldTypeWithId,
+      fieldMapCreate,
+      isManyToMany,
+      useConnect,
+      propertyName: childInfo.propertyName,
+      formKey: childFormKey(childInfo),
+      outputType: childInfo.outputType,
+    };
+  });
+
+  const childParamsForAdd = allChildrenData.map(({ childVar, fieldType, useConnect }) =>
+    useConnect ? `${childVar}Ids: string[]` : `${childVar}Items: ${fieldType}[]`
+  ).join(', ');
+  const childParamsForUpdate = allChildrenData.map(({ childVar, fieldTypeWithId, useConnect }) =>
+    useConnect ? `${childVar}Ids: string[]` : `${childVar}Items: ${fieldTypeWithId}[]`
+  ).join(', ');
+
+  // Generate nested create for all children
+  const childNestedCreate = allChildrenData.map(({ propertyName, childVar, fieldMapCreate, useConnect }) => {
+    if (useConnect) {
+      return `      ${propertyName}: {\n        connect: ${childVar}Ids.map((id) => ({ id })),\n      },`;
+    } else {
+      return `      ${propertyName}: {\n        create: ${childVar}Items.map(f => ({\n${fieldMapCreate}\n        })),\n      },`;
+    }
+  }).join('\n');
+
+  // Generate nested update (deleteMany + create for one-to-many, set for many-to-many)
+  const childNestedUpdate = allChildrenData.map(({ propertyName, childVar, fieldMapCreate, useConnect }) => {
+    if (useConnect) {
+      return `      ${propertyName}: {\n        set: ${childVar}Ids.map((id) => ({ id })),\n      },`;
+    } else {
+      return `      ${propertyName}: {\n        deleteMany: {},\n        create: ${childVar}Items.map(f => ({\n${fieldMapCreate}\n        })),\n      },`;
+    }
+  }).join('\n');
+
+  // Self-child validation for service
+  const selfChildValidation = selfParentProp
+    ? allChildrenData
+        .filter((childInfo) => childInfo.child === parent && childInfo.outputType === 'list' && !childInfo.isManyToMany)
+        .map((childInfo) => `
+  if (${childInfo.childVar}Ids.length > 0) {
+    if (id && ${childInfo.childVar}Ids.includes(id)) {
+      throw new Error('Cannot set an item as its own child.');
+    }
+    const invalid${childInfo.childPascal} = await prisma.${parent}.findMany({
+      where: id
+        ? {
+            id: { in: ${childInfo.childVar}Ids },
+            AND: [
+              { ${selfParentProp}: { not: null } },
+              { NOT: { ${selfParentProp}: id } },
+            ],
+          }
+        : {
+            id: { in: ${childInfo.childVar}Ids },
+            ${selfParentProp}: { not: null },
+          },
+      select: { id: true },
+    });
+
+    if (invalid${childInfo.childPascal}.length > 0) {
+      throw new Error('One or more selected children already belong to another parent.');
+    }
+  }
+`)
+        .join('')
+    : '';
+
+  const childArgsForCall = allChildrenData.map(({ childVar, useConnect }) =>
+    useConnect ? `${childVar}Ids` : `${childVar}Items`
+  ).join(', ');
+
+  return `${utilityCode}
+
+export async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}${parentParamsWithTypes && childParamsForAdd ? ', ' : ''}${childParamsForAdd}) {${selfChildValidation ? `\n  const id = null;${selfChildValidation}` : ''}
+  return await prisma.${parent}.create({
+    data: {
+${parentDataObj}
+      creator_id: creatorId,
+${childNestedCreate}
+    },
+  });
+}
+
+export async function update${parentPascal}(id: string${parentParamsWithTypes ? ', ' : ''}${parentParamsWithTypes}${parentParamsWithTypes && childParamsForUpdate ? ', ' : ''}${childParamsForUpdate}, srcSnapshotRaw?: string | null) {${selfChildValidation}
+  return await prisma.$transaction(async (tx) => {
+    if (srcSnapshotRaw) {
+      await assertNotStale(tx, id, srcSnapshotRaw);
+    }
+    return await tx.${parent}.update({
+      where: { id },
+      data: {
+${parentDataObj}
+${childNestedUpdate}
+      },
+    });
+  });
+}
+${canDelete ? `
+export async function delete${parentPascal}(ids: string[]) {
+  if (ids.length === 1) {
+    await prisma.${parent}.delete({ where: { id: ids[0] } });
+  } else {
+    await prisma.${parent}.deleteMany({ where: { id: { in: ids } } });
+  }
+}
+` : ''}`;
+}
+
+export function generateApiRoute(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any): string {
+  const parentPascal = toPascalCase(parent);
+  const parentDef = schema.definitions[parent];
+  const canCreate = generateConfig?.new !== false;
+
+  // Compute body destructuring for POST
+  const parentProps = parentDef.properties
+    ? Object.keys(parentDef.properties).filter(k =>
+        k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
+      )
+    : [];
+
+  const parentPropInfos = parentDef.properties
+    ? parentProps.map(p => ({
+        prop: p,
+        varName: safeVarName(p),
+        def: parentDef.properties![p]
+      }))
+    : [];
+
+  const bodyDestructure = parentPropInfos.map(p => p.prop).join(', ');
+
+  const allChildrenData = children.map(childInfo => {
+    const isManyToMany = childInfo.relationship?.type === 'many-to-many';
+    const useConnect = isManyToMany || childInfo.name === parent;
+    return {
+      childVar: childVarName(childInfo),
+      propertyName: childInfo.propertyName,
+      useConnect,
+    };
+  });
+
+  const childBodyFields = allChildrenData.map(({ childVar, propertyName, useConnect }) =>
+    useConnect ? `${childVar}_ids` : propertyName
+  );
+
+  const allBodyFields = [...parentPropInfos.map(p => p.prop), ...childBodyFields].join(', ');
+
+  const childServiceArgs = allChildrenData.map(({ childVar, propertyName, useConnect }) =>
+    useConnect ? `${childVar}_ids ?? []` : `${propertyName} ?? []`
+  ).join(', ');
+
+  const parentServiceArgs = parentPropInfos.map(p => {
+    const isNullable = Array.isArray(p.def.type) && p.def.type.includes('null');
+    return isNullable ? `${p.prop} ?? null` : p.prop;
+  }).join(', ');
+
+  const serviceArgsForCreate = `userId, ${parentServiceArgs}${parentServiceArgs && childServiceArgs ? ', ' : ''}${childServiceArgs}`;
+
+  return `import { NextRequest, NextResponse } from 'next/server';
+import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import { getAll${parentPascal}s } from '@/lib/${parent}/getters';${canCreate ? `\nimport { add${parentPascal} } from '@/lib/${parent}/service';` : ''}
+
+export async function GET(request: NextRequest) {
+  try {
+    const { userId } = await authenticateApiKey(request);
+    await requireApiPermission(userId, '${parent}', 'read');
+    const items = await getAll${parentPascal}s();
+    return NextResponse.json(items);
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+${canCreate ? `
+export async function POST(request: NextRequest) {
+  try {
+    const { userId } = await authenticateApiKey(request);
+    await requireApiPermission(userId, '${parent}', 'create');
+    const body = await request.json();
+    const { ${allBodyFields} } = body;
+    const result = await add${parentPascal}(${serviceArgsForCreate});
+    return NextResponse.json(result, { status: 201 });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+` : ''}`;
+}
+
+export function generateApiDetailRoute(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any): string {
+  const parentPascal = toPascalCase(parent);
+  const parentDef = schema.definitions[parent];
+  const canUpdate = generateConfig?.edit !== false;
+  const canDelete = generateConfig?.delete !== false;
+
+  // Compute body destructuring for PUT
+  const parentProps = parentDef.properties
+    ? Object.keys(parentDef.properties).filter(k =>
+        k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
+      )
+    : [];
+
+  const parentPropInfos = parentDef.properties
+    ? parentProps.map(p => ({
+        prop: p,
+        varName: safeVarName(p),
+        def: parentDef.properties![p]
+      }))
+    : [];
+
+  const allChildrenData = children.map(childInfo => {
+    const isManyToMany = childInfo.relationship?.type === 'many-to-many';
+    const useConnect = isManyToMany || childInfo.name === parent;
+    return {
+      childVar: childVarName(childInfo),
+      propertyName: childInfo.propertyName,
+      useConnect,
+    };
+  });
+
+  const childBodyFields = allChildrenData.map(({ childVar, propertyName, useConnect }) =>
+    useConnect ? `${childVar}_ids` : propertyName
+  );
+
+  const allBodyFields = [...parentPropInfos.map(p => p.prop), ...childBodyFields].join(', ');
+
+  const childServiceArgs = allChildrenData.map(({ childVar, propertyName, useConnect }) =>
+    useConnect ? `${childVar}_ids ?? []` : `${propertyName} ?? []`
+  ).join(', ');
+
+  const parentServiceArgs = parentPropInfos.map(p => {
+    const isNullable = Array.isArray(p.def.type) && p.def.type.includes('null');
+    return isNullable ? `${p.prop} ?? null` : p.prop;
+  }).join(', ');
+
+  const serviceArgsForUpdate = `id, ${parentServiceArgs}${parentServiceArgs && childServiceArgs ? ', ' : ''}${childServiceArgs}`;
+
+  const serviceImports = [
+    canUpdate ? `update${parentPascal}` : '',
+    canDelete ? `delete${parentPascal}` : '',
+  ].filter(Boolean).join(', ');
+
+  return `import { NextRequest, NextResponse } from 'next/server';
+import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import { get${parentPascal}Detail } from '@/lib/${parent}/getters';${serviceImports ? `\nimport { ${serviceImports} } from '@/lib/${parent}/service';` : ''}
+
+type Params = { params: Promise<{ id: string }> };
+
+export async function GET(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const { userId } = await authenticateApiKey(request);
+    await requireApiPermission(userId, '${parent}', 'read');
+    const item = await get${parentPascal}Detail(id);
+    if (!item) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return NextResponse.json(item);
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+${canUpdate ? `
+export async function PUT(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const { userId } = await authenticateApiKey(request);
+    await requireApiPermission(userId, '${parent}', 'update');
+    const body = await request.json();
+    const { ${allBodyFields} } = body;
+    const result = await update${parentPascal}(${serviceArgsForUpdate});
+    return NextResponse.json(result);
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+` : ''}${canDelete ? `
+export async function DELETE(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const { userId } = await authenticateApiKey(request);
+    await requireApiPermission(userId, '${parent}', 'delete');
+    await delete${parentPascal}([id]);
+    return new NextResponse(null, { status: 204 });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+` : ''}`;
 }

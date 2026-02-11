@@ -7,7 +7,7 @@ import { assertPermission, getModelPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
-async function getAllUserAccounts(): Promise<UserAccount[]> {
+export async function getAllUserAccounts(): Promise<UserAccount[]> {
 
   const userAccounts = await prisma.user_account.findMany({
   });
@@ -21,7 +21,7 @@ async function getAllUserAccounts(): Promise<UserAccount[]> {
   }));
 }
 
-async function getUserAccountDetail(id: string): Promise<UserAccountDetail | null> {
+export async function getUserAccountDetail(id: string): Promise<UserAccountDetail | null> {
   
   const userAccount = await prisma.user_account.findUnique({
     where: { 

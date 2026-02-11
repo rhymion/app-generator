@@ -8,7 +8,7 @@ import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';
 
-async function getAllParent1s(): Promise<Parent1[]> {
+export async function getAllParent1s(): Promise<Parent1[]> {
   const associatedOrganizations = await getAssociatedOrganizationListPageData();
   const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
 
@@ -30,7 +30,7 @@ async function getAllParent1s(): Promise<Parent1[]> {
   }));
 }
 
-async function getParent1Detail(id: string): Promise<Parent1Detail | null> {
+export async function getParent1Detail(id: string): Promise<Parent1Detail | null> {
     const associatedOrganizations = await getAssociatedOrganizationListPageData();
   const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
 
