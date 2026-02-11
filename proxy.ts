@@ -15,15 +15,14 @@ export async function proxy(req: NextRequest) {
     '/favicon.ico',
   ];
 
-  // Allow next internals and public assets through
+  // Allow next internals, public assets, and API routes (except /api/auth) through
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/static') ||
     pathname.startsWith('/public') ||
-    pathname.startsWith('/api') && pathname.startsWith('/api/auth') === false
+    (pathname.startsWith('/api') && !pathname.startsWith('/api/auth'))
   ) {
-    // allow static, next internals; let API auth be checked below
-    // Fall through to token check for APIs except auth
+    return NextResponse.next();
   }
 
   // allow explicit public paths
