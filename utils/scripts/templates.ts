@@ -2108,7 +2108,7 @@ export function generateApiRoute(parent: string, children: ChildInfo[], schema: 
     useConnect ? `${childVar}_ids` : propertyName
   );
 
-  const allBodyFields = [...parentPropInfos.map(p => p.prop), ...childBodyFields].join(', ');
+  const allBodyFields = [...parentPropInfos.map(p => p.prop === p.varName ? p.prop : `${p.prop}: ${p.varName}`), ...childBodyFields].join(', ');
 
   const childServiceArgs = allChildrenData.map(({ childVar, propertyName, useConnect }) =>
     useConnect ? `${childVar}_ids ?? []` : `${propertyName} ?? []`
@@ -2116,7 +2116,7 @@ export function generateApiRoute(parent: string, children: ChildInfo[], schema: 
 
   const parentServiceArgs = parentPropInfos.map(p => {
     const isNullable = Array.isArray(p.def.type) && p.def.type.includes('null');
-    return isNullable ? `${p.prop} ?? null` : p.prop;
+    return isNullable ? `${p.varName} ?? null` : p.varName;
   }).join(', ');
 
   const serviceArgsForCreate = `userId, ${parentServiceArgs}${parentServiceArgs && childServiceArgs ? ', ' : ''}${childServiceArgs}`;
@@ -2186,7 +2186,7 @@ export function generateApiDetailRoute(parent: string, children: ChildInfo[], sc
     useConnect ? `${childVar}_ids` : propertyName
   );
 
-  const allBodyFields = [...parentPropInfos.map(p => p.prop), ...childBodyFields].join(', ');
+  const allBodyFields = [...parentPropInfos.map(p => p.prop === p.varName ? p.prop : `${p.prop}: ${p.varName}`), ...childBodyFields].join(', ');
 
   const childServiceArgs = allChildrenData.map(({ childVar, propertyName, useConnect }) =>
     useConnect ? `${childVar}_ids ?? []` : `${propertyName} ?? []`
@@ -2194,7 +2194,7 @@ export function generateApiDetailRoute(parent: string, children: ChildInfo[], sc
 
   const parentServiceArgs = parentPropInfos.map(p => {
     const isNullable = Array.isArray(p.def.type) && p.def.type.includes('null');
-    return isNullable ? `${p.prop} ?? null` : p.prop;
+    return isNullable ? `${p.varName} ?? null` : p.varName;
   }).join(', ');
 
   const serviceArgsForUpdate = `id, ${parentServiceArgs}${parentServiceArgs && childServiceArgs ? ', ' : ''}${childServiceArgs}`;

@@ -19,8 +19,8 @@ export async function POST(request: NextRequest) {
     const { userId } = await authenticateApiKey(request);
     await requireApiPermission(userId, 'parent_only', 'create');
     const body = await request.json();
-    const { name, description, login_time, logout_time } = body;
-    const result = await addParentOnly(userId, name, description ?? null, login_time ?? null, logout_time ?? null);
+    const { name, description, login_time: loginTime, logout_time: logoutTime } = body;
+    const result = await addParentOnly(userId, name, description ?? null, loginTime ?? null, logoutTime ?? null);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     return handleApiError(error);

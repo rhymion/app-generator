@@ -19,8 +19,8 @@ export async function POST(request: NextRequest) {
     const { userId } = await authenticateApiKey(request);
     await requireApiPermission(userId, 'user_account', 'create');
     const body = await request.json();
-    const { name, email, password, api_key, avatar, roles_ids } = body;
-    const result = await addUserAccount(userId, name, email, password, api_key ?? null, avatar ?? null, roles_ids ?? []);
+    const { name, email, password, api_key: apiKey, avatar, roles_ids } = body;
+    const result = await addUserAccount(userId, name, email, password, apiKey ?? null, avatar ?? null, roles_ids ?? []);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     return handleApiError(error);

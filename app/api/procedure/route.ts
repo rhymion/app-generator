@@ -19,8 +19,8 @@ export async function POST(request: NextRequest) {
     const { userId } = await authenticateApiKey(request);
     await requireApiPermission(userId, 'procedure', 'create');
     const body = await request.json();
-    const { name, description, parent_id, children_ids, precededBy_ids, followedBy_ids } = body;
-    const result = await addProcedure(userId, name, description ?? null, parent_id ?? null, children_ids ?? [], precededBy_ids ?? [], followedBy_ids ?? []);
+    const { name, description, parent_id: parentId, children_ids, precededBy_ids, followedBy_ids } = body;
+    const result = await addProcedure(userId, name, description ?? null, parentId ?? null, children_ids ?? [], precededBy_ids ?? [], followedBy_ids ?? []);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     return handleApiError(error);
