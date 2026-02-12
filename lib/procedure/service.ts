@@ -1,5 +1,5 @@
 import prisma from '@/lib/prisma';
-import { normalizeValue, normalizeChildRefs, type NormalizedSnapshot } from '@/lib/normalize';
+import { normalizeValue, normalizeChildRefs, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
 
 type TransactionClient = Pick<typeof prisma, 'procedure'>;
 
@@ -31,24 +31,6 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
   }
 
   return normalizeSnapshot(current as Record<string, unknown>);
-}
-
-async function assertNotStale(tx: TransactionClient, id: string, srcSnapshotRaw: string) {
-  let expectedSnapshot: NormalizedSnapshot;
-  try {
-    expectedSnapshot = normalizeSnapshot(JSON.parse(srcSnapshotRaw) as Record<string, unknown>);
-  } catch {
-    throw new Error('Invalid snapshot data. Please reload and try again.');
-  }
-
-  const currentSnapshot = await getCurrentSnapshot(tx, id);
-  if (!currentSnapshot) {
-    throw new Error('This record no longer exists.');
-  }
-
-  if (JSON.stringify(currentSnapshot) !== JSON.stringify(expectedSnapshot)) {
-    throw new Error('This record has been updated since you opened it. Please reload to compare with the latest changes.');
-  }
 }
 
 export async function addProcedure(creatorId: string, name: string, description: string | null, parentId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[]) {
@@ -125,7 +107,7 @@ export async function updateProcedure(id: string, name: string, description: str
 
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
-      await assertNotStale(tx, id, srcSnapshotRaw);
+      await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
     return await tx.procedure.update({
       where: { id },

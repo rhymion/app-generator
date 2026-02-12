@@ -27,24 +27,6 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
   return normalizeSnapshot(current as Record<string, unknown>);
 }
 
-async function assertNotStale(tx: TransactionClient, id: string, srcSnapshotRaw: string) {
-  let expectedSnapshot: NormalizedSnapshot;
-  try {
-    expectedSnapshot = normalizeSnapshot(JSON.parse(srcSnapshotRaw) as Record<string, unknown>);
-  } catch {
-    throw new Error('Invalid snapshot data. Please reload and try again.');
-  }
-
-  const currentSnapshot = await getCurrentSnapshot(tx, id);
-  if (!currentSnapshot) {
-    throw new Error('This record no longer exists.');
-  }
-
-  if (JSON.stringify(currentSnapshot) !== JSON.stringify(expectedSnapshot)) {
-    throw new Error('This record has been updated since you opened it. Please reload to compare with the latest changes.');
-  }
-}
-
 export async function deleteSetting6(ids: string[]) {
   if (ids.length === 1) {
     await prisma.user_account.delete({ where: { id: ids[0] } });

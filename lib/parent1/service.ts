@@ -1,5 +1,5 @@
 import prisma from '@/lib/prisma';
-import { normalizeValue, normalizeChildRefs, type NormalizedSnapshot } from '@/lib/normalize';
+import { normalizeValue, normalizeChildRefs, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
 
 type TransactionClient = Pick<typeof prisma, 'parent1'>;
 
@@ -34,24 +34,6 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
   }
 
   return normalizeSnapshot(current as Record<string, unknown>);
-}
-
-async function assertNotStale(tx: TransactionClient, id: string, srcSnapshotRaw: string) {
-  let expectedSnapshot: NormalizedSnapshot;
-  try {
-    expectedSnapshot = normalizeSnapshot(JSON.parse(srcSnapshotRaw) as Record<string, unknown>);
-  } catch {
-    throw new Error('Invalid snapshot data. Please reload and try again.');
-  }
-
-  const currentSnapshot = await getCurrentSnapshot(tx, id);
-  if (!currentSnapshot) {
-    throw new Error('This record no longer exists.');
-  }
-
-  if (JSON.stringify(currentSnapshot) !== JSON.stringify(expectedSnapshot)) {
-    throw new Error('This record has been updated since you opened it. Please reload to compare with the latest changes.');
-  }
 }
 
 export async function addParent1(creatorId: string, name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { name: string }[]) {
@@ -96,7 +78,7 @@ export async function addParent1(creatorId: string, name: string, organizationId
 export async function updateParent1(id: string, name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { id?: string; order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { id?: string; name: string }[], srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
-      await assertNotStale(tx, id, srcSnapshotRaw);
+      await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
     return await tx.parent1.update({
       where: { id },

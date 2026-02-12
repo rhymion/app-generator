@@ -37,3 +37,25 @@ export function normalizeChildRefs(items: unknown): string[] {
     .filter((id): id is string => Boolean(id))
     .sort();
 }
+
+export async function assertNotStale(
+  srcSnapshotRaw: string,
+  normalizeSnapshot: (snapshot: Record<string, unknown> | null | undefined) => NormalizedSnapshot,
+  fetchCurrentSnapshot: () => Promise<NormalizedSnapshot | null>,
+) {
+  let expectedSnapshot: NormalizedSnapshot;
+  try {
+    expectedSnapshot = normalizeSnapshot(JSON.parse(srcSnapshotRaw) as Record<string, unknown>);
+  } catch {
+    throw new Error('Invalid snapshot data. Please reload and try again.');
+  }
+
+  const currentSnapshot = await fetchCurrentSnapshot();
+  if (!currentSnapshot) {
+    throw new Error('This record no longer exists.');
+  }
+
+  if (JSON.stringify(currentSnapshot) !== JSON.stringify(expectedSnapshot)) {
+    throw new Error('This record has been updated since you opened it. Please reload to compare with the latest changes.');
+  }
+}
