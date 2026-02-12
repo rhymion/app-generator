@@ -27,8 +27,9 @@ export type DetailPropertyMap = Record<string, SchemaProperty> | undefined;
  * @param schema - Full schema
  * @returns Map of properties or undefined if detail def doesn't exist
  */
-export function getDetailProperties(parent: string, schema: Schema): DetailPropertyMap {
-  const detailDef = schema.definitions[`${parent}_detail`];
+export function getDetailProperties(parent: string, schema: Schema, detailKey?: string): DetailPropertyMap {
+  const key = detailKey ?? `${parent}_detail`;
+  const detailDef = schema.definitions[key];
   if (!detailDef) return undefined;
 
   if (detailDef.properties) {
@@ -52,8 +53,8 @@ export function getDetailProperties(parent: string, schema: Schema): DetailPrope
  * @param schema - Full schema
  * @returns Property name that references the target, or target name if not found
  */
-export function getDetailRelationName(parent: string, target: string, schema: Schema): string {
-  const properties = getDetailProperties(parent, schema);
+export function getDetailRelationName(parent: string, target: string, schema: Schema, detailKey?: string): string {
+  const properties = getDetailProperties(parent, schema, detailKey);
   if (!properties) return target;
 
   for (const [propName, prop] of Object.entries(properties)) {
@@ -65,6 +66,22 @@ export function getDetailRelationName(parent: string, target: string, schema: Sc
   }
 
   return target;
+}
+
+/**
+ * Filters properties from a schema definition based on a field whitelist.
+ * If fields is undefined/empty, returns all properties (backward compat).
+ * Always preserves 'id' in the result.
+ */
+export function filterFields(
+  properties: Record<string, SchemaProperty>,
+  fields?: string[]
+): Record<string, SchemaProperty> {
+  if (!fields || fields.length === 0) return properties;
+  const allowed = new Set([...fields, 'id', 'created_at', 'updated_at', 'creator_id']);
+  return Object.fromEntries(
+    Object.entries(properties).filter(([key]) => allowed.has(key))
+  );
 }
 
 /**

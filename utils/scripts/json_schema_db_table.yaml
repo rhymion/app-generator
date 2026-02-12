@@ -332,14 +332,6 @@ definitions:
               $ref: "#/definitions/parent1_list"
 
   parent_only:
-    x-generate:
-      list: true
-      view: true
-      new: true
-      edit: true
-      delete: true
-      invalidate: false
-      api: true
     type: object
     required:
       - id
@@ -365,6 +357,18 @@ definitions:
           - string
           - "null"
         format: date-time
+
+  parent_only_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+    allOf:
+      - $ref: "#/definitions/parent_only"
 
   user_account:
     type: object
@@ -440,6 +444,25 @@ definitions:
             x-outputType: list
             items:
               $ref: "#/definitions/role"
+
+  setting:
+    x-generate:
+      list: false
+      view: true
+      new: false
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      fields:
+        - name
+        - email
+    x-relationships:
+      roles:
+        type: many-to-many
+        target: role
+    allOf:
+      - $ref: "#/definitions/user_account"
 
   role_detail:
     x-generate:

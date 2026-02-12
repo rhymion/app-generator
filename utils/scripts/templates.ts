@@ -14,6 +14,7 @@ import {
   getDetailProperties,
   getDetailRelationName,
   getParentRelationships,
+  filterFields,
   type ParentRelationshipMeta,
   type DetailPropertyMap,
 } from './helpers/schema-helpers';
@@ -32,46 +33,49 @@ import {
 // Re-export types for backward compatibility
 export type { ChildInfo, RelationshipInfo } from './helpers/child-helpers';
 
-export function generateTypes(parent: string, children: ChildInfo[], schema: Schema): string {
+export function generateTypes(parent: string, children: ChildInfo[], schema: Schema, modelName?: string, definitionKey?: string, generateConfig?: any): string {
+  const model = modelName ?? parent;
+  const defKey = definitionKey ?? `${parent}_detail`;
   const parentPascal = toPascalCase(parent);
-  
-  const parentDef = schema.definitions[parent];
-  const parentRelationships = getParentRelationships(parentDef);
+
+  const modelDef = schema.definitions[model];
+  const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
+  const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps });
   const relationshipTargets = Array.from(
     new Map(parentRelationships.map(r => [r.target, r])).values()
   );
-  
+
   const parentProps: string[] = [];
   const parentExtraProps: string[] = [];
   const formViewExtraProps: string[] = [];
 
   relationshipTargets.forEach((rel) => {
     const targetPascal = toPascalCase(rel.target);
-    const relationName = getDetailRelationName(parent, rel.target, schema);
+    const relationName = getDetailRelationName(parent, rel.target, schema, defKey);
     parentExtraProps.push(`  ${relationName}?: ${targetPascal} | null;`);
     formViewExtraProps.push(`    ${relationName}?: ${targetPascal} | null;`);
   });
-  
+
   // Generate parent type
-  if (parentDef.properties) {
-    for (const [key, prop] of Object.entries(parentDef.properties)) {
+  if (filteredProps) {
+    for (const [key, prop] of Object.entries(filteredProps)) {
       const tsType = getTsType(prop);
       parentProps.push(`  ${key}: ${tsType};`);
     }
   }
-  
+
   // Get parent properties for FormViewProps (excluding timestamps)
-  const formViewParentProps = parentDef.properties
-    ? Object.entries(parentDef.properties)
+  const formViewParentProps = filteredProps
+    ? Object.entries(filteredProps)
           .filter(([key]) => key !== 'created_at' && key !== 'updated_at' && key !== 'creator_id')
         .map(([key, prop]) => `    ${key}: ${getTsType(prop)};`)
         .join('\n')
     : '';
-  
+
   // Build type definitions
   const importLines = relationshipTargets.length > 0
     ? relationshipTargets
-        .filter(r => r.target !== parent)
+        .filter(r => r.target !== model)
         .map(r => `import type { ${toPascalCase(r.target)} } from '@/lib/${r.target}/types';`)
         .join('\n') + '\n\n'
     : '';
@@ -88,7 +92,7 @@ ${parentExtraProps.join('\n')}
   // Add option types for many-to-one relationships
   if (relationshipTargets.length > 0) {
     const optionTypes = relationshipTargets
-      .filter(r => r.target !== parent)
+      .filter(r => r.target !== model)
       .map(r => {
         const targetPascal = toPascalCase(r.target);
         const labelField = r.labelField ?? 'name';
@@ -118,7 +122,7 @@ ${parentExtraProps.join('\n')}
         childProps.push(`  ${key}: ${tsType};`);
       }
       
-      if (!declaredChildTypes.has(child.name) && child.name !== parent) {
+      if (!declaredChildTypes.has(child.name) && child.name !== model) {
         declaredChildTypes.add(child.name);
         childTypeDeclarations.push(`export type ${childPascal} = {
 ${childProps.join('\n')}
@@ -188,21 +192,24 @@ ${Array.from(new Set([
   return result;
 }
 
-export function generateGetters(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any): string {
+export function generateGetters(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any, modelName?: string, definitionKey?: string): string {
+  const model = modelName ?? parent;
+  const defKey = definitionKey ?? `${parent}_detail`;
   const parentPascal = toPascalCase(parent);
   const parentCamel = toCamelCase(parent);
-  
-  const parentDef = schema.definitions[parent];
-  const parentRelationships = getParentRelationships(parentDef).map((rel) => ({
+
+  const modelDef = schema.definitions[model];
+  const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
+  const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps }).map((rel) => ({
     ...rel,
-    relationName: getDetailRelationName(parent, rel.target, schema),
+    relationName: getDetailRelationName(parent, rel.target, schema, defKey),
   }));
   const hasOrganizationRelationship = parentRelationships.some(r => r.target === 'organization');
-  const shouldFilterByOrganization = hasOrganizationRelationship && parent !== 'organization' && parent !== 'user_account';
-  
+  const shouldFilterByOrganization = hasOrganizationRelationship && model !== 'organization' && model !== 'user_account';
+
   // Get all parent properties except timestamps
-  const parentProps = parentDef.properties 
-    ? Object.keys(parentDef.properties).filter(k => 
+  const parentProps = filteredProps
+    ? Object.keys(filteredProps).filter(k =>
         k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
       )
     : [];
@@ -241,7 +248,7 @@ export async function getAll${parentPascal}s(): Promise<${parentPascal}[]> {
 ${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizationListPageData();
   const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
 ` : ''}
-  const ${parentCamel}s = await prisma.${parent}.findMany({${shouldFilterByOrganization ? `
+  const ${parentCamel}s = await prisma.${model}.findMany({${shouldFilterByOrganization ? `
     where: {
       organization_id: { in: associatedOrganizationIds },
     },` : ''}${includePropsList ? `
@@ -257,7 +264,7 @@ export async function get${parentPascal}Detail(id: string): Promise<${parentPasc
   ${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizationListPageData();
   const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
 ` : ''}
-  const ${parentCamel} = await prisma.${parent}.${shouldFilterByOrganization ? 'findFirst' : 'findUnique'}({
+  const ${parentCamel} = await prisma.${model}.${shouldFilterByOrganization ? 'findFirst' : 'findUnique'}({
     where: { 
       id,${shouldFilterByOrganization ? `
       organization_id: { in: associatedOrganizationIds },` : ''}
@@ -279,54 +286,56 @@ ${relationshipMapping}` : ''}
 }
 
 export async function get${parentPascal}ListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('${parent}');
+  const userPermissions = await getModelPermissions('${model}');
   if (isAssertPermission) {
-    await assertPermission(userPermissions, 'read', '${parent}');
+    await assertPermission(userPermissions, 'read', '${model}');
   }
   const ${parentCamel}s = await getAll${parentPascal}s();
   return { ${parentCamel}s, userPermissions };
 }
 
 export async function get${parentPascal}DetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('${parent}');
-  await assertPermission(userPermissions, operation, '${parent}');
+  const userPermissions = await getModelPermissions('${model}');
+  await assertPermission(userPermissions, operation, '${model}');
   const ${parentCamel} = await get${parentPascal}Detail(id);
   return { ${parentCamel}, userPermissions };
 }
 
 export async function get${parentPascal}NewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('${parent}');
-  await assertPermission(userPermissions, 'create', '${parent}');
+  const userPermissions = await getModelPermissions('${model}');
+  await assertPermission(userPermissions, 'create', '${model}');
   return userPermissions;
 }
 `;
 }
 
-export function generateActions(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any): string {
+export function generateActions(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any, modelName?: string): string {
+  const model = modelName ?? parent;
   const parentPascal = toPascalCase(parent);
-  const parentDef = schema.definitions[parent];
+  const modelDef = schema.definitions[model];
+  const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
   const canDelete = generateConfig?.delete !== false;
-  const parentRelationships = getParentRelationships(parentDef);
-  const selfParentRel = parentRelationships.find((rel) => rel.target === parent);
+  const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps });
+  const selfParentRel = parentRelationships.find((rel) => rel.target === model);
   const selfParentProp = selfParentRel?.propName ?? null;
-  
+
   // Get parent properties (excluding id and timestamps)
-  const parentProps = parentDef.properties
-    ? Object.keys(parentDef.properties).filter(k => 
+  const parentProps = filteredProps
+    ? Object.keys(filteredProps).filter(k =>
         k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
       )
     : [];
-  
+
   // Generate FormData.get statements for parent properties
-  const parentPropInfos = parentDef.properties
+  const parentPropInfos = filteredProps
     ? parentProps.map(p => ({
         prop: p,
         varName: safeVarName(p),
-        def: parentDef.properties![p]
+        def: filteredProps[p]
       }))
     : [];
 
-  const formDataGets = parentDef.properties
+  const formDataGets = filteredProps
     ? parentPropInfos.map(({ prop, varName, def }) => {
         const propType = Array.isArray(def.type) ? def.type.find(t => t !== 'null') : def.type;
         const isNullable = Array.isArray(def.type) && def.type.includes('null');
@@ -362,13 +371,13 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
     : '';
   
   const parentParams = parentPropInfos.map(p => p.varName).join(', ');
-  const parentParamsWithTypes = parentDef.properties
+  const parentParamsWithTypes = filteredProps
     ? parentPropInfos.map(p => {
         const tsType = getTsType(p.def);
         return `${p.varName}: ${tsType}`;
       }).join(', ')
     : '';
-  
+
   const parentDataObj = parentPropInfos.map(p => `      ${p.prop}: ${p.varName},`).join('\n');
 
   const normalizeKind = (def: SchemaProperty): 'date' | 'number' | 'boolean' | 'string' | 'other' => {
@@ -413,9 +422,9 @@ export async function upsert${parentPascal}(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('${parent}', 'update');
+    await requirePermission('${model}', 'update');
   } else {
-    await requirePermission('${parent}', 'create');
+    await requirePermission('${model}', 'create');
   }
 ${formDataGets}
 
@@ -431,7 +440,7 @@ ${formDataGets}
 }
 ${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
-  await requirePermission('${parent}', 'delete');
+  await requirePermission('${model}', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   await delete${parentPascal}(ids);
   revalidatePath('/');
@@ -447,19 +456,19 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     const childPascal = childPascalName(childInfo);
     const childDef = schema.definitions[child];
     const isManyToMany = childInfo.relationship?.type === 'many-to-many';
-    const useConnect = isManyToMany || child === parent;
-    
+    const useConnect = isManyToMany || child === model;
+
     if (!childDef?.properties) {
       throw new Error(`Child definition ${child} has no properties`);
     }
-    
+
     const parentIdPropNames = new Set<string>();
-    if (child === parent) {
+    if (child === model) {
       parentRelationships
-        .filter(rel => rel.target === parent)
+        .filter(rel => rel.target === model)
         .forEach(rel => parentIdPropNames.add(rel.propName));
     } else {
-      parentIdPropNames.add(`${parent}_id`);
+      parentIdPropNames.add(`${model}_id`);
     }
 
     const childProps = Object.keys(childDef.properties).filter(k => 
@@ -504,13 +513,13 @@ export async function remove${parentPascal}(data: FormData | string[]) {
 
   const selfChildValidation = selfParentProp
     ? allChildrenData
-        .filter((childInfo) => childInfo.child === parent && childInfo.outputType === 'list' && !childInfo.isManyToMany)
+        .filter((childInfo) => childInfo.child === model && childInfo.outputType === 'list' && !childInfo.isManyToMany)
         .map((childInfo) => `
   if (${childInfo.childVar}Ids.length > 0) {
     if (id && ${childInfo.childVar}Ids.includes(id)) {
       throw new Error('Cannot set an item as its own child.');
     }
-    const invalid${childInfo.childPascal} = await prisma.${parent}.findMany({
+    const invalid${childInfo.childPascal} = await prisma.${model}.findMany({
       where: id
         ? {
             id: { in: ${childInfo.childVar}Ids },
@@ -573,9 +582,9 @@ export async function upsert${parentPascal}(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('${parent}', 'update');
+    await requirePermission('${model}', 'update');
   } else {
-    await requirePermission('${parent}', 'create');
+    await requirePermission('${model}', 'create');
   }
 ${formDataGets}
 ${childFormDataExtractions}
@@ -592,7 +601,7 @@ ${childFormDataExtractions}
 }
 ${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
-  await requirePermission('${parent}', 'delete');
+  await requirePermission('${model}', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   await delete${parentPascal}(ids);
   revalidatePath('/');
@@ -601,7 +610,8 @@ export async function remove${parentPascal}(data: FormData | string[]) {
 ` : ''}`;
 }
 
-export function generateColumnDef(parent: string, children: ChildInfo[], schema: Schema): string {
+export function generateColumnDef(parent: string, children: ChildInfo[], schema: Schema, modelName?: string, definitionKey?: string): string {
+  const model = modelName ?? parent;
   if (children.length === 0) {
     return '';
   }
@@ -622,7 +632,7 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
     let needsDateTimeImports = false;
     
     for (const [key, prop] of Object.entries(childDef.properties)) {
-      if (key === 'id' || key === `${parent}_id` || key === 'created_at' || key === 'updated_at' || key === 'creator_id') {
+      if (key === 'id' || key === `${model}_id` || key === 'created_at' || key === 'updated_at' || key === 'creator_id') {
         continue;
       }
       
@@ -708,38 +718,41 @@ ${columnFunctions}
 `;
 }
 
-export function generateFormUpsert(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any): string {
+export function generateFormUpsert(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any, modelName?: string, definitionKey?: string): string {
+  const model = modelName ?? parent;
+  const defKey = definitionKey ?? `${parent}_detail`;
   const parentPascal = toPascalCase(parent);
   const parentTitle = toTitleCase(parent);
-  const parentDef = schema.definitions[parent];
+  const modelDef = schema.definitions[model];
+  const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
   const canDelete = generateConfig?.delete !== false;
-  const parentRelationships = getParentRelationships(parentDef).map((rel) => ({
+  const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps }).map((rel) => ({
     ...rel,
-    relationName: getDetailRelationName(parent, rel.target, schema),
+    relationName: getDetailRelationName(parent, rel.target, schema, defKey),
   }));
-  const selfParentRel = parentRelationships.find((rel) => rel.target === parent);
+  const selfParentRel = parentRelationships.find((rel) => rel.target === model);
   const selfParentProp = selfParentRel?.propName ?? null;
-  
-  if (!parentDef.properties) {
-    throw new Error(`Parent definition ${parent} has no properties`);
+
+  if (!filteredProps || Object.keys(filteredProps).length === 0) {
+    throw new Error(`Model definition ${model} has no properties`);
   }
-  
+
   // Get parent properties (excluding id and timestamps)
-  const parentProps = Object.keys(parentDef.properties).filter(k => 
+  const parentProps = Object.keys(filteredProps).filter(k =>
     k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
   );
   const relationshipProps = parentRelationships.map(r => r.propName);
   const nonRelationshipProps = parentProps.filter(p => !relationshipProps.includes(p));
-  
+
   // Categorize parent properties by type
   const dateTimeProps: string[] = [];
   const numberProps: string[] = [];
   const imageProps: string[] = [];
   const booleanProps: string[] = [];
   const textProps: string[] = [];
-  
+
   nonRelationshipProps.forEach(p => {
-    const prop = parentDef.properties![p];
+    const prop = filteredProps[p];
     const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
     const format = (prop as any).format;
     
@@ -790,8 +803,8 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   
   // Generate form fields
   const textFields = textProps.map(p => {
-    const prop = parentDef.properties![p];
-    const isRequired = parentDef.required?.includes(p);
+    const prop = filteredProps[p];
+    const isRequired = modelDef.required?.includes(p);
     const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     const minLength = (prop as any).minLength;
     const maxLength = (prop as any).maxLength;
@@ -841,7 +854,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   }).join('\n');
   
   const numberFields = numberProps.map(p => {
-    const prop = parentDef.properties![p];
+    const prop = filteredProps[p];
     const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     const min = (prop as any).minimum ?? 0;
     const max = (prop as any).maximum ?? 1000000;
@@ -1001,11 +1014,11 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       }
       
       const childProps = Object.keys(childDef.properties).filter(k => 
-        k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
+        k !== 'id' && k !== `${model}_id` && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
       );
       
       const useConnectSelection = childInfo.relationship?.type === 'many-to-many'
-        || (childInfo.outputType === 'list' && childInfo.name === parent);
+        || (childInfo.outputType === 'list' && childInfo.name === model);
 
       // For connect/select relationships (many-to-many or self list)
       if (useConnectSelection) {
@@ -1062,7 +1075,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const createNew${childPascal} = () => ({
     id: \`temp-\${Date.now()}-\${Math.random()}\`,
 ${createNewChildProps}
-    ${parent}_id: src.id,
+    ${model}_id: src.id,
   });`;
     }).join('\n');
     
@@ -1098,7 +1111,7 @@ ${createNewChildProps}
       
       // For list output type
       if (childInfo.outputType === 'list') {
-        if (childInfo.name === parent) {
+        if (childInfo.name === model) {
           return `    const ${childVar} = ${childVar}Ref.current?.getItems?.() || [];
 
     ${childVar}.forEach((item) => {
@@ -1129,7 +1142,7 @@ ${createNewChildProps}
       }
       
       const childProps = Object.keys(childDef.properties).filter(k => 
-        k !== 'id' && k !== `${parent}_id` && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
+        k !== 'id' && k !== `${model}_id` && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
       );
       
       const childSerialize = childProps.map(p => `          ${p}: field.${p},`).join('\n');
@@ -1179,10 +1192,10 @@ ${childSerialize}
       
       // For list output type, use EditableListWrapper
       if (childInfo.outputType === 'list') {
-        if (childInfo.name === parent) {
+        if (childInfo.name === model) {
           const targetPascal = toPascalCase(parent);
           // Check if this is a self-referential parent-child relationship
-          const selfParentRel = parentRelationships.find((rel) => rel.target === parent);
+          const selfParentRel = parentRelationships.find((rel) => rel.target === model);
           const hasSelfParentRel = selfParentRel !== undefined;
 
           // For self-referential relationships with parent_id, filter out items that already have a different parent
@@ -1337,22 +1350,25 @@ ${parentTextFields}${childGridComponents.length > 0 ? '\n' + childGridComponents
 `;
 }
 
-export function generateFormView(parent: string, children: ChildInfo[], schema: Schema): string {
+export function generateFormView(parent: string, children: ChildInfo[], schema: Schema, modelName?: string, definitionKey?: string): string {
+  const model = modelName ?? parent;
+  const defKey = definitionKey ?? `${parent}_detail`;
   const parentPascal = toPascalCase(parent);
   const parentTitle = toTitleCase(parent);
-  const parentDef = schema.definitions[parent];
-  const parentRelationships = getParentRelationships(parentDef).map((rel) => ({
+  const modelDef = schema.definitions[model];
+  const filteredProps = filterFields(modelDef.properties ?? {}, undefined);
+  const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps }).map((rel) => ({
     ...rel,
-    relationName: getDetailRelationName(parent, rel.target, schema),
+    relationName: getDetailRelationName(parent, rel.target, schema, defKey),
   }));
   const relationshipByProp = new Map(parentRelationships.map(r => [r.propName, r] as const));
-  
-  if (!parentDef.properties) {
-    throw new Error(`Parent definition ${parent} has no properties`);
+
+  if (!filteredProps || Object.keys(filteredProps).length === 0) {
+    throw new Error(`Parent definition ${model} has no properties`);
   }
-  
+
   // Get parent properties (excluding id and timestamps)
-  const parentProps = Object.keys(parentDef.properties).filter(k => 
+  const parentProps = Object.keys(filteredProps).filter(k =>
     k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
   );
   
@@ -1363,8 +1379,8 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   const otherFields: string[] = [];
   
   parentProps.forEach(p => {
-    const prop = parentDef.properties![p];
-    const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
+    const prop = filteredProps[p];
+    const propType = Array.isArray(prop.type) ? prop.type.find((t: string) => t !== 'null') : prop.type;
     const format = (prop as any).format;
     
     if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
@@ -1406,10 +1422,10 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   
   const dateTimeFieldsJsx = dateTimeFields.map(p => {
     const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-    const prop = parentDef.properties![p];
+    const prop = filteredProps[p];
     const format = (prop as any).format;
     const showTime = format === 'date-time' || format === 'time';
-    
+
     return `      <DateTimeWrapper label="${label}" date_time={src.${p}}${showTime ? '' : ' show_time={false}'} readOnly />`;
   }).join('\n');
   
@@ -1540,14 +1556,15 @@ ${childViewGrids}
 `;
 }
 
-export function generatePageList(parent: string, schema: Schema): string {
+export function generatePageList(parent: string, schema: Schema, modelName?: string): string {
+  const model = modelName ?? parent;
   const parentPascal = toPascalCase(parent);
   const parentTitle = toTitleCase(parent);
   const parentCamel = toCamelCase(parent);
-  
-  // Check for x-display configuration in the parent definition
-  const parentDef = schema.definitions[parent];
-  const xDisplay = (parentDef as any)?.['x-display'];
+
+  // Check for x-display configuration in the model definition
+  const modelDef = schema.definitions[model];
+  const xDisplay = (modelDef as any)?.['x-display'];
   
   let displayFieldsCode = '';
   if (xDisplay && Array.isArray(xDisplay)) {
@@ -1577,22 +1594,25 @@ export default async function ${parentPascal}sPage() {
 `;
 }
 
-export function generatePageNew(parent: string, children: ChildInfo[], schema: Schema): string {
+export function generatePageNew(parent: string, children: ChildInfo[], schema: Schema, modelName?: string, definitionKey?: string): string {
+  const model = modelName ?? parent;
+  const defKey = definitionKey ?? `${parent}_detail`;
   const parentPascal = toPascalCase(parent);
-  const parentDef = schema.definitions[parent];
-  const parentRelationships = getParentRelationships(parentDef);
-  
-  if (!parentDef.properties) {
-    throw new Error(`Parent definition ${parent} has no properties`);
+  const modelDef = schema.definitions[model];
+  const filteredProps = filterFields(modelDef.properties ?? {}, undefined);
+  const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps });
+
+  if (!filteredProps || Object.keys(filteredProps).length === 0) {
+    throw new Error(`Parent definition ${model} has no properties`);
   }
-  
+
   // Get parent properties (excluding id and timestamps) and set default values
-  const parentDefaultProps = Object.entries(parentDef.properties)
+  const parentDefaultProps = Object.entries(filteredProps)
     .filter(([key]) => key !== 'id' && key !== 'created_at' && key !== 'updated_at' && key !== 'creator_id')
     .map(([key, prop]) => {
-      const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
+      const propType = Array.isArray(prop.type) ? prop.type.find((t: string) => t !== 'null') : prop.type;
       const format = (prop as any).format;
-      const isRequired = parentDef.required?.includes(key);
+      const isRequired = modelDef.required?.includes(key);
       const isNullable = Array.isArray(prop.type) && prop.type.includes('null');
       
       // Date/DateTime/Time fields
@@ -1671,11 +1691,13 @@ ${parentDefaultProps}${childrenProps ? `\n${childrenProps}` : ''}
 `;
 }
 
-export function generatePageEdit(parent: string, children: ChildInfo[], schema: Schema): string {
+export function generatePageEdit(parent: string, children: ChildInfo[], schema: Schema, modelName?: string, definitionKey?: string): string {
+  const model = modelName ?? parent;
   const parentPascal = toPascalCase(parent);
   const parentCamel = toCamelCase(parent);
-  const parentDef = schema.definitions[parent];
-  const parentRelationships = getParentRelationships(parentDef);
+  const modelDef = schema.definitions[model];
+  const filteredProps = filterFields(modelDef.properties ?? {}, undefined);
+  const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps });
   
   // Generate imports and fetching for many-to-many relationships
   const manyToManyChildren = children.filter(c => c.relationship?.type === 'many-to-many');
@@ -1734,7 +1756,8 @@ ${promiseAllFetches}
 `;
 }
 
-export function generatePageView(parent: string): string {
+export function generatePageView(parent: string, modelName?: string): string {
+  const model = modelName ?? parent;
   const parentPascal = toPascalCase(parent);
   const parentCamel = toCamelCase(parent);
   
@@ -1754,30 +1777,28 @@ export default async function View${parentPascal}Page({ params }: ${parentPascal
 `;
 }
 
-export function generateService(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any): string {
+export function generateService(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any, modelName?: string): string {
+  const model = modelName ?? parent;
   const parentPascal = toPascalCase(parent);
-  const parentDef = schema.definitions[parent];
+  const modelDef = schema.definitions[model];
+  const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
   const canDelete = generateConfig?.delete !== false;
-  const parentRelationships = getParentRelationships(parentDef);
-  const selfParentRel = parentRelationships.find((rel) => rel.target === parent);
+  const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps });
+  const selfParentRel = parentRelationships.find((rel) => rel.target === model);
   const selfParentProp = selfParentRel?.propName ?? null;
 
   // Get parent properties (excluding id and timestamps)
-  const parentProps = parentDef.properties
-    ? Object.keys(parentDef.properties).filter(k =>
-        k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
-      )
-    : [];
+  const parentProps = Object.keys(filteredProps).filter(k =>
+    k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
+  );
 
-  const parentPropInfos = parentDef.properties
-    ? parentProps.map(p => ({
-        prop: p,
-        varName: safeVarName(p),
-        def: parentDef.properties![p]
-      }))
-    : [];
+  const parentPropInfos = parentProps.map(p => ({
+    prop: p,
+    varName: safeVarName(p),
+    def: filteredProps[p]
+  }));
 
-  const parentParamsWithTypes = parentDef.properties
+  const parentParamsWithTypes = parentPropInfos.length > 0
     ? parentPropInfos.map(p => {
         const tsType = getTsType(p.def);
         return `${p.varName}: ${tsType}`;
@@ -1810,7 +1831,7 @@ export function generateService(parent: string, children: ChildInfo[], schema: S
   const utilityCode = `import prisma from '@/lib/prisma';
 
 type NormalizedSnapshot = Record<string, unknown>;
-type TransactionClient = Pick<typeof prisma, '${parent}'>;
+type TransactionClient = Pick<typeof prisma, '${model}'>;
 
 function normalizeValue(value: unknown, kind: 'date' | 'number' | 'boolean' | 'string' | 'other') {
   if (value === null || value === undefined || value === '') {
@@ -1859,7 +1880,7 @@ ${snapshotFieldMappings}${snapshotChildMappings ? `\n${snapshotChildMappings}` :
 }
 
 async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
-  const current = await tx.${parent}.findUnique({
+  const current = await tx.${model}.findUnique({
     where: { id }${snapshotIncludeProps}
   });
 
@@ -1893,7 +1914,7 @@ async function assertNotStale(tx: TransactionClient, id: string, srcSnapshotRaw:
     return `${utilityCode}
 
 export async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}) {
-  return await prisma.${parent}.create({
+  return await prisma.${model}.create({
     data: {
 ${parentDataObj}
       creator_id: creatorId,
@@ -1906,7 +1927,7 @@ export async function update${parentPascal}(id: string, ${parentParamsWithTypes}
     if (srcSnapshotRaw) {
       await assertNotStale(tx, id, srcSnapshotRaw);
     }
-    return await tx.${parent}.update({
+    return await tx.${model}.update({
       where: { id },
       data: {
 ${parentDataObj}
@@ -1917,9 +1938,9 @@ ${parentDataObj}
 ${canDelete ? `
 export async function delete${parentPascal}(ids: string[]) {
   if (ids.length === 1) {
-    await prisma.${parent}.delete({ where: { id: ids[0] } });
+    await prisma.${model}.delete({ where: { id: ids[0] } });
   } else {
-    await prisma.${parent}.deleteMany({ where: { id: { in: ids } } });
+    await prisma.${model}.deleteMany({ where: { id: { in: ids } } });
   }
 }
 ` : ''}`;
@@ -1932,19 +1953,19 @@ export async function delete${parentPascal}(ids: string[]) {
     const childPascal = childPascalName(childInfo);
     const childDef = schema.definitions[child];
     const isManyToMany = childInfo.relationship?.type === 'many-to-many';
-    const useConnect = isManyToMany || child === parent;
+    const useConnect = isManyToMany || child === model;
 
     if (!childDef?.properties) {
       throw new Error(`Child definition ${child} has no properties`);
     }
 
     const parentIdPropNames = new Set<string>();
-    if (child === parent) {
+    if (child === model) {
       parentRelationships
-        .filter(rel => rel.target === parent)
+        .filter(rel => rel.target === model)
         .forEach(rel => parentIdPropNames.add(rel.propName));
     } else {
-      parentIdPropNames.add(`${parent}_id`);
+      parentIdPropNames.add(`${model}_id`);
     }
 
     const childProps = Object.keys(childDef.properties).filter(k =>
@@ -2001,13 +2022,13 @@ export async function delete${parentPascal}(ids: string[]) {
   // Self-child validation for service
   const selfChildValidation = selfParentProp
     ? allChildrenData
-        .filter((childInfo) => childInfo.child === parent && childInfo.outputType === 'list' && !childInfo.isManyToMany)
+        .filter((childInfo) => childInfo.child === model && childInfo.outputType === 'list' && !childInfo.isManyToMany)
         .map((childInfo) => `
   if (${childInfo.childVar}Ids.length > 0) {
     if (id && ${childInfo.childVar}Ids.includes(id)) {
       throw new Error('Cannot set an item as its own child.');
     }
-    const invalid${childInfo.childPascal} = await prisma.${parent}.findMany({
+    const invalid${childInfo.childPascal} = await prisma.${model}.findMany({
       where: id
         ? {
             id: { in: ${childInfo.childVar}Ids },
@@ -2038,7 +2059,7 @@ export async function delete${parentPascal}(ids: string[]) {
   return `${utilityCode}
 
 export async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}${parentParamsWithTypes && childParamsForAdd ? ', ' : ''}${childParamsForAdd}) {${selfChildValidation ? `\n  const id = null;${selfChildValidation}` : ''}
-  return await prisma.${parent}.create({
+  return await prisma.${model}.create({
     data: {
 ${parentDataObj}
       creator_id: creatorId,
@@ -2052,7 +2073,7 @@ export async function update${parentPascal}(id: string${parentParamsWithTypes ? 
     if (srcSnapshotRaw) {
       await assertNotStale(tx, id, srcSnapshotRaw);
     }
-    return await tx.${parent}.update({
+    return await tx.${model}.update({
       where: { id },
       data: {
 ${parentDataObj}
@@ -2064,39 +2085,37 @@ ${childNestedUpdate}
 ${canDelete ? `
 export async function delete${parentPascal}(ids: string[]) {
   if (ids.length === 1) {
-    await prisma.${parent}.delete({ where: { id: ids[0] } });
+    await prisma.${model}.delete({ where: { id: ids[0] } });
   } else {
-    await prisma.${parent}.deleteMany({ where: { id: { in: ids } } });
+    await prisma.${model}.deleteMany({ where: { id: { in: ids } } });
   }
 }
 ` : ''}`;
 }
 
-export function generateApiRoute(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any): string {
+export function generateApiRoute(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any, modelName?: string): string {
+  const model = modelName ?? parent;
   const parentPascal = toPascalCase(parent);
-  const parentDef = schema.definitions[parent];
+  const modelDef = schema.definitions[model];
+  const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
   const canCreate = generateConfig?.new !== false;
 
   // Compute body destructuring for POST
-  const parentProps = parentDef.properties
-    ? Object.keys(parentDef.properties).filter(k =>
-        k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
-      )
-    : [];
+  const parentProps = Object.keys(filteredProps).filter(k =>
+    k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
+  );
 
-  const parentPropInfos = parentDef.properties
-    ? parentProps.map(p => ({
-        prop: p,
-        varName: safeVarName(p),
-        def: parentDef.properties![p]
-      }))
-    : [];
+  const parentPropInfos = parentProps.map(p => ({
+    prop: p,
+    varName: safeVarName(p),
+    def: filteredProps[p]
+  }));
 
   const bodyDestructure = parentPropInfos.map(p => p.prop).join(', ');
 
   const allChildrenData = children.map(childInfo => {
     const isManyToMany = childInfo.relationship?.type === 'many-to-many';
-    const useConnect = isManyToMany || childInfo.name === parent;
+    const useConnect = isManyToMany || childInfo.name === model;
     return {
       childVar: childVarName(childInfo),
       propertyName: childInfo.propertyName,
@@ -2128,7 +2147,7 @@ import { getAll${parentPascal}s } from '@/lib/${parent}/getters';${canCreate ? `
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '${parent}', 'read');
+    await requireApiPermission(userId, '${model}', 'read');
     const items = await getAll${parentPascal}s();
     return NextResponse.json(items);
   } catch (error) {
@@ -2139,7 +2158,7 @@ ${canCreate ? `
 export async function POST(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '${parent}', 'create');
+    await requireApiPermission(userId, '${model}', 'create');
     const body = await request.json();
     const { ${allBodyFields} } = body;
     const result = await add${parentPascal}(${serviceArgsForCreate});
@@ -2151,30 +2170,28 @@ export async function POST(request: NextRequest) {
 ` : ''}`;
 }
 
-export function generateApiDetailRoute(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any): string {
+export function generateApiDetailRoute(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any, modelName?: string): string {
+  const model = modelName ?? parent;
   const parentPascal = toPascalCase(parent);
-  const parentDef = schema.definitions[parent];
+  const modelDef = schema.definitions[model];
+  const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
   const canUpdate = generateConfig?.edit !== false;
   const canDelete = generateConfig?.delete !== false;
 
   // Compute body destructuring for PUT
-  const parentProps = parentDef.properties
-    ? Object.keys(parentDef.properties).filter(k =>
-        k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
-      )
-    : [];
+  const parentProps = Object.keys(filteredProps).filter(k =>
+    k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
+  );
 
-  const parentPropInfos = parentDef.properties
-    ? parentProps.map(p => ({
-        prop: p,
-        varName: safeVarName(p),
-        def: parentDef.properties![p]
-      }))
-    : [];
+  const parentPropInfos = parentProps.map(p => ({
+    prop: p,
+    varName: safeVarName(p),
+    def: filteredProps[p]
+  }));
 
   const allChildrenData = children.map(childInfo => {
     const isManyToMany = childInfo.relationship?.type === 'many-to-many';
-    const useConnect = isManyToMany || childInfo.name === parent;
+    const useConnect = isManyToMany || childInfo.name === model;
     return {
       childVar: childVarName(childInfo),
       propertyName: childInfo.propertyName,
@@ -2214,7 +2231,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '${parent}', 'read');
+    await requireApiPermission(userId, '${model}', 'read');
     const item = await get${parentPascal}Detail(id);
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -2229,7 +2246,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '${parent}', 'update');
+    await requireApiPermission(userId, '${model}', 'update');
     const body = await request.json();
     const { ${allBodyFields} } = body;
     const result = await update${parentPascal}(${serviceArgsForUpdate});
@@ -2243,7 +2260,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '${parent}', 'delete');
+    await requireApiPermission(userId, '${model}', 'delete');
     await delete${parentPascal}([id]);
     return new NextResponse(null, { status: 204 });
   } catch (error) {

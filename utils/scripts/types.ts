@@ -25,6 +25,7 @@ export interface GenerateConfig {
   invalidate?: boolean;
   test?: boolean;      // E2E test generation
   api?: boolean;       // API route generation
+  fields?: string[];   // Optional whitelist of base entity fields
 }
 
 export interface SchemaDefinition {

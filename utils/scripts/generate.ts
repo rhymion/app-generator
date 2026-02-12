@@ -24,7 +24,9 @@ function parseSchema(filePath: string): Schema {
 }
 
 interface EntityRelation {
-  parent: string;
+  parent: string;           // entityName — for file paths, routes, function names
+  modelName: string;        // DB model — for Prisma queries, permissions, schema lookup
+  definitionKey: string;    // original schema key — for looking up children/relationships
   children: Array<{
     name: string;
     propertyName: string;
@@ -41,86 +43,116 @@ interface EntityRelation {
     edit: boolean;
     delete: boolean;
     api: boolean;
+    fields?: string[];
   };
+}
+
+function extractChildren(def: any, schema: Schema, defKey: string) {
+  const children: Array<{ name: string; propertyName: string; outputType?: string;
+    relationship?: { type: 'many-to-many' | 'one-to-many'; target: string } }> = [];
+
+  // Get properties - support both allOf style and explicit properties
+  let properties = def.properties;
+  if (!properties && def.allOf) {
+    const propsObj = def.allOf.find((item: any) => item.properties);
+    if (propsObj) {
+      properties = propsObj.properties;
+    }
+  }
+
+  // Get x-relationships if defined
+  const xRelationships = (def as any)?.['x-relationships'] || {};
+
+  if (properties) {
+    for (const [propName, prop] of Object.entries(properties)) {
+      const propAny = prop as any;
+      if (propAny.type === 'array' && propAny.items?.$ref) {
+        const ref = propAny.items.$ref as string;
+        const childName = ref.split('/').pop();
+        if (childName) {
+          const outputType = propAny['x-outputType'] || propAny.outputType;
+          let relationship = undefined;
+          if (xRelationships[propName]) {
+            const relInfo = xRelationships[propName];
+            relationship = {
+              type: relInfo.type as 'many-to-many' | 'one-to-many',
+              target: relInfo.target || childName,
+            };
+          }
+          children.push({ name: childName, propertyName: propName, outputType, relationship });
+        }
+      }
+    }
+  }
+  return children;
 }
 
 function extractEntities(schema: Schema): EntityRelation[] {
   const defs = Object.keys(schema.definitions);
   const results: EntityRelation[] = [];
-  
-  // Find all parent entities (should have basic properties)
-  const parents = defs.filter(def => 
-    !def.endsWith('_detail') && 
+
+  // Step 1: Identify base models (definitions with id + name, not suffixed)
+  const baseModels = new Set(defs.filter(def =>
+    !def.endsWith('_detail') &&
     !def.endsWith('_input') &&
     schema.definitions[def].properties?.id &&
     schema.definitions[def].properties?.name
-  );
-  
-  // Collect all child entity names and track relationships
+  ));
+
+  // Step 2: Find all code-generation targets (definitions with x-generate)
   const allChildren = new Set<string>();
   const childToParents = new Map<string, string[]>();
-  
-  for (const parent of parents) {
-    const children: Array<{ name: string; propertyName: string; outputType?: string; 
-      relationship?: { type: 'many-to-many' | 'one-to-many'; target: string } }> = [];
-    
-    // Find detail entity for this parent
-    const detailKey = `${parent}_detail`;
-    const detailDef = schema.definitions[detailKey];
-    
-    if (detailDef) {
-      // Get properties - support both allOf style and explicit properties
-      let properties = detailDef.properties;
-      
-      if (!properties && detailDef.allOf) {
-        // New style using allOf - find the object with properties
-        const propsObj = detailDef.allOf.find((item: any) => item.properties);
-        if (propsObj) {
-          properties = propsObj.properties;
-        }
-      }
-      
-      // Get x-relationships if defined
-      const xRelationships = (detailDef as any)?.['x-relationships'] || {};
-      
-      if (properties) {
-        // Find all child entities from array properties with $ref
-        for (const [propName, prop] of Object.entries(properties)) {
-          const propAny = prop as any;
-          if (propAny.type === 'array' && propAny.items?.$ref) {
-            // Extract child entity name from the $ref (e.g., "#/definitions/yyyyy_yyyyy")
-            const ref = propAny.items.$ref as string;
-            const childName = ref.split('/').pop();
-            if (childName) {
-              // Check for x-outputType custom property
-              const outputType = propAny['x-outputType'] || propAny.outputType;
-              
-              // Check for x-relationships to determine relationship type
-              let relationship = undefined;
-              if (xRelationships[propName]) {
-                const relInfo = xRelationships[propName];
-                relationship = {
-                  type: relInfo.type as 'many-to-many' | 'one-to-many',
-                  target: relInfo.target || childName,
-                };
-              }
-              
-              children.push({ name: childName, propertyName: propName, outputType, relationship });
-              allChildren.add(childName);
-              
-              // Track parent-child relationships
-              if (!childToParents.has(childName)) {
-                childToParents.set(childName, []);
-              }
-              childToParents.get(childName)!.push(parent);
-            }
-          }
+
+  for (const defKey of defs) {
+    const def = schema.definitions[defKey];
+
+    // Resolve modelName from allOf $ref to a base model
+    let modelName: string | null = null;
+    if (def.allOf) {
+      const refItem = def.allOf.find((item: any) => item.$ref);
+      if (refItem?.$ref) {
+        const refTarget = refItem.$ref.split('/').pop()!;
+        if (baseModels.has(refTarget)) {
+          modelName = refTarget;
         }
       }
     }
-    
-    // Extract x-generate configuration from detail definition (or parent definition for parent-only entities)
-    const xGenerate = (detailDef as any)?.['x-generate'] || (schema.definitions[parent] as any)?.['x-generate'] || {};
+
+    // Get x-generate config: from this definition, or from the base model for _detail
+    const xGenerate = (def as any)?.['x-generate']
+      || (defKey.endsWith('_detail') && modelName ? (schema.definitions[modelName] as any)?.['x-generate'] : null)
+      || (baseModels.has(defKey) ? (schema.definitions[defKey] as any)?.['x-generate'] : null);
+
+    if (!xGenerate) continue;
+
+    // Must have allOf $ref to a base model, OR be a base model itself
+    if (!modelName && !baseModels.has(defKey)) continue;
+
+    // Derive entityName
+    let entityName: string;
+    if (defKey.endsWith('_detail')) {
+      entityName = defKey.replace(/_detail$/, ''); // backward compat
+    } else {
+      entityName = defKey;
+    }
+
+    // If no modelName resolved (base model with x-generate directly), model = entity
+    if (!modelName) {
+      modelName = entityName;
+    }
+
+    // Extract children from allOf properties
+    const children = extractChildren(def, schema, defKey);
+
+    // Track children for many-to-many detection (use modelName as the "parent identity")
+    for (const child of children) {
+      allChildren.add(child.name);
+      if (!childToParents.has(child.name)) {
+        childToParents.set(child.name, []);
+      }
+      childToParents.get(child.name)!.push(modelName);
+    }
+
     const generateConfig = {
       list: xGenerate.list !== false,
       view: xGenerate.view !== false,
@@ -128,41 +160,37 @@ function extractEntities(schema: Schema): EntityRelation[] {
       edit: xGenerate.edit !== false,
       delete: xGenerate.delete !== false,
       api: xGenerate.api === true,
+      fields: xGenerate.fields as string[] | undefined,
     };
-    
-    results.push({ parent, children, generateConfig });
+
+    results.push({ parent: entityName, modelName, definitionKey: defKey, children, generateConfig });
   }
-  
-  // Detect many-to-many relationships: A references B AND B references A
+
+  // Step 3: Detect many-to-many relationships
   const manyToManyPairs = new Set<string>();
   for (const [child, parentsList] of childToParents) {
-    for (const parent of parentsList) {
-      // Check if parent also appears as a child of this child
-      const childParents = childToParents.get(parent) || [];
+    for (const parentModel of parentsList) {
+      const childParents = childToParents.get(parentModel) || [];
       if (childParents.includes(child)) {
-        // Many-to-many relationship detected
-        const pair = [parent, child].sort().join('<->');
+        const pair = [parentModel, child].sort().join('<->');
         manyToManyPairs.add(pair);
       }
     }
   }
-  
-  // Filter out entities that are ONLY children (not in many-to-many)
+
+  // Step 4: Filter out entities that are ONLY children (not in many-to-many)
   return results.filter(r => {
-    if (!allChildren.has(r.parent)) {
-      // Not a child of anyone, include it
+    if (!allChildren.has(r.modelName)) {
       return true;
     }
-    
-    // Check if this parent is part of a many-to-many relationship
+
     for (const pair of manyToManyPairs) {
-      if (pair.includes(r.parent)) {
+      if (pair.includes(r.modelName)) {
         console.log(`  Many-to-many detected: ${pair}`);
-        return true; // Include entities in many-to-many relationships
+        return true;
       }
     }
-    
-    // This is a pure child entity, exclude it
+
     return false;
   });
 }
@@ -178,91 +206,91 @@ function generate(inputPath: string, outputDir: string) {
   
   console.log(`Found ${entityRelations.length} parent entity(ies)`);
   
-  for (const { parent, children, generateConfig } of entityRelations) {
-    console.log(`\nGenerating code for parent: ${parent}`);
-    console.log(`  Generate config: list=${generateConfig.list}, view=${generateConfig.view}, new=${generateConfig.new}, edit=${generateConfig.edit}, delete=${generateConfig.delete}, api=${generateConfig.api}`);
-    
+  for (const { parent, modelName, definitionKey, children, generateConfig } of entityRelations) {
+    console.log(`\nGenerating code for parent: ${parent}${modelName !== parent ? ` (model: ${modelName})` : ''}`);
+    console.log(`  Generate config: list=${generateConfig.list}, view=${generateConfig.view}, new=${generateConfig.new}, edit=${generateConfig.edit}, delete=${generateConfig.delete}, api=${generateConfig.api}${generateConfig.fields ? `, fields=[${generateConfig.fields.join(',')}]` : ''}`);
+
     if (children.length === 0) {
       console.log(`  No children (parent-only case)`);
     } else {
       console.log(`  Children: ${children.map(c => `${c.name} (${c.propertyName})`).join(', ')}`);
     }
-    
+
     // For backward compatibility, use first child if exists
     const primaryChild = children.length > 0 ? children[0].name : '';
     const hasChildren = children.length > 0;
-    
+
     // Create directories
     const libDir = path.join(outputDir, 'lib', parent);
     const componentsDir = path.join(outputDir, 'components', parent);
     const appDir = path.join(outputDir, 'app', parent);
-    
+
     fs.mkdirSync(libDir, { recursive: true });
     fs.mkdirSync(componentsDir, { recursive: true });
-    
-    // Generate files - pass full children array to support multiple children
-    fs.writeFileSync(path.join(libDir, 'types.ts'), generateTypes(parent, children, schema));
-    
+
+    // Generate files - pass modelName and definitionKey for multi-interface support
+    fs.writeFileSync(path.join(libDir, 'types.ts'), generateTypes(parent, children, schema, modelName, definitionKey, generateConfig));
+
     // Generate getters only if list or view is enabled
     if (generateConfig.list || generateConfig.view) {
-      fs.writeFileSync(path.join(libDir, 'getters.ts'), generateGetters(parent, children, schema, generateConfig));
+      fs.writeFileSync(path.join(libDir, 'getters.ts'), generateGetters(parent, children, schema, generateConfig, modelName, definitionKey));
     }
-    
+
     // Generate service layer (shared DB operations for actions and API routes)
     if (generateConfig.new || generateConfig.edit || generateConfig.delete) {
-      fs.writeFileSync(path.join(libDir, 'service.ts'), generateService(parent, children, schema, generateConfig));
+      fs.writeFileSync(path.join(libDir, 'service.ts'), generateService(parent, children, schema, generateConfig, modelName));
     }
 
     // Generate actions only if new, edit, or delete is enabled
     if (generateConfig.new || generateConfig.edit || generateConfig.delete) {
-      fs.writeFileSync(path.join(libDir, 'actions.ts'), generateActions(parent, children, schema, generateConfig));
+      fs.writeFileSync(path.join(libDir, 'actions.ts'), generateActions(parent, children, schema, generateConfig, modelName));
     }
 
     // Generate API routes if api is enabled
     if (generateConfig.api) {
       const apiDir = path.join(outputDir, 'app', 'api', parent);
       fs.mkdirSync(apiDir, { recursive: true });
-      fs.writeFileSync(path.join(apiDir, 'route.ts'), generateApiRoute(parent, children, schema, generateConfig));
+      fs.writeFileSync(path.join(apiDir, 'route.ts'), generateApiRoute(parent, children, schema, generateConfig, modelName));
 
       fs.mkdirSync(path.join(apiDir, '[id]'), { recursive: true });
-      fs.writeFileSync(path.join(apiDir, '[id]', 'route.ts'), generateApiDetailRoute(parent, children, schema, generateConfig));
+      fs.writeFileSync(path.join(apiDir, '[id]', 'route.ts'), generateApiDetailRoute(parent, children, schema, generateConfig, modelName));
       console.log(`  API routes generated at app/api/${parent}/`);
     }
-    
+
     // Generate column_def only if there are children and list is enabled
     if (hasChildren && generateConfig.list) {
-      fs.writeFileSync(path.join(componentsDir, 'column_def.tsx'), generateColumnDef(parent, children, schema));
+      fs.writeFileSync(path.join(componentsDir, 'column_def.tsx'), generateColumnDef(parent, children, schema, modelName, definitionKey));
     }
-    
+
     // Generate FormUpsert only if new or edit is enabled
     if (generateConfig.new || generateConfig.edit) {
-      fs.writeFileSync(path.join(componentsDir, 'FormUpsert.tsx'), generateFormUpsert(parent, children, schema, generateConfig));
+      fs.writeFileSync(path.join(componentsDir, 'FormUpsert.tsx'), generateFormUpsert(parent, children, schema, generateConfig, modelName, definitionKey));
     }
-    
+
     // Generate FormView only if view is enabled
     if (generateConfig.view) {
-      fs.writeFileSync(path.join(componentsDir, 'FormView.tsx'), generateFormView(parent, children, schema));
+      fs.writeFileSync(path.join(componentsDir, 'FormView.tsx'), generateFormView(parent, children, schema, modelName, definitionKey));
     }
-    
+
     // Conditionally generate pages based on config
     if (generateConfig.list) {
       fs.mkdirSync(appDir, { recursive: true });
-      fs.writeFileSync(path.join(appDir, 'page.tsx'), generatePageList(parent, schema));
+      fs.writeFileSync(path.join(appDir, 'page.tsx'), generatePageList(parent, schema, modelName));
     }
-    
+
     if (generateConfig.new) {
       fs.mkdirSync(path.join(appDir, 'new'), { recursive: true });
-      fs.writeFileSync(path.join(appDir, 'new', 'page.tsx'), generatePageNew(parent, children, schema));
+      fs.writeFileSync(path.join(appDir, 'new', 'page.tsx'), generatePageNew(parent, children, schema, modelName, definitionKey));
     }
-    
+
     if (generateConfig.edit) {
       fs.mkdirSync(path.join(appDir, 'edit', '[id]'), { recursive: true });
-      fs.writeFileSync(path.join(appDir, 'edit', '[id]', 'page.tsx'), generatePageEdit(parent, children, schema));
+      fs.writeFileSync(path.join(appDir, 'edit', '[id]', 'page.tsx'), generatePageEdit(parent, children, schema, modelName, definitionKey));
     }
-    
+
     if (generateConfig.view) {
       fs.mkdirSync(path.join(appDir, 'view', '[id]'), { recursive: true });
-      fs.writeFileSync(path.join(appDir, 'view', '[id]', 'page.tsx'), generatePageView(parent));
+      fs.writeFileSync(path.join(appDir, 'view', '[id]', 'page.tsx'), generatePageView(parent, modelName));
     }
   }
   
