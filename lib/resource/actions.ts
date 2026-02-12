@@ -17,7 +17,7 @@ export async function upsertResource(data: FormData) {
   const description = data.get('description') as string | null;
   const organizationId = data.get('organization_id') as string;
   const resourceAttachmentsRaw = data.getAll('resource_attachment[]') as string[];
-  const resourceAttachmentsItems = resourceAttachmentsRaw.map(f => JSON.parse(f) as { id?: string; name: string; path: string });
+  const resourceAttachmentsItems = resourceAttachmentsRaw.map(f => JSON.parse(f) as { id?: string; order: number; name: string; path: string });
   const resourceImagesRaw = data.getAll('resource_image[]') as string[];
   const resourceImagesItems = resourceImagesRaw.map(f => JSON.parse(f) as { id?: string; name: string; path: string });
 

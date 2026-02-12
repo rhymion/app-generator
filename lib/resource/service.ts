@@ -31,7 +31,7 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
   return normalizeSnapshot(current as Record<string, unknown>);
 }
 
-export async function addResource(creatorId: string, name: string, description: string | null, organizationId: string, resourceAttachmentsItems: { name: string; path: string }[], resourceImagesItems: { name: string; path: string }[]) {
+export async function addResource(creatorId: string, name: string, description: string | null, organizationId: string, resourceAttachmentsItems: { order: number; name: string; path: string }[], resourceImagesItems: { name: string; path: string }[]) {
   return await prisma.resource.create({
     data: {
       name: name,
@@ -40,6 +40,7 @@ export async function addResource(creatorId: string, name: string, description: 
       creator_id: creatorId,
       resource_attachments: {
         create: resourceAttachmentsItems.map(f => ({
+          order: f.order,
           name: f.name,
           path: f.path,
         })),
@@ -54,7 +55,7 @@ export async function addResource(creatorId: string, name: string, description: 
   });
 }
 
-export async function updateResource(id: string, name: string, description: string | null, organizationId: string, resourceAttachmentsItems: { id?: string; name: string; path: string }[], resourceImagesItems: { id?: string; name: string; path: string }[], srcSnapshotRaw?: string | null) {
+export async function updateResource(id: string, name: string, description: string | null, organizationId: string, resourceAttachmentsItems: { id?: string; order: number; name: string; path: string }[], resourceImagesItems: { id?: string; name: string; path: string }[], srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -68,6 +69,7 @@ export async function updateResource(id: string, name: string, description: stri
       resource_attachments: {
         deleteMany: {},
         create: resourceAttachmentsItems.map(f => ({
+          order: f.order,
           name: f.name,
           path: f.path,
         })),

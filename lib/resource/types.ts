@@ -22,6 +22,7 @@ export type ResourceDetail = Resource & {
 
 export type ResourceAttachment = {
   id: string;
+  order: number;
   name: string;
   path: string;
 };

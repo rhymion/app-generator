@@ -1037,6 +1037,15 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     
     if (hasListChildren) {
       childImports = `import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';\n` + childImports;
+
+      const hasOrderedListChildren = children.some(c => {
+        if (c.outputType !== 'list' || c.relationship?.type === 'many-to-many') return false;
+        const childDef = schema.definitions[c.name];
+        return childDef?.properties && 'order' in childDef.properties;
+      });
+      if (hasOrderedListChildren) {
+        childImports = `import OrderedEditableListWrapper from '../OrderedEditableListWrapper';\n` + childImports;
+      }
     }
     
     // Add imports for many-to-many target types
@@ -1088,13 +1097,15 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       
       // For list output type, generate different initialization
       if (childInfo.outputType === 'list') {
+        const hasOrder = childDef.properties && 'order' in childDef.properties;
+        const orderLine = hasOrder ? `\n    order: f.order,` : '';
         if (childInfo.fileType) {
           // File-type list child: value=path, label=name
           return `  const initial${childPascal}: EditableListWrapperItem[] = src.${childInfo.propertyName}.map(f => ({
     id: f.id || \`temp-\${Date.now()}-\${Math.random()}\`,
     value: f.path,
     label: f.name,
-    originalId: f.id,
+    originalId: f.id,${orderLine}
   }));`;
         }
         // Assuming list items have a 'name' field as the primary value
@@ -1102,7 +1113,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     id: f.id || \`temp-\${Date.now()}-\${Math.random()}\`,
     value: f.name,
     label: f.name,
-    originalId: f.id,
+    originalId: f.id,${orderLine}
   }));`;
       }
       
@@ -1192,6 +1203,8 @@ ${createNewChildProps}
       );
     });`;
         }
+        const hasOrder = childDef.properties && 'order' in childDef.properties;
+        const orderProp = hasOrder ? `\n          order: item.order,` : '';
         if (childInfo.fileType) {
           return `    const ${childVar} = ${childVar}Ref.current?.getItems?.() || [];
 
@@ -1200,7 +1213,7 @@ ${createNewChildProps}
       formData.append(
         '${formKey}[]',
         JSON.stringify({
-          id: itemId,
+          id: itemId,${orderProp}
           name: item.label,
           path: item.value,
         })
@@ -1214,7 +1227,7 @@ ${createNewChildProps}
       formData.append(
         '${formKey}[]',
         JSON.stringify({
-          id: itemId,
+          id: itemId,${orderProp}
           name: item.value,
         })
       );
@@ -1300,11 +1313,13 @@ ${childSerialize}
         excludeOptionIds={[src.id]}
       />`;
         }
+        const hasOrderField = childDef?.properties && 'order' in childDef.properties;
+        const listComponent = hasOrderField ? 'OrderedEditableListWrapper' : 'EditableListWrapper';
         if (childInfo.fileType) {
           const acceptedTypes = childInfo.fileType === 'image'
             ? 'image/jpeg,image/png,image/gif,image/webp'
             : '.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip';
-          return `      <EditableListWrapper
+          return `      <${listComponent}
         ref={${childVar}Ref}
         initialItems={initial${childPascal}}
         itemType="file"
@@ -1315,7 +1330,7 @@ ${childSerialize}
         title="${childTitleLabel}"
       />`;
         }
-        return `      <EditableListWrapper
+        return `      <${listComponent}
         ref={${childVar}Ref}
         initialItems={initial${childPascal}}
         itemType="text"

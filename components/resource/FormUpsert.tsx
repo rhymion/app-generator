@@ -8,9 +8,11 @@ import Autocomplete from '@mui/material/Autocomplete';
 import { upsertResource, removeResource } from '@/lib/resource/actions';
 import type { FormUpsertProps } from '@/lib/resource/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import OrderedEditableListWrapper from '../OrderedEditableListWrapper';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
+import OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';
   
 
 export default function FormUpsert({ src, isEdit, permissions, allOrganizations = [], organizationPermissions }: FormUpsertProps) {
@@ -30,6 +32,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     value: f.path,
     label: f.name,
     originalId: f.id,
+    order: f.order,
   }));
   const initialResourceImages: EditableListWrapperItem[] = src.resource_images.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
@@ -65,6 +68,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         'resource_attachment[]',
         JSON.stringify({
           id: itemId,
+          order: item.order,
           name: item.label,
           path: item.value,
         })
@@ -140,7 +144,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
           />
         )}
       />
-      <EditableListWrapper
+      <OrderedEditableListWrapper
         ref={resourceAttachmentsRef}
         initialItems={initialResourceAttachments}
         itemType="file"
