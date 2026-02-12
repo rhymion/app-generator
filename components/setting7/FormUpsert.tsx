@@ -110,7 +110,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
       isEdit={isEdit}
       formFields={formFields}
       onSubmit={handleSubmit}
-      onDelete={isEdit && canDelete ? handleDelete : undefined}
+      onDelete={undefined}
       onBack={handleBack}
       deleteEntityLabel="Setting7"
       submitButtonLabel="Save"

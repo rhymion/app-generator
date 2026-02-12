@@ -7,6 +7,6 @@ export default async function UserAccountsPage() {
   return <DataGridClient src={userAccounts} basePath="/user_account" removeAction={removeUserAccount} entityLabel="User Account" displayFields={[
     { field: 'name', headerName: 'Name', width: 150 },
     { field: 'email', headerName: 'Email', width: 400 }
-  ]} 
+  ]}
     permissions={userPermissions} />;
 }

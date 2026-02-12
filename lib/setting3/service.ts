@@ -80,16 +80,6 @@ async function assertNotStale(tx: TransactionClient, id: string, srcSnapshotRaw:
   }
 }
 
-export async function addSetting3(creatorId: string, name: string, email: string) {
-  return await prisma.user_account.create({
-    data: {
-      name: name,
-      email: email,
-      creator_id: creatorId,
-    },
-  });
-}
-
 export async function updateSetting3(id: string, name: string, email: string, srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {

@@ -83,37 +83,6 @@ async function assertNotStale(tx: TransactionClient, id: string, srcSnapshotRaw:
   }
 }
 
-export async function addSetting6(creatorId: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null) {
-  return await prisma.user_account.create({
-    data: {
-      name: name,
-      email: email,
-      password: password,
-      api_key: apiKey,
-      avatar: avatar,
-      creator_id: creatorId,
-    },
-  });
-}
-
-export async function updateSetting6(id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
-    if (srcSnapshotRaw) {
-      await assertNotStale(tx, id, srcSnapshotRaw);
-    }
-    return await tx.user_account.update({
-      where: { id },
-      data: {
-      name: name,
-      email: email,
-      password: password,
-      api_key: apiKey,
-      avatar: avatar,
-      },
-    });
-  });
-}
-
 export async function deleteSetting6(ids: string[]) {
   if (ids.length === 1) {
     await prisma.user_account.delete({ where: { id: ids[0] } });

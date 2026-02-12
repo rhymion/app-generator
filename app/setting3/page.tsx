@@ -7,6 +7,6 @@ export default async function Setting3sPage() {
   return <DataGridClient src={setting3s} basePath="/setting3" removeAction={removeSetting3} entityLabel="Setting3" displayFields={[
     { field: 'name', headerName: 'Name', width: 150 },
     { field: 'email', headerName: 'Email', width: 400 }
-  ]} 
+  ]}
     permissions={userPermissions} />;
 }

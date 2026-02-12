@@ -231,10 +231,8 @@ function generate(inputPath: string, outputDir: string) {
     // Generate files - pass modelName and definitionKey for multi-interface support
     fs.writeFileSync(path.join(libDir, 'types.ts'), generateTypes(parent, children, schema, modelName, definitionKey, generateConfig));
 
-    // Generate getters only if list or view is enabled
-    if (generateConfig.list || generateConfig.view) {
-      fs.writeFileSync(path.join(libDir, 'getters.ts'), generateGetters(parent, children, schema, generateConfig, modelName, definitionKey));
-    }
+    // Always generate getters (needed by pages, API routes, and edit/new access checks)
+    fs.writeFileSync(path.join(libDir, 'getters.ts'), generateGetters(parent, children, schema, generateConfig, modelName, definitionKey));
 
     // Generate service layer (shared DB operations for actions and API routes)
     if (generateConfig.new || generateConfig.edit || generateConfig.delete) {
@@ -246,14 +244,18 @@ function generate(inputPath: string, outputDir: string) {
       fs.writeFileSync(path.join(libDir, 'actions.ts'), generateActions(parent, children, schema, generateConfig, modelName));
     }
 
-    // Generate API routes if api is enabled
+    // Generate API routes if api is enabled (each file only if it has at least one method)
     if (generateConfig.api) {
       const apiDir = path.join(outputDir, 'app', 'api', parent);
-      fs.mkdirSync(apiDir, { recursive: true });
-      fs.writeFileSync(path.join(apiDir, 'route.ts'), generateApiRoute(parent, children, schema, generateConfig, modelName));
-
-      fs.mkdirSync(path.join(apiDir, '[id]'), { recursive: true });
-      fs.writeFileSync(path.join(apiDir, '[id]', 'route.ts'), generateApiDetailRoute(parent, children, schema, generateConfig, modelName));
+      if (generateConfig.list || generateConfig.new) {
+        fs.mkdirSync(apiDir, { recursive: true });
+        fs.writeFileSync(path.join(apiDir, 'route.ts'), generateApiRoute(parent, children, schema, generateConfig, modelName));
+      }
+      if (generateConfig.view || generateConfig.edit || generateConfig.delete) {
+        fs.mkdirSync(apiDir, { recursive: true });
+        fs.mkdirSync(path.join(apiDir, '[id]'), { recursive: true });
+        fs.writeFileSync(path.join(apiDir, '[id]', 'route.ts'), generateApiDetailRoute(parent, children, schema, generateConfig, modelName));
+      }
       console.log(`  API routes generated at app/api/${parent}/`);
     }
 
@@ -269,13 +271,13 @@ function generate(inputPath: string, outputDir: string) {
 
     // Generate FormView only if view is enabled
     if (generateConfig.view) {
-      fs.writeFileSync(path.join(componentsDir, 'FormView.tsx'), generateFormView(parent, children, schema, modelName, definitionKey));
+      fs.writeFileSync(path.join(componentsDir, 'FormView.tsx'), generateFormView(parent, children, schema, generateConfig, modelName, definitionKey));
     }
 
     // Conditionally generate pages based on config
     if (generateConfig.list) {
       fs.mkdirSync(appDir, { recursive: true });
-      fs.writeFileSync(path.join(appDir, 'page.tsx'), generatePageList(parent, schema, modelName));
+      fs.writeFileSync(path.join(appDir, 'page.tsx'), generatePageList(parent, schema, generateConfig, modelName));
     }
 
     if (generateConfig.new) {

@@ -92,22 +92,6 @@ export async function addSetting8(creatorId: string, name: string, email: string
   });
 }
 
-export async function updateSetting8(id: string, name: string, email: string, password: string, srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
-    if (srcSnapshotRaw) {
-      await assertNotStale(tx, id, srcSnapshotRaw);
-    }
-    return await tx.user_account.update({
-      where: { id },
-      data: {
-      name: name,
-      email: email,
-      password: password,
-      },
-    });
-  });
-}
-
 export async function deleteSetting8(ids: string[]) {
   if (ids.length === 1) {
     await prisma.user_account.delete({ where: { id: ids[0] } });

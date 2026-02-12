@@ -4,6 +4,6 @@ import { removeOrganization } from '@/lib/organization/actions';
 
 export default async function OrganizationsPage() {
   const { organizations, userPermissions } = await getOrganizationListPageData();
-  return <DataGridClient src={organizations} basePath="/organization" removeAction={removeOrganization} entityLabel="Organization" 
+  return <DataGridClient src={organizations} basePath="/organization" removeAction={removeOrganization} entityLabel="Organization"
     permissions={userPermissions} />;
 }

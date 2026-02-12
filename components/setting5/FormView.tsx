@@ -2,7 +2,6 @@ import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/setting5/types';
 import Link from '@mui/material/Link';
-import ImageDisplay from '../ImageDisplay';
   import FormControlLabel from '@mui/material/FormControlLabel';
   import Checkbox from '@mui/material/Checkbox';
 
@@ -33,21 +32,6 @@ export default function FormView({ src, permissions }: FormViewProps) {
         margin="normal"
         aria-readonly
       />
-      <TextField
-        label="Password"
-        value={src.password || ''}
-        fullWidth
-        margin="normal"
-        aria-readonly
-      />
-      <TextField
-        label="Api Key"
-        value={src.api_key || ''}
-        fullWidth
-        margin="normal"
-        aria-readonly
-      />
-      <ImageDisplay url={src.avatar} alt="Avatar" />
     </div>
   );
 }

@@ -26,7 +26,7 @@ interface DisplayFieldConfig<T> {
 interface DataGridClientProps<T extends BaseEntity> {
   src: T[];
   basePath: string;
-  removeAction: (formDataOrIds: FormData | string[]) => Promise<void>;
+  removeAction?: (formDataOrIds: FormData | string[]) => Promise<void>;
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];
   permissions?: ModelPermissions;
@@ -73,7 +73,7 @@ export default function DataGridClient<T extends BaseEntity>({
   const deleteConfirmed = () => {
     const selectedRows = apiRef.current?.getSelectedRows() || new Map();
     const selectedIds = Array.from(selectedRows.keys());
-    if (selectedIds.length > 0) {
+    if (selectedIds.length > 0 && removeAction) {
       startTransition(() => removeAction(selectedIds));
     }
     setOpenDeleteDialog(false);

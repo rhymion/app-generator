@@ -91,19 +91,3 @@ export async function addSetting2(creatorId: string, name: string, email: string
     },
   });
 }
-
-export async function updateSetting2(id: string, name: string, email: string, password: string, srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
-    if (srcSnapshotRaw) {
-      await assertNotStale(tx, id, srcSnapshotRaw);
-    }
-    return await tx.user_account.update({
-      where: { id },
-      data: {
-      name: name,
-      email: email,
-      password: password,
-      },
-    });
-  });
-}

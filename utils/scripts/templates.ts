@@ -314,6 +314,8 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
   const parentPascal = toPascalCase(parent);
   const modelDef = schema.definitions[model];
   const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
+  const canCreate = generateConfig?.new !== false;
+  const canUpdate = generateConfig?.edit !== false;
   const canDelete = generateConfig?.delete !== false;
   const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps });
   const selfParentRel = parentRelationships.find((rel) => rel.target === model);
@@ -411,15 +413,16 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
   
   // For parent-only, generate simple CRUD
   if (children.length === 0) {
-    return `'use server';
+    const serviceImports = [
+      canCreate ? `add${parentPascal}` : '',
+      canUpdate ? `update${parentPascal}` : '',
+      canDelete ? `delete${parentPascal}` : '',
+    ].filter(Boolean).join(', ');
 
-import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
-import { add${parentPascal}, update${parentPascal}${canDelete ? `, delete${parentPascal}` : ''} } from './service';
-
-export async function upsert${parentPascal}(data: FormData) {
-  const id = data.get('id') as string | null;
+    // Build upsert body based on which operations are enabled
+    let upsertBody = '';
+    if (canCreate && canUpdate) {
+      upsertBody = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
     await requirePermission('${model}', 'update');
@@ -433,12 +436,36 @@ ${formDataGets}
   } else {
     const creatorId = await getSessionUserIdOrThrow();
     await add${parentPascal}(creatorId, ${parentParams});
-  }
+  }`;
+    } else if (canUpdate) {
+      upsertBody = `  const id = data.get('id') as string | null;
+  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
+  if (!id) throw new Error('Create not supported');
+  await requirePermission('${model}', 'update');
+${formDataGets}
+
+  await update${parentPascal}(id, ${parentParams}, srcSnapshotRaw);`;
+    } else if (canCreate) {
+      upsertBody = `  await requirePermission('${model}', 'create');
+${formDataGets}
+
+  const creatorId = await getSessionUserIdOrThrow();
+  await add${parentPascal}(creatorId, ${parentParams});`;
+    }
+
+    return `'use server';
+
+import { redirect } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';${serviceImports ? `\nimport { ${serviceImports} } from './service';` : ''}
+${(canCreate || canUpdate) ? `
+export async function upsert${parentPascal}(data: FormData) {
+${upsertBody}
 
   revalidatePath('/');
   redirect('/${parent}');
 }
-${canDelete ? `
+` : ''}${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
   await requirePermission('${model}', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
@@ -571,15 +598,18 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     }
   }).join('\n');
   
-  return `'use server';
+  const serviceImportsWithChildren = [
+    canCreate ? `add${parentPascal}` : '',
+    canUpdate ? `update${parentPascal}` : '',
+    canDelete ? `delete${parentPascal}` : '',
+  ].filter(Boolean).join(', ');
 
-import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
-import { add${parentPascal}, update${parentPascal}${canDelete ? `, delete${parentPascal}` : ''} } from './service';
+  const childArgs = `${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall}`;
 
-export async function upsert${parentPascal}(data: FormData) {
-  const id = data.get('id') as string | null;
+  // Build upsert body based on which operations are enabled
+  let upsertBodyWithChildren = '';
+  if (canCreate && canUpdate) {
+    upsertBodyWithChildren = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
     await requirePermission('${model}', 'update');
@@ -590,16 +620,42 @@ ${formDataGets}
 ${childFormDataExtractions}
 
   if (id) {
-    await update${parentPascal}(id, ${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall}, srcSnapshotRaw);
+    await update${parentPascal}(id, ${parentParams}${childArgs}, srcSnapshotRaw);
   } else {
     const creatorId = await getSessionUserIdOrThrow();
-    await add${parentPascal}(creatorId, ${parentParams}${parentParams && childArgsForCall ? ', ' : ''}${childArgsForCall});
+    await add${parentPascal}(creatorId, ${parentParams}${childArgs});
+  }`;
+  } else if (canUpdate) {
+    upsertBodyWithChildren = `  const id = data.get('id') as string | null;
+  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
+  if (!id) throw new Error('Create not supported');
+  await requirePermission('${model}', 'update');
+${formDataGets}
+${childFormDataExtractions}
+
+  await update${parentPascal}(id, ${parentParams}${childArgs}, srcSnapshotRaw);`;
+  } else if (canCreate) {
+    upsertBodyWithChildren = `  await requirePermission('${model}', 'create');
+${formDataGets}
+${childFormDataExtractions}
+
+  const creatorId = await getSessionUserIdOrThrow();
+  await add${parentPascal}(creatorId, ${parentParams}${childArgs});`;
   }
+
+  return `'use server';
+
+import { redirect } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';${serviceImportsWithChildren ? `\nimport { ${serviceImportsWithChildren} } from './service';` : ''}
+${(canCreate || canUpdate) ? `
+export async function upsert${parentPascal}(data: FormData) {
+${upsertBodyWithChildren}
 
   revalidatePath('/');
   redirect('/${parent}');
 }
-${canDelete ? `
+` : ''}${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
   await requirePermission('${model}', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
@@ -1339,7 +1395,7 @@ ${parentTextFields}${childGridComponents.length > 0 ? '\n' + childGridComponents
       isEdit={isEdit}
       formFields={formFields}
       onSubmit={handleSubmit}
-      onDelete={isEdit && canDelete ? handleDelete : undefined}
+      onDelete={${canDelete ? 'isEdit && canDelete ? handleDelete : undefined' : 'undefined'}}
       onBack={handleBack}
       deleteEntityLabel="${parentTitle}"
       submitButtonLabel="Save"
@@ -1350,13 +1406,13 @@ ${parentTextFields}${childGridComponents.length > 0 ? '\n' + childGridComponents
 `;
 }
 
-export function generateFormView(parent: string, children: ChildInfo[], schema: Schema, modelName?: string, definitionKey?: string): string {
+export function generateFormView(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any, modelName?: string, definitionKey?: string): string {
   const model = modelName ?? parent;
   const defKey = definitionKey ?? `${parent}_detail`;
   const parentPascal = toPascalCase(parent);
   const parentTitle = toTitleCase(parent);
   const modelDef = schema.definitions[model];
-  const filteredProps = filterFields(modelDef.properties ?? {}, undefined);
+  const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
   const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps }).map((rel) => ({
     ...rel,
     relationName: getDetailRelationName(parent, rel.target, schema, defKey),
@@ -1556,39 +1612,42 @@ ${childViewGrids}
 `;
 }
 
-export function generatePageList(parent: string, schema: Schema, modelName?: string): string {
+export function generatePageList(parent: string, schema: Schema, generateConfig?: any, modelName?: string): string {
   const model = modelName ?? parent;
   const parentPascal = toPascalCase(parent);
   const parentTitle = toTitleCase(parent);
   const parentCamel = toCamelCase(parent);
+  const canDelete = generateConfig?.delete !== false;
 
   // Check for x-display configuration in the model definition
   const modelDef = schema.definitions[model];
   const xDisplay = (modelDef as any)?.['x-display'];
-  
+
   let displayFieldsCode = '';
   if (xDisplay && Array.isArray(xDisplay)) {
     const fields = xDisplay.map((item: any) => {
       const fieldName = Object.keys(item)[0];
       const config = item[fieldName];
-      const headerName = fieldName.split('_').map((word: string) => 
+      const headerName = fieldName.split('_').map((word: string) =>
         word.charAt(0).toUpperCase() + word.slice(1)
       ).join(' ');
       const width = config?.width || 200;
-      
+
       return `    { field: '${fieldName}', headerName: '${headerName}', width: ${width} }`;
     }).join(',\n');
-    
+
     displayFieldsCode = ` displayFields={[\n${fields}\n  ]}`;
   }
-  
+
+  const removeImport = canDelete ? `\nimport { remove${parentPascal} } from '@/lib/${parent}/actions';` : '';
+  const removeActionProp = canDelete ? ` removeAction={remove${parentPascal}}` : '';
+
   return `import { get${parentPascal}ListPageData } from '@/lib/${parent}/getters';
-import DataGridClient from '@/components/DataGridClient';
-import { remove${parentPascal} } from '@/lib/${parent}/actions';
+import DataGridClient from '@/components/DataGridClient';${removeImport}
 
 export default async function ${parentPascal}sPage() {
   const { ${parentCamel}s, userPermissions } = await get${parentPascal}ListPageData();
-  return <DataGridClient src={${parentCamel}s} basePath="/${parent}" removeAction={remove${parentPascal}} entityLabel="${parentTitle}"${displayFieldsCode} 
+  return <DataGridClient src={${parentCamel}s} basePath="/${parent}"${removeActionProp} entityLabel="${parentTitle}"${displayFieldsCode}
     permissions={userPermissions} />;
 }
 `;
@@ -1782,6 +1841,8 @@ export function generateService(parent: string, children: ChildInfo[], schema: S
   const parentPascal = toPascalCase(parent);
   const modelDef = schema.definitions[model];
   const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
+  const canCreate = generateConfig?.new !== false;
+  const canUpdate = generateConfig?.edit !== false;
   const canDelete = generateConfig?.delete !== false;
   const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps });
   const selfParentRel = parentRelationships.find((rel) => rel.target === model);
@@ -1912,7 +1973,7 @@ async function assertNotStale(tx: TransactionClient, id: string, srcSnapshotRaw:
   // For parent-only case
   if (children.length === 0) {
     return `${utilityCode}
-
+${canCreate ? `
 export async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}) {
   return await prisma.${model}.create({
     data: {
@@ -1921,7 +1982,7 @@ ${parentDataObj}
     },
   });
 }
-
+` : ''}${canUpdate ? `
 export async function update${parentPascal}(id: string, ${parentParamsWithTypes}, srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
@@ -1935,7 +1996,7 @@ ${parentDataObj}
     });
   });
 }
-${canDelete ? `
+` : ''}${canDelete ? `
 export async function delete${parentPascal}(ids: string[]) {
   if (ids.length === 1) {
     await prisma.${model}.delete({ where: { id: ids[0] } });
@@ -2057,7 +2118,7 @@ export async function delete${parentPascal}(ids: string[]) {
   ).join(', ');
 
   return `${utilityCode}
-
+${canCreate ? `
 export async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}${parentParamsWithTypes && childParamsForAdd ? ', ' : ''}${childParamsForAdd}) {${selfChildValidation ? `\n  const id = null;${selfChildValidation}` : ''}
   return await prisma.${model}.create({
     data: {
@@ -2067,7 +2128,7 @@ ${childNestedCreate}
     },
   });
 }
-
+` : ''}${canUpdate ? `
 export async function update${parentPascal}(id: string${parentParamsWithTypes ? ', ' : ''}${parentParamsWithTypes}${parentParamsWithTypes && childParamsForUpdate ? ', ' : ''}${childParamsForUpdate}, srcSnapshotRaw?: string | null) {${selfChildValidation}
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
@@ -2082,7 +2143,7 @@ ${childNestedUpdate}
     });
   });
 }
-${canDelete ? `
+` : ''}${canDelete ? `
 export async function delete${parentPascal}(ids: string[]) {
   if (ids.length === 1) {
     await prisma.${model}.delete({ where: { id: ids[0] } });
@@ -2098,6 +2159,7 @@ export function generateApiRoute(parent: string, children: ChildInfo[], schema: 
   const parentPascal = toPascalCase(parent);
   const modelDef = schema.definitions[model];
   const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
+  const canList = generateConfig?.list !== false;
   const canCreate = generateConfig?.new !== false;
 
   // Compute body destructuring for POST
@@ -2141,9 +2203,8 @@ export function generateApiRoute(parent: string, children: ChildInfo[], schema: 
   const serviceArgsForCreate = `userId, ${parentServiceArgs}${parentServiceArgs && childServiceArgs ? ', ' : ''}${childServiceArgs}`;
 
   return `import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
-import { getAll${parentPascal}s } from '@/lib/${parent}/getters';${canCreate ? `\nimport { add${parentPascal} } from '@/lib/${parent}/service';` : ''}
-
+import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';${canList ? `\nimport { getAll${parentPascal}s } from '@/lib/${parent}/getters';` : ''}${canCreate ? `\nimport { add${parentPascal} } from '@/lib/${parent}/service';` : ''}
+${canList ? `
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
@@ -2154,7 +2215,7 @@ export async function GET(request: NextRequest) {
     return handleApiError(error);
   }
 }
-${canCreate ? `
+` : ''}${canCreate ? `
 export async function POST(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
@@ -2175,6 +2236,7 @@ export function generateApiDetailRoute(parent: string, children: ChildInfo[], sc
   const parentPascal = toPascalCase(parent);
   const modelDef = schema.definitions[model];
   const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
+  const canView = generateConfig?.view !== false;
   const canUpdate = generateConfig?.edit !== false;
   const canDelete = generateConfig?.delete !== false;
 
@@ -2222,11 +2284,10 @@ export function generateApiDetailRoute(parent: string, children: ChildInfo[], sc
   ].filter(Boolean).join(', ');
 
   return `import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
-import { get${parentPascal}Detail } from '@/lib/${parent}/getters';${serviceImports ? `\nimport { ${serviceImports} } from '@/lib/${parent}/service';` : ''}
+import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';${canView ? `\nimport { get${parentPascal}Detail } from '@/lib/${parent}/getters';` : ''}${serviceImports ? `\nimport { ${serviceImports} } from '@/lib/${parent}/service';` : ''}
 
 type Params = { params: Promise<{ id: string }> };
-
+${canView ? `
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
@@ -2241,7 +2302,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     return handleApiError(error);
   }
 }
-${canUpdate ? `
+` : ''}${canUpdate ? `
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;

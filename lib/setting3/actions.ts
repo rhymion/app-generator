@@ -3,25 +3,17 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
-import { addSetting3, updateSetting3, deleteSetting3 } from './service';
+import { updateSetting3, deleteSetting3 } from './service';
 
 export async function upsertSetting3(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
-  if (id) {
-    await requirePermission('user_account', 'update');
-  } else {
-    await requirePermission('user_account', 'create');
-  }
+  if (!id) throw new Error('Create not supported');
+  await requirePermission('user_account', 'update');
   const name = data.get('name') as string;
   const email = data.get('email') as string;
 
-  if (id) {
-    await updateSetting3(id, name, email, srcSnapshotRaw);
-  } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await addSetting3(creatorId, name, email);
-  }
+  await updateSetting3(id, name, email, srcSnapshotRaw);
 
   revalidatePath('/');
   redirect('/setting3');
