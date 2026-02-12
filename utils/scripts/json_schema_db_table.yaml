@@ -445,7 +445,74 @@ definitions:
             items:
               $ref: "#/definitions/role"
 
-  setting:
+  # setting:
+  #   x-generate:
+  #     list: false
+  #     view: true
+  #     new: false
+  #     edit: true
+  #     delete: false
+  #     invalidate: false
+  #     api: true
+  #   allOf:
+  #     - $ref: "#/definitions/user_account"
+
+  setting1:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+    allOf:
+      - $ref: "#/definitions/user_account"
+
+  setting2:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      fields:
+        - name
+        - email
+        - password
+    allOf:
+      - $ref: "#/definitions/user_account"
+
+  setting3:
+    x-generate:
+      list: true
+      view: false
+      new: false
+      edit: true
+      delete: true
+      invalidate: false
+      api: false
+      fields:
+        - name
+        - email
+    allOf:
+      - $ref: "#/definitions/user_account"
+
+  setting4:
+    x-generate:
+      list: true
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: true
+    allOf:
+      - $ref: "#/definitions/user_account"
+
+  setting5:
     x-generate:
       list: false
       view: true
@@ -457,10 +524,46 @@ definitions:
       fields:
         - name
         - email
-    x-relationships:
-      roles:
-        type: many-to-many
-        target: role
+    allOf:
+      - $ref: "#/definitions/user_account"
+
+  setting6:
+    x-generate:
+      list: false
+      view: true
+      new: false
+      edit: false
+      delete: true
+      invalidate: false
+      api: false
+    allOf:
+      - $ref: "#/definitions/user_account"
+
+  setting7:
+    x-generate:
+      list: false
+      view: false
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: false
+    allOf:
+      - $ref: "#/definitions/user_account"
+
+  setting8:
+    x-generate:
+      list: false
+      view: false
+      new: true
+      edit: false
+      delete: true
+      invalidate: false
+      api: true
+      fields:
+        - name
+        - email
+        - password
     allOf:
       - $ref: "#/definitions/user_account"
 
