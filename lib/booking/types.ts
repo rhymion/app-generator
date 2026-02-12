@@ -1,0 +1,44 @@
+import type { ModelPermissions } from '@/lib/authz';
+
+import type { Resource } from '@/lib/resource/types';
+
+export type Booking = {
+  id: string;
+  name: string;
+  resource_id: string;
+  start_time: Date;
+  end_time: Date;
+  resource?: Resource | null;
+};
+
+export type ResourceOption = {
+  id: string;
+  name: string;
+};
+
+export type BookingDetail = Booking;
+
+export type BookingDetailPageProps = Readonly<{
+  params: Promise<{
+    id: string;
+  }>
+}>;
+
+export type FormViewProps = Readonly<{
+  src: {
+    id: string;
+    name: string;
+    resource_id: string;
+    start_time: Date;
+    end_time: Date;
+    resource?: Resource | null;
+  };
+  permissions?: ModelPermissions;
+}>;
+
+export type FormUpsertProps = Readonly<FormViewProps & {
+  isEdit: boolean;
+  allResources?: Resource[];
+
+  resourcePermissions?: ModelPermissions;
+}>;

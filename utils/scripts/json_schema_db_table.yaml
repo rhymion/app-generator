@@ -846,3 +846,50 @@ definitions:
             x-fileType: image
             items:
               $ref: "#/definitions/resource_image"
+
+  booking:
+    type: object
+    required:
+      - id
+      - name
+      - resource_id
+      - start_time
+      - end_time
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+      resource_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: resource
+          labelField: name
+      start_time:
+        type: string
+        format: date-time
+      end_time:
+        type: string
+        format: date-time
+
+  booking_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+    allOf:
+      - $ref: "#/definitions/booking"
+      - type: object
+        required:
+          - resource
+        properties:
+          resource:
+            $ref: "#/definitions/resource"
