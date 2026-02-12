@@ -755,3 +755,92 @@ definitions:
             x-outputType: list
             items:
               $ref: "#/definitions/procedure"
+
+  resource:
+    type: object
+    required:
+      - id
+      - name
+      - organization_id
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+      description:
+        type:
+          - string
+          - "null"
+      organization_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: organization
+          labelField: name
+
+  resource_attachment:
+    type: object
+    required:
+      - id
+      - name
+      - path
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+      path:
+        type: string
+        format: uri
+
+  resource_image:
+    type: object
+    required:
+      - id
+      - name
+      - path
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+      path:
+        type: string
+        format: uri
+
+  resource_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+    allOf:
+      - $ref: "#/definitions/resource"
+      - type: object
+        required:
+          - organization
+          - resource_attachments
+          - resource_images
+        properties:
+          organization:
+            $ref: "#/definitions/organization"
+          resource_attachments:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/resource_attachment"
+          resource_images:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/resource_image"
