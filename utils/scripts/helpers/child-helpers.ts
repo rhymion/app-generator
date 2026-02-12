@@ -19,6 +19,7 @@ export interface ChildInfo {
   name: string;
   propertyName: string;
   outputType?: string;
+  fileType?: 'file' | 'image';
   relationship?: RelationshipInfo;
 }
 

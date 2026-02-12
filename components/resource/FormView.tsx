@@ -47,10 +47,11 @@ export default function FormView({ src, permissions }: FormViewProps) {
         <ListWrapper
           items={src.resource_attachments.map(f => ({
             id: f.id,
-            value: f.name,
+            value: f.path,
             label: f.name,
           }))}
-          itemType="text"
+          itemType="file"
+          fileVariant="file"
           showTitle={true}
           title="Resource Attachments"
         />
@@ -59,10 +60,11 @@ export default function FormView({ src, permissions }: FormViewProps) {
         <ListWrapper
           items={src.resource_images.map(f => ({
             id: f.id,
-            value: f.name,
+            value: f.path,
             label: f.name,
           }))}
-          itemType="text"
+          itemType="file"
+          fileVariant="image"
           showTitle={true}
           title="Resource Images"
         />

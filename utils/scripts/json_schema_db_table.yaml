@@ -837,10 +837,12 @@ definitions:
           resource_attachments:
             type: array
             x-outputType: list
+            x-fileType: file
             items:
               $ref: "#/definitions/resource_attachment"
           resource_images:
             type: array
             x-outputType: list
+            x-fileType: image
             items:
               $ref: "#/definitions/resource_image"

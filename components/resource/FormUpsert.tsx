@@ -27,13 +27,13 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   const descriptionRef = useRef<HTMLInputElement>(null);
   const initialResourceAttachments: EditableListWrapperItem[] = src.resource_attachments.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
-    value: f.name,
+    value: f.path,
     label: f.name,
     originalId: f.id,
   }));
   const initialResourceImages: EditableListWrapperItem[] = src.resource_images.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
-    value: f.name,
+    value: f.path,
     label: f.name,
     originalId: f.id,
   }));
@@ -65,7 +65,8 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         'resource_attachment[]',
         JSON.stringify({
           id: itemId,
-          name: item.value,
+          name: item.label,
+          path: item.value,
         })
       );
     });
@@ -77,7 +78,8 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         'resource_image[]',
         JSON.stringify({
           id: itemId,
-          name: item.value,
+          name: item.label,
+          path: item.value,
         })
       );
     });
@@ -141,22 +143,22 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
       <EditableListWrapper
         ref={resourceAttachmentsRef}
         initialItems={initialResourceAttachments}
-        itemType="text"
+        itemType="file"
+        fileVariant="file"
+        acceptedFileTypes=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip"
         addButtonLabel="Add Resource Attachments"
         showTitle={true}
         title="Resource Attachments"
-        textFieldLabel="Name"
-        textFieldPlaceholder="Enter name"
       />
       <EditableListWrapper
         ref={resourceImagesRef}
         initialItems={initialResourceImages}
-        itemType="text"
+        itemType="file"
+        fileVariant="image"
+        acceptedFileTypes="image/jpeg,image/png,image/gif,image/webp"
         addButtonLabel="Add Resource Images"
         showTitle={true}
         title="Resource Images"
-        textFieldLabel="Name"
-        textFieldPlaceholder="Enter name"
       />
     </>
   );

@@ -31,6 +31,7 @@ interface EntityRelation {
     name: string;
     propertyName: string;
     outputType?: string;
+    fileType?: 'file' | 'image';
     relationship?: {
       type: 'many-to-many' | 'one-to-many';
       target: string;
@@ -49,6 +50,7 @@ interface EntityRelation {
 
 function extractChildren(def: any, schema: Schema, defKey: string) {
   const children: Array<{ name: string; propertyName: string; outputType?: string;
+    fileType?: 'file' | 'image';
     relationship?: { type: 'many-to-many' | 'one-to-many'; target: string } }> = [];
 
   // Get properties - support both allOf style and explicit properties
@@ -71,6 +73,7 @@ function extractChildren(def: any, schema: Schema, defKey: string) {
         const childName = ref.split('/').pop();
         if (childName) {
           const outputType = propAny['x-outputType'] || propAny.outputType;
+          const fileType = propAny['x-fileType'] as 'file' | 'image' | undefined;
           let relationship = undefined;
           if (xRelationships[propName]) {
             const relInfo = xRelationships[propName];
@@ -79,7 +82,7 @@ function extractChildren(def: any, schema: Schema, defKey: string) {
               target: relInfo.target || childName,
             };
           }
-          children.push({ name: childName, propertyName: propName, outputType, relationship });
+          children.push({ name: childName, propertyName: propName, outputType, fileType, relationship });
         }
       }
     }

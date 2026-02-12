@@ -1088,6 +1088,15 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       
       // For list output type, generate different initialization
       if (childInfo.outputType === 'list') {
+        if (childInfo.fileType) {
+          // File-type list child: value=path, label=name
+          return `  const initial${childPascal}: EditableListWrapperItem[] = src.${childInfo.propertyName}.map(f => ({
+    id: f.id || \`temp-\${Date.now()}-\${Math.random()}\`,
+    value: f.path,
+    label: f.name,
+    originalId: f.id,
+  }));`;
+        }
         // Assuming list items have a 'name' field as the primary value
         return `  const initial${childPascal}: EditableListWrapperItem[] = src.${childInfo.propertyName}.map(f => ({
     id: f.id || \`temp-\${Date.now()}-\${Math.random()}\`,
@@ -1183,6 +1192,21 @@ ${createNewChildProps}
       );
     });`;
         }
+        if (childInfo.fileType) {
+          return `    const ${childVar} = ${childVar}Ref.current?.getItems?.() || [];
+
+    ${childVar}.forEach((item) => {
+      const itemId = item.originalId || (typeof item.id === 'string' && item.id.startsWith('temp-') ? undefined : item.id);
+      formData.append(
+        '${formKey}[]',
+        JSON.stringify({
+          id: itemId,
+          name: item.label,
+          path: item.value,
+        })
+      );
+    });`;
+        }
         return `    const ${childVar} = ${childVar}Ref.current?.getItems?.() || [];
 
     ${childVar}.forEach((item) => {
@@ -1274,6 +1298,21 @@ ${childSerialize}
           value: item.id,
         }))}
         excludeOptionIds={[src.id]}
+      />`;
+        }
+        if (childInfo.fileType) {
+          const acceptedTypes = childInfo.fileType === 'image'
+            ? 'image/jpeg,image/png,image/gif,image/webp'
+            : '.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip';
+          return `      <EditableListWrapper
+        ref={${childVar}Ref}
+        initialItems={initial${childPascal}}
+        itemType="file"
+        fileVariant="${childInfo.fileType}"
+        acceptedFileTypes="${acceptedTypes}"
+        addButtonLabel="Add ${childTitleLabel}"
+        showTitle={true}
+        title="${childTitleLabel}"
       />`;
         }
         return `      <EditableListWrapper
@@ -1555,6 +1594,21 @@ ${parentTextFields}
     
     // For list output type, use ListWrapper
     if (childInfo.outputType === 'list') {
+      if (childInfo.fileType) {
+        return `      <div>
+        <ListWrapper
+          items={src.${childInfo.propertyName}.map(f => ({
+            id: f.id,
+            value: f.path,
+            label: f.name,
+          }))}
+          itemType="file"
+          fileVariant="${childInfo.fileType}"
+          showTitle={true}
+          title="${childTitleLabel}"
+        />
+      </div>`;
+      }
       return `      <div>
         <ListWrapper
           items={src.${childInfo.propertyName}.map(f => ({

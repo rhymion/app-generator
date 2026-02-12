@@ -19,12 +19,9 @@ interface ListWrapperProps {
   itemType: ItemType;
   title?: string;
   showTitle?: boolean;
+  fileVariant?: 'file' | 'image';
   // Custom rendering
   renderItem?: (item: ListWrapperItem) => React.ReactNode;
-}
-
-interface ListWrapperHandle {
-  getItems: () => ListWrapperItem[];
 }
 
 function ListWrapper(
@@ -33,11 +30,40 @@ function ListWrapper(
   itemType,
   title = 'Items',
   showTitle = true,
+  fileVariant = 'file',
   renderItem,
-}: ListWrapperProps) 
+}: ListWrapperProps)
 {
 
+  const isUrlValue = (v: any): v is string =>
+    typeof v === 'string' && (v.startsWith('/') || v.startsWith('http'));
+
   const defaultRenderItem = (item: ListWrapperItem) => {
+    if (itemType === 'file' && isUrlValue(item.value)) {
+      if (fileVariant === 'image') {
+        return (
+          <ListItemText
+            primary={
+              <a href={item.value} target="_blank" rel="noopener noreferrer">
+                {item.label || 'Image'}
+              </a>
+            }
+            secondary={
+              <img src={item.value} alt={item.label || ''} style={{ maxWidth: 100, maxHeight: 100, objectFit: 'contain', marginTop: 4 }} />
+            }
+          />
+        );
+      }
+      return (
+        <ListItemText
+          primary={
+            <a href={item.value} target="_blank" rel="noopener noreferrer" download>
+              {item.label || item.value}
+            </a>
+          }
+        />
+      );
+    }
     return (
       <ListItemText
         primary={item.label || item.value}

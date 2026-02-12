@@ -17,6 +17,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';
 import Paper from '@mui/material/Paper';
 import Box from '@mui/material/Box';
+import CircularProgress from '@mui/material/CircularProgress';
 
 export type ItemType = 'text' | 'autocomplete' | 'file';
 
@@ -53,6 +54,8 @@ interface EditableListWrapperProps {
   // For file type
   acceptedFileTypes?: string;
   maxFileSize?: number; // in bytes
+  uploadEndpoint?: string;
+  fileVariant?: 'file' | 'image';
   // Custom rendering
   renderItem?: (item: EditableListWrapperItem) => React.ReactNode;
   // Validation
@@ -82,6 +85,8 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
     excludeOptionIds,
     acceptedFileTypes = '*',
     maxFileSize = 10 * 1024 * 1024, // 10MB default
+    uploadEndpoint = '/api/upload',
+    fileVariant = 'file',
     renderItem,
     validateItem,
     onItemsChange,
@@ -94,6 +99,7 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
     const [selectedAutocomplete, setSelectedAutocomplete] = useState<AutocompleteOption | null>(null);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [uploading, setUploading] = useState(false);
 
     // Internal filtering for autocomplete options
     const availableOptions = useMemo(() => {
@@ -139,6 +145,7 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
     };
 
     const handleCloseAddDialog = () => {
+      if (uploading) return;
       setOpenAddDialog(false);
       setInputValue('');
       setSelectedAutocomplete(null);
@@ -158,7 +165,7 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
       onItemsChange?.(nextItems);
     };
 
-    const handleAdd = () => {
+    const handleAdd = async () => {
       let value: any;
       let label: string = '';
 
@@ -188,8 +195,28 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
             setError(`File size must be less than ${maxFileSize / 1024 / 1024}MB`);
             return;
           }
-          value = selectedFile;
-          label = selectedFile.name;
+          setUploading(true);
+          try {
+            const uploadFormData = new FormData();
+            uploadFormData.append('file', selectedFile);
+            const response = await fetch(uploadEndpoint, {
+              method: 'POST',
+              body: uploadFormData,
+            });
+            if (!response.ok) {
+              const errorData = await response.json();
+              throw new Error(errorData.error || 'Upload failed');
+            }
+            const data = await response.json();
+            value = data.url;
+            label = selectedFile.name;
+          } catch (err) {
+            setError(err instanceof Error ? err.message : 'Upload failed');
+            setUploading(false);
+            return;
+          } finally {
+            setUploading(false);
+          }
           break;
       }
 
@@ -252,7 +279,31 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
       }
     };
 
+    const isUrlValue = (v: any): v is string =>
+      typeof v === 'string' && (v.startsWith('/') || v.startsWith('http'));
+
     const defaultRenderItem = (item: EditableListWrapperItem) => {
+      if (itemType === 'file' && isUrlValue(item.value)) {
+        if (fileVariant === 'image') {
+          return (
+            <ListItemText
+              primary={item.label || item.value}
+              secondary={
+                <img src={item.value} alt={item.label || ''} style={{ maxWidth: 80, maxHeight: 80, objectFit: 'contain', marginTop: 4 }} />
+              }
+            />
+          );
+        }
+        return (
+          <ListItemText
+            primary={
+              <a href={item.value} target="_blank" rel="noopener noreferrer">
+                {item.label || item.value}
+              </a>
+            }
+          />
+        );
+      }
       return (
         <ListItemText
           primary={item.label || item.value}
@@ -359,6 +410,7 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
                   variant="outlined"
                   component="label"
                   fullWidth
+                  disabled={uploading}
                 >
                   Choose File
                   <input
@@ -368,9 +420,15 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
                     onChange={handleFileChange}
                   />
                 </Button>
-                {selectedFile && (
+                {selectedFile && !uploading && (
                   <Box sx={{ mt: 1 }}>
                     <strong>Selected:</strong> {selectedFile.name} ({(selectedFile.size / 1024).toFixed(2)} KB)
+                  </Box>
+                )}
+                {uploading && (
+                  <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <CircularProgress size={20} />
+                    <span>Uploading...</span>
                   </Box>
                 )}
                 {error && (
@@ -382,8 +440,10 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
             )}
           </DialogContent>
           <DialogActions>
-            <Button onClick={handleCloseAddDialog}>Cancel</Button>
-            <Button onClick={handleAdd} variant="contained">Add</Button>
+            <Button onClick={handleCloseAddDialog} disabled={uploading}>Cancel</Button>
+            <Button onClick={handleAdd} variant="contained" disabled={uploading}>
+              {uploading ? 'Uploading...' : 'Add'}
+            </Button>
           </DialogActions>
         </Dialog>
 
