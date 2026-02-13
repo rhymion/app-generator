@@ -23,6 +23,8 @@ import CircularProgress from '@mui/material/CircularProgress';
 
 import type { ItemType, EditableListWrapperItem, AutocompleteOption } from './EditableListWrapper';
 
+const EMPTY_ITEMS: EditableListWrapperItem[] = [];
+
 interface OrderedEditableListWrapperProps {
   initialItems?: EditableListWrapperItem[];
   itemType: ItemType;
@@ -60,7 +62,7 @@ interface OrderedEditableListWrapperHandle {
 
 const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, OrderedEditableListWrapperProps>(
   ({
-    initialItems = [],
+    initialItems = EMPTY_ITEMS,
     itemType,
     addButtonLabel = 'Add Item',
     title = 'Items',
