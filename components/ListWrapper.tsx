@@ -4,6 +4,7 @@ import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
 import Paper from '@mui/material/Paper';
+import Link from '@mui/material/Link';
 
 export type ItemType = 'text' | 'autocomplete' | 'file';
 
@@ -44,9 +45,9 @@ function ListWrapper(
         return (
           <ListItemText
             primary={
-              <a href={item.value} target="_blank" rel="noopener noreferrer">
+              <Link href={item.value} target="_blank" rel="noopener noreferrer">
                 {item.label || 'Image'}
-              </a>
+              </Link>
             }
             secondary={
               <img src={item.value} alt={item.label || ''} style={{ maxWidth: 100, maxHeight: 100, objectFit: 'contain', marginTop: 4 }} />
@@ -57,9 +58,9 @@ function ListWrapper(
       return (
         <ListItemText
           primary={
-            <a href={item.value} target="_blank" rel="noopener noreferrer" download>
+            <Link href={item.value} target="_blank" rel="noopener noreferrer" download>
               {item.label || item.value}
-            </a>
+            </Link>
           }
         />
       );
