@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import EditableListWrapper from './EditableListWrapper';
 
@@ -306,6 +306,110 @@ describe('EditableListWrapper', () => {
         expect(screen.getByRole('option', { name: 'Option 1' })).toBeInTheDocument();
         expect(screen.getByRole('option', { name: 'Option 2' })).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('File and Image', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('renders file items as download links', () => {
+      render(
+        <EditableListWrapper
+          itemType="file"
+          fileVariant="file"
+          initialItems={[
+            { id: '1', value: '/uploads/doc.pdf', label: 'doc.pdf' },
+          ]}
+        />
+      );
+
+      const link = screen.getByRole('link', { name: 'doc.pdf' });
+      expect(link).toHaveAttribute('href', '/uploads/doc.pdf');
+      expect(link).toHaveAttribute('target', '_blank');
+    });
+
+    it('renders image items with thumbnail previews', () => {
+      render(
+        <EditableListWrapper
+          itemType="file"
+          fileVariant="image"
+          initialItems={[
+            { id: '1', value: '/uploads/photo.png', label: 'photo.png' },
+          ]}
+        />
+      );
+
+      expect(screen.getByText('photo.png')).toBeInTheDocument();
+      const img = screen.getByRole('img');
+      expect(img).toHaveAttribute('src', '/uploads/photo.png');
+      expect(img).toHaveAttribute('alt', 'photo.png');
+    });
+
+    it('uploads a file and adds it to the list', async () => {
+      const user = userEvent.setup();
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ url: '/uploads/test-file.pdf' }),
+      } as Response);
+
+      render(
+        <EditableListWrapper
+          itemType="file"
+          fileVariant="file"
+          initialItems={[]}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /add item/i }));
+      const addDialog = screen.getByRole('dialog', { name: /add items/i });
+      const fileInput = addDialog.querySelector('input[type="file"]') as HTMLInputElement;
+
+      const file = new File(['content'], 'test-file.pdf', { type: 'application/pdf' });
+      fireEvent.change(fileInput, { target: { files: [file] } });
+
+      await user.click(within(addDialog).getByRole('button', { name: /add/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /add items/i })).not.toBeInTheDocument();
+      });
+
+      expect(global.fetch).toHaveBeenCalledOnce();
+      const link = screen.getByRole('link', { name: 'test-file.pdf' });
+      expect(link).toHaveAttribute('href', '/uploads/test-file.pdf');
+    });
+
+    it('shows error when upload fails', async () => {
+      const user = userEvent.setup();
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        json: () => Promise.resolve({ error: 'File too large' }),
+      } as Response);
+
+      render(
+        <EditableListWrapper
+          itemType="file"
+          fileVariant="file"
+          initialItems={[]}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /add item/i }));
+      const addDialog = screen.getByRole('dialog', { name: /add items/i });
+      const fileInput = addDialog.querySelector('input[type="file"]') as HTMLInputElement;
+
+      const file = new File(['content'], 'big-file.pdf', { type: 'application/pdf' });
+      fireEvent.change(fileInput, { target: { files: [file] } });
+
+      await user.click(within(addDialog).getByRole('button', { name: /add/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('File too large')).toBeInTheDocument();
+      });
+
+      // Dialog should still be open
+      expect(screen.getByRole('dialog', { name: /add items/i })).toBeInTheDocument();
     });
   });
 });

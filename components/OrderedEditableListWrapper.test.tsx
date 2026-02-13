@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import OrderedEditableListWrapper from './OrderedEditableListWrapper';
 
@@ -306,6 +306,201 @@ describe('OrderedEditableListWrapper', () => {
         expect(screen.getByRole('option', { name: 'Option 1' })).toBeInTheDocument();
         expect(screen.getByRole('option', { name: 'Option 2' })).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('Ordering', () => {
+    it('disables both move buttons when there is only one item', () => {
+      render(
+        <OrderedEditableListWrapper
+          itemType="text"
+          initialItems={[{ id: '1', value: 'Only', label: 'Only Item' }]}
+        />
+      );
+
+      const item = screen.getByText('Only Item').closest('li')!;
+      expect(item.querySelector('button[aria-label="move up"]')).toBeDisabled();
+      expect(item.querySelector('button[aria-label="move down"]')).toBeDisabled();
+    });
+
+    it('disables move up for first item and move down for last item', () => {
+      render(
+        <OrderedEditableListWrapper
+          itemType="text"
+          initialItems={[
+            { id: '1', value: 'A', label: 'First' },
+            { id: '2', value: 'B', label: 'Middle' },
+            { id: '3', value: 'C', label: 'Last' },
+          ]}
+        />
+      );
+
+      const firstItem = screen.getByText('First').closest('li')!;
+      const middleItem = screen.getByText('Middle').closest('li')!;
+      const lastItem = screen.getByText('Last').closest('li')!;
+
+      expect(firstItem.querySelector('button[aria-label="move up"]')).toBeDisabled();
+      expect(firstItem.querySelector('button[aria-label="move down"]')).not.toBeDisabled();
+
+      expect(middleItem.querySelector('button[aria-label="move up"]')).not.toBeDisabled();
+      expect(middleItem.querySelector('button[aria-label="move down"]')).not.toBeDisabled();
+
+      expect(lastItem.querySelector('button[aria-label="move up"]')).not.toBeDisabled();
+      expect(lastItem.querySelector('button[aria-label="move down"]')).toBeDisabled();
+    });
+
+    it('moves an item down when clicking move down button', async () => {
+      const user = userEvent.setup();
+
+      render(
+        <OrderedEditableListWrapper
+          itemType="text"
+          initialItems={[
+            { id: '1', value: 'A', label: 'First' },
+            { id: '2', value: 'B', label: 'Second' },
+            { id: '3', value: 'C', label: 'Third' },
+          ]}
+        />
+      );
+
+      const firstItem = screen.getByText('First').closest('li')!;
+      const moveDownButton = firstItem.querySelector('button[aria-label="move down"]') as HTMLElement;
+      await user.click(moveDownButton);
+
+      // Order should now be: Second, First, Third
+      const listItems = within(screen.getByRole('list')).getAllByRole('listitem');
+      expect(within(listItems[0]).getByText('Second')).toBeInTheDocument();
+      expect(within(listItems[1]).getByText('First')).toBeInTheDocument();
+      expect(within(listItems[2]).getByText('Third')).toBeInTheDocument();
+    });
+
+    it('moves an item up when clicking move up button', async () => {
+      const user = userEvent.setup();
+
+      render(
+        <OrderedEditableListWrapper
+          itemType="text"
+          initialItems={[
+            { id: '1', value: 'A', label: 'First' },
+            { id: '2', value: 'B', label: 'Second' },
+            { id: '3', value: 'C', label: 'Third' },
+          ]}
+        />
+      );
+
+      const thirdItem = screen.getByText('Third').closest('li')!;
+      const moveUpButton = thirdItem.querySelector('button[aria-label="move up"]') as HTMLElement;
+      await user.click(moveUpButton);
+
+      // Order should now be: First, Third, Second
+      const listItems = within(screen.getByRole('list')).getAllByRole('listitem');
+      expect(within(listItems[0]).getByText('First')).toBeInTheDocument();
+      expect(within(listItems[1]).getByText('Third')).toBeInTheDocument();
+      expect(within(listItems[2]).getByText('Second')).toBeInTheDocument();
+    });
+  });
+
+  describe('File and Image', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('renders file items as download links', () => {
+      render(
+        <OrderedEditableListWrapper
+          itemType="file"
+          fileVariant="file"
+          initialItems={[
+            { id: '1', value: '/uploads/doc.pdf', label: 'doc.pdf' },
+          ]}
+        />
+      );
+
+      const link = screen.getByRole('link', { name: 'doc.pdf' });
+      expect(link).toHaveAttribute('href', '/uploads/doc.pdf');
+      expect(link).toHaveAttribute('target', '_blank');
+    });
+
+    it('renders image items with thumbnail previews', () => {
+      render(
+        <OrderedEditableListWrapper
+          itemType="file"
+          fileVariant="image"
+          initialItems={[
+            { id: '1', value: '/uploads/photo.png', label: 'photo.png' },
+          ]}
+        />
+      );
+
+      expect(screen.getByText('photo.png')).toBeInTheDocument();
+      const img = screen.getByRole('img');
+      expect(img).toHaveAttribute('src', '/uploads/photo.png');
+      expect(img).toHaveAttribute('alt', 'photo.png');
+    });
+
+    it('uploads a file and adds it to the list', async () => {
+      const user = userEvent.setup();
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ url: '/uploads/test-file.pdf' }),
+      } as Response);
+
+      render(
+        <OrderedEditableListWrapper
+          itemType="file"
+          fileVariant="file"
+          initialItems={[]}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /add item/i }));
+      const addDialog = screen.getByRole('dialog', { name: /add items/i });
+      const fileInput = addDialog.querySelector('input[type="file"]') as HTMLInputElement;
+
+      const file = new File(['content'], 'test-file.pdf', { type: 'application/pdf' });
+      fireEvent.change(fileInput, { target: { files: [file] } });
+
+      await user.click(within(addDialog).getByRole('button', { name: /add/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /add items/i })).not.toBeInTheDocument();
+      });
+
+      expect(global.fetch).toHaveBeenCalledOnce();
+      const link = screen.getByRole('link', { name: 'test-file.pdf' });
+      expect(link).toHaveAttribute('href', '/uploads/test-file.pdf');
+    });
+
+    it('shows error when upload fails', async () => {
+      const user = userEvent.setup();
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        json: () => Promise.resolve({ error: 'File too large' }),
+      } as Response);
+
+      render(
+        <OrderedEditableListWrapper
+          itemType="file"
+          fileVariant="file"
+          initialItems={[]}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /add item/i }));
+      const addDialog = screen.getByRole('dialog', { name: /add items/i });
+      const fileInput = addDialog.querySelector('input[type="file"]') as HTMLInputElement;
+
+      const file = new File(['content'], 'big-file.pdf', { type: 'application/pdf' });
+      fireEvent.change(fileInput, { target: { files: [file] } });
+
+      await user.click(within(addDialog).getByRole('button', { name: /add/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('File too large')).toBeInTheDocument();
+      });
+
+      // Dialog should still be open
+      expect(screen.getByRole('dialog', { name: /add items/i })).toBeInTheDocument();
     });
   });
 });
