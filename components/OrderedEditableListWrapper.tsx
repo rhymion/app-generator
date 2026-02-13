@@ -20,6 +20,8 @@ import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import Paper from '@mui/material/Paper';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
+import Typography from '@mui/material/Typography';
+import Link from '@mui/material/Link';
 
 import type { ItemType, EditableListWrapperItem, AutocompleteOption } from './EditableListWrapper';
 
@@ -304,7 +306,11 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
         if (fileVariant === 'image') {
           return (
             <ListItemText
-              primary={item.label || item.value}
+              primary={
+                <Link href={item.value} target="_blank" rel="noopener noreferrer">
+                  {item.label || item.value}
+                </Link>
+              }
               secondary={
                 <img src={item.value} alt={item.label || ''} style={{ maxWidth: 80, maxHeight: 80, objectFit: 'contain', marginTop: 4 }} />
               }
@@ -314,9 +320,9 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
         return (
           <ListItemText
             primary={
-              <a href={item.value} target="_blank" rel="noopener noreferrer">
+              <Link href={item.value} target="_blank" rel="noopener noreferrer">
                 {item.label || item.value}
-              </a>
+              </Link>
             }
           />
         );
@@ -393,6 +399,13 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
                     </Box>
                   }
                 >
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ minWidth: 28, mr: 1, flexShrink: 0 }}
+                  >
+                    {item.order}.
+                  </Typography>
                   {renderItem ? renderItem(item) : defaultRenderItem(item)}
                 </ListItem>
               ))

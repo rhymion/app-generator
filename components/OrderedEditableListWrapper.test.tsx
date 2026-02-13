@@ -9,7 +9,7 @@ describe('OrderedEditableListWrapper', () => {
     expect(screen.getByText('No items yet')).toBeInTheDocument();
   });
 
-  it('renders a single item', () => {
+  it('renders a single item with order number', () => {
     render(
       <OrderedEditableListWrapper
         itemType="text"
@@ -18,10 +18,11 @@ describe('OrderedEditableListWrapper', () => {
     );
 
     expect(screen.getByText('Item One')).toBeInTheDocument();
+    expect(screen.getByText('1.')).toBeInTheDocument();
     expect(screen.queryByText('No items yet')).not.toBeInTheDocument();
   });
 
-  it('renders multiple items', () => {
+  it('renders multiple items with order numbers', () => {
     render(
       <OrderedEditableListWrapper
         itemType="text"
@@ -36,6 +37,11 @@ describe('OrderedEditableListWrapper', () => {
     expect(screen.getByText('Item One')).toBeInTheDocument();
     expect(screen.getByText('Item Two')).toBeInTheDocument();
     expect(screen.getByText('Item Three')).toBeInTheDocument();
+
+    const listItems = within(screen.getByRole('list')).getAllByRole('listitem');
+    expect(within(listItems[0]).getByText('1.')).toBeInTheDocument();
+    expect(within(listItems[1]).getByText('2.')).toBeInTheDocument();
+    expect(within(listItems[2]).getByText('3.')).toBeInTheDocument();
   });
 
   it('adds and deletes an autocomplete item', async () => {
@@ -369,8 +375,11 @@ describe('OrderedEditableListWrapper', () => {
 
       // Order should now be: Second, First, Third
       const listItems = within(screen.getByRole('list')).getAllByRole('listitem');
+      expect(within(listItems[0]).getByText('1.')).toBeInTheDocument();
       expect(within(listItems[0]).getByText('Second')).toBeInTheDocument();
+      expect(within(listItems[1]).getByText('2.')).toBeInTheDocument();
       expect(within(listItems[1]).getByText('First')).toBeInTheDocument();
+      expect(within(listItems[2]).getByText('3.')).toBeInTheDocument();
       expect(within(listItems[2]).getByText('Third')).toBeInTheDocument();
     });
 
@@ -394,8 +403,11 @@ describe('OrderedEditableListWrapper', () => {
 
       // Order should now be: First, Third, Second
       const listItems = within(screen.getByRole('list')).getAllByRole('listitem');
+      expect(within(listItems[0]).getByText('1.')).toBeInTheDocument();
       expect(within(listItems[0]).getByText('First')).toBeInTheDocument();
+      expect(within(listItems[1]).getByText('2.')).toBeInTheDocument();
       expect(within(listItems[1]).getByText('Third')).toBeInTheDocument();
+      expect(within(listItems[2]).getByText('3.')).toBeInTheDocument();
       expect(within(listItems[2]).getByText('Second')).toBeInTheDocument();
     });
   });
@@ -432,7 +444,8 @@ describe('OrderedEditableListWrapper', () => {
         />
       );
 
-      expect(screen.getByText('photo.png')).toBeInTheDocument();
+      const link = screen.getByRole('link', { name: 'photo.png' });
+      expect(link).toHaveAttribute('href', '/uploads/photo.png');
       const img = screen.getByRole('img');
       expect(img).toHaveAttribute('src', '/uploads/photo.png');
       expect(img).toHaveAttribute('alt', 'photo.png');

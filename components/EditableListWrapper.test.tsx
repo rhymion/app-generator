@@ -341,7 +341,8 @@ describe('EditableListWrapper', () => {
         />
       );
 
-      expect(screen.getByText('photo.png')).toBeInTheDocument();
+      const link = screen.getByRole('link', { name: 'photo.png' });
+      expect(link).toHaveAttribute('href', '/uploads/photo.png');
       const img = screen.getByRole('img');
       expect(img).toHaveAttribute('src', '/uploads/photo.png');
       expect(img).toHaveAttribute('alt', 'photo.png');

@@ -18,6 +18,7 @@ import AddIcon from '@mui/icons-material/Add';
 import Paper from '@mui/material/Paper';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
+import Link from '@mui/material/Link';
 
 export type ItemType = 'text' | 'autocomplete' | 'file';
 
@@ -287,7 +288,11 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
         if (fileVariant === 'image') {
           return (
             <ListItemText
-              primary={item.label || item.value}
+              primary={
+                <Link href={item.value} target="_blank" rel="noopener noreferrer">
+                  {item.label || item.value}
+                </Link>
+              }
               secondary={
                 <img src={item.value} alt={item.label || ''} style={{ maxWidth: 80, maxHeight: 80, objectFit: 'contain', marginTop: 4 }} />
               }
@@ -297,9 +302,9 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
         return (
           <ListItemText
             primary={
-              <a href={item.value} target="_blank" rel="noopener noreferrer">
+              <Link href={item.value} target="_blank" rel="noopener noreferrer">
                 {item.label || item.value}
-              </a>
+              </Link>
             }
           />
         );
