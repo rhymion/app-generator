@@ -10,21 +10,253 @@ datasource db {
   provider = "postgresql"
 }
 
-model User {
-  id       String  @id @default(cuid())
-  name     String?
-  email    String  @unique
-  password String
+model db_table {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String? 
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  creator_id String
+  creator    user_account @relation(fields: [creator_id], references: [id])
+  fields       field[]
 }
 
-model reviews {
-  id        String    @id
-  title     String　
-  author    String　
-  price     Int　
-  publisher String　
-  published String　
-  image     String　
-  read      DateTime  @default(now())
-  memo      String
+model field {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  db_table_id    String     
+  db_table       db_table @relation(fields: [db_table_id], references: [id], onDelete: Cascade)
+  max_length  Int?
+  max         Int?
+  regex       String?
+  required    Boolean   @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model xxxxx_xxxxx {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String? 
+  team         String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  creator_id String
+  creator    user_account @relation(fields: [creator_id], references: [id])
+  yyyyy_yyyyys yyyyy_yyyyy[]
+}
+
+model yyyyy_yyyyy {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  xxxxx_xxxxx_id    String     
+  xxxxx_xxxxx       xxxxx_xxxxx @relation(fields: [xxxxx_xxxxx_id], references: [id], onDelete: Cascade)
+  max_length  Int?
+  max         Int?
+  regex       String?
+  required    Boolean   @default(true)
+  written_by  String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model parent1 {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  organization_id    String     
+  organization       organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  description  String? 
+  price        Int
+  due_date     DateTime
+  image_url    String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  creator_id String
+  creator    user_account @relation(fields: [creator_id], references: [id])
+  parent1_child1s parent1_child1[]
+  parent1_child2s parent1_child2[]
+  parent1_lists   parent1_list[]
+}
+
+model parent1_child1 {
+  id          String   @id @default(cuid())
+  order       Int      @default(0)
+  name        String
+  type        String
+  parent1_id    String     
+  parent1       parent1 @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
+  max_length  Int?
+  max         Int?
+  regex       String?
+  required    Boolean   @default(true)
+  written_by  String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model parent1_child2 {
+  id          String   @id @default(cuid())
+  name        String
+  parent1_id    String     
+  parent1       parent1 @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
+  required    Boolean   @default(true)
+  start_date  DateTime?
+  end_date    DateTime
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model parent1_list {
+  id          String   @id @default(cuid())
+  name        String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  parent1_id    String     
+  parent1       parent1 @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
+}
+
+model parent_only {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String? 
+  login_time   DateTime?
+  logout_time  DateTime?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  creator_id String
+  creator    user_account @relation(fields: [creator_id], references: [id])
+}
+
+model user_account {
+  id       String  @id @default(cuid())
+  name     String
+  email    String  @unique
+  password String
+  api_key  String?
+  avatar   String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  creator_id String
+  creator    user_account @relation("UserAccountCreator", fields: [creator_id], references: [id])
+  roles    role[] @relation("UserRoles")
+  organizations organization[] @relation("UserOrganizations")
+  created_db_tables db_table[]
+  created_xxxxx_xxxxxs xxxxx_xxxxx[]
+  created_parent1s parent1[]
+  created_parent_onlys parent_only[]
+  created_permissions permission[]
+  created_procedures procedure[]
+  created_roles    role[] @relation("RoleCreator")
+  created_organizations organization[] @relation("OrganizationCreator")
+  created_user_accounts user_account[] @relation("UserAccountCreator")
+  created_resources resource[]
+  created_bookings  booking[]
+  @@index([api_key])
+}
+
+model role {
+  id       String  @id @default(cuid())
+  name     String
+  description String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  creator_id String
+  creator    user_account @relation("RoleCreator", fields: [creator_id], references: [id])
+  user_accounts user_account[] @relation("UserRoles")
+  permissions permission[]
+}
+
+model organization {
+  id       String  @id @default(cuid())
+  name     String
+  description String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  creator_id String
+  creator    user_account @relation("OrganizationCreator", fields: [creator_id], references: [id])
+  user_accounts user_account[] @relation("UserOrganizations")
+  parent1s parent1[]
+  resources resource[]
+}
+
+model permission {
+  id       String @id @default(cuid())
+  name     String
+  role_id  String?
+  role     role? @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  create   Boolean
+  read     Boolean
+  update   Boolean
+  delete   Boolean
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  creator_id String
+  creator    user_account @relation(fields: [creator_id], references: [id])
+  @@unique([name, role_id])
+}
+
+model procedure {
+  id           String @id @default(cuid())
+  name         String
+  description  String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  creator_id String
+  creator    user_account @relation(fields: [creator_id], references: [id])
+  parent_id     String?
+  parent       procedure? @relation("ParentChild", fields: [parent_id], references: [id])
+  children     procedure[] @relation("ParentChild")
+  preceded_by  procedure[] @relation("BeforeAfter")
+  followed_by  procedure[] @relation("BeforeAfter")
+}
+
+model resource {
+  id           String @id @default(cuid())
+  name         String
+  description  String?
+  organization_id String
+  organization organization @relation(fields: [organization_id], references: [id])
+  resource_attachments  resource_attachment[]
+  resource_images  resource_image[]
+  bookings     booking[]
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  creator_id String
+  creator    user_account @relation(fields: [creator_id], references: [id])
+}
+
+model resource_attachment {
+  id           String @id @default(cuid())
+  order        Int @default(0)
+  name         String
+  path         String
+  resource_id  String
+  resource     resource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model resource_image {
+  id           String @id @default(cuid())
+  name         String
+  path         String
+  resource_id  String
+  resource     resource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model booking {
+  id           String @id @default(cuid())
+  name         String
+  resource_id  String
+  resource     resource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
+  start_time   DateTime
+  end_time     DateTime
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+  creator_id   String
+  creator      user_account @relation(fields: [creator_id], references: [id])
 }

@@ -1,0 +1,401 @@
+openapi: 3.0.3
+info:
+  title: DB Table API
+  description: API for managing database table definitions and their fields
+  version: 1.0.0
+  contact:
+    name: API Support
+
+servers:
+  - url: http://localhost:3000
+    description: Development server
+  - url: https://production.example.com
+    description: Production server
+
+tags:
+  - name: db_table
+    description: Database table management operations
+
+paths:
+  /db_table:
+    get:
+      tags:
+        - db_table
+      summary: List all database tables
+      description: Retrieve a list of all database table definitions
+      operationId: getAllDbTables
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DbTable'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /db_table/new:
+    get:
+      tags:
+        - db_table
+      summary: Show form to create a new database table
+      description: Display the form for creating a new database table definition
+      operationId: showNewDbTableForm
+      responses:
+        '200':
+          description: Form page displayed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    
+    post:
+      tags:
+        - db_table
+      summary: Create a new database table
+      description: Create a new database table definition with its fields
+      operationId: createDbTable
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DbTableUpsertRequest'
+      responses:
+        '303':
+          description: Redirect to table list after creation
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /db_table
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /db_table/view/{id}:
+    get:
+      tags:
+        - db_table
+      summary: View database table details
+      description: Display detailed information about a specific database table and its fields
+      operationId: viewDbTable
+      parameters:
+        - $ref: '#/components/parameters/DbTableId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DbTableDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /db_table/edit/{id}:
+    get:
+      tags:
+        - db_table
+      summary: Show form to edit a database table
+      description: Display the form for editing an existing database table definition
+      operationId: showEditDbTableForm
+      parameters:
+        - $ref: '#/components/parameters/DbTableId'
+      responses:
+        '200':
+          description: Form page displayed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DbTableDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags:
+        - db_table
+      summary: Update an existing database table
+      description: Update a database table definition and its fields
+      operationId: updateDbTable
+      parameters:
+        - $ref: '#/components/parameters/DbTableId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DbTableUpsertRequest'
+      responses:
+        '303':
+          description: Redirect to table list after update
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /db_table
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /db_table/delete:
+    post:
+      tags:
+        - db_table
+      summary: Delete database table(s)
+      description: Delete one or more database table definitions. Related fields are automatically deleted via cascade.
+      operationId: deleteDbTable
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              oneOf:
+                - type: object
+                  properties:
+                    id:
+                      type: string
+                      description: Single table ID to delete
+                  required:
+                    - id
+                - type: object
+                  properties:
+                    ids:
+                      type: array
+                      items:
+                        type: string
+                      description: Array of table IDs to delete
+                  required:
+                    - ids
+      responses:
+        '303':
+          description: Redirect to table list after deletion
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /db_table
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  schemas:
+    DbTable:
+      type: object
+      description: Basic database table information
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          description: Unique identifier (CUID)
+          example: "clh5s8k9r0000s608vr3a4abc"
+        name:
+          type: string
+          description: Unique table name
+          example: "users"
+        description:
+          type: string
+          nullable: true
+          description: Optional table description
+          example: "User information table"
+
+    Field:
+      type: object
+      description: Field definition for a database table
+      required:
+        - id
+        - name
+        - type
+        - table_id
+        - required
+      properties:
+        id:
+          type: string
+          description: Unique field identifier (CUID)
+          example: "clh5s8k9r0001s608abc12345"
+        name:
+          type: string
+          description: Field name
+          example: "email"
+        type:
+          type: string
+          description: Field data type
+          example: "string"
+          enum:
+            - string
+            - number
+            - boolean
+            - date
+        table_id:
+          type: string
+          description: Reference to parent table ID
+          example: "clh5s8k9r0000s608vr3a4abc"
+        max_length:
+          type: integer
+          nullable: true
+          description: Maximum length for string fields
+          example: 255
+        max:
+          type: integer
+          nullable: true
+          description: Maximum value for number fields
+          example: 100
+        regex:
+          type: string
+          nullable: true
+          description: Regular expression pattern for validation
+          example: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+        required:
+          type: boolean
+          description: Whether the field is required
+          default: true
+          example: true
+
+    DbTableDetail:
+      allOf:
+        - $ref: '#/components/schemas/DbTable'
+        - type: object
+          required:
+            - fields
+          properties:
+            fields:
+              type: array
+              description: Array of field definitions for this table
+              items:
+                $ref: '#/components/schemas/Field'
+
+    FieldInput:
+      type: object
+      description: Field data for creating or updating
+      required:
+        - name
+        - type
+        - required
+      properties:
+        id:
+          type: string
+          description: Field ID (only present when updating)
+        name:
+          type: string
+          description: Field name
+          example: "email"
+        type:
+          type: string
+          description: Field data type
+          example: "string"
+        max_length:
+          type: integer
+          nullable: true
+          description: Maximum length for string fields
+        max:
+          type: integer
+          nullable: true
+          description: Maximum value for number fields
+        regex:
+          type: string
+          nullable: true
+          description: Regular expression pattern for validation
+        required:
+          type: boolean
+          description: Whether the field is required
+          default: true
+
+    DbTableUpsertRequest:
+      type: object
+      required:
+        - name
+      properties:
+        id:
+          type: string
+          description: Table ID (only present when updating)
+        name:
+          type: string
+          description: Table name (must be unique)
+          example: "users"
+        description:
+          type: string
+          nullable: true
+          description: Optional table description
+        fields[]:
+          type: array
+          description: Array of JSON-stringified field objects
+          items:
+            type: string
+            description: JSON string of FieldInput object
+            example: '{"name":"email","type":"string","max_length":255,"required":true}'
+
+    Error:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Error message
+          example: "User not authenticated"
+        code:
+          type: string
+          description: Error code
+          example: "UNAUTHORIZED"
+
+  parameters:
+    DbTableId:
+      name: id
+      in: path
+      required: true
+      description: Database table unique identifier
+      schema:
+        type: string
+        example: "clh5s8k9r0000s608vr3a4abc"
+
+  responses:
+    Unauthorized:
+      description: User not authenticated
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: "User not authenticated"
+            code: "UNAUTHORIZED"
+
+    NotFound:
+      description: Database table not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: "Database table not found"
+            code: "NOT_FOUND"
+
+    BadRequest:
+      description: Invalid request data
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: "Invalid request data"
+            code: "BAD_REQUEST"
+
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: next-auth.session-token
+      description: NextAuth session cookie
+
+security:
+  - sessionAuth: []

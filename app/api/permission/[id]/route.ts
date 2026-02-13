@@ -1,0 +1,47 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import { getPermissionDetail } from '@/lib/permission/getters';
+import { updatePermission, deletePermission } from '@/lib/permission/service';
+
+type Params = { params: Promise<{ id: string }> };
+
+export async function GET(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const { userId } = await authenticateApiKey(request);
+    await requireApiPermission(userId, 'permission', 'read');
+    const item = await getPermissionDetail(id);
+    if (!item) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return NextResponse.json(item);
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+export async function PUT(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const { userId } = await authenticateApiKey(request);
+    await requireApiPermission(userId, 'permission', 'update');
+    const body = await request.json();
+    const { name, create, read, update, delete: deleteValue, role_id: roleId } = body;
+    const result = await updatePermission(id, name, create, read, update, deleteValue, roleId ?? null);
+    return NextResponse.json(result);
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+export async function DELETE(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const { userId } = await authenticateApiKey(request);
+    await requireApiPermission(userId, 'permission', 'delete');
+    await deletePermission([id]);
+    return new NextResponse(null, { status: 204 });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

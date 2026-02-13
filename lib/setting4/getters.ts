@@ -1,0 +1,61 @@
+'use server';
+
+import prisma from '@/lib/prisma';
+import type { Setting4, Setting4Detail } from '@/lib/setting4/types';
+import type { ModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions } from '@/lib/authz';
+import type { Operation } from '@/lib/authz';
+import { getServerSession } from 'next-auth/next';
+
+export async function getAllSetting4s(): Promise<Setting4[]> {
+
+  const setting4s = await prisma.user_account.findMany({
+  });
+  return setting4s.map((setting4) => ({
+    id: setting4.id,
+    name: setting4.name,
+    email: setting4.email,
+    password: setting4.password,
+    api_key: setting4.api_key,
+    avatar: setting4.avatar,
+  }));
+}
+
+export async function getSetting4Detail(id: string): Promise<Setting4Detail | null> {
+  
+  const setting4 = await prisma.user_account.findUnique({
+    where: { 
+      id,
+    },
+  });
+
+  if (!setting4) {
+    return null;
+  }
+
+  return {
+    ...setting4,
+  };
+}
+
+export async function getSetting4ListPageData(isAssertPermission: boolean = true) {
+  const userPermissions = await getModelPermissions('user_account');
+  if (isAssertPermission) {
+    await assertPermission(userPermissions, 'read', 'user_account');
+  }
+  const setting4s = await getAllSetting4s();
+  return { setting4s, userPermissions };
+}
+
+export async function getSetting4DetailPageData(id: string, operation: Operation = 'read') {
+  const userPermissions = await getModelPermissions('user_account');
+  await assertPermission(userPermissions, operation, 'user_account');
+  const setting4 = await getSetting4Detail(id);
+  return { setting4, userPermissions };
+}
+
+export async function getSetting4NewPageAccessCheck() {
+  const userPermissions = await getModelPermissions('user_account');
+  await assertPermission(userPermissions, 'create', 'user_account');
+  return userPermissions;
+}

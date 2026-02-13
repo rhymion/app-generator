@@ -1,0 +1,92 @@
+// SQLite schema for local testing/experimentation
+// This is a copy of schema.prisma with SQLite provider
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model users {
+  id       String  @id @default(cuid())
+  name     String?
+  email    String  @unique
+  password String
+  api_key   String?
+  avatar   String?
+  reviews  reviews[]
+}
+
+model books {
+  id        String   @id @default(cuid())
+  title     String
+  author    String
+  price     Int
+  publisher String
+  published String
+  image     String
+  reviews   reviews[]
+}
+
+model reviews {
+  id        String   @id @default(cuid())
+  memo      String
+  read      DateTime @default(now())
+  book_id    String
+  book       books     @relation(fields: [book_id], references: [id])
+  author_id  String
+  author     users     @relation(fields: [author_id], references: [id])
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model db_table {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String? 
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  fields       field[]
+}
+
+model field {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  table_id    String     
+  table       db_table @relation(fields: [table_id], references: [id], onDelete: Cascade)
+  max_length  Int?
+  max         Int?
+  regex       String?
+  required    Boolean   @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model xxxxx_xxxxx {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String? 
+  team         String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  yyyyy_yyyyys yyyyy_yyyyy[]
+}
+
+model yyyyy_yyyyy {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  xxxxx_xxxxx_id    String     
+  xxxxx_xxxxx       xxxxx_xxxxx @relation(fields: [xxxxx_xxxxx_id], references: [id], onDelete: Cascade)
+  max_length  Int?
+  max         Int?
+  regex       String?
+  required    Boolean   @default(true)
+  written_by  String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}

@@ -1,7 +1,9 @@
+import NextAuth, { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import { type NextAuthOptions } from "next-auth";
+import { randomUUID } from "crypto";
 import prisma from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { createId } from "@paralleldrive/cuid2";
 
 export const authOptions = {
   secret: process.env.AUTH_SECRET,
@@ -18,13 +20,16 @@ export const authOptions = {
           throw new Error("Invalid credentials");
         }
 
-        const user = await prisma.user.findUnique({
+        const user = await prisma.user_account.findUnique({
           where: { email: credentials.email },
         });
 
         if (!user) {
-          return await prisma.user.create({
+          const userId = createId();
+          return await prisma.user_account.create({
             data: {
+              id: userId,
+              creator_id: userId,
               name: credentials.name ?? credentials.email,
               email: credentials.email,
               password: await bcrypt.hash(credentials.password, 10),
