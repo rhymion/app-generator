@@ -6,7 +6,7 @@ import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import { addSetting8, deleteSetting8 } from './service';
 
 export async function upsertSetting8(data: FormData) {
-  await requirePermission('user_account', 'create');
+  await requirePermission('setting8', 'create');
   const name = data.get('name') as string;
   const email = data.get('email') as string;
   const password = data.get('password') as string;
@@ -19,7 +19,7 @@ export async function upsertSetting8(data: FormData) {
 }
 
 export async function removeSetting8(data: FormData | string[]) {
-  await requirePermission('user_account', 'delete');
+  await requirePermission('setting8', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   await deleteSetting8(ids);
   revalidatePath('/');

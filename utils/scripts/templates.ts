@@ -425,9 +425,9 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
       upsertBody = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('${model}', 'update');
+    await requirePermission('${parent}', 'update');
   } else {
-    await requirePermission('${model}', 'create');
+    await requirePermission('${parent}', 'create');
   }
 ${formDataGets}
 
@@ -441,12 +441,12 @@ ${formDataGets}
       upsertBody = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (!id) throw new Error('Create not supported');
-  await requirePermission('${model}', 'update');
+  await requirePermission('${parent}', 'update');
 ${formDataGets}
 
   await update${parentPascal}(id, ${parentParams}, srcSnapshotRaw);`;
     } else if (canCreate) {
-      upsertBody = `  await requirePermission('${model}', 'create');
+      upsertBody = `  await requirePermission('${parent}', 'create');
 ${formDataGets}
 
   const creatorId = await getSessionUserIdOrThrow();
@@ -467,7 +467,7 @@ ${upsertBody}
 }
 ` : ''}${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
-  await requirePermission('${model}', 'delete');
+  await requirePermission('${parent}', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   await delete${parentPascal}(ids);
   revalidatePath('/');
@@ -612,9 +612,9 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     upsertBodyWithChildren = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('${model}', 'update');
+    await requirePermission('${parent}', 'update');
   } else {
-    await requirePermission('${model}', 'create');
+    await requirePermission('${parent}', 'create');
   }
 ${formDataGets}
 ${childFormDataExtractions}
@@ -629,13 +629,13 @@ ${childFormDataExtractions}
     upsertBodyWithChildren = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (!id) throw new Error('Create not supported');
-  await requirePermission('${model}', 'update');
+  await requirePermission('${parent}', 'update');
 ${formDataGets}
 ${childFormDataExtractions}
 
   await update${parentPascal}(id, ${parentParams}${childArgs}, srcSnapshotRaw);`;
   } else if (canCreate) {
-    upsertBodyWithChildren = `  await requirePermission('${model}', 'create');
+    upsertBodyWithChildren = `  await requirePermission('${parent}', 'create');
 ${formDataGets}
 ${childFormDataExtractions}
 
@@ -657,7 +657,7 @@ ${upsertBodyWithChildren}
 }
 ` : ''}${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
-  await requirePermission('${model}', 'delete');
+  await requirePermission('${parent}', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   await delete${parentPascal}(ids);
   revalidatePath('/');

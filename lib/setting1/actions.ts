@@ -9,9 +9,9 @@ export async function upsertSetting1(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('user_account', 'update');
+    await requirePermission('setting1', 'update');
   } else {
-    await requirePermission('user_account', 'create');
+    await requirePermission('setting1', 'create');
   }
   const name = data.get('name') as string;
   const email = data.get('email') as string;
@@ -31,7 +31,7 @@ export async function upsertSetting1(data: FormData) {
 }
 
 export async function removeSetting1(data: FormData | string[]) {
-  await requirePermission('user_account', 'delete');
+  await requirePermission('setting1', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   await deleteSetting1(ids);
   revalidatePath('/');

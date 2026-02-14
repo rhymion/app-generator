@@ -9,9 +9,9 @@ export async function upsertSetting7(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('user_account', 'update');
+    await requirePermission('setting7', 'update');
   } else {
-    await requirePermission('user_account', 'create');
+    await requirePermission('setting7', 'create');
   }
   const name = data.get('name') as string;
   const email = data.get('email') as string;

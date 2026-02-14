@@ -6,7 +6,7 @@ import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import { addSetting2 } from './service';
 
 export async function upsertSetting2(data: FormData) {
-  await requirePermission('user_account', 'create');
+  await requirePermission('setting2', 'create');
   const name = data.get('name') as string;
   const email = data.get('email') as string;
   const password = data.get('password') as string;

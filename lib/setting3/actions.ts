@@ -9,7 +9,7 @@ export async function upsertSetting3(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (!id) throw new Error('Create not supported');
-  await requirePermission('user_account', 'update');
+  await requirePermission('setting3', 'update');
   const name = data.get('name') as string;
   const email = data.get('email') as string;
 
@@ -20,7 +20,7 @@ export async function upsertSetting3(data: FormData) {
 }
 
 export async function removeSetting3(data: FormData | string[]) {
-  await requirePermission('user_account', 'delete');
+  await requirePermission('setting3', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   await deleteSetting3(ids);
   revalidatePath('/');
