@@ -1,13 +1,20 @@
 import type { ModelPermissions } from '@/lib/authz';
 
-
+import type { UserAccount } from '@/lib/user_account/types';
 
 export type Procedure = {
   id: string;
   name: string;
   description: string | null;
   parent_id: string | null;
+  assignee_id: string | null;
   parent?: Procedure | null;
+  assignee?: UserAccount | null;
+};
+
+export type UserAccountOption = {
+  id: string;
+  name: string;
 };
 
 export type ProcedureDetail = Procedure & {
@@ -28,7 +35,9 @@ export type FormViewProps = Readonly<{
     name: string;
     description: string | null;
     parent_id: string | null;
+    assignee_id: string | null;
     parent?: Procedure | null;
+    assignee?: UserAccount | null;
     children: Procedure[];
     preceded_by: Procedure[];
     followed_by: Procedure[];
@@ -43,6 +52,8 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allProcedures?: Procedure[];
+  allUserAccounts?: UserAccount[];
 
   procedurePermissions?: ModelPermissions;
+  userAccountPermissions?: ModelPermissions;
 }>;

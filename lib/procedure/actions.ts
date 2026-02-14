@@ -16,6 +16,7 @@ export async function upsertProcedure(data: FormData) {
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
   const parentId = (data.get('parent_id') as string | null) || null;
+  const assigneeId = (data.get('assignee_id') as string | null) || null;
   const childrenRaw = data.getAll('children[]') as string[];
   const childrenItems = childrenRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
   const childrenIds = childrenItems
@@ -34,9 +35,9 @@ export async function upsertProcedure(data: FormData) {
   const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateProcedure(userId, id, name, description, parentId, childrenIds, precededByIds, followedByIds, srcSnapshotRaw);
+    await updateProcedure(userId, id, name, description, parentId, assigneeId, childrenIds, precededByIds, followedByIds, srcSnapshotRaw);
   } else {
-    await addProcedure(userId, name, description, parentId, childrenIds, precededByIds, followedByIds);
+    await addProcedure(userId, name, description, parentId, assigneeId, childrenIds, precededByIds, followedByIds);
   }
 
   revalidatePath('/');

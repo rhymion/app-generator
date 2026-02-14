@@ -44,6 +44,13 @@ export default function FormView({ src, permissions }: FormViewProps) {
         margin="normal"
         aria-readonly
       />
+      <TextField
+        label="Assignee Id"
+        value={src.assignee?.name || src.assignee_id || ''}
+        fullWidth
+        margin="normal"
+        aria-readonly
+      />
       <div>
         <ListWrapper
           items={src.children.map(f => ({

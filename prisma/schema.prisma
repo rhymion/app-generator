@@ -164,6 +164,7 @@ model user_account {
   updated_permissions permission[] @relation("PermissionUpdater")
   created_procedures procedure[] @relation("ProcedureCreator")
   updated_procedures procedure[] @relation("ProcedureUpdater")
+  assigned_procedures procedure[] @relation("ProcedureAssignee")
   created_roles    role[] @relation("RoleCreator")
   updated_roles    role[] @relation("RoleUpdater")
   created_organizations organization[] @relation("OrganizationCreator")
@@ -234,6 +235,8 @@ model procedure {
   creator    user_account @relation("ProcedureCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user_account @relation("ProcedureUpdater", fields: [updater_id], references: [id])
+  assignee_id  String?
+  assignee     user_account? @relation("ProcedureAssignee", fields: [assignee_id], references: [id])
   parent_id     String?
   parent       procedure? @relation("ParentChild", fields: [parent_id], references: [id])
   children     procedure[] @relation("ParentChild")

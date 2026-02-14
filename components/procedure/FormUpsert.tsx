@@ -15,7 +15,7 @@ import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
   
 
-export default function FormUpsert({ src, isEdit, permissions, allProcedures = [], procedurePermissions }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, permissions, allProcedures = [], allUserAccounts = [], procedurePermissions, userAccountPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +23,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
   const [parentId, setParentId] = useState<string | null>(src.parent_id || null);
+  const [assigneeId, setAssigneeId] = useState<string | null>(src.assignee_id || null);
   const childrenRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const precededByRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const followedByRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
@@ -52,6 +53,12 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
       label: item.name,
     }));
   }, [allProcedures]);
+  const assigneeIdOptions = useMemo(() => {
+    return allUserAccounts.map((item) => ({
+      id: item.id,
+      label: item.name,
+    }));
+  }, [allUserAccounts]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -66,6 +73,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
     formData.set('name', nameRef.current?.value || '');
     formData.set('description', descriptionRef.current?.value || '');
     formData.set('parent_id', parentId || '');
+    formData.set('assignee_id', assigneeId || '');
     const children = childrenRef.current?.getItems?.() || [];
 
     children.forEach((item) => {
@@ -160,6 +168,19 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
           <TextField
             {...params}
             label="Parent"
+            margin="normal"
+            
+          />
+        )}
+      />
+      <Autocomplete
+        options={assigneeIdOptions}
+        value={assigneeIdOptions.find((option) => option.id === assigneeId) || null}
+        onChange={(_, newValue) => setAssigneeId(newValue?.id ?? null)}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Assignee"
             margin="normal"
             
           />

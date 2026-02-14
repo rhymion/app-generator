@@ -714,6 +714,15 @@ definitions:
           type: many-to-one
           target: procedure
           labelField: name
+      assignee_id:
+        type: 
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: user_account
+          labelField: name
 
   procedure_detail:
     x-generate:
@@ -739,6 +748,8 @@ definitions:
           - preceded_by
           - followed_by
         properties:
+          assignee:
+            $ref: "#/definitions/user_account"
           parent:
             $ref: "#/definitions/procedure"
           children:

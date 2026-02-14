@@ -10,6 +10,7 @@ function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined)
     name: normalizeValue(safeSnapshot.name, 'string'),
     description: normalizeValue(safeSnapshot.description, 'string'),
     parent_id: normalizeValue(safeSnapshot.parent_id, 'string'),
+    assignee_id: normalizeValue(safeSnapshot.assignee_id, 'string'),
     children: normalizeChildRefs(safeSnapshot.children),
     preceded_by: normalizeChildRefs(safeSnapshot.preceded_by),
     followed_by: normalizeChildRefs(safeSnapshot.followed_by),
@@ -33,7 +34,7 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
   return normalizeSnapshot(current as Record<string, unknown>);
 }
 
-export async function addProcedure(creatorId: string, name: string, description: string | null, parentId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[]) {
+export async function addProcedure(creatorId: string, name: string, description: string | null, parentId: string | null, assigneeId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[]) {
   const id = null;
   if (childrenIds.length > 0) {
     if (id && childrenIds.includes(id)) {
@@ -65,6 +66,7 @@ export async function addProcedure(creatorId: string, name: string, description:
       name: name,
       description: description,
       parent_id: parentId,
+      assignee_id: assigneeId,
       creator_id: creatorId,
       updater_id: creatorId,
       children: {
@@ -80,7 +82,7 @@ export async function addProcedure(creatorId: string, name: string, description:
   });
 }
 
-export async function updateProcedure(updaterId: string, id: string, name: string, description: string | null, parentId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[], srcSnapshotRaw?: string | null) {
+export async function updateProcedure(updaterId: string, id: string, name: string, description: string | null, parentId: string | null, assigneeId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[], srcSnapshotRaw?: string | null) {
   if (childrenIds.length > 0) {
     if (id && childrenIds.includes(id)) {
       throw new Error('Cannot set an item as its own child.');
@@ -116,6 +118,7 @@ export async function updateProcedure(updaterId: string, id: string, name: strin
       name: name,
       description: description,
       parent_id: parentId,
+      assignee_id: assigneeId,
         updater_id: updaterId,
       children: {
         set: childrenIds.map((id) => ({ id })),
