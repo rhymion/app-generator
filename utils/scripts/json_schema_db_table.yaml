@@ -723,6 +723,7 @@ definitions:
       edit: true
       delete: true
       invalidate: false
+      api: true
     x-relationships:
       preceded_by:
         type: many-to-many
