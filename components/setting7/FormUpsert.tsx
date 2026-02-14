@@ -7,6 +7,7 @@ import TextField from '@mui/material/TextField';
 import { upsertSetting7 } from '@/lib/setting7/actions';
 import type { FormUpsertProps } from '@/lib/setting7/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 
 import ImageUpload from '../ImageUpload';
 
@@ -101,6 +102,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         value={avatar}
         onChange={setAvatar}
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 

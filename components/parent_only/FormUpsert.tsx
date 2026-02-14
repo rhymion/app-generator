@@ -7,6 +7,7 @@ import TextField from '@mui/material/TextField';
 import { upsertParentOnly, removeParentOnly } from '@/lib/parent_only/actions';
 import type { FormUpsertProps } from '@/lib/parent_only/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
@@ -92,6 +93,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         date_time={logoutTime ? logoutTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setLogoutTime(newValue)}
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 

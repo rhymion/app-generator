@@ -9,6 +9,7 @@ import NumberField from '../NumberField';
 import { upsertParent1, removeParent1 } from '@/lib/parent1/actions';
 import type { FormUpsertProps } from '@/lib/parent1/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
@@ -240,6 +241,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 

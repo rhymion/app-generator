@@ -7,6 +7,7 @@ import FieldsViewGrid from '../FieldsViewGrid';
 import ListWrapper from '../ListWrapper';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
@@ -48,6 +49,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           title="User Accounts"
         />
       </div>
+      <AuditInfo src={src} />
     </div>
   );
 }

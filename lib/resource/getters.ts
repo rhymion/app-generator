@@ -39,7 +39,11 @@ export async function getResourceDetail(id: string): Promise<ResourceDetail | nu
     include: { 
       resource_attachments: true, 
       resource_images: true, 
-      organization: true 
+      organization: true, 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
     },
   });
 

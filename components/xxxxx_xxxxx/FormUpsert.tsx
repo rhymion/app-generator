@@ -7,6 +7,7 @@ import TextField from '@mui/material/TextField';
 import { upsertXxxxxXxxxx, removeXxxxxXxxxx } from '@/lib/xxxxx_xxxxx/actions';
 import type { FormUpsertProps } from '@/lib/xxxxx_xxxxx/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
   import { yyyyy_yyyyys_columns } from '../xxxxx_xxxxx/column_def';
@@ -133,6 +134,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         showTitle={true}
         title="Yyyyy Yyyyys"
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 

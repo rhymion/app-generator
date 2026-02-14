@@ -7,6 +7,7 @@ import FieldsViewGrid from '../FieldsViewGrid';
 import { fields_columns } from '../db_table/column_def';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
@@ -40,6 +41,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
         <h2>Fields</h2>
         <FieldsViewGrid fields={src.fields} columns={fieldsColumns} />
       </div>
+      <AuditInfo src={src} />
     </div>
   );
 }

@@ -8,6 +8,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import { upsertPermission, removePermission } from '@/lib/permission/actions';
 import type { FormUpsertProps } from '@/lib/permission/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
@@ -112,6 +113,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         control={<Checkbox checked={deleteValue} onChange={(e) => setDeleteValue(e.target.checked)} />}
         label="Delete"
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 

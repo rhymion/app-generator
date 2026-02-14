@@ -24,6 +24,12 @@ export async function getSetting5Detail(id: string): Promise<Setting5Detail | nu
     where: { 
       id,
     },
+    include: { 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
+    },
   });
 
   if (!setting5) {

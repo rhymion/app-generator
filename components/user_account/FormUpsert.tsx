@@ -16,6 +16,7 @@ import type { Role } from '@/lib/role/types';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
+import AuditInfo from '../AuditInfo';
   
 import ImageUpload from '../ImageUpload';
 
@@ -177,6 +178,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         }))}
         excludeOptionIds={[src.id]}
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 

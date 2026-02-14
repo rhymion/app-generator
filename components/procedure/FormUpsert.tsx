@@ -8,6 +8,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import { upsertProcedure, removeProcedure } from '@/lib/procedure/actions';
 import type { FormUpsertProps } from '@/lib/procedure/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 import type { Procedure } from '@/lib/procedure/types';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
@@ -212,6 +213,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         }))}
         excludeOptionIds={[src.id]}
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 

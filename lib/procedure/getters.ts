@@ -31,7 +31,11 @@ export async function getProcedureDetail(id: string): Promise<ProcedureDetail | 
       children: true, 
       preceded_by: true, 
       followed_by: true, 
-      parent: true 
+      parent: true, 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
     },
   });
 

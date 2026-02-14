@@ -26,6 +26,12 @@ export async function getParentOnlyDetail(id: string): Promise<ParentOnlyDetail 
     where: { 
       id,
     },
+    include: { 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
+    },
   });
 
   if (!parentOnly) {

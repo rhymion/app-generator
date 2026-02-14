@@ -25,7 +25,11 @@ export async function getRoleDetail(id: string): Promise<RoleDetail | null> {
       id,
     },
     include: { 
-      user_accounts: true 
+      user_accounts: true, 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
     },
   });
 

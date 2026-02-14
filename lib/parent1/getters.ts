@@ -43,7 +43,11 @@ export async function getParent1Detail(id: string): Promise<Parent1Detail | null
       parent1_child1s: true, 
       parent1_child2s: true, 
       parent1_lists: true, 
-      organization: true 
+      organization: true, 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
     },
   });
 

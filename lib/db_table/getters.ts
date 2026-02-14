@@ -25,7 +25,11 @@ export async function getDbTableDetail(id: string): Promise<DbTableDetail | null
       id,
     },
     include: { 
-      fields: true 
+      fields: true, 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
     },
   });
 

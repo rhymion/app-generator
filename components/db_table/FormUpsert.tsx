@@ -7,6 +7,7 @@ import TextField from '@mui/material/TextField';
 import { upsertDbTable, removeDbTable } from '@/lib/db_table/actions';
 import type { FormUpsertProps } from '@/lib/db_table/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
   import { fields_columns } from '../db_table/column_def';
@@ -119,6 +120,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         showTitle={true}
         title="Fields"
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 

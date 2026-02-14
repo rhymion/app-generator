@@ -7,6 +7,7 @@ import TextField from '@mui/material/TextField';
 import { upsertOrganization, removeOrganization } from '@/lib/organization/actions';
 import type { FormUpsertProps } from '@/lib/organization/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 import type { UserAccount } from '@/lib/user_account/types';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
@@ -116,6 +117,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         }))}
         excludeOptionIds={[src.id]}
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 

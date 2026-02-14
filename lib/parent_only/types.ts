@@ -24,6 +24,10 @@ export type FormViewProps = Readonly<{
     description: string | null;
     login_time: Date | null;
     logout_time: Date | null;
+    created_at?: string | Date;
+    updated_at?: string | Date;
+    creator?: { id: string; name: string } | null;
+    updater?: { id: string; name: string } | null;
   };
   permissions?: ModelPermissions;
 }>;

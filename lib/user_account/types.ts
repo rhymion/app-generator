@@ -34,6 +34,10 @@ export type FormViewProps = Readonly<{
     api_key: string | null;
     avatar: string | null;
     roles: Role[];
+    created_at?: string | Date;
+    updated_at?: string | Date;
+    creator?: { id: string; name: string } | null;
+    updater?: { id: string; name: string } | null;
   };
   permissions?: ModelPermissions;
 }>;

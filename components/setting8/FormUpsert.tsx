@@ -7,6 +7,7 @@ import TextField from '@mui/material/TextField';
 import { upsertSetting8, removeSetting8 } from '@/lib/setting8/actions';
 import type { FormUpsertProps } from '@/lib/setting8/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 
 
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
@@ -88,6 +89,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         multiline={false}
         rows={undefined}
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 

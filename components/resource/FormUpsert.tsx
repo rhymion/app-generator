@@ -8,6 +8,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import { upsertResource, removeResource } from '@/lib/resource/actions';
 import type { FormUpsertProps } from '@/lib/resource/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 import OrderedEditableListWrapper from '../OrderedEditableListWrapper';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
@@ -164,6 +165,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         showTitle={true}
         title="Resource Images"
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 

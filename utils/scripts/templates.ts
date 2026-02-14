@@ -163,7 +163,14 @@ ${formViewParentProps}${formViewExtraProps.length > 0 ? `\n${formViewExtraProps.
   if (children.length > 0) {
     result += `\n${formViewChildProps.join('\n')}`;
   }
-  
+
+  // Add audit metadata fields (optional so new pages work without them)
+  result += `
+    created_at?: string | Date;
+    updated_at?: string | Date;
+    creator?: { id: string; name: string } | null;
+    updater?: { id: string; name: string } | null;`;
+
   result += `
   };
   permissions?: ModelPermissions;
@@ -224,10 +231,12 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
   ].filter(Boolean);
   const includePropsList = includeEntriesList.length > 0 ? includeEntriesList.join(', ') : '';
 
-  // Build include for detail (children + many-to-one)
+  // Build include for detail (children + many-to-one + audit relations)
   const includeEntriesDetail = [
     ...children.map(c => `${c.propertyName}: true`),
     ...parentRelationships.map(r => `${r.relationName}: true`),
+    `creator: { select: { id: true, name: true } }`,
+    `updater: { select: { id: true, name: true } }`,
   ].filter(Boolean);
   const includePropsDetail = includeEntriesDetail.length > 0 ? includeEntriesDetail.join(', ') : '';
   
@@ -1395,6 +1404,7 @@ import TextField from '@mui/material/TextField';${hasManyToOne ? "\nimport Autoc
 import { upsert${parentPascal}${canDelete ? `, remove${parentPascal}` : ''} } from '@/lib/${parent}/actions';
 import type { FormUpsertProps } from '@/lib/${parent}/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 ${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${imageProps.length > 0 ? '\nimport ImageUpload from \'../ImageUpload\';' : ''}${booleanImports}
 
 export default function FormUpsert(${formUpsertParams}) {
@@ -1442,6 +1452,7 @@ ${canDelete ? `
   const formFields = (
     <>
 ${parentTextFields}${childGridComponents.length > 0 ? '\n' + childGridComponents : '' }
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 
@@ -1578,6 +1589,7 @@ import type { FormViewProps } from '@/lib/${parent}/types';
 import Link from '@mui/material/Link';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}
   import FormControlLabel from '@mui/material/FormControlLabel';
   import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
@@ -1593,6 +1605,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
         </div>
       </div>
 ${parentTextFields}
+      <AuditInfo src={src} />
     </div>
   );
 }
@@ -1660,6 +1673,7 @@ import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';${columnImportLine}${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}${listImport}
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
@@ -1677,6 +1691,7 @@ ${columnVariables}
       </div>
 ${parentTextFields}
 ${childViewGrids}
+      <AuditInfo src={src} />
     </div>
   );
 }

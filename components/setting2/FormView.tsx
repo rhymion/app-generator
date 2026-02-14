@@ -4,6 +4,7 @@ import type { FormViewProps } from '@/lib/setting2/types';
 import Link from '@mui/material/Link';
   import FormControlLabel from '@mui/material/FormControlLabel';
   import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
@@ -39,6 +40,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
         margin="normal"
         aria-readonly
       />
+      <AuditInfo src={src} />
     </div>
   );
 }
