@@ -60,6 +60,7 @@ export async function seedTestDatabase() {
     data: {
       id: userId,
       creator_id: userId,
+      updater_id: userId,
       email: TEST_CREDENTIALS.email,
       name: TEST_CREDENTIALS.name,
       password: hashedPassword,

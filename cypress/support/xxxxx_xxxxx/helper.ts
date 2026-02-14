@@ -19,6 +19,7 @@ export async function populateXxxxxXxxxxData(length: number) {
         name: `Xxxxx Xxxxx ${i}`,
         description: `Description for Xxxxx Xxxxx ${i}`,
         creator_id: testUser.id,
+        updater_id: testUser.id,
       },
     });
     records.push(record);

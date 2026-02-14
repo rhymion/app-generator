@@ -30,6 +30,7 @@ export const authOptions = {
             data: {
               id: userId,
               creator_id: userId,
+              updater_id: userId,
               name: credentials.name ?? credentials.email,
               email: credentials.email,
               password: await bcrypt.hash(credentials.password, 10),

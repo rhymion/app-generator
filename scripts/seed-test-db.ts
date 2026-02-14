@@ -24,6 +24,7 @@ async function main() {
     create: {
       id: userId,
       creator_id: userId,
+      updater_id: userId,
       email: 'test@example.com',
       name: 'Test User',
       password: hashedPassword,
@@ -35,6 +36,7 @@ async function main() {
     update: {},
     create: {
       creator_id: userId,
+      updater_id: userId,
       email: 'admin@example.com',
       name: 'Admin User',
       password: hashedPassword,
@@ -47,6 +49,7 @@ async function main() {
       name: 'test_table',
       description: 'Test table for e2e testing',
       creator_id: user1.id,
+      updater_id: user1.id,
       fields: {
         create: [
           {
