@@ -11,8 +11,8 @@ export async function upsertSetting2(data: FormData) {
   const email = data.get('email') as string;
   const password = data.get('password') as string;
 
-  const creatorId = await getSessionUserIdOrThrow();
-  await addSetting2(creatorId, name, email, password);
+  const userId = await getSessionUserIdOrThrow();
+  await addSetting2(userId, name, email, password);
 
   revalidatePath('/');
   redirect('/setting2');

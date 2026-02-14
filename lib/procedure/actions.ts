@@ -31,12 +31,12 @@ export async function upsertProcedure(data: FormData) {
   const followedByIds = followedByItems
     .map((followedBy) => followedBy.id)
     .filter((followedById): followedById is string => Boolean(followedById));
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateProcedure(id, name, description, parentId, childrenIds, precededByIds, followedByIds, srcSnapshotRaw);
+    await updateProcedure(userId, id, name, description, parentId, childrenIds, precededByIds, followedByIds, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await addProcedure(creatorId, name, description, parentId, childrenIds, precededByIds, followedByIds);
+    await addProcedure(userId, name, description, parentId, childrenIds, precededByIds, followedByIds);
   }
 
   revalidatePath('/');

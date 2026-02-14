@@ -66,6 +66,7 @@ export async function addProcedure(creatorId: string, name: string, description:
       description: description,
       parent_id: parentId,
       creator_id: creatorId,
+      updater_id: creatorId,
       children: {
         connect: childrenIds.map((id) => ({ id })),
       },
@@ -79,7 +80,7 @@ export async function addProcedure(creatorId: string, name: string, description:
   });
 }
 
-export async function updateProcedure(id: string, name: string, description: string | null, parentId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[], srcSnapshotRaw?: string | null) {
+export async function updateProcedure(updaterId: string, id: string, name: string, description: string | null, parentId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[], srcSnapshotRaw?: string | null) {
   if (childrenIds.length > 0) {
     if (id && childrenIds.includes(id)) {
       throw new Error('Cannot set an item as its own child.');
@@ -115,6 +116,7 @@ export async function updateProcedure(id: string, name: string, description: str
       name: name,
       description: description,
       parent_id: parentId,
+        updater_id: updaterId,
       children: {
         set: childrenIds.map((id) => ({ id })),
       },

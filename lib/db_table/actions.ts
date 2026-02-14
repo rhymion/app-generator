@@ -17,12 +17,12 @@ export async function upsertDbTable(data: FormData) {
   const description = data.get('description') as string | null;
   const fieldsRaw = data.getAll('field[]') as string[];
   const fieldsItems = fieldsRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean });
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateDbTable(id, name, description, fieldsItems, srcSnapshotRaw);
+    await updateDbTable(userId, id, name, description, fieldsItems, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await addDbTable(creatorId, name, description, fieldsItems);
+    await addDbTable(userId, name, description, fieldsItems);
   }
 
   revalidatePath('/');

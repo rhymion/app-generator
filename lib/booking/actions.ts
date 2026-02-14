@@ -19,12 +19,12 @@ export async function upsertBooking(data: FormData) {
   const startTime = new Date(startTimeStr);
   const endTimeStr = data.get('end_time') as string;
   const endTime = new Date(endTimeStr);
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateBooking(id, name, resourceId, startTime, endTime, srcSnapshotRaw);
+    await updateBooking(userId, id, name, resourceId, startTime, endTime, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await addBooking(creatorId, name, resourceId, startTime, endTime);
+    await addBooking(userId, name, resourceId, startTime, endTime);
   }
 
   revalidatePath('/');

@@ -18,12 +18,12 @@ export async function upsertXxxxxXxxxx(data: FormData) {
   const team = data.get('team') as string | null;
   const yyyyyYyyyysRaw = data.getAll('yyyyy_yyyyy[]') as string[];
   const yyyyyYyyyysItems = yyyyyYyyyysRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateXxxxxXxxxx(id, name, description, team, yyyyyYyyyysItems, srcSnapshotRaw);
+    await updateXxxxxXxxxx(userId, id, name, description, team, yyyyyYyyyysItems, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await addXxxxxXxxxx(creatorId, name, description, team, yyyyyYyyyysItems);
+    await addXxxxxXxxxx(userId, name, description, team, yyyyyYyyyysItems);
   }
 
   revalidatePath('/');

@@ -27,7 +27,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, 'parent_only', 'update');
     const body = await request.json();
     const { name, description, login_time: loginTime, logout_time: logoutTime } = body;
-    const result = await updateParentOnly(id, name, description ?? null, loginTime ?? null, logoutTime ?? null);
+    const result = await updateParentOnly(userId, id, name, description ?? null, loginTime ?? null, logoutTime ?? null);
     return NextResponse.json(result);
   } catch (error) {
     return handleApiError(error);

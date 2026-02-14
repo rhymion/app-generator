@@ -20,12 +20,12 @@ export async function upsertResource(data: FormData) {
   const resourceAttachmentsItems = resourceAttachmentsRaw.map(f => JSON.parse(f) as { id?: string; order: number; name: string; path: string });
   const resourceImagesRaw = data.getAll('resource_image[]') as string[];
   const resourceImagesItems = resourceImagesRaw.map(f => JSON.parse(f) as { id?: string; name: string; path: string });
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateResource(id, name, description, organizationId, resourceAttachmentsItems, resourceImagesItems, srcSnapshotRaw);
+    await updateResource(userId, id, name, description, organizationId, resourceAttachmentsItems, resourceImagesItems, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await addResource(creatorId, name, description, organizationId, resourceAttachmentsItems, resourceImagesItems);
+    await addResource(userId, name, description, organizationId, resourceAttachmentsItems, resourceImagesItems);
   }
 
   revalidatePath('/');

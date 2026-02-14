@@ -34,6 +34,7 @@ export async function addOrganization(creatorId: string, name: string, descripti
       name: name,
       description: description,
       creator_id: creatorId,
+      updater_id: creatorId,
       user_accounts: {
         connect: userAccountsIds.map((id) => ({ id })),
       },
@@ -41,7 +42,7 @@ export async function addOrganization(creatorId: string, name: string, descripti
   });
 }
 
-export async function updateOrganization(id: string, name: string, description: string | null, userAccountsIds: string[], srcSnapshotRaw?: string | null) {
+export async function updateOrganization(updaterId: string, id: string, name: string, description: string | null, userAccountsIds: string[], srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -51,6 +52,7 @@ export async function updateOrganization(id: string, name: string, description: 
       data: {
       name: name,
       description: description,
+        updater_id: updaterId,
       user_accounts: {
         set: userAccountsIds.map((id) => ({ id })),
       },

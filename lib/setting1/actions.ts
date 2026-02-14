@@ -18,12 +18,12 @@ export async function upsertSetting1(data: FormData) {
   const password = data.get('password') as string;
   const apiKey = data.get('api_key') as string | null;
   const avatar = data.get('avatar') as string | null;
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateSetting1(id, name, email, password, apiKey, avatar, srcSnapshotRaw);
+    await updateSetting1(userId, id, name, email, password, apiKey, avatar, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await addSetting1(creatorId, name, email, password, apiKey, avatar);
+    await addSetting1(userId, name, email, password, apiKey, avatar);
   }
 
   revalidatePath('/');

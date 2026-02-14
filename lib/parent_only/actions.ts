@@ -19,12 +19,12 @@ export async function upsertParentOnly(data: FormData) {
   const loginTime = loginTimeStr ? new Date(loginTimeStr) : null;
   const logoutTimeStr = data.get('logout_time') as string | null;
   const logoutTime = logoutTimeStr ? new Date(logoutTimeStr) : null;
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateParentOnly(id, name, description, loginTime, logoutTime, srcSnapshotRaw);
+    await updateParentOnly(userId, id, name, description, loginTime, logoutTime, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await addParentOnly(creatorId, name, description, loginTime, logoutTime);
+    await addParentOnly(userId, name, description, loginTime, logoutTime);
   }
 
   revalidatePath('/');

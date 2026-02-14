@@ -36,11 +36,12 @@ export async function addSetting1(creatorId: string, name: string, email: string
       api_key: apiKey,
       avatar: avatar,
       creator_id: creatorId,
+      updater_id: creatorId,
     },
   });
 }
 
-export async function updateSetting1(id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, srcSnapshotRaw?: string | null) {
+export async function updateSetting1(updaterId: string, id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -53,6 +54,7 @@ export async function updateSetting1(id: string, name: string, email: string, pa
       password: password,
       api_key: apiKey,
       avatar: avatar,
+        updater_id: updaterId,
       },
     });
   });

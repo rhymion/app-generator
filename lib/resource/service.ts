@@ -38,6 +38,7 @@ export async function addResource(creatorId: string, name: string, description: 
       description: description,
       organization_id: organizationId,
       creator_id: creatorId,
+      updater_id: creatorId,
       resource_attachments: {
         create: resourceAttachmentsItems.map(f => ({
           order: f.order,
@@ -55,7 +56,7 @@ export async function addResource(creatorId: string, name: string, description: 
   });
 }
 
-export async function updateResource(id: string, name: string, description: string | null, organizationId: string, resourceAttachmentsItems: { id?: string; order: number; name: string; path: string }[], resourceImagesItems: { id?: string; name: string; path: string }[], srcSnapshotRaw?: string | null) {
+export async function updateResource(updaterId: string, id: string, name: string, description: string | null, organizationId: string, resourceAttachmentsItems: { id?: string; order: number; name: string; path: string }[], resourceImagesItems: { id?: string; name: string; path: string }[], srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -66,6 +67,7 @@ export async function updateResource(id: string, name: string, description: stri
       name: name,
       description: description,
       organization_id: organizationId,
+        updater_id: updaterId,
       resource_attachments: {
         deleteMany: {},
         create: resourceAttachmentsItems.map(f => ({

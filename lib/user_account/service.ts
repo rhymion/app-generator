@@ -40,6 +40,7 @@ export async function addUserAccount(creatorId: string, name: string, email: str
       api_key: apiKey,
       avatar: avatar,
       creator_id: creatorId,
+      updater_id: creatorId,
       roles: {
         connect: rolesIds.map((id) => ({ id })),
       },
@@ -47,7 +48,7 @@ export async function addUserAccount(creatorId: string, name: string, email: str
   });
 }
 
-export async function updateUserAccount(id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, rolesIds: string[], srcSnapshotRaw?: string | null) {
+export async function updateUserAccount(updaterId: string, id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, rolesIds: string[], srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -60,6 +61,7 @@ export async function updateUserAccount(id: string, name: string, email: string,
       password: password,
       api_key: apiKey,
       avatar: avatar,
+        updater_id: updaterId,
       roles: {
         set: rolesIds.map((id) => ({ id })),
       },

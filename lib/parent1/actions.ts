@@ -26,12 +26,12 @@ export async function upsertParent1(data: FormData) {
   const parent1Child2sItems = parent1Child2sRaw.map(f => JSON.parse(f) as { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date });
   const parent1ListsRaw = data.getAll('parent1_list[]') as string[];
   const parent1ListsItems = parent1ListsRaw.map(f => JSON.parse(f) as { id?: string; name: string });
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateParent1(id, name, organizationId, description, price, dueDate, imageUrl, parent1Child1sItems, parent1Child2sItems, parent1ListsItems, srcSnapshotRaw);
+    await updateParent1(userId, id, name, organizationId, description, price, dueDate, imageUrl, parent1Child1sItems, parent1Child2sItems, parent1ListsItems, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await addParent1(creatorId, name, organizationId, description, price, dueDate, imageUrl, parent1Child1sItems, parent1Child2sItems, parent1ListsItems);
+    await addParent1(userId, name, organizationId, description, price, dueDate, imageUrl, parent1Child1sItems, parent1Child2sItems, parent1ListsItems);
   }
 
   revalidatePath('/');

@@ -20,12 +20,12 @@ export async function upsertOrganization(data: FormData) {
   const userAccountsIds = userAccountsItems
     .map((userAccount) => userAccount.id)
     .filter((userAccountId): userAccountId is string => Boolean(userAccountId));
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateOrganization(id, name, description, userAccountsIds, srcSnapshotRaw);
+    await updateOrganization(userId, id, name, description, userAccountsIds, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await addOrganization(creatorId, name, description, userAccountsIds);
+    await addOrganization(userId, name, description, userAccountsIds);
   }
 
   revalidatePath('/');

@@ -19,12 +19,12 @@ export async function upsertPermission(data: FormData) {
   const update = data.get('update') === 'true';
   const deleteValue = data.get('delete') === 'true';
   const roleId = (data.get('role_id') as string | null) || null;
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updatePermission(id, name, create, read, update, deleteValue, roleId, srcSnapshotRaw);
+    await updatePermission(userId, id, name, create, read, update, deleteValue, roleId, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await addPermission(creatorId, name, create, read, update, deleteValue, roleId);
+    await addPermission(userId, name, create, read, update, deleteValue, roleId);
   }
 
   revalidatePath('/');

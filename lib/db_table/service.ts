@@ -34,6 +34,7 @@ export async function addDbTable(creatorId: string, name: string, description: s
       name: name,
       description: description,
       creator_id: creatorId,
+      updater_id: creatorId,
       fields: {
         create: fieldsItems.map(f => ({
           name: f.name,
@@ -48,7 +49,7 @@ export async function addDbTable(creatorId: string, name: string, description: s
   });
 }
 
-export async function updateDbTable(id: string, name: string, description: string | null, fieldsItems: { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean }[], srcSnapshotRaw?: string | null) {
+export async function updateDbTable(updaterId: string, id: string, name: string, description: string | null, fieldsItems: { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean }[], srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -58,6 +59,7 @@ export async function updateDbTable(id: string, name: string, description: strin
       data: {
       name: name,
       description: description,
+        updater_id: updaterId,
       fields: {
         deleteMany: {},
         create: fieldsItems.map(f => ({

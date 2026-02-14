@@ -20,12 +20,12 @@ export async function upsertRole(data: FormData) {
   const userAccountsIds = userAccountsItems
     .map((userAccount) => userAccount.id)
     .filter((userAccountId): userAccountId is string => Boolean(userAccountId));
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateRole(id, name, description, userAccountsIds, srcSnapshotRaw);
+    await updateRole(userId, id, name, description, userAccountsIds, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await addRole(creatorId, name, description, userAccountsIds);
+    await addRole(userId, name, description, userAccountsIds);
   }
 
   revalidatePath('/');

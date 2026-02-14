@@ -12,8 +12,9 @@ export async function upsertSetting5(data: FormData) {
   await requirePermission('setting5', 'update');
   const name = data.get('name') as string;
   const email = data.get('email') as string;
+  const userId = await getSessionUserIdOrThrow();
 
-  await updateSetting5(id, name, email, srcSnapshotRaw);
+  await updateSetting5(userId, id, name, email, srcSnapshotRaw);
 
   revalidatePath('/');
   redirect('/setting5');

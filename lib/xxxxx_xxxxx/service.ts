@@ -36,6 +36,7 @@ export async function addXxxxxXxxxx(creatorId: string, name: string, description
       description: description,
       team: team,
       creator_id: creatorId,
+      updater_id: creatorId,
       yyyyy_yyyyys: {
         create: yyyyyYyyyysItems.map(f => ({
           name: f.name,
@@ -51,7 +52,7 @@ export async function addXxxxxXxxxx(creatorId: string, name: string, description
   });
 }
 
-export async function updateXxxxxXxxxx(id: string, name: string, description: string | null, team: string | null, yyyyyYyyyysItems: { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], srcSnapshotRaw?: string | null) {
+export async function updateXxxxxXxxxx(updaterId: string, id: string, name: string, description: string | null, team: string | null, yyyyyYyyyysItems: { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -62,6 +63,7 @@ export async function updateXxxxxXxxxx(id: string, name: string, description: st
       name: name,
       description: description,
       team: team,
+        updater_id: updaterId,
       yyyyy_yyyyys: {
         deleteMany: {},
         create: yyyyyYyyyysItems.map(f => ({

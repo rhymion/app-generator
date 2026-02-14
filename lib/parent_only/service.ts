@@ -34,11 +34,12 @@ export async function addParentOnly(creatorId: string, name: string, description
       login_time: loginTime,
       logout_time: logoutTime,
       creator_id: creatorId,
+      updater_id: creatorId,
     },
   });
 }
 
-export async function updateParentOnly(id: string, name: string, description: string | null, loginTime: Date | null, logoutTime: Date | null, srcSnapshotRaw?: string | null) {
+export async function updateParentOnly(updaterId: string, id: string, name: string, description: string | null, loginTime: Date | null, logoutTime: Date | null, srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -50,6 +51,7 @@ export async function updateParentOnly(id: string, name: string, description: st
       description: description,
       login_time: loginTime,
       logout_time: logoutTime,
+        updater_id: updaterId,
       },
     });
   });

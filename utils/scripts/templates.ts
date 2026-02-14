@@ -430,12 +430,12 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
     await requirePermission('${parent}', 'create');
   }
 ${formDataGets}
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await update${parentPascal}(id, ${parentParams}, srcSnapshotRaw);
+    await update${parentPascal}(userId, id, ${parentParams}, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await add${parentPascal}(creatorId, ${parentParams});
+    await add${parentPascal}(userId, ${parentParams});
   }`;
     } else if (canUpdate) {
       upsertBody = `  const id = data.get('id') as string | null;
@@ -443,14 +443,15 @@ ${formDataGets}
   if (!id) throw new Error('Create not supported');
   await requirePermission('${parent}', 'update');
 ${formDataGets}
+  const userId = await getSessionUserIdOrThrow();
 
-  await update${parentPascal}(id, ${parentParams}, srcSnapshotRaw);`;
+  await update${parentPascal}(userId, id, ${parentParams}, srcSnapshotRaw);`;
     } else if (canCreate) {
       upsertBody = `  await requirePermission('${parent}', 'create');
 ${formDataGets}
 
-  const creatorId = await getSessionUserIdOrThrow();
-  await add${parentPascal}(creatorId, ${parentParams});`;
+  const userId = await getSessionUserIdOrThrow();
+  await add${parentPascal}(userId, ${parentParams});`;
     }
 
     return `'use server';
@@ -618,12 +619,12 @@ export async function remove${parentPascal}(data: FormData | string[]) {
   }
 ${formDataGets}
 ${childFormDataExtractions}
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await update${parentPascal}(id, ${parentParams}${childArgs}, srcSnapshotRaw);
+    await update${parentPascal}(userId, id, ${parentParams}${childArgs}, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await add${parentPascal}(creatorId, ${parentParams}${childArgs});
+    await add${parentPascal}(userId, ${parentParams}${childArgs});
   }`;
   } else if (canUpdate) {
     upsertBodyWithChildren = `  const id = data.get('id') as string | null;
@@ -633,14 +634,15 @@ ${childFormDataExtractions}
 ${formDataGets}
 ${childFormDataExtractions}
 
-  await update${parentPascal}(id, ${parentParams}${childArgs}, srcSnapshotRaw);`;
+  const userId = await getSessionUserIdOrThrow();
+  await update${parentPascal}(userId, id, ${parentParams}${childArgs}, srcSnapshotRaw);`;
   } else if (canCreate) {
     upsertBodyWithChildren = `  await requirePermission('${parent}', 'create');
 ${formDataGets}
 ${childFormDataExtractions}
 
-  const creatorId = await getSessionUserIdOrThrow();
-  await add${parentPascal}(creatorId, ${parentParams}${childArgs});`;
+  const userId = await getSessionUserIdOrThrow();
+  await add${parentPascal}(userId, ${parentParams}${childArgs});`;
   }
 
   return `'use server';
@@ -1992,11 +1994,12 @@ export async function add${parentPascal}(creatorId: string, ${parentParamsWithTy
     data: {
 ${parentDataObj}
       creator_id: creatorId,
+      updater_id: creatorId,
     },
   });
 }
 ` : ''}${canUpdate ? `
-export async function update${parentPascal}(id: string, ${parentParamsWithTypes}, srcSnapshotRaw?: string | null) {
+export async function update${parentPascal}(updaterId: string, id: string, ${parentParamsWithTypes}, srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -2005,6 +2008,7 @@ export async function update${parentPascal}(id: string, ${parentParamsWithTypes}
       where: { id },
       data: {
 ${parentDataObj}
+        updater_id: updaterId,
       },
     });
   });
@@ -2137,12 +2141,13 @@ export async function add${parentPascal}(creatorId: string, ${parentParamsWithTy
     data: {
 ${parentDataObj}
       creator_id: creatorId,
+      updater_id: creatorId,
 ${childNestedCreate}
     },
   });
 }
 ` : ''}${canUpdate ? `
-export async function update${parentPascal}(id: string${parentParamsWithTypes ? ', ' : ''}${parentParamsWithTypes}${parentParamsWithTypes && childParamsForUpdate ? ', ' : ''}${childParamsForUpdate}, srcSnapshotRaw?: string | null) {${selfChildValidation}
+export async function update${parentPascal}(updaterId: string, id: string${parentParamsWithTypes ? ', ' : ''}${parentParamsWithTypes}${parentParamsWithTypes && childParamsForUpdate ? ', ' : ''}${childParamsForUpdate}, srcSnapshotRaw?: string | null) {${selfChildValidation}
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -2151,6 +2156,7 @@ export async function update${parentPascal}(id: string${parentParamsWithTypes ? 
       where: { id },
       data: {
 ${parentDataObj}
+        updater_id: updaterId,
 ${childNestedUpdate}
       },
     });
@@ -2323,7 +2329,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, '${model}', 'update');
     const body = await request.json();
     const { ${allBodyFields} } = body;
-    const result = await update${parentPascal}(${serviceArgsForUpdate});
+    const result = await update${parentPascal}(userId, ${serviceArgsForUpdate});
     return NextResponse.json(result);
   } catch (error) {
     return handleApiError(error);
