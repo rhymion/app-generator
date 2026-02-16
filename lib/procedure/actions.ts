@@ -3,13 +3,15 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import prisma from '@/lib/prisma';
 import { addProcedure, updateProcedure, deleteProcedure } from './service';
 
 export async function upsertProcedure(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('procedure', 'update');
+    const existing = await prisma.procedure.findUnique({ where: { id }, select: { creator_id: true, assignee_id: true } });
+    await requirePermission('procedure', 'update', existing);
   } else {
     await requirePermission('procedure', 'create');
   }
@@ -45,8 +47,11 @@ export async function upsertProcedure(data: FormData) {
 }
 
 export async function removeProcedure(data: FormData | string[]) {
-  await requirePermission('procedure', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  const items = await prisma.procedure.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true, assignee_id: true } });
+  for (const item of items) {
+    await requirePermission('procedure', 'delete', item);
+  }
   await deleteProcedure(ids);
   revalidatePath('/');
   redirect('/procedure');

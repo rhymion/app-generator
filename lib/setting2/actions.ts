@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import prisma from '@/lib/prisma';
 import { addSetting2 } from './service';
 
 export async function upsertSetting2(data: FormData) {

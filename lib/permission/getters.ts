@@ -59,9 +59,9 @@ export async function getPermissionListPageData(isAssertPermission: boolean = tr
 }
 
 export async function getPermissionDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('permission');
-  await assertPermission(userPermissions, operation, 'permission');
   const permission = await getPermissionDetail(id);
+  const userPermissions = await getModelPermissions('permission', undefined, permission);
+  await assertPermission(userPermissions, operation, 'permission');
   return { permission, userPermissions };
 }
 

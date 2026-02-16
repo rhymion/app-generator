@@ -3,13 +3,15 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import prisma from '@/lib/prisma';
 import { addResource, updateResource, deleteResource } from './service';
 
 export async function upsertResource(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('resource', 'update');
+    const existing = await prisma.resource.findUnique({ where: { id }, select: { creator_id: true } });
+    await requirePermission('resource', 'update', existing);
   } else {
     await requirePermission('resource', 'create');
   }
@@ -33,8 +35,11 @@ export async function upsertResource(data: FormData) {
 }
 
 export async function removeResource(data: FormData | string[]) {
-  await requirePermission('resource', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  const items = await prisma.resource.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
+  for (const item of items) {
+    await requirePermission('resource', 'delete', item);
+  }
   await deleteResource(ids);
   revalidatePath('/');
   redirect('/resource');

@@ -21,12 +21,20 @@ export type Operation = 'create' | 'read' | 'update' | 'delete';
 export type ModelName = string;
 export type ModelPermissions = Record<Operation, boolean>;
 
+export type ItemContext = {
+  creator_id?: string | null;
+  assignee_id?: string | null;
+  [key: string]: unknown;
+} | null | undefined;
+
 const EMPTY_PERMISSIONS: ModelPermissions = {
   create: false,
   read: false,
   update: false,
   delete: false,
 };
+
+const SPECIAL_ROLE_NAMES = ['Creator', 'Assignee'] as const;
 
 async function getUserRoleIds(userId: string): Promise<string[]> {
   const user = await prisma.user_account.findUnique({
@@ -36,19 +44,11 @@ async function getUserRoleIds(userId: string): Promise<string[]> {
   return user?.roles?.map((role) => role.id) ?? [];
 }
 
-function mergePermissionRows(rows: { create: boolean; read: boolean; update: boolean; delete: boolean }[]): ModelPermissions {
-  return rows.reduce<ModelPermissions>(
-    (acc, row) => ({
-      create: acc.create || row.create,
-      read: acc.read || row.read,
-      update: acc.update || row.update,
-      delete: acc.delete || row.delete,
-    }),
-    { ...EMPTY_PERMISSIONS }
-  );
-}
-
-export async function getModelPermissions(model: ModelName, userId?: string | null): Promise<ModelPermissions> {
+export async function getModelPermissions(
+  model: ModelName,
+  userId?: string | null,
+  item?: ItemContext,
+): Promise<ModelPermissions> {
   const resolvedUserId = userId ?? (await getSessionUserId());
   if (!resolvedUserId) {
     return { ...EMPTY_PERMISSIONS };
@@ -56,23 +56,51 @@ export async function getModelPermissions(model: ModelName, userId?: string | nu
 
   const roleIds = await getUserRoleIds(resolvedUserId);
 
+  // Build OR conditions for the permission query
+  const orConditions: any[] = [
+    { role_id: null }, // Global permissions (no role)
+  ];
+
+  // Regular roles: user's roles EXCEPT Creator/Assignee (ignore direct assignments)
+  if (roleIds.length > 0) {
+    orConditions.push({
+      role_id: { in: roleIds },
+      role: { name: { notIn: [...SPECIAL_ROLE_NAMES] } },
+    });
+  }
+
+  // Special roles based on item context
+  if (item) {
+    const matchingSpecialRoles: string[] = [];
+    if (item.creator_id && item.creator_id === resolvedUserId) {
+      matchingSpecialRoles.push('Creator');
+    }
+    if (item.assignee_id && item.assignee_id === resolvedUserId) {
+      matchingSpecialRoles.push('Assignee');
+    }
+    if (matchingSpecialRoles.length > 0) {
+      orConditions.push({
+        role: { name: { in: matchingSpecialRoles } },
+      });
+    }
+  }
+
   const permissions = await prisma.permission.findMany({
     where: {
       name: model,
-      OR: [
-        { role_id: null },
-        ...(roleIds.length > 0 ? [{ role_id: { in: roleIds } }] : []),
-      ],
+      OR: orConditions,
     },
     select: {
       create: true,
       read: true,
       update: true,
       delete: true,
+      role: { select: { name: true } },
     },
   });
 
   if (permissions.length === 0) {
+    // Default: grant all permissions if no explicit permissions are defined
     return {
       create: true,
       read: true,
@@ -81,17 +109,38 @@ export async function getModelPermissions(model: ModelName, userId?: string | nu
     };
   }
 
-  return mergePermissionRows(permissions);
+  // Merge with OR logic, but mask `create` for Creator/Assignee roles
+  return permissions.reduce<ModelPermissions>(
+    (acc, row) => {
+      const isSpecialRole = row.role && SPECIAL_ROLE_NAMES.includes(row.role.name as any);
+      return {
+        create: acc.create || (!isSpecialRole && row.create),
+        read: acc.read || row.read,
+        update: acc.update || row.update,
+        delete: acc.delete || row.delete,
+      };
+    },
+    { ...EMPTY_PERMISSIONS },
+  );
 }
 
-export async function canAccess(model: ModelName, operation: Operation, userId?: string | null): Promise<boolean> {
-  const permissions = await getModelPermissions(model, userId);
+export async function canAccess(
+  model: ModelName,
+  operation: Operation,
+  userId?: string | null,
+  item?: ItemContext,
+): Promise<boolean> {
+  const permissions = await getModelPermissions(model, userId, item);
   return Boolean(permissions[operation]);
 }
 
-export async function requirePermission(model: ModelName, operation: Operation): Promise<void> {
-  const allowed = await canAccess(model, operation);
-  if (!allowed) {
+export async function requirePermission(
+  model: ModelName,
+  operation: Operation,
+  item?: ItemContext,
+): Promise<void> {
+  const permissions = await getModelPermissions(model, undefined, item);
+  if (!permissions[operation]) {
     throw new Error(`Access denied: ${model}.${operation}`);
   }
 }

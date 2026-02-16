@@ -69,9 +69,9 @@ export async function getResourceListPageData(isAssertPermission: boolean = true
 }
 
 export async function getResourceDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('resource');
-  await assertPermission(userPermissions, operation, 'resource');
   const resource = await getResourceDetail(id);
+  const userPermissions = await getModelPermissions('resource', undefined, resource);
+  await assertPermission(userPermissions, operation, 'resource');
   return { resource, userPermissions };
 }
 

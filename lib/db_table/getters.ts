@@ -53,9 +53,9 @@ export async function getDbTableListPageData(isAssertPermission: boolean = true)
 }
 
 export async function getDbTableDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('db_table');
-  await assertPermission(userPermissions, operation, 'db_table');
   const dbTable = await getDbTableDetail(id);
+  const userPermissions = await getModelPermissions('db_table', undefined, dbTable);
+  await assertPermission(userPermissions, operation, 'db_table');
   return { dbTable, userPermissions };
 }
 

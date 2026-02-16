@@ -3,11 +3,15 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import prisma from '@/lib/prisma';
 import { deleteSetting6 } from './service';
 
 export async function removeSetting6(data: FormData | string[]) {
-  await requirePermission('setting6', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  const items = await prisma.user_account.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
+  for (const item of items) {
+    await requirePermission('setting6', 'delete', item);
+  }
   await deleteSetting6(ids);
   revalidatePath('/');
   redirect('/setting6');

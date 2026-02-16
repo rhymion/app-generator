@@ -66,9 +66,9 @@ export async function getProcedureListPageData(isAssertPermission: boolean = tru
 }
 
 export async function getProcedureDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('procedure');
-  await assertPermission(userPermissions, operation, 'procedure');
   const procedure = await getProcedureDetail(id);
+  const userPermissions = await getModelPermissions('procedure', undefined, procedure);
+  await assertPermission(userPermissions, operation, 'procedure');
   return { procedure, userPermissions };
 }
 

@@ -53,9 +53,9 @@ export async function getParentOnlyListPageData(isAssertPermission: boolean = tr
 }
 
 export async function getParentOnlyDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('parent_only');
-  await assertPermission(userPermissions, operation, 'parent_only');
   const parentOnly = await getParentOnlyDetail(id);
+  const userPermissions = await getModelPermissions('parent_only', undefined, parentOnly);
+  await assertPermission(userPermissions, operation, 'parent_only');
   return { parentOnly, userPermissions };
 }
 

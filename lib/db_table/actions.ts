@@ -3,13 +3,15 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import prisma from '@/lib/prisma';
 import { addDbTable, updateDbTable, deleteDbTable } from './service';
 
 export async function upsertDbTable(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('db_table', 'update');
+    const existing = await prisma.db_table.findUnique({ where: { id }, select: { creator_id: true } });
+    await requirePermission('db_table', 'update', existing);
   } else {
     await requirePermission('db_table', 'create');
   }
@@ -30,8 +32,11 @@ export async function upsertDbTable(data: FormData) {
 }
 
 export async function removeDbTable(data: FormData | string[]) {
-  await requirePermission('db_table', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  const items = await prisma.db_table.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
+  for (const item of items) {
+    await requirePermission('db_table', 'delete', item);
+  }
   await deleteDbTable(ids);
   revalidatePath('/');
   redirect('/db_table');

@@ -11,7 +11,8 @@ export async function upsertUserAccount(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('user_account', 'update');
+    const existing = await prisma.user_account.findUnique({ where: { id }, select: { creator_id: true } });
+    await requirePermission('user_account', 'update', existing);
   } else {
     await requirePermission('user_account', 'create');
   }
@@ -46,8 +47,11 @@ export async function generateApiKey(): Promise<string> {
 }
 
 export async function removeUserAccount(data: FormData | string[]) {
-  await requirePermission('user_account', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  const items = await prisma.user_account.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
+  for (const item of items) {
+    await requirePermission('user_account', 'delete', item);
+  }
   await deleteUserAccount(ids);
   revalidatePath('/');
   redirect('/user_account');

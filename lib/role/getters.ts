@@ -53,9 +53,9 @@ export async function getRoleListPageData(isAssertPermission: boolean = true) {
 }
 
 export async function getRoleDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('role');
-  await assertPermission(userPermissions, operation, 'role');
   const role = await getRoleDetail(id);
+  const userPermissions = await getModelPermissions('role', undefined, role);
+  await assertPermission(userPermissions, operation, 'role');
   return { role, userPermissions };
 }
 

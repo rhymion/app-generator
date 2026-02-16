@@ -54,9 +54,9 @@ export async function getSetting4ListPageData(isAssertPermission: boolean = true
 }
 
 export async function getSetting4DetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('user_account');
-  await assertPermission(userPermissions, operation, 'user_account');
   const setting4 = await getSetting4Detail(id);
+  const userPermissions = await getModelPermissions('user_account', undefined, setting4);
+  await assertPermission(userPermissions, operation, 'user_account');
   return { setting4, userPermissions };
 }
 

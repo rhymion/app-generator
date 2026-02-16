@@ -57,9 +57,9 @@ export async function getBookingListPageData(isAssertPermission: boolean = true)
 }
 
 export async function getBookingDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('booking');
-  await assertPermission(userPermissions, operation, 'booking');
   const booking = await getBookingDetail(id);
+  const userPermissions = await getModelPermissions('booking', undefined, booking);
+  await assertPermission(userPermissions, operation, 'booking');
   return { booking, userPermissions };
 }
 

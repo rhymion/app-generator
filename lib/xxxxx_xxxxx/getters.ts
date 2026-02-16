@@ -54,9 +54,9 @@ export async function getXxxxxXxxxxListPageData(isAssertPermission: boolean = tr
 }
 
 export async function getXxxxxXxxxxDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('xxxxx_xxxxx');
-  await assertPermission(userPermissions, operation, 'xxxxx_xxxxx');
   const xxxxxXxxxx = await getXxxxxXxxxxDetail(id);
+  const userPermissions = await getModelPermissions('xxxxx_xxxxx', undefined, xxxxxXxxxx);
+  await assertPermission(userPermissions, operation, 'xxxxx_xxxxx');
   return { xxxxxXxxxx, userPermissions };
 }
 

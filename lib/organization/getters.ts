@@ -53,9 +53,9 @@ export async function getOrganizationListPageData(isAssertPermission: boolean = 
 }
 
 export async function getOrganizationDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('organization');
-  await assertPermission(userPermissions, operation, 'organization');
   const organization = await getOrganizationDetail(id);
+  const userPermissions = await getModelPermissions('organization', undefined, organization);
+  await assertPermission(userPermissions, operation, 'organization');
   return { organization, userPermissions };
 }
 

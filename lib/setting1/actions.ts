@@ -3,13 +3,15 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import prisma from '@/lib/prisma';
 import { addSetting1, updateSetting1, deleteSetting1 } from './service';
 
 export async function upsertSetting1(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('setting1', 'update');
+    const existing = await prisma.user_account.findUnique({ where: { id }, select: { creator_id: true } });
+    await requirePermission('setting1', 'update', existing);
   } else {
     await requirePermission('setting1', 'create');
   }
@@ -31,8 +33,11 @@ export async function upsertSetting1(data: FormData) {
 }
 
 export async function removeSetting1(data: FormData | string[]) {
-  await requirePermission('setting1', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  const items = await prisma.user_account.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
+  for (const item of items) {
+    await requirePermission('setting1', 'delete', item);
+  }
   await deleteSetting1(ids);
   revalidatePath('/');
   redirect('/setting1');

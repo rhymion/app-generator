@@ -304,9 +304,9 @@ export async function get${parentPascal}ListPageData(isAssertPermission: boolean
 }
 
 export async function get${parentPascal}DetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('${model}');
-  await assertPermission(userPermissions, operation, '${model}');
   const ${parentCamel} = await get${parentPascal}Detail(id);
+  const userPermissions = await getModelPermissions('${model}', undefined, ${parentCamel});
+  await assertPermission(userPermissions, operation, '${model}');
   return { ${parentCamel}, userPermissions };
 }
 
@@ -329,6 +329,10 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
   const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps });
   const selfParentRel = parentRelationships.find((rel) => rel.target === model);
   const selfParentProp = selfParentRel?.propName ?? null;
+
+  // Check if model has assignee_id for item-level permission context
+  const hasAssigneeId = filteredProps ? 'assignee_id' in filteredProps : false;
+  const itemContextSelect = `{ creator_id: true${hasAssigneeId ? ', assignee_id: true' : ''} }`;
 
   // Get parent properties (excluding id and timestamps)
   const parentProps = filteredProps
@@ -434,7 +438,8 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
       upsertBody = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('${parent}', 'update');
+    const existing = await prisma.${model}.findUnique({ where: { id }, select: ${itemContextSelect} });
+    await requirePermission('${parent}', 'update', existing);
   } else {
     await requirePermission('${parent}', 'create');
   }
@@ -450,7 +455,8 @@ ${formDataGets}
       upsertBody = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (!id) throw new Error('Create not supported');
-  await requirePermission('${parent}', 'update');
+  const existing = await prisma.${model}.findUnique({ where: { id }, select: ${itemContextSelect} });
+  await requirePermission('${parent}', 'update', existing);
 ${formDataGets}
   const userId = await getSessionUserIdOrThrow();
 
@@ -467,7 +473,8 @@ ${formDataGets}
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';${serviceImports ? `\nimport { ${serviceImports} } from './service';` : ''}
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import prisma from '@/lib/prisma';${serviceImports ? `\nimport { ${serviceImports} } from './service';` : ''}
 ${(canCreate || canUpdate) ? `
 export async function upsert${parentPascal}(data: FormData) {
 ${upsertBody}
@@ -477,8 +484,11 @@ ${upsertBody}
 }
 ` : ''}${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
-  await requirePermission('${parent}', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  const items = await prisma.${model}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true${hasAssigneeId ? ', assignee_id: true' : ''} } });
+  for (const item of items) {
+    await requirePermission('${parent}', 'delete', item);
+  }
   await delete${parentPascal}(ids);
   revalidatePath('/');
   redirect('/${parent}');
@@ -622,7 +632,8 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     upsertBodyWithChildren = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('${parent}', 'update');
+    const existing = await prisma.${model}.findUnique({ where: { id }, select: ${itemContextSelect} });
+    await requirePermission('${parent}', 'update', existing);
   } else {
     await requirePermission('${parent}', 'create');
   }
@@ -639,7 +650,8 @@ ${childFormDataExtractions}
     upsertBodyWithChildren = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (!id) throw new Error('Create not supported');
-  await requirePermission('${parent}', 'update');
+  const existing = await prisma.${model}.findUnique({ where: { id }, select: ${itemContextSelect} });
+  await requirePermission('${parent}', 'update', existing);
 ${formDataGets}
 ${childFormDataExtractions}
 
@@ -658,7 +670,8 @@ ${childFormDataExtractions}
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';${serviceImportsWithChildren ? `\nimport { ${serviceImportsWithChildren} } from './service';` : ''}
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import prisma from '@/lib/prisma';${serviceImportsWithChildren ? `\nimport { ${serviceImportsWithChildren} } from './service';` : ''}
 ${(canCreate || canUpdate) ? `
 export async function upsert${parentPascal}(data: FormData) {
 ${upsertBodyWithChildren}
@@ -668,8 +681,11 @@ ${upsertBodyWithChildren}
 }
 ` : ''}${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
-  await requirePermission('${parent}', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  const items = await prisma.${model}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true${hasAssigneeId ? ', assignee_id: true' : ''} } });
+  for (const item of items) {
+    await requirePermission('${parent}', 'delete', item);
+  }
   await delete${parentPascal}(ids);
   revalidatePath('/');
   redirect('/${parent}');
@@ -2317,8 +2333,12 @@ export function generateApiDetailRoute(parent: string, children: ChildInfo[], sc
     canDelete ? `delete${parentPascal}` : '',
   ].filter(Boolean).join(', ');
 
+  const hasAssigneeId = filteredProps ? 'assignee_id' in filteredProps : false;
+  const itemContextSelect = `{ creator_id: true${hasAssigneeId ? ', assignee_id: true' : ''} }`;
+
   return `import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';${canView ? `\nimport { get${parentPascal}Detail } from '@/lib/${parent}/getters';` : ''}${serviceImports ? `\nimport { ${serviceImports} } from '@/lib/${parent}/service';` : ''}
+import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import prisma from '@/lib/prisma';${canView ? `\nimport { get${parentPascal}Detail } from '@/lib/${parent}/getters';` : ''}${serviceImports ? `\nimport { ${serviceImports} } from '@/lib/${parent}/service';` : ''}
 
 type Params = { params: Promise<{ id: string }> };
 ${canView ? `
@@ -2326,11 +2346,11 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '${model}', 'read');
     const item = await get${parentPascal}Detail(id);
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
+    await requireApiPermission(userId, '${model}', 'read', item);
     return NextResponse.json(item);
   } catch (error) {
     return handleApiError(error);
@@ -2341,7 +2361,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '${model}', 'update');
+    const existing = await prisma.${model}.findUnique({ where: { id }, select: ${itemContextSelect} });
+    if (!existing) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    await requireApiPermission(userId, '${model}', 'update', existing);
     const body = await request.json();
     const { ${allBodyFields} } = body;
     const result = await update${parentPascal}(userId, ${serviceArgsForUpdate});
@@ -2355,7 +2379,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '${model}', 'delete');
+    const existing = await prisma.${model}.findUnique({ where: { id }, select: ${itemContextSelect} });
+    if (!existing) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    await requireApiPermission(userId, '${model}', 'delete', existing);
     await delete${parentPascal}([id]);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
