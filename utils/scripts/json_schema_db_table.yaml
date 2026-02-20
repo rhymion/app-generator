@@ -155,6 +155,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/xxxxx_xxxxx"
       - type: object
@@ -367,6 +368,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/parent_only"
 
@@ -900,6 +902,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/booking"
       - type: object

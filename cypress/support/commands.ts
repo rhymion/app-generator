@@ -52,14 +52,95 @@ Cypress.Commands.add('checkField', (label: string, expectedValue: string) => {
   cy.get('body').then(($body) => {
     const $label = $body.find(`label:contains("${label}")`).first();
     const forAttr = $label.attr('for');
-    
+
     if (forAttr) {
-      // Use the 'for' attribute to find the specific input/textarea
       cy.get(`#${forAttr}`).should('have.value', expectedValue);
     } else {
-      // Fall back to finding within parent (for wrapped labels)
       cy.contains('label', label).parent().find('input, textarea').first().should('have.value', expectedValue);
     }
+  });
+});
+
+/**
+ * Clear and re-fill a labeled form field (for editing existing values)
+ */
+Cypress.Commands.add('clearAndFillField', (label: string, value: string) => {
+  cy.get('body').then(($body) => {
+    const $label = $body.find(`label:contains("${label}")`).first();
+    const forAttr = $label.attr('for');
+
+    if (forAttr) {
+      cy.get(`#${forAttr}`).clear().type(value);
+    } else {
+      cy.contains('label', label).parent().find('input, textarea').first().clear().type(value);
+    }
+  });
+});
+
+/**
+ * Clear a labeled form field value entirely
+ */
+Cypress.Commands.add('clearField', (label: string) => {
+  cy.get('body').then(($body) => {
+    const $label = $body.find(`label:contains("${label}")`).first();
+    const forAttr = $label.attr('for');
+
+    if (forAttr) {
+      cy.get(`#${forAttr}`).clear();
+    } else {
+      cy.contains('label', label).parent().find('input, textarea').first().clear();
+    }
+  });
+});
+
+/**
+ * Select an option from MUI Autocomplete by label
+ */
+Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) => {
+  cy.contains('label', label).parent().find('input').first().clear().type(optionText);
+  cy.get('.MuiAutocomplete-popper li').contains(optionText).click();
+});
+
+/**
+ * Clear MUI Autocomplete selection
+ */
+Cypress.Commands.add('clearAutocomplete', (label: string) => {
+  cy.contains('label', label).parent().find('button[aria-label="Clear"]').click();
+});
+
+/**
+ * Set checkbox state by label
+ */
+Cypress.Commands.add('setCheckbox', (label: string, checked: boolean) => {
+  cy.contains('label', label).parent().find('input[type="checkbox"]').then(($cb) => {
+    if (checked && !$cb.is(':checked')) {
+      cy.wrap($cb).check();
+    } else if (!checked && $cb.is(':checked')) {
+      cy.wrap($cb).uncheck();
+    }
+  });
+});
+
+/**
+ * Fill MUI DateTimePicker by label
+ */
+Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
+  cy.contains('label', label).parent().find('input').first().clear().type(dateString);
+});
+
+/**
+ * Clear MUI DateTimePicker by label
+ */
+Cypress.Commands.add('clearDateTime', (label: string) => {
+  cy.contains('label', label).parent().find('input').first().clear();
+});
+
+/**
+ * Select DataGrid rows by checkbox (0-based indices)
+ */
+Cypress.Commands.add('selectDataGridRows', (indices: number[]) => {
+  indices.forEach((i) => {
+    cy.get(`div[role="row"][data-rowindex="${i}"]`).find('input[type="checkbox"]').check();
   });
 });
 
@@ -67,36 +148,18 @@ Cypress.Commands.add('checkField', (label: string, expectedValue: string) => {
 declare global {
   namespace Cypress {
     interface Chainable {
-      /**
-       * Custom command to login
-       * @param email - User email
-       * @param password - User password
-       * @example cy.login('test@example.com', 'password123')
-       */
       login(email: string, password: string): Chainable<void>;
-      
-      /**
-       * Fill a form field by label
-       * @param label - Label text
-       * @param value - Value to type
-       * @example cy.fillField('Name', 'John Doe')
-       */
       fillField(label: string, value: string): Chainable<void>;
-      
-      /**
-       * Click a button by text
-       * @param text - Button text
-       * @example cy.clickButton('Save')
-       */
       clickButton(text: string): Chainable<void>;
-      
-      /**
-       * Check a form field value by label
-       * @param label - Label text
-       * @param expectedValue - Expected value
-       * @example cy.checkField('Name', 'John Doe')
-       */
       checkField(label: string, expectedValue: string): Chainable<void>;
+      clearAndFillField(label: string, value: string): Chainable<void>;
+      clearField(label: string): Chainable<void>;
+      selectAutocomplete(label: string, optionText: string): Chainable<void>;
+      clearAutocomplete(label: string): Chainable<void>;
+      setCheckbox(label: string, checked: boolean): Chainable<void>;
+      fillDateTime(label: string, dateString: string): Chainable<void>;
+      clearDateTime(label: string): Chainable<void>;
+      selectDataGridRows(indices: number[]): Chainable<void>;
     }
   }
 }

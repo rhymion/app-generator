@@ -1,105 +1,208 @@
+// AUTO-GENERATED - DO NOT EDIT
 import { TEST_CREDENTIALS } from '../support/test-credentials';
-import { fillDataGridRow, assertDataGridEmpty } from '../support/datagrid-helpers';
+import { fillDataGridRow, assertDataGridEmpty, getDataGridRowCount, assertDataGridRowData } from '../support/datagrid-helpers';
 
-describe('Testing xxxxx xxxxx pages and their behavior', () => {
+describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
   beforeEach(() => {
-    // Reset and seed database with fresh data
     cy.task('db:reset');
     cy.task('db:seed');
-
-    // Clear ALL session data including cy.session() cache
     Cypress.session.clearAllSavedSessions();
     cy.clearCookies();
     cy.clearLocalStorage();
-
-    // Visit a page first so we can access window
     cy.visit('/');
-
-    // Now clear session storage
-    cy.window().then((win) => {
-      win.sessionStorage.clear();
-    });
-
-    // Login with seeded user credentials (creates new session)
+    cy.window().then((win) => { win.sessionStorage.clear(); });
     cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
   });
 
-  it('View xxxxx xxxxx list page', () => {
-    cy.visit('/');
-    cy.contains('Xxxxx Xxxxx').click();
-    cy.url().should('include', '/xxxxx_xxxxx');
-    assertDataGridEmpty();
+  describe('Display list', () => {
+    it('1.1 shows empty state with no items', () => {
+      cy.visit('/xxxxx_xxxxx');
+      assertDataGridEmpty();
+    });
+
+    it('1.2 shows list with one item', () => {
+      cy.task('db:populateXxxxxXxxxx', 1);
+      cy.visit('/xxxxx_xxxxx');
+      getDataGridRowCount().should('eq', 1);
+      cy.contains('Xxxxx Xxxxx 1').should('be.visible');
+    });
+
+    it('1.3 shows list with multiple items', () => {
+      cy.task('db:populateXxxxxXxxxx', 3);
+      cy.visit('/xxxxx_xxxxx');
+      getDataGridRowCount().should('eq', 3);
+    });
   });
 
-  it('Create new xxxxx xxxxx', () => {
-    cy.visit('/xxxxx_xxxxx');
-    cy.clickButton('Create New Xxxxx Xxxxx');
-
-    // Fill in form fields
-    cy.fillField('Name', 'Test Xxxxx');
-    cy.fillField('Description', 'This is a test xxxxx xxxxx.');
-    cy.fillField('Team', 'Test Team');
-    
-    // Add and fill child row
-    cy.clickButton('Add Yyyyy Yyyyy');
-    fillDataGridRow(0, {
-      name: 'field1',
-      type: 'string',
-      max_length: 255,
-      required: true,
-      written_by: 'Test User',
+  describe('Create', () => {
+    it('2.1 creates with minimal data (required fields only)', () => {
+      cy.visit('/xxxxx_xxxxx');
+      cy.clickButton('Create New Xxxxx Xxxxx');
+      cy.fillField('Name', 'Test Xxxxx Xxxxx');
+      // Add required child: Yyyyy Yyyyys
+      cy.clickButton('Add Yyyyy Yyyyys');
+      fillDataGridRow(0, { name: 'Test Yyyyy Yyyyys', type: 'string', required: true, written_by: 'Test Written By' });
+      cy.clickButton('Save');
+      cy.url().should('include', '/xxxxx_xxxxx');
+      cy.contains('Test Xxxxx Xxxxx').should('be.visible');
+      // Verify on view page
+      cy.contains('Test Xxxxx Xxxxx').click();
+      cy.url().should('include', '/xxxxx_xxxxx/view');
+      cy.checkField('Name', 'Test Xxxxx Xxxxx');
     });
 
-    // Save and verify
-    cy.clickButton('Save');
-    cy.url().should('include', '/xxxxx_xxxxx');
-    cy.contains('Test Xxxxx').should('be.visible');
+    it('2.2 creates with full data (all fields and children)', () => {
+      cy.visit('/xxxxx_xxxxx');
+      cy.clickButton('Create New Xxxxx Xxxxx');
+      cy.fillField('Name', 'Test Xxxxx Xxxxx');
+      cy.fillField('Description', 'Test Description');
+      cy.fillField('Team', 'Test Team');
+      // Add child: Yyyyy Yyyyys
+      cy.clickButton('Add Yyyyy Yyyyys');
+      fillDataGridRow(0, { name: 'Test Yyyyy Yyyyys', type: 'string', max_length: 100, max: 100, regex: 'Test Regex', required: true, written_by: 'Test Written By' });
+      cy.clickButton('Save');
+      cy.url().should('include', '/xxxxx_xxxxx');
+      cy.contains('Test Xxxxx Xxxxx').should('be.visible');
+      // Verify on view page
+      cy.contains('Test Xxxxx Xxxxx').click();
+      cy.url().should('include', '/xxxxx_xxxxx/view');
+      cy.checkField('Name', 'Test Xxxxx Xxxxx');
+      cy.checkField('Description', 'Test Description');
+      cy.checkField('Team', 'Test Team');
+    });
   });
 
-  it('Edit existing xxxxx xxxxx', () => {
-    // Populate data using Cypress tasks (runs in Node.js context)
-    cy.task<any[]>('db:populateXxxxxXxxxx', 1).then((records) => {
-      const xxxxxXxxxx = records[0];
-      cy.task('db:populateYyyyyYyyyy', { xxxxxXxxxxId: xxxxxXxxxx.id, length: 1 });
+  describe('Edit', () => {
+    it('3.1 adds optional data and child items', () => {
+      cy.task<any[]>('db:populateXxxxxXxxxx', 1).then((records) => {
+        cy.visit('/xxxxx_xxxxx');
+        cy.contains('Xxxxx Xxxxx 1').click();
+        cy.contains('Edit').click();
+        cy.url().should('include', '/xxxxx_xxxxx/edit');
+        cy.fillField('Description', 'Test Description');
+        cy.fillField('Team', 'Test Team');
+        // Add child: Yyyyy Yyyyys
+        cy.clickButton('Add Yyyyy Yyyyys');
+        fillDataGridRow(0, { name: 'Test Yyyyy Yyyyys', type: 'string', required: true, written_by: 'Test Written By' });
+        cy.clickButton('Save');
+        cy.url().should('include', '/xxxxx_xxxxx');
+        cy.contains('Xxxxx Xxxxx 1').should('be.visible');
+        // Verify on view page
+        cy.contains('Xxxxx Xxxxx 1').click();
+        cy.url().should('include', '/xxxxx_xxxxx/view');
+        cy.checkField('Name', 'Xxxxx Xxxxx 1');
+      });
     });
-    
-    cy.visit('/xxxxx_xxxxx');
-    cy.contains('Xxxxx Xxxxx 1').click();
-    cy.contains('Edit').click();
-    cy.url().should('include', '/xxxxx_xxxxx/edit');
 
-    // Update form fields
-    cy.fillField('Description', 'Updated description for test xxxxx xxxxx.');
-    
-    // Update child row
-    fillDataGridRow(0, {
-      name: 'field1_updated',
-      type: 'number',
-      max: 100,
-      required: false,
+    it('3.2 removes optional data and child items', () => {
+      cy.task<any[]>('db:populateXxxxxXxxxxFull', 1).then((records) => {
+        cy.task('db:populateXxxxxXxxxxYyyyyYyyyy', { parentId: records[0].id, length: 1 });
+        cy.visit('/xxxxx_xxxxx');
+        cy.contains('Xxxxx Xxxxx 1').click();
+        cy.contains('Edit').click();
+        cy.url().should('include', '/xxxxx_xxxxx/edit');
+        cy.clearField('Description');
+        cy.clearField('Team');
+        // Delete child: Yyyyy Yyyyys
+        cy.selectDataGridRows([0]);
+        cy.clickButton('Delete Selected');
+        cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+        cy.clickButton('Save');
+        cy.url().should('include', '/xxxxx_xxxxx');
+        cy.contains('Xxxxx Xxxxx 1').should('be.visible');
+      });
     });
 
-    // Save and verify
-    cy.clickButton('Save');
-    cy.url().should('include', '/xxxxx_xxxxx');
-    cy.contains('Xxxxx Xxxxx 1').should('be.visible');
-    cy.contains('Updated description for test xxxxx xxxxx.').should('be.visible');
+    it('3.3 edits with mixed changes', () => {
+      cy.task<any[]>('db:populateXxxxxXxxxx', 1).then((records) => {
+        cy.visit('/xxxxx_xxxxx');
+        cy.contains('Xxxxx Xxxxx 1').click();
+        cy.contains('Edit').click();
+        cy.clearAndFillField('Name', 'Updated Xxxxx Xxxxx');
+        cy.fillField('Description', 'Updated Description');
+        cy.clickButton('Save');
+        cy.url().should('include', '/xxxxx_xxxxx');
+        cy.contains('Updated Xxxxx Xxxxx').should('be.visible');
+        // Verify on view page
+        cy.contains('Updated Xxxxx Xxxxx').click();
+        cy.url().should('include', '/xxxxx_xxxxx/view');
+        cy.checkField('Name', 'Updated Xxxxx Xxxxx');
+      });
+    });
   });
 
-  it('Delete existing xxxxx xxxxx', () => {
-    cy.task<any[]>('db:populateXxxxxXxxxx', 1).then((records) => {
-      const xxxxxXxxxx = records[0];
-      cy.task('db:populateYyyyyYyyyy', { xxxxxXxxxxId: xxxxxXxxxx.id, length: 1 });
+  describe('Delete', () => {
+    it('4.1 deletes a single item from list view', () => {
+      cy.task('db:populateXxxxxXxxxx', 2);
+      cy.visit('/xxxxx_xxxxx');
+      cy.selectDataGridRows([0]);
+      cy.clickButton('Delete Selected');
+      cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+      getDataGridRowCount().should('eq', 1);
     });
-    cy.visit('/xxxxx_xxxxx');
-    cy.contains('Xxxxx Xxxxx 1').click();
-    cy.contains('Edit').click();
-    cy.url().should('include', '/xxxxx_xxxxx/edit');
 
-    // Delete and verify
-    cy.clickButton('Delete Xxxxx Xxxxx');
-    cy.get('div[role="dialog"]').find('button').contains('Delete').click();
-    cy.url().should('include', '/xxxxx_xxxxx');
-    cy.contains('Xxxxx Xxxxx 1').should('not.exist');
+    it('4.2 deletes multiple items from list view', () => {
+      cy.task('db:populateXxxxxXxxxx', 3);
+      cy.visit('/xxxxx_xxxxx');
+      cy.selectDataGridRows([0, 1]);
+      cy.clickButton('Delete Selected');
+      cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+      getDataGridRowCount().should('eq', 1);
+    });
+
+    it('4.3 deletes an item from edit page', () => {
+      cy.task('db:populateXxxxxXxxxx', 1);
+      cy.visit('/xxxxx_xxxxx');
+      cy.contains('Xxxxx Xxxxx 1').click();
+      cy.contains('Edit').click();
+      cy.url().should('include', '/xxxxx_xxxxx/edit');
+      cy.clickButton('Delete Xxxxx Xxxxx');
+      cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+      cy.url().should('include', '/xxxxx_xxxxx');
+      cy.contains('Xxxxx Xxxxx 1').should('not.exist');
+    });
+  });
+
+  describe('Fail create', () => {
+    it('5.1 fails when required parent field is missing', () => {
+      cy.visit('/xxxxx_xxxxx/new');
+      cy.clickButton('Save');
+      cy.url().should('include', '/xxxxx_xxxxx/new');
+    });
+
+    it('5.2 fails when required child field is missing', () => {
+      cy.visit('/xxxxx_xxxxx/new');
+      cy.fillField('Name', 'Test Xxxxx Xxxxx');
+      cy.clickButton('Add Yyyyy Yyyyys');
+      fillDataGridRow(0, { name: 'Test Yyyyy Yyyyys', type: 'string', required: true });
+      cy.clickButton('Save');
+      cy.url().should('include', '/xxxxx_xxxxx/new');
+    });
+  });
+
+  describe('Fail edit', () => {
+    it('6.1 fails when required parent field is cleared', () => {
+      cy.task('db:populateXxxxxXxxxx', 1);
+      cy.visit('/xxxxx_xxxxx');
+      cy.contains('Xxxxx Xxxxx 1').click();
+      cy.contains('Edit').click();
+      cy.clearField('Name');
+      cy.clickButton('Save');
+      cy.url().should('include', '/xxxxx_xxxxx/edit');
+    });
+
+    it('6.2 fails when required child field is cleared', () => {
+      cy.task<any[]>('db:populateXxxxxXxxxx', 1).then((records) => {
+        cy.task('db:populateXxxxxXxxxxYyyyyYyyyy', { parentId: records[0].id, length: 1 });
+        cy.visit('/xxxxx_xxxxx');
+        cy.contains('Xxxxx Xxxxx 1').click();
+        cy.contains('Edit').click();
+        // Clear required child field
+        cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="name"]').dblclick();
+        cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="name"] input').clear().type('{enter}');
+        cy.clickButton('Save');
+        cy.url().should('include', '/xxxxx_xxxxx/edit');
+      });
+    });
   });
 });
