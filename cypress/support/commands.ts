@@ -196,7 +196,7 @@ Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
  * Requires DateTimeWrapper to have clearable={true} on the field slot.
  */
 Cypress.Commands.add('clearDateTime', (label: string) => {
-  cy.contains('label', label).parent().find('button[aria-label="Clear value"]').click();
+  cy.contains('label', label).parent().find('button[title="Clear"]').click();
 });
 
 /**
