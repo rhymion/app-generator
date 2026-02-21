@@ -122,17 +122,22 @@ Cypress.Commands.add('setCheckbox', (label: string, checked: boolean) => {
 });
 
 /**
- * Fill MUI DateTimePicker by label
+ * Fill MUI DateTimePicker by label.
+ * Uses {selectall} instead of .clear() because DateTimePicker uses a sectioned
+ * masked input where .clear() can leave the cursor in an unexpected position.
  */
 Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
-  cy.contains('label', label).parent().find('input').first().clear().type(dateString);
+  cy.contains('label', label).parent().find('input').first()
+    .click()
+    .type(`{selectall}${dateString}`);
 });
 
 /**
- * Clear MUI DateTimePicker by label
+ * Clear MUI DateTimePicker by clicking its clear button.
+ * Requires DateTimeWrapper to have clearable={true} on the field slot.
  */
 Cypress.Commands.add('clearDateTime', (label: string) => {
-  cy.contains('label', label).parent().find('input').first().clear();
+  cy.contains('label', label).parent().find('button[aria-label="Clear value"]').click();
 });
 
 /**

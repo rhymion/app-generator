@@ -9,10 +9,11 @@ export default function DateTimeWrapper({label, date_time, show_time = true, ...
     <div>
       <LocalizationProvider dateAdapter={AdapterDayjs}>
         <DateTimePicker
+          enableAccessibleFieldDOMStructure={false}
           views={show_time ? ['year', 'month', 'day', 'hours', 'minutes'] : ['year', 'month', 'day']}
           label={label}
           value={date_time ? dayjs(date_time) : null}
-          slotProps={{ textField: { margin: 'normal' } }}
+          slotProps={{ field: { clearable: true }, textField: { margin: 'normal' } }}
           {...other}
         />
       </LocalizationProvider>
