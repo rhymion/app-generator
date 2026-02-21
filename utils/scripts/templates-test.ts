@@ -692,8 +692,8 @@ export function generateTestSpec(
     lines.push(`    it('1.2 shows list with one item', () => {`);
     lines.push(`      cy.task('db:populate${pascal}', 1);`);
     lines.push(`      cy.visit('/${parent}');`);
-    lines.push(`      getDataGridRowCount().should('eq', 1);`);
     lines.push(`      cy.contains('${title} 1').should('be.visible');`);
+    lines.push(`      getDataGridRowCount().should('eq', 1);`);
     lines.push(`    });`);
     lines.push('');
 
@@ -701,6 +701,7 @@ export function generateTestSpec(
     lines.push(`    it('1.3 shows list with multiple items', () => {`);
     lines.push(`      cy.task('db:populate${pascal}', 3);`);
     lines.push(`      cy.visit('/${parent}');`);
+    lines.push(`      cy.contains('${title} 1').should('be.visible');`);
     lines.push(`      getDataGridRowCount().should('eq', 3);`);
     lines.push(`    });`);
 

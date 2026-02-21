@@ -23,13 +23,14 @@ describe('Testing Parent Only pages and their behavior', () => {
     it('1.2 shows list with one item', () => {
       cy.task('db:populateParentOnly', 1);
       cy.visit('/parent_only');
-      getDataGridRowCount().should('eq', 1);
       cy.contains('Parent Only 1').should('be.visible');
+      getDataGridRowCount().should('eq', 1);
     });
 
     it('1.3 shows list with multiple items', () => {
       cy.task('db:populateParentOnly', 3);
       cy.visit('/parent_only');
+      cy.contains('Parent Only 1').should('be.visible');
       getDataGridRowCount().should('eq', 3);
     });
   });

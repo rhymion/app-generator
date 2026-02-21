@@ -23,13 +23,14 @@ describe('Testing Booking pages and their behavior', () => {
     it('1.2 shows list with one item', () => {
       cy.task('db:populateBooking', 1);
       cy.visit('/booking');
-      getDataGridRowCount().should('eq', 1);
       cy.contains('Booking 1').should('be.visible');
+      getDataGridRowCount().should('eq', 1);
     });
 
     it('1.3 shows list with multiple items', () => {
       cy.task('db:populateBooking', 3);
       cy.visit('/booking');
+      cy.contains('Booking 1').should('be.visible');
       getDataGridRowCount().should('eq', 3);
     });
   });

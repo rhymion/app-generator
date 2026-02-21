@@ -23,13 +23,14 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
     it('1.2 shows list with one item', () => {
       cy.task('db:populateXxxxxXxxxx', 1);
       cy.visit('/xxxxx_xxxxx');
-      getDataGridRowCount().should('eq', 1);
       cy.contains('Xxxxx Xxxxx 1').should('be.visible');
+      getDataGridRowCount().should('eq', 1);
     });
 
     it('1.3 shows list with multiple items', () => {
       cy.task('db:populateXxxxxXxxxx', 3);
       cy.visit('/xxxxx_xxxxx');
+      cy.contains('Xxxxx Xxxxx 1').should('be.visible');
       getDataGridRowCount().should('eq', 3);
     });
   });
