@@ -527,7 +527,7 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     );
     
     const fieldType = `{ ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
-    const fieldTypeWithId = `{ ${childPropsWithId.map(p => `${p.replace(/id/, 'id?')}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
+    const fieldTypeWithId = `{ ${childPropsWithId.map(p => `${p.replace(/^id/, 'id?')}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
     
     const fieldMapCreate = childProps.map(p => `          ${p}: f.${p},`).join('\n');
     
