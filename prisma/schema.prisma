@@ -20,7 +20,8 @@ model db_table {
   creator    user_account @relation("DbTableCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user_account @relation("DbTableUpdater", fields: [updater_id], references: [id])
-  fields       field[]
+  fields       field[] @relation("ParentTable")
+  referenced_by field[] @relation("ReferenceTable")
 }
 
 model field {
@@ -28,7 +29,9 @@ model field {
   name        String
   type        String
   db_table_id    String     
-  db_table       db_table @relation(fields: [db_table_id], references: [id], onDelete: Cascade)
+  db_table       db_table @relation("ParentTable", fields: [db_table_id], references: [id], onDelete: Cascade)
+  reference_id   String?
+  reference      db_table? @relation("ReferenceTable", fields: [reference_id], references: [id])
   max_length  Int?
   max         Int?
   regex       String?

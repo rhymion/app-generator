@@ -16,6 +16,7 @@ export type Field = {
   name: string;
   type: string;
   db_table_id: string;
+  reference_id: string | null;
   max_length: number | null;
   max: number | null;
   regex: string | null;

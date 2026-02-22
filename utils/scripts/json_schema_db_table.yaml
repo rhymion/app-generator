@@ -43,6 +43,15 @@ definitions:
       db_table_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
+      reference_id:
+        type: 
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: db_table
+          labelField: name
       max_length:
         type:
           - integer
