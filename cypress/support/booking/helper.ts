@@ -16,7 +16,7 @@ export async function populateBookingDependencies() {
     data: { name: 'Test Organization', creator_id: testUser.id, updater_id: testUser.id, 
       user_accounts: {
         connect: [testUser.id].map((id) => ({ id }))
-      } 
+      }
     },
   });
   const resource = await prisma.resource.create({

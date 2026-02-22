@@ -488,7 +488,7 @@ export function generateTestHelper(
   } else {
     lines.push(`  const testUser = await getTestUser();`);
     for (const dep of deps) {
-      const depDef = schema.definitions[dep.target];
+      const depDef = schema.definitions[dep.target + "_detail"];
       const depTitle = toTitleCase(dep.target);
       const dataFields: string[] = [`name: 'Test ${depTitle}'`];
       for (const fk of dep.fkDeps) {
@@ -496,6 +496,13 @@ export function generateTestHelper(
       }
       dataFields.push(`creator_id: testUser.id`);
       dataFields.push(`updater_id: testUser.id`);
+      if (depDef['x-relationships']?.user_accounts?.target === 'user_account') {
+        dataFields.push(`
+      user_accounts: {
+        connect: [testUser.id].map((id) => ({ id }))
+      }
+   `);
+      }
 
       lines.push(`  const ${dep.varName} = await prisma.${dep.target}.create({`);
       lines.push(`    data: { ${dataFields.join(', ')} },`);
