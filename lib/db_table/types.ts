@@ -9,6 +9,7 @@ export type DbTable = {
 
 export type DbTableDetail = DbTable & {
   fields: Field[];
+  db_table_comments: DbTableComment[];
 };
 
 export type Field = {
@@ -23,6 +24,12 @@ export type Field = {
   required: boolean;
   reference?: DbTable | null;
 };
+
+export type DbTableComment = {
+  id: string;
+  message: string;
+  db_table_id: string;
+};
 export type DbTableDetailPageProps = Readonly<{
   params: Promise<{
     id: string;
@@ -35,6 +42,7 @@ export type FormViewProps = Readonly<{
     name: string;
     description: string | null;
     fields: Field[];
+    db_table_comments: DbTableComment[];
     created_at?: string | Date;
     updated_at?: string | Date;
     creator?: { id: string; name: string } | null;

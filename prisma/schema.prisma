@@ -22,6 +22,7 @@ model db_table {
   updater    user_account @relation("DbTableUpdater", fields: [updater_id], references: [id])
   fields       field[] @relation("ParentTable")
   referenced_by field[] @relation("ReferenceTable")
+  db_table_comments       db_table_comment[] @relation("CommentParentTable")
 }
 
 model field {
@@ -38,6 +39,17 @@ model field {
   required    Boolean   @default(true)
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+}
+
+model db_table_comment {
+  id          String   @id @default(cuid())
+  message     String
+  db_table_id    String     
+  db_table       db_table @relation("CommentParentTable", fields: [db_table_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  creator_id String
+  creator    user_account @relation("DbTableCommentCreator", fields: [creator_id], references: [id])
 }
 
 model xxxxx_xxxxx {
@@ -178,6 +190,7 @@ model user_account {
   updated_resources resource[] @relation("ResourceUpdater")
   created_bookings  booking[] @relation("BookingCreator")
   updated_bookings  booking[] @relation("BookingUpdater")
+  created_db_table_comments  db_table_comment[] @relation("DbTableCommentCreator")
   @@index([api_key])
 }
 

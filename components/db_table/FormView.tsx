@@ -6,7 +6,7 @@ import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/db_table/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
-import { fields_columns } from '../db_table/column_def';
+import { fields_columns, db_table_comments_columns } from '../db_table/column_def';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import AuditInfo from '../AuditInfo';
@@ -14,6 +14,7 @@ import AuditInfo from '../AuditInfo';
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
   const fieldsColumns: GridColDef[] = fields_columns(false);
+  const dbTableCommentsColumns: GridColDef[] = db_table_comments_columns(false);
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -42,6 +43,10 @@ export default function FormView({ src, permissions }: FormViewProps) {
       <div>
         <h2>Fields</h2>
         <FieldsViewGrid fields={src.fields} columns={fieldsColumns} />
+      </div>
+      <div>
+        <h2>Db Table Comments</h2>
+        <FieldsViewGrid fields={src.db_table_comments} columns={dbTableCommentsColumns} />
       </div>
       <AuditInfo src={src} />
     </div>

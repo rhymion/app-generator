@@ -10,6 +10,7 @@ export default async function AddDbTablePage() {
     name: '',
     description: '',
     fields: [],
+    db_table_comments: [],
   };
   return <FormUpsert src={src} isEdit={false} permissions={userPermissions} allDbTables={dbTablesData.dbTables} dbTablePermissions={dbTablesData.userPermissions} />;
 }

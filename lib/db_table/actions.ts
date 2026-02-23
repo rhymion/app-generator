@@ -19,12 +19,14 @@ export async function upsertDbTable(data: FormData) {
   const description = data.get('description') as string | null;
   const fieldsRaw = data.getAll('field[]') as string[];
   const fieldsItems = fieldsRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean });
+  const dbTableCommentsRaw = data.getAll('db_table_comment[]') as string[];
+  const dbTableCommentsItems = dbTableCommentsRaw.map(f => JSON.parse(f) as { id?: string; message: string });
   const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateDbTable(userId, id, name, description, fieldsItems, srcSnapshotRaw);
+    await updateDbTable(userId, id, name, description, fieldsItems, dbTableCommentsItems, srcSnapshotRaw);
   } else {
-    await addDbTable(userId, name, description, fieldsItems);
+    await addDbTable(userId, name, description, fieldsItems, dbTableCommentsItems);
   }
 
   revalidatePath('/');

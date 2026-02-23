@@ -13,3 +13,9 @@ export function fields_columns(editable: boolean = false, referenceIdOptions?: A
     { field: 'required', headerName: 'Required', width: 100, editable: editable, type: 'boolean' },
   ];
 }
+
+export function db_table_comments_columns(editable: boolean = false): GridColDef[] {
+  return [
+    { field: 'message', headerName: 'Message', width: 150, editable: editable },
+  ];
+}

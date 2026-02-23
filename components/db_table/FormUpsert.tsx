@@ -10,7 +10,7 @@ import FormWithChildGrid from '../FormWithChildGrid';
 import AuditInfo from '../AuditInfo';
 import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
-  import { fields_columns } from '../db_table/column_def';
+  import { fields_columns, db_table_comments_columns } from '../db_table/column_def';
 
 export default function FormUpsert({ src, isEdit, permissions, allDbTables = [], dbTablePermissions }: FormUpsertProps) {
   const router = useRouter();
@@ -20,6 +20,7 @@ export default function FormUpsert({ src, isEdit, permissions, allDbTables = [],
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
   const fieldsRef = useRef<{ getFields: () => GridRowsProp }>(null);
+  const dbTableCommentsRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const referenceIdOptions = useMemo(() =>
@@ -38,6 +39,15 @@ export default function FormUpsert({ src, isEdit, permissions, allDbTables = [],
     max: null,
     regex: '',
     required: true,
+    db_table_id: src.id,
+  });
+  const dbTableCommentsColumns = db_table_comments_columns(true);
+
+  const initialDbTableComments = src.db_table_comments.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
+
+  const createNewDbTableComments = () => ({
+    id: `temp-${Date.now()}-${Math.random()}`,
+    message: '',
     db_table_id: src.id,
   });
 
@@ -67,6 +77,17 @@ export default function FormUpsert({ src, isEdit, permissions, allDbTables = [],
           max: field.max,
           regex: field.regex,
           required: field.required,
+        })
+      );
+    });
+    const dbTableComments = dbTableCommentsRef.current?.getFields?.() || [];
+
+    (dbTableComments as any[]).forEach((field) => {
+      formData.append(
+        'db_table_comment[]',
+        JSON.stringify({
+          id: field.id.startsWith('temp-') ? undefined : field.id,
+          message: field.message,
         })
       );
     });
@@ -124,6 +145,17 @@ export default function FormUpsert({ src, isEdit, permissions, allDbTables = [],
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
         title="Fields"
+      />
+      <FieldsDataGrid
+        ref={dbTableCommentsRef}
+        initialFields={initialDbTableComments}
+        columns={dbTableCommentsColumns}
+        createNewRow={createNewDbTableComments}
+        addButtonLabel="Add Db Table Comments"
+        deleteDialogTitle="Delete Selected Db Table Comments?"
+        deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
+        showTitle={true}
+        title="Db Table Comments"
       />
       {isEdit && <AuditInfo src={src} />}
     </>
