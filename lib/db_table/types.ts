@@ -21,6 +21,7 @@ export type Field = {
   max: number | null;
   regex: string | null;
   required: boolean;
+  reference?: DbTable | null;
 };
 export type DbTableDetailPageProps = Readonly<{
   params: Promise<{
@@ -44,5 +45,7 @@ export type FormViewProps = Readonly<{
 
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
+  allDbTables?: DbTable[];
 
+  dbTablePermissions?: ModelPermissions;
 }>;

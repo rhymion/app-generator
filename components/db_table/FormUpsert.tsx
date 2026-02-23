@@ -12,7 +12,7 @@ import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
   import { fields_columns } from '../db_table/column_def';
 
-export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, permissions, allDbTables = [], dbTablePermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +22,10 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const fieldsRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
-  const fieldsColumns = fields_columns(true);
+  const referenceIdOptions = useMemo(() =>
+    (allDbTables ?? []).map(item => ({ value: item.id, label: item.name })),
+  [allDbTables]);
+  const fieldsColumns = fields_columns(true, referenceIdOptions);
 
   const initialFields = src.fields.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
 

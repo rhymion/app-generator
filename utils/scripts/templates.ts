@@ -72,11 +72,21 @@ export function generateTypes(parent: string, children: ChildInfo[], schema: Sch
         .join('\n')
     : '';
 
+  // Collect child entity many-to-one relationships (needed for imports - computed early)
+  const childEntityRelationshipsEarly = children.flatMap(childInfo => {
+    const childDef = schema.definitions[childInfo.name];
+    if (!childDef?.properties) return [];
+    return getParentRelationships(childDef);
+  });
+  const allImportTargets = Array.from(new Set([
+    ...relationshipTargets.map(r => r.target),
+    ...childEntityRelationshipsEarly.map(r => r.target),
+  ])).filter(t => t !== model);
+
   // Build type definitions
-  const importLines = relationshipTargets.length > 0
-    ? relationshipTargets
-        .filter(r => r.target !== model)
-        .map(r => `import type { ${toPascalCase(r.target)} } from '@/lib/${r.target}/types';`)
+  const importLines = allImportTargets.length > 0
+    ? allImportTargets
+        .map(target => `import type { ${toPascalCase(target)} } from '@/lib/${target}/types';`)
         .join('\n') + '\n\n'
     : '';
 
@@ -105,27 +115,43 @@ ${parentExtraProps.join('\n')}
     }
   }
   
+  // Collect child entity many-to-one relationships (for imports and FormUpsertProps)
+  const childEntityRelationships = children.flatMap(childInfo => {
+    const childDef = schema.definitions[childInfo.name];
+    if (!childDef?.properties) return [];
+    return getParentRelationships(childDef);
+  });
+  const childRelationshipTargets = Array.from(new Set(childEntityRelationships.map(r => r.target)));
+
   // Generate child types
   const childTypeDeclarations: string[] = [];
   const detailChildProps: string[] = [];
   const formViewChildProps: string[] = [];
   const declaredChildTypes = new Set<string>();
-  
+
   for (const child of children) {
     const childPascal = toPascalCase(child.name);
     const childDef = schema.definitions[child.name];
-    
+
     if (childDef?.properties) {
       const childProps: string[] = [];
       for (const [key, prop] of Object.entries(childDef.properties)) {
         const tsType = getTsType(prop);
         childProps.push(`  ${key}: ${tsType};`);
       }
-      
+
+      // Add optional relation objects from child's many-to-one relationships
+      const childRels = getParentRelationships(childDef);
+      const childRelProps = childRels.map(r => {
+        const relName = r.propName.replace(/_id$/, '');
+        const targetPascal = toPascalCase(r.target);
+        return `  ${relName}?: ${targetPascal} | null;`;
+      });
+
       if (!declaredChildTypes.has(child.name) && child.name !== model) {
         declaredChildTypes.add(child.name);
         childTypeDeclarations.push(`export type ${childPascal} = {
-${childProps.join('\n')}
+${childProps.join('\n')}${childRelProps.length > 0 ? '\n' + childRelProps.join('\n') : ''}
 };
 `);
       }
@@ -133,7 +159,7 @@ ${childProps.join('\n')}
       formViewChildProps.push(`    ${child.propertyName}: ${childPascal}[];`);
     }
   }
-  
+
   // Add Detail type
   if (children.length > 0) {
     result += `export type ${parentPascal}Detail = ${parentPascal} & {
@@ -148,7 +174,7 @@ ${detailChildProps.join('\n')}
 
 `;
   }
-  
+
   // Add page props and form props
   result += `export type ${parentPascal}DetailPageProps = Readonly<{
   params: Promise<{
@@ -159,7 +185,7 @@ ${detailChildProps.join('\n')}
 export type FormViewProps = Readonly<{
   src: {
 ${formViewParentProps}${formViewExtraProps.length > 0 ? `\n${formViewExtraProps.join('\n')}` : ''}`;
-  
+
   if (children.length > 0) {
     result += `\n${formViewChildProps.join('\n')}`;
   }
@@ -180,7 +206,7 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;${(() => {
     const manyToManyTargets = Array.from(new Set(children.filter(c => c.relationship?.type === 'many-to-many').map(c => c.relationship!.target)));
     const manyToOneTargets = Array.from(new Set(relationshipTargets.map(r => r.target)));
-    const combinedTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets]));
+    const combinedTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets, ...childRelationshipTargets]));
     return combinedTargets.map(target => {
       const targetPascal = toPascalCase(target);
       return `\n  all${targetPascal}s?: ${targetPascal}[];`;
@@ -188,7 +214,8 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   })()}
 ${Array.from(new Set([
   ...children.filter(c => c.relationship?.type === 'many-to-many').map(c => c.relationship!.target),
-  ...relationshipTargets.map(r => r.target)
+  ...relationshipTargets.map(r => r.target),
+  ...childRelationshipTargets,
 ])).map(target => {
     const targetCamel = toCamelCase(target);
     return `\n  ${targetCamel}Permissions?: ModelPermissions;`;
@@ -233,7 +260,14 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
 
   // Build include for detail (children + many-to-one + audit relations)
   const includeEntriesDetail = [
-    ...children.map(c => `${c.propertyName}: true`),
+    ...children.map(c => {
+      const childDef = schema.definitions[c.name];
+      if (!childDef?.properties) return `${c.propertyName}: true`;
+      const childRels = getParentRelationships(childDef);
+      if (childRels.length === 0) return `${c.propertyName}: true`;
+      const childIncludes = childRels.map(r => `${r.propName.replace(/_id$/, '')}: true`).join(', ');
+      return `${c.propertyName}: { include: { ${childIncludes} } }`;
+    }),
     ...parentRelationships.map(r => `${r.relationName}: true`),
     `creator: { select: { id: true, name: true } }`,
     `updater: { select: { id: true, name: true } }`,
@@ -713,19 +747,40 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
     const columns: string[] = [];
     const dateTimeFields: string[] = [];
     let needsDateTimeImports = false;
-    
+
+    // Collect many-to-one relationship params for this child
+    const childRelParams: string[] = [];
+    for (const [key, prop] of Object.entries(childDef.properties)) {
+      const rel = (prop as any)['x-relationship'];
+      if (rel && rel.type === 'many-to-one') {
+        const propCamel = toCamelCase(key);
+        childRelParams.push(`${propCamel}Options?: Array<{ value: string | null; label: string }>`);
+      }
+    }
+
     for (const [key, prop] of Object.entries(childDef.properties)) {
       if (key === 'id' || key === `${model}_id` || key === 'created_at' || key === 'updated_at' || key === 'creator_id') {
         continue;
       }
-      
+
+      // Many-to-one relationship: singleSelect column with options parameter
+      const relationship = (prop as any)['x-relationship'];
+      if (relationship && relationship.type === 'many-to-one') {
+        const labelBase = key.replace(/_id$/, '');
+        const headerName = toTitleCase(labelBase);
+        const propCamel = toCamelCase(key);
+        const paramName = `${propCamel}Options`;
+        columns.push(`    { field: '${key}', headerName: '${headerName}', width: 200, editable: editable, type: 'singleSelect', valueOptions: ${paramName} ?? [] },`);
+        continue;
+      }
+
       const headerName = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
       let width = 150;
       let typeStr = '';
-      
+
       const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
       const format = (prop as any).format;
-      
+
       // Special handling for 'order' field - always read-only
       if (key === 'order') {
         typeStr = ", type: 'number'";
@@ -733,7 +788,7 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
         columns.push(`    { field: '${key}', headerName: 'No.', width: ${width}, editable: false${typeStr} },`);
         continue;
       }
-      
+
       if (prop.type === 'boolean' || (Array.isArray(prop.type) && prop.type.includes('boolean'))) {
         typeStr = ", type: 'boolean'";
         width = 100;
@@ -745,21 +800,21 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
         needsDateTimeImports = true;
         dateTimeFields.push(key);
         width = 250;
-        
-        columns.push(`    { 
-      field: '${key}', 
-      headerName: '${headerName}', 
-      width: ${width}, 
+
+        columns.push(`    {
+      field: '${key}',
+      headerName: '${headerName}',
+      width: ${width},
       editable: editable,
       renderEditCell: (params: GridRenderEditCellParams) => (
         <DateTimeWrapper
           label="${headerName}"
           date_time={params.value ? new Date(params.value) : null}
           onChange={(newValue: dayjs.Dayjs | null) => {
-            params.api.setEditCellValue({ 
-              id: params.id, 
-              field: params.field, 
-              value: newValue ? newValue.toISOString() : '' 
+            params.api.setEditCellValue({
+              id: params.id,
+              field: params.field,
+              value: newValue ? newValue.toISOString() : ''
             });
           }}
         />
@@ -771,11 +826,13 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
     },`);
         continue;
       }
-      
+
       columns.push(`    { field: '${key}', headerName: '${headerName}', width: ${width}, editable: editable${typeStr} },`);
     }
-    
-    return `export function ${childSnake}_columns(editable: boolean = false): GridColDef[] {
+
+    const relParamsStr = childRelParams.length > 0 ? `, ${childRelParams.join(', ')}` : '';
+
+    return `export function ${childSnake}_columns(editable: boolean = false${relParamsStr}): GridColDef[] {
   return [
 ${columns.join('\n')}
   ];
@@ -1170,8 +1227,14 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       if (childInfo.outputType === 'list') {
         return '';
       }
-      
-      return `  const ${childVar}Columns = ${childColumnsFnName(childInfo)}(true);
+
+      // Build option args for child's many-to-one relationships
+      const childRels = getParentRelationships(childDef);
+      const relOptionArgs = childRels.length > 0
+        ? ', ' + childRels.map(r => `${toCamelCase(r.propName)}Options`).join(', ')
+        : '';
+
+      return `  const ${childVar}Columns = ${childColumnsFnName(childInfo)}(true${relOptionArgs});
 
   const initial${childPascal} = src.${childInfo.propertyName}.map(f => ({ ...f, id: f.id || \`temp-\${Date.now()}-\${Math.random()}\` }));
 
@@ -1389,12 +1452,31 @@ ${childSerialize}
   
   const hasManyToMany = children.some(c => c.relationship?.type === 'many-to-many');
   
+  // Collect child entity many-to-one relationships for option generation
+  const allChildEntityRels = children.flatMap(childInfo => {
+    const childDef = schema.definitions[childInfo.name];
+    if (!childDef?.properties || childInfo.outputType === 'list' || childInfo.relationship?.type === 'many-to-many') return [];
+    return getParentRelationships(childDef);
+  });
+  // Deduplicate by propName
+  const uniqueChildEntityRels = Array.from(new Map(allChildEntityRels.map(r => [r.propName, r])).values());
+  const childEntityRelOptionSetups = uniqueChildEntityRels.map(r => {
+    const propCamel = toCamelCase(r.propName);
+    const targetPascal = toPascalCase(r.target);
+    const labelField = r.labelField ?? 'name';
+    const optionsVar = `${propCamel}Options`;
+    return `  const ${optionsVar} = useMemo(() =>
+    (all${targetPascal}s ?? []).map(item => ({ value: item.id, label: item.${labelField} })),
+  [all${targetPascal}s]);`;
+  }).join('\n');
+
   // Generate FormUpsert props destructuring
   const manyToManyTargets = children
     .filter(c => c.relationship?.type === 'many-to-many')
     .map(c => c.relationship!.target);
   const manyToOneTargets = parentRelationships.map(r => r.target);
-  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets]));
+  const childEntityRelTargets = uniqueChildEntityRels.map(r => r.target);
+  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets, ...childEntityRelTargets]));
   const extraProps = selectionTargets
     .map(target => `all${toPascalCase(target)}s = []`)
     .join(', ');
@@ -1431,7 +1513,7 @@ export default function FormUpsert(${formUpsertParams}) {
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 ${allStates ? '\n' + allStates : ''}
 ${childVariables}
-${parentRefs}${childGridSetup}${relationshipOptionSetups ? `\n${relationshipOptionSetups}` : ''}
+${parentRefs}${relationshipOptionSetups ? `\n${relationshipOptionSetups}` : ''}${childEntityRelOptionSetups ? `\n${childEntityRelOptionSetups}` : ''}${childGridSetup}
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1804,7 +1886,7 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
   // Build children properties
   const childrenProps = children.map(c => `    ${c.propertyName}: [],`).join('\n');
   
-  // Generate imports and fetching for relationship selections (many-to-many and many-to-one)
+  // Generate imports and fetching for relationship selections (many-to-many, many-to-one, and child entity many-to-one)
   const manyToManyChildren = children.filter(c => c.relationship?.type === 'many-to-many');
   const manyToManyTargets = manyToManyChildren
     .map(c => c.relationship!.target)
@@ -1814,7 +1896,15 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
     .map(r => r.target)
     .filter((target, index, self) => self.indexOf(target) === index);
 
-  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets]));
+  const childEntityRelTargetsNew = Array.from(new Set(
+    children.flatMap(childInfo => {
+      const childDef = schema.definitions[childInfo.name];
+      if (!childDef?.properties || childInfo.outputType === 'list' || childInfo.relationship?.type === 'many-to-many') return [];
+      return getParentRelationships(childDef).map(r => r.target);
+    })
+  ));
+
+  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets, ...childEntityRelTargetsNew]));
 
   const selectionImports = selectionTargets.length > 0
     ? selectionTargets
@@ -1860,7 +1950,7 @@ export function generatePageEdit(parent: string, children: ChildInfo[], schema: 
   const filteredProps = filterFields(modelDef.properties ?? {}, undefined);
   const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps });
   
-  // Generate imports and fetching for many-to-many relationships
+  // Generate imports and fetching for many-to-many, many-to-one, and child entity many-to-one relationships
   const manyToManyChildren = children.filter(c => c.relationship?.type === 'many-to-many');
   const manyToManyTargets = manyToManyChildren
     .map(c => c.relationship!.target)
@@ -1870,7 +1960,15 @@ export function generatePageEdit(parent: string, children: ChildInfo[], schema: 
     .map(r => r.target)
     .filter((target, index, self) => self.indexOf(target) === index);
 
-  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets]));
+  const childEntityRelTargetsEdit = Array.from(new Set(
+    children.flatMap(childInfo => {
+      const childDef = schema.definitions[childInfo.name];
+      if (!childDef?.properties || childInfo.outputType === 'list' || childInfo.relationship?.type === 'many-to-many') return [];
+      return getParentRelationships(childDef).map(r => r.target);
+    })
+  ));
+
+  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets, ...childEntityRelTargetsEdit]));
 
   const selectionImports = selectionTargets.length > 0
     ? '\n' + selectionTargets
@@ -2084,9 +2182,9 @@ export async function delete${parentPascal}(ids: string[]) {
     const fieldType = `{ ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
     const fieldTypeWithId = `{ ${Object.keys(childDef.properties).filter(k =>
       !parentIdPropNames.has(k) && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
-    ).map(p => `${p.replace(/id/, 'id?')}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
+    ).map(p => `${p.replace(/^id/, 'id?')}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
 
-    const fieldMapCreate = childProps.map(p => `          ${p}: f.${p},`).join('\n');
+    const fieldMapCreate = childProps.map(p => `          ${p}: f.${p}${p.endsWith('id') && childDef.properties![p]?.type.includes('null') ? ' || null' : ''},`).join('\n');
 
     return {
       child,

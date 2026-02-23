@@ -29,6 +29,18 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
   const followedByRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
+  const parentIdOptions = useMemo(() => {
+    return allProcedures.map((item) => ({
+      id: item.id,
+      label: item.name,
+    }));
+  }, [allProcedures]);
+  const assigneeIdOptions = useMemo(() => {
+    return allUserAccounts.map((item) => ({
+      id: item.id,
+      label: item.name,
+    }));
+  }, [allUserAccounts]);
   const initialChildren: EditableListWrapperItem[] = src.children.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
@@ -47,18 +59,6 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
     label: f.name,
     originalId: f.id,
   }));
-  const parentIdOptions = useMemo(() => {
-    return allProcedures.map((item) => ({
-      id: item.id,
-      label: item.name,
-    }));
-  }, [allProcedures]);
-  const assigneeIdOptions = useMemo(() => {
-    return allUserAccounts.map((item) => ({
-      id: item.id,
-      label: item.name,
-    }));
-  }, [allUserAccounts]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

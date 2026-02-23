@@ -35,6 +35,12 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
+  const organizationIdOptions = useMemo(() => {
+    return allOrganizations.map((item) => ({
+      id: item.id,
+      label: item.name,
+    }));
+  }, [allOrganizations]);
   const parent1Child1sColumns = parent1_child1s_columns(true);
 
   const initialParent1Child1s = src.parent1_child1s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
@@ -69,12 +75,6 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     label: f.name,
     originalId: f.id,
   }));
-  const organizationIdOptions = useMemo(() => {
-    return allOrganizations.map((item) => ({
-      id: item.id,
-      label: item.name,
-    }));
-  }, [allOrganizations]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

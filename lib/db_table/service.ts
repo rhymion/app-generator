@@ -39,7 +39,7 @@ export async function addDbTable(creatorId: string, name: string, description: s
         create: fieldsItems.map(f => ({
           name: f.name,
           type: f.type,
-          reference_id: f.reference_id,
+          reference_id: f.reference_id || null,
           max_length: f.max_length,
           max: f.max,
           regex: f.regex,
@@ -50,7 +50,7 @@ export async function addDbTable(creatorId: string, name: string, description: s
   });
 }
 
-export async function updateDbTable(updaterId: string, id: string, name: string, description: string | null, fieldsItems: { id?: string; name: string; type: string; reference_id?: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean }[], srcSnapshotRaw?: string | null) {
+export async function updateDbTable(updaterId: string, id: string, name: string, description: string | null, fieldsItems: { id?: string; name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean }[], srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -66,7 +66,7 @@ export async function updateDbTable(updaterId: string, id: string, name: string,
         create: fieldsItems.map(f => ({
           name: f.name,
           type: f.type,
-          reference_id: f.reference_id,
+          reference_id: f.reference_id || null,
           max_length: f.max_length,
           max: f.max,
           regex: f.regex,

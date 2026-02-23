@@ -28,6 +28,12 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   const resourceImagesRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
+  const organizationIdOptions = useMemo(() => {
+    return allOrganizations.map((item) => ({
+      id: item.id,
+      label: item.name,
+    }));
+  }, [allOrganizations]);
   const initialResourceAttachments: EditableListWrapperItem[] = src.resource_attachments.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.path,
@@ -41,12 +47,6 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     label: f.name,
     originalId: f.id,
   }));
-  const organizationIdOptions = useMemo(() => {
-    return allOrganizations.map((item) => ({
-      id: item.id,
-      label: item.name,
-    }));
-  }, [allOrganizations]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
