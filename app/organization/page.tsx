@@ -1,9 +1,9 @@
 import { getOrganizationListPageData } from '@/lib/organization/getters';
-import DataGridClient from '@/components/DataGridClient';
+import ResponsiveListClient from '@/components/ResponsiveListClient';
 import { removeOrganization } from '@/lib/organization/actions';
 
 export default async function OrganizationsPage() {
   const { organizations, userPermissions } = await getOrganizationListPageData();
-  return <DataGridClient src={organizations} basePath="/organization" removeAction={removeOrganization} entityLabel="Organization"
+  return <ResponsiveListClient src={organizations} basePath="/organization" removeAction={removeOrganization} entityLabel="Organization"
     permissions={userPermissions} />;
 }

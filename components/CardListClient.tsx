@@ -25,6 +25,7 @@ interface BaseEntity {
 interface DisplayFieldConfig<T> {
   field: keyof T;
   headerName: string;
+  width?: number;
 }
 
 interface CardListClientProps<T extends BaseEntity> {
