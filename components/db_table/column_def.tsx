@@ -4,7 +4,9 @@ export function fields_columns(editable: boolean = false, referenceIdOptions?: A
   return [
     { field: 'name', headerName: 'Name', width: 150, editable: editable },
     { field: 'type', headerName: 'Type', width: 150, editable: editable },
-    { field: 'reference_id', headerName: 'Reference', width: 200, editable: editable, type: 'singleSelect', valueOptions: referenceIdOptions ?? [] },
+    ...(referenceIdOptions && referenceIdOptions.length > 0
+      ? [{ field: 'reference_id', headerName: 'Reference', width: 200, editable: editable, type: 'singleSelect' as const, valueOptions: referenceIdOptions }]
+      : [{ field: 'reference_id', headerName: 'Reference', width: 200, editable: false, valueGetter: (_value: any, row: any) => row.reference?.name ?? '' }]),
     { field: 'max_length', headerName: 'Max Length', width: 100, editable: editable, type: 'number' },
     { field: 'max', headerName: 'Max', width: 100, editable: editable, type: 'number' },
     { field: 'regex', headerName: 'Regex', width: 150, editable: editable },

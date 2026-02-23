@@ -1,3 +1,5 @@
+'use client';
+
 import { GridColDef } from '@mui/x-data-grid';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';

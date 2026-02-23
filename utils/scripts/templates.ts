@@ -763,14 +763,17 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
         continue;
       }
 
-      // Many-to-one relationship: singleSelect column with options parameter
+      // Many-to-one relationship: singleSelect when options provided, valueGetter fallback for view
       const relationship = (prop as any)['x-relationship'];
       if (relationship && relationship.type === 'many-to-one') {
         const labelBase = key.replace(/_id$/, '');
         const headerName = toTitleCase(labelBase);
         const propCamel = toCamelCase(key);
         const paramName = `${propCamel}Options`;
-        columns.push(`    { field: '${key}', headerName: '${headerName}', width: 200, editable: editable, type: 'singleSelect', valueOptions: ${paramName} ?? [] },`);
+        const relName = labelBase; // e.g. 'reference' from 'reference_id'
+        columns.push(`    ...(${paramName} && ${paramName}.length > 0
+      ? [{ field: '${key}', headerName: '${headerName}', width: 200, editable: editable, type: 'singleSelect' as const, valueOptions: ${paramName} }]
+      : [{ field: '${key}', headerName: '${headerName}', width: 200, editable: false, valueGetter: (_value: any, row: any) => row.${relName}?.name ?? '' }]),`);
         continue;
       }
 
@@ -1666,16 +1669,19 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   
   const parentTextFields = [textFields, booleanFieldsJsx, dateTimeFieldsJsx, imageFieldsJsx].filter(f => f).join('\n');
   
-  // Check if any child has DateTime fields
+  // Check if any child has DateTime fields or many-to-one relationships
+  // (both require 'use client' due to functions in column definitions)
   const needsClientDirective = children.some(childInfo => {
     const child = childInfo.name;
     const childDef = schema.definitions[child];
     if (!childDef?.properties) return false;
-    
+
     return Object.entries(childDef.properties).some(([key, prop]) => {
       const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
       const format = (prop as any).format;
-      return propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time');
+      const rel = (prop as any)['x-relationship'];
+      return (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time'))
+        || (rel && rel.type === 'many-to-one');
     });
   });
 
