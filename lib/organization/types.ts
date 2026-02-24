@@ -44,4 +44,5 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   allUserAccounts?: UserAccount[];
 
   userAccountPermissions?: ModelPermissions;
+  currentUserId?: string | null;
 }>;

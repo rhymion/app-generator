@@ -10,7 +10,6 @@ function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined)
     name: normalizeValue(safeSnapshot.name, 'string'),
     description: normalizeValue(safeSnapshot.description, 'string'),
     fields: normalizeChildRefs(safeSnapshot.fields),
-    db_table_comments: normalizeChildRefs(safeSnapshot.db_table_comments),
   };
 }
 
@@ -18,8 +17,7 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
   const current = await tx.db_table.findUnique({
     where: { id },
     include: {
-      fields: { select: { id: true } },
-      db_table_comments: { select: { id: true } }
+      fields: { select: { id: true } }
     }
   });
 
@@ -30,7 +28,7 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
   return normalizeSnapshot(current as Record<string, unknown>);
 }
 
-export async function addDbTable(creatorId: string, name: string, description: string | null, fieldsItems: { name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean }[], dbTableCommentsItems: { message: string }[]) {
+export async function addDbTable(creatorId: string, name: string, description: string | null, fieldsItems: { name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean }[]) {
   return await prisma.db_table.create({
     data: {
       name: name,
@@ -48,16 +46,11 @@ export async function addDbTable(creatorId: string, name: string, description: s
           required: f.required,
         })),
       },
-      db_table_comments: {
-        create: dbTableCommentsItems.map(f => ({
-          message: f.message,
-        })),
-      },
     },
   });
 }
 
-export async function updateDbTable(updaterId: string, id: string, name: string, description: string | null, fieldsItems: { id?: string; name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean }[], dbTableCommentsItems: { id?: string; message: string }[], srcSnapshotRaw?: string | null) {
+export async function updateDbTable(updaterId: string, id: string, name: string, description: string | null, fieldsItems: { id?: string; name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean }[], srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -78,12 +71,6 @@ export async function updateDbTable(updaterId: string, id: string, name: string,
           max: f.max,
           regex: f.regex,
           required: f.required,
-        })),
-      },
-      db_table_comments: {
-        deleteMany: {},
-        create: dbTableCommentsItems.map(f => ({
-          message: f.message,
         })),
       },
       },

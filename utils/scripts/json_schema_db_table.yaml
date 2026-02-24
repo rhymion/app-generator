@@ -107,6 +107,7 @@ definitions:
               $ref: "#/definitions/field"
           db_table_comments:
             type: array
+            x-outputType: comments
             items:
               $ref: "#/definitions/db_table_comment"
 

@@ -26,7 +26,10 @@ export async function getDbTableDetail(id: string): Promise<DbTableDetail | null
     },
     include: { 
       fields: { include: { reference: true } }, 
-      db_table_comments: true, 
+      db_table_comments: { include: { creator: { select: { id: true, 
+      name: true, 
+      avatar: true } } }, 
+      orderBy: { created_at: 'asc' } }, 
       creator: { select: { id: true, 
       name: true } }, 
       updater: { select: { id: true, 

@@ -29,6 +29,9 @@ export type DbTableComment = {
   id: string;
   message: string;
   db_table_id: string;
+  created_at?: string | Date | null;
+  updated_at?: string | Date | null;
+  creator?: { id: string; name: string; avatar?: string | null } | null;
 };
 export type DbTableDetailPageProps = Readonly<{
   params: Promise<{
@@ -56,4 +59,5 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   allDbTables?: DbTable[];
 
   dbTablePermissions?: ModelPermissions;
+  currentUserId?: string | null;
 }>;

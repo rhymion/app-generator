@@ -19,14 +19,12 @@ export async function upsertDbTable(data: FormData) {
   const description = data.get('description') as string | null;
   const fieldsRaw = data.getAll('field[]') as string[];
   const fieldsItems = fieldsRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean });
-  const dbTableCommentsRaw = data.getAll('db_table_comment[]') as string[];
-  const dbTableCommentsItems = dbTableCommentsRaw.map(f => JSON.parse(f) as { id?: string; message: string });
   const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateDbTable(userId, id, name, description, fieldsItems, dbTableCommentsItems, srcSnapshotRaw);
+    await updateDbTable(userId, id, name, description, fieldsItems, srcSnapshotRaw);
   } else {
-    await addDbTable(userId, name, description, fieldsItems, dbTableCommentsItems);
+    await addDbTable(userId, name, description, fieldsItems);
   }
 
   revalidatePath('/');
@@ -42,4 +40,33 @@ export async function removeDbTable(data: FormData | string[]) {
   await deleteDbTable(ids);
   revalidatePath('/');
   redirect('/db_table');
+}
+
+export async function addDbTableComment(db_table_id: string, message: string): Promise<void> {
+  const userId = await getSessionUserIdOrThrow();
+  await prisma.db_table_comment.create({
+    data: { message, db_table_id, creator_id: userId },
+  });
+  revalidatePath('/');
+}
+
+export async function updateDbTableComment(commentId: string, message: string): Promise<void> {
+  const userId = await getSessionUserIdOrThrow();
+  const comment = await prisma.db_table_comment.findUnique({ where: { id: commentId }, select: { creator_id: true } });
+  if (!comment || comment.creator_id !== userId) {
+    throw new Error('Not authorized to edit this comment');
+  }
+  await prisma.db_table_comment.update({ where: { id: commentId }, data: { message } });
+  revalidatePath('/');
+}
+
+export async function deleteDbTableComment(commentId: string): Promise<void> {
+  const userId = await getSessionUserIdOrThrow();
+  const comment = await prisma.db_table_comment.findUnique({ where: { id: commentId }, select: { creator_id: true } });
+  if (!comment) return;
+  if (comment.creator_id !== userId) {
+    await requirePermission('db_table', 'delete');
+  }
+  await prisma.db_table_comment.delete({ where: { id: commentId } });
+  revalidatePath('/');
 }

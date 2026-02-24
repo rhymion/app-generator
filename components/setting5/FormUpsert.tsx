@@ -76,16 +76,19 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   );
 
   return (
-    <FormWithChildGrid
-      title={`${isEdit ? 'Edit' : 'Add'} Setting5`}
-      isEdit={isEdit}
-      formFields={formFields}
-      onSubmit={handleSubmit}
-      onDelete={undefined}
-      onBack={handleBack}
-      deleteEntityLabel="Setting5"
-      submitButtonLabel="Save"
-      error={error}
-    />
+    <>
+      <FormWithChildGrid
+        title={`${isEdit ? 'Edit' : 'Add'} Setting5`}
+        isEdit={isEdit}
+        formFields={formFields}
+        onSubmit={handleSubmit}
+        onDelete={undefined}
+        onBack={handleBack}
+        deleteEntityLabel="Setting5"
+        submitButtonLabel="Save"
+        error={error}
+      />
+
+    </>
   );
 }

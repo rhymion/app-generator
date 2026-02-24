@@ -1,12 +1,15 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { GridColDef } from '@mui/x-data-grid';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/db_table/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
-import { fields_columns, db_table_comments_columns } from '../db_table/column_def';
+import { fields_columns } from '../db_table/column_def';
+import CommentListWrapper from '../CommentListWrapper';
+import { addDbTableComment, updateDbTableComment, deleteDbTableComment } from '@/lib/db_table/actions';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import AuditInfo from '../AuditInfo';
@@ -14,7 +17,6 @@ import AuditInfo from '../AuditInfo';
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
   const fieldsColumns: GridColDef[] = fields_columns(false);
-  const dbTableCommentsColumns: GridColDef[] = db_table_comments_columns(false);
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -44,10 +46,12 @@ export default function FormView({ src, permissions }: FormViewProps) {
         <h2>Fields</h2>
         <FieldsViewGrid fields={src.fields} columns={fieldsColumns} />
       </div>
-      <div>
-        <h2>Db Table Comments</h2>
-        <FieldsViewGrid fields={src.db_table_comments} columns={dbTableCommentsColumns} />
-      </div>
+      <CommentListWrapper
+        comments={src.db_table_comments}
+        showTitle={true}
+        title="Db Table Comments"
+        permissions={{ create: false, delete: false }}
+      />
       <AuditInfo src={src} />
     </div>
   );

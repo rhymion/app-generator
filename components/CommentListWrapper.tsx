@@ -57,7 +57,7 @@ interface CommentItemComponentProps {
   onDelete?: (id: string) => Promise<void>;
 }
 
-function CommentItemComponent({ comment, isCreator, canDelete, onUpdate, onDelete }: CommentItemComponentProps) {
+function CommentItemComponent({ comment, canDelete, onUpdate, onDelete }: CommentItemComponentProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editMessage, setEditMessage] = useState(comment.message);
   const [isPending, startTransition] = useTransition();
@@ -143,9 +143,9 @@ function CommentItemComponent({ comment, isCreator, canDelete, onUpdate, onDelet
               <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                 {comment.message}
               </Typography>
-              {(isCreator || canDelete) && (
+              {(canDelete) && (
                 <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 0.5 }}>
-                  {isCreator && onUpdate && (
+                  {canDelete && onUpdate && (
                     <Button size="small" onClick={() => setIsEditing(true)} disabled={isPending}>
                       Edit
                     </Button>
@@ -203,7 +203,7 @@ export default function CommentListWrapper({
                 <CommentItemComponent
                   comment={comment}
                   isCreator={!!currentUserId && comment.creator?.id === currentUserId}
-                  canDelete={permissions.delete || comment.creator?.id === currentUserId}
+                  canDelete={permissions.delete && comment.creator?.id === currentUserId}
                   onUpdate={onUpdateComment}
                   onDelete={onDeleteComment}
                 />
