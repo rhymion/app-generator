@@ -859,6 +859,7 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
       headerName: '${headerName}',
       width: ${width},
       editable: editable,
+      type: 'dateTime',
       renderEditCell: (params: GridRenderEditCellParams) => (
         <DateTimeWrapper
           label="${headerName}"
