@@ -12,7 +12,7 @@ describe('Authentication E2E Tests', () => {
     cy.clearLocalStorage();
 
     // Visit the home page
-    cy.visit('/');
+    cy.visit('/en/');
 
     // Now clear session storage (after page is loaded)
     cy.window().then((win) => {

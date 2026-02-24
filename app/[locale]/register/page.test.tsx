@@ -1,13 +1,34 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import RegisterPage from "./page";
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
-// Mock next/navigation
-vi.mock("next/navigation", () => ({
-  useRouter: vi.fn(),
+// Mock @/i18n/navigation (replaces next/navigation in this component)
+const mockPush = vi.fn();
+const mockRefresh = vi.fn();
+vi.mock("@/i18n/navigation", () => ({
+  useRouter: vi.fn(() => ({ push: mockPush, refresh: mockRefresh })),
+  Link: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+
+// Mock next-intl — return English strings matching messages/en.json
+vi.mock("next-intl", () => ({
+  useTranslations: (_namespace: string) => (key: string) => {
+    const messages: Record<string, string> = {
+      registerTitle: "Create your account",
+      namePlaceholder: "Full name",
+      emailPlaceholder: "Email address",
+      passwordPlaceholder: "Password",
+      registerButton: "Register",
+      haveAccount: "Already have an account? Sign in",
+      emailInUse: "Email address is already in use",
+      registrationFailed: "Registration failed",
+    };
+    return messages[key] ?? key;
+  },
 }));
 
 // Mock next-auth/react
@@ -16,15 +37,8 @@ vi.mock("next-auth/react", () => ({
 }));
 
 describe("RegisterPage", () => {
-  const mockPush = vi.fn();
-  const mockRefresh = vi.fn();
-
   beforeEach(() => {
     vi.clearAllMocks();
-    (useRouter as any).mockReturnValue({
-      push: mockPush,
-      refresh: mockRefresh,
-    });
   });
 
   afterEach(() => {

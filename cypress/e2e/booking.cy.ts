@@ -9,27 +9,27 @@ describe('Testing Booking pages and their behavior', () => {
     Cypress.session.clearAllSavedSessions();
     cy.clearCookies();
     cy.clearLocalStorage();
-    cy.visit('/');
+    cy.visit('/en/');
     cy.window().then((win) => { win.sessionStorage.clear(); });
     cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
   });
 
   describe('Display list', () => {
     it('1.1 shows empty state with no items', () => {
-      cy.visit('/booking');
+      cy.visit('/en/booking');
       assertDataGridEmpty();
     });
 
     it('1.2 shows list with one item', () => {
       cy.task('db:populateBooking', 1);
-      cy.visit('/booking');
+      cy.visit('/en/booking');
       cy.contains('Booking 1').should('be.visible');
       getDataGridRowCount().should('eq', 1);
     });
 
     it('1.3 shows list with multiple items', () => {
       cy.task('db:populateBooking', 3);
-      cy.visit('/booking');
+      cy.visit('/en/booking');
       cy.contains('Booking 1').should('be.visible');
       getDataGridRowCount().should('eq', 3);
     });
@@ -38,7 +38,7 @@ describe('Testing Booking pages and their behavior', () => {
   describe('Create', () => {
     it('2.1 creates with minimal data (required fields only)', () => {
       cy.task<any>('db:populateBookingDependencies').then((deps) => {
-        cy.visit('/booking');
+        cy.visit('/en/booking');
         cy.clickButton('Create New Booking');
         cy.fillField('Name', 'Test Booking');
         cy.selectAutocomplete('Resource', deps.resource.name);
@@ -59,7 +59,7 @@ describe('Testing Booking pages and their behavior', () => {
 
     it('2.2 creates with full data (all fields and children)', () => {
       cy.task<any>('db:populateBookingDependencies').then((deps) => {
-        cy.visit('/booking');
+        cy.visit('/en/booking');
         cy.clickButton('Create New Booking');
         cy.fillField('Name', 'Test Booking');
         cy.selectAutocomplete('Resource', deps.resource.name);
@@ -82,7 +82,7 @@ describe('Testing Booking pages and their behavior', () => {
   describe('Edit', () => {
     it('3.3 edits with mixed changes', () => {
       cy.task<any[]>('db:populateBooking', 1).then((records) => {
-        cy.visit('/booking');
+        cy.visit('/en/booking');
         cy.contains('Booking 1').click();
         cy.contains('Edit').click();
         cy.clearAndFillField('Name', 'Updated Booking');
@@ -100,7 +100,7 @@ describe('Testing Booking pages and their behavior', () => {
   describe('Delete', () => {
     it('4.1 deletes a single item from list view', () => {
       cy.task('db:populateBooking', 2);
-      cy.visit('/booking');
+      cy.visit('/en/booking');
       cy.selectDataGridRows([0]);
       cy.clickButton('Delete Selected');
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
@@ -109,7 +109,7 @@ describe('Testing Booking pages and their behavior', () => {
 
     it('4.2 deletes multiple items from list view', () => {
       cy.task('db:populateBooking', 3);
-      cy.visit('/booking');
+      cy.visit('/en/booking');
       cy.selectDataGridRows([0, 1]);
       cy.clickButton('Delete Selected');
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
@@ -118,7 +118,7 @@ describe('Testing Booking pages and their behavior', () => {
 
     it('4.3 deletes an item from edit page', () => {
       cy.task('db:populateBooking', 1);
-      cy.visit('/booking');
+      cy.visit('/en/booking');
       cy.contains('Booking 1').click();
       cy.contains('Edit').click();
       cy.url().should('include', '/booking/edit');
@@ -132,7 +132,7 @@ describe('Testing Booking pages and their behavior', () => {
   describe('Fail create', () => {
     it('5.1 fails when required parent field is missing', () => {
       cy.task<any>('db:populateBookingDependencies').then((deps) => {
-        cy.visit('/booking/new');
+        cy.visit('/en/booking/new');
         cy.selectAutocomplete('Resource', deps.resource.name);
         cy.fillDateTime('Start Time', '01/15/2025 09:00 AM');
         cy.fillDateTime('End Time', '01/15/2025 05:00 PM');
@@ -146,7 +146,7 @@ describe('Testing Booking pages and their behavior', () => {
   describe('Fail edit', () => {
     it('6.1 fails when required parent field is cleared', () => {
       cy.task('db:populateBooking', 1);
-      cy.visit('/booking');
+      cy.visit('/en/booking');
       cy.contains('Booking 1').click();
       cy.contains('Edit').click();
       cy.clearField('Name');

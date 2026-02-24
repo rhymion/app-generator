@@ -9,27 +9,27 @@ describe('Testing Parent Only pages and their behavior', () => {
     Cypress.session.clearAllSavedSessions();
     cy.clearCookies();
     cy.clearLocalStorage();
-    cy.visit('/');
+    cy.visit('/en/');
     cy.window().then((win) => { win.sessionStorage.clear(); });
     cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
   });
 
   describe('Display list', () => {
     it('1.1 shows empty state with no items', () => {
-      cy.visit('/parent_only');
+      cy.visit('/en/parent_only');
       assertDataGridEmpty();
     });
 
     it('1.2 shows list with one item', () => {
       cy.task('db:populateParentOnly', 1);
-      cy.visit('/parent_only');
+      cy.visit('/en/parent_only');
       cy.contains('Parent Only 1').should('be.visible');
       getDataGridRowCount().should('eq', 1);
     });
 
     it('1.3 shows list with multiple items', () => {
       cy.task('db:populateParentOnly', 3);
-      cy.visit('/parent_only');
+      cy.visit('/en/parent_only');
       cy.contains('Parent Only 1').should('be.visible');
       getDataGridRowCount().should('eq', 3);
     });
@@ -37,7 +37,7 @@ describe('Testing Parent Only pages and their behavior', () => {
 
   describe('Create', () => {
     it('2.1 creates with minimal data (required fields only)', () => {
-      cy.visit('/parent_only');
+      cy.visit('/en/parent_only');
       cy.clickButton('Create New Parent Only');
       cy.fillField('Name', 'Test Parent Only');
       cy.clickButton('Save');
@@ -50,7 +50,7 @@ describe('Testing Parent Only pages and their behavior', () => {
     });
 
     it('2.2 creates with full data (all fields and children)', () => {
-      cy.visit('/parent_only');
+      cy.visit('/en/parent_only');
       cy.clickButton('Create New Parent Only');
       cy.fillField('Name', 'Test Parent Only');
       cy.fillField('Description', 'Test Description');
@@ -72,7 +72,7 @@ describe('Testing Parent Only pages and their behavior', () => {
   describe('Edit', () => {
     it('3.1 adds optional data and child items', () => {
       cy.task<any[]>('db:populateParentOnly', 1).then((records) => {
-        cy.visit('/parent_only');
+        cy.visit('/en/parent_only');
         cy.contains('Parent Only 1').click();
         cy.contains('Edit').click();
         cy.url().should('include', '/parent_only/edit');
@@ -91,7 +91,7 @@ describe('Testing Parent Only pages and their behavior', () => {
 
     it('3.2 removes optional data and child items', () => {
       cy.task<any[]>('db:populateParentOnlyFull', 1).then((records) => {
-        cy.visit('/parent_only');
+        cy.visit('/en/parent_only');
         cy.contains('Parent Only 1').click();
         cy.contains('Edit').click();
         cy.url().should('include', '/parent_only/edit');
@@ -106,7 +106,7 @@ describe('Testing Parent Only pages and their behavior', () => {
 
     it('3.3 edits with mixed changes', () => {
       cy.task<any[]>('db:populateParentOnly', 1).then((records) => {
-        cy.visit('/parent_only');
+        cy.visit('/en/parent_only');
         cy.contains('Parent Only 1').click();
         cy.contains('Edit').click();
         cy.clearAndFillField('Name', 'Updated Parent Only');
@@ -125,7 +125,7 @@ describe('Testing Parent Only pages and their behavior', () => {
   describe('Delete', () => {
     it('4.1 deletes a single item from list view', () => {
       cy.task('db:populateParentOnly', 2);
-      cy.visit('/parent_only');
+      cy.visit('/en/parent_only');
       cy.selectDataGridRows([0]);
       cy.clickButton('Delete Selected');
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
@@ -134,7 +134,7 @@ describe('Testing Parent Only pages and their behavior', () => {
 
     it('4.2 deletes multiple items from list view', () => {
       cy.task('db:populateParentOnly', 3);
-      cy.visit('/parent_only');
+      cy.visit('/en/parent_only');
       cy.selectDataGridRows([0, 1]);
       cy.clickButton('Delete Selected');
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
@@ -143,7 +143,7 @@ describe('Testing Parent Only pages and their behavior', () => {
 
     it('4.3 deletes an item from edit page', () => {
       cy.task('db:populateParentOnly', 1);
-      cy.visit('/parent_only');
+      cy.visit('/en/parent_only');
       cy.contains('Parent Only 1').click();
       cy.contains('Edit').click();
       cy.url().should('include', '/parent_only/edit');
@@ -156,7 +156,7 @@ describe('Testing Parent Only pages and their behavior', () => {
 
   describe('Fail create', () => {
     it('5.1 fails when required parent field is missing', () => {
-      cy.visit('/parent_only/new');
+      cy.visit('/en/parent_only/new');
       cy.clickButton('Save');
       cy.url().should('include', '/parent_only/new');
     });
@@ -166,7 +166,7 @@ describe('Testing Parent Only pages and their behavior', () => {
   describe('Fail edit', () => {
     it('6.1 fails when required parent field is cleared', () => {
       cy.task('db:populateParentOnly', 1);
-      cy.visit('/parent_only');
+      cy.visit('/en/parent_only');
       cy.contains('Parent Only 1').click();
       cy.contains('Edit').click();
       cy.clearField('Name');

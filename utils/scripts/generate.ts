@@ -233,7 +233,7 @@ function generate(inputPath: string, outputDir: string) {
     // Create directories
     const libDir = path.join(outputDir, 'lib', parent);
     const componentsDir = path.join(outputDir, 'components', parent);
-    const appDir = path.join(outputDir, 'app', parent);
+    const appDir = path.join(outputDir, 'app', '[locale]', parent);
 
     fs.mkdirSync(libDir, { recursive: true });
     fs.mkdirSync(componentsDir, { recursive: true });

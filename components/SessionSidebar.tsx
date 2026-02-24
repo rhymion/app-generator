@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { usePathname } from "next/navigation";
-import Sidebar from "../app/@sidebar/page";
+import Sidebar from "../app/[locale]/@sidebar/page";
 import { useSidebar } from "./SidebarContext";
 import { themeConfig } from "@/lib/site-config";
 

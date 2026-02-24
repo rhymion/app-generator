@@ -1,0 +1,34 @@
+{
+  "Header": {
+    "signIn": "Sign In",
+    "signOut": "Sign Out",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu"
+  },
+  "Nav": {
+    "home": "Home",
+    "dbTables": "DB Tables",
+    "xxxxxXxxxx": "Xxxxx Xxxxx",
+    "parentOnly": "Parent Only",
+    "parent1": "Parent1",
+    "userAccount": "User Account",
+    "role": "Role",
+    "organization": "Organization",
+    "permission": "Permission"
+  },
+  "Auth": {
+    "signInTitle": "Sign in to your account",
+    "registerTitle": "Create your account",
+    "emailPlaceholder": "Email address",
+    "namePlaceholder": "Full name",
+    "passwordPlaceholder": "Password",
+    "signInButton": "Sign in",
+    "registerButton": "Register",
+    "noAccount": "No account? Register.",
+    "haveAccount": "Already have an account? Sign in",
+    "invalidCredentials": "Invalid credentials",
+    "loginError": "An error occurred during login",
+    "emailInUse": "Email address is already in use",
+    "registrationFailed": "Registration failed"
+  }
+}

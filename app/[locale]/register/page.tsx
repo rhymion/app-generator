@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { useRouter } from "@/i18n/navigation";
+import { Link } from "@/i18n/navigation";
 import { signIn } from "next-auth/react";
+import { useTranslations } from "next-intl";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const t = useTranslations("Auth");
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -19,14 +21,14 @@ export default function RegisterPage() {
       });
 
       if (signInResult?.error) {
-        setError("Email address is already in use");
+        setError(t("emailInUse"));
         return;
       }
 
       router.push("/");
       router.refresh();
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Registration failed");
+      setError(error instanceof Error ? error.message : t("registrationFailed"));
     }
   }
 
@@ -35,14 +37,14 @@ export default function RegisterPage() {
       <div className="max-w-md w-full space-y-8">
         <div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Create your account
+            {t("registerTitle")}
           </h2>
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="rounded-md shadow-xs -space-y-px">
             <div>
               <label htmlFor="name" className="sr-only">
-                Name
+                {t("namePlaceholder")}
               </label>
               <input
                 id="name"
@@ -50,12 +52,12 @@ export default function RegisterPage() {
                 type="text"
                 required
                 className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-hidden focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder="Full name"
+                placeholder={t("namePlaceholder")}
               />
             </div>
             <div>
               <label htmlFor="email" className="sr-only">
-                Email address
+                {t("emailPlaceholder")}
               </label>
               <input
                 id="email"
@@ -63,12 +65,12 @@ export default function RegisterPage() {
                 type="email"
                 required
                 className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-hidden focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder="Email address"
+                placeholder={t("emailPlaceholder")}
               />
             </div>
             <div>
               <label htmlFor="password" className="sr-only">
-                Password
+                {t("passwordPlaceholder")}
               </label>
               <input
                 id="password"
@@ -76,7 +78,7 @@ export default function RegisterPage() {
                 type="password"
                 required
                 className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-hidden focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder="Password"
+                placeholder={t("passwordPlaceholder")}
               />
             </div>
           </div>
@@ -90,13 +92,13 @@ export default function RegisterPage() {
               type="submit"
               className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
             >
-              Register
+              {t("registerButton")}
             </button>
           </div>
         </form>
         <div className="text-center">
           <Link href="/login" className="text-blue-600 hover:underline">
-            Already have an account? Sign in
+            {t("haveAccount")}
           </Link>
         </div>
       </div>

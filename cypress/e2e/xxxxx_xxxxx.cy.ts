@@ -9,27 +9,27 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
     Cypress.session.clearAllSavedSessions();
     cy.clearCookies();
     cy.clearLocalStorage();
-    cy.visit('/');
+    cy.visit('/en/');
     cy.window().then((win) => { win.sessionStorage.clear(); });
     cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
   });
 
   describe('Display list', () => {
     it('1.1 shows empty state with no items', () => {
-      cy.visit('/xxxxx_xxxxx');
+      cy.visit('/en/xxxxx_xxxxx');
       assertDataGridEmpty();
     });
 
     it('1.2 shows list with one item', () => {
       cy.task('db:populateXxxxxXxxxx', 1);
-      cy.visit('/xxxxx_xxxxx');
+      cy.visit('/en/xxxxx_xxxxx');
       cy.contains('Xxxxx Xxxxx 1').should('be.visible');
       getDataGridRowCount().should('eq', 1);
     });
 
     it('1.3 shows list with multiple items', () => {
       cy.task('db:populateXxxxxXxxxx', 3);
-      cy.visit('/xxxxx_xxxxx');
+      cy.visit('/en/xxxxx_xxxxx');
       cy.contains('Xxxxx Xxxxx 1').should('be.visible');
       getDataGridRowCount().should('eq', 3);
     });
@@ -37,7 +37,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
 
   describe('Create', () => {
     it('2.1 creates with minimal data (required fields only)', () => {
-      cy.visit('/xxxxx_xxxxx');
+      cy.visit('/en/xxxxx_xxxxx');
       cy.clickButton('Create New Xxxxx Xxxxx');
       cy.fillField('Name', 'Test Xxxxx Xxxxx');
       // Add required child: Yyyyy Yyyyys
@@ -53,7 +53,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
     });
 
     it('2.2 creates with full data (all fields and children)', () => {
-      cy.visit('/xxxxx_xxxxx');
+      cy.visit('/en/xxxxx_xxxxx');
       cy.clickButton('Create New Xxxxx Xxxxx');
       cy.fillField('Name', 'Test Xxxxx Xxxxx');
       cy.fillField('Description', 'Test Description');
@@ -76,7 +76,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
   describe('Edit', () => {
     it('3.1 adds optional data and child items', () => {
       cy.task<any[]>('db:populateXxxxxXxxxx', 1).then((records) => {
-        cy.visit('/xxxxx_xxxxx');
+        cy.visit('/en/xxxxx_xxxxx');
         cy.contains('Xxxxx Xxxxx 1').click();
         cy.contains('Edit').click();
         cy.url().should('include', '/xxxxx_xxxxx/edit');
@@ -98,7 +98,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
     it('3.2 removes optional data and child items', () => {
       cy.task<any[]>('db:populateXxxxxXxxxxFull', 1).then((records) => {
         cy.task('db:populateXxxxxXxxxxYyyyyYyyyy', { parentId: records[0].id, length: 1 });
-        cy.visit('/xxxxx_xxxxx');
+        cy.visit('/en/xxxxx_xxxxx');
         cy.contains('Xxxxx Xxxxx 1').click();
         cy.contains('Edit').click();
         cy.url().should('include', '/xxxxx_xxxxx/edit');
@@ -116,7 +116,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
 
     it('3.3 edits with mixed changes', () => {
       cy.task<any[]>('db:populateXxxxxXxxxx', 1).then((records) => {
-        cy.visit('/xxxxx_xxxxx');
+        cy.visit('/en/xxxxx_xxxxx');
         cy.contains('Xxxxx Xxxxx 1').click();
         cy.contains('Edit').click();
         cy.clearAndFillField('Name', 'Updated Xxxxx Xxxxx');
@@ -135,7 +135,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
   describe('Delete', () => {
     it('4.1 deletes a single item from list view', () => {
       cy.task('db:populateXxxxxXxxxx', 2);
-      cy.visit('/xxxxx_xxxxx');
+      cy.visit('/en/xxxxx_xxxxx');
       cy.selectDataGridRows([0]);
       cy.clickButton('Delete Selected');
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
@@ -144,7 +144,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
 
     it('4.2 deletes multiple items from list view', () => {
       cy.task('db:populateXxxxxXxxxx', 3);
-      cy.visit('/xxxxx_xxxxx');
+      cy.visit('/en/xxxxx_xxxxx');
       cy.selectDataGridRows([0, 1]);
       cy.clickButton('Delete Selected');
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
@@ -153,7 +153,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
 
     it('4.3 deletes an item from edit page', () => {
       cy.task('db:populateXxxxxXxxxx', 1);
-      cy.visit('/xxxxx_xxxxx');
+      cy.visit('/en/xxxxx_xxxxx');
       cy.contains('Xxxxx Xxxxx 1').click();
       cy.contains('Edit').click();
       cy.url().should('include', '/xxxxx_xxxxx/edit');
@@ -166,13 +166,13 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
 
   describe('Fail create', () => {
     it('5.1 fails when required parent field is missing', () => {
-      cy.visit('/xxxxx_xxxxx/new');
+      cy.visit('/en/xxxxx_xxxxx/new');
       cy.clickButton('Save');
       cy.url().should('include', '/xxxxx_xxxxx/new');
     });
 
     it('5.2 fails when required child field is missing', () => {
-      cy.visit('/xxxxx_xxxxx/new');
+      cy.visit('/en/xxxxx_xxxxx/new');
       cy.fillField('Name', 'Test Xxxxx Xxxxx');
       cy.clickButton('Add Yyyyy Yyyyys');
       fillDataGridRow(0, { name: 'Test Yyyyy Yyyyys', type: 'string', required: true });
@@ -184,7 +184,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
   describe('Fail edit', () => {
     it('6.1 fails when required parent field is cleared', () => {
       cy.task('db:populateXxxxxXxxxx', 1);
-      cy.visit('/xxxxx_xxxxx');
+      cy.visit('/en/xxxxx_xxxxx');
       cy.contains('Xxxxx Xxxxx 1').click();
       cy.contains('Edit').click();
       cy.clearField('Name');
@@ -195,7 +195,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
     it('6.2 fails when required child field is cleared', () => {
       cy.task<any[]>('db:populateXxxxxXxxxx', 1).then((records) => {
         cy.task('db:populateXxxxxXxxxxYyyyyYyyyy', { parentId: records[0].id, length: 1 });
-        cy.visit('/xxxxx_xxxxx');
+        cy.visit('/en/xxxxx_xxxxx');
         cy.contains('Xxxxx Xxxxx 1').click();
         cy.contains('Edit').click();
         // Clear required child field

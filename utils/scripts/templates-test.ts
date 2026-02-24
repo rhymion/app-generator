@@ -678,7 +678,7 @@ export function generateTestSpec(
   lines.push(`    Cypress.session.clearAllSavedSessions();`);
   lines.push(`    cy.clearCookies();`);
   lines.push(`    cy.clearLocalStorage();`);
-  lines.push(`    cy.visit('/');`);
+  lines.push(`    cy.visit('/en/');`);
   lines.push(`    cy.window().then((win) => { win.sessionStorage.clear(); });`);
   lines.push(`    cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);`);
   lines.push(`  });`);
@@ -690,7 +690,7 @@ export function generateTestSpec(
 
     // 1.1 Empty state
     lines.push(`    it('1.1 shows empty state with no items', () => {`);
-    lines.push(`      cy.visit('/${parent}');`);
+    lines.push(`      cy.visit('/en/${parent}');`);
     lines.push(`      assertDataGridEmpty();`);
     lines.push(`    });`);
     lines.push('');
@@ -698,7 +698,7 @@ export function generateTestSpec(
     // 1.2 One item
     lines.push(`    it('1.2 shows list with one item', () => {`);
     lines.push(`      cy.task('db:populate${pascal}', 1);`);
-    lines.push(`      cy.visit('/${parent}');`);
+    lines.push(`      cy.visit('/en/${parent}');`);
     lines.push(`      cy.contains('${title} 1').should('be.visible');`);
     lines.push(`      getDataGridRowCount().should('eq', 1);`);
     lines.push(`    });`);
@@ -707,7 +707,7 @@ export function generateTestSpec(
     // 1.3 Multiple items
     lines.push(`    it('1.3 shows list with multiple items', () => {`);
     lines.push(`      cy.task('db:populate${pascal}', 3);`);
-    lines.push(`      cy.visit('/${parent}');`);
+    lines.push(`      cy.visit('/en/${parent}');`);
     lines.push(`      cy.contains('${title} 1').should('be.visible');`);
     lines.push(`      getDataGridRowCount().should('eq', 3);`);
     lines.push(`    });`);
@@ -725,7 +725,7 @@ export function generateTestSpec(
     if (hasDeps) {
       lines.push(`      cy.task<any>('db:populate${pascal}Dependencies').then((deps) => {`);
     }
-    lines.push(`${I}cy.visit('/${parent}');`);
+    lines.push(`${I}cy.visit('/en/${parent}');`);
     lines.push(`${I}cy.clickButton('Create New ${title}');`);
 
     // Fill required fields
@@ -788,7 +788,7 @@ export function generateTestSpec(
       }
     }
 
-    lines.push(`${I}cy.visit('/${parent}');`);
+    lines.push(`${I}cy.visit('/en/${parent}');`);
     lines.push(`${I}cy.clickButton('Create New ${title}');`);
 
     // Fill ALL fields (required + optional)
@@ -862,7 +862,7 @@ export function generateTestSpec(
         }
       }
 
-      lines.push(`        cy.visit('/${parent}');`);
+      lines.push(`        cy.visit('/en/${parent}');`);
       lines.push(`        cy.contains('${title} 1').click();`);
       lines.push(`        cy.contains('Edit').click();`);
       lines.push(`        cy.url().should('include', '/${parent}/edit');`);
@@ -934,7 +934,7 @@ export function generateTestSpec(
         lines.push(`        cy.task('db:populate${pascal}${childPascal}', { parentId: records[0].id, length: 1 });`);
       }
 
-      lines.push(`        cy.visit('/${parent}');`);
+      lines.push(`        cy.visit('/en/${parent}');`);
       lines.push(`        cy.contains('${title} 1').click();`);
       lines.push(`        cy.contains('Edit').click();`);
       lines.push(`        cy.url().should('include', '/${parent}/edit');`);
@@ -966,7 +966,7 @@ export function generateTestSpec(
     // 3.3 Mixed changes
     lines.push(`    it('3.3 edits with mixed changes', () => {`);
     lines.push(`      cy.task<any[]>('db:populate${pascal}', 1).then((records) => {`);
-    lines.push(`        cy.visit('/${parent}');`);
+    lines.push(`        cy.visit('/en/${parent}');`);
     lines.push(`        cy.contains('${title} 1').click();`);
     lines.push(`        cy.contains('Edit').click();`);
 
@@ -1008,7 +1008,7 @@ export function generateTestSpec(
     if (generateConfig.list) {
       lines.push(`    it('4.1 deletes a single item from list view', () => {`);
       lines.push(`      cy.task('db:populate${pascal}', 2);`);
-      lines.push(`      cy.visit('/${parent}');`);
+      lines.push(`      cy.visit('/en/${parent}');`);
       lines.push(`      cy.selectDataGridRows([0]);`);
       lines.push(`      cy.clickButton('Delete Selected');`);
       lines.push(`      cy.get('div[role="dialog"]').find('button').contains('Delete').click();`);
@@ -1019,7 +1019,7 @@ export function generateTestSpec(
       // 4.2 Delete multiple from list
       lines.push(`    it('4.2 deletes multiple items from list view', () => {`);
       lines.push(`      cy.task('db:populate${pascal}', 3);`);
-      lines.push(`      cy.visit('/${parent}');`);
+      lines.push(`      cy.visit('/en/${parent}');`);
       lines.push(`      cy.selectDataGridRows([0, 1]);`);
       lines.push(`      cy.clickButton('Delete Selected');`);
       lines.push(`      cy.get('div[role="dialog"]').find('button').contains('Delete').click();`);
@@ -1032,7 +1032,7 @@ export function generateTestSpec(
     if (generateConfig.edit) {
       lines.push(`    it('4.3 deletes an item from edit page', () => {`);
       lines.push(`      cy.task('db:populate${pascal}', 1);`);
-      lines.push(`      cy.visit('/${parent}');`);
+      lines.push(`      cy.visit('/en/${parent}');`);
       lines.push(`      cy.contains('${title} 1').click();`);
       lines.push(`      cy.contains('Edit').click();`);
       lines.push(`      cy.url().should('include', '/${parent}/edit');`);
@@ -1061,7 +1061,7 @@ export function generateTestSpec(
       if (hasDeps) {
         lines.push(`      cy.task<any>('db:populate${pascal}Dependencies').then((deps) => {`);
       }
-      lines.push(`${I}cy.visit('/${parent}/new');`);
+      lines.push(`${I}cy.visit('/en/${parent}/new');`);
 
       // Fill all required fields EXCEPT the one to skip
       for (const line of genFillCommands(fieldsToFill, title, I, deps)) {
@@ -1103,7 +1103,7 @@ export function generateTestSpec(
         if (hasDeps) {
           lines.push(`      cy.task<any>('db:populate${pascal}Dependencies').then((deps) => {`);
         }
-        lines.push(`${I}cy.visit('/${parent}/new');`);
+        lines.push(`${I}cy.visit('/en/${parent}/new');`);
 
         // Fill required parent fields
         for (const line of genFillCommands(requiredFieldMetas, title, I, deps)) {
@@ -1138,7 +1138,7 @@ export function generateTestSpec(
 
       lines.push(`    it('6.1 fails when required parent field is cleared', () => {`);
       lines.push(`      cy.task('db:populate${pascal}', 1);`);
-      lines.push(`      cy.visit('/${parent}');`);
+      lines.push(`      cy.visit('/en/${parent}');`);
       lines.push(`      cy.contains('${title} 1').click();`);
       lines.push(`      cy.contains('Edit').click();`);
       lines.push(genClearCommand(fieldToClear, '      '));
@@ -1157,7 +1157,7 @@ export function generateTestSpec(
       lines.push(`    it('6.2 fails when required child field is cleared', () => {`);
       lines.push(`      cy.task<any[]>('db:populate${pascal}', 1).then((records) => {`);
       lines.push(`        cy.task('db:populate${pascal}${childPascal}', { parentId: records[0].id, length: 1 });`);
-      lines.push(`        cy.visit('/${parent}');`);
+      lines.push(`        cy.visit('/en/${parent}');`);
       lines.push(`        cy.contains('${title} 1').click();`);
       lines.push(`        cy.contains('Edit').click();`);
       lines.push(`        // Clear required child field`);
