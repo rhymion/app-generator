@@ -69,8 +69,86 @@ async function main() {
     },
   });
 
+  const role = await prisma.role.create({
+    data: {
+      name: 'Admin',
+      description: 'Admin role with all permissions',
+      creator_id: user2.id,
+      updater_id: user2.id,
+      user_accounts: {
+        connect: { id: user2.id },
+      },
+    },
+  });
+
+  const entities = ['db_table', 'xxxxx_xxxxx', 'parent_only', 'parent1', 'user_account', 'role', 'organization', 'permission', 'procedure', 'resource', 'booking'];
+  const admin_permissions = await Promise.all(entities.map(async function(entity) {
+    return await prisma.permission.create({
+      data: {
+        name: entity,
+        role_id: role.id,
+        creator_id: user2.id,
+        updater_id: user2.id,
+        create: true,
+        read: true,
+        update: true,
+        delete: true,
+      },
+    });
+  })); 
+
+  const no_role_permissions = await Promise.all(entities.map(async function(entity) {
+    return await prisma.permission.create({
+      data: {
+        name: entity,
+        creator_id: user2.id,
+        updater_id: user2.id,
+        create: false,
+        read: true,
+        update: false,
+        delete: false,
+      },
+    });
+  }));
+
+  const organization1 = await prisma.organization.create({
+    data: {
+      name: 'Test Organization 1',
+      description: 'Organization for testing',
+      creator_id: user2.id,
+      updater_id: user2.id,
+      user_accounts: {
+        connect: [{ id: user1.id }, { id: user2.id }],
+      },
+    },
+  });
+
+  const organization2 = await prisma.organization.create({
+    data: {
+      name: 'Test Organization 2',
+      description: 'Organization for testing',
+      creator_id: user2.id,
+      updater_id: user2.id,
+      user_accounts: {
+        connect: { id: user1.id },
+      },
+    },
+  });
+
+  const organization3 = await prisma.organization.create({
+    data: {
+      name: 'Test Organization 3',
+      description: 'Organization for testing',
+      creator_id: user2.id,
+      updater_id: user2.id,
+      user_accounts: {
+        connect: { id: user2.id },
+      },
+    },
+  });
+
   console.log('Test database seeded successfully!');
-  console.log({ user1, user2, dbTable });
+  console.log({ user1, user2, dbTable, role, admin_permissions, no_role_permissions, organization1, organization2, organization3 });
 }
 
 main()
