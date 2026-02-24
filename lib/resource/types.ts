@@ -58,7 +58,7 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allOrganizations?: Organization[];
+  currentUserId?: string | null;
 
   organizationPermissions?: ModelPermissions;
-  currentUserId?: string | null;
 }>;

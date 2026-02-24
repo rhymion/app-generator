@@ -57,7 +57,7 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allDbTables?: DbTable[];
+  currentUserId?: string | null;
 
   dbTablePermissions?: ModelPermissions;
-  currentUserId?: string | null;
 }>;
