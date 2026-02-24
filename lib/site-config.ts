@@ -19,7 +19,7 @@ export const siteConfig = {
 
   /** Links listed in the sidebar navigation */
   navLinks: [
-    { label: "Home", href: "/" },
+    { label: "Home", href: "/", external: false },
     { label: "DB Tables", href: "/db_table" },
     { label: "Xxxxx Xxxxx", href: "/xxxxx_xxxxx" },
     { label: "Parent Only", href: "/parent_only" },

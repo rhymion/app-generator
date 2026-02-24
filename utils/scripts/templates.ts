@@ -221,14 +221,14 @@ export type FormUpsertProps = Readonly<FormViewProps & {
       return `\n  all${targetPascal}s?: ${targetPascal}[];`;
     }).join('');
   })()}
+  currentUserId?: string | null;
 ${Array.from(new Set([
   ...children.filter(c => c.relationship?.type === 'many-to-many').map(c => c.relationship!.target),
   ...relationshipTargets.map(r => r.target),
   ...childRelationshipTargets,
 ])).map(target => {
     const targetCamel = toCamelCase(target);
-    return `\n  ${targetCamel}Permissions?: ModelPermissions;
-  currentUserId?: string | null;`;
+    return `\n  ${targetCamel}Permissions?: ModelPermissions;`;
   }).join('')}
 }>;
 `;
@@ -2449,6 +2449,7 @@ export function generateApiRoute(parent: string, children: ChildInfo[], schema: 
       childVar: childVarName(childInfo),
       propertyName: childInfo.propertyName,
       useConnect,
+      outputType: childInfo.outputType,
     };
   });
 
@@ -2458,7 +2459,7 @@ export function generateApiRoute(parent: string, children: ChildInfo[], schema: 
 
   const allBodyFields = [...parentPropInfos.map(p => p.prop === p.varName ? p.prop : `${p.prop}: ${p.varName}`), ...childBodyFields].join(', ');
 
-  const childServiceArgs = allChildrenData.map(({ childVar, propertyName, useConnect }) =>
+  const childServiceArgs = allChildrenData.filter(c => c.outputType !== 'comments').map(({ childVar, propertyName, useConnect }) =>
     useConnect ? `${childVar}_ids ?? []` : `${propertyName} ?? []`
   ).join(', ');
 
@@ -2525,6 +2526,7 @@ export function generateApiDetailRoute(parent: string, children: ChildInfo[], sc
       childVar: childVarName(childInfo),
       propertyName: childInfo.propertyName,
       useConnect,
+      outputType: childInfo.outputType,
     };
   });
 
@@ -2534,7 +2536,7 @@ export function generateApiDetailRoute(parent: string, children: ChildInfo[], sc
 
   const allBodyFields = [...parentPropInfos.map(p => p.prop === p.varName ? p.prop : `${p.prop}: ${p.varName}`), ...childBodyFields].join(', ');
 
-  const childServiceArgs = allChildrenData.map(({ childVar, propertyName, useConnect }) =>
+  const childServiceArgs = allChildrenData.filter(c => c.outputType !== 'comments').map(({ childVar, propertyName, useConnect }) =>
     useConnect ? `${childVar}_ids ?? []` : `${propertyName} ?? []`
   ).join(', ');
 

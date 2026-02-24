@@ -32,7 +32,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, 'db_table', 'update', existing);
     const body = await request.json();
     const { name, description, fields, db_table_comments } = body;
-    const result = await updateDbTable(userId, id, name, description ?? null, fields ?? [], db_table_comments ?? []);
+    const result = await updateDbTable(userId, id, name, description ?? null, fields ?? []);
     return NextResponse.json(result);
   } catch (error) {
     return handleApiError(error);
