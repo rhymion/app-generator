@@ -30,7 +30,7 @@ export default function SessionSidebar() {
       {isOpen && (
         <div className="md:hidden fixed inset-0 z-40 flex">
           {/* Drawer panel */}
-          <div className={`flex-none w-64 h-full overflow-y-auto shadow-xl ${themeConfig.sidebar.panel}`}>
+          <div className={`flex-none w-64 h-full overflow-y-auto shadow-xl mt-14 ${themeConfig.sidebar.panel}`}>
             <Sidebar />
           </div>
           {/* Backdrop – click to close */}
