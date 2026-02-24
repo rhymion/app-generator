@@ -19,10 +19,18 @@ function getDisplayValue(col: GridColDef, row: any): string {
   if (col.valueGetter) {
     const result = (col.valueGetter as Function)(rawValue, row, col, null);
     if (result === null || result === undefined) return '';
+    if (col.valueFormatter) {
+      const formatted = (col.valueFormatter as Function)(result, row, col, null);
+      return formatted === null || formatted === undefined ? '' : String(formatted);
+    }
     return String(result);
   }
   if (col.type === 'boolean') return Boolean(rawValue) ? 'Yes' : 'No';
   if (rawValue === null || rawValue === undefined) return '';
+  if (col.valueFormatter) {
+    const formatted = (col.valueFormatter as Function)(rawValue, row, col, null);
+    return formatted === null || formatted === undefined ? '' : String(formatted);
+  }
   return String(rawValue);
 }
 

@@ -22,6 +22,8 @@ import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
+import DateTimeWrapper from './DateTimeWrapper';
+import dayjs from 'dayjs';
 
 interface FieldsDataGridProps {
   initialFields?: GridRowsProp;
@@ -43,10 +45,18 @@ function getDisplayValue(col: GridColDef, row: any): string {
   if (col.valueGetter) {
     const result = (col.valueGetter as Function)(rawValue, row, col, null);
     if (result === null || result === undefined) return '';
+    if (col.valueFormatter) {
+      const formatted = (col.valueFormatter as Function)(result, row, col, null);
+      return formatted === null || formatted === undefined ? '' : String(formatted);
+    }
     return String(result);
   }
   if (col.type === 'boolean') return Boolean(rawValue) ? 'Yes' : 'No';
   if (rawValue === null || rawValue === undefined) return '';
+  if (col.valueFormatter) {
+    const formatted = (col.valueFormatter as Function)(rawValue, row, col, null);
+    return formatted === null || formatted === undefined ? '' : String(formatted);
+  }
   return String(rawValue);
 }
 
@@ -57,6 +67,17 @@ function DialogField({ col, value, onChange }: { col: GridColDef; value: any; on
         control={<Checkbox checked={Boolean(value)} onChange={e => onChange(e.target.checked)} />}
         label={col.headerName}
         sx={{ mt: 1, display: 'block' }}
+      />
+    );
+  }
+  if (col.type === 'dateTime') {
+    const dateValue = value ? new Date(value) : null;
+    const validDate = dateValue && !isNaN(dateValue.getTime()) ? dateValue : null;
+    return (
+      <DateTimeWrapper
+        label={col.headerName || ''}
+        date_time={validDate}
+        onChange={(newValue: dayjs.Dayjs | null) => onChange(newValue ? newValue.toISOString() : '')}
       />
     );
   }

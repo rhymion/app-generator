@@ -88,7 +88,7 @@ model parent1 {
   organization       organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   description  String? 
   price        Int
-  due_date     DateTime
+  due_date     DateTime @db.Timestamptz(3)
   image_url    String?
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -123,8 +123,8 @@ model parent1_child2 {
   parent1_id    String     
   parent1       parent1 @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
   required    Boolean   @default(true)
-  start_date  DateTime?
-  end_date    DateTime
+  start_date  DateTime? @db.Timestamptz(3)
+  end_date    DateTime  @db.Timestamptz(3)
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 }
@@ -142,8 +142,8 @@ model parent_only {
   id           String   @id @default(cuid())
   name         String   @unique
   description  String? 
-  login_time   DateTime?
-  logout_time  DateTime?
+  login_time   DateTime? @db.Timestamptz(3)
+  logout_time  DateTime? @db.Timestamptz(3)
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
   creator_id String
@@ -303,8 +303,8 @@ model booking {
   name         String
   resource_id  String
   resource     resource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
-  start_time   DateTime
-  end_time     DateTime
+  start_time   DateTime @db.Timestamptz(3)
+  end_time     DateTime @db.Timestamptz(3)
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
   creator_id   String

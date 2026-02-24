@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import dayjs from 'dayjs';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
@@ -44,7 +45,7 @@ function formatValue<T>(item: T, field: keyof T): string {
   const value = item[field];
   if (value === null || value === undefined) return '';
   if (typeof value === 'object' && value !== null && 'name' in value) return (value as { name: string }).name;
-  if (value instanceof Date) return value.toLocaleString();
+  if (value instanceof Date) return dayjs(value).format('YYYY-MM-DD HH:mm');
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   return String(value);
 }

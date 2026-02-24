@@ -24,6 +24,7 @@ export function parent1_child2s_columns(editable: boolean = false): GridColDef[]
       headerName: 'Start Date',
       width: 250,
       editable: editable,
+      type: 'dateTime',
       renderEditCell: (params: GridRenderEditCellParams) => (
         <DateTimeWrapper
           label="Start Date"
@@ -47,6 +48,7 @@ export function parent1_child2s_columns(editable: boolean = false): GridColDef[]
       headerName: 'End Date',
       width: 250,
       editable: editable,
+      type: 'dateTime',
       renderEditCell: (params: GridRenderEditCellParams) => (
         <DateTimeWrapper
           label="End Date"
