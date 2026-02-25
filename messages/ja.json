@@ -1,0 +1,34 @@
+{
+  "Header": {
+    "signIn": "ログイン",
+    "signOut": "ログアウト",
+    "openMenu": "メニューを開く",
+    "closeMenu": "メニューを閉じる"
+  },
+  "Nav": {
+    "home": "ホーム",
+    "dbTables": "DBテーブル",
+    "xxxxxXxxxx": "Xxxxx Xxxxx",
+    "parentOnly": "親のみ",
+    "parent1": "親1",
+    "userAccount": "ユーザーアカウント",
+    "role": "ロール",
+    "organization": "組織",
+    "permission": "権限"
+  },
+  "Auth": {
+    "signInTitle": "アカウントにログイン",
+    "registerTitle": "アカウントを作成",
+    "emailPlaceholder": "メールアドレス",
+    "namePlaceholder": "氏名",
+    "passwordPlaceholder": "パスワード",
+    "signInButton": "ログイン",
+    "registerButton": "登録",
+    "noAccount": "アカウントがない方はこちら",
+    "haveAccount": "既にアカウントをお持ちの方はこちら",
+    "invalidCredentials": "認証情報が正しくありません",
+    "loginError": "ログイン中にエラーが発生しました",
+    "emailInUse": "このメールアドレスは既に使用されています",
+    "registrationFailed": "登録に失敗しました"
+  }
+}

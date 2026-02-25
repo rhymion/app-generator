@@ -26,6 +26,12 @@ export async function getParentOnlyDetail(id: string): Promise<ParentOnlyDetail 
     where: { 
       id,
     },
+    include: { 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
+    },
   });
 
   if (!parentOnly) {
@@ -47,9 +53,9 @@ export async function getParentOnlyListPageData(isAssertPermission: boolean = tr
 }
 
 export async function getParentOnlyDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('parent_only');
-  await assertPermission(userPermissions, operation, 'parent_only');
   const parentOnly = await getParentOnlyDetail(id);
+  const userPermissions = await getModelPermissions('parent_only', undefined, parentOnly);
+  await assertPermission(userPermissions, operation, 'parent_only');
   return { parentOnly, userPermissions };
 }
 

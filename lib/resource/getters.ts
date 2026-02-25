@@ -39,7 +39,11 @@ export async function getResourceDetail(id: string): Promise<ResourceDetail | nu
     include: { 
       resource_attachments: true, 
       resource_images: true, 
-      organization: true 
+      organization: true, 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
     },
   });
 
@@ -65,9 +69,9 @@ export async function getResourceListPageData(isAssertPermission: boolean = true
 }
 
 export async function getResourceDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('resource');
-  await assertPermission(userPermissions, operation, 'resource');
   const resource = await getResourceDetail(id);
+  const userPermissions = await getModelPermissions('resource', undefined, resource);
+  await assertPermission(userPermissions, operation, 'resource');
   return { resource, userPermissions };
 }
 

@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     const { userId } = await authenticateApiKey(request);
     await requireApiPermission(userId, 'db_table', 'create');
     const body = await request.json();
-    const { name, description, fields } = body;
+    const { name, description, fields, db_table_comments } = body;
     const result = await addDbTable(userId, name, description ?? null, fields ?? []);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

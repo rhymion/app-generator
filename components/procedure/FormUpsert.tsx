@@ -8,13 +8,14 @@ import Autocomplete from '@mui/material/Autocomplete';
 import { upsertProcedure, removeProcedure } from '@/lib/procedure/actions';
 import type { FormUpsertProps } from '@/lib/procedure/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 import type { Procedure } from '@/lib/procedure/types';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
   
 
-export default function FormUpsert({ src, isEdit, permissions, allProcedures = [], procedurePermissions }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, permissions, allProcedures = [], allUserAccounts = [], procedurePermissions, userAccountPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -22,11 +23,24 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
   const [parentId, setParentId] = useState<string | null>(src.parent_id || null);
+  const [assigneeId, setAssigneeId] = useState<string | null>(src.assignee_id || null);
   const childrenRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const precededByRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const followedByRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
+  const parentIdOptions = useMemo(() => {
+    return allProcedures.map((item) => ({
+      id: item.id,
+      label: item.name,
+    }));
+  }, [allProcedures]);
+  const assigneeIdOptions = useMemo(() => {
+    return allUserAccounts.map((item) => ({
+      id: item.id,
+      label: item.name,
+    }));
+  }, [allUserAccounts]);
   const initialChildren: EditableListWrapperItem[] = src.children.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
@@ -45,12 +59,6 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
     label: f.name,
     originalId: f.id,
   }));
-  const parentIdOptions = useMemo(() => {
-    return allProcedures.map((item) => ({
-      id: item.id,
-      label: item.name,
-    }));
-  }, [allProcedures]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -65,6 +73,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
     formData.set('name', nameRef.current?.value || '');
     formData.set('description', descriptionRef.current?.value || '');
     formData.set('parent_id', parentId || '');
+    formData.set('assignee_id', assigneeId || '');
     const children = childrenRef.current?.getItems?.() || [];
 
     children.forEach((item) => {
@@ -164,6 +173,19 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
           />
         )}
       />
+      <Autocomplete
+        options={assigneeIdOptions}
+        value={assigneeIdOptions.find((option) => option.id === assigneeId) || null}
+        onChange={(_, newValue) => setAssigneeId(newValue?.id ?? null)}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Assignee"
+            margin="normal"
+            
+          />
+        )}
+      />
       <EditableListWrapper
         ref={childrenRef}
         initialItems={initialChildren}
@@ -212,20 +234,24 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         }))}
         excludeOptionIds={[src.id]}
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 
   return (
-    <FormWithChildGrid
-      title={`${isEdit ? 'Edit' : 'Add'} Procedure`}
-      isEdit={isEdit}
-      formFields={formFields}
-      onSubmit={handleSubmit}
-      onDelete={isEdit && canDelete ? handleDelete : undefined}
-      onBack={handleBack}
-      deleteEntityLabel="Procedure"
-      submitButtonLabel="Save"
-      error={error}
-    />
+    <>
+      <FormWithChildGrid
+        title={`${isEdit ? 'Edit' : 'Add'} Procedure`}
+        isEdit={isEdit}
+        formFields={formFields}
+        onSubmit={handleSubmit}
+        onDelete={isEdit && canDelete ? handleDelete : undefined}
+        onBack={handleBack}
+        deleteEntityLabel="Procedure"
+        submitButtonLabel="Save"
+        error={error}
+      />
+
+    </>
   );
 }

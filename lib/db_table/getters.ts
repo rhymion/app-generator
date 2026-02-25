@@ -25,7 +25,15 @@ export async function getDbTableDetail(id: string): Promise<DbTableDetail | null
       id,
     },
     include: { 
-      fields: true 
+      fields: { include: { reference: true } }, 
+      db_table_comments: { include: { creator: { select: { id: true, 
+      name: true, 
+      avatar: true } } }, 
+      orderBy: { created_at: 'asc' } }, 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
     },
   });
 
@@ -36,6 +44,7 @@ export async function getDbTableDetail(id: string): Promise<DbTableDetail | null
   return {
     ...dbTable,
     fields: dbTable.fields,
+    db_table_comments: dbTable.db_table_comments,
   };
 }
 
@@ -49,9 +58,9 @@ export async function getDbTableListPageData(isAssertPermission: boolean = true)
 }
 
 export async function getDbTableDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('db_table');
-  await assertPermission(userPermissions, operation, 'db_table');
   const dbTable = await getDbTableDetail(id);
+  const userPermissions = await getModelPermissions('db_table', undefined, dbTable);
+  await assertPermission(userPermissions, operation, 'db_table');
   return { dbTable, userPermissions };
 }
 

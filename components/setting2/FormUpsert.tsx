@@ -7,6 +7,7 @@ import TextField from '@mui/material/TextField';
 import { upsertSetting2 } from '@/lib/setting2/actions';
 import type { FormUpsertProps } from '@/lib/setting2/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 
 
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
@@ -82,20 +83,24 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         multiline={false}
         rows={undefined}
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 
   return (
-    <FormWithChildGrid
-      title={`${isEdit ? 'Edit' : 'Add'} Setting2`}
-      isEdit={isEdit}
-      formFields={formFields}
-      onSubmit={handleSubmit}
-      onDelete={undefined}
-      onBack={handleBack}
-      deleteEntityLabel="Setting2"
-      submitButtonLabel="Save"
-      error={error}
-    />
+    <>
+      <FormWithChildGrid
+        title={`${isEdit ? 'Edit' : 'Add'} Setting2`}
+        isEdit={isEdit}
+        formFields={formFields}
+        onSubmit={handleSubmit}
+        onDelete={undefined}
+        onBack={handleBack}
+        deleteEntityLabel="Setting2"
+        submitButtonLabel="Save"
+        error={error}
+      />
+
+    </>
   );
 }

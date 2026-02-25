@@ -1,4 +1,5 @@
 import { defineConfig } from "cypress";
+import { getGeneratedTasks } from "./cypress/support/generated-tasks";
 
 export default defineConfig({
   e2e: {
@@ -6,7 +7,7 @@ export default defineConfig({
     setupNodeEvents(on, config) {
       // Load test environment variables
       require('dotenv').config({ path: '.env.test' });
-      
+
       // Task to reset and seed database before tests
       on('task', {
         async 'db:reset'() {
@@ -19,19 +20,9 @@ export default defineConfig({
           await seedTestDatabase();
           return null;
         },
-        async 'db:populateXxxxxXxxxx'(length: number) {
-          const { populateXxxxxXxxxxData } = require('./cypress/support/xxxxx_xxxxx/helper');
-          const records = await populateXxxxxXxxxxData(length);
-          return records;
-        },
-        async 'db:populateYyyyyYyyyy'(params: { xxxxxXxxxxId: string; length?: number; Length?: number }) {
-          const { populateYyyyyYyyyyData } = require('./cypress/support/xxxxx_xxxxx/helper');
-          const length = params.length || params.Length || 1;
-          const records = await populateYyyyyYyyyyData(params.xxxxxXxxxxId, length);
-          return records;
-        }
+        ...getGeneratedTasks(),
       });
-      
+
       return config;
     },
     video: false,

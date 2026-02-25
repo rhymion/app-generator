@@ -9,6 +9,19 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import CardActions from '@mui/material/CardActions';
+import Typography from '@mui/material/Typography';
+import TextField from '@mui/material/TextField';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import MenuItem from '@mui/material/MenuItem';
+import Select from '@mui/material/Select';
+import FormControl from '@mui/material/FormControl';
+import InputLabel from '@mui/material/InputLabel';
 
 interface OrderedFieldsDataGridProps {
   initialFields?: GridRowsProp;
@@ -23,6 +36,53 @@ interface OrderedFieldsDataGridProps {
 
 interface OrderedFieldsDataGridHandle {
   getFields: () => GridRowsProp;
+}
+
+function getDisplayValue(col: GridColDef, row: any): string {
+  const rawValue = row[col.field];
+  if (col.valueGetter) {
+    const result = (col.valueGetter as Function)(rawValue, row, col, null);
+    if (result === null || result === undefined) return '';
+    return String(result);
+  }
+  if (col.type === 'boolean') return Boolean(rawValue) ? 'Yes' : 'No';
+  if (rawValue === null || rawValue === undefined) return '';
+  return String(rawValue);
+}
+
+function DialogField({ col, value, onChange }: { col: GridColDef; value: any; onChange: (v: any) => void }) {
+  if (col.type === 'boolean') {
+    return (
+      <FormControlLabel
+        control={<Checkbox checked={Boolean(value)} onChange={e => onChange(e.target.checked)} />}
+        label={col.headerName}
+        sx={{ mt: 1, display: 'block' }}
+      />
+    );
+  }
+  if (col.type === 'singleSelect') {
+    const opts = ((col as any).valueOptions as Array<{ value: string | null; label: string }>) ?? [];
+    return (
+      <FormControl fullWidth margin="normal">
+        <InputLabel>{col.headerName}</InputLabel>
+        <Select value={value ?? ''} label={col.headerName} onChange={e => onChange(e.target.value)}>
+          {opts.map(opt => (
+            <MenuItem key={String(opt.value)} value={opt.value ?? ''}>{opt.label}</MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+    );
+  }
+  return (
+    <TextField
+      label={col.headerName}
+      value={value ?? ''}
+      type={col.type === 'number' ? 'number' : 'text'}
+      onChange={e => onChange(col.type === 'number' ? Number(e.target.value) : e.target.value)}
+      fullWidth
+      margin="normal"
+    />
+  );
 }
 
 const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFieldsDataGridProps>(
@@ -44,6 +104,13 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
     });
     const [openDeleteSelectedDialog, setOpenDeleteSelectedDialog] = useState(false);
     const [selectedRowIds, setSelectedRowIds] = useState<GridRowSelectionModel>({ type: 'include', ids: new Set() });
+    const isMobile = useMediaQuery('(max-width: 768px)');
+
+    // Mobile edit dialog state
+    const [editDialogOpen, setEditDialogOpen] = useState(false);
+    const [editingRow, setEditingRow] = useState<any | null>(null); // null = new row
+    const [editValues, setEditValues] = useState<Record<string, any>>({});
+    const [deleteRowId, setDeleteRowId] = useState<string | null>(null);
 
     // Initialize fields: sort by order first, then ensure sequential order values
     useEffect(() => {
@@ -53,7 +120,7 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
         const orderB = typeof b.order === 'number' ? b.order : 0;
         return orderA - orderB;
       });
-      
+
       // Re-assign order values to be sequential (1, 2, 3, ...)
       const fieldsWithOrder = sortedFields.map((field, index) => ({
         ...field,
@@ -94,9 +161,16 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
     }
 
     const addField = () => {
-      const newRow = createNewRow();
-      const updatedFields = [...fields, newRow];
-      updateFieldsOrder(updatedFields);
+      if (isMobile) {
+        const newRow = createNewRow();
+        setEditingRow(null);
+        setEditValues({ ...newRow });
+        setEditDialogOpen(true);
+      } else {
+        const newRow = createNewRow();
+        const updatedFields = [...fields, newRow];
+        updateFieldsOrder(updatedFields);
+      }
     };
 
     const deleteSelectedConfirmed = () => {
@@ -112,11 +186,38 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
       setOpenDeleteSelectedDialog(true);
     };
 
+    const openEditDialog = (row: any) => {
+      setEditingRow(row);
+      setEditValues({ ...row });
+      setEditDialogOpen(true);
+    };
+
+    const handleEditSave = () => {
+      if (editingRow) {
+        const updatedFields = fields.map(r =>
+          r.id === editingRow.id ? { ...editValues, id: editingRow.id, order: r.order } : r
+        );
+        setFields(updatedFields);
+      } else {
+        const newRow = { ...editValues, id: `temp-${Date.now()}-${Math.random()}` };
+        updateFieldsOrder([...fields, newRow]);
+      }
+      setEditDialogOpen(false);
+    };
+
+    const handleDeleteRow = () => {
+      if (deleteRowId) {
+        const updatedFields = fields.filter(r => r.id !== deleteRowId);
+        updateFieldsOrder(updatedFields);
+        setDeleteRowId(null);
+      }
+    };
+
     // Make order column read-only and add up/down buttons to columns
     const columnsWithActions: GridColDef[] = [
-      ...columns.map(col => 
-        col.field === 'order' 
-          ? { ...col, editable: false } 
+      ...columns.map(col =>
+        col.field === 'order'
+          ? { ...col, editable: false }
           : col
       ),
       {
@@ -129,24 +230,24 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
           const index = fields.findIndex(f => f.id === params.id);
           return (
             <>
-              <Button 
-                size="small" 
-                disabled={index === 0} 
+              <Button
+                size="small"
+                disabled={index === 0}
                 onClick={() => {
                   const idx = fields.findIndex(f => f.id === params.id);
                   if (idx > 0) moveRowUp(idx);
-                }} 
+                }}
                 variant="outlined"
               >
                 ↑
               </Button>
-              <Button 
-                size="small" 
-                disabled={index === fields.length - 1} 
+              <Button
+                size="small"
+                disabled={index === fields.length - 1}
                 onClick={() => {
                   const idx = fields.findIndex(f => f.id === params.id);
                   if (idx < fields.length - 1) moveRowDown(idx);
-                }} 
+                }}
                 variant="outlined"
               >
                 ↓
@@ -156,6 +257,87 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
         },
       },
     ];
+
+    const editableColumns = columns.filter(col => col.editable && col.field !== 'id' && col.field !== 'order');
+    const displayColumns = columns.filter(col => col.field !== 'id' && col.field !== 'actions');
+
+    if (isMobile) {
+      return (
+        <div>
+          {showTitle && <h2>{title}</h2>}
+          <Button onClick={addField} variant="contained" sx={{ mb: 2 }}>{addButtonLabel}</Button>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {fields.length === 0 ? (
+              <Typography color="text.secondary">No items.</Typography>
+            ) : (
+              fields.map((row, index) => (
+                <Card key={row.id ?? index} variant="outlined">
+                  <CardContent sx={{ pb: 0 }}>
+                    {displayColumns.map(col => {
+                      const displayValue = getDisplayValue(col, row);
+                      if (!displayValue) return null;
+                      return (
+                        <Box key={col.field} sx={{ mt: 0.5 }}>
+                          <Typography variant="caption" color="text.secondary" component="span">
+                            {col.headerName}:{' '}
+                          </Typography>
+                          <Typography variant="body2" component="span">
+                            {displayValue}
+                          </Typography>
+                        </Box>
+                      );
+                    })}
+                  </CardContent>
+                  <CardActions sx={{ justifyContent: 'space-between' }}>
+                    <Box>
+                      <Button size="small" disabled={index === 0} onClick={() => moveRowUp(index)} variant="outlined" sx={{ mr: 0.5 }}>↑</Button>
+                      <Button size="small" disabled={index === fields.length - 1} onClick={() => moveRowDown(index)} variant="outlined">↓</Button>
+                    </Box>
+                    <Box>
+                      <Button size="small" onClick={() => openEditDialog(row)} sx={{ mr: 0.5 }}>Edit</Button>
+                      <Button size="small" color="error" onClick={() => setDeleteRowId(String(row.id))}>Delete</Button>
+                    </Box>
+                  </CardActions>
+                </Card>
+              ))
+            )}
+          </Box>
+
+          {/* Edit / Add Dialog */}
+          <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} fullWidth maxWidth="sm">
+            <DialogTitle>{editingRow ? 'Edit Item' : 'Add Item'}</DialogTitle>
+            <DialogContent>
+              {editableColumns.map(col => (
+                <DialogField
+                  key={col.field}
+                  col={col}
+                  value={editValues[col.field]}
+                  onChange={v => setEditValues(prev => ({ ...prev, [col.field]: v }))}
+                />
+              ))}
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setEditDialogOpen(false)} color="inherit">Cancel</Button>
+              <Button onClick={handleEditSave} variant="contained">Save</Button>
+            </DialogActions>
+          </Dialog>
+
+          {/* Delete Row Confirmation */}
+          <Dialog open={deleteRowId !== null} onClose={() => setDeleteRowId(null)}>
+            <DialogTitle>Delete Item?</DialogTitle>
+            <DialogContent>
+              <DialogContentText>
+                Are you sure you want to delete this item? This action cannot be undone.
+              </DialogContentText>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setDeleteRowId(null)} color="inherit">Cancel</Button>
+              <Button onClick={handleDeleteRow} color="error" variant="contained">Delete</Button>
+            </DialogActions>
+          </Dialog>
+        </div>
+      );
+    }
 
     return (
       <div>

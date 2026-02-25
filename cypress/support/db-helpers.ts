@@ -39,8 +39,10 @@ export async function resetTestDatabase() {
   // Level 4: Delete tables that reference user_account (via creator_id)
   await prisma.parent1.deleteMany();
   await prisma.xxxxx_xxxxx.deleteMany();
+  await prisma.booking.deleteMany();
   await prisma.db_table.deleteMany();
   await prisma.parent_only.deleteMany();
+  await prisma.resource.deleteMany();
   await prisma.role.deleteMany();
   await prisma.organization.deleteMany();
 
@@ -60,6 +62,7 @@ export async function seedTestDatabase() {
     data: {
       id: userId,
       creator_id: userId,
+      updater_id: userId,
       email: TEST_CREDENTIALS.email,
       name: TEST_CREDENTIALS.name,
       password: hashedPassword,

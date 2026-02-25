@@ -5,6 +5,7 @@ import Link from '@mui/material/Link';
 import DateTimeWrapper from '../DateTimeWrapper';
   import FormControlLabel from '@mui/material/FormControlLabel';
   import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
@@ -35,6 +36,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
       />
       <DateTimeWrapper label="Start Time" date_time={src.start_time} readOnly />
       <DateTimeWrapper label="End Time" date_time={src.end_time} readOnly />
+      <AuditInfo src={src} />
     </div>
   );
 }

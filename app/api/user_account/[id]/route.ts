@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import prisma from '@/lib/prisma';
 import { getUserAccountDetail } from '@/lib/user_account/getters';
 import { updateUserAccount, deleteUserAccount } from '@/lib/user_account/service';
 
@@ -9,11 +10,11 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, 'user_account', 'read');
     const item = await getUserAccountDetail(id);
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
+    await requireApiPermission(userId, 'user_account', 'read', item);
     return NextResponse.json(item);
   } catch (error) {
     return handleApiError(error);
@@ -24,10 +25,14 @@ export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, 'user_account', 'update');
+    const existing = await prisma.user_account.findUnique({ where: { id }, select: { creator_id: true } });
+    if (!existing) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    await requireApiPermission(userId, 'user_account', 'update', existing);
     const body = await request.json();
     const { name, email, password, api_key: apiKey, avatar, roles_ids } = body;
-    const result = await updateUserAccount(id, name, email, password, apiKey ?? null, avatar ?? null, roles_ids ?? []);
+    const result = await updateUserAccount(userId, id, name, email, password, apiKey ?? null, avatar ?? null, roles_ids ?? []);
     return NextResponse.json(result);
   } catch (error) {
     return handleApiError(error);
@@ -38,7 +43,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, 'user_account', 'delete');
+    const existing = await prisma.user_account.findUnique({ where: { id }, select: { creator_id: true } });
+    if (!existing) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    await requireApiPermission(userId, 'user_account', 'delete', existing);
     await deleteUserAccount([id]);
     return new NextResponse(null, { status: 204 });
   } catch (error) {

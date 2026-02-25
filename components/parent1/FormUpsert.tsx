@@ -9,6 +9,7 @@ import NumberField from '../NumberField';
 import { upsertParent1, removeParent1 } from '@/lib/parent1/actions';
 import type { FormUpsertProps } from '@/lib/parent1/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
@@ -34,6 +35,12 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
+  const organizationIdOptions = useMemo(() => {
+    return allOrganizations.map((item) => ({
+      id: item.id,
+      label: item.name,
+    }));
+  }, [allOrganizations]);
   const parent1Child1sColumns = parent1_child1s_columns(true);
 
   const initialParent1Child1s = src.parent1_child1s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
@@ -68,12 +75,6 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     label: f.name,
     originalId: f.id,
   }));
-  const organizationIdOptions = useMemo(() => {
-    return allOrganizations.map((item) => ({
-      id: item.id,
-      label: item.name,
-    }));
-  }, [allOrganizations]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -240,20 +241,24 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 
   return (
-    <FormWithChildGrid
-      title={`${isEdit ? 'Edit' : 'Add'} Parent1`}
-      isEdit={isEdit}
-      formFields={formFields}
-      onSubmit={handleSubmit}
-      onDelete={isEdit && canDelete ? handleDelete : undefined}
-      onBack={handleBack}
-      deleteEntityLabel="Parent1"
-      submitButtonLabel="Save"
-      error={error}
-    />
+    <>
+      <FormWithChildGrid
+        title={`${isEdit ? 'Edit' : 'Add'} Parent1`}
+        isEdit={isEdit}
+        formFields={formFields}
+        onSubmit={handleSubmit}
+        onDelete={isEdit && canDelete ? handleDelete : undefined}
+        onBack={handleBack}
+        deleteEntityLabel="Parent1"
+        submitButtonLabel="Save"
+        error={error}
+      />
+
+    </>
   );
 }

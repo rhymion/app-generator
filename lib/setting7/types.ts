@@ -26,11 +26,16 @@ export type FormViewProps = Readonly<{
     password: string;
     api_key: string | null;
     avatar: string | null;
+    created_at?: string | Date;
+    updated_at?: string | Date;
+    creator?: { id: string; name: string } | null;
+    updater?: { id: string; name: string } | null;
   };
   permissions?: ModelPermissions;
 }>;
 
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
+  currentUserId?: string | null;
 
 }>;

@@ -34,11 +34,12 @@ export async function addBooking(creatorId: string, name: string, resourceId: st
       start_time: startTime,
       end_time: endTime,
       creator_id: creatorId,
+      updater_id: creatorId,
     },
   });
 }
 
-export async function updateBooking(id: string, name: string, resourceId: string, startTime: Date, endTime: Date, srcSnapshotRaw?: string | null) {
+export async function updateBooking(updaterId: string, id: string, name: string, resourceId: string, startTime: Date, endTime: Date, srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -50,6 +51,7 @@ export async function updateBooking(id: string, name: string, resourceId: string
       resource_id: resourceId,
       start_time: startTime,
       end_time: endTime,
+        updater_id: updaterId,
       },
     });
   });

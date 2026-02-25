@@ -5,6 +5,7 @@ import Link from '@mui/material/Link';
 import ImageDisplay from '../ImageDisplay';
   import FormControlLabel from '@mui/material/FormControlLabel';
   import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
@@ -48,6 +49,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
         aria-readonly
       />
       <ImageDisplay url={src.avatar} alt="Avatar" />
+      <AuditInfo src={src} />
     </div>
   );
 }

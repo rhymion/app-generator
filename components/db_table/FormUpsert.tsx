@@ -4,14 +4,16 @@ import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
-import { upsertDbTable, removeDbTable } from '@/lib/db_table/actions';
+import { upsertDbTable, removeDbTable, addDbTableComment, updateDbTableComment, deleteDbTableComment } from '@/lib/db_table/actions';
 import type { FormUpsertProps } from '@/lib/db_table/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
+import CommentListWrapper from '../CommentListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
   import { fields_columns } from '../db_table/column_def';
 
-export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, permissions, currentUserId, allDbTables = [], dbTablePermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +23,10 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const fieldsRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
-  const fieldsColumns = fields_columns(true);
+  const referenceIdOptions = useMemo(() =>
+    (allDbTables ?? []).map(item => ({ value: item.id, label: item.name })),
+  [allDbTables]);
+  const fieldsColumns = fields_columns(true, referenceIdOptions);
 
   const initialFields = src.fields.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
 
@@ -29,6 +34,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
     id: `temp-${Date.now()}-${Math.random()}`,
     name: '',
     type: '',
+    reference_id: '',
     max_length: null,
     max: null,
     regex: '',
@@ -57,6 +63,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
           id: field.id.startsWith('temp-') ? undefined : field.id,
           name: field.name,
           type: field.type,
+          reference_id: field.reference_id,
           max_length: field.max_length,
           max: field.max,
           regex: field.regex,
@@ -82,6 +89,21 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
 
   const handleBack = () => {
     router.push('/db_table');
+    router.refresh();
+  };
+
+  const handleCreateComment = async (message: string) => {
+    await addDbTableComment(src.id, message);
+    router.refresh();
+  };
+
+  const handleUpdateComment = async (commentId: string, message: string) => {
+    await updateDbTableComment(commentId, message);
+    router.refresh();
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    await deleteDbTableComment(commentId);
     router.refresh();
   };
 
@@ -119,20 +141,35 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         showTitle={true}
         title="Fields"
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 
   return (
-    <FormWithChildGrid
-      title={`${isEdit ? 'Edit' : 'Add'} Db Table`}
-      isEdit={isEdit}
-      formFields={formFields}
-      onSubmit={handleSubmit}
-      onDelete={isEdit && canDelete ? handleDelete : undefined}
-      onBack={handleBack}
-      deleteEntityLabel="Db Table"
-      submitButtonLabel="Save"
-      error={error}
-    />
+    <>
+      <FormWithChildGrid
+        title={`${isEdit ? 'Edit' : 'Add'} Db Table`}
+        isEdit={isEdit}
+        formFields={formFields}
+        onSubmit={handleSubmit}
+        onDelete={isEdit && canDelete ? handleDelete : undefined}
+        onBack={handleBack}
+        deleteEntityLabel="Db Table"
+        submitButtonLabel="Save"
+        error={error}
+      />
+      {isEdit && (
+        <CommentListWrapper
+          comments={src.db_table_comments}
+          showTitle={true}
+          title="Db Table Comments"
+          currentUserId={currentUserId}
+          permissions={{ create: permissions?.update ?? false, delete: permissions?.update ?? false }}
+          onCreateComment={handleCreateComment}
+          onUpdateComment={handleUpdateComment}
+          onDeleteComment={handleDeleteComment}
+        />
+      )}
+    </>
   );
 }

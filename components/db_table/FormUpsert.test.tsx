@@ -26,9 +26,10 @@ describe('FormUpsert', () => {
     name: 'Test Table',
     description: 'Test Description',
     fields: [
-      { id: '1', name: 'field1', db_table_id: '1', type: 'string', max_length: 100, max: null, regex: null, required: true },
-      { id: '2', name: 'field2', db_table_id: '1', type: 'number', max_length: null, max: 100, regex: null, required: false },
+      { id: '1', name: 'field1', db_table_id: '1', type: 'string', reference_id: null, max_length: 100, max: null, regex: null, required: true },
+      { id: '2', name: 'field2', db_table_id: '1', type: 'number', reference_id: null, max_length: null, max: 100, regex: null, required: false },
     ],
+    db_table_comments: [],
   };
 
   beforeEach(() => {

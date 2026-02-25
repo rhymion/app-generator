@@ -72,11 +72,21 @@ export function generateTypes(parent: string, children: ChildInfo[], schema: Sch
         .join('\n')
     : '';
 
+  // Collect child entity many-to-one relationships (needed for imports - computed early)
+  const childEntityRelationshipsEarly = children.flatMap(childInfo => {
+    const childDef = schema.definitions[childInfo.name];
+    if (!childDef?.properties) return [];
+    return getParentRelationships(childDef);
+  });
+  const allImportTargets = Array.from(new Set([
+    ...relationshipTargets.map(r => r.target),
+    ...childEntityRelationshipsEarly.map(r => r.target),
+  ])).filter(t => t !== model);
+
   // Build type definitions
-  const importLines = relationshipTargets.length > 0
-    ? relationshipTargets
-        .filter(r => r.target !== model)
-        .map(r => `import type { ${toPascalCase(r.target)} } from '@/lib/${r.target}/types';`)
+  const importLines = allImportTargets.length > 0
+    ? allImportTargets
+        .map(target => `import type { ${toPascalCase(target)} } from '@/lib/${target}/types';`)
         .join('\n') + '\n\n'
     : '';
 
@@ -105,27 +115,52 @@ ${parentExtraProps.join('\n')}
     }
   }
   
+  // Collect child entity many-to-one relationships (for imports and FormUpsertProps)
+  const childEntityRelationships = children.flatMap(childInfo => {
+    const childDef = schema.definitions[childInfo.name];
+    if (!childDef?.properties) return [];
+    return getParentRelationships(childDef);
+  });
+  const childRelationshipTargets = Array.from(new Set(childEntityRelationships.map(r => r.target)));
+
   // Generate child types
   const childTypeDeclarations: string[] = [];
   const detailChildProps: string[] = [];
   const formViewChildProps: string[] = [];
   const declaredChildTypes = new Set<string>();
-  
+
   for (const child of children) {
     const childPascal = toPascalCase(child.name);
     const childDef = schema.definitions[child.name];
-    
+
     if (childDef?.properties) {
       const childProps: string[] = [];
       for (const [key, prop] of Object.entries(childDef.properties)) {
         const tsType = getTsType(prop);
         childProps.push(`  ${key}: ${tsType};`);
       }
-      
+
+      // Add optional relation objects from child's many-to-one relationships
+      const childRels = getParentRelationships(childDef);
+      const childRelProps = childRels.map(r => {
+        const relName = r.propName.replace(/_id$/, '');
+        const targetPascal = toPascalCase(r.target);
+        return `  ${relName}?: ${targetPascal} | null;`;
+      });
+
+      // Add audit fields for comments output type (creator with avatar + timestamps)
+      const commentExtraProps = child.outputType === 'comments'
+        ? [
+            '  created_at?: string | Date | null;',
+            '  updated_at?: string | Date | null;',
+            '  creator?: { id: string; name: string; avatar?: string | null } | null;',
+          ]
+        : [];
+
       if (!declaredChildTypes.has(child.name) && child.name !== model) {
         declaredChildTypes.add(child.name);
         childTypeDeclarations.push(`export type ${childPascal} = {
-${childProps.join('\n')}
+${childProps.join('\n')}${childRelProps.length > 0 ? '\n' + childRelProps.join('\n') : ''}${commentExtraProps.length > 0 ? '\n' + commentExtraProps.join('\n') : ''}
 };
 `);
       }
@@ -133,7 +168,7 @@ ${childProps.join('\n')}
       formViewChildProps.push(`    ${child.propertyName}: ${childPascal}[];`);
     }
   }
-  
+
   // Add Detail type
   if (children.length > 0) {
     result += `export type ${parentPascal}Detail = ${parentPascal} & {
@@ -148,7 +183,7 @@ ${detailChildProps.join('\n')}
 
 `;
   }
-  
+
   // Add page props and form props
   result += `export type ${parentPascal}DetailPageProps = Readonly<{
   params: Promise<{
@@ -159,11 +194,18 @@ ${detailChildProps.join('\n')}
 export type FormViewProps = Readonly<{
   src: {
 ${formViewParentProps}${formViewExtraProps.length > 0 ? `\n${formViewExtraProps.join('\n')}` : ''}`;
-  
+
   if (children.length > 0) {
     result += `\n${formViewChildProps.join('\n')}`;
   }
-  
+
+  // Add audit metadata fields (optional so new pages work without them)
+  result += `
+    created_at?: string | Date;
+    updated_at?: string | Date;
+    creator?: { id: string; name: string } | null;
+    updater?: { id: string; name: string } | null;`;
+
   result += `
   };
   permissions?: ModelPermissions;
@@ -173,15 +215,17 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;${(() => {
     const manyToManyTargets = Array.from(new Set(children.filter(c => c.relationship?.type === 'many-to-many').map(c => c.relationship!.target)));
     const manyToOneTargets = Array.from(new Set(relationshipTargets.map(r => r.target)));
-    const combinedTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets]));
+    const combinedTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets, ...childRelationshipTargets]));
     return combinedTargets.map(target => {
       const targetPascal = toPascalCase(target);
       return `\n  all${targetPascal}s?: ${targetPascal}[];`;
     }).join('');
   })()}
+  currentUserId?: string | null;
 ${Array.from(new Set([
   ...children.filter(c => c.relationship?.type === 'many-to-many').map(c => c.relationship!.target),
-  ...relationshipTargets.map(r => r.target)
+  ...relationshipTargets.map(r => r.target),
+  ...childRelationshipTargets,
 ])).map(target => {
     const targetCamel = toCamelCase(target);
     return `\n  ${targetCamel}Permissions?: ModelPermissions;`;
@@ -224,10 +268,22 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
   ].filter(Boolean);
   const includePropsList = includeEntriesList.length > 0 ? includeEntriesList.join(', ') : '';
 
-  // Build include for detail (children + many-to-one)
+  // Build include for detail (children + many-to-one + audit relations)
   const includeEntriesDetail = [
-    ...children.map(c => `${c.propertyName}: true`),
+    ...children.map(c => {
+      if (c.outputType === 'comments') {
+        return `${c.propertyName}: { include: { creator: { select: { id: true, name: true, avatar: true } } }, orderBy: { created_at: 'asc' } }`;
+      }
+      const childDef = schema.definitions[c.name];
+      if (!childDef?.properties) return `${c.propertyName}: true`;
+      const childRels = getParentRelationships(childDef);
+      if (childRels.length === 0) return `${c.propertyName}: true`;
+      const childIncludes = childRels.map(r => `${r.propName.replace(/_id$/, '')}: true`).join(', ');
+      return `${c.propertyName}: { include: { ${childIncludes} } }`;
+    }),
     ...parentRelationships.map(r => `${r.relationName}: true`),
+    `creator: { select: { id: true, name: true } }`,
+    `updater: { select: { id: true, name: true } }`,
   ].filter(Boolean);
   const includePropsDetail = includeEntriesDetail.length > 0 ? includeEntriesDetail.join(', ') : '';
   
@@ -295,9 +351,9 @@ export async function get${parentPascal}ListPageData(isAssertPermission: boolean
 }
 
 export async function get${parentPascal}DetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('${model}');
-  await assertPermission(userPermissions, operation, '${model}');
   const ${parentCamel} = await get${parentPascal}Detail(id);
+  const userPermissions = await getModelPermissions('${model}', undefined, ${parentCamel});
+  await assertPermission(userPermissions, operation, '${model}');
   return { ${parentCamel}, userPermissions };
 }
 
@@ -320,6 +376,10 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
   const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps });
   const selfParentRel = parentRelationships.find((rel) => rel.target === model);
   const selfParentProp = selfParentRel?.propName ?? null;
+
+  // Check if model has assignee_id for item-level permission context
+  const hasAssigneeId = filteredProps ? 'assignee_id' in filteredProps : false;
+  const itemContextSelect = `{ creator_id: true${hasAssigneeId ? ', assignee_id: true' : ''} }`;
 
   // Get parent properties (excluding id and timestamps)
   const parentProps = filteredProps
@@ -411,6 +471,42 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
     ? `,\n    include: {\n      ${children.map(childInfo => `${childInfo.propertyName}: { select: { id: true } }`).join(',\n      ')}\n    }`
     : '';
   
+  // Generate comment CRUD actions for any comment children (appended to the output regardless of parent/child case)
+  const commentChildren = children.filter(c => c.outputType === 'comments');
+  const commentActionsCode = commentChildren.map(commentChild => {
+    const childModelName = commentChild.name;
+    const parentIdProp = `${model}_id`;
+    return `
+export async function add${parentPascal}Comment(${parentIdProp}: string, message: string): Promise<void> {
+  const userId = await getSessionUserIdOrThrow();
+  await prisma.${childModelName}.create({
+    data: { message, ${parentIdProp}, creator_id: userId },
+  });
+  revalidatePath('/');
+}
+
+export async function update${parentPascal}Comment(commentId: string, message: string): Promise<void> {
+  const userId = await getSessionUserIdOrThrow();
+  const comment = await prisma.${childModelName}.findUnique({ where: { id: commentId }, select: { creator_id: true } });
+  if (!comment || comment.creator_id !== userId) {
+    throw new Error('Not authorized to edit this comment');
+  }
+  await prisma.${childModelName}.update({ where: { id: commentId }, data: { message } });
+  revalidatePath('/');
+}
+
+export async function delete${parentPascal}Comment(commentId: string): Promise<void> {
+  const userId = await getSessionUserIdOrThrow();
+  const comment = await prisma.${childModelName}.findUnique({ where: { id: commentId }, select: { creator_id: true } });
+  if (!comment) return;
+  if (comment.creator_id !== userId) {
+    await requirePermission('${parent}', 'delete');
+  }
+  await prisma.${childModelName}.delete({ where: { id: commentId } });
+  revalidatePath('/');
+}`;
+  }).join('\n');
+
   // For parent-only, generate simple CRUD
   if (children.length === 0) {
     const serviceImports = [
@@ -425,39 +521,43 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
       upsertBody = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('${model}', 'update');
+    const existing = await prisma.${model}.findUnique({ where: { id }, select: ${itemContextSelect} });
+    await requirePermission('${parent}', 'update', existing);
   } else {
-    await requirePermission('${model}', 'create');
+    await requirePermission('${parent}', 'create');
   }
 ${formDataGets}
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await update${parentPascal}(id, ${parentParams}, srcSnapshotRaw);
+    await update${parentPascal}(userId, id, ${parentParams}, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await add${parentPascal}(creatorId, ${parentParams});
+    await add${parentPascal}(userId, ${parentParams});
   }`;
     } else if (canUpdate) {
       upsertBody = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (!id) throw new Error('Create not supported');
-  await requirePermission('${model}', 'update');
+  const existing = await prisma.${model}.findUnique({ where: { id }, select: ${itemContextSelect} });
+  await requirePermission('${parent}', 'update', existing);
 ${formDataGets}
+  const userId = await getSessionUserIdOrThrow();
 
-  await update${parentPascal}(id, ${parentParams}, srcSnapshotRaw);`;
+  await update${parentPascal}(userId, id, ${parentParams}, srcSnapshotRaw);`;
     } else if (canCreate) {
-      upsertBody = `  await requirePermission('${model}', 'create');
+      upsertBody = `  await requirePermission('${parent}', 'create');
 ${formDataGets}
 
-  const creatorId = await getSessionUserIdOrThrow();
-  await add${parentPascal}(creatorId, ${parentParams});`;
+  const userId = await getSessionUserIdOrThrow();
+  await add${parentPascal}(userId, ${parentParams});`;
     }
 
     return `'use server';
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';${serviceImports ? `\nimport { ${serviceImports} } from './service';` : ''}
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import prisma from '@/lib/prisma';${serviceImports ? `\nimport { ${serviceImports} } from './service';` : ''}
 ${(canCreate || canUpdate) ? `
 export async function upsert${parentPascal}(data: FormData) {
 ${upsertBody}
@@ -467,17 +567,20 @@ ${upsertBody}
 }
 ` : ''}${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
-  await requirePermission('${model}', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  const items = await prisma.${model}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true${hasAssigneeId ? ', assignee_id: true' : ''} } });
+  for (const item of items) {
+    await requirePermission('${parent}', 'delete', item);
+  }
   await delete${parentPascal}(ids);
   revalidatePath('/');
   redirect('/${parent}');
 }
-` : ''}`;
+` : ''}${commentActionsCode}`;
   }
   
-  // For with-children cases, handle all children
-  const allChildrenData = children.map(childInfo => {
+  // For with-children cases, handle all non-comment children (comments are managed independently)
+  const allChildrenData = children.filter(c => c.outputType !== 'comments').map(childInfo => {
     const child = childInfo.name;
     const childVar = childVarName(childInfo);
     const childPascal = childPascalName(childInfo);
@@ -507,7 +610,7 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     );
     
     const fieldType = `{ ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
-    const fieldTypeWithId = `{ ${childPropsWithId.map(p => `${p.replace(/id/, 'id?')}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
+    const fieldTypeWithId = `{ ${childPropsWithId.map(p => `${p.replace(/^id/, 'id?')}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
     
     const fieldMapCreate = childProps.map(p => `          ${p}: f.${p},`).join('\n');
     
@@ -612,42 +715,46 @@ export async function remove${parentPascal}(data: FormData | string[]) {
     upsertBodyWithChildren = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('${model}', 'update');
+    const existing = await prisma.${model}.findUnique({ where: { id }, select: ${itemContextSelect} });
+    await requirePermission('${parent}', 'update', existing);
   } else {
-    await requirePermission('${model}', 'create');
+    await requirePermission('${parent}', 'create');
   }
 ${formDataGets}
 ${childFormDataExtractions}
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await update${parentPascal}(id, ${parentParams}${childArgs}, srcSnapshotRaw);
+    await update${parentPascal}(userId, id, ${parentParams}${childArgs}, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await add${parentPascal}(creatorId, ${parentParams}${childArgs});
+    await add${parentPascal}(userId, ${parentParams}${childArgs});
   }`;
   } else if (canUpdate) {
     upsertBodyWithChildren = `  const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (!id) throw new Error('Create not supported');
-  await requirePermission('${model}', 'update');
+  const existing = await prisma.${model}.findUnique({ where: { id }, select: ${itemContextSelect} });
+  await requirePermission('${parent}', 'update', existing);
 ${formDataGets}
 ${childFormDataExtractions}
 
-  await update${parentPascal}(id, ${parentParams}${childArgs}, srcSnapshotRaw);`;
+  const userId = await getSessionUserIdOrThrow();
+  await update${parentPascal}(userId, id, ${parentParams}${childArgs}, srcSnapshotRaw);`;
   } else if (canCreate) {
-    upsertBodyWithChildren = `  await requirePermission('${model}', 'create');
+    upsertBodyWithChildren = `  await requirePermission('${parent}', 'create');
 ${formDataGets}
 ${childFormDataExtractions}
 
-  const creatorId = await getSessionUserIdOrThrow();
-  await add${parentPascal}(creatorId, ${parentParams}${childArgs});`;
+  const userId = await getSessionUserIdOrThrow();
+  await add${parentPascal}(userId, ${parentParams}${childArgs});`;
   }
 
   return `'use server';
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';${serviceImportsWithChildren ? `\nimport { ${serviceImportsWithChildren} } from './service';` : ''}
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import prisma from '@/lib/prisma';${serviceImportsWithChildren ? `\nimport { ${serviceImportsWithChildren} } from './service';` : ''}
 ${(canCreate || canUpdate) ? `
 export async function upsert${parentPascal}(data: FormData) {
 ${upsertBodyWithChildren}
@@ -657,22 +764,26 @@ ${upsertBodyWithChildren}
 }
 ` : ''}${canDelete ? `
 export async function remove${parentPascal}(data: FormData | string[]) {
-  await requirePermission('${model}', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  const items = await prisma.${model}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true${hasAssigneeId ? ', assignee_id: true' : ''} } });
+  for (const item of items) {
+    await requirePermission('${parent}', 'delete', item);
+  }
   await delete${parentPascal}(ids);
   revalidatePath('/');
   redirect('/${parent}');
 }
-` : ''}`;
+` : ''}${commentActionsCode}`;
 }
 
 export function generateColumnDef(parent: string, children: ChildInfo[], schema: Schema, modelName?: string, definitionKey?: string): string {
   const model = modelName ?? parent;
-  if (children.length === 0) {
+  const nonCommentChildren = children.filter(c => c.outputType !== 'comments');
+  if (nonCommentChildren.length === 0) {
     return '';
   }
-  
-  const columnFunctions = children.map(childInfo => {
+
+  const columnFunctions = nonCommentChildren.map(childInfo => {
     const child = childInfo.name;
     const childSnake = childInfo.propertyName;
     const childDef = schema.definitions[child];
@@ -686,19 +797,43 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
     const columns: string[] = [];
     const dateTimeFields: string[] = [];
     let needsDateTimeImports = false;
-    
+
+    // Collect many-to-one relationship params for this child
+    const childRelParams: string[] = [];
+    for (const [key, prop] of Object.entries(childDef.properties)) {
+      const rel = (prop as any)['x-relationship'];
+      if (rel && rel.type === 'many-to-one') {
+        const propCamel = toCamelCase(key);
+        childRelParams.push(`${propCamel}Options?: Array<{ value: string | null; label: string }>`);
+      }
+    }
+
     for (const [key, prop] of Object.entries(childDef.properties)) {
       if (key === 'id' || key === `${model}_id` || key === 'created_at' || key === 'updated_at' || key === 'creator_id') {
         continue;
       }
-      
+
+      // Many-to-one relationship: singleSelect when options provided, valueGetter fallback for view
+      const relationship = (prop as any)['x-relationship'];
+      if (relationship && relationship.type === 'many-to-one') {
+        const labelBase = key.replace(/_id$/, '');
+        const headerName = toTitleCase(labelBase);
+        const propCamel = toCamelCase(key);
+        const paramName = `${propCamel}Options`;
+        const relName = labelBase; // e.g. 'reference' from 'reference_id'
+        columns.push(`    ...(${paramName} && ${paramName}.length > 0
+      ? [{ field: '${key}', headerName: '${headerName}', width: 200, editable: editable, type: 'singleSelect' as const, valueOptions: ${paramName} }]
+      : [{ field: '${key}', headerName: '${headerName}', width: 200, editable: false, valueGetter: (_value: any, row: any) => row.${relName}?.name ?? '' }]),`);
+        continue;
+      }
+
       const headerName = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
       let width = 150;
       let typeStr = '';
-      
+
       const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
       const format = (prop as any).format;
-      
+
       // Special handling for 'order' field - always read-only
       if (key === 'order') {
         typeStr = ", type: 'number'";
@@ -706,7 +841,7 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
         columns.push(`    { field: '${key}', headerName: 'No.', width: ${width}, editable: false${typeStr} },`);
         continue;
       }
-      
+
       if (prop.type === 'boolean' || (Array.isArray(prop.type) && prop.type.includes('boolean'))) {
         typeStr = ", type: 'boolean'";
         width = 100;
@@ -718,21 +853,22 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
         needsDateTimeImports = true;
         dateTimeFields.push(key);
         width = 250;
-        
-        columns.push(`    { 
-      field: '${key}', 
-      headerName: '${headerName}', 
-      width: ${width}, 
+
+        columns.push(`    {
+      field: '${key}',
+      headerName: '${headerName}',
+      width: ${width},
       editable: editable,
+      type: 'dateTime',
       renderEditCell: (params: GridRenderEditCellParams) => (
         <DateTimeWrapper
           label="${headerName}"
           date_time={params.value ? new Date(params.value) : null}
           onChange={(newValue: dayjs.Dayjs | null) => {
-            params.api.setEditCellValue({ 
-              id: params.id, 
-              field: params.field, 
-              value: newValue ? newValue.toISOString() : '' 
+            params.api.setEditCellValue({
+              id: params.id,
+              field: params.field,
+              value: newValue ? newValue.toISOString() : ''
             });
           }}
         />
@@ -744,19 +880,21 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
     },`);
         continue;
       }
-      
+
       columns.push(`    { field: '${key}', headerName: '${headerName}', width: ${width}, editable: editable${typeStr} },`);
     }
-    
-    return `export function ${childSnake}_columns(editable: boolean = false): GridColDef[] {
+
+    const relParamsStr = childRelParams.length > 0 ? `, ${childRelParams.join(', ')}` : '';
+
+    return `export function ${childSnake}_columns(editable: boolean = false${relParamsStr}): GridColDef[] {
   return [
 ${columns.join('\n')}
   ];
 }`;
   }).join('\n\n');
   
-  // Check if any child has DateTime fields
-  const needsDateTimeImports = children.some(childInfo => {
+  // Check if any non-comment child has DateTime fields
+  const needsDateTimeImports = nonCommentChildren.some(childInfo => {
     const child = childInfo.name;
     const childDef = schema.definitions[child];
     if (!childDef?.properties) return false;
@@ -1007,21 +1145,25 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   }, [all${targetPascal}s]);`;
   }).join('\n');
 
+  // Comment children: rendered independently outside the form
+  const commentChildren = children.filter(c => c.outputType === 'comments');
+  const hasCommentChildren = commentChildren.length > 0;
+
   // Generate code for all children
   let childVariables = '';
   let childImports = '';
   let childGridSetup = '';
   let childFormDataHandling = '';
   let childGridComponents = '';
-  
+
   if (hasChildren) {
     const columnImports = children
-      .filter(c => c.outputType !== 'list' && c.relationship?.type !== 'many-to-many')
+      .filter(c => c.outputType !== 'list' && c.outputType !== 'comments' && c.relationship?.type !== 'many-to-many')
       .map(c => childColumnsFnName(c))
       .join(', ');
-    
-    // Check if any child has 'order' field
-    const hasOrderedChildren = children.some(childInfo => {
+
+    // Check if any non-comment child has 'order' field
+    const hasOrderedChildren = children.filter(c => c.outputType !== 'comments').some(childInfo => {
       const childDef = schema.definitions[childInfo.name];
       return childDef?.properties && 'order' in childDef.properties;
     });
@@ -1060,7 +1202,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       childImports = manyToManyImports + '\n' + childImports;
     }
     
-    childVariables = children.map(childInfo => {
+    childVariables = children.filter(c => c.outputType !== 'comments').map(childInfo => {
       const childVar = childVarName(childInfo);
       const refType = (childInfo.outputType === 'list' || childInfo.relationship?.type === 'many-to-many')
         ? '{ getItems: () => EditableListWrapperItem[] }'
@@ -1068,12 +1210,12 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       return `  const ${childVar}Ref = useRef<${refType}>(null);`;
     }).join('\n');
     
-    const allChildSetups = children.map(childInfo => {
+    const allChildSetups = children.filter(c => c.outputType !== 'comments').map(childInfo => {
       const child = childInfo.name;
       const childVar = childVarName(childInfo);
       const childPascal = childPascalName(childInfo);
       const childDef = schema.definitions[child];
-      
+
       if (!childDef?.properties) {
         throw new Error(`Child definition ${child} has no properties`);
       }
@@ -1143,8 +1285,14 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       if (childInfo.outputType === 'list') {
         return '';
       }
-      
-      return `  const ${childVar}Columns = ${childColumnsFnName(childInfo)}(true);
+
+      // Build option args for child's many-to-one relationships
+      const childRels = getParentRelationships(childDef);
+      const relOptionArgs = childRels.length > 0
+        ? ', ' + childRels.map(r => `${toCamelCase(r.propName)}Options`).join(', ')
+        : '';
+
+      return `  const ${childVar}Columns = ${childColumnsFnName(childInfo)}(true${relOptionArgs});
 
   const initial${childPascal} = src.${childInfo.propertyName}.map(f => ({ ...f, id: f.id || \`temp-\${Date.now()}-\${Math.random()}\` }));
 
@@ -1157,7 +1305,7 @@ ${createNewChildProps}
     
     childGridSetup = `\n${allChildSetups}`;
     
-      const allChildFormDataHandling = children.map(childInfo => {
+      const allChildFormDataHandling = children.filter(c => c.outputType !== 'comments').map(childInfo => {
         const child = childInfo.name;
         const childVar = childVarName(childInfo);
         const formKey = childFormKey(childInfo);
@@ -1255,7 +1403,7 @@ ${childSerialize}
     
     childFormDataHandling = `\n${allChildFormDataHandling}`;
     
-    childGridComponents = children.map(childInfo => {
+    childGridComponents = children.filter(c => c.outputType !== 'comments').map(childInfo => {
       const child = childInfo.name;
       const childVar = childVarName(childInfo);
       const childPascal = childPascalName(childInfo);
@@ -1362,12 +1510,31 @@ ${childSerialize}
   
   const hasManyToMany = children.some(c => c.relationship?.type === 'many-to-many');
   
+  // Collect child entity many-to-one relationships for option generation
+  const allChildEntityRels = children.flatMap(childInfo => {
+    const childDef = schema.definitions[childInfo.name];
+    if (!childDef?.properties || childInfo.outputType === 'list' || childInfo.outputType === 'comments' || childInfo.relationship?.type === 'many-to-many') return [];
+    return getParentRelationships(childDef);
+  });
+  // Deduplicate by propName
+  const uniqueChildEntityRels = Array.from(new Map(allChildEntityRels.map(r => [r.propName, r])).values());
+  const childEntityRelOptionSetups = uniqueChildEntityRels.map(r => {
+    const propCamel = toCamelCase(r.propName);
+    const targetPascal = toPascalCase(r.target);
+    const labelField = r.labelField ?? 'name';
+    const optionsVar = `${propCamel}Options`;
+    return `  const ${optionsVar} = useMemo(() =>
+    (all${targetPascal}s ?? []).map(item => ({ value: item.id, label: item.${labelField} })),
+  [all${targetPascal}s]);`;
+  }).join('\n');
+
   // Generate FormUpsert props destructuring
   const manyToManyTargets = children
     .filter(c => c.relationship?.type === 'many-to-many')
     .map(c => c.relationship!.target);
   const manyToOneTargets = parentRelationships.map(r => r.target);
-  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets]));
+  const childEntityRelTargets = uniqueChildEntityRels.map(r => r.target);
+  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets, ...childEntityRelTargets]));
   const extraProps = selectionTargets
     .map(target => `all${toPascalCase(target)}s = []`)
     .join(', ');
@@ -1376,8 +1543,8 @@ ${childSerialize}
     .map(target => `${toCamelCase(target)}Permissions`)
     .join(', ');
   
-  const formUpsertParams = extraProps || selectionPermissionProps
-    ? `{ src, isEdit, permissions${extraProps ? `, ${extraProps}` : ''}${selectionPermissionProps ? `, ${selectionPermissionProps}` : ''} }: FormUpsertProps`
+  const formUpsertParams = extraProps || selectionPermissionProps || hasCommentChildren
+    ? `{ src, isEdit, permissions${hasCommentChildren ? ', currentUserId' : ''}${extraProps ? `, ${extraProps}` : ''}${selectionPermissionProps ? `, ${selectionPermissionProps}` : ''} }: FormUpsertProps`
     : `{ src, isEdit, permissions }: FormUpsertProps`;
   
   const booleanImports = booleanProps.length > 0
@@ -1390,9 +1557,10 @@ import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';${hasManyToOne ? "\nimport Autocomplete from '@mui/material/Autocomplete';" : ''}${numberProps.length > 0 ? '\nimport NumberField from \'../NumberField\';' : ''}
-import { upsert${parentPascal}${canDelete ? `, remove${parentPascal}` : ''} } from '@/lib/${parent}/actions';
+import { upsert${parentPascal}${canDelete ? `, remove${parentPascal}` : ''}${hasCommentChildren ? `, add${parentPascal}Comment, update${parentPascal}Comment, delete${parentPascal}Comment` : ''} } from '@/lib/${parent}/actions';
 import type { FormUpsertProps } from '@/lib/${parent}/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';${hasCommentChildren ? "\nimport CommentListWrapper from '../CommentListWrapper';" : ''}
 ${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${imageProps.length > 0 ? '\nimport ImageUpload from \'../ImageUpload\';' : ''}${booleanImports}
 
 export default function FormUpsert(${formUpsertParams}) {
@@ -1403,7 +1571,7 @@ export default function FormUpsert(${formUpsertParams}) {
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 ${allStates ? '\n' + allStates : ''}
 ${childVariables}
-${parentRefs}${childGridSetup}${relationshipOptionSetups ? `\n${relationshipOptionSetups}` : ''}
+${parentRefs}${relationshipOptionSetups ? `\n${relationshipOptionSetups}` : ''}${childEntityRelOptionSetups ? `\n${childEntityRelOptionSetups}` : ''}${childGridSetup}
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1436,25 +1604,58 @@ ${canDelete ? `
     router.push('/${parent}');
     router.refresh();
   };
+${hasCommentChildren ? `
+  const handleCreateComment = async (message: string) => {
+    await add${parentPascal}Comment(src.id, message);
+    router.refresh();
+  };
 
+  const handleUpdateComment = async (commentId: string, message: string) => {
+    await update${parentPascal}Comment(commentId, message);
+    router.refresh();
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    await delete${parentPascal}Comment(commentId);
+    router.refresh();
+  };
+` : ''}
   const formFields = (
     <>
 ${parentTextFields}${childGridComponents.length > 0 ? '\n' + childGridComponents : '' }
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 
   return (
-    <FormWithChildGrid
-      title={\`\${isEdit ? 'Edit' : 'Add'} ${parentTitle}\`}
-      isEdit={isEdit}
-      formFields={formFields}
-      onSubmit={handleSubmit}
-      onDelete={${canDelete ? 'isEdit && canDelete ? handleDelete : undefined' : 'undefined'}}
-      onBack={handleBack}
-      deleteEntityLabel="${parentTitle}"
-      submitButtonLabel="Save"
-      error={error}
-    />
+    <>
+      <FormWithChildGrid
+        title={\`\${isEdit ? 'Edit' : 'Add'} ${parentTitle}\`}
+        isEdit={isEdit}
+        formFields={formFields}
+        onSubmit={handleSubmit}
+        onDelete={${canDelete ? 'isEdit && canDelete ? handleDelete : undefined' : 'undefined'}}
+        onBack={handleBack}
+        deleteEntityLabel="${parentTitle}"
+        submitButtonLabel="Save"
+        error={error}
+      />
+${hasCommentChildren ? commentChildren.map(childInfo => {
+  const childTitleLabel = childTitle(childInfo);
+  return `      {isEdit && (
+        <CommentListWrapper
+          comments={src.${childInfo.propertyName}}
+          showTitle={true}
+          title="${childTitleLabel}"
+          currentUserId={currentUserId}
+          permissions={{ create: permissions?.update ?? false, delete: permissions?.update ?? false }}
+          onCreateComment={handleCreateComment}
+          onUpdateComment={handleUpdateComment}
+          onDeleteComment={handleDeleteComment}
+        />
+      )}`;
+}).join('\n') : ''}
+    </>
   );
 }
 `;
@@ -1555,16 +1756,21 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   
   const parentTextFields = [textFields, booleanFieldsJsx, dateTimeFieldsJsx, imageFieldsJsx].filter(f => f).join('\n');
   
-  // Check if any child has DateTime fields
-  const needsClientDirective = children.some(childInfo => {
+  // Check if any child has DateTime fields or many-to-one relationships
+  // (both require 'use client' due to functions in column definitions)
+  // Comments also require 'use client' for interactive callbacks + router.refresh()
+  const hasCommentChildren = children.some(c => c.outputType === 'comments');
+  const needsClientDirective = hasCommentChildren || children.some(childInfo => {
     const child = childInfo.name;
     const childDef = schema.definitions[child];
     if (!childDef?.properties) return false;
-    
+
     return Object.entries(childDef.properties).some(([key, prop]) => {
       const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
       const format = (prop as any).format;
-      return propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time');
+      const rel = (prop as any)['x-relationship'];
+      return (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time'))
+        || (rel && rel.type === 'many-to-one');
     });
   });
 
@@ -1576,6 +1782,7 @@ import type { FormViewProps } from '@/lib/${parent}/types';
 import Link from '@mui/material/Link';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}
   import FormControlLabel from '@mui/material/FormControlLabel';
   import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
@@ -1591,6 +1798,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
         </div>
       </div>
 ${parentTextFields}
+      <AuditInfo src={src} />
     </div>
   );
 }
@@ -1600,13 +1808,26 @@ ${parentTextFields}
   // For with-children case - generate view grids for all children
   const hasListChildren = children.some(c => c.outputType === 'list');
   const listImport = hasListChildren ? '\nimport ListWrapper from \'../ListWrapper\';' : '';
-  
-  const gridChildren = children.filter(c => c.outputType !== 'list');
+  const commentImport = hasCommentChildren
+    ? `\nimport CommentListWrapper from '../CommentListWrapper';\nimport { add${parentPascal}Comment, update${parentPascal}Comment, delete${parentPascal}Comment } from '@/lib/${parent}/actions';`
+    : '';
+
+  const gridChildren = children.filter(c => c.outputType !== 'list' && c.outputType !== 'comments');
   const columnImports = gridChildren.map(c => childColumnsFnName(c)).join(', ');
-  
+
   const childViewGrids = children.map(childInfo => {
     const childTitleLabel = childTitle(childInfo);
-    
+
+    // For comments output type, use CommentListWrapper with interactive callbacks
+    if (childInfo.outputType === 'comments') {
+      return `      <CommentListWrapper
+        comments={src.${childInfo.propertyName}}
+        showTitle={true}
+        title="${childTitleLabel}"
+        permissions={{ create: false, delete: false }}
+      />`;
+    }
+
     // For list output type, use ListWrapper
     if (childInfo.outputType === 'list') {
       if (childInfo.fileType) {
@@ -1650,14 +1871,15 @@ ${parentTextFields}
   
   const columnImportLine = columnImports ? `\nimport { ${columnImports} } from '../${parent}/column_def';` : '';
   
-  return `${needsClientDirective ? "'use client';\n\n" : ''}import { GridColDef } from '@mui/x-data-grid';
+  return `${needsClientDirective ? "'use client';\n\n" : ''}${hasCommentChildren ? "import { useRouter } from 'next/navigation';\n" : ''}import { GridColDef } from '@mui/x-data-grid';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';
 import Link from '@mui/material/Link';
-import FieldsViewGrid from '../FieldsViewGrid';${columnImportLine}${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}${listImport}
+import FieldsViewGrid from '../FieldsViewGrid';${columnImportLine}${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}${listImport}${commentImport}
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
@@ -1675,6 +1897,7 @@ ${columnVariables}
       </div>
 ${parentTextFields}
 ${childViewGrids}
+      <AuditInfo src={src} />
     </div>
   );
 }
@@ -1711,12 +1934,18 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
   const removeImport = canDelete ? `\nimport { remove${parentPascal} } from '@/lib/${parent}/actions';` : '';
   const removeActionProp = canDelete ? ` removeAction={remove${parentPascal}}` : '';
 
+  const forceCards = generateConfig?.listDisplay === 'cards';
+  const listComponent = forceCards ? 'CardListClient' : 'ResponsiveListClient';
+  const listComponentImport = forceCards
+    ? `import CardListClient from '@/components/CardListClient';`
+    : `import ResponsiveListClient from '@/components/ResponsiveListClient';`;
+
   return `import { get${parentPascal}ListPageData } from '@/lib/${parent}/getters';
-import DataGridClient from '@/components/DataGridClient';${removeImport}
+${listComponentImport}${removeImport}
 
 export default async function ${parentPascal}sPage() {
   const { ${parentCamel}s, userPermissions } = await get${parentPascal}ListPageData();
-  return <DataGridClient src={${parentCamel}s} basePath="/${parent}"${removeActionProp} entityLabel="${parentTitle}"${displayFieldsCode}
+  return <${listComponent} src={${parentCamel}s} basePath="/${parent}"${removeActionProp} entityLabel="${parentTitle}"${displayFieldsCode}
     permissions={userPermissions} />;
 }
 `;
@@ -1771,7 +2000,7 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
   // Build children properties
   const childrenProps = children.map(c => `    ${c.propertyName}: [],`).join('\n');
   
-  // Generate imports and fetching for relationship selections (many-to-many and many-to-one)
+  // Generate imports and fetching for relationship selections (many-to-many, many-to-one, and child entity many-to-one)
   const manyToManyChildren = children.filter(c => c.relationship?.type === 'many-to-many');
   const manyToManyTargets = manyToManyChildren
     .map(c => c.relationship!.target)
@@ -1781,7 +2010,15 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
     .map(r => r.target)
     .filter((target, index, self) => self.indexOf(target) === index);
 
-  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets]));
+  const childEntityRelTargetsNew = Array.from(new Set(
+    children.flatMap(childInfo => {
+      const childDef = schema.definitions[childInfo.name];
+      if (!childDef?.properties || childInfo.outputType === 'list' || childInfo.outputType === 'comments' || childInfo.relationship?.type === 'many-to-many') return [];
+      return getParentRelationships(childDef).map(r => r.target);
+    })
+  ));
+
+  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets, ...childEntityRelTargetsNew]));
 
   const selectionImports = selectionTargets.length > 0
     ? selectionTargets
@@ -1827,7 +2064,7 @@ export function generatePageEdit(parent: string, children: ChildInfo[], schema: 
   const filteredProps = filterFields(modelDef.properties ?? {}, undefined);
   const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps });
   
-  // Generate imports and fetching for many-to-many relationships
+  // Generate imports and fetching for many-to-many, many-to-one, and child entity many-to-one relationships
   const manyToManyChildren = children.filter(c => c.relationship?.type === 'many-to-many');
   const manyToManyTargets = manyToManyChildren
     .map(c => c.relationship!.target)
@@ -1837,7 +2074,15 @@ export function generatePageEdit(parent: string, children: ChildInfo[], schema: 
     .map(r => r.target)
     .filter((target, index, self) => self.indexOf(target) === index);
 
-  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets]));
+  const childEntityRelTargetsEdit = Array.from(new Set(
+    children.flatMap(childInfo => {
+      const childDef = schema.definitions[childInfo.name];
+      if (!childDef?.properties || childInfo.outputType === 'list' || childInfo.outputType === 'comments' || childInfo.relationship?.type === 'many-to-many') return [];
+      return getParentRelationships(childDef).map(r => r.target);
+    })
+  ));
+
+  const selectionTargets = Array.from(new Set([...manyToManyTargets, ...manyToOneTargets, ...childEntityRelTargetsEdit]));
 
   const selectionImports = selectionTargets.length > 0
     ? '\n' + selectionTargets
@@ -1868,18 +2113,23 @@ export function generatePageEdit(parent: string, children: ChildInfo[], schema: 
         .join(' ')
     : '';
   
+  const hasCommentChildrenEdit = children.some(c => c.outputType === 'comments');
+  const sessionImportEdit = hasCommentChildrenEdit ? `\nimport { getSessionUserId } from '@/lib/authz';` : '';
+  const sessionFetchEdit = hasCommentChildrenEdit ? `\n  const currentUserId = await getSessionUserId();` : '';
+  const currentUserIdPropEdit = hasCommentChildrenEdit ? ` currentUserId={currentUserId}` : '';
+
   return `import FormUpsert from '@/components/${parent}/FormUpsert';
-import { get${parentPascal}DetailPageData } from '@/lib/${parent}/getters';${selectionImports}
+import { get${parentPascal}DetailPageData } from '@/lib/${parent}/getters';${selectionImports}${sessionImportEdit}
 import { ${parentPascal}DetailPageProps } from '@/lib/${parent}/types';
 import { notFound } from 'next/navigation';
 
 export default async function Edit${parentPascal}Page({ params }: ${parentPascal}DetailPageProps) {
   const { id } = await params;
-${promiseAllFetches}
+${promiseAllFetches}${sessionFetchEdit}
   if (!detail.${parentCamel}) {
     notFound();
   }
-  return <FormUpsert src={detail.${parentCamel}} isEdit={true} permissions={detail.userPermissions}${selectionProps} />;
+  return <FormUpsert src={detail.${parentCamel}} isEdit={true} permissions={detail.userPermissions}${selectionProps}${currentUserIdPropEdit} />;
 }
 `;
 }
@@ -1950,16 +2200,17 @@ export function generateService(parent: string, children: ChildInfo[], schema: S
   const snapshotFieldMappings = parentPropInfos
     .map(({ prop, def }) => `    ${prop}: normalizeValue(safeSnapshot.${prop}, '${normalizeKind(def)}'),`)
     .join('\n');
-  const snapshotChildMappings = children.length > 0
-    ? children.map(childInfo => `    ${childInfo.propertyName}: normalizeChildRefs(safeSnapshot.${childInfo.propertyName}),`).join('\n')
+  const nonCommentChildren = children.filter(c => c.outputType !== 'comments');
+  const snapshotChildMappings = nonCommentChildren.length > 0
+    ? nonCommentChildren.map(childInfo => `    ${childInfo.propertyName}: normalizeChildRefs(safeSnapshot.${childInfo.propertyName}),`).join('\n')
     : '';
-  const snapshotIncludeProps = children.length > 0
-    ? `,\n    include: {\n      ${children.map(childInfo => `${childInfo.propertyName}: { select: { id: true } }`).join(',\n      ')}\n    }`
+  const snapshotIncludeProps = nonCommentChildren.length > 0
+    ? `,\n    include: {\n      ${nonCommentChildren.map(childInfo => `${childInfo.propertyName}: { select: { id: true } }`).join(',\n      ')}\n    }`
     : '';
 
   // Shared utility code
   const utilityCode = `import prisma from '@/lib/prisma';
-import { normalizeValue,${children.length > 0 ? ' normalizeChildRefs,' : ''}${canUpdate ? ' assertNotStale,' : ''} type NormalizedSnapshot } from '@/lib/normalize';
+import { normalizeValue,${nonCommentChildren.length > 0 ? ' normalizeChildRefs,' : ''}${canUpdate ? ' assertNotStale,' : ''} type NormalizedSnapshot } from '@/lib/normalize';
 
 type TransactionClient = Pick<typeof prisma, '${model}'>;
 
@@ -1992,11 +2243,12 @@ export async function add${parentPascal}(creatorId: string, ${parentParamsWithTy
     data: {
 ${parentDataObj}
       creator_id: creatorId,
+      updater_id: creatorId,
     },
   });
 }
 ` : ''}${canUpdate ? `
-export async function update${parentPascal}(id: string, ${parentParamsWithTypes}, srcSnapshotRaw?: string | null) {
+export async function update${parentPascal}(updaterId: string, id: string, ${parentParamsWithTypes}, srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -2005,6 +2257,7 @@ export async function update${parentPascal}(id: string, ${parentParamsWithTypes}
       where: { id },
       data: {
 ${parentDataObj}
+        updater_id: updaterId,
       },
     });
   });
@@ -2020,8 +2273,8 @@ export async function delete${parentPascal}(ids: string[]) {
 ` : ''}`;
   }
 
-  // For with-children cases
-  const allChildrenData = children.map(childInfo => {
+  // For with-children cases (exclude comments — they are managed independently)
+  const allChildrenData = children.filter(c => c.outputType !== 'comments').map(childInfo => {
     const child = childInfo.name;
     const childVar = childVarName(childInfo);
     const childPascal = childPascalName(childInfo);
@@ -2049,9 +2302,9 @@ export async function delete${parentPascal}(ids: string[]) {
     const fieldType = `{ ${childProps.map(p => `${p}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
     const fieldTypeWithId = `{ ${Object.keys(childDef.properties).filter(k =>
       !parentIdPropNames.has(k) && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
-    ).map(p => `${p.replace(/id/, 'id?')}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
+    ).map(p => `${p.replace(/^id/, 'id?')}: ${getTsType(childDef.properties![p])}`).join('; ')} }`;
 
-    const fieldMapCreate = childProps.map(p => `          ${p}: f.${p},`).join('\n');
+    const fieldMapCreate = childProps.map(p => `          ${p}: f.${p}${p.endsWith('id') && childDef.properties![p]?.type.includes('null') ? ' || null' : ''},`).join('\n');
 
     return {
       child,
@@ -2137,12 +2390,13 @@ export async function add${parentPascal}(creatorId: string, ${parentParamsWithTy
     data: {
 ${parentDataObj}
       creator_id: creatorId,
+      updater_id: creatorId,
 ${childNestedCreate}
     },
   });
 }
 ` : ''}${canUpdate ? `
-export async function update${parentPascal}(id: string${parentParamsWithTypes ? ', ' : ''}${parentParamsWithTypes}${parentParamsWithTypes && childParamsForUpdate ? ', ' : ''}${childParamsForUpdate}, srcSnapshotRaw?: string | null) {${selfChildValidation}
+export async function update${parentPascal}(updaterId: string, id: string${parentParamsWithTypes ? ', ' : ''}${parentParamsWithTypes}${parentParamsWithTypes && childParamsForUpdate ? ', ' : ''}${childParamsForUpdate}, srcSnapshotRaw?: string | null) {${selfChildValidation}
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -2151,6 +2405,7 @@ export async function update${parentPascal}(id: string${parentParamsWithTypes ? 
       where: { id },
       data: {
 ${parentDataObj}
+        updater_id: updaterId,
 ${childNestedUpdate}
       },
     });
@@ -2195,6 +2450,7 @@ export function generateApiRoute(parent: string, children: ChildInfo[], schema: 
       childVar: childVarName(childInfo),
       propertyName: childInfo.propertyName,
       useConnect,
+      outputType: childInfo.outputType,
     };
   });
 
@@ -2204,7 +2460,7 @@ export function generateApiRoute(parent: string, children: ChildInfo[], schema: 
 
   const allBodyFields = [...parentPropInfos.map(p => p.prop === p.varName ? p.prop : `${p.prop}: ${p.varName}`), ...childBodyFields].join(', ');
 
-  const childServiceArgs = allChildrenData.map(({ childVar, propertyName, useConnect }) =>
+  const childServiceArgs = allChildrenData.filter(c => c.outputType !== 'comments').map(({ childVar, propertyName, useConnect }) =>
     useConnect ? `${childVar}_ids ?? []` : `${propertyName} ?? []`
   ).join(', ');
 
@@ -2271,6 +2527,7 @@ export function generateApiDetailRoute(parent: string, children: ChildInfo[], sc
       childVar: childVarName(childInfo),
       propertyName: childInfo.propertyName,
       useConnect,
+      outputType: childInfo.outputType,
     };
   });
 
@@ -2280,7 +2537,7 @@ export function generateApiDetailRoute(parent: string, children: ChildInfo[], sc
 
   const allBodyFields = [...parentPropInfos.map(p => p.prop === p.varName ? p.prop : `${p.prop}: ${p.varName}`), ...childBodyFields].join(', ');
 
-  const childServiceArgs = allChildrenData.map(({ childVar, propertyName, useConnect }) =>
+  const childServiceArgs = allChildrenData.filter(c => c.outputType !== 'comments').map(({ childVar, propertyName, useConnect }) =>
     useConnect ? `${childVar}_ids ?? []` : `${propertyName} ?? []`
   ).join(', ');
 
@@ -2296,8 +2553,12 @@ export function generateApiDetailRoute(parent: string, children: ChildInfo[], sc
     canDelete ? `delete${parentPascal}` : '',
   ].filter(Boolean).join(', ');
 
+  const hasAssigneeId = filteredProps ? 'assignee_id' in filteredProps : false;
+  const itemContextSelect = `{ creator_id: true${hasAssigneeId ? ', assignee_id: true' : ''} }`;
+
   return `import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';${canView ? `\nimport { get${parentPascal}Detail } from '@/lib/${parent}/getters';` : ''}${serviceImports ? `\nimport { ${serviceImports} } from '@/lib/${parent}/service';` : ''}
+import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import prisma from '@/lib/prisma';${canView ? `\nimport { get${parentPascal}Detail } from '@/lib/${parent}/getters';` : ''}${serviceImports ? `\nimport { ${serviceImports} } from '@/lib/${parent}/service';` : ''}
 
 type Params = { params: Promise<{ id: string }> };
 ${canView ? `
@@ -2305,11 +2566,11 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '${model}', 'read');
     const item = await get${parentPascal}Detail(id);
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
+    await requireApiPermission(userId, '${model}', 'read', item);
     return NextResponse.json(item);
   } catch (error) {
     return handleApiError(error);
@@ -2320,10 +2581,14 @@ export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '${model}', 'update');
+    const existing = await prisma.${model}.findUnique({ where: { id }, select: ${itemContextSelect} });
+    if (!existing) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    await requireApiPermission(userId, '${model}', 'update', existing);
     const body = await request.json();
     const { ${allBodyFields} } = body;
-    const result = await update${parentPascal}(${serviceArgsForUpdate});
+    const result = await update${parentPascal}(userId, ${serviceArgsForUpdate});
     return NextResponse.json(result);
   } catch (error) {
     return handleApiError(error);
@@ -2334,7 +2599,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '${model}', 'delete');
+    const existing = await prisma.${model}.findUnique({ where: { id }, select: ${itemContextSelect} });
+    if (!existing) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    await requireApiPermission(userId, '${model}', 'delete', existing);
     await delete${parentPascal}([id]);
     return new NextResponse(null, { status: 204 });
   } catch (error) {

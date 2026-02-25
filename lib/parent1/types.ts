@@ -68,6 +68,10 @@ export type FormViewProps = Readonly<{
     parent1_child1s: Parent1Child1[];
     parent1_child2s: Parent1Child2[];
     parent1_lists: Parent1List[];
+    created_at?: string | Date;
+    updated_at?: string | Date;
+    creator?: { id: string; name: string } | null;
+    updater?: { id: string; name: string } | null;
   };
   permissions?: ModelPermissions;
 }>;
@@ -75,6 +79,7 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allOrganizations?: Organization[];
+  currentUserId?: string | null;
 
   organizationPermissions?: ModelPermissions;
 }>;

@@ -24,7 +24,7 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
   return normalizeSnapshot(current as Record<string, unknown>);
 }
 
-export async function updateSetting3(id: string, name: string, email: string, srcSnapshotRaw?: string | null) {
+export async function updateSetting3(updaterId: string, id: string, name: string, email: string, srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -34,6 +34,7 @@ export async function updateSetting3(id: string, name: string, email: string, sr
       data: {
       name: name,
       email: email,
+        updater_id: updaterId,
       },
     });
   });

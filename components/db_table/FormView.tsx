@@ -1,3 +1,6 @@
+'use client';
+
+import { useRouter } from 'next/navigation';
 import { GridColDef } from '@mui/x-data-grid';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
@@ -5,8 +8,11 @@ import type { FormViewProps } from '@/lib/db_table/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
 import { fields_columns } from '../db_table/column_def';
+import CommentListWrapper from '../CommentListWrapper';
+import { addDbTableComment, updateDbTableComment, deleteDbTableComment } from '@/lib/db_table/actions';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
@@ -40,6 +46,13 @@ export default function FormView({ src, permissions }: FormViewProps) {
         <h2>Fields</h2>
         <FieldsViewGrid fields={src.fields} columns={fieldsColumns} />
       </div>
+      <CommentListWrapper
+        comments={src.db_table_comments}
+        showTitle={true}
+        title="Db Table Comments"
+        permissions={{ create: false, delete: false }}
+      />
+      <AuditInfo src={src} />
     </div>
   );
 }

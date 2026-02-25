@@ -19,20 +19,21 @@ export function parent1_child2s_columns(editable: boolean = false): GridColDef[]
   return [
     { field: 'name', headerName: 'Name', width: 150, editable: editable },
     { field: 'required', headerName: 'Required', width: 100, editable: editable, type: 'boolean' },
-    { 
-      field: 'start_date', 
-      headerName: 'Start Date', 
-      width: 250, 
+    {
+      field: 'start_date',
+      headerName: 'Start Date',
+      width: 250,
       editable: editable,
+      type: 'dateTime',
       renderEditCell: (params: GridRenderEditCellParams) => (
         <DateTimeWrapper
           label="Start Date"
           date_time={params.value ? new Date(params.value) : null}
           onChange={(newValue: dayjs.Dayjs | null) => {
-            params.api.setEditCellValue({ 
-              id: params.id, 
-              field: params.field, 
-              value: newValue ? newValue.toISOString() : '' 
+            params.api.setEditCellValue({
+              id: params.id,
+              field: params.field,
+              value: newValue ? newValue.toISOString() : ''
             });
           }}
         />
@@ -42,20 +43,21 @@ export function parent1_child2s_columns(editable: boolean = false): GridColDef[]
         return dayjs(value).format('YYYY-MM-DD HH:mm');
       },
     },
-    { 
-      field: 'end_date', 
-      headerName: 'End Date', 
-      width: 250, 
+    {
+      field: 'end_date',
+      headerName: 'End Date',
+      width: 250,
       editable: editable,
+      type: 'dateTime',
       renderEditCell: (params: GridRenderEditCellParams) => (
         <DateTimeWrapper
           label="End Date"
           date_time={params.value ? new Date(params.value) : null}
           onChange={(newValue: dayjs.Dayjs | null) => {
-            params.api.setEditCellValue({ 
-              id: params.id, 
-              field: params.field, 
-              value: newValue ? newValue.toISOString() : '' 
+            params.api.setEditCellValue({
+              id: params.id,
+              field: params.field,
+              value: newValue ? newValue.toISOString() : ''
             });
           }}
         />

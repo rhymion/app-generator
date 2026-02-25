@@ -17,6 +17,11 @@ import {
   generateApiRoute,
   generateApiDetailRoute,
 } from './templates';
+import {
+  generateTestHelper,
+  generateTestSpec,
+  generateTestTasksRegistry,
+} from './templates-test';
 
 function parseSchema(filePath: string): Schema {
   const content = fs.readFileSync(filePath, 'utf8');
@@ -44,6 +49,7 @@ interface EntityRelation {
     edit: boolean;
     delete: boolean;
     api: boolean;
+    test: boolean;
     fields?: string[];
   };
 }
@@ -163,6 +169,7 @@ function extractEntities(schema: Schema): EntityRelation[] {
       edit: xGenerate.edit !== false,
       delete: xGenerate.delete !== false,
       api: xGenerate.api === true,
+      test: xGenerate.test === true,
       fields: xGenerate.fields as string[] | undefined,
     };
 
@@ -211,7 +218,7 @@ function generate(inputPath: string, outputDir: string) {
   
   for (const { parent, modelName, definitionKey, children, generateConfig } of entityRelations) {
     console.log(`\nGenerating code for parent: ${parent}${modelName !== parent ? ` (model: ${modelName})` : ''}`);
-    console.log(`  Generate config: list=${generateConfig.list}, view=${generateConfig.view}, new=${generateConfig.new}, edit=${generateConfig.edit}, delete=${generateConfig.delete}, api=${generateConfig.api}${generateConfig.fields ? `, fields=[${generateConfig.fields.join(',')}]` : ''}`);
+    console.log(`  Generate config: list=${generateConfig.list}, view=${generateConfig.view}, new=${generateConfig.new}, edit=${generateConfig.edit}, delete=${generateConfig.delete}, api=${generateConfig.api}, test=${generateConfig.test}${generateConfig.fields ? `, fields=[${generateConfig.fields.join(',')}]` : ''}`);
 
     if (children.length === 0) {
       console.log(`  No children (parent-only case)`);
@@ -226,7 +233,7 @@ function generate(inputPath: string, outputDir: string) {
     // Create directories
     const libDir = path.join(outputDir, 'lib', parent);
     const componentsDir = path.join(outputDir, 'components', parent);
-    const appDir = path.join(outputDir, 'app', parent);
+    const appDir = path.join(outputDir, 'app', '[locale]', parent);
 
     fs.mkdirSync(libDir, { recursive: true });
     fs.mkdirSync(componentsDir, { recursive: true });
@@ -297,8 +304,42 @@ function generate(inputPath: string, outputDir: string) {
       fs.mkdirSync(path.join(appDir, 'view', '[id]'), { recursive: true });
       fs.writeFileSync(path.join(appDir, 'view', '[id]', 'page.tsx'), generatePageView(parent, modelName));
     }
+
+    // Generate Cypress E2E test files if test is enabled
+    if (generateConfig.test) {
+      const cypressSupportDir = path.join(outputDir, 'cypress', 'support', parent);
+      const cypressE2eDir = path.join(outputDir, 'cypress', 'e2e');
+
+      fs.mkdirSync(cypressSupportDir, { recursive: true });
+      fs.mkdirSync(cypressE2eDir, { recursive: true });
+
+      fs.writeFileSync(
+        path.join(cypressSupportDir, 'helper.ts'),
+        generateTestHelper(parent, children, schema, modelName, definitionKey, generateConfig)
+      );
+      fs.writeFileSync(
+        path.join(cypressE2eDir, `${parent}.cy.ts`),
+        generateTestSpec(parent, children, schema, modelName, definitionKey, generateConfig)
+      );
+      console.log(`  E2E test files generated for ${parent}`);
+    }
   }
-  
+
+  // Generate accumulated Cypress task registry for all test-enabled entities
+  const testEntities = entityRelations.filter(e => e.generateConfig.test);
+  if (testEntities.length > 0) {
+    const registryDir = path.join(outputDir, 'cypress', 'support');
+    fs.mkdirSync(registryDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(registryDir, 'generated-tasks.ts'),
+      generateTestTasksRegistry(
+        testEntities.map(e => ({ parent: e.parent, modelName: e.modelName, children: e.children })),
+        schema
+      )
+    );
+    console.log(`\nGenerated tasks registry with ${testEntities.length} entities`);
+  }
+
   console.log('\nCode generation complete!');
 }
 

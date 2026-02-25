@@ -41,6 +41,14 @@ export interface SchemaDefinition {
     properties?: Record<string, SchemaProperty>;
   }>;
   'x-generate'?: GenerateConfig;
+  'x-relationships'?: SchemaRelationships<any>;
+}
+
+export type SchemaRelationships<K extends keyof any> = {
+  [P in K]: {
+    target: string;
+    type: string;
+  }
 }
 
 export interface Schema {

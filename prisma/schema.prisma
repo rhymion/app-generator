@@ -17,8 +17,12 @@ model db_table {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
   creator_id String
-  creator    user_account @relation(fields: [creator_id], references: [id])
-  fields       field[]
+  creator    user_account @relation("DbTableCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account @relation("DbTableUpdater", fields: [updater_id], references: [id])
+  fields       field[] @relation("ParentTable")
+  referenced_by field[] @relation("ReferenceTable")
+  db_table_comments       db_table_comment[] @relation("CommentParentTable")
 }
 
 model field {
@@ -26,13 +30,26 @@ model field {
   name        String
   type        String
   db_table_id    String     
-  db_table       db_table @relation(fields: [db_table_id], references: [id], onDelete: Cascade)
+  db_table       db_table @relation("ParentTable", fields: [db_table_id], references: [id], onDelete: Cascade)
+  reference_id   String?
+  reference      db_table? @relation("ReferenceTable", fields: [reference_id], references: [id])
   max_length  Int?
   max         Int?
   regex       String?
   required    Boolean   @default(true)
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+}
+
+model db_table_comment {
+  id          String   @id @default(cuid())
+  message     String
+  db_table_id    String     
+  db_table       db_table @relation("CommentParentTable", fields: [db_table_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  creator_id String
+  creator    user_account @relation("DbTableCommentCreator", fields: [creator_id], references: [id])
 }
 
 model xxxxx_xxxxx {
@@ -43,7 +60,9 @@ model xxxxx_xxxxx {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
   creator_id String
-  creator    user_account @relation(fields: [creator_id], references: [id])
+  creator    user_account @relation("XxxxxXxxxxCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account @relation("XxxxxXxxxxUpdater", fields: [updater_id], references: [id])
   yyyyy_yyyyys yyyyy_yyyyy[]
 }
 
@@ -69,12 +88,14 @@ model parent1 {
   organization       organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   description  String? 
   price        Int
-  due_date     DateTime
+  due_date     DateTime @db.Timestamptz(3)
   image_url    String?
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
   creator_id String
-  creator    user_account @relation(fields: [creator_id], references: [id])
+  creator    user_account @relation("Parent1Creator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account @relation("Parent1Updater", fields: [updater_id], references: [id])
   parent1_child1s parent1_child1[]
   parent1_child2s parent1_child2[]
   parent1_lists   parent1_list[]
@@ -102,8 +123,8 @@ model parent1_child2 {
   parent1_id    String     
   parent1       parent1 @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
   required    Boolean   @default(true)
-  start_date  DateTime?
-  end_date    DateTime
+  start_date  DateTime? @db.Timestamptz(3)
+  end_date    DateTime  @db.Timestamptz(3)
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 }
@@ -121,12 +142,14 @@ model parent_only {
   id           String   @id @default(cuid())
   name         String   @unique
   description  String? 
-  login_time   DateTime?
-  logout_time  DateTime?
+  login_time   DateTime? @db.Timestamptz(3)
+  logout_time  DateTime? @db.Timestamptz(3)
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
   creator_id String
-  creator    user_account @relation(fields: [creator_id], references: [id])
+  creator    user_account @relation("ParentOnlyCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account @relation("ParentOnlyUpdater", fields: [updater_id], references: [id])
 }
 
 model user_account {
@@ -140,19 +163,34 @@ model user_account {
   updated_at DateTime @updatedAt
   creator_id String
   creator    user_account @relation("UserAccountCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account @relation("UserAccountUpdater", fields: [updater_id], references: [id])
   roles    role[] @relation("UserRoles")
   organizations organization[] @relation("UserOrganizations")
-  created_db_tables db_table[]
-  created_xxxxx_xxxxxs xxxxx_xxxxx[]
-  created_parent1s parent1[]
-  created_parent_onlys parent_only[]
-  created_permissions permission[]
-  created_procedures procedure[]
+  created_db_tables db_table[] @relation("DbTableCreator")
+  updated_db_tables db_table[] @relation("DbTableUpdater")
+  created_xxxxx_xxxxxs xxxxx_xxxxx[] @relation("XxxxxXxxxxCreator")
+  updated_xxxxx_xxxxxs xxxxx_xxxxx[] @relation("XxxxxXxxxxUpdater")
+  created_parent1s parent1[] @relation("Parent1Creator")
+  updated_parent1s parent1[] @relation("Parent1Updater")
+  created_parent_onlys parent_only[] @relation("ParentOnlyCreator")
+  updated_parent_onlys parent_only[] @relation("ParentOnlyUpdater")
+  created_permissions permission[] @relation("PermissionCreator")
+  updated_permissions permission[] @relation("PermissionUpdater")
+  created_procedures procedure[] @relation("ProcedureCreator")
+  updated_procedures procedure[] @relation("ProcedureUpdater")
+  assigned_procedures procedure[] @relation("ProcedureAssignee")
   created_roles    role[] @relation("RoleCreator")
+  updated_roles    role[] @relation("RoleUpdater")
   created_organizations organization[] @relation("OrganizationCreator")
+  updated_organizations organization[] @relation("OrganizationUpdater")
   created_user_accounts user_account[] @relation("UserAccountCreator")
-  created_resources resource[]
-  created_bookings  booking[]
+  updated_user_accounts user_account[] @relation("UserAccountUpdater")
+  created_resources resource[] @relation("ResourceCreator")
+  updated_resources resource[] @relation("ResourceUpdater")
+  created_bookings  booking[] @relation("BookingCreator")
+  updated_bookings  booking[] @relation("BookingUpdater")
+  created_db_table_comments  db_table_comment[] @relation("DbTableCommentCreator")
   @@index([api_key])
 }
 
@@ -164,6 +202,8 @@ model role {
   updated_at DateTime @updatedAt
   creator_id String
   creator    user_account @relation("RoleCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account @relation("RoleUpdater", fields: [updater_id], references: [id])
   user_accounts user_account[] @relation("UserRoles")
   permissions permission[]
 }
@@ -176,6 +216,8 @@ model organization {
   updated_at DateTime @updatedAt
   creator_id String
   creator    user_account @relation("OrganizationCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account @relation("OrganizationUpdater", fields: [updater_id], references: [id])
   user_accounts user_account[] @relation("UserOrganizations")
   parent1s parent1[]
   resources resource[]
@@ -193,7 +235,9 @@ model permission {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
   creator_id String
-  creator    user_account @relation(fields: [creator_id], references: [id])
+  creator    user_account @relation("PermissionCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account @relation("PermissionUpdater", fields: [updater_id], references: [id])
   @@unique([name, role_id])
 }
 
@@ -204,7 +248,11 @@ model procedure {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
   creator_id String
-  creator    user_account @relation(fields: [creator_id], references: [id])
+  creator    user_account @relation("ProcedureCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account @relation("ProcedureUpdater", fields: [updater_id], references: [id])
+  assignee_id  String?
+  assignee     user_account? @relation("ProcedureAssignee", fields: [assignee_id], references: [id])
   parent_id     String?
   parent       procedure? @relation("ParentChild", fields: [parent_id], references: [id])
   children     procedure[] @relation("ParentChild")
@@ -224,7 +272,9 @@ model resource {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
   creator_id String
-  creator    user_account @relation(fields: [creator_id], references: [id])
+  creator    user_account @relation("ResourceCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account @relation("ResourceUpdater", fields: [updater_id], references: [id])
 }
 
 model resource_attachment {
@@ -253,10 +303,12 @@ model booking {
   name         String
   resource_id  String
   resource     resource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
-  start_time   DateTime
-  end_time     DateTime
+  start_time   DateTime @db.Timestamptz(3)
+  end_time     DateTime @db.Timestamptz(3)
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
   creator_id   String
-  creator      user_account @relation(fields: [creator_id], references: [id])
+  creator      user_account @relation("BookingCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account @relation("BookingUpdater", fields: [updater_id], references: [id])
 }

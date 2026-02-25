@@ -43,6 +43,15 @@ definitions:
       db_table_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
+      reference_id:
+        type: 
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: db_table
+          labelField: name
       max_length:
         type:
           - integer
@@ -59,6 +68,23 @@ definitions:
       required:
         type: boolean
         default: true
+
+  db_table_comment:
+    type: object
+    required:
+      - id
+      - message
+      - db_table_id
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      message:
+        type: string
+        minLength: 1
+      db_table_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
 
   db_table_detail:
     x-generate:
@@ -79,6 +105,11 @@ definitions:
             type: array
             items:
               $ref: "#/definitions/field"
+          db_table_comments:
+            type: array
+            x-outputType: comments
+            items:
+              $ref: "#/definitions/db_table_comment"
 
   xxxxx_xxxxx:
     type: object
@@ -155,6 +186,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/xxxxx_xxxxx"
       - type: object
@@ -367,6 +399,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/parent_only"
 
@@ -714,6 +747,15 @@ definitions:
           type: many-to-one
           target: procedure
           labelField: name
+      assignee_id:
+        type: 
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: user_account
+          labelField: name
 
   procedure_detail:
     x-generate:
@@ -723,6 +765,7 @@ definitions:
       edit: true
       delete: true
       invalidate: false
+      api: true
     x-relationships:
       preceded_by:
         type: many-to-many
@@ -738,6 +781,8 @@ definitions:
           - preceded_by
           - followed_by
         properties:
+          assignee:
+            $ref: "#/definitions/user_account"
           parent:
             $ref: "#/definitions/procedure"
           children:
@@ -888,6 +933,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/booking"
       - type: object

@@ -1,3 +1,5 @@
+'use client';
+
 import { GridColDef } from '@mui/x-data-grid';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
@@ -7,6 +9,7 @@ import FieldsViewGrid from '../FieldsViewGrid';
 import ListWrapper from '../ListWrapper';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
@@ -39,6 +42,13 @@ export default function FormView({ src, permissions }: FormViewProps) {
       <TextField
         label="Parent Id"
         value={src.parent?.name || src.parent_id || ''}
+        fullWidth
+        margin="normal"
+        aria-readonly
+      />
+      <TextField
+        label="Assignee Id"
+        value={src.assignee?.name || src.assignee_id || ''}
         fullWidth
         margin="normal"
         aria-readonly
@@ -79,6 +89,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           title="Followed By"
         />
       </div>
+      <AuditInfo src={src} />
     </div>
   );
 }

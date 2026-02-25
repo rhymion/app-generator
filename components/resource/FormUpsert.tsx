@@ -8,6 +8,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import { upsertResource, removeResource } from '@/lib/resource/actions';
 import type { FormUpsertProps } from '@/lib/resource/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 import OrderedEditableListWrapper from '../OrderedEditableListWrapper';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
@@ -27,6 +28,12 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   const resourceImagesRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
+  const organizationIdOptions = useMemo(() => {
+    return allOrganizations.map((item) => ({
+      id: item.id,
+      label: item.name,
+    }));
+  }, [allOrganizations]);
   const initialResourceAttachments: EditableListWrapperItem[] = src.resource_attachments.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.path,
@@ -40,12 +47,6 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     label: f.name,
     originalId: f.id,
   }));
-  const organizationIdOptions = useMemo(() => {
-    return allOrganizations.map((item) => ({
-      id: item.id,
-      label: item.name,
-    }));
-  }, [allOrganizations]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -164,20 +165,24 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         showTitle={true}
         title="Resource Images"
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 
   return (
-    <FormWithChildGrid
-      title={`${isEdit ? 'Edit' : 'Add'} Resource`}
-      isEdit={isEdit}
-      formFields={formFields}
-      onSubmit={handleSubmit}
-      onDelete={isEdit && canDelete ? handleDelete : undefined}
-      onBack={handleBack}
-      deleteEntityLabel="Resource"
-      submitButtonLabel="Save"
-      error={error}
-    />
+    <>
+      <FormWithChildGrid
+        title={`${isEdit ? 'Edit' : 'Add'} Resource`}
+        isEdit={isEdit}
+        formFields={formFields}
+        onSubmit={handleSubmit}
+        onDelete={isEdit && canDelete ? handleDelete : undefined}
+        onBack={handleBack}
+        deleteEntityLabel="Resource"
+        submitButtonLabel="Save"
+        error={error}
+      />
+
+    </>
   );
 }

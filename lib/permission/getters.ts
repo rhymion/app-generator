@@ -31,7 +31,11 @@ export async function getPermissionDetail(id: string): Promise<PermissionDetail 
       id,
     },
     include: { 
-      role: true 
+      role: true, 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
     },
   });
 
@@ -55,9 +59,9 @@ export async function getPermissionListPageData(isAssertPermission: boolean = tr
 }
 
 export async function getPermissionDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('permission');
-  await assertPermission(userPermissions, operation, 'permission');
   const permission = await getPermissionDetail(id);
+  const userPermissions = await getModelPermissions('permission', undefined, permission);
+  await assertPermission(userPermissions, operation, 'permission');
   return { permission, userPermissions };
 }
 

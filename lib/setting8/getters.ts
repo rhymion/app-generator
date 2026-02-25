@@ -25,6 +25,12 @@ export async function getSetting8Detail(id: string): Promise<Setting8Detail | nu
     where: { 
       id,
     },
+    include: { 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
+    },
   });
 
   if (!setting8) {
@@ -46,9 +52,9 @@ export async function getSetting8ListPageData(isAssertPermission: boolean = true
 }
 
 export async function getSetting8DetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('user_account');
-  await assertPermission(userPermissions, operation, 'user_account');
   const setting8 = await getSetting8Detail(id);
+  const userPermissions = await getModelPermissions('user_account', undefined, setting8);
+  await assertPermission(userPermissions, operation, 'user_account');
   return { setting8, userPermissions };
 }
 

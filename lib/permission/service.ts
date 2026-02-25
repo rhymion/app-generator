@@ -38,11 +38,12 @@ export async function addPermission(creatorId: string, name: string, create: boo
       delete: deleteValue,
       role_id: roleId,
       creator_id: creatorId,
+      updater_id: creatorId,
     },
   });
 }
 
-export async function updatePermission(id: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null, srcSnapshotRaw?: string | null) {
+export async function updatePermission(updaterId: string, id: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null, srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -56,6 +57,7 @@ export async function updatePermission(id: string, name: string, create: boolean
       update: update,
       delete: deleteValue,
       role_id: roleId,
+        updater_id: updaterId,
       },
     });
   });

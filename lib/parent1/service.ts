@@ -46,6 +46,7 @@ export async function addParent1(creatorId: string, name: string, organizationId
       due_date: dueDate,
       image_url: imageUrl,
       creator_id: creatorId,
+      updater_id: creatorId,
       parent1_child1s: {
         create: parent1Child1sItems.map(f => ({
           order: f.order,
@@ -75,7 +76,7 @@ export async function addParent1(creatorId: string, name: string, organizationId
   });
 }
 
-export async function updateParent1(id: string, name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { id?: string; order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { id?: string; name: string }[], srcSnapshotRaw?: string | null) {
+export async function updateParent1(updaterId: string, id: string, name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { id?: string; order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { id?: string; name: string }[], srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -89,6 +90,7 @@ export async function updateParent1(id: string, name: string, organizationId: st
       price: price,
       due_date: dueDate,
       image_url: imageUrl,
+        updater_id: updaterId,
       parent1_child1s: {
         deleteMany: {},
         create: parent1Child1sItems.map(f => ({

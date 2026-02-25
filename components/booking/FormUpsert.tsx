@@ -8,6 +8,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import { upsertBooking, removeBooking } from '@/lib/booking/actions';
 import type { FormUpsertProps } from '@/lib/booking/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
@@ -102,20 +103,24 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
         date_time={endTime ? endTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setEndTime(newValue)}
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 
   return (
-    <FormWithChildGrid
-      title={`${isEdit ? 'Edit' : 'Add'} Booking`}
-      isEdit={isEdit}
-      formFields={formFields}
-      onSubmit={handleSubmit}
-      onDelete={isEdit && canDelete ? handleDelete : undefined}
-      onBack={handleBack}
-      deleteEntityLabel="Booking"
-      submitButtonLabel="Save"
-      error={error}
-    />
+    <>
+      <FormWithChildGrid
+        title={`${isEdit ? 'Edit' : 'Add'} Booking`}
+        isEdit={isEdit}
+        formFields={formFields}
+        onSubmit={handleSubmit}
+        onDelete={isEdit && canDelete ? handleDelete : undefined}
+        onBack={handleBack}
+        deleteEntityLabel="Booking"
+        submitButtonLabel="Save"
+        error={error}
+      />
+
+    </>
   );
 }

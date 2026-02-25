@@ -3,19 +3,22 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import prisma from '@/lib/prisma';
 import { addProcedure, updateProcedure, deleteProcedure } from './service';
 
 export async function upsertProcedure(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    await requirePermission('procedure', 'update');
+    const existing = await prisma.procedure.findUnique({ where: { id }, select: { creator_id: true, assignee_id: true } });
+    await requirePermission('procedure', 'update', existing);
   } else {
     await requirePermission('procedure', 'create');
   }
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
   const parentId = (data.get('parent_id') as string | null) || null;
+  const assigneeId = (data.get('assignee_id') as string | null) || null;
   const childrenRaw = data.getAll('children[]') as string[];
   const childrenItems = childrenRaw.map(f => JSON.parse(f) as { id?: string; name?: string });
   const childrenIds = childrenItems
@@ -31,12 +34,12 @@ export async function upsertProcedure(data: FormData) {
   const followedByIds = followedByItems
     .map((followedBy) => followedBy.id)
     .filter((followedById): followedById is string => Boolean(followedById));
+  const userId = await getSessionUserIdOrThrow();
 
   if (id) {
-    await updateProcedure(id, name, description, parentId, childrenIds, precededByIds, followedByIds, srcSnapshotRaw);
+    await updateProcedure(userId, id, name, description, parentId, assigneeId, childrenIds, precededByIds, followedByIds, srcSnapshotRaw);
   } else {
-    const creatorId = await getSessionUserIdOrThrow();
-    await addProcedure(creatorId, name, description, parentId, childrenIds, precededByIds, followedByIds);
+    await addProcedure(userId, name, description, parentId, assigneeId, childrenIds, precededByIds, followedByIds);
   }
 
   revalidatePath('/');
@@ -44,8 +47,11 @@ export async function upsertProcedure(data: FormData) {
 }
 
 export async function removeProcedure(data: FormData | string[]) {
-  await requirePermission('procedure', 'delete');
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  const items = await prisma.procedure.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true, assignee_id: true } });
+  for (const item of items) {
+    await requirePermission('procedure', 'delete', item);
+  }
   await deleteProcedure(ids);
   revalidatePath('/');
   redirect('/procedure');

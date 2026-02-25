@@ -24,6 +24,12 @@ export async function getSetting3Detail(id: string): Promise<Setting3Detail | nu
     where: { 
       id,
     },
+    include: { 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
+    },
   });
 
   if (!setting3) {
@@ -45,9 +51,9 @@ export async function getSetting3ListPageData(isAssertPermission: boolean = true
 }
 
 export async function getSetting3DetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('user_account');
-  await assertPermission(userPermissions, operation, 'user_account');
   const setting3 = await getSetting3Detail(id);
+  const userPermissions = await getModelPermissions('user_account', undefined, setting3);
+  await assertPermission(userPermissions, operation, 'user_account');
   return { setting3, userPermissions };
 }
 

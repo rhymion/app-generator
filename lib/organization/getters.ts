@@ -25,7 +25,11 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
       id,
     },
     include: { 
-      user_accounts: true 
+      user_accounts: true, 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
     },
   });
 
@@ -49,9 +53,9 @@ export async function getOrganizationListPageData(isAssertPermission: boolean = 
 }
 
 export async function getOrganizationDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('organization');
-  await assertPermission(userPermissions, operation, 'organization');
   const organization = await getOrganizationDetail(id);
+  const userPermissions = await getModelPermissions('organization', undefined, organization);
+  await assertPermission(userPermissions, operation, 'organization');
   return { organization, userPermissions };
 }
 

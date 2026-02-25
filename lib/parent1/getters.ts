@@ -43,7 +43,11 @@ export async function getParent1Detail(id: string): Promise<Parent1Detail | null
       parent1_child1s: true, 
       parent1_child2s: true, 
       parent1_lists: true, 
-      organization: true 
+      organization: true, 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
     },
   });
 
@@ -70,9 +74,9 @@ export async function getParent1ListPageData(isAssertPermission: boolean = true)
 }
 
 export async function getParent1DetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('parent1');
-  await assertPermission(userPermissions, operation, 'parent1');
   const parent1 = await getParent1Detail(id);
+  const userPermissions = await getModelPermissions('parent1', undefined, parent1);
+  await assertPermission(userPermissions, operation, 'parent1');
   return { parent1, userPermissions };
 }
 

@@ -28,7 +28,11 @@ export async function getUserAccountDetail(id: string): Promise<UserAccountDetai
       id,
     },
     include: { 
-      roles: true 
+      roles: true, 
+      creator: { select: { id: true, 
+      name: true } }, 
+      updater: { select: { id: true, 
+      name: true } } 
     },
   });
 
@@ -52,9 +56,9 @@ export async function getUserAccountListPageData(isAssertPermission: boolean = t
 }
 
 export async function getUserAccountDetailPageData(id: string, operation: Operation = 'read') {
-  const userPermissions = await getModelPermissions('user_account');
-  await assertPermission(userPermissions, operation, 'user_account');
   const userAccount = await getUserAccountDetail(id);
+  const userPermissions = await getModelPermissions('user_account', undefined, userAccount);
+  await assertPermission(userPermissions, operation, 'user_account');
   return { userAccount, userPermissions };
 }
 

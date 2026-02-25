@@ -36,6 +36,10 @@ export type FormViewProps = Readonly<{
     delete: boolean;
     role_id: string | null;
     role?: Role | null;
+    created_at?: string | Date;
+    updated_at?: string | Date;
+    creator?: { id: string; name: string } | null;
+    updater?: { id: string; name: string } | null;
   };
   permissions?: ModelPermissions;
 }>;
@@ -43,6 +47,7 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allRoles?: Role[];
+  currentUserId?: string | null;
 
   rolePermissions?: ModelPermissions;
 }>;

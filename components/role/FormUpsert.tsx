@@ -7,6 +7,7 @@ import TextField from '@mui/material/TextField';
 import { upsertRole, removeRole } from '@/lib/role/actions';
 import type { FormUpsertProps } from '@/lib/role/types';
 import FormWithChildGrid from '../FormWithChildGrid';
+import AuditInfo from '../AuditInfo';
 import type { UserAccount } from '@/lib/user_account/types';
 import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
@@ -116,20 +117,24 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         }))}
         excludeOptionIds={[src.id]}
       />
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 
   return (
-    <FormWithChildGrid
-      title={`${isEdit ? 'Edit' : 'Add'} Role`}
-      isEdit={isEdit}
-      formFields={formFields}
-      onSubmit={handleSubmit}
-      onDelete={isEdit && canDelete ? handleDelete : undefined}
-      onBack={handleBack}
-      deleteEntityLabel="Role"
-      submitButtonLabel="Save"
-      error={error}
-    />
+    <>
+      <FormWithChildGrid
+        title={`${isEdit ? 'Edit' : 'Add'} Role`}
+        isEdit={isEdit}
+        formFields={formFields}
+        onSubmit={handleSubmit}
+        onDelete={isEdit && canDelete ? handleDelete : undefined}
+        onBack={handleBack}
+        deleteEntityLabel="Role"
+        submitButtonLabel="Save"
+        error={error}
+      />
+
+    </>
   );
 }

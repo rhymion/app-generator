@@ -47,6 +47,10 @@ export type FormViewProps = Readonly<{
     organization?: Organization | null;
     resource_attachments: ResourceAttachment[];
     resource_images: ResourceImage[];
+    created_at?: string | Date;
+    updated_at?: string | Date;
+    creator?: { id: string; name: string } | null;
+    updater?: { id: string; name: string } | null;
   };
   permissions?: ModelPermissions;
 }>;
@@ -54,6 +58,7 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allOrganizations?: Organization[];
+  currentUserId?: string | null;
 
   organizationPermissions?: ModelPermissions;
 }>;

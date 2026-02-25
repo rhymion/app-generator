@@ -32,6 +32,7 @@ export async function addSetting8(creatorId: string, name: string, email: string
       email: email,
       password: password,
       creator_id: creatorId,
+      updater_id: creatorId,
     },
   });
 }
