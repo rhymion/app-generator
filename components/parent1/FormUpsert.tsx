@@ -94,8 +94,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     formData.set('image_url', imageUrl);
     const parent1Child1s = parent1Child1sRef.current?.getFields?.() || [];
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (parent1Child1s as any[]).forEach((field) => {
+    (parent1Child1s as GridRowsProp).forEach((field) => {
       formData.append(
         'parent1_child1[]',
         JSON.stringify({
@@ -113,8 +112,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     });
     const parent1Child2s = parent1Child2sRef.current?.getFields?.() || [];
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (parent1Child2s as any[]).forEach((field) => {
+    (parent1Child2s as GridRowsProp).forEach((field) => {
       formData.append(
         'parent1_child2[]',
         JSON.stringify({

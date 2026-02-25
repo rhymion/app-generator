@@ -56,8 +56,7 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
     formData.set('description', descriptionRef.current?.value || '');
     const fields = fieldsRef.current?.getFields?.() || [];
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (fields as any[]).forEach((field) => {
+    (fields as GridRowsProp).forEach((field) => {
       formData.append(
         'field[]',
         JSON.stringify({

@@ -7,7 +7,6 @@ export function children_columns(editable: boolean = false, parentIdOptions?: Ar
     ...(parentIdOptions && parentIdOptions.length > 0
       ? [{ field: 'parent_id', headerName: 'Parent', width: 200, editable: editable, type: 'singleSelect' as const, valueOptions: parentIdOptions }]
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       : [{ field: 'parent_id', headerName: 'Parent', width: 200, editable: false, valueGetter: (_value: any, row: any) => row.parent?.name ?? '' }]),
     ...(assigneeIdOptions && assigneeIdOptions.length > 0
       ? [{ field: 'assignee_id', headerName: 'Assignee', width: 200, editable: editable, type: 'singleSelect' as const, valueOptions: assigneeIdOptions }]
