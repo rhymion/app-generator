@@ -65,9 +65,9 @@ jobs:
           path: ~/.cache/Cypress
           key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - name: Generate Prisma client
-        run: npx prisma generate
-      - name: Run database migrations
-        run: npx prisma migrate deploy
+      - name: Start docker container for testing
+        run: npm run docker:test:up
+      - name: Reset test database
+        run: npm run db:reset:test
       - name: Run Cypress E2E tests
         run: npm run cy:test
