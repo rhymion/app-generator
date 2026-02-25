@@ -52,7 +52,7 @@ interface OrderedEditableListWrapperProps {
   // Custom rendering
   renderItem?: (item: EditableListWrapperItem) => React.ReactNode;
   // Validation
-  validateItem?: (value: any) => string | null;
+  validateItem?: (value: unknown) => string | null;
   // Change callback
   /** @deprecated No longer needed when using allAutocompleteOptions */
   onItemsChange?: (items: EditableListWrapperItem[]) => void;
@@ -173,7 +173,7 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
     };
 
     const handleAdd = async () => {
-      let value: any;
+      let value: string | number;
       let label: string = '';
 
       switch (itemType) {
@@ -298,7 +298,7 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
       }
     };
 
-    const isUrlValue = (v: any): v is string =>
+    const isUrlValue = (v: unknown): v is string =>
       typeof v === 'string' && (v.startsWith('/') || v.startsWith('http'));
 
     const defaultRenderItem = (item: EditableListWrapperItem) => {

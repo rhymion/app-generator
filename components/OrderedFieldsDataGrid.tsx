@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, forwardRef, useImperativeHandle, useEffect } from 'react';
-import { DataGrid, GridColDef, GridRowsProp, useGridApiRef, GridRowSelectionModel } from '@mui/x-data-grid';
+import { DataGrid, GridColDef, GridRowsProp, GridValidRowModel, useGridApiRef, GridRowSelectionModel } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
 import Button from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
@@ -26,7 +26,7 @@ import InputLabel from '@mui/material/InputLabel';
 interface OrderedFieldsDataGridProps {
   initialFields?: GridRowsProp;
   columns: GridColDef[];
-  createNewRow: () => any;
+  createNewRow: () => GridValidRowModel;
   addButtonLabel?: string;
   deleteDialogTitle?: string;
   deleteDialogMessage?: string;
@@ -38,10 +38,10 @@ interface OrderedFieldsDataGridHandle {
   getFields: () => GridRowsProp;
 }
 
-function getDisplayValue(col: GridColDef, row: any): string {
+function getDisplayValue(col: GridColDef, row: GridValidRowModel): string {
   const rawValue = row[col.field];
   if (col.valueGetter) {
-    const result = (col.valueGetter as Function)(rawValue, row, col, null);
+    const result = (col.valueGetter as (...args: unknown[]) => unknown)(rawValue, row, col, null);
     if (result === null || result === undefined) return '';
     return String(result);
   }
@@ -50,7 +50,7 @@ function getDisplayValue(col: GridColDef, row: any): string {
   return String(rawValue);
 }
 
-function DialogField({ col, value, onChange }: { col: GridColDef; value: any; onChange: (v: any) => void }) {
+function DialogField({ col, value, onChange }: { col: GridColDef; value: GridValidRowModel[string]; onChange: (v: GridValidRowModel[string]) => void }) {
   if (col.type === 'boolean') {
     return (
       <FormControlLabel
@@ -61,7 +61,7 @@ function DialogField({ col, value, onChange }: { col: GridColDef; value: any; on
     );
   }
   if (col.type === 'singleSelect') {
-    const opts = ((col as any).valueOptions as Array<{ value: string | null; label: string }>) ?? [];
+    const opts = ((col as { valueOptions?: Array<{ value: string | null; label: string }> }).valueOptions as Array<{ value: string | null; label: string }>) ?? [];
     return (
       <FormControl fullWidth margin="normal">
         <InputLabel>{col.headerName}</InputLabel>
@@ -108,8 +108,8 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
 
     // Mobile edit dialog state
     const [editDialogOpen, setEditDialogOpen] = useState(false);
-    const [editingRow, setEditingRow] = useState<any | null>(null); // null = new row
-    const [editValues, setEditValues] = useState<Record<string, any>>({});
+    const [editingRow, setEditingRow] = useState<GridValidRowModel | null>(null); // null = new row
+    const [editValues, setEditValues] = useState<GridValidRowModel>({});
     const [deleteRowId, setDeleteRowId] = useState<string | null>(null);
 
     // Initialize fields: sort by order first, then ensure sequential order values
@@ -126,6 +126,7 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
         ...field,
         order: index + 1,
       }));
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFields(fieldsWithOrder);
     }, [initialFields]);
 
@@ -142,7 +143,7 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
       getFields: () => fields,
     }), [fields]);
 
-    function processRowUpdate(newRow: any, oldRow: any) {
+    function processRowUpdate(newRow: GridValidRowModel, oldRow: GridValidRowModel) {
       const updatedFields = fields.map(row => row.id === newRow.id ? { ...newRow, order: row.order } : row);
       setFields(updatedFields);
       return { ...newRow, order: oldRow.order };
@@ -186,7 +187,7 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
       setOpenDeleteSelectedDialog(true);
     };
 
-    const openEditDialog = (row: any) => {
+    const openEditDialog = (row: GridValidRowModel) => {
       setEditingRow(row);
       setEditValues({ ...row });
       setEditDialogOpen(true);
@@ -312,7 +313,7 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
                   key={col.field}
                   col={col}
                   value={editValues[col.field]}
-                  onChange={v => setEditValues(prev => ({ ...prev, [col.field]: v }))}
+                  onChange={v => setEditValues((prev: GridValidRowModel) => ({ ...prev, [col.field]: v }))}
                 />
               ))}
             </DialogContent>

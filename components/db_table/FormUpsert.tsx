@@ -28,7 +28,7 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
   [allDbTables]);
   const fieldsColumns = fields_columns(true, referenceIdOptions);
 
-  const initialFields = src.fields.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
+  const [initialFields] = useState<GridRowsProp>(() => src.fields.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` })));
 
   const createNewFields = () => ({
     id: `temp-${Date.now()}-${Math.random()}`,
@@ -56,6 +56,7 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
     formData.set('description', descriptionRef.current?.value || '');
     const fields = fieldsRef.current?.getFields?.() || [];
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (fields as any[]).forEach((field) => {
       formData.append(
         'field[]',

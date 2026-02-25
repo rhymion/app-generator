@@ -57,6 +57,7 @@ export async function getModelPermissions(
   const roleIds = await getUserRoleIds(resolvedUserId);
 
   // Build OR conditions for the permission query
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const orConditions: any[] = [
     { role_id: null }, // Global permissions (no role)
   ];
@@ -112,6 +113,7 @@ export async function getModelPermissions(
   // Merge with OR logic, but mask `create` for Creator/Assignee roles
   return permissions.reduce<ModelPermissions>(
     (acc, row) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const isSpecialRole = row.role && SPECIAL_ROLE_NAMES.includes(row.role.name as any);
       return {
         create: acc.create || (!isSpecialRole && row.create),

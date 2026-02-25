@@ -24,12 +24,12 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
   const userAccountsRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
-  const initialUserAccounts: EditableListWrapperItem[] = src.user_accounts.map(f => ({
+  const [initialUserAccounts] = useState<EditableListWrapperItem[]>(() => src.user_accounts.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
     label: f.name,
     originalId: f.id,
-  }));
+  })));
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

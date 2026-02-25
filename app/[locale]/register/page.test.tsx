@@ -95,6 +95,7 @@ describe("RegisterPage", () => {
 
   it("should succeed to register with user name, email address and password", async () => {
     const user = userEvent.setup();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (signIn as any).mockResolvedValueOnce({ error: null });
 
     render(<RegisterPage />);
@@ -126,6 +127,7 @@ describe("RegisterPage", () => {
 
   it("should fail to register with email address same as existing account", async () => {
     const user = userEvent.setup();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (signIn as any).mockResolvedValueOnce({
       error: "Failed to sign in after registration",
     });

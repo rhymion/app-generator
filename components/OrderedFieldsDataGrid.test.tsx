@@ -87,6 +87,7 @@ describe('OrderedFieldsDataGrid', () => {
     });
   });
   it('handles pagination correctly', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ref = { current: null as any };
     const manyFields = Array.from({ length: 15 }, (_, i) => ({
       id: `${i}`,
@@ -100,6 +101,7 @@ describe('OrderedFieldsDataGrid', () => {
 
     render(
       <OrderedFieldsDataGrid
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ref={ref as any}
         initialFields={manyFields}
         
@@ -119,6 +121,7 @@ describe('OrderedFieldsDataGrid', () => {
     expect(screen.getByLabelText(/previous/i)).toBeInTheDocument();
   });
   it('edits records successfully', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ref = { current: null as any };
     render(
       <OrderedFieldsDataGrid
@@ -137,11 +140,13 @@ describe('OrderedFieldsDataGrid', () => {
     
     await waitFor(() => {
       const updatedFields = ref.current?.getFields() || [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       expect(updatedFields.find((f: any) => f.id === '1').name).toBe('newField1');
     });
   });
 
   it('moves field up when up button is clicked', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ref = { current: null as any };
     render(
       <OrderedFieldsDataGrid
@@ -163,6 +168,7 @@ describe('OrderedFieldsDataGrid', () => {
   });
 
   it('moves field down when down button is clicked', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ref = { current: null as any };
     render(
       <OrderedFieldsDataGrid
@@ -218,6 +224,7 @@ describe('OrderedFieldsDataGrid', () => {
   });
 
   it('deletes selected fields when confirmed', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ref = { current: null as any };
     render(
       <OrderedFieldsDataGrid
@@ -260,6 +267,7 @@ describe('OrderedFieldsDataGrid', () => {
   });
 
   it('cancels deletion when clicking Cancel in Delete Selected dialog', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ref = { current: null as any };
     render(
       <OrderedFieldsDataGrid

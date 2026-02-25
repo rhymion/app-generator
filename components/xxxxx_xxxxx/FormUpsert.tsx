@@ -25,7 +25,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const teamRef = useRef<HTMLInputElement>(null);
   const yyyyyYyyyysColumns = yyyyy_yyyyys_columns(true);
 
-  const initialYyyyyYyyyys = src.yyyyy_yyyyys.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
+  const [initialYyyyyYyyyys] = useState<GridRowsProp>(() => src.yyyyy_yyyyys.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` })));
 
   const createNewYyyyyYyyyys = () => ({
     id: `temp-${Date.now()}-${Math.random()}`,
@@ -54,7 +54,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
     formData.set('team', teamRef.current?.value || '');
     const yyyyyYyyyys = yyyyyYyyyysRef.current?.getFields?.() || [];
 
-    (yyyyyYyyyys as any[]).forEach((field) => {
+    (yyyyyYyyyys as GridRowsProp).forEach((field) => {
       formData.append(
         'yyyyy_yyyyy[]',
         JSON.stringify({

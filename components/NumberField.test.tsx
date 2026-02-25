@@ -341,7 +341,7 @@ describe('NumberField', () => {
     );
 
     // Check that the component renders with small size
-    let formControl = container.querySelector('.MuiFormControl-root');
+    const formControl = container.querySelector('.MuiFormControl-root');
     expect(formControl).toBeInTheDocument();
 
     // Check increment button has small size

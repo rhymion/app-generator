@@ -87,6 +87,7 @@ describe('FieldsDataGrid', () => {
     });
   });
   it('handles pagination correctly', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ref = { current: null as any };
     const manyFields = Array.from({ length: 15 }, (_, i) => ({
       id: `${i}`,
@@ -100,6 +101,7 @@ describe('FieldsDataGrid', () => {
 
     render(
       <FieldsDataGrid
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ref={ref as any}
         initialFields={manyFields}
         
@@ -119,6 +121,7 @@ describe('FieldsDataGrid', () => {
     expect(screen.getByLabelText(/previous/i)).toBeInTheDocument();
   });
   it('edits records successfully', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ref = { current: null as any };
     render(
       <FieldsDataGrid
@@ -137,6 +140,7 @@ describe('FieldsDataGrid', () => {
     
     await waitFor(() => {
       const updatedFields = ref.current?.getFields() || [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       expect(updatedFields.find((f: any) => f.id === '1').name).toBe('newField1');
     });
   });
@@ -159,6 +163,7 @@ describe('FieldsDataGrid', () => {
   });
 
   it('deletes selected fields when confirmed', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ref = { current: null as any };
     render(
       <FieldsDataGrid
@@ -201,6 +206,7 @@ describe('FieldsDataGrid', () => {
   });
 
   it('cancels deletion when clicking Cancel in Delete Selected dialog', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ref = { current: null as any };
     render(
       <FieldsDataGrid

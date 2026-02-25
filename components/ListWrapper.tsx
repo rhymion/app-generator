@@ -10,8 +10,10 @@ export type ItemType = 'text' | 'autocomplete' | 'file';
 
 export interface ListWrapperItem {
   id: string | number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   value: any;
   label?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any;
 }
 
@@ -36,7 +38,7 @@ function ListWrapper(
 }: ListWrapperProps)
 {
 
-  const isUrlValue = (v: any): v is string =>
+  const isUrlValue = (v: unknown): v is string =>
     typeof v === 'string' && (v.startsWith('/') || v.startsWith('http'));
 
   const defaultRenderItem = (item: ListWrapperItem) => {
