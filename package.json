@@ -49,6 +49,7 @@
     "react-dom": "^19.2.3"
   },
   "devDependencies": {
+    "@marp-team/marp-cli": "^4.2.3",
     "@prisma/adapter-pg": "^7.4.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
