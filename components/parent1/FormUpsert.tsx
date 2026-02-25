@@ -43,7 +43,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   }, [allOrganizations]);
   const parent1Child1sColumns = parent1_child1s_columns(true);
 
-  const initialParent1Child1s = src.parent1_child1s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
+  const [initialParent1Child1s] = useState<GridRowsProp>(() => src.parent1_child1s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` })));
 
   const createNewParent1Child1s = () => ({
     id: `temp-${Date.now()}-${Math.random()}`,
@@ -59,7 +59,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   });
   const parent1Child2sColumns = parent1_child2s_columns(true);
 
-  const initialParent1Child2s = src.parent1_child2s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` }));
+  const [initialParent1Child2s] = useState<GridRowsProp>(() => src.parent1_child2s.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` })));
 
   const createNewParent1Child2s = () => ({
     id: `temp-${Date.now()}-${Math.random()}`,
@@ -69,12 +69,12 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     end_date: dayjs().toISOString(),
     parent1_id: src.id,
   });
-  const initialParent1Lists: EditableListWrapperItem[] = src.parent1_lists.map(f => ({
+  const [initialParent1Lists] = useState<EditableListWrapperItem[]>(() => src.parent1_lists.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.name,
     label: f.name,
     originalId: f.id,
-  }));
+  })));
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -94,7 +94,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     formData.set('image_url', imageUrl);
     const parent1Child1s = parent1Child1sRef.current?.getFields?.() || [];
 
-    (parent1Child1s as any[]).forEach((field) => {
+    (parent1Child1s as GridRowsProp).forEach((field) => {
       formData.append(
         'parent1_child1[]',
         JSON.stringify({
@@ -112,7 +112,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     });
     const parent1Child2s = parent1Child2sRef.current?.getFields?.() || [];
 
-    (parent1Child2s as any[]).forEach((field) => {
+    (parent1Child2s as GridRowsProp).forEach((field) => {
       formData.append(
         'parent1_child2[]',
         JSON.stringify({

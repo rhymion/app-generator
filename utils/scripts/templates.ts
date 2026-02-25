@@ -1,4 +1,4 @@
-import type { Schema, SchemaProperty, SchemaDefinition, GenerateConfig } from './types';
+import type { Schema, SchemaProperty } from './types';
 
 // Import helper functions
 import {
@@ -9,25 +9,19 @@ import {
   singularize,
   toPascalCaseFromVar,
 } from './helpers/naming';
-import { getTsType, mapJsonTypeToTs } from './helpers/type-mapping';
+import { getTsType } from './helpers/type-mapping';
 import {
-  getDetailProperties,
   getDetailRelationName,
   getParentRelationships,
   filterFields,
-  type ParentRelationshipMeta,
-  type DetailPropertyMap,
 } from './helpers/schema-helpers';
 import {
   childVarName,
   childPascalName,
   childTitle,
   childColumnsFnName,
-  childSingularVarName,
-  childSingularPascalName,
   childFormKey,
   type ChildInfo,
-  type RelationshipInfo,
 } from './helpers/child-helpers';
 
 // Re-export types for backward compatibility
@@ -433,15 +427,6 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
     : '';
   
   const parentParams = parentPropInfos.map(p => p.varName).join(', ');
-  const parentParamsWithTypes = filteredProps
-    ? parentPropInfos.map(p => {
-        const tsType = getTsType(p.def);
-        return `${p.varName}: ${tsType}`;
-      }).join(', ')
-    : '';
-
-  const parentDataObj = parentPropInfos.map(p => `      ${p.prop}: ${p.varName},`).join('\n');
-
   const normalizeKind = (def: SchemaProperty): 'date' | 'number' | 'boolean' | 'string' | 'other' => {
     const propType = Array.isArray(def.type) ? def.type.find(t => t !== 'null') : def.type;
     const format = (def as any).format;
@@ -461,16 +446,6 @@ export function generateActions(parent: string, children: ChildInfo[], schema: S
     return 'other';
   };
 
-  const snapshotFieldMappings = parentPropInfos
-    .map(({ prop, def }) => `    ${prop}: normalizeValue(safeSnapshot.${prop}, '${normalizeKind(def)}'),`)
-    .join('\n');
-  const snapshotChildMappings = children.length > 0
-    ? children.map(childInfo => `    ${childInfo.propertyName}: normalizeChildRefs(safeSnapshot.${childInfo.propertyName}),`).join('\n')
-    : '';
-  const snapshotIncludeProps = children.length > 0
-    ? `,\n    include: {\n      ${children.map(childInfo => `${childInfo.propertyName}: { select: { id: true } }`).join(',\n      ')}\n    }`
-    : '';
-  
   // Generate comment CRUD actions for any comment children (appended to the output regardless of parent/child case)
   const commentChildren = children.filter(c => c.outputType === 'comments');
   const commentActionsCode = commentChildren.map(commentChild => {
@@ -823,6 +798,7 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
         const relName = labelBase; // e.g. 'reference' from 'reference_id'
         columns.push(`    ...(${paramName} && ${paramName}.length > 0
       ? [{ field: '${key}', headerName: '${headerName}', width: 200, editable: editable, type: 'singleSelect' as const, valueOptions: ${paramName} }]
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       : [{ field: '${key}', headerName: '${headerName}', width: 200, editable: false, valueGetter: (_value: any, row: any) => row.${relName}?.name ?? '' }]),`);
         continue;
       }
@@ -1229,12 +1205,12 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
 
       // For connect/select relationships (many-to-many or self list)
       if (useConnectSelection) {
-        return `  const initial${childPascal}: EditableListWrapperItem[] = src.${childInfo.propertyName}.map(f => ({
+        return `  const [initial${childPascal}] = useState<EditableListWrapperItem[]>(() => src.${childInfo.propertyName}.map(f => ({
     id: f.id || \`temp-\${Date.now()}-\${Math.random()}\`,
     value: f.id,
     label: f.name,
     originalId: f.id,
-  }));`;
+  })));`;
       }
       
       // For list output type, generate different initialization
@@ -1243,20 +1219,20 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
         const orderLine = hasOrder ? `\n    order: f.order,` : '';
         if (childInfo.fileType) {
           // File-type list child: value=path, label=name
-          return `  const initial${childPascal}: EditableListWrapperItem[] = src.${childInfo.propertyName}.map(f => ({
+          return `  const [initial${childPascal}] = useState<EditableListWrapperItem[]>(() => src.${childInfo.propertyName}.map(f => ({
     id: f.id || \`temp-\${Date.now()}-\${Math.random()}\`,
     value: f.path,
     label: f.name,
     originalId: f.id,${orderLine}
-  }));`;
+  })));`;
         }
         // Assuming list items have a 'name' field as the primary value
-        return `  const initial${childPascal}: EditableListWrapperItem[] = src.${childInfo.propertyName}.map(f => ({
+        return `  const [initial${childPascal}] = useState<EditableListWrapperItem[]>(() => src.${childInfo.propertyName}.map(f => ({
     id: f.id || \`temp-\${Date.now()}-\${Math.random()}\`,
     value: f.name,
     label: f.name,
     originalId: f.id,${orderLine}
-  }));`;
+  })));`;
       }
       
       const createNewChildProps = childProps.map(p => {
@@ -1294,7 +1270,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
 
       return `  const ${childVar}Columns = ${childColumnsFnName(childInfo)}(true${relOptionArgs});
 
-  const initial${childPascal} = src.${childInfo.propertyName}.map(f => ({ ...f, id: f.id || \`temp-\${Date.now()}-\${Math.random()}\` }));
+  const [initial${childPascal}] = useState<GridRowsProp>(() => src.${childInfo.propertyName}.map(f => ({ ...f, id: f.id || \`temp-\${Date.now()}-\${Math.random()}\` })));
 
   const createNew${childPascal} = () => ({
     id: \`temp-\${Date.now()}-\${Math.random()}\`,
@@ -1390,7 +1366,7 @@ ${createNewChildProps}
       
       return `    const ${childVar} = ${childVar}Ref.current?.getFields?.() || [];
 
-    (${childVar} as any[]).forEach((field) => {
+    (${childVar} as GridRowsProp).forEach((field) => {
       formData.append(
         '${formKey}[]',
         JSON.stringify({

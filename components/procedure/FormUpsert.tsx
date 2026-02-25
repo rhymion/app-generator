@@ -41,24 +41,24 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
       label: item.name,
     }));
   }, [allUserAccounts]);
-  const initialChildren: EditableListWrapperItem[] = src.children.map(f => ({
+  const [initialChildren] = useState<EditableListWrapperItem[]>(() => src.children.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
     label: f.name,
     originalId: f.id,
-  }));
-  const initialPrecededBy: EditableListWrapperItem[] = src.preceded_by.map(f => ({
+  })));
+  const [initialPrecededBy] = useState<EditableListWrapperItem[]>(() => src.preceded_by.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
     label: f.name,
     originalId: f.id,
-  }));
-  const initialFollowedBy: EditableListWrapperItem[] = src.followed_by.map(f => ({
+  })));
+  const [initialFollowedBy] = useState<EditableListWrapperItem[]>(() => src.followed_by.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
     label: f.name,
     originalId: f.id,
-  }));
+  })));
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

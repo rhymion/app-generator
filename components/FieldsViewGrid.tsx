@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { DataGrid, GridColDef, GridRowsProp } from '@mui/x-data-grid';
+import { DataGrid, GridColDef, GridRowsProp, GridValidRowModel } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import Box from '@mui/material/Box';
@@ -14,13 +14,13 @@ interface FieldsViewGridProps {
   columns: GridColDef[];
 }
 
-function getDisplayValue(col: GridColDef, row: any): string {
+function getDisplayValue(col: GridColDef, row: GridValidRowModel): string {
   const rawValue = row[col.field];
   if (col.valueGetter) {
-    const result = (col.valueGetter as Function)(rawValue, row, col, null);
+    const result = (col.valueGetter as (...args: unknown[]) => unknown)(rawValue, row, col, null);
     if (result === null || result === undefined) return '';
     if (col.valueFormatter) {
-      const formatted = (col.valueFormatter as Function)(result, row, col, null);
+      const formatted = (col.valueFormatter as (...args: unknown[]) => unknown)(result, row, col, null);
       return formatted === null || formatted === undefined ? '' : String(formatted);
     }
     return String(result);
@@ -28,7 +28,7 @@ function getDisplayValue(col: GridColDef, row: any): string {
   if (col.type === 'boolean') return Boolean(rawValue) ? 'Yes' : 'No';
   if (rawValue === null || rawValue === undefined) return '';
   if (col.valueFormatter) {
-    const formatted = (col.valueFormatter as Function)(rawValue, row, col, null);
+    const formatted = (col.valueFormatter as (...args: unknown[]) => unknown)(rawValue, row, col, null);
     return formatted === null || formatted === undefined ? '' : String(formatted);
   }
   return String(rawValue);

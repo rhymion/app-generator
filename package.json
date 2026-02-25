@@ -49,6 +49,7 @@
     "react-dom": "^19.2.3"
   },
   "devDependencies": {
+    "@marp-team/marp-cli": "^4.2.3",
     "@prisma/adapter-pg": "^7.4.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
@@ -63,7 +64,7 @@
     "cypress": "^15.9.0",
     "dotenv-cli": "^11.0.0",
     "eslint": "^10.0.2",
-    "eslint-config-next": "^0.2.4",
+    "eslint-config-next": "^16.1.6",
     "jsdom": "^27.4.0",
     "prisma": "^7.4.1",
     "start-server-and-test": "^2.1.3",

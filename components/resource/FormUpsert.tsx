@@ -34,19 +34,19 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
       label: item.name,
     }));
   }, [allOrganizations]);
-  const initialResourceAttachments: EditableListWrapperItem[] = src.resource_attachments.map(f => ({
+  const [initialResourceAttachments] = useState<EditableListWrapperItem[]>(() => src.resource_attachments.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.path,
     label: f.name,
     originalId: f.id,
     order: f.order,
-  }));
-  const initialResourceImages: EditableListWrapperItem[] = src.resource_images.map(f => ({
+  })));
+  const [initialResourceImages] = useState<EditableListWrapperItem[]>(() => src.resource_images.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.path,
     label: f.name,
     originalId: f.id,
-  }));
+  })));
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

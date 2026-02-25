@@ -24,14 +24,17 @@ export type ItemType = 'text' | 'autocomplete' | 'file';
 
 export interface EditableListWrapperItem {
   id: string | number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   value: any;
   label?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any;
 }
 
 export interface AutocompleteOption {
   id: string | number;
   label: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any;
 }
 
@@ -60,7 +63,7 @@ interface EditableListWrapperProps {
   // Custom rendering
   renderItem?: (item: EditableListWrapperItem) => React.ReactNode;
   // Validation
-  validateItem?: (value: any) => string | null; // returns error message or null
+  validateItem?: (value: unknown) => string | null; // returns error message or null
   // Change callback
   /** @deprecated No longer needed when using allAutocompleteOptions */
   onItemsChange?: (items: EditableListWrapperItem[]) => void;
@@ -167,7 +170,7 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
     };
 
     const handleAdd = async () => {
-      let value: any;
+      let value: string | number;
       let label: string = '';
 
       switch (itemType) {
@@ -280,7 +283,7 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
       }
     };
 
-    const isUrlValue = (v: any): v is string =>
+    const isUrlValue = (v: unknown): v is string =>
       typeof v === 'string' && (v.startsWith('/') || v.startsWith('http'));
 
     const defaultRenderItem = (item: EditableListWrapperItem) => {

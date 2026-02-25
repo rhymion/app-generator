@@ -33,12 +33,12 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   const nameRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
-  const initialRoles: EditableListWrapperItem[] = src.roles.map(f => ({
+  const [initialRoles] = useState<EditableListWrapperItem[]>(() => src.roles.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
     label: f.name,
     originalId: f.id,
-  }));
+  })));
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

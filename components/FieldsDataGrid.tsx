@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, forwardRef, useImperativeHandle } from 'react';
-import { DataGrid, GridColDef, GridRowsProp, useGridApiRef, GridRowSelectionModel } from '@mui/x-data-grid';
+import { DataGrid, GridColDef, GridRowsProp, GridValidRowModel, useGridApiRef, GridRowSelectionModel } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
 import Button from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
@@ -28,7 +28,7 @@ import dayjs from 'dayjs';
 interface FieldsDataGridProps {
   initialFields?: GridRowsProp;
   columns: GridColDef[];
-  createNewRow: () => any;
+  createNewRow: () => GridValidRowModel;
   addButtonLabel?: string;
   deleteDialogTitle?: string;
   deleteDialogMessage?: string;
@@ -40,13 +40,13 @@ interface FieldsDataGridHandle {
   getFields: () => GridRowsProp;
 }
 
-function getDisplayValue(col: GridColDef, row: any): string {
+function getDisplayValue(col: GridColDef, row: GridValidRowModel): string {
   const rawValue = row[col.field];
   if (col.valueGetter) {
-    const result = (col.valueGetter as Function)(rawValue, row, col, null);
+    const result = (col.valueGetter as (...args: unknown[]) => unknown)(rawValue, row, col, null);
     if (result === null || result === undefined) return '';
     if (col.valueFormatter) {
-      const formatted = (col.valueFormatter as Function)(result, row, col, null);
+      const formatted = (col.valueFormatter as (...args: unknown[]) => unknown)(result, row, col, null);
       return formatted === null || formatted === undefined ? '' : String(formatted);
     }
     return String(result);
@@ -54,13 +54,13 @@ function getDisplayValue(col: GridColDef, row: any): string {
   if (col.type === 'boolean') return Boolean(rawValue) ? 'Yes' : 'No';
   if (rawValue === null || rawValue === undefined) return '';
   if (col.valueFormatter) {
-    const formatted = (col.valueFormatter as Function)(rawValue, row, col, null);
+    const formatted = (col.valueFormatter as (...args: unknown[]) => unknown)(rawValue, row, col, null);
     return formatted === null || formatted === undefined ? '' : String(formatted);
   }
   return String(rawValue);
 }
 
-function DialogField({ col, value, onChange }: { col: GridColDef; value: any; onChange: (v: any) => void }) {
+function DialogField({ col, value, onChange }: { col: GridColDef; value: GridValidRowModel[string]; onChange: (v: GridValidRowModel[string]) => void }) {
   if (col.type === 'boolean') {
     return (
       <FormControlLabel
@@ -82,7 +82,7 @@ function DialogField({ col, value, onChange }: { col: GridColDef; value: any; on
     );
   }
   if (col.type === 'singleSelect') {
-    const opts = ((col as any).valueOptions as Array<{ value: string | null; label: string }>) ?? [];
+    const opts = ((col as { valueOptions?: Array<{ value: string | null; label: string }> }).valueOptions as Array<{ value: string | null; label: string }>) ?? [];
     return (
       <FormControl fullWidth margin="normal">
         <InputLabel>{col.headerName}</InputLabel>
@@ -129,15 +129,15 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
 
     // Mobile edit dialog state
     const [editDialogOpen, setEditDialogOpen] = useState(false);
-    const [editingRow, setEditingRow] = useState<any | null>(null); // null = new row
-    const [editValues, setEditValues] = useState<Record<string, any>>({});
+    const [editingRow, setEditingRow] = useState<GridValidRowModel | null>(null); // null = new row
+    const [editValues, setEditValues] = useState<GridValidRowModel>({});
     const [deleteRowId, setDeleteRowId] = useState<string | null>(null);
 
     useImperativeHandle(ref, () => ({
       getFields: () => fields,
     }), [fields]);
 
-    function processRowUpdate(newRow: any, oldRow: any) {
+    function processRowUpdate(newRow: GridValidRowModel, oldRow: GridValidRowModel) {
       const updatedFields = fields.map(row => row.id === newRow.id ? newRow : row);
       setFields(updatedFields);
       return newRow;
@@ -180,7 +180,7 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
       setOpenDeleteSelectedDialog(true);
     };
 
-    const openEditDialog = (row: any) => {
+    const openEditDialog = (row: GridValidRowModel) => {
       setEditingRow(row);
       setEditValues({ ...row });
       setEditDialogOpen(true);
@@ -250,7 +250,7 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
                   key={col.field}
                   col={col}
                   value={editValues[col.field]}
-                  onChange={v => setEditValues(prev => ({ ...prev, [col.field]: v }))}
+                  onChange={v => setEditValues((prev: GridValidRowModel) => ({ ...prev, [col.field]: v }))}
                 />
               ))}
             </DialogContent>
