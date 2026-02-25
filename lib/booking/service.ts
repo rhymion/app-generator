@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { assertNoBookingOverlap } from './overlap';
 
 type TransactionClient = Pick<typeof prisma, 'booking'>;
 
@@ -27,15 +28,18 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 }
 
 export async function addBooking(creatorId: string, name: string, resourceId: string, startTime: Date, endTime: Date) {
-  return await prisma.booking.create({
-    data: {
-      name: name,
-      resource_id: resourceId,
-      start_time: startTime,
-      end_time: endTime,
-      creator_id: creatorId,
-      updater_id: creatorId,
-    },
+  return await prisma.$transaction(async (tx) => {
+    await assertNoBookingOverlap(tx, resourceId, startTime, endTime);
+    return await tx.booking.create({
+      data: {
+        name: name,
+        resource_id: resourceId,
+        start_time: startTime,
+        end_time: endTime,
+        creator_id: creatorId,
+        updater_id: creatorId,
+      },
+    });
   });
 }
 
@@ -44,6 +48,7 @@ export async function updateBooking(updaterId: string, id: string, name: string,
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
+    await assertNoBookingOverlap(tx, resourceId, startTime, endTime, id);
     return await tx.booking.update({
       where: { id },
       data: {

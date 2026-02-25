@@ -9,8 +9,8 @@ export default async function AddBookingPage() {
     id: '',
     name: '',
     resource_id: '',
-    start_time: new Date(),
-    end_time: new Date(),
+    start_time: null,
+    end_time: null,
   };
   return <FormUpsert src={src} isEdit={false} permissions={userPermissions} allResources={resourcesData.resources} resourcePermissions={resourcesData.userPermissions} />;
 }

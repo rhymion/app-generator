@@ -14,7 +14,9 @@
     "userAccount": "User Account",
     "role": "Role",
     "organization": "Organization",
-    "permission": "Permission"
+    "permission": "Permission",
+    "resource": "Resource",
+    "booking": "Booking"
   },
   "Auth": {
     "signInTitle": "Sign in to your account",

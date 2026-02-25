@@ -28,6 +28,8 @@ export const siteConfig = {
     { label: "Role", href: "/role" },
     { label: "Organization", href: "/organization" },
     { label: "Permission", href: "/permission" },
+    { label: "Resource", href: "/resource" },
+    { label: "Booking", href: "/booking" },
   ] satisfies NavLink[],
 };
 
