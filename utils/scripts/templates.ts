@@ -290,13 +290,13 @@ export function generateGetters(parent: string, children: ChildInfo[], schema: S
 import prisma from '@/lib/prisma';
 import type { ${parentPascal}, ${parentPascal}Detail } from '@/lib/${parent}/types';
 import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions${shouldFilterByOrganization ? ', getSessionUserIdOrThrow' : ''} } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';${shouldFilterByOrganization ? "\nimport { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';" : ''}
+import { getServerSession } from 'next-auth/next';${shouldFilterByOrganization ? "\nimport { getAssociatedOrganizations } from '@/lib/organization/getters_associated';" : ''}
 
-export async function getAll${parentPascal}s(): Promise<${parentPascal}[]> {
-${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizationListPageData();
-  const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
+export async function getAll${parentPascal}s(${shouldFilterByOrganization ? 'userId: string' : ''}): Promise<${parentPascal}[]> {
+${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizations(userId);
+  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 ` : ''}
   const ${parentCamel}s = await prisma.${model}.findMany({${shouldFilterByOrganization ? `
     where: {
@@ -310,9 +310,9 @@ ${relationshipMapping}` : ''}
   }));
 }
 
-export async function get${parentPascal}Detail(id: string): Promise<${parentPascal}Detail | null> {
-  ${shouldFilterByOrganization ? `  const associatedOrganizations = await getAssociatedOrganizationListPageData();
-  const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
+export async function get${parentPascal}Detail(id: string${shouldFilterByOrganization ? ', userId: string' : ''}): Promise<${parentPascal}Detail | null> {
+  ${shouldFilterByOrganization ? `const associatedOrganizations = await getAssociatedOrganizations(userId);
+  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 ` : ''}
   const ${parentCamel} = await prisma.${model}.${shouldFilterByOrganization ? 'findFirst' : 'findUnique'}({
     where: { 
@@ -335,18 +335,20 @@ ${relationshipMapping}` : ''}
   };
 }
 
-export async function get${parentPascal}ListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('${model}');
+export async function get${parentPascal}ListPageData(isAssertPermission: boolean = true) {${shouldFilterByOrganization ? `
+  const userId = await getSessionUserIdOrThrow();` : ''}
+  const userPermissions = await getModelPermissions('${model}'${shouldFilterByOrganization ? ', userId' : ''});
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', '${model}');
   }
-  const ${parentCamel}s = await getAll${parentPascal}s();
+  const ${parentCamel}s = await getAll${parentPascal}s(${shouldFilterByOrganization ? 'userId' : ''});
   return { ${parentCamel}s, userPermissions };
 }
 
-export async function get${parentPascal}DetailPageData(id: string, operation: Operation = 'read') {
-  const ${parentCamel} = await get${parentPascal}Detail(id);
-  const userPermissions = await getModelPermissions('${model}', undefined, ${parentCamel});
+export async function get${parentPascal}DetailPageData(id: string, operation: Operation = 'read') {${shouldFilterByOrganization ? `
+  const userId = await getSessionUserIdOrThrow();` : ''}
+  const ${parentCamel} = await get${parentPascal}Detail(id${shouldFilterByOrganization ? ', userId' : ''});
+  const userPermissions = await getModelPermissions('${model}', ${shouldFilterByOrganization ? 'userId' : 'undefined'}, ${parentCamel});
   await assertPermission(userPermissions, operation, '${model}');
   return { ${parentCamel}, userPermissions };
 }
@@ -2398,7 +2400,7 @@ export async function delete${parentPascal}(ids: string[]) {
 ` : ''}`;
 }
 
-export function generateApiRoute(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any, modelName?: string): string {
+export function generateApiRoute(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any, modelName?: string, definitionKey?: string): string {
   const model = modelName ?? parent;
   const parentPascal = toPascalCase(parent);
   const modelDef = schema.definitions[model];
@@ -2417,7 +2419,13 @@ export function generateApiRoute(parent: string, children: ChildInfo[], schema: 
     def: filteredProps[p]
   }));
 
-  const bodyDestructure = parentPropInfos.map(p => p.prop).join(', ');
+  const defKey = definitionKey ?? `${parent}_detail`;
+  const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps }).map((rel) => ({
+    ...rel,
+    relationName: getDetailRelationName(parent, rel.target, schema, defKey),
+  }));
+  const hasOrganizationRelationship = parentRelationships.some(r => r.target === 'organization');
+  const shouldFilterByOrganization = hasOrganizationRelationship && model !== 'organization' && model !== 'user_account';
 
   const allChildrenData = children.map(childInfo => {
     const isManyToMany = childInfo.relationship?.type === 'many-to-many';
@@ -2454,7 +2462,7 @@ export async function GET(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
     await requireApiPermission(userId, '${model}', 'read');
-    const items = await getAll${parentPascal}s();
+    const items = await getAll${parentPascal}s(${shouldFilterByOrganization ? 'userId' : ''});
     return NextResponse.json(items);
   } catch (error) {
     return handleApiError(error);
@@ -2476,7 +2484,7 @@ export async function POST(request: NextRequest) {
 ` : ''}`;
 }
 
-export function generateApiDetailRoute(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any, modelName?: string): string {
+export function generateApiDetailRoute(parent: string, children: ChildInfo[], schema: Schema, generateConfig?: any, modelName?: string, definitionKey?: string): string {
   const model = modelName ?? parent;
   const parentPascal = toPascalCase(parent);
   const modelDef = schema.definitions[model];
@@ -2495,6 +2503,14 @@ export function generateApiDetailRoute(parent: string, children: ChildInfo[], sc
     varName: safeVarName(p),
     def: filteredProps[p]
   }));
+
+  const defKey = definitionKey ?? `${parent}_detail`;
+  const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps }).map((rel) => ({
+    ...rel,
+    relationName: getDetailRelationName(parent, rel.target, schema, defKey),
+  }));
+  const hasOrganizationRelationship = parentRelationships.some(r => r.target === 'organization');
+  const shouldFilterByOrganization = hasOrganizationRelationship && model !== 'organization' && model !== 'user_account';
 
   const allChildrenData = children.map(childInfo => {
     const isManyToMany = childInfo.relationship?.type === 'many-to-many';
@@ -2542,7 +2558,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    const item = await get${parentPascal}Detail(id);
+    const item = await get${parentPascal}Detail(id${shouldFilterByOrganization ? ', userId' : ''});
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }

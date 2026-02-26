@@ -6,7 +6,7 @@ import { authOptions } from '@/auth';
 import { getServerSession } from 'next-auth';
 import { assertPermission, getModelPermissions, getSessionUserIdOrThrow, Operation } from '../authz';
 
-async function getAssociatedOrganizations(userId: string): Promise<Organization[]> {
+export async function getAssociatedOrganizations(userId: string): Promise<Organization[]> {
   const organizations = await prisma.organization.findMany({
     where: {
       user_accounts: {
@@ -23,7 +23,7 @@ async function getAssociatedOrganizations(userId: string): Promise<Organization[
   }));
 }
 
-async function getAssociatedOrganizationDetail(id: string, userId: string): Promise<OrganizationDetail | null> {
+export async function getAssociatedOrganizationDetail(id: string, userId: string): Promise<OrganizationDetail | null> {
   const organization = await prisma.organization.findUnique({
     where: { 
       id,
