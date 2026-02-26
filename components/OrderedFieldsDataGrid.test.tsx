@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import OrderedFieldsDataGrid from './OrderedFieldsDataGrid';
-import { DeleteTestUtils } from '@/utils/test/operations/delete';
-import { TickTestUtils } from '@/utils/test/operations/tick';
+import { DeleteTestUtils } from '@/cypress/support/delete';
+import { TickTestUtils } from '@/cypress/support/tick';
 import { GridColDef } from '@mui/x-data-grid';
 
 describe('OrderedFieldsDataGrid', () => {
