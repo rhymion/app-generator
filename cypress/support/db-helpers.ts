@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/app/generated/prisma/client';
-import { TEST_CREDENTIALS, getTestPasswordHash } from './test-credentials';
+import { TEST_CREDENTIALS, TEST_API_KEY, getTestPasswordHash } from './test-credentials';
 import { createId } from "@paralleldrive/cuid2";
 
 // import prisma from '@/lib/prisma';
@@ -66,10 +66,65 @@ export async function seedTestDatabase() {
       email: TEST_CREDENTIALS.email,
       name: TEST_CREDENTIALS.name,
       password: hashedPassword,
+      api_key: TEST_API_KEY,
     },
   });
 
   return { user };
+}
+
+/**
+ * Create a limited API user with explicit deny permissions for a given model.
+ * Returns the limited user's API key.
+ *
+ * How permission denial works:
+ * - Main test user has no roles → no permission records match → default-grant (all true)
+ * - Limited user has a DenyRole with explicit false permissions → all operations denied → 403
+ */
+export async function createLimitedApiUser(modelName: string): Promise<string> {
+  const testUser = await prisma.user_account.findUnique({
+    where: { email: TEST_CREDENTIALS.email },
+  });
+  if (!testUser) throw new Error('Test user not found. Run db:seed first.');
+
+  const limitedApiKey = `test_mk_limited_${modelName}`;
+  const limitedUserId = createId();
+
+  const denyRole = await prisma.role.create({
+    data: {
+      name: `DenyRole_${modelName}`,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+
+  await prisma.permission.create({
+    data: {
+      name: modelName,
+      role_id: denyRole.id,
+      create: false,
+      read: false,
+      update: false,
+      delete: false,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+
+  await prisma.user_account.create({
+    data: {
+      id: limitedUserId,
+      creator_id: limitedUserId,
+      updater_id: limitedUserId,
+      email: `limited_${modelName}@example.com`,
+      name: `Limited User (${modelName})`,
+      password: 'not_needed',
+      api_key: limitedApiKey,
+      roles: { connect: [{ id: denyRole.id }] },
+    },
+  });
+
+  return limitedApiKey;
 }
 
 export { prisma };
