@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
     await requireApiPermission(userId, 'parent1', 'read');
-    const items = await getAllParent1s();
+    const items = await getAllParent1s(userId);
     return NextResponse.json(items);
   } catch (error) {
     return handleApiError(error);

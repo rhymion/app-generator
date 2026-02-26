@@ -3,14 +3,14 @@
 import prisma from '@/lib/prisma';
 import type { Resource, ResourceDetail } from '@/lib/resource/types';
 import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions, getSessionUserIdOrThrow } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
-import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 
-export async function getAllResources(): Promise<Resource[]> {
-  const associatedOrganizations = await getAssociatedOrganizationListPageData();
-  const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
+export async function getAllResources(userId: string): Promise<Resource[]> {
+  const associatedOrganizations = await getAssociatedOrganizations(userId);
+  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 
   const resources = await prisma.resource.findMany({
     where: {
@@ -27,9 +27,9 @@ export async function getAllResources(): Promise<Resource[]> {
   }));
 }
 
-export async function getResourceDetail(id: string): Promise<ResourceDetail | null> {
-    const associatedOrganizations = await getAssociatedOrganizationListPageData();
-  const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
+export async function getResourceDetail(id: string, userId: string): Promise<ResourceDetail | null> {
+  const associatedOrganizations = await getAssociatedOrganizations(userId);
+  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 
   const resource = await prisma.resource.findFirst({
     where: { 
@@ -60,17 +60,19 @@ export async function getResourceDetail(id: string): Promise<ResourceDetail | nu
 }
 
 export async function getResourceListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('resource');
+  const userId = await getSessionUserIdOrThrow();
+  const userPermissions = await getModelPermissions('resource', userId);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'resource');
   }
-  const resources = await getAllResources();
+  const resources = await getAllResources(userId);
   return { resources, userPermissions };
 }
 
 export async function getResourceDetailPageData(id: string, operation: Operation = 'read') {
-  const resource = await getResourceDetail(id);
-  const userPermissions = await getModelPermissions('resource', undefined, resource);
+  const userId = await getSessionUserIdOrThrow();
+  const resource = await getResourceDetail(id, userId);
+  const userPermissions = await getModelPermissions('resource', userId, resource);
   await assertPermission(userPermissions, operation, 'resource');
   return { resource, userPermissions };
 }

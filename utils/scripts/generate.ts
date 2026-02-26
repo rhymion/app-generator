@@ -259,12 +259,12 @@ function generate(inputPath: string, outputDir: string) {
       const apiDir = path.join(outputDir, 'app', 'api', parent);
       if (generateConfig.list || generateConfig.new) {
         fs.mkdirSync(apiDir, { recursive: true });
-        fs.writeFileSync(path.join(apiDir, 'route.ts'), generateApiRoute(parent, children, schema, generateConfig, modelName));
+        fs.writeFileSync(path.join(apiDir, 'route.ts'), generateApiRoute(parent, children, schema, generateConfig, modelName, definitionKey));
       }
       if (generateConfig.view || generateConfig.edit || generateConfig.delete) {
         fs.mkdirSync(apiDir, { recursive: true });
         fs.mkdirSync(path.join(apiDir, '[id]'), { recursive: true });
-        fs.writeFileSync(path.join(apiDir, '[id]', 'route.ts'), generateApiDetailRoute(parent, children, schema, generateConfig, modelName));
+        fs.writeFileSync(path.join(apiDir, '[id]', 'route.ts'), generateApiDetailRoute(parent, children, schema, generateConfig, modelName, definitionKey));
       }
       console.log(`  API routes generated at app/api/${parent}/`);
     }

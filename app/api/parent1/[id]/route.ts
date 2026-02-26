@@ -10,7 +10,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    const item = await getParent1Detail(id);
+    const item = await getParent1Detail(id, userId);
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }

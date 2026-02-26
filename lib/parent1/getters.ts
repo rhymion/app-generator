@@ -3,14 +3,14 @@
 import prisma from '@/lib/prisma';
 import type { Parent1, Parent1Detail } from '@/lib/parent1/types';
 import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions, getSessionUserIdOrThrow } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
-import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 
-export async function getAllParent1s(): Promise<Parent1[]> {
-  const associatedOrganizations = await getAssociatedOrganizationListPageData();
-  const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
+export async function getAllParent1s(userId: string): Promise<Parent1[]> {
+  const associatedOrganizations = await getAssociatedOrganizations(userId);
+  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 
   const parent1s = await prisma.parent1.findMany({
     where: {
@@ -30,9 +30,9 @@ export async function getAllParent1s(): Promise<Parent1[]> {
   }));
 }
 
-export async function getParent1Detail(id: string): Promise<Parent1Detail | null> {
-    const associatedOrganizations = await getAssociatedOrganizationListPageData();
-  const associatedOrganizationIds = associatedOrganizations.organizations.map((organization) => organization.id);
+export async function getParent1Detail(id: string, userId: string): Promise<Parent1Detail | null> {
+  const associatedOrganizations = await getAssociatedOrganizations(userId);
+  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 
   const parent1 = await prisma.parent1.findFirst({
     where: { 
@@ -65,17 +65,19 @@ export async function getParent1Detail(id: string): Promise<Parent1Detail | null
 }
 
 export async function getParent1ListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('parent1');
+  const userId = await getSessionUserIdOrThrow();
+  const userPermissions = await getModelPermissions('parent1', userId);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'parent1');
   }
-  const parent1s = await getAllParent1s();
+  const parent1s = await getAllParent1s(userId);
   return { parent1s, userPermissions };
 }
 
 export async function getParent1DetailPageData(id: string, operation: Operation = 'read') {
-  const parent1 = await getParent1Detail(id);
-  const userPermissions = await getModelPermissions('parent1', undefined, parent1);
+  const userId = await getSessionUserIdOrThrow();
+  const parent1 = await getParent1Detail(id, userId);
+  const userPermissions = await getModelPermissions('parent1', userId, parent1);
   await assertPermission(userPermissions, operation, 'parent1');
   return { parent1, userPermissions };
 }
