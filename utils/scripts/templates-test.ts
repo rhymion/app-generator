@@ -1191,6 +1191,317 @@ interface EntityInfo {
   children: ChildInfo[];
 }
 
+// ========================================
+// generateApiTestSpec
+// ========================================
+
+function apiValue(field: FieldMeta, entityTitle: string): string {
+  switch (field.category) {
+    case 'text':
+      if (field.propName === 'name') return `'Test ${entityTitle}'`;
+      if (field.enumValues?.length) return `'${field.enumValues[0]}'`;
+      return `'Test ${field.label}'`;
+    case 'number': {
+      let val = 100;
+      if (field.min !== undefined) val = Math.max(field.min, val);
+      if (field.max !== undefined) val = Math.min(field.max, val);
+      return String(val);
+    }
+    case 'boolean':
+      return 'true';
+    case 'datetime':
+      if (field.propName.includes('end') || field.propName.includes('logout') || field.propName.includes('finish')) {
+        return "'2025-01-15T17:00:00.000Z'";
+      }
+      return "'2025-01-15T09:00:00.000Z'";
+    case 'autocomplete':
+      return ''; // Handled separately via deps
+  }
+}
+
+export function generateApiTestSpec(
+  parent: string,
+  children: ChildInfo[],
+  schema: Schema,
+  modelName?: string,
+  _definitionKey?: string,
+  generateConfig?: GenerateConfig
+): string {
+  const model = modelName ?? parent;
+  const parentPascal = toPascalCase(parent);
+  const title = toTitleCase(parent);
+  const modelDef = schema.definitions[model];
+  if (!modelDef) return '';
+
+  const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
+  const relationships = getParentRelationships({ ...modelDef, properties: filteredProps });
+
+  const requiredFieldsList = modelDef.required ?? [];
+  const allFieldMetas = getFieldMetas(filteredProps, requiredFieldsList, relationships, generateConfig?.fields);
+
+  const deps = resolveDependencies(model, schema);
+  const entityFkDeps = getEntityFkDeps(model, schema, deps);
+  const hasDeps = entityFkDeps.length > 0;
+
+  const childMetas = analyzeChildren(children, schema, model);
+  const apiChildMetas = childMetas.filter(c => c.renderType !== 'file');
+
+  // All parent props for PUT body (mirrors route template field exclusions)
+  const putBodyProps = Object.keys(filteredProps).filter(k =>
+    k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
+  );
+
+  // Build POST body lines (nameVal=null means omit name for fail test)
+  function buildPostBodyLines(nameVal: string | null, indent: string): string[] {
+    const out: string[] = [];
+    for (const field of allFieldMetas) {
+      if (!field.required) continue;
+      if (field.category === 'autocomplete') {
+        const dep = entityFkDeps.find(d => d.propName === field.propName);
+        if (dep) out.push(`${indent}${field.propName}: deps.${dep.depVarName}.id,`);
+      } else if (field.propName === 'name') {
+        if (nameVal !== null) out.push(`${indent}name: ${nameVal},`);
+      } else {
+        out.push(`${indent}${field.propName}: ${apiValue(field, title)},`);
+      }
+    }
+    for (const c of apiChildMetas) {
+      out.push(`${indent}${c.child.propertyName}: [],`);
+    }
+    return out;
+  }
+
+  // Build PUT body lines using records[0] values
+  function buildPutBodyLines(nameVal: string, indent: string): string[] {
+    const out: string[] = [];
+    for (const prop of putBodyProps) {
+      if (prop === 'name') {
+        out.push(`${indent}name: ${nameVal},`);
+      } else {
+        out.push(`${indent}${prop}: records[0].${prop},`);
+      }
+    }
+    for (const c of apiChildMetas) {
+      out.push(`${indent}${c.child.propertyName}: [],`);
+    }
+    return out;
+  }
+
+  const lines: string[] = [];
+  const apiPath = `/api/${parent}`;
+
+  lines.push(`// AUTO-GENERATED - DO NOT EDIT`);
+  lines.push(`import { TEST_API_KEY } from '../../support/test-credentials';`);
+  lines.push('');
+  lines.push(`const API_BASE = '${apiPath}';`);
+  lines.push('');
+  lines.push(`describe('API: ${title}', () => {`);
+  lines.push(`  beforeEach(() => {`);
+  lines.push(`    cy.task('db:reset');`);
+  lines.push(`    cy.task('db:seed');`);
+  lines.push(`  });`);
+  lines.push('');
+
+  // --- 1. GET list ---
+  if (generateConfig?.list !== false) {
+    lines.push(`  describe('GET ${apiPath}', () => {`);
+    lines.push(`    it('1.1 returns empty list when no items', () => {`);
+    lines.push(`      cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })`);
+    lines.push(`        .then((res) => {`);
+    lines.push(`          expect(res.status).to.eq(200);`);
+    lines.push(`          expect(res.body).to.deep.eq([]);`);
+    lines.push(`        });`);
+    lines.push(`    });`);
+    lines.push('');
+    lines.push(`    it('1.2 returns list with items', () => {`);
+    lines.push(`      cy.task('db:populate${parentPascal}', 1);`);
+    lines.push(`      cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })`);
+    lines.push(`        .then((res) => {`);
+    lines.push(`          expect(res.status).to.eq(200);`);
+    lines.push(`          expect(res.body).to.have.length(1);`);
+    lines.push(`        });`);
+    lines.push(`    });`);
+    lines.push(`  });`);
+    lines.push('');
+  }
+
+  // --- 2. GET detail ---
+  if (generateConfig?.view !== false) {
+    lines.push(`  describe('GET ${apiPath}/:id', () => {`);
+    lines.push(`    it('2.1 returns item detail by id', () => {`);
+    lines.push(`      cy.task<any[]>('db:populate${parentPascal}', 1).then((records) => {`);
+    lines.push("        cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })");
+    lines.push(`          .then((res) => {`);
+    lines.push(`            expect(res.status).to.eq(200);`);
+    lines.push(`            expect(res.body.id).to.eq(records[0].id);`);
+    lines.push(`          });`);
+    lines.push(`      });`);
+    lines.push(`    });`);
+    lines.push('');
+    lines.push(`    it('2.2 returns 404 for non-existent id', () => {`);
+    lines.push("      cy.request({ url: `${API_BASE}/non-existent-id`, headers: { 'X-API-Key': TEST_API_KEY }, failOnStatusCode: false })");
+    lines.push(`        .then((res) => {`);
+    lines.push(`          expect(res.status).to.eq(404);`);
+    lines.push(`        });`);
+    lines.push(`    });`);
+    lines.push(`  });`);
+    lines.push('');
+  }
+
+  // --- 3. POST create + 5.1 fail ---
+  if (generateConfig?.new !== false) {
+    const I = hasDeps ? '        ' : '      ';
+    lines.push(`  describe('POST ${apiPath}', () => {`);
+
+    // 3.1 success
+    lines.push(`    it('3.1 creates with required fields, verified by GET', () => {`);
+    if (hasDeps) lines.push(`      cy.task<any>('db:populate${parentPascal}Dependencies').then((deps) => {`);
+    lines.push(`${I}cy.request({`);
+    lines.push(`${I}  method: 'POST',`);
+    lines.push(`${I}  url: API_BASE,`);
+    lines.push(`${I}  headers: { 'X-API-Key': TEST_API_KEY },`);
+    lines.push(`${I}  body: {`);
+    for (const l of buildPostBodyLines(`'Test ${title}'`, `${I}    `)) lines.push(l);
+    lines.push(`${I}  },`);
+    lines.push(`${I}}).then((res) => {`);
+    lines.push(`${I}  expect(res.status).to.eq(201);`);
+    lines.push(`${I}  expect(res.body.name).to.eq('Test ${title}');`);
+    lines.push(`${I}  cy.request({ url: \`\${API_BASE}/\${res.body.id}\`, headers: { 'X-API-Key': TEST_API_KEY } })`);
+    lines.push(`${I}    .then((getRes) => {`);
+    lines.push(`${I}      expect(getRes.status).to.eq(200);`);
+    lines.push(`${I}      expect(getRes.body.name).to.eq('Test ${title}');`);
+    lines.push(`${I}    });`);
+    lines.push(`${I}});`);
+    if (hasDeps) lines.push(`      });`);
+    lines.push(`    });`);
+    lines.push('');
+
+    // 5.1 fail: missing name
+    lines.push(`    it('5.1 fails when required field name is missing', () => {`);
+    if (hasDeps) lines.push(`      cy.task<any>('db:populate${parentPascal}Dependencies').then((deps) => {`);
+    lines.push(`${I}cy.request({`);
+    lines.push(`${I}  method: 'POST',`);
+    lines.push(`${I}  url: API_BASE,`);
+    lines.push(`${I}  headers: { 'X-API-Key': TEST_API_KEY },`);
+    lines.push(`${I}  body: {`);
+    for (const l of buildPostBodyLines(null, `${I}    `)) lines.push(l);
+    lines.push(`${I}  },`);
+    lines.push(`${I}  failOnStatusCode: false,`);
+    lines.push(`${I}}).then((res) => {`);
+    lines.push(`${I}  expect(res.status).to.be.gte(400);`);
+    lines.push(`${I}});`);
+    if (hasDeps) lines.push(`      });`);
+    lines.push(`    });`);
+    lines.push(`  });`);
+    lines.push('');
+  }
+
+  // --- 4.1 PUT update ---
+  if (generateConfig?.edit !== false) {
+    lines.push(`  describe('PUT ${apiPath}/:id', () => {`);
+    lines.push(`    it('4.1 updates, verified by GET', () => {`);
+    lines.push(`      cy.task<any[]>('db:populate${parentPascal}', 1).then((records) => {`);
+    lines.push(`        cy.request({`);
+    lines.push(`          method: 'PUT',`);
+    lines.push("          url: `${API_BASE}/${records[0].id}`,");
+    lines.push(`          headers: { 'X-API-Key': TEST_API_KEY },`);
+    lines.push(`          body: {`);
+    for (const l of buildPutBodyLines(`'Updated ${title}'`, '            ')) lines.push(l);
+    lines.push(`          },`);
+    lines.push(`        }).then((res) => {`);
+    lines.push(`          expect(res.status).to.eq(200);`);
+    lines.push("          cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })");
+    lines.push(`            .then((getRes) => {`);
+    lines.push(`              expect(getRes.status).to.eq(200);`);
+    lines.push(`              expect(getRes.body.name).to.eq('Updated ${title}');`);
+    lines.push(`            });`);
+    lines.push(`        });`);
+    lines.push(`      });`);
+    lines.push(`    });`);
+    lines.push(`  });`);
+    lines.push('');
+  }
+
+  // --- 4.2 DELETE ---
+  if (generateConfig?.delete !== false) {
+    lines.push(`  describe('DELETE ${apiPath}/:id', () => {`);
+    lines.push(`    it('4.2 deletes item, verified by GET returning 404', () => {`);
+    lines.push(`      cy.task<any[]>('db:populate${parentPascal}', 1).then((records) => {`);
+    lines.push(`        cy.request({`);
+    lines.push(`          method: 'DELETE',`);
+    lines.push("          url: `${API_BASE}/${records[0].id}`,");
+    lines.push(`          headers: { 'X-API-Key': TEST_API_KEY },`);
+    lines.push(`        }).then((res) => {`);
+    lines.push(`          expect(res.status).to.eq(204);`);
+    lines.push("          cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY }, failOnStatusCode: false })");
+    lines.push(`            .then((getRes) => {`);
+    lines.push(`              expect(getRes.status).to.eq(404);`);
+    lines.push(`            });`);
+    lines.push(`        });`);
+    lines.push(`      });`);
+    lines.push(`    });`);
+    lines.push(`  });`);
+    lines.push('');
+  }
+
+  // --- 6. Auth errors ---
+  lines.push(`  describe('Authentication errors', () => {`);
+  lines.push(`    it('6.1 returns 401 without API key', () => {`);
+  lines.push(`      cy.request({ url: API_BASE, failOnStatusCode: false })`);
+  lines.push(`        .then((res) => {`);
+  lines.push(`          expect(res.status).to.eq(401);`);
+  lines.push(`        });`);
+  lines.push(`    });`);
+  lines.push('');
+  lines.push(`    it('6.2 returns 401 with invalid API key', () => {`);
+  lines.push(`      cy.request({ url: API_BASE, headers: { 'X-API-Key': 'invalid_key' }, failOnStatusCode: false })`);
+  lines.push(`        .then((res) => {`);
+  lines.push(`          expect(res.status).to.eq(401);`);
+  lines.push(`        });`);
+  lines.push(`    });`);
+  lines.push(`  });`);
+  lines.push('');
+
+  // --- 7. Permission errors ---
+  lines.push(`  describe('Permission errors', () => {`);
+  lines.push(`    it('7.1 returns 403 for GET list when permission denied', () => {`);
+  lines.push(`      cy.task<string>('db:createLimitedApiUser', '${model}').then((limitedKey) => {`);
+  lines.push(`        cy.request({ url: API_BASE, headers: { 'X-API-Key': limitedKey }, failOnStatusCode: false })`);
+  lines.push(`          .then((res) => {`);
+  lines.push(`            expect(res.status).to.eq(403);`);
+  lines.push(`          });`);
+  lines.push(`      });`);
+  lines.push(`    });`);
+
+  if (generateConfig?.new !== false) {
+    const I7 = hasDeps ? '        ' : '      ';
+    lines.push('');
+    lines.push(`    it('7.2 returns 403 for POST when permission denied', () => {`);
+    if (hasDeps) lines.push(`      cy.task<any>('db:populate${parentPascal}Dependencies').then((deps) => {`);
+    lines.push(`${I7}cy.task<string>('db:createLimitedApiUser', '${model}').then((limitedKey) => {`);
+    lines.push(`${I7}  cy.request({`);
+    lines.push(`${I7}    method: 'POST',`);
+    lines.push(`${I7}    url: API_BASE,`);
+    lines.push(`${I7}    headers: { 'X-API-Key': limitedKey },`);
+    lines.push(`${I7}    body: {`);
+    for (const l of buildPostBodyLines(`'Test ${title}'`, `${I7}      `)) lines.push(l);
+    lines.push(`${I7}    },`);
+    lines.push(`${I7}    failOnStatusCode: false,`);
+    lines.push(`${I7}  }).then((res) => {`);
+    lines.push(`${I7}    expect(res.status).to.eq(403);`);
+    lines.push(`${I7}  });`);
+    lines.push(`${I7}});`);
+    if (hasDeps) lines.push(`      });`);
+    lines.push(`    });`);
+  }
+
+  lines.push(`  });`);
+  lines.push(`});`);
+  lines.push('');
+
+  return lines.join('\n');
+}
+
 export function generateTestTasksRegistry(entities: EntityInfo[], schema: Schema): string {
   const lines: string[] = [];
 

@@ -21,6 +21,7 @@ import {
   generateTestHelper,
   generateTestSpec,
   generateTestTasksRegistry,
+  generateApiTestSpec,
 } from './templates-test';
 
 function parseSchema(filePath: string): Schema {
@@ -322,6 +323,17 @@ function generate(inputPath: string, outputDir: string) {
         generateTestSpec(parent, children, schema, modelName, definitionKey, generateConfig)
       );
       console.log(`  E2E test files generated for ${parent}`);
+    }
+
+    // Generate API Cypress test spec if both api and test are enabled
+    if (generateConfig.api && generateConfig.test) {
+      const cypressApiDir = path.join(outputDir, 'cypress', 'e2e', 'api');
+      fs.mkdirSync(cypressApiDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(cypressApiDir, `${parent}.cy.ts`),
+        generateApiTestSpec(parent, children, schema, modelName, definitionKey, generateConfig)
+      );
+      console.log(`  API test spec generated at cypress/e2e/api/${parent}.cy.ts`);
     }
   }
 

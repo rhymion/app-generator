@@ -20,11 +20,16 @@ export default defineConfig({
           await seedTestDatabase();
           return null;
         },
+        async 'db:createLimitedApiUser'(modelName: string) {
+          const { createLimitedApiUser } = require('./cypress/support/db-helpers');
+          return await createLimitedApiUser(modelName);
+        },
         ...getGeneratedTasks(),
       });
 
       return config;
     },
+    scrollBehavior: 'center',
     video: false,
   },
 });
