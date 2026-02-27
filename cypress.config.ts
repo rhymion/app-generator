@@ -7,6 +7,7 @@ export default defineConfig({
     setupNodeEvents(on, config) {
       // Load test environment variables
       require('dotenv').config({ path: '.env.test' });
+      config.defaultCommandTimeout = 10000; // Increase default command timeout to 10 seconds
 
       // Task to reset and seed database before tests
       on('task', {
