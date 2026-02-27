@@ -21,6 +21,7 @@ import {
   generateTestHelper,
   generateTestSpec,
   generateTestTasksRegistry,
+  generateApiTestSpec,
 } from './templates-test';
 
 function parseSchema(filePath: string): Schema {
@@ -259,12 +260,12 @@ function generate(inputPath: string, outputDir: string) {
       const apiDir = path.join(outputDir, 'app', 'api', parent);
       if (generateConfig.list || generateConfig.new) {
         fs.mkdirSync(apiDir, { recursive: true });
-        fs.writeFileSync(path.join(apiDir, 'route.ts'), generateApiRoute(parent, children, schema, generateConfig, modelName));
+        fs.writeFileSync(path.join(apiDir, 'route.ts'), generateApiRoute(parent, children, schema, generateConfig, modelName, definitionKey));
       }
       if (generateConfig.view || generateConfig.edit || generateConfig.delete) {
         fs.mkdirSync(apiDir, { recursive: true });
         fs.mkdirSync(path.join(apiDir, '[id]'), { recursive: true });
-        fs.writeFileSync(path.join(apiDir, '[id]', 'route.ts'), generateApiDetailRoute(parent, children, schema, generateConfig, modelName));
+        fs.writeFileSync(path.join(apiDir, '[id]', 'route.ts'), generateApiDetailRoute(parent, children, schema, generateConfig, modelName, definitionKey));
       }
       console.log(`  API routes generated at app/api/${parent}/`);
     }
@@ -322,6 +323,17 @@ function generate(inputPath: string, outputDir: string) {
         generateTestSpec(parent, children, schema, modelName, definitionKey, generateConfig)
       );
       console.log(`  E2E test files generated for ${parent}`);
+    }
+
+    // Generate API Cypress test spec if both api and test are enabled
+    if (generateConfig.api && generateConfig.test) {
+      const cypressApiDir = path.join(outputDir, 'cypress', 'e2e', 'api');
+      fs.mkdirSync(cypressApiDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(cypressApiDir, `${parent}.cy.ts`),
+        generateApiTestSpec(parent, children, schema, modelName, definitionKey, generateConfig)
+      );
+      console.log(`  API test spec generated at cypress/e2e/api/${parent}.cy.ts`);
     }
   }
 

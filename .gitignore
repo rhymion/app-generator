@@ -57,3 +57,6 @@ next-env.d.ts
 /prisma/schema.postgres.backup
 # Uploaded files
 /public/uploads/
+
+# non-technical docs
+/docs/slides

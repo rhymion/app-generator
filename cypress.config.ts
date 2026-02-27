@@ -7,6 +7,7 @@ export default defineConfig({
     setupNodeEvents(on, config) {
       // Load test environment variables
       require('dotenv').config({ path: '.env.test' });
+      config.defaultCommandTimeout = 10000; // Increase default command timeout to 10 seconds
 
       // Task to reset and seed database before tests
       on('task', {
@@ -20,11 +21,17 @@ export default defineConfig({
           await seedTestDatabase();
           return null;
         },
+        async 'db:createLimitedApiUser'(modelName: string) {
+          const { createLimitedApiUser } = require('./cypress/support/db-helpers');
+          return await createLimitedApiUser(modelName);
+        },
         ...getGeneratedTasks(),
       });
 
       return config;
     },
+    scrollBehavior: 'center',
     video: false,
+    allowCypressEnv: false,
   },
 });

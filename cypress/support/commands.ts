@@ -121,74 +121,26 @@ Cypress.Commands.add('setCheckbox', (label: string, checked: boolean) => {
   });
 });
 
-// Full month names — used to build aria-labels for year/month/day calendar buttons
-const PICKER_MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-
 /**
- * Fill MUI DateTimePicker by label using the calendar UI.
+ * Fill MUI DateTimePicker by label using direct keyboard input.
  * Accepts dateString in "MM/DD/YYYY HH:MM AM|PM" format.
  *
- * Flow (MUI X v8, views=['year','month','day','hours','minutes']):
- *   1. Click the open button (last button in field, after optional Clear button).
- *   2. Click month/year header → enters year-picker view.
- *   3. Click target year → MUI switches to month-picker view (because 'month' is in views).
- *   4. Click target month → MUI switches to day-calendar view.
- *   5. Click target day.
- *   6. Switch to keyboard (digital) time input via "edit time" button.
- *   7. Fill hours and minutes via text inputs.
- *   8. Click AM or PM.
- *   9. Click OK.
- *
- * Why no prev/next month navigation:
- *   Clicking a year in year-picker view causes MUI to show the month-picker
- *   (not the day calendar). Prev/Next month arrows are only visible in day-calendar
- *   view, so they cannot be used to navigate from year-picker view.
- *   Instead, clicking year → month → day reaches any date in 3 steps.
- *
- * Selectors target MUI X v8 with enableAccessibleFieldDOMStructure=false.
+ * MUI X v8 with enableAccessibleFieldDOMStructure=false renders a single <input>
+ * with section-based keyboard handling. Typing digits auto-advances through each
+ * section (MM → DD → YYYY → HH → MM → AM/PM), which works reliably in both
+ * headed and headless Chromium without needing the calendar picker UI.
  */
 Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
   const parts = dateString.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})\s+(AM|PM)$/i);
   if (!parts) throw new Error(`fillDateTime: Expected "MM/DD/YYYY HH:MM AM/PM", got "${dateString}"`);
   const [, month, day, year, hour, minute, ampm] = parts;
+  const ampmChar = ampm.toUpperCase() === 'AM' ? 'a' : 'p';
 
-  const targetYear = parseInt(year);
-  const targetMonth = parseInt(month); // 1-12
-  const targetDay = parseInt(day);
-  const targetMonthName = PICKER_MONTH_NAMES[targetMonth - 1];
-
-  // 1. Open the picker
-  cy.contains('label', label).parent().find('button').last().click();
-  cy.get('.MuiPickerPopper-root').should('be.visible');
-
-  // 2. Click the month/year header → year-picker view
-  cy.get('.MuiPickersCalendarHeader-label').click();
-
-  // 3. Select the target year → month-picker view
-  cy.get('.MuiYearCalendar-root button').contains(String(targetYear)).scrollIntoView().click();
-
-  // 4. Select the target month → day-calendar view
-  //    Month buttons use aria-label = full month name (e.g. "January")
-  cy.get(`.MuiMonthCalendar-root [aria-label="${targetMonthName}"]`).click();
-
-  // 5. Click the target day — aria-label format: "January 15, 2025"
-  cy.get(`.MuiPickersDay-root`).contains(String(targetDay)).click();
-
-  // 6. Switch to keyboard (digital) time input
-  //cy.get('.MuiPickersPopper-root').find('button[aria-label="edit time"]').click();
-
-  // 7. Fill hours and minutes
-  cy.get('.MuiPickerPopper-root').find('ul[aria-label="Select hours"]').children().contains(hour).scrollIntoView().click();
-  cy.get('.MuiPickerPopper-root').find('ul[aria-label="Select minutes"]').children().contains(minute).scrollIntoView().click();
-
-  // 8. Click AM or PM
-  cy.get('.MuiPickerPopper-root').find('ul[aria-label="Select meridiem"]').children().contains(ampm).click();
-
-  // 9. Confirm
-  cy.get('.MuiPickerPopper-root').contains('button', 'OK').click();
+  cy.contains('label', label)
+    .parent()
+    .find('input')
+    .click()
+    .type(month + day + year + hour + minute + ampmChar);
 });
 
 /**
