@@ -16,7 +16,9 @@
     "organization": "Organization",
     "permission": "Permission",
     "resource": "Resource",
-    "booking": "Booking"
+    "booking": "Booking",
+    "shiftTemplate": "Shift Template",
+    "shift": "Shift"
   },
   "Auth": {
     "signInTitle": "Sign in to your account",

@@ -16,7 +16,9 @@
     "organization": "組織",
     "permission": "権限",
     "resource": "リソース",
-    "booking": "予約"
+    "booking": "予約",
+    "shiftTemplate": "シフトテンプレート",
+    "shift": "シフト"
   },
   "Auth": {
     "signInTitle": "アカウントにログイン",
