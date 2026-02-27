@@ -166,6 +166,8 @@ model user_account {
   updater_id String
   updater    user_account @relation("UserAccountUpdater", fields: [updater_id], references: [id])
   roles    role[] @relation("UserRoles")
+  shift_templates    shift_template[] @relation("ShiftTemplateUser")
+  shifts    shift[] @relation("ShiftUser")
   organizations organization[] @relation("UserOrganizations")
   created_db_tables db_table[] @relation("DbTableCreator")
   updated_db_tables db_table[] @relation("DbTableUpdater")
@@ -190,6 +192,10 @@ model user_account {
   updated_resources resource[] @relation("ResourceUpdater")
   created_bookings  booking[] @relation("BookingCreator")
   updated_bookings  booking[] @relation("BookingUpdater")
+  created_shift_templates  shift_template[] @relation("ShiftTemplateCreator")
+  updated_shift_templates  shift_template[] @relation("ShiftTemplateUpdater")
+  created_shifts  shift[] @relation("ShiftCreator")
+  updated_shifts  shift[] @relation("ShiftUpdater")
   created_db_table_comments  db_table_comment[] @relation("DbTableCommentCreator")
   @@index([api_key])
 }
@@ -311,4 +317,34 @@ model booking {
   creator      user_account @relation("BookingCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user_account @relation("BookingUpdater", fields: [updater_id], references: [id])
+}
+
+model shift_template {
+  id          String @id @default(cuid())
+  user_account_id     String
+  user_account        user_account @relation("ShiftTemplateUser", fields: [user_account_id], references: [id])
+  day_of_week Int
+  start_time  DateTime @db.Timetz(0)
+  end_time    DateTime @db.Timetz(0)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  creator_id  String
+  creator     user_account @relation("ShiftTemplateCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user_account @relation("ShiftTemplateUpdater", fields: [updater_id], references: [id])
+}
+
+model shift {
+  id          String @id @default(cuid())
+  user_account_id     String
+  user_account        user_account @relation("ShiftUser", fields: [user_account_id], references: [id])
+  start_time  DateTime @db.Timestamptz(0)
+  end_time    DateTime @db.Timestamptz(0)
+  status      Int
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  creator_id  String
+  creator     user_account @relation("ShiftCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user_account @relation("ShiftUpdater", fields: [updater_id], references: [id])
 }

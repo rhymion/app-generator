@@ -105,8 +105,8 @@ function extractEntities(schema: Schema): EntityRelation[] {
   const baseModels = new Set(defs.filter(def =>
     !def.endsWith('_detail') &&
     !def.endsWith('_input') &&
-    schema.definitions[def].properties?.id &&
-    schema.definitions[def].properties?.name
+    schema.definitions[def].properties?.id //&&
+    // schema.definitions[def].properties?.name
   ));
 
   // Step 2: Find all code-generation targets (definitions with x-generate)

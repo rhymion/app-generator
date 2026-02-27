@@ -942,3 +942,113 @@ definitions:
         properties:
           resource:
             $ref: "#/definitions/resource"
+
+  shift_template:
+    type: object
+    required:
+      - id
+      - user_account_id
+      - day_of_week
+      - start_time
+      - end_time
+    x-display:
+      - user_account: 
+          width: 200
+      - day_of_week: 
+          width: 100
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      user_account_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: user_account
+          labelField: name
+      day_of_week:
+        type: integer
+        minimum: 0
+        maximum: 6
+      start_time:
+        type: string
+        format: date-time
+      end_time:
+        type: string
+        format: date-time
+
+  shift_template_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    allOf:
+      - $ref: "#/definitions/shift_template"
+      - type: object
+        required:
+          - user_account
+        properties:
+          user_account:
+            $ref: "#/definitions/user_account"
+
+  shift:
+    type: object
+    required:
+      - id
+      - user_account_id
+      - start_time
+      - end_time
+      - status
+    x-display:
+      - user_account: 
+          width: 200
+      - start_time:
+          width: 200
+      - end_time:
+          width: 200
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      user_account_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: user_account
+          labelField: name
+      start_time:
+        type: string
+        format: date-time
+      end_time:
+        type: string
+        format: date-time
+      status:
+        type: integer
+        minimum: 0
+        maximum: 2
+
+  shift_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    allOf:
+      - $ref: "#/definitions/shift"
+      - type: object
+        required:
+          - user_account
+        properties:
+          user_account:
+            $ref: "#/definitions/user_account"
