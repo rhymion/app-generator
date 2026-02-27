@@ -92,11 +92,13 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
       />
       <DateTimeWrapper 
         label="Start Time" 
+        show_date={false}
         date_time={startTime ? startTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setStartTime(newValue)}
       />
       <DateTimeWrapper 
         label="End Time" 
+        show_date={false}
         date_time={endTime ? endTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setEndTime(newValue)}
       />
