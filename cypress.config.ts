@@ -31,5 +31,6 @@ export default defineConfig({
     },
     scrollBehavior: 'center',
     video: false,
+    allowCypressEnv: false,
   },
 });
