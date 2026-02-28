@@ -2,8 +2,27 @@
 
 import prisma from '@/lib/prisma';
 import { requirePermission, getSessionUserIdOrThrow } from '@/lib/authz';
+import dayjs from 'dayjs';
+import utcPlugin from 'dayjs/plugin/utc';
+import timezonePlugin from 'dayjs/plugin/timezone';
+
+dayjs.extend(utcPlugin);
+dayjs.extend(timezonePlugin);
 
 type TxClient = Pick<typeof prisma, 'shift'>;
+
+/** Extract local {h, m, s} from a Timetz Date (stored UTC-normalized at epoch 1970-01-01). */
+function localTimeIn(date: Date, tz: string): { h: number; m: number; s: number } {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: tz,
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type: string) => parseInt(parts.find((p) => p.type === type)?.value ?? '0', 10);
+  return { h: get('hour') % 24, m: get('minute'), s: get('second') };
+}
 
 export type CopyShiftsResult = {
   success: number;
@@ -38,12 +57,14 @@ async function hasShiftOverlap(
 export async function copyShiftTemplatesToShifts(
   startDateStr: string,
   endDateStr: string,
+  timeZone: string = 'UTC',
 ): Promise<CopyShiftsResult> {
   await requirePermission('shift_template', 'create');
   const userId = await getSessionUserIdOrThrow();
 
-  const startDate = new Date(startDateStr + 'T00:00:00Z');
-  const endDate = new Date(endDateStr + 'T00:00:00Z');
+  // Iterate day by day in the specified timezone
+  const startDay = dayjs.tz(startDateStr, timeZone);
+  const endDay = dayjs.tz(endDateStr, timeZone);
 
   const templates = await prisma.shift_template.findMany({
     include: { user_account: { select: { name: true } } },
@@ -53,54 +74,35 @@ export async function copyShiftTemplatesToShifts(
   const failures: { label: string; reason: string }[] = [];
 
   for (
-    let current = new Date(startDate);
-    current <= endDate;
-    current = new Date(current.getTime() + 86400000)
+    let current = startDay;
+    !current.isAfter(endDay, 'day');
+    current = current.add(1, 'day')
   ) {
-    const dayOfWeek = current.getUTCDay();
+    const dayOfWeek = current.day(); // 0 = Sunday, same convention as JS Date
     const dayTemplates = templates.filter((t) => t.day_of_week === dayOfWeek);
 
     for (const template of dayTemplates) {
-      // Timetz values are stored as Date objects with epoch date (1970-01-01) and time in UTC
-      const isOvernight = template.start_time.getTime() > template.end_time.getTime();
+      // Timetz values are stored as UTC-normalized Dates at epoch 1970-01-01.
+      // e.g. "8:00 AM JST" is stored as 1970-01-01T23:00:00Z.
+      // We must extract the LOCAL hour/minute/second in the user's timezone.
+      const startLocal = localTimeIn(template.start_time, timeZone);
+      const endLocal = localTimeIn(template.end_time, timeZone);
 
-      const shiftStart = new Date(
-        Date.UTC(
-          current.getUTCFullYear(),
-          current.getUTCMonth(),
-          current.getUTCDate(),
-          template.start_time.getUTCHours(),
-          template.start_time.getUTCMinutes(),
-          template.start_time.getUTCSeconds(),
-        ),
-      );
+      // Overnight: start is later in the day than end (in local time)
+      const isOvernight = (startLocal.h * 60 + startLocal.m) > (endLocal.h * 60 + endLocal.m);
 
-      // Overnight shift: end time is on the next day (allowed even if next day > endDate)
+      // Apply local time to the current date in the timezone
+      const shiftStart = current
+        .hour(startLocal.h).minute(startLocal.m).second(startLocal.s).millisecond(0)
+        .toDate();
+
+      const nextDay = current.add(1, 'day');
       const shiftEnd = isOvernight
-        ? new Date(
-            Date.UTC(
-              current.getUTCFullYear(),
-              current.getUTCMonth(),
-              current.getUTCDate() + 1,
-              template.end_time.getUTCHours(),
-              template.end_time.getUTCMinutes(),
-              template.end_time.getUTCSeconds(),
-            ),
-          )
-        : new Date(
-            Date.UTC(
-              current.getUTCFullYear(),
-              current.getUTCMonth(),
-              current.getUTCDate(),
-              template.end_time.getUTCHours(),
-              template.end_time.getUTCMinutes(),
-              template.end_time.getUTCSeconds(),
-            ),
-          );
+        ? nextDay.hour(endLocal.h).minute(endLocal.m).second(endLocal.s).millisecond(0).toDate()
+        : current.hour(endLocal.h).minute(endLocal.m).second(endLocal.s).millisecond(0).toDate();
 
       const userName = template.user_account?.name ?? template.user_account_id;
-      const dateStr = current.toISOString().slice(0, 10);
-      const label = `${userName} on ${dateStr}`;
+      const label = `${userName} on ${current.format('YYYY-MM-DD')}`;
 
       try {
         await prisma.$transaction(async (tx) => {

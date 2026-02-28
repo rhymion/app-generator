@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Button from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
@@ -22,8 +22,14 @@ export default function CopyShiftsButton({ permissions }: CopyShiftsButtonProps)
   const [open, setOpen] = useState(false);
   const [startDate, setStartDate] = useState<Dayjs | null>(null);
   const [endDate, setEndDate] = useState<Dayjs | null>(null);
+  const [timezone, setTimezone] = useState('UTC');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<CopyShiftsResult | null>(null);
+
+  // Set browser local timezone once on mount
+  useEffect(() => {
+    setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }, []);
 
   if (!permissions.create) return null;
 
@@ -34,6 +40,7 @@ export default function CopyShiftsButton({ permissions }: CopyShiftsButtonProps)
       const r = await copyShiftTemplatesToShifts(
         startDate.format('YYYY-MM-DD'),
         endDate.format('YYYY-MM-DD'),
+        timezone,
       );
       setResult(r);
     } finally {

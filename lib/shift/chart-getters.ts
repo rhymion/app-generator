@@ -18,10 +18,8 @@ export async function getShiftsForChart(startDate: Date, endDate: Date): Promise
 
   const shifts = await prisma.shift.findMany({
     where: {
-      start_time: {
-        gte: startDate,
-        lt: endDate,
-      },
+      start_time: { lt: endDate },
+      end_time: { gt: startDate },
     },
     include: { user_account: true },
     orderBy: [{ start_time: 'asc' }],

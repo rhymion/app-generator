@@ -24,6 +24,7 @@ export default function DateTimeWrapper({label, date_time, show_date = true, sho
         <TimePicker
           enableAccessibleFieldDOMStructure={false}
           views={['hours', 'minutes']}
+          label={label}
           value={date_time ? dayjs(date_time) : null}
           slotProps={{ field: { clearable: true }, textField: { margin: 'normal' } }}
           {...other}

@@ -15,19 +15,23 @@ function parseWeekStart(dateStr: string | undefined): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - dayOfWeek));
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export default async function ShiftChartPage({
   searchParams,
 }: {
-  searchParams: Promise<{ start?: string }>;
+  searchParams: Promise<{ start?: string; tz?: string }>;
 }) {
-  const { start } = await searchParams;
+  const { start, tz } = await searchParams;
   const weekStart = parseWeekStart(start);
-  const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
-
-  const shifts = await getShiftsForChart(weekStart, weekEnd);
-
-  // Pass as plain "YYYY-MM-DD" so the client parses it as local midnight
   const weekStartStr = weekStart.toISOString().slice(0, 10);
 
-  return <ShiftGanttChart shifts={shifts} weekStart={weekStartStr} />;
+  // Add 1-day buffer on each side so any client timezone can correctly display
+  // the full 7-day window without missing boundary shifts.
+  const queryStart = new Date(weekStart.getTime() - DAY_MS);
+  const queryEnd = new Date(weekStart.getTime() + 8 * DAY_MS);
+
+  const shifts = await getShiftsForChart(queryStart, queryEnd);
+
+  return <ShiftGanttChart shifts={shifts} weekStart={weekStartStr} timeZone={tz ?? ''} />;
 }

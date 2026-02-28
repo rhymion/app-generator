@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useRouter } from '@/i18n/navigation';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -11,76 +11,108 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
+import utcPlugin from 'dayjs/plugin/utc';
+import timezonePlugin from 'dayjs/plugin/timezone';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import type { ShiftForChart } from '@/lib/shift/chart-getters';
+
+dayjs.extend(utcPlugin);
+dayjs.extend(timezonePlugin);
+
+// ── Constants ────────────────────────────────────────────────────────────────
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const HOUR_TICKS = [0, 3, 6, 9, 12, 15, 18, 21, 24];
 const MINUTES_IN_DAY = 24 * 60;
 const USER_LABEL_WIDTH = 130;
 
-// Colors for user bars — cycles through palette
-const BAR_BG = ['#e3f2fd', '#e8f5e9', '#fce4ec', '#f3e5f5', '#fff3e0', '#e0f7fa', '#fbe9e7', '#eceff1'];
+const BAR_BG     = ['#e3f2fd', '#e8f5e9', '#fce4ec', '#f3e5f5', '#fff3e0', '#e0f7fa', '#fbe9e7', '#eceff1'];
 const BAR_BORDER = ['#1565c0', '#2e7d32', '#c62828', '#6a1b9a', '#e65100', '#00695c', '#4e342e', '#37474f'];
 
 const STATUS_LABELS: Record<number, string> = { 0: 'Scheduled', 1: 'Confirmed', 2: 'Cancelled' };
 
-function dateKey(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+// ── Timezone-aware helpers ───────────────────────────────────────────────────
+
+/** "HH:MM" for a UTC Date displayed in the given timezone. */
+function fmtInTz(date: Date, tz: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const h = parts.find((p) => p.type === 'hour')?.value ?? '00';
+  const m = parts.find((p) => p.type === 'minute')?.value ?? '00';
+  return `${h === '24' ? '00' : h}:${m}`;
 }
 
-function parseLocalDate(dateStr: string): Date {
-  // Parse "YYYY-MM-DD" as local midnight to avoid UTC-offset surprises
-  const [y, mo, d] = dateStr.split('-').map(Number);
-  return new Date(y, mo - 1, d);
+/** "Jan 7" for a UTC Date displayed in the given timezone. */
+function fmtDateInTz(date: Date, tz: string): string {
+  return date.toLocaleDateString(undefined, { timeZone: tz, month: 'short', day: 'numeric' });
 }
 
-function fmt(date: Date): string {
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-}
+// ── Types ────────────────────────────────────────────────────────────────────
 
-function fmtDate(date: Date): string {
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
+type DayInfo = {
+  key: string;        // "YYYY-MM-DD"
+  midnight: Date;     // UTC instant = 00:00 of this day in the timezone
+  nextMidnight: Date; // UTC instant = 00:00 of the next day in the timezone
+  dayOfWeek: number;  // 0 = Sunday
+};
 
 type Props = {
   shifts: ShiftForChart[];
-  /** "YYYY-MM-DD" string for the first day displayed */
+  /** "YYYY-MM-DD" — the first day of the displayed week. */
   weekStart: string;
+  /** IANA timezone string from URL. Empty string = detect browser local on mount. */
+  timeZone?: string;
 };
+
+// ── Component ────────────────────────────────────────────────────────────────
 
 export default function ShiftGanttChart({ shifts, weekStart }: Props) {
   const router = useRouter();
 
-  const weekStartDate = useMemo(() => parseLocalDate(weekStart), [weekStart]);
+  // Detect browser local timezone on mount; always use local time, no selector shown.
+  const [resolvedTz, setResolvedTz] = useState('UTC');
+  useEffect(() => {
+    setResolvedTz(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }, []);
 
-  // Build the 7 days (local dates)
-  const days = useMemo(
+  // Build 7 DayInfo objects: midnight/nextMidnight are UTC instants for the day
+  // boundaries in resolvedTz — this drives both shift grouping and bar positioning.
+  const days = useMemo<DayInfo[]>(
     () =>
       Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(weekStartDate);
-        d.setDate(weekStartDate.getDate() + i);
-        return d;
+        const d = dayjs.tz(weekStart, resolvedTz).add(i, 'day');
+        return {
+          key: d.format('YYYY-MM-DD'),
+          midnight: d.toDate(),
+          nextMidnight: d.add(1, 'day').toDate(),
+          dayOfWeek: d.day(),
+        };
       }),
-    [weekStartDate],
+    [weekStart, resolvedTz],
   );
 
-  // Group shifts by local date key
+  // Assign each shift to every day it overlaps (handles cross-midnight shifts)
   const shiftsByDay = useMemo(() => {
     const map = new Map<string, ShiftForChart[]>();
-    for (const day of days) map.set(dateKey(day), []);
+    for (const { key } of days) map.set(key, []);
     for (const shift of shifts) {
-      const key = dateKey(new Date(shift.start_time));
-      map.get(key)?.push(shift);
+      const start = new Date(shift.start_time);
+      const end = new Date(shift.end_time);
+      for (const { key, midnight, nextMidnight } of days) {
+        if (start < nextMidnight && end > midnight) {
+          map.get(key)?.push(shift);
+        }
+      }
     }
     return map;
   }, [shifts, days]);
 
-  // Stable color index per user
+  // Stable color index per user across the whole week
   const userColorIndex = useMemo(() => {
     const seen = new Map<string, number>();
     for (const s of shifts) {
@@ -89,10 +121,11 @@ export default function ShiftGanttChart({ shifts, weekStart }: Props) {
     return seen;
   }, [shifts]);
 
+  // ── Navigation ──────────────────────────────────────────────────────────────
+
   function navigate(offsetDays: number) {
-    const d = new Date(weekStartDate);
-    d.setDate(weekStartDate.getDate() + offsetDays);
-    router.push(`/shift/chart?start=${dateKey(d)}`);
+    const newStart = dayjs.tz(weekStart, resolvedTz).add(offsetDays, 'day').format('YYYY-MM-DD');
+    router.push(`/shift/chart?start=${newStart}`);
   }
 
   function handleDateChange(value: Dayjs | null) {
@@ -100,9 +133,11 @@ export default function ShiftGanttChart({ shifts, weekStart }: Props) {
     router.push(`/shift/chart?start=${value.format('YYYY-MM-DD')}`);
   }
 
+  // ── Render ──────────────────────────────────────────────────────────────────
+
   return (
     <Box sx={{ p: 2 }}>
-      {/* ── Navigation header ── */}
+      {/* Navigation header */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3, flexWrap: 'wrap' }}>
         <Button variant="outlined" size="small" startIcon={<ChevronLeftIcon />} onClick={() => navigate(-7)}>
           Back
@@ -110,7 +145,7 @@ export default function ShiftGanttChart({ shifts, weekStart }: Props) {
         <LocalizationProvider dateAdapter={AdapterDayjs}>
           <DatePicker
             label="Week start"
-            value={dayjs(weekStartDate)}
+            value={dayjs(weekStart)}
             onChange={handleDateChange}
             enableAccessibleFieldDOMStructure={false}
             slotProps={{ textField: { size: 'small' } }}
@@ -121,29 +156,25 @@ export default function ShiftGanttChart({ shifts, weekStart }: Props) {
         </Button>
       </Box>
 
-      {/* ── One section per day ── */}
-      {days.map((day) => {
-        const key = dateKey(day);
-        const dayShifts = shiftsByDay.get(key) ?? [];
+      {/* One section per day */}
+      {days.map((dayInfo) => {
+        const dayShifts = shiftsByDay.get(dayInfo.key) ?? [];
 
-        // Unique users who have a shift this day, preserving order of first appearance
         const userIds: string[] = [];
         for (const s of dayShifts) {
           if (!userIds.includes(s.user_account_id)) userIds.push(s.user_account_id);
         }
 
         return (
-          <Box key={key} sx={{ mb: 3 }}>
-            {/* Day label */}
+          <Box key={dayInfo.key} sx={{ mb: 3 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 0.5 }}>
-              {DAY_NAMES[day.getDay()]}, {fmtDate(day)}
+              {DAY_NAMES[dayInfo.dayOfWeek]}, {fmtDateInTz(dayInfo.midnight, resolvedTz)}
             </Typography>
 
             <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
               {/* Time ruler */}
               <Box
                 sx={{
-                  display: 'flex',
                   position: 'relative',
                   height: 22,
                   bgcolor: 'grey.100',
@@ -170,7 +201,7 @@ export default function ShiftGanttChart({ shifts, weekStart }: Props) {
                 ))}
               </Box>
 
-              {/* Rows */}
+              {/* User rows */}
               {userIds.length === 0 ? (
                 <Box sx={{ px: 2, py: 1, color: 'text.disabled', fontSize: '0.8rem' }}>No shifts</Box>
               ) : (
@@ -209,7 +240,7 @@ export default function ShiftGanttChart({ shifts, weekStart }: Props) {
 
                       {/* Timeline */}
                       <Box sx={{ flex: 1, position: 'relative', height: 44 }}>
-                        {/* Vertical grid lines at every 3-hour tick */}
+                        {/* Grid lines */}
                         {HOUR_TICKS.slice(1, -1).map((h) => (
                           <Box
                             key={h}
@@ -229,23 +260,24 @@ export default function ShiftGanttChart({ shifts, weekStart }: Props) {
                           const start = new Date(shift.start_time);
                           const end = new Date(shift.end_time);
 
-                          // Offset in minutes from local midnight of this day
-                          const midnight = new Date(day);
-                          midnight.setHours(0, 0, 0, 0);
-                          const startMin = (start.getTime() - midnight.getTime()) / 60000;
-                          const endMin = Math.min(
-                            (end.getTime() - midnight.getTime()) / 60000,
-                            MINUTES_IN_DAY,
-                          );
+                          const { midnight, nextMidnight } = dayInfo;
+                          const fromPrevDay = start < midnight;
+                          const toNextDay = end > nextMidnight;
+                          const effectiveStart = fromPrevDay ? midnight : start;
+                          const effectiveEnd = toNextDay ? nextMidnight : end;
 
-                          const leftPct = Math.max(0, (startMin / MINUTES_IN_DAY) * 100);
+                          const startMin = (effectiveStart.getTime() - midnight.getTime()) / 60000;
+                          const endMin = (effectiveEnd.getTime() - midnight.getTime()) / 60000;
+                          const leftPct = (startMin / MINUTES_IN_DAY) * 100;
                           const widthPct = Math.max(0.3, ((endMin - startMin) / MINUTES_IN_DAY) * 100);
+
+                          const borderRadius = `${fromPrevDay ? 0 : 3}px ${toNextDay ? 0 : 3}px ${toNextDay ? 0 : 3}px ${fromPrevDay ? 0 : 3}px`;
                           const statusLabel = STATUS_LABELS[shift.status] ?? `Status ${shift.status}`;
 
                           return (
                             <Tooltip
                               key={shift.id}
-                              title={`${name}: ${fmt(start)}–${fmt(end)} (${statusLabel})`}
+                              title={`${name}: ${fmtInTz(start, resolvedTz)}–${fmtInTz(end, resolvedTz)} (${statusLabel})`}
                               arrow
                             >
                               <Box
@@ -257,7 +289,7 @@ export default function ShiftGanttChart({ shifts, weekStart }: Props) {
                                   height: '70%',
                                   bgcolor: BAR_BG[ci],
                                   border: `2px solid ${BAR_BORDER[ci]}`,
-                                  borderRadius: '3px',
+                                  borderRadius,
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
@@ -278,7 +310,7 @@ export default function ShiftGanttChart({ shifts, weekStart }: Props) {
                                     textOverflow: 'ellipsis',
                                   }}
                                 >
-                                  {fmt(start)}–{fmt(end)}
+                                  {fmtInTz(start, resolvedTz)}–{fmtInTz(end, resolvedTz)}
                                 </Typography>
                               </Box>
                             </Tooltip>
