@@ -823,6 +823,15 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
       if (prop.type === 'boolean' || (Array.isArray(prop.type) && prop.type.includes('boolean'))) {
         typeStr = ", type: 'boolean'";
         width = 100;
+      } else if ((prop.type === 'integer' || (Array.isArray(prop.type) && prop.type.includes('integer'))) && Array.isArray((prop as any).enum)) {
+        const enumValues: (string | number)[] = (prop as any).enum;
+        const valueOptions = enumValues.map((v, i) =>
+          typeof v === 'string'
+            ? `{ value: ${i}, label: '${v}' }`
+            : `{ value: ${v}, label: '${v}' }`
+        ).join(', ');
+        typeStr = `, type: 'singleSelect' as const, valueOptions: [${valueOptions}]`;
+        width = 150;
       } else if (prop.type === 'integer' || (Array.isArray(prop.type) && prop.type.includes('integer'))) {
         typeStr = ", type: 'number'";
         width = 100;
@@ -919,6 +928,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   // Categorize parent properties by type
   const dateTimeProps: string[] = [];
   const numberProps: string[] = [];
+  const enumIntegerProps: string[] = []; // integer fields with enum → rendered as Autocomplete
   const imageProps: string[] = [];
   const booleanProps: string[] = [];
   const textProps: string[] = [];
@@ -927,9 +937,11 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     const prop = filteredProps[p];
     const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
     const format = (prop as any).format;
-    
+
     if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
       dateTimeProps.push(p);
+    } else if ((propType === 'integer' || propType === 'number') && Array.isArray((prop as any).enum)) {
+      enumIntegerProps.push(p);
     } else if (propType === 'integer' || propType === 'number') {
       numberProps.push(p);
     } else if (propType === 'boolean') {
@@ -964,14 +976,20 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     const stateSetter = toPascalCaseFromVar(stateName);
     return `  const [${stateName}, set${stateSetter}] = useState<boolean>(Boolean(src.${p}));`;
   }).join('\n');
-  
+
+  const enumIntegerStates = enumIntegerProps.map(p => {
+    const stateName = safeVarName(p);
+    const stateSetter = toPascalCaseFromVar(stateName);
+    return `  const [${stateName}, set${stateSetter}] = useState<number | null>(src.${p} ?? null);`;
+  }).join('\n');
+
   const relationshipStates = parentRelationships.map(r => {
     const stateName = safeVarName(r.propName);
     const stateSetter = toPascalCaseFromVar(stateName);
     return `  const [${stateName}, set${stateSetter}] = useState<string | null>(src.${r.propName} || null);`;
   }).join('\n');
 
-  const allStates = [dateTimeStates, imageStates, booleanStates, relationshipStates].filter(s => s).join('\n');
+  const allStates = [dateTimeStates, imageStates, booleanStates, enumIntegerStates, relationshipStates].filter(s => s).join('\n');
   
   // Generate form fields
   const textFields = textProps.map(p => {
@@ -1072,7 +1090,29 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       />`;
   }).join('\n');
 
-  const parentTextFields = [textFields, relationshipFields, numberFields, booleanFields, dateTimeFields, imageFields].filter(f => f).join('\n');
+  const enumIntegerFields = enumIntegerProps.map(p => {
+    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const stateName = safeVarName(p);
+    const stateSetter = toPascalCaseFromVar(stateName);
+    const optionsVar = `${stateName}Options`;
+    const isRequired = modelDef.required?.includes(p);
+
+    return `      <Autocomplete
+        options={${optionsVar}}
+        value={${optionsVar}.find((o) => o.value === ${stateName}) ?? null}
+        onChange={(_, newValue) => set${stateSetter}(newValue?.value ?? null)}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="${label}"
+            margin="normal"
+            ${isRequired ? 'required' : ''}
+          />
+        )}
+      />`;
+  }).join('\n');
+
+  const parentTextFields = [textFields, relationshipFields, numberFields, enumIntegerFields, booleanFields, dateTimeFields, imageFields].filter(f => f).join('\n');
   
   // Generate FormData sets
   const textFormDataSets = textProps.map(p => 
@@ -1103,12 +1143,30 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     return `    formData.set('${p}', ${stateName}.toString());`;
   }).join('\n');
 
-  const parentFormDataSets = [textFormDataSets, relationshipFormDataSets, numberFormDataSets, booleanFormDataSets, dateTimeFormDataSets, imageFormDataSets].filter(s => s).join('\n');
+  const enumIntegerFormDataSets = enumIntegerProps.map(p => {
+    const stateName = safeVarName(p);
+    return `    formData.set('${p}', ${stateName} !== null ? String(${stateName}) : '');`;
+  }).join('\n');
+
+  const parentFormDataSets = [textFormDataSets, relationshipFormDataSets, numberFormDataSets, enumIntegerFormDataSets, booleanFormDataSets, dateTimeFormDataSets, imageFormDataSets].filter(s => s).join('\n');
   
   // Determine if we have children
   const hasChildren = children.length > 0;
   const hasManyToOne = parentRelationships.length > 0;
   
+  // Generate named option constants for enum integer fields
+  const enumIntegerOptionSetups = enumIntegerProps.map(p => {
+    const prop = filteredProps[p];
+    const stateName = safeVarName(p);
+    const enumValues: (string | number)[] = (prop as any).enum;
+    const options = enumValues.map((v, i) =>
+      typeof v === 'string'
+        ? `{ value: ${i}, label: '${v}' }`
+        : `{ value: ${v}, label: '${v}' }`
+    ).join(', ');
+    return `  const ${stateName}Options = [${options}];`;
+  }).join('\n');
+
   const relationshipOptionSetups = parentRelationships.map(r => {
     const targetPascal = toPascalCase(r.target);
     const labelField = r.labelField ?? 'name';
@@ -1534,7 +1592,7 @@ ${childSerialize}
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
-import TextField from '@mui/material/TextField';${hasManyToOne ? "\nimport Autocomplete from '@mui/material/Autocomplete';" : ''}${numberProps.length > 0 ? '\nimport NumberField from \'../NumberField\';' : ''}
+import TextField from '@mui/material/TextField';${(hasManyToOne || enumIntegerProps.length > 0) ? "\nimport Autocomplete from '@mui/material/Autocomplete';" : ''}${numberProps.length > 0 ? '\nimport NumberField from \'../NumberField\';' : ''}
 import { upsert${parentPascal}${canDelete ? `, remove${parentPascal}` : ''}${hasCommentChildren ? `, add${parentPascal}Comment, update${parentPascal}Comment, delete${parentPascal}Comment` : ''} } from '@/lib/${parent}/actions';
 import type { FormUpsertProps } from '@/lib/${parent}/types';
 import FormWithChildGrid from '../FormWithChildGrid';
@@ -1549,7 +1607,7 @@ export default function FormUpsert(${formUpsertParams}) {
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 ${allStates ? '\n' + allStates : ''}
 ${childVariables}
-${parentRefs}${relationshipOptionSetups ? `\n${relationshipOptionSetups}` : ''}${childEntityRelOptionSetups ? `\n${childEntityRelOptionSetups}` : ''}${childGridSetup}
+${parentRefs}${enumIntegerOptionSetups ? `\n${enumIntegerOptionSetups}` : ''}${relationshipOptionSetups ? `\n${relationshipOptionSetups}` : ''}${childEntityRelOptionSetups ? `\n${childEntityRelOptionSetups}` : ''}${childGridSetup}
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1894,6 +1952,7 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
   const xDisplay = (modelDef as any)?.['x-display'];
 
   let displayFieldsCode = '';
+  let primaryFieldCode = '';
   if (xDisplay && Array.isArray(xDisplay)) {
     const fields = xDisplay.map((item: any) => {
       const fieldName = Object.keys(item)[0];
@@ -1907,6 +1966,15 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
     }).join(',\n');
 
     displayFieldsCode = ` displayFields={[\n${fields}\n  ]}`;
+
+    const primaryItem = xDisplay.find((item: any) => {
+      const config = item[Object.keys(item)[0]];
+      return config?.primary === true;
+    });
+    if (primaryItem) {
+      const primaryFieldName = Object.keys(primaryItem)[0];
+      primaryFieldCode = ` primaryField="${primaryFieldName}"`;
+    }
   }
 
   const removeImport = canDelete ? `\nimport { remove${parentPascal} } from '@/lib/${parent}/actions';` : '';
@@ -1923,7 +1991,7 @@ ${listComponentImport}${removeImport}
 
 export default async function ${parentPascal}sPage() {
   const { ${parentCamel}s, userPermissions } = await get${parentPascal}ListPageData();
-  return <${listComponent} src={${parentCamel}s} basePath="/${parent}"${removeActionProp} entityLabel="${parentTitle}"${displayFieldsCode}
+  return <${listComponent} src={${parentCamel}s} basePath="/${parent}"${removeActionProp} entityLabel="${parentTitle}"${primaryFieldCode}${displayFieldsCode}
     permissions={userPermissions} />;
 }
 `;

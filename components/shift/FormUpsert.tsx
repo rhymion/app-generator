@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
-import NumberField from '../NumberField';
 import { upsertShift, removeShift } from '@/lib/shift/actions';
 import type { FormUpsertProps } from '@/lib/shift/types';
 import FormWithChildGrid from '../FormWithChildGrid';
@@ -23,9 +22,11 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
 
   const [startTime, setStartTime] = useState<Dayjs | null>(src.start_time ? dayjs(src.start_time) : null);
   const [endTime, setEndTime] = useState<Dayjs | null>(src.end_time ? dayjs(src.end_time) : null);
+  const [status, setStatus] = useState<number | null>(src.status ?? null);
   const [userAccountId, setUserAccountId] = useState<string | null>(src.user_account_id || null);
 
-  const statusRef = useRef<HTMLInputElement>(null);
+
+  const statusOptions = [{ value: 0, label: 'Scheduled' }, { value: 1, label: 'Approved' }, { value: 2, label: 'Cancelled' }];
   const userAccountIdOptions = useMemo(() => {
     return allUserAccounts.map((item) => ({
       id: item.id,
@@ -44,7 +45,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
       formData.set('__src_snapshot', srcSnapshot);
     }
     formData.set('user_account_id', userAccountId || '');
-    formData.set('status', statusRef.current?.value || '');
+    formData.set('status', status !== null ? String(status) : '');
     formData.set('start_time', startTime?.toISOString() || '');
     formData.set('end_time', endTime?.toISOString() || '');
 
@@ -83,12 +84,18 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
           />
         )}
       />
-      <NumberField 
-        label="Status" 
-        inputRef={statusRef} 
-        defaultValue={src.status || 0} 
-        min={0}
-        max={2}
+      <Autocomplete
+        options={statusOptions}
+        value={statusOptions.find((o) => o.value === status) ?? null}
+        onChange={(_, newValue) => setStatus(newValue?.value ?? null)}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Status"
+            margin="normal"
+            required
+          />
+        )}
       />
       <DateTimeWrapper 
         label="Start Time" 

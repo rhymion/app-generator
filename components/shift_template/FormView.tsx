@@ -9,6 +9,7 @@ import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
+  const dayOfWeekOptions = [{ value: 0, label: 'Sunday' }, { value: 1, label: 'Monday' }, { value: 2, label: 'Tuesday' }, { value: 3, label: 'Wednesday' }, { value: 4, label: 'Thursday' }, { value: 5, label: 'Friday' }, { value: 6, label: 'Saturday' }];
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -29,7 +30,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
       />
       <TextField
         label="Day Of Week"
-        value={src.day_of_week || ''}
+        value={dayOfWeekOptions[src.day_of_week || 0]?.label || ''}
         fullWidth
         margin="normal"
         aria-readonly

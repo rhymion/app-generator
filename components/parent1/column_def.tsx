@@ -8,7 +8,7 @@ export function parent1_child1s_columns(editable: boolean = false): GridColDef[]
     { field: 'name', headerName: 'Name', width: 150, editable: editable },
     { field: 'type', headerName: 'Type', width: 150, editable: editable },
     { field: 'max_length', headerName: 'Max Length', width: 100, editable: editable, type: 'number' },
-    { field: 'max', headerName: 'Max', width: 100, editable: editable, type: 'number' },
+    { field: 'max', headerName: 'Max', width: 150, editable: editable, type: 'singleSelect' as const, valueOptions: [{ value: null, label: '-- None --' }, { value: 1, label: '100' }, { value: 2, label: '255' }, { value: 3, label: '65535' }] },
     { field: 'regex', headerName: 'Regex', width: 150, editable: editable },
     { field: 'required', headerName: 'Required', width: 100, editable: editable, type: 'boolean' },
     { field: 'written_by', headerName: 'Written By', width: 150, editable: editable },

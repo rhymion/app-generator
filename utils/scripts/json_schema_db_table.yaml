@@ -277,6 +277,10 @@ definitions:
         type:
           - integer
           - "null"
+        enum:
+          - "100"
+          - "255"
+          - "65535"
       regex:
         type:
           - string
@@ -953,6 +957,7 @@ definitions:
       - end_time
     x-display:
       - user_account: 
+          primary: true
           width: 200
       - day_of_week: 
           width: 100
@@ -971,6 +976,14 @@ definitions:
         type: integer
         minimum: 0
         maximum: 6
+        enum:
+          - Sunday
+          - Monday
+          - Tuesday
+          - Wednesday
+          - Thursday
+          - Friday
+          - Saturday
       start_time:
         type: string
         format: date-time
@@ -1007,6 +1020,7 @@ definitions:
       - status
     x-display:
       - user_account: 
+          primary: true
           width: 200
       - start_time:
           width: 200
@@ -1033,6 +1047,10 @@ definitions:
         type: integer
         minimum: 0
         maximum: 2
+        enum:
+          - Scheduled
+          - Approved
+          - Cancelled
 
   shift_detail:
     x-generate:

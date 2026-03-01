@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
-import NumberField from '../NumberField';
 import { upsertShiftTemplate, removeShiftTemplate } from '@/lib/shift_template/actions';
 import type { FormUpsertProps } from '@/lib/shift_template/types';
 import FormWithChildGrid from '../FormWithChildGrid';
@@ -23,9 +22,11 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
 
   const [startTime, setStartTime] = useState<Dayjs | null>(src.start_time ? dayjs(src.start_time) : null);
   const [endTime, setEndTime] = useState<Dayjs | null>(src.end_time ? dayjs(src.end_time) : null);
+  const [dayOfWeek, setDayOfWeek] = useState<number | null>(src.day_of_week ?? null);
   const [userAccountId, setUserAccountId] = useState<string | null>(src.user_account_id || null);
 
-  const day_of_weekRef = useRef<HTMLInputElement>(null);
+
+  const dayOfWeekOptions = [{ value: 0, label: 'Sunday' }, { value: 1, label: 'Monday' }, { value: 2, label: 'Tuesday' }, { value: 3, label: 'Wednesday' }, { value: 4, label: 'Thursday' }, { value: 5, label: 'Friday' }, { value: 6, label: 'Saturday' }];
   const userAccountIdOptions = useMemo(() => {
     return allUserAccounts.map((item) => ({
       id: item.id,
@@ -44,7 +45,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
       formData.set('__src_snapshot', srcSnapshot);
     }
     formData.set('user_account_id', userAccountId || '');
-    formData.set('day_of_week', day_of_weekRef.current?.value || '');
+    formData.set('day_of_week', dayOfWeek !== null ? String(dayOfWeek) : '');
     formData.set('start_time', startTime?.toISOString() || '');
     formData.set('end_time', endTime?.toISOString() || '');
 
@@ -83,12 +84,18 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
           />
         )}
       />
-      <NumberField 
-        label="Day Of Week" 
-        inputRef={day_of_weekRef} 
-        defaultValue={src.day_of_week || 0} 
-        min={0}
-        max={6}
+      <Autocomplete
+        options={dayOfWeekOptions}
+        value={dayOfWeekOptions.find((o) => o.value === dayOfWeek) ?? null}
+        onChange={(_, newValue) => setDayOfWeek(newValue?.value ?? null)}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Day Of Week"
+            margin="normal"
+            required
+          />
+        )}
       />
       <DateTimeWrapper 
         label="Start Time" 

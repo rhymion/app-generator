@@ -9,6 +9,11 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 
 export default async function ShiftsPage() {
   const { shifts, userPermissions } = await getShiftListPageData();
+  const formattedShifts = shifts.map(shift => ({
+    ...shift,
+    start_time: shift.start_time ? new Date(shift.start_time).toLocaleString('sv-SE') : '',
+    end_time: shift.end_time ? new Date(shift.end_time).toLocaleString('sv-SE') : '',
+  }));
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 1 }}>
@@ -18,7 +23,8 @@ export default async function ShiftsPage() {
           </Button>
         </Link>
       </Box>
-      <ResponsiveListClient src={shifts} basePath="/shift" removeAction={removeShift} entityLabel="Shift" displayFields={[
+      <ResponsiveListClient src={formattedShifts} basePath="/shift" removeAction={removeShift} entityLabel="Shift"
+       primaryField="user_account" displayFields={[
         { field: 'user_account', headerName: 'User Account', width: 200 },
         { field: 'start_time', headerName: 'Start Time', width: 200 },
         { field: 'end_time', headerName: 'End Time', width: 200 }
