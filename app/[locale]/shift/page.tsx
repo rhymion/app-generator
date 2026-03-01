@@ -9,10 +9,10 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 
 export default async function ShiftsPage() {
   const { shifts, userPermissions } = await getShiftListPageData();
-  const formattedShifts = shifts.map(shift => ({
-    ...shift,
-    start_time: shift.start_time ? new Date(shift.start_time).toLocaleString('sv-SE') : '',
-    end_time: shift.end_time ? new Date(shift.end_time).toLocaleString('sv-SE') : '',
+  const formattedShifts = shifts.map(item => ({
+    ...item,
+    start_time: item.start_time ? new Date(item.start_time).toLocaleString('sv-SE') : '',
+    end_time: item.end_time ? new Date(item.end_time).toLocaleString('sv-SE') : '',
   }));
   return (
     <Box>

@@ -9,6 +9,7 @@ import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
+  const statusOptions = [{ value: 0, label: 'Scheduled' }, { value: 1, label: 'Approved' }, { value: 2, label: 'Cancelled' }];
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -29,7 +30,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
       />
       <TextField
         label="Status"
-        value={src.status || ''}
+        value={statusOptions.find(o => o.value === src.status)?.label ?? ''}
         fullWidth
         margin="normal"
         aria-readonly

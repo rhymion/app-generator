@@ -30,7 +30,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
       />
       <TextField
         label="Day Of Week"
-        value={dayOfWeekOptions[src.day_of_week || 0]?.label || ''}
+        value={dayOfWeekOptions.find(o => o.value === src.day_of_week)?.label ?? ''}
         fullWidth
         margin="normal"
         aria-readonly

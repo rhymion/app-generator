@@ -5,9 +5,9 @@ import CopyShiftsButton from '@/components/shift_template/CopyShiftsButton';
 
 export default async function ShiftTemplatesPage() {
   const { shiftTemplates, userPermissions } = await getShiftTemplateListPageData();
-  const formattedShiftTemplates = shiftTemplates.map(template => ({
-    ...template,
-    day_of_week: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][template.day_of_week] || ''
+  const formattedShiftTemplates = shiftTemplates.map(item => ({
+    ...item,
+    day_of_week: (['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const)[item.day_of_week as number] ?? '',
   }));
   return (
     <>

@@ -27,6 +27,24 @@ import {
 // Re-export types for backward compatibility
 export type { ChildInfo, RelationshipInfo } from './helpers/child-helpers';
 
+/**
+ * Build a { value, label } option string for an integer enum entry.
+ * - Real string labels (e.g. "Sunday") → value is the array index (0, 1, 2…)
+ * - Numeric strings (e.g. "100") or actual numbers → value is the parsed number
+ */
+function intEnumOption(v: string | number, i: number): string {
+  if (typeof v === 'number') return `{ value: ${v}, label: '${v}' }`;
+  const n = Number(v);
+  return isNaN(n)
+    ? `{ value: ${i}, label: '${v}' }`   // real string label
+    : `{ value: ${n}, label: '${v}' }`;  // numeric string → keep the original label text
+}
+
+/** True when at least one enum value is a real (non-numeric) string label. */
+function hasStringLabels(enumValues: (string | number)[]): boolean {
+  return enumValues.some(v => typeof v === 'string' && isNaN(Number(v)));
+}
+
 export function generateTypes(parent: string, children: ChildInfo[], schema: Schema, modelName?: string, definitionKey?: string, generateConfig?: any): string {
   const model = modelName ?? parent;
   const defKey = definitionKey ?? `${parent}_detail`;
@@ -772,8 +790,6 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
     }
     
     const columns: string[] = [];
-    const dateTimeFields: string[] = [];
-    let needsDateTimeImports = false;
 
     // Collect many-to-one relationship params for this child
     const childRelParams: string[] = [];
@@ -825,20 +841,20 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
         width = 100;
       } else if ((prop.type === 'integer' || (Array.isArray(prop.type) && prop.type.includes('integer'))) && Array.isArray((prop as any).enum)) {
         const enumValues: (string | number)[] = (prop as any).enum;
-        const valueOptions = enumValues.map((v, i) =>
-          typeof v === 'string'
-            ? `{ value: ${i}, label: '${v}' }`
-            : `{ value: ${v}, label: '${v}' }`
-        ).join(', ');
-        typeStr = `, type: 'singleSelect' as const, valueOptions: [${valueOptions}]`;
-        width = 150;
+        const isNullable = Array.isArray(prop.type) && prop.type.includes('null');
+        const enumOptions = enumValues.map((v, i) => intEnumOption(v, i)).join(', ');
+        const nullOption = `{ value: '' as const, label: '-- None --' }`;
+        const valueOptions = isNullable ? `${nullOption}, ${enumOptions}` : enumOptions;
+        const nullableExtras = isNullable
+          ? `,\n      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n      valueGetter: (value: any) => value ?? '',\n      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n      valueSetter: (value: any, row: any) => ({ ...row, ${key}: value === '' ? null : value })`
+          : '';
+        columns.push(`    { field: '${key}', headerName: '${headerName}', width: 150, editable: editable, type: 'singleSelect' as const, valueOptions: [${valueOptions}]${nullableExtras} },`);
+        continue;
       } else if (prop.type === 'integer' || (Array.isArray(prop.type) && prop.type.includes('integer'))) {
         typeStr = ", type: 'number'";
         width = 100;
       } else if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
         // DateTime field - needs custom renderEditCell
-        needsDateTimeImports = true;
-        dateTimeFields.push(key);
         width = 250;
 
         columns.push(`    {
@@ -1159,11 +1175,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     const prop = filteredProps[p];
     const stateName = safeVarName(p);
     const enumValues: (string | number)[] = (prop as any).enum;
-    const options = enumValues.map((v, i) =>
-      typeof v === 'string'
-        ? `{ value: ${i}, label: '${v}' }`
-        : `{ value: ${v}, label: '${v}' }`
-    ).join(', ');
+    const options = enumValues.map((v, i) => intEnumOption(v, i)).join(', ');
     return `  const ${stateName}Options = [${options}];`;
   }).join('\n');
 
@@ -1723,19 +1735,22 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   const dateTimeFields: string[] = [];
   const imageFields: string[] = [];
   const booleanFields: string[] = [];
+  const enumIntegerViewFields: string[] = [];
   const otherFields: string[] = [];
-  
+
   parentProps.forEach(p => {
     const prop = filteredProps[p];
     const propType = Array.isArray(prop.type) ? prop.type.find((t: string) => t !== 'null') : prop.type;
     const format = (prop as any).format;
-    
+
     if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
       dateTimeFields.push(p);
     } else if (propType === 'string' && format === 'uri') {
       imageFields.push(p);
     } else if (propType === 'boolean') {
       booleanFields.push(p);
+    } else if ((propType === 'integer' || propType === 'number') && Array.isArray((prop as any).enum)) {
+      enumIntegerViewFields.push(p);
     } else {
       otherFields.push(p);
     }
@@ -1789,8 +1804,29 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
         label="${label}"
       />`;
   }).join('\n');
-  
-  const parentTextFields = [textFields, booleanFieldsJsx, dateTimeFieldsJsx, imageFieldsJsx].filter(f => f).join('\n');
+
+  // Generate option constants and read-only TextFields for integer enum fields
+  const enumIntegerViewOptionSetups = enumIntegerViewFields.map(p => {
+    const prop = filteredProps[p];
+    const stateName = safeVarName(p);
+    const enumValues: (string | number)[] = (prop as any).enum;
+    const options = enumValues.map((v, i) => intEnumOption(v, i)).join(', ');
+    return `  const ${stateName}Options = [${options}];`;
+  }).join('\n');
+
+  const enumIntegerViewFieldsJsx = enumIntegerViewFields.map(p => {
+    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const stateName = safeVarName(p);
+    return `      <TextField
+        label="${label}"
+        value={${stateName}Options.find(o => o.value === src.${p})?.label ?? ''}
+        fullWidth
+        margin="normal"
+        aria-readonly
+      />`;
+  }).join('\n');
+
+  const parentTextFields = [textFields, enumIntegerViewFieldsJsx, booleanFieldsJsx, dateTimeFieldsJsx, imageFieldsJsx].filter(f => f).join('\n');
   
   // Check if any child has DateTime fields or many-to-one relationships
   // (both require 'use client' due to functions in column definitions)
@@ -1822,7 +1858,7 @@ import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
-  return (
+${enumIntegerViewOptionSetups ? enumIntegerViewOptionSetups + '\n' : ''}  return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <h1>${parentTitle}</h1>
@@ -1919,7 +1955,7 @@ import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
-${columnVariables}
+${enumIntegerViewOptionSetups ? enumIntegerViewOptionSetups + '\n' : ''}${columnVariables}
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -1953,6 +1989,11 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
 
   let displayFieldsCode = '';
   let primaryFieldCode = '';
+
+  // Determine which x-display fields need pre-formatting for list display
+  const modelProps = modelDef?.properties ?? {};
+  const formattingEntries: string[] = []; // e.g. `day_of_week: labels[item.day_of_week] ?? ''`
+
   if (xDisplay && Array.isArray(xDisplay)) {
     const fields = xDisplay.map((item: any) => {
       const fieldName = Object.keys(item)[0];
@@ -1961,6 +2002,23 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
         word.charAt(0).toUpperCase() + word.slice(1)
       ).join(' ');
       const width = config?.width || 200;
+
+      // Collect formatting for fields that need it
+      const prop = modelProps[fieldName];
+      if (prop) {
+        const propType = Array.isArray(prop.type) ? prop.type.find((t: string) => t !== 'null') : prop.type;
+        const format = (prop as any).format;
+        const enumValues: (string | number)[] | undefined = (prop as any).enum;
+
+        if ((propType === 'integer' || propType === 'number') && Array.isArray(enumValues) && hasStringLabels(enumValues)) {
+          // Integer field with string labels: map index → label
+          const labels = enumValues.map(v => `'${v}'`).join(', ');
+          formattingEntries.push(`    ${fieldName}: ([${labels}] as const)[item.${fieldName} as number] ?? '',`);
+        } else if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
+          // Date/datetime/time: format as Swedish locale string for a YYYY-MM-DD HH:MM:SS display
+          formattingEntries.push(`    ${fieldName}: item.${fieldName} ? new Date(item.${fieldName}).toLocaleString('sv-SE') : '',`);
+        }
+      }
 
       return `    { field: '${fieldName}', headerName: '${headerName}', width: ${width} }`;
     }).join(',\n');
@@ -1977,6 +2035,13 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
     }
   }
 
+  const needsFormatting = formattingEntries.length > 0;
+  const formattedVar = `formatted${parentPascal}s`;
+  const formattingBlock = needsFormatting
+    ? `  const ${formattedVar} = ${parentCamel}s.map(item => ({\n    ...item,\n${formattingEntries.join('\n')}\n  }));\n`
+    : '';
+  const srcVar = needsFormatting ? formattedVar : `${parentCamel}s`;
+
   const removeImport = canDelete ? `\nimport { remove${parentPascal} } from '@/lib/${parent}/actions';` : '';
   const removeActionProp = canDelete ? ` removeAction={remove${parentPascal}}` : '';
 
@@ -1991,7 +2056,7 @@ ${listComponentImport}${removeImport}
 
 export default async function ${parentPascal}sPage() {
   const { ${parentCamel}s, userPermissions } = await get${parentPascal}ListPageData();
-  return <${listComponent} src={${parentCamel}s} basePath="/${parent}"${removeActionProp} entityLabel="${parentTitle}"${primaryFieldCode}${displayFieldsCode}
+${formattingBlock}  return <${listComponent} src={${srcVar}} basePath="/${parent}"${removeActionProp} entityLabel="${parentTitle}"${primaryFieldCode}${displayFieldsCode}
     permissions={userPermissions} />;
 }
 `;
