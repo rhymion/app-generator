@@ -30,6 +30,7 @@ interface DataGridClientProps<T extends BaseEntity> {
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];
   permissions?: ModelPermissions;
+  primaryField?: keyof T;
 }
 
 export default function DataGridClient<T extends BaseEntity>({ 
@@ -39,6 +40,7 @@ export default function DataGridClient<T extends BaseEntity>({
   entityLabel = 'Item',
   displayFields,
   permissions = { create: true, read: true, update: true, delete: true },
+  primaryField = 'name' as keyof T,
 }: DataGridClientProps<T>) {
   const [items, setItems] = useState(src);
   const [isPending, startTransition] = useTransition();
@@ -90,15 +92,17 @@ export default function DataGridClient<T extends BaseEntity>({
   ];
 
   const dataColumns: GridColDef<T>[] = defaultDisplayFields.map(fieldConfig => {
-    // Special handling for name field to include link to view page
-    if (fieldConfig.field === 'name') {
+    // Special handling for primary field to include link to view page
+    if (fieldConfig.field === primaryField) {
       return {
         field: fieldConfig.field as string,
         headerName: fieldConfig.headerName,
         width: fieldConfig.width || 150,
         renderCell: (params) => {
-          const nameValue = params.row[fieldConfig.field];
-          return <Link href={`${basePath}/view/${params.id}`}>{String(nameValue || params.id)}</Link>;
+          const fieldValue = params.row[fieldConfig.field];
+          return <Link href={`${basePath}/view/${params.id}`}>
+            {`${(fieldValue && typeof fieldValue === 'object' && 'name' in fieldValue ? fieldValue.name : String(fieldValue || params.id))}`}
+          </Link>;
         },
       };
     }

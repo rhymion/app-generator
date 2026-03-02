@@ -64,6 +64,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
       entityLabel={entityLabel}
       displayFields={displayFields}
       permissions={permissions}
+      primaryField={primaryField}
     />
   );
 }
