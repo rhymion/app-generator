@@ -29,8 +29,8 @@ export type FormViewProps = Readonly<{
     id: string;
     user_account_id: string;
     day_of_week: number;
-    start_time: Date;
-    end_time: Date;
+    start_time: Date | null;
+    end_time: Date | null;
     user_account?: UserAccount | null;
     created_at?: string | Date;
     updated_at?: string | Date;

@@ -8,8 +8,8 @@ export default async function AddShiftPage() {
   const src = {
     id: '',
     user_account_id: '',
-    start_time: new Date(),
-    end_time: new Date(),
+    start_time: null,
+    end_time: null,
     status: 0,
   };
   return <FormUpsert src={src} isEdit={false} permissions={userPermissions} allUserAccounts={userAccountsData.userAccounts} userAccountPermissions={userAccountsData.userPermissions} />;

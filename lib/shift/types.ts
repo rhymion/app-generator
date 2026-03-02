@@ -28,8 +28,8 @@ export type FormViewProps = Readonly<{
   src: {
     id: string;
     user_account_id: string;
-    start_time: Date;
-    end_time: Date;
+    start_time: Date | null;
+    end_time: Date | null;
     status: number;
     user_account?: UserAccount | null;
     created_at?: string | Date;

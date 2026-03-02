@@ -11,7 +11,7 @@ export default async function AddParent1Page() {
     organization_id: '',
     description: '',
     price: 0,
-    due_date: new Date(),
+    due_date: null,
     image_url: '',
     parent1_child1s: [],
     parent1_child2s: [],

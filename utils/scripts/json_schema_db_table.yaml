@@ -986,10 +986,10 @@ definitions:
           - Saturday
       start_time:
         type: string
-        format: date-time
+        format: time
       end_time:
         type: string
-        format: date-time
+        format: time
 
   shift_template_detail:
     x-generate:

@@ -9,8 +9,8 @@ export default async function AddShiftTemplatePage() {
     id: '',
     user_account_id: '',
     day_of_week: 0,
-    start_time: new Date(),
-    end_time: new Date(),
+    start_time: null,
+    end_time: null,
   };
   return <FormUpsert src={src} isEdit={false} permissions={userPermissions} allUserAccounts={userAccountsData.userAccounts} userAccountPermissions={userAccountsData.userPermissions} />;
 }

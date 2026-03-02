@@ -34,8 +34,8 @@ export default function FormView({ src, permissions }: FormViewProps) {
         margin="normal"
         aria-readonly
       />
-      <DateTimeWrapper label="Start Time" date_time={src.start_time || null} readOnly />
-      <DateTimeWrapper label="End Time" date_time={src.end_time || null} readOnly />
+      <DateTimeWrapper label="Start Time" date_time={src.start_time} readOnly />
+      <DateTimeWrapper label="End Time" date_time={src.end_time} readOnly />
       <AuditInfo src={src} />
     </div>
   );

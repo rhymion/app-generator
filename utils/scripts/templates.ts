@@ -80,7 +80,7 @@ export function generateTypes(parent: string, children: ChildInfo[], schema: Sch
   const formViewParentProps = filteredProps
     ? Object.entries(filteredProps)
           .filter(([key]) => key !== 'created_at' && key !== 'updated_at' && key !== 'creator_id')
-        .map(([key, prop]) => `    ${key}: ${getTsType(prop)};`)
+        .map(([key, prop]) => `    ${key}: ${getTsType(prop, true)};`)
         .join('\n')
     : '';
 
@@ -1078,9 +1078,9 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     const camelCase = safeVarName(p);
     const pascalCase = toPascalCaseFromVar(camelCase);
-    
+    const showDateStr = filteredProps[p].format === 'time' ? '\n        show_date={false}' : '';
     return `      <DateTimeWrapper 
-        label="${label}" 
+        label="${label}" ${showDateStr}
         date_time={${camelCase} ? ${camelCase}.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => set${pascalCase}(newValue)}
       />`;
@@ -2085,7 +2085,7 @@ export function generatePageNew(parent: string, children: ChildInfo[], schema: S
       
       // Date/DateTime/Time fields
       if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
-        return isRequired ? `    ${key}: new Date(),` : `    ${key}: null,`;
+        return `    ${key}: null,`;
       }
       
       // Number/Integer fields

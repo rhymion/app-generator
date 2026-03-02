@@ -62,7 +62,7 @@ export type FormViewProps = Readonly<{
     organization_id: string;
     description: string | null;
     price: number;
-    due_date: Date;
+    due_date: Date | null;
     image_url: string | null;
     organization?: Organization | null;
     parent1_child1s: Parent1Child1[];

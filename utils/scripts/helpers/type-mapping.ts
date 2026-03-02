@@ -31,7 +31,7 @@ export function mapJsonTypeToTs(type: string): string {
  * @param prop - JSON Schema property definition
  * @returns TypeScript type as string
  */
-export function getTsType(prop: SchemaProperty): string {
+export function getTsType(prop: SchemaProperty, forViewProps: boolean = false): string {
   // Check for date/datetime/time format
   const format = (prop as any).format;
   const isDateType = format === 'date' || format === 'date-time' || format === 'time';
@@ -40,7 +40,7 @@ export function getTsType(prop: SchemaProperty): string {
     // Union type for nullable
     if (isDateType) {
       // For nullable date types
-      return prop.type.includes('null') ? 'Date | null' : 'Date';
+      return prop.type.includes('null') || forViewProps ? 'Date | null' : 'Date';
     }
     return prop.type.map(t => t === 'null' ? 'null' : mapJsonTypeToTs(t)).join(' | ');
   }
@@ -50,7 +50,7 @@ export function getTsType(prop: SchemaProperty): string {
   }
 
   if (isDateType && prop.type === 'string') {
-    return 'Date';
+    return forViewProps ? 'Date | null' : 'Date';
   }
 
   return mapJsonTypeToTs(prop.type);

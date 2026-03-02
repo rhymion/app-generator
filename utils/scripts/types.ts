@@ -2,6 +2,7 @@ export interface SchemaProperty {
   type: string | string[];
   description?: string;
   pattern?: string;
+  format?: string;
   minLength?: number;
   minimum?: number;
   default?: any;

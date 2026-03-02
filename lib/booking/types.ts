@@ -29,8 +29,8 @@ export type FormViewProps = Readonly<{
     id: string;
     name: string;
     resource_id: string;
-    start_time?: Date | null;
-    end_time?: Date | null;
+    start_time: Date | null;
+    end_time: Date | null;
     resource?: Resource | null;
     created_at?: string | Date;
     updated_at?: string | Date;
