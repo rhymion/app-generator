@@ -856,6 +856,7 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
       } else if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
         // DateTime field - needs custom renderEditCell
         width = 250;
+        const showDateStr = format === 'time' ? '\n      show_date={false}' : '';
 
         columns.push(`    {
       field: '${key}',
@@ -865,7 +866,7 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
       type: 'dateTime',
       renderEditCell: (params: GridRenderEditCellParams) => (
         <DateTimeWrapper
-          label="${headerName}"
+          label="${headerName}"${showDateStr}
           date_time={params.value ? new Date(params.value) : null}
           onChange={(newValue: dayjs.Dayjs | null) => {
             params.api.setEditCellValue({
