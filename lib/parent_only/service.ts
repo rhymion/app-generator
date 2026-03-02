@@ -27,15 +27,17 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 }
 
 export async function addParentOnly(creatorId: string, name: string, description: string | null, loginTime: Date | null, logoutTime: Date | null) {
-  return await prisma.parent_only.create({
-    data: {
-      name: name,
-      description: description,
-      login_time: loginTime,
-      logout_time: logoutTime,
-      creator_id: creatorId,
-      updater_id: creatorId,
-    },
+  return await prisma.$transaction(async (tx) => {
+    return await tx.parent_only.create({
+      data: {
+        name: name,
+        description: description,
+        login_time: loginTime,
+        logout_time: logoutTime,
+        creator_id: creatorId,
+        updater_id: creatorId,
+      },
+    });
   });
 }
 
@@ -47,10 +49,10 @@ export async function updateParentOnly(updaterId: string, id: string, name: stri
     return await tx.parent_only.update({
       where: { id },
       data: {
-      name: name,
-      description: description,
-      login_time: loginTime,
-      logout_time: logoutTime,
+        name: name,
+        description: description,
+        login_time: loginTime,
+        logout_time: logoutTime,
         updater_id: updaterId,
       },
     });

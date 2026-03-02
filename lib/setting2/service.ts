@@ -26,13 +26,15 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 }
 
 export async function addSetting2(creatorId: string, name: string, email: string, password: string) {
-  return await prisma.user_account.create({
-    data: {
-      name: name,
-      email: email,
-      password: password,
-      creator_id: creatorId,
-      updater_id: creatorId,
-    },
+  return await prisma.$transaction(async (tx) => {
+    return await tx.user_account.create({
+      data: {
+        name: name,
+        email: email,
+        password: password,
+        creator_id: creatorId,
+        updater_id: creatorId,
+      },
+    });
   });
 }

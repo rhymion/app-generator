@@ -61,14 +61,15 @@ export async function addProcedure(creatorId: string, name: string, description:
     }
   }
 
-  return await prisma.procedure.create({
-    data: {
-      name: name,
-      description: description,
-      parent_id: parentId,
-      assignee_id: assigneeId,
-      creator_id: creatorId,
-      updater_id: creatorId,
+  return await prisma.$transaction(async (tx) => {
+    return await tx.procedure.create({
+      data: {
+        name: name,
+        description: description,
+        parent_id: parentId,
+        assignee_id: assigneeId,
+        creator_id: creatorId,
+        updater_id: creatorId,
       children: {
         connect: childrenIds.map((id) => ({ id })),
       },
@@ -78,7 +79,8 @@ export async function addProcedure(creatorId: string, name: string, description:
       followed_by: {
         connect: followedByIds.map((id) => ({ id })),
       },
-    },
+      },
+    });
   });
 }
 
@@ -115,10 +117,10 @@ export async function updateProcedure(updaterId: string, id: string, name: strin
     return await tx.procedure.update({
       where: { id },
       data: {
-      name: name,
-      description: description,
-      parent_id: parentId,
-      assignee_id: assigneeId,
+        name: name,
+        description: description,
+        parent_id: parentId,
+        assignee_id: assigneeId,
         updater_id: updaterId,
       children: {
         set: childrenIds.map((id) => ({ id })),

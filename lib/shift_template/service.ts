@@ -27,15 +27,17 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 }
 
 export async function addShiftTemplate(creatorId: string, userAccountId: string, dayOfWeek: number, startTime: Date, endTime: Date) {
-  return await prisma.shift_template.create({
-    data: {
-      user_account_id: userAccountId,
-      day_of_week: dayOfWeek,
-      start_time: startTime,
-      end_time: endTime,
-      creator_id: creatorId,
-      updater_id: creatorId,
-    },
+  return await prisma.$transaction(async (tx) => {
+    return await tx.shift_template.create({
+      data: {
+        user_account_id: userAccountId,
+        day_of_week: dayOfWeek,
+        start_time: startTime,
+        end_time: endTime,
+        creator_id: creatorId,
+        updater_id: creatorId,
+      },
+    });
   });
 }
 
@@ -47,10 +49,10 @@ export async function updateShiftTemplate(updaterId: string, id: string, userAcc
     return await tx.shift_template.update({
       where: { id },
       data: {
-      user_account_id: userAccountId,
-      day_of_week: dayOfWeek,
-      start_time: startTime,
-      end_time: endTime,
+        user_account_id: userAccountId,
+        day_of_week: dayOfWeek,
+        start_time: startTime,
+        end_time: endTime,
         updater_id: updaterId,
       },
     });

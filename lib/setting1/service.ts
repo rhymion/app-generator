@@ -28,16 +28,18 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 }
 
 export async function addSetting1(creatorId: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null) {
-  return await prisma.user_account.create({
-    data: {
-      name: name,
-      email: email,
-      password: password,
-      api_key: apiKey,
-      avatar: avatar,
-      creator_id: creatorId,
-      updater_id: creatorId,
-    },
+  return await prisma.$transaction(async (tx) => {
+    return await tx.user_account.create({
+      data: {
+        name: name,
+        email: email,
+        password: password,
+        api_key: apiKey,
+        avatar: avatar,
+        creator_id: creatorId,
+        updater_id: creatorId,
+      },
+    });
   });
 }
 
@@ -49,11 +51,11 @@ export async function updateSetting1(updaterId: string, id: string, name: string
     return await tx.user_account.update({
       where: { id },
       data: {
-      name: name,
-      email: email,
-      password: password,
-      api_key: apiKey,
-      avatar: avatar,
+        name: name,
+        email: email,
+        password: password,
+        api_key: apiKey,
+        avatar: avatar,
         updater_id: updaterId,
       },
     });

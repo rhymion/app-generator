@@ -29,17 +29,19 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 }
 
 export async function addPermission(creatorId: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null) {
-  return await prisma.permission.create({
-    data: {
-      name: name,
-      create: create,
-      read: read,
-      update: update,
-      delete: deleteValue,
-      role_id: roleId,
-      creator_id: creatorId,
-      updater_id: creatorId,
-    },
+  return await prisma.$transaction(async (tx) => {
+    return await tx.permission.create({
+      data: {
+        name: name,
+        create: create,
+        read: read,
+        update: update,
+        delete: deleteValue,
+        role_id: roleId,
+        creator_id: creatorId,
+        updater_id: creatorId,
+      },
+    });
   });
 }
 
@@ -51,12 +53,12 @@ export async function updatePermission(updaterId: string, id: string, name: stri
     return await tx.permission.update({
       where: { id },
       data: {
-      name: name,
-      create: create,
-      read: read,
-      update: update,
-      delete: deleteValue,
-      role_id: roleId,
+        name: name,
+        create: create,
+        read: read,
+        update: update,
+        delete: deleteValue,
+        role_id: roleId,
         updater_id: updaterId,
       },
     });

@@ -27,15 +27,17 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 }
 
 export async function addShift(creatorId: string, userAccountId: string, startTime: Date, endTime: Date, status: number) {
-  return await prisma.shift.create({
-    data: {
-      user_account_id: userAccountId,
-      start_time: startTime,
-      end_time: endTime,
-      status: status,
-      creator_id: creatorId,
-      updater_id: creatorId,
-    },
+  return await prisma.$transaction(async (tx) => {
+    return await tx.shift.create({
+      data: {
+        user_account_id: userAccountId,
+        start_time: startTime,
+        end_time: endTime,
+        status: status,
+        creator_id: creatorId,
+        updater_id: creatorId,
+      },
+    });
   });
 }
 
@@ -47,10 +49,10 @@ export async function updateShift(updaterId: string, id: string, userAccountId: 
     return await tx.shift.update({
       where: { id },
       data: {
-      user_account_id: userAccountId,
-      start_time: startTime,
-      end_time: endTime,
-      status: status,
+        user_account_id: userAccountId,
+        start_time: startTime,
+        end_time: endTime,
+        status: status,
         updater_id: updaterId,
       },
     });

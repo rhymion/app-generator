@@ -30,15 +30,16 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 }
 
 export async function addXxxxxXxxxx(creatorId: string, name: string, description: string | null, team: string | null, yyyyyYyyyysItems: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]) {
-  return await prisma.xxxxx_xxxxx.create({
-    data: {
-      name: name,
-      description: description,
-      team: team,
-      creator_id: creatorId,
-      updater_id: creatorId,
-      yyyyy_yyyyys: {
-        create: yyyyyYyyyysItems.map(f => ({
+  return await prisma.$transaction(async (tx) => {
+    return await tx.xxxxx_xxxxx.create({
+      data: {
+        name: name,
+        description: description,
+        team: team,
+        creator_id: creatorId,
+        updater_id: creatorId,
+        yyyyy_yyyyys: {
+          create: yyyyyYyyyysItems.map(f => ({
           name: f.name,
           type: f.type,
           max_length: f.max_length,
@@ -46,9 +47,10 @@ export async function addXxxxxXxxxx(creatorId: string, name: string, description
           regex: f.regex,
           required: f.required,
           written_by: f.written_by,
-        })),
+          })),
+        },
       },
-    },
+    });
   });
 }
 
@@ -60,9 +62,9 @@ export async function updateXxxxxXxxxx(updaterId: string, id: string, name: stri
     return await tx.xxxxx_xxxxx.update({
       where: { id },
       data: {
-      name: name,
-      description: description,
-      team: team,
+        name: name,
+        description: description,
+        team: team,
         updater_id: updaterId,
       yyyyy_yyyyys: {
         deleteMany: {},

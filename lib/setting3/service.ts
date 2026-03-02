@@ -32,8 +32,8 @@ export async function updateSetting3(updaterId: string, id: string, name: string
     return await tx.user_account.update({
       where: { id },
       data: {
-      name: name,
-      email: email,
+        name: name,
+        email: email,
         updater_id: updaterId,
       },
     });

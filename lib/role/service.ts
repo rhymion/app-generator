@@ -29,16 +29,18 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 }
 
 export async function addRole(creatorId: string, name: string, description: string | null, userAccountsIds: string[]) {
-  return await prisma.role.create({
-    data: {
-      name: name,
-      description: description,
-      creator_id: creatorId,
-      updater_id: creatorId,
+  return await prisma.$transaction(async (tx) => {
+    return await tx.role.create({
+      data: {
+        name: name,
+        description: description,
+        creator_id: creatorId,
+        updater_id: creatorId,
       user_accounts: {
         connect: userAccountsIds.map((id) => ({ id })),
       },
-    },
+      },
+    });
   });
 }
 
@@ -50,8 +52,8 @@ export async function updateRole(updaterId: string, id: string, name: string, de
     return await tx.role.update({
       where: { id },
       data: {
-      name: name,
-      description: description,
+        name: name,
+        description: description,
         updater_id: updaterId,
       user_accounts: {
         set: userAccountsIds.map((id) => ({ id })),

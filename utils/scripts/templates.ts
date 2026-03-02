@@ -2297,7 +2297,7 @@ export function generateService(parent: string, children: ChildInfo[], schema: S
       }).join(', ')
     : '';
 
-  const parentDataObj = parentPropInfos.map(p => `      ${p.prop}: ${p.varName},`).join('\n');
+  const parentDataObj = parentPropInfos.map(p => `        ${p.prop}: ${p.varName},`).join('\n');
 
   const normalizeKind = (def: SchemaProperty): 'date' | 'number' | 'boolean' | 'string' | 'other' => {
     const propType = Array.isArray(def.type) ? def.type.find(t => t !== 'null') : def.type;
@@ -2351,12 +2351,14 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
     return `${utilityCode}
 ${canCreate ? `
 export async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}) {
-  return await prisma.${model}.create({
-    data: {
+  return await prisma.$transaction(async (tx) => {
+    return await tx.${model}.create({
+      data: {
 ${parentDataObj}
-      creator_id: creatorId,
-      updater_id: creatorId,
-    },
+        creator_id: creatorId,
+        updater_id: creatorId,
+      },
+    });
   });
 }
 ` : ''}${canUpdate ? `
@@ -2445,7 +2447,7 @@ export async function delete${parentPascal}(ids: string[]) {
     if (useConnect) {
       return `      ${propertyName}: {\n        connect: ${childVar}Ids.map((id) => ({ id })),\n      },`;
     } else {
-      return `      ${propertyName}: {\n        create: ${childVar}Items.map(f => ({\n${fieldMapCreate}\n        })),\n      },`;
+      return `        ${propertyName}: {\n          create: ${childVar}Items.map(f => ({\n${fieldMapCreate}\n          })),\n        },`;
     }
   }).join('\n');
 
@@ -2498,13 +2500,15 @@ export async function delete${parentPascal}(ids: string[]) {
   return `${utilityCode}
 ${canCreate ? `
 export async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}${parentParamsWithTypes && childParamsForAdd ? ', ' : ''}${childParamsForAdd}) {${selfChildValidation ? `\n  const id = null;${selfChildValidation}` : ''}
-  return await prisma.${model}.create({
-    data: {
+  return await prisma.$transaction(async (tx) => {
+    return await tx.${model}.create({
+      data: {
 ${parentDataObj}
-      creator_id: creatorId,
-      updater_id: creatorId,
+        creator_id: creatorId,
+        updater_id: creatorId,
 ${childNestedCreate}
-    },
+      },
+    });
   });
 }
 ` : ''}${canUpdate ? `

@@ -37,18 +37,19 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 }
 
 export async function addParent1(creatorId: string, name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { name: string }[]) {
-  return await prisma.parent1.create({
-    data: {
-      name: name,
-      organization_id: organizationId,
-      description: description,
-      price: price,
-      due_date: dueDate,
-      image_url: imageUrl,
-      creator_id: creatorId,
-      updater_id: creatorId,
-      parent1_child1s: {
-        create: parent1Child1sItems.map(f => ({
+  return await prisma.$transaction(async (tx) => {
+    return await tx.parent1.create({
+      data: {
+        name: name,
+        organization_id: organizationId,
+        description: description,
+        price: price,
+        due_date: dueDate,
+        image_url: imageUrl,
+        creator_id: creatorId,
+        updater_id: creatorId,
+        parent1_child1s: {
+          create: parent1Child1sItems.map(f => ({
           order: f.order,
           name: f.name,
           type: f.type,
@@ -57,22 +58,23 @@ export async function addParent1(creatorId: string, name: string, organizationId
           regex: f.regex,
           required: f.required,
           written_by: f.written_by,
-        })),
-      },
-      parent1_child2s: {
-        create: parent1Child2sItems.map(f => ({
+          })),
+        },
+        parent1_child2s: {
+          create: parent1Child2sItems.map(f => ({
           name: f.name,
           required: f.required,
           start_date: f.start_date,
           end_date: f.end_date,
-        })),
-      },
-      parent1_lists: {
-        create: parent1ListsItems.map(f => ({
+          })),
+        },
+        parent1_lists: {
+          create: parent1ListsItems.map(f => ({
           name: f.name,
-        })),
+          })),
+        },
       },
-    },
+    });
   });
 }
 
@@ -84,12 +86,12 @@ export async function updateParent1(updaterId: string, id: string, name: string,
     return await tx.parent1.update({
       where: { id },
       data: {
-      name: name,
-      organization_id: organizationId,
-      description: description,
-      price: price,
-      due_date: dueDate,
-      image_url: imageUrl,
+        name: name,
+        organization_id: organizationId,
+        description: description,
+        price: price,
+        due_date: dueDate,
+        image_url: imageUrl,
         updater_id: updaterId,
       parent1_child1s: {
         deleteMany: {},

@@ -29,14 +29,15 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 }
 
 export async function addDbTable(creatorId: string, name: string, description: string | null, fieldsItems: { name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean }[]) {
-  return await prisma.db_table.create({
-    data: {
-      name: name,
-      description: description,
-      creator_id: creatorId,
-      updater_id: creatorId,
-      fields: {
-        create: fieldsItems.map(f => ({
+  return await prisma.$transaction(async (tx) => {
+    return await tx.db_table.create({
+      data: {
+        name: name,
+        description: description,
+        creator_id: creatorId,
+        updater_id: creatorId,
+        fields: {
+          create: fieldsItems.map(f => ({
           name: f.name,
           type: f.type,
           reference_id: f.reference_id || null,
@@ -44,9 +45,10 @@ export async function addDbTable(creatorId: string, name: string, description: s
           max: f.max,
           regex: f.regex,
           required: f.required,
-        })),
+          })),
+        },
       },
-    },
+    });
   });
 }
 
@@ -58,8 +60,8 @@ export async function updateDbTable(updaterId: string, id: string, name: string,
     return await tx.db_table.update({
       where: { id },
       data: {
-      name: name,
-      description: description,
+        name: name,
+        description: description,
         updater_id: updaterId,
       fields: {
         deleteMany: {},

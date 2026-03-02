@@ -32,27 +32,29 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 }
 
 export async function addResource(creatorId: string, name: string, description: string | null, organizationId: string, resourceAttachmentsItems: { order: number; name: string; path: string }[], resourceImagesItems: { name: string; path: string }[]) {
-  return await prisma.resource.create({
-    data: {
-      name: name,
-      description: description,
-      organization_id: organizationId,
-      creator_id: creatorId,
-      updater_id: creatorId,
-      resource_attachments: {
-        create: resourceAttachmentsItems.map(f => ({
+  return await prisma.$transaction(async (tx) => {
+    return await tx.resource.create({
+      data: {
+        name: name,
+        description: description,
+        organization_id: organizationId,
+        creator_id: creatorId,
+        updater_id: creatorId,
+        resource_attachments: {
+          create: resourceAttachmentsItems.map(f => ({
           order: f.order,
           name: f.name,
           path: f.path,
-        })),
-      },
-      resource_images: {
-        create: resourceImagesItems.map(f => ({
+          })),
+        },
+        resource_images: {
+          create: resourceImagesItems.map(f => ({
           name: f.name,
           path: f.path,
-        })),
+          })),
+        },
       },
-    },
+    });
   });
 }
 
@@ -64,9 +66,9 @@ export async function updateResource(updaterId: string, id: string, name: string
     return await tx.resource.update({
       where: { id },
       data: {
-      name: name,
-      description: description,
-      organization_id: organizationId,
+        name: name,
+        description: description,
+        organization_id: organizationId,
         updater_id: updaterId,
       resource_attachments: {
         deleteMany: {},
