@@ -415,10 +415,11 @@ definitions:
       - email
       - password
     x-display:
-      - name: 
-          width: 150
-      - email: 
-          width: 400
+      table:
+        - name: 
+            width: 150
+        - email: 
+            width: 400
     properties:
       id:
         type: string
@@ -681,10 +682,11 @@ definitions:
       - update
       - delete
     x-display:
-      - name: 
-          width: 200
-      - role: 
-          width: 200
+      table:
+        - name: 
+            width: 200
+        - role: 
+            width: 200
     properties:
       id:
         type: string
@@ -907,6 +909,20 @@ definitions:
       - resource_id
       - start_time
       - end_time
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 200
+        - resource:
+            width: 200
+        - start_time:
+            width: 200
+        - end_time:
+            width: 200
+      chart:
+        span: week
+        row_by: resource
     properties:
       id:
         type: string
@@ -956,11 +972,12 @@ definitions:
       - start_time
       - end_time
     x-display:
-      - user_account: 
-          primary: true
-          width: 200
-      - day_of_week: 
-          width: 100
+      table:
+        - user_account: 
+            primary: true
+            width: 200
+        - day_of_week: 
+            width: 100
     properties:
       id:
         type: string
@@ -1019,13 +1036,17 @@ definitions:
       - end_time
       - status
     x-display:
-      - user_account: 
-          primary: true
-          width: 200
-      - start_time:
-          width: 200
-      - end_time:
-          width: 200
+      table:
+        - user_account: 
+            primary: true
+            width: 200
+        - start_time:
+            width: 200
+        - end_time:
+            width: 200
+      chart:
+        span: week 
+        row_by: user_account
     properties:
       id:
         type: string

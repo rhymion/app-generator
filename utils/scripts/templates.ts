@@ -2018,6 +2018,12 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
   const modelDef = schema.definitions[model];
   const xDisplay = (modelDef as any)?.['x-display'];
 
+  // Support nested format { table: [...], chart: {...} } as well as legacy flat array
+  const xDisplayTable: any[] | null = (xDisplay && !Array.isArray(xDisplay))
+    ? (Array.isArray(xDisplay.table) ? xDisplay.table : null)
+    : (Array.isArray(xDisplay) ? xDisplay : null);
+  const hasChart = !!(xDisplay && !Array.isArray(xDisplay) && xDisplay.chart);
+
   let displayFieldsCode = '';
   let primaryFieldCode = '';
 
@@ -2025,8 +2031,8 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
   const modelProps = modelDef?.properties ?? {};
   const formattingEntries: string[] = []; // e.g. `day_of_week: labels[item.day_of_week] ?? ''`
 
-  if (xDisplay && Array.isArray(xDisplay)) {
-    const fields = xDisplay.map((item: any) => {
+  if (xDisplayTable) {
+    const fields = xDisplayTable.map((item: any) => {
       const fieldName = Object.keys(item)[0];
       const config = item[fieldName];
       const headerName = fieldName.split('_').map((word: string) =>
@@ -2035,7 +2041,7 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
       const width = config?.width || 200;
 
       // Collect formatting for fields that need it
-      const prop = modelProps[fieldName];
+      const prop = (modelProps as any)[fieldName];
       if (prop) {
         const propType = Array.isArray(prop.type) ? prop.type.find((t: string) => t !== 'null') : prop.type;
         const format = (prop as any).format;
@@ -2056,7 +2062,7 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
 
     displayFieldsCode = ` displayFields={[\n${fields}\n  ]}`;
 
-    const primaryItem = xDisplay.find((item: any) => {
+    const primaryItem = xDisplayTable.find((item: any) => {
       const config = item[Object.keys(item)[0]];
       return config?.primary === true;
     });
@@ -2082,6 +2088,31 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
     ? `import CardListClient from '@/components/CardListClient';`
     : `import ResponsiveListClient from '@/components/ResponsiveListClient';`;
 
+  const chartImports = hasChart
+    ? `\nimport Link from '@mui/material/Link';\nimport Button from '@mui/material/Button';\nimport Box from '@mui/material/Box';\nimport BarChartIcon from '@mui/icons-material/BarChart';`
+    : '';
+
+  if (hasChart) {
+    return `import { get${parentPascal}ListPageData } from '@/lib/${parent}/getters';
+${listComponentImport}${removeImport}${chartImports}
+
+export default async function ${parentPascal}sPage() {
+  const { ${parentCamel}s, userPermissions } = await get${parentPascal}ListPageData();
+${formattingBlock}  return (
+    <Box>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 1 }}>
+        <Link href="/${parent}/chart" underline="none">
+          <Button variant="outlined" size="medium" startIcon={<BarChartIcon />}>Chart</Button>
+        </Link>
+      </Box>
+      <${listComponent} src={${srcVar}} basePath="/${parent}"${removeActionProp} entityLabel="${parentTitle}"${primaryFieldCode}${displayFieldsCode}
+        permissions={userPermissions} />
+    </Box>
+  );
+}
+`;
+  }
+
   return `import { get${parentPascal}ListPageData } from '@/lib/${parent}/getters';
 ${listComponentImport}${removeImport}
 
@@ -2089,6 +2120,204 @@ export default async function ${parentPascal}sPage() {
   const { ${parentCamel}s, userPermissions } = await get${parentPascal}ListPageData();
 ${formattingBlock}  return <${listComponent} src={${srcVar}} basePath="/${parent}"${removeActionProp} entityLabel="${parentTitle}"${primaryFieldCode}${displayFieldsCode}
     permissions={userPermissions} />;
+}
+`;
+}
+
+export function generateChartGetters(parent: string, schema: Schema, modelName?: string): string {
+  const model = modelName ?? parent;
+  const parentPascal = toPascalCase(parent);
+  const modelDef = schema.definitions[model];
+  const xDisplay = (modelDef as any)?.['x-display'];
+  const chartConfig = xDisplay?.chart;
+
+  if (!chartConfig) return '';
+
+  const rowBy = chartConfig.row_by as string;
+  const startField = (chartConfig.start_field ?? 'start_time') as string;
+  const endField   = (chartConfig.end_field   ?? 'end_time')   as string;
+
+  // Find the FK field and label field for row_by relationship
+  const properties = (modelDef?.properties ?? {}) as Record<string, any>;
+  let fkField    = `${rowBy}_id`;
+  let labelField = 'name';
+
+  for (const [propName, prop] of Object.entries(properties)) {
+    const rel = prop?.['x-relationship'];
+    if (rel?.target === rowBy) {
+      fkField    = propName;
+      labelField = rel.labelField ?? 'name';
+      break;
+    }
+  }
+
+  // Find additional required scalar fields (for tooltip, e.g. status enum or name)
+  const excludeFields = new Set(['id', fkField, startField, endField, 'created_at', 'updated_at', 'creator_id']);
+  const required = (modelDef?.required ?? []) as string[];
+  const extraFields: Array<{ name: string; tsType: string }> = [];
+  const extraSelects: string[] = [];
+
+  for (const [fieldName, prop] of Object.entries(properties)) {
+    if (excludeFields.has(fieldName) || !required.includes(fieldName)) continue;
+    const propType = Array.isArray(prop.type) ? prop.type.find((t: string) => t !== 'null') : prop.type;
+    if (propType === 'string') {
+      extraFields.push({ name: fieldName, tsType: 'string' });
+      extraSelects.push(`    ${fieldName}: item.${fieldName},`);
+    } else if ((propType === 'integer' || propType === 'number') && Array.isArray(prop.enum) && hasStringLabels(prop.enum)) {
+      extraFields.push({ name: fieldName, tsType: 'number' });
+      extraSelects.push(`    ${fieldName}: item.${fieldName},`);
+    }
+  }
+
+  const extraTypeLines  = extraFields.map((f) => `  ${f.name}: ${f.tsType};`).join('\n');
+  const extraSelectLines = extraSelects.join('\n');
+
+  return `'use server';
+
+import prisma from '@/lib/prisma';
+import { assertPermission, getModelPermissions } from '@/lib/authz';
+
+export type ${parentPascal}ForChart = {
+  id: string;
+  ${fkField}: string;
+  ${rowBy}_name: string;
+  ${startField}: string;
+  ${endField}: string;
+${extraTypeLines}
+};
+
+export async function get${parentPascal}sForChart(startDate: Date, endDate: Date): Promise<${parentPascal}ForChart[]> {
+  const userPermissions = await getModelPermissions('${model}');
+  await assertPermission(userPermissions, 'read', '${model}');
+
+  const items = await prisma.${model}.findMany({
+    where: {
+      ${startField}: { lt: endDate },
+      ${endField}: { gt: startDate },
+    },
+    include: { ${rowBy}: true },
+    orderBy: [{ ${startField}: 'asc' }],
+  });
+
+  return items.map((item) => ({
+    id: item.id,
+    ${fkField}: item.${fkField},
+    ${rowBy}_name: (item.${rowBy} as any).${labelField},
+    ${startField}: (item.${startField} as Date).toISOString(),
+    ${endField}: (item.${endField} as Date).toISOString(),
+${extraSelectLines}
+  }));
+}
+`;
+}
+
+export function generatePageChart(parent: string, schema: Schema, modelName?: string): string {
+  const model = modelName ?? parent;
+  const parentPascal = toPascalCase(parent);
+  const modelDef = schema.definitions[model];
+  const xDisplay = (modelDef as any)?.['x-display'];
+  const chartConfig = xDisplay?.chart;
+
+  if (!chartConfig) return '';
+
+  const span       = (chartConfig.span       ?? 'week')       as 'week' | 'month' | 'year';
+  const rowBy      = (chartConfig.row_by)                     as string;
+  const startField = (chartConfig.start_field ?? 'start_time') as string;
+  const endField   = (chartConfig.end_field   ?? 'end_time')   as string;
+
+  // Find FK field
+  const properties = (modelDef?.properties ?? {}) as Record<string, any>;
+  let fkField = `${rowBy}_id`;
+  for (const [propName, prop] of Object.entries(properties)) {
+    if (prop?.['x-relationship']?.target === rowBy) { fkField = propName; break; }
+  }
+
+  // Build tooltip expression from the first extra required scalar field
+  const excludeFields = new Set(['id', fkField, startField, endField, 'created_at', 'updated_at', 'creator_id']);
+  const required = (modelDef?.required ?? []) as string[];
+  let tooltipExpr = '';
+  for (const [fieldName, prop] of Object.entries(properties)) {
+    if (excludeFields.has(fieldName) || !required.includes(fieldName)) continue;
+    const propType = Array.isArray(prop.type) ? prop.type.find((t: string) => t !== 'null') : prop.type;
+    if (propType === 'string') {
+      tooltipExpr = `item.${fieldName}`;
+      break;
+    } else if ((propType === 'integer' || propType === 'number') && Array.isArray(prop.enum) && hasStringLabels(prop.enum)) {
+      const labelsArr = prop.enum.map((v: string | number) => `'${v}'`).join(', ');
+      tooltipExpr = `([${labelsArr}] as const)[item.${fieldName} as number] ?? String(item.${fieldName})`;
+      break;
+    }
+  }
+  const tooltipProp = tooltipExpr ? `\n    tooltip: ${tooltipExpr},` : '';
+
+  // parsePeriodStart helper based on span
+  const parseFnBody = span === 'week'
+    ? `  if (dateStr && /^\\d{4}-\\d{2}-\\d{2}$/.test(dateStr)) {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  }
+  const now = new Date();
+  const dow = now.getUTCDay();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - dow));`
+    : span === 'month'
+    ? `  if (dateStr && /^\\d{4}-\\d{2}-\\d{2}$/.test(dateStr)) {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+  }
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));`
+    : `  if (dateStr && /^\\d{4}-\\d{2}-\\d{2}$/.test(dateStr)) {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) return new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  }
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), 0, 1));`;
+
+  // Query range with buffer
+  const queryRangeCode = span === 'week'
+    ? `  const DAY_MS = 86400000;
+  const queryStart = new Date(periodStart.getTime() - DAY_MS);
+  const queryEnd   = new Date(periodStart.getTime() + 8 * DAY_MS);`
+    : span === 'month'
+    ? `  const queryStart = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth(), 0));
+  const queryEnd   = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 2));`
+    : `  const queryStart = new Date(Date.UTC(periodStart.getUTCFullYear() - 1, 11, 30));
+  const queryEnd   = new Date(Date.UTC(periodStart.getUTCFullYear() + 1, 0, 2));`;
+
+  return `import { get${parentPascal}sForChart } from '@/lib/${parent}/chart-getters';
+import GanttChart from '@/components/GanttChart';
+import type { GanttItem } from '@/components/GanttChart';
+
+function parsePeriodStart(dateStr: string | undefined): Date {
+${parseFnBody}
+}
+
+export default async function ${parentPascal}ChartPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ start?: string }>;
+}) {
+  const { start } = await searchParams;
+  const periodStart = parsePeriodStart(start);
+  const periodStartStr = periodStart.toISOString().slice(0, 10);
+${queryRangeCode}
+  const items = await get${parentPascal}sForChart(queryStart, queryEnd);
+  const ganttItems: GanttItem[] = items.map((item) => ({
+    id: item.id,
+    start_time: item.${startField},
+    end_time: item.${endField},
+    row_id: item.${fkField},
+    row_label: item.${rowBy}_name,${tooltipProp}
+  }));
+
+  return (
+    <GanttChart
+      items={ganttItems}
+      periodStart={periodStartStr}
+      span="${span}"
+      basePath="/${parent}"
+    />
+  );
 }
 `;
 }

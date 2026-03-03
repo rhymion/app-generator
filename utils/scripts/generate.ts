@@ -16,6 +16,8 @@ import {
   generateService,
   generateApiRoute,
   generateApiDetailRoute,
+  generateChartGetters,
+  generatePageChart,
 } from './templates';
 import {
   generateTestHelper,
@@ -285,10 +287,27 @@ function generate(inputPath: string, outputDir: string) {
       fs.writeFileSync(path.join(componentsDir, 'FormView.tsx'), generateFormView(parent, children, schema, generateConfig, modelName, definitionKey));
     }
 
+    // Read x-display config to determine which pages to generate
+    const xDisplay = (schema.definitions[modelName] as any)?.['x-display'];
+    const xDisplayTable = (xDisplay && !Array.isArray(xDisplay))
+      ? (Array.isArray(xDisplay.table) ? xDisplay.table : null)
+      : (Array.isArray(xDisplay) ? xDisplay : null);
+    // showTable: true when no x-display at all (default), or x-display.table is explicitly set
+    const showTable = !xDisplay || xDisplayTable !== null;
+    const showChart = !!(xDisplay && !Array.isArray(xDisplay) && xDisplay.chart);
+
     // Conditionally generate pages based on config
-    if (generateConfig.list) {
+    if (generateConfig.list && showTable) {
       fs.mkdirSync(appDir, { recursive: true });
       fs.writeFileSync(path.join(appDir, 'page.tsx'), generatePageList(parent, schema, generateConfig, modelName));
+    }
+
+    if (showChart) {
+      const chartAppDir = path.join(appDir, 'chart');
+      fs.mkdirSync(chartAppDir, { recursive: true });
+      fs.writeFileSync(path.join(chartAppDir, 'page.tsx'), generatePageChart(parent, schema, modelName));
+      fs.writeFileSync(path.join(libDir, 'chart-getters.ts'), generateChartGetters(parent, schema, modelName));
+      console.log(`  Chart page generated at app/[locale]/${parent}/chart/`);
     }
 
     if (generateConfig.new) {

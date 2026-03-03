@@ -1,4 +1,4 @@
-import { getShiftsForChart } from '@/lib/shift/chart-getters';
+import { getBookingsForChart } from '@/lib/booking/chart-getters';
 import GanttChart from '@/components/GanttChart';
 import type { GanttItem } from '@/components/GanttChart';
 
@@ -12,7 +12,7 @@ function parsePeriodStart(dateStr: string | undefined): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - dow));
 }
 
-export default async function ShiftChartPage({
+export default async function BookingChartPage({
   searchParams,
 }: {
   searchParams: Promise<{ start?: string }>;
@@ -23,14 +23,14 @@ export default async function ShiftChartPage({
   const DAY_MS = 86400000;
   const queryStart = new Date(periodStart.getTime() - DAY_MS);
   const queryEnd   = new Date(periodStart.getTime() + 8 * DAY_MS);
-  const items = await getShiftsForChart(queryStart, queryEnd);
+  const items = await getBookingsForChart(queryStart, queryEnd);
   const ganttItems: GanttItem[] = items.map((item) => ({
     id: item.id,
     start_time: item.start_time,
     end_time: item.end_time,
-    row_id: item.user_account_id,
-    row_label: item.user_account_name,
-    tooltip: (['Scheduled', 'Approved', 'Cancelled'] as const)[item.status as number] ?? String(item.status),
+    row_id: item.resource_id,
+    row_label: item.resource_name,
+    tooltip: item.name,
   }));
 
   return (
@@ -38,7 +38,7 @@ export default async function ShiftChartPage({
       items={ganttItems}
       periodStart={periodStartStr}
       span="week"
-      basePath="/shift"
+      basePath="/booking"
     />
   );
 }
