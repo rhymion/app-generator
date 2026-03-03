@@ -127,7 +127,7 @@ describe('Testing Parent Only pages and their behavior', () => {
       cy.task('db:populateParentOnly', 2);
       cy.visit('/en/parent_only');
       cy.selectDataGridRows([0]);
-      cy.clickButton('Delete Selected');
+      cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       getDataGridRowCount().should('eq', 1);
     });
@@ -136,7 +136,7 @@ describe('Testing Parent Only pages and their behavior', () => {
       cy.task('db:populateParentOnly', 3);
       cy.visit('/en/parent_only');
       cy.selectDataGridRows([0, 1]);
-      cy.clickButton('Delete Selected');
+      cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       getDataGridRowCount().should('eq', 1);
     });

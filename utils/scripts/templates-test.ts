@@ -950,7 +950,7 @@ export function generateTestSpec(
       for (const childMeta of dataGridChildren) {
         lines.push(`        // Delete child: ${childMeta.names.title}`);
         lines.push(`        cy.selectDataGridRows([0]);`);
-        lines.push(`        cy.clickButton('Delete Selected');`);
+        lines.push(`        cy.contains('h2', '${childMeta.names.title}').parent().find('button[aria-label="Delete Selected"]').click();`);
         lines.push(`        cy.get('div[role="dialog"]').find('button').contains('Delete').click();`);
       }
 
@@ -1010,7 +1010,7 @@ export function generateTestSpec(
       lines.push(`      cy.task('db:populate${pascal}', 2);`);
       lines.push(`      cy.visit('/en/${parent}');`);
       lines.push(`      cy.selectDataGridRows([0]);`);
-      lines.push(`      cy.clickButton('Delete Selected');`);
+      lines.push(`      cy.get('div').find('button[aria-label="Delete Selected"]').click();`);
       lines.push(`      cy.get('div[role="dialog"]').find('button').contains('Delete').click();`);
       lines.push(`      getDataGridRowCount().should('eq', 1);`);
       lines.push(`    });`);
@@ -1021,7 +1021,7 @@ export function generateTestSpec(
       lines.push(`      cy.task('db:populate${pascal}', 3);`);
       lines.push(`      cy.visit('/en/${parent}');`);
       lines.push(`      cy.selectDataGridRows([0, 1]);`);
-      lines.push(`      cy.clickButton('Delete Selected');`);
+      lines.push(`      cy.get('div').find('button[aria-label="Delete Selected"]').click();`);
       lines.push(`      cy.get('div[role="dialog"]').find('button').contains('Delete').click();`);
       lines.push(`      getDataGridRowCount().should('eq', 1);`);
       lines.push(`    });`);

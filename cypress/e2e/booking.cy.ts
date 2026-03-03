@@ -102,7 +102,7 @@ describe('Testing Booking pages and their behavior', () => {
       cy.task('db:populateBooking', 2);
       cy.visit('/en/booking');
       cy.selectDataGridRows([0]);
-      cy.clickButton('Delete Selected');
+      cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       getDataGridRowCount().should('eq', 1);
     });
@@ -111,7 +111,7 @@ describe('Testing Booking pages and their behavior', () => {
       cy.task('db:populateBooking', 3);
       cy.visit('/en/booking');
       cy.selectDataGridRows([0, 1]);
-      cy.clickButton('Delete Selected');
+      cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       getDataGridRowCount().should('eq', 1);
     });

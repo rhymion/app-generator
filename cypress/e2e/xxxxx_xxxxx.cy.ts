@@ -106,8 +106,8 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
         cy.clearField('Team');
         // Delete child: Yyyyy Yyyyys
         cy.selectDataGridRows([0]);
-        cy.clickButton('Delete Selected');
-        cy.get('div[role="dialog"]').find('[aria-label="Delete"]').click();
+        cy.contains('h2', 'Yyyyy Yyyyys').parent().find('button[aria-label="Delete Selected"]').click();
+        cy.get('div[role="dialog"]').find('button').contains('Delete').click();
         cy.clickButton('Save');
         cy.url().should('include', '/xxxxx_xxxxx');
         cy.contains('Xxxxx Xxxxx 1').should('be.visible');
@@ -137,7 +137,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
       cy.task('db:populateXxxxxXxxxx', 2);
       cy.visit('/en/xxxxx_xxxxx');
       cy.selectDataGridRows([0]);
-      cy.clickButton('Delete Selected');
+      cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       getDataGridRowCount().should('eq', 1);
     });
@@ -146,7 +146,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
       cy.task('db:populateXxxxxXxxxx', 3);
       cy.visit('/en/xxxxx_xxxxx');
       cy.selectDataGridRows([0, 1]);
-      cy.clickButton('Delete Selected');
+      cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       getDataGridRowCount().should('eq', 1);
     });
