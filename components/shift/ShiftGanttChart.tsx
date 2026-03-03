@@ -16,6 +16,7 @@ import timezonePlugin from 'dayjs/plugin/timezone';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import type { ShiftForChart } from '@/lib/shift/chart-getters';
+import Link from 'next/link';
 
 dayjs.extend(utcPlugin);
 dayjs.extend(timezonePlugin);
@@ -299,19 +300,24 @@ export default function ShiftGanttChart({ shifts, weekStart }: Props) {
                                   '&:hover': { opacity: 0.75 },
                                 }}
                               >
-                                <Typography
-                                  sx={{
-                                    fontSize: '0.6rem',
-                                    fontWeight: 700,
-                                    color: BAR_BORDER[ci],
-                                    px: 0.5,
-                                    whiteSpace: 'nowrap',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                  }}
+                                <Link
+                                  href={`/shift/edit/${shift.id}`}
+                                  style={{ color: 'inherit', textDecoration: 'none', display: 'block', width: '100%', textAlign: 'center' }}
                                 >
-                                  {fmtInTz(start, resolvedTz)}–{fmtInTz(end, resolvedTz)}
-                                </Typography>
+                                  <Typography
+                                    sx={{
+                                      fontSize: '0.6rem',
+                                      fontWeight: 700,
+                                      color: BAR_BORDER[ci],
+                                      px: 0.5,
+                                      whiteSpace: 'nowrap',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                    }}
+                                  >
+                                    {fmtInTz(start, resolvedTz)}–{fmtInTz(end, resolvedTz)}
+                                  </Typography>
+                                </Link>
                               </Box>
                             </Tooltip>
                           );
