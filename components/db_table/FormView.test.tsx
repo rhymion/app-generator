@@ -23,11 +23,11 @@ describe('FormView', () => {
 
   it('has Edit and Back to List buttons', async () => {
     render(<FormView src={mockSrc} />);
-    expect(screen.getByRole('button', { name: /edit/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /back to list/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /add/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Edit')).toBeInTheDocument();
+    expect(screen.getByLabelText('Back to List')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Add')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Delete')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Save')).not.toBeInTheDocument();
     //await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(4)); // Header + 3 rows
   });
 
