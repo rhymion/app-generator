@@ -1,12 +1,15 @@
 'use client';
 
 import { GridColDef } from '@mui/x-data-grid';
-import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/parent1/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
 import { parent1_child1s_columns, parent1_child2s_columns } from '../parent1/column_def';
+import EditIcon from '@mui/icons-material/Edit';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DateTimeWrapper from '../DateTimeWrapper';
 import ImageDisplay from '../ImageDisplay';
 import ListWrapper from '../ListWrapper';
@@ -24,9 +27,21 @@ export default function FormView({ src, permissions }: FormViewProps) {
         <h1>Parent1</h1>
         <div>
           {canEdit && (
-            <Link href={`/parent1/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+            <Tooltip title="Edit">
+              <Link href={`/parent1/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
+                <IconButton component="span" color="primary" tabIndex={-1}>
+                  <EditIcon />
+                </IconButton>
+              </Link>
+            </Tooltip>
           )}
-          <Link href="/parent1"><Button variant="outlined">Back to List</Button></Link>
+          <Tooltip title="Back to List">
+            <Link href="/parent1" aria-label="Back to List">
+              <IconButton component="span" tabIndex={-1}>
+                <ArrowBackIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         </div>
       </div>
       <TextField

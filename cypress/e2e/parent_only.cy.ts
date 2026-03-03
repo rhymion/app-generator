@@ -74,7 +74,7 @@ describe('Testing Parent Only pages and their behavior', () => {
       cy.task<any[]>('db:populateParentOnly', 1).then((records) => {
         cy.visit('/en/parent_only');
         cy.contains('Parent Only 1').click();
-        cy.contains('Edit').click();
+        cy.get('[aria-label="Edit"]').click();
         cy.url().should('include', '/parent_only/edit');
         cy.fillField('Description', 'Test Description');
         cy.fillDateTime('Login Time', '01/15/2025 09:00 AM');
@@ -93,7 +93,7 @@ describe('Testing Parent Only pages and their behavior', () => {
       cy.task<any[]>('db:populateParentOnlyFull', 1).then((records) => {
         cy.visit('/en/parent_only');
         cy.contains('Parent Only 1').click();
-        cy.contains('Edit').click();
+        cy.get('[aria-label="Edit"]').click();
         cy.url().should('include', '/parent_only/edit');
         cy.clearField('Description');
         cy.clearDateTime('Login Time');
@@ -108,7 +108,7 @@ describe('Testing Parent Only pages and their behavior', () => {
       cy.task<any[]>('db:populateParentOnly', 1).then((records) => {
         cy.visit('/en/parent_only');
         cy.contains('Parent Only 1').click();
-        cy.contains('Edit').click();
+        cy.get('[aria-label="Edit"]').click();
         cy.clearAndFillField('Name', 'Updated Parent Only');
         cy.fillField('Description', 'Updated Description');
         cy.clickButton('Save');
@@ -145,7 +145,7 @@ describe('Testing Parent Only pages and their behavior', () => {
       cy.task('db:populateParentOnly', 1);
       cy.visit('/en/parent_only');
       cy.contains('Parent Only 1').click();
-      cy.contains('Edit').click();
+      cy.get('[aria-label="Edit"]').click();
       cy.url().should('include', '/parent_only/edit');
       cy.clickButton('Delete Parent Only');
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
@@ -168,7 +168,7 @@ describe('Testing Parent Only pages and their behavior', () => {
       cy.task('db:populateParentOnly', 1);
       cy.visit('/en/parent_only');
       cy.contains('Parent Only 1').click();
-      cy.contains('Edit').click();
+      cy.get('[aria-label="Edit"]').click();
       cy.clearField('Name');
       cy.clickButton('Save');
       cy.url().should('include', '/parent_only/edit');

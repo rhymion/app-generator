@@ -5,16 +5,18 @@ import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
 import IconButton from '@mui/material/IconButton';
-import Button from '@mui/material/Button';
+import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
+import Button from '@mui/material/Button';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import Paper from '@mui/material/Paper';
@@ -339,13 +341,11 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
       <div>
         {showTitle && <h2>{title}</h2>}
         <Box sx={{ mb: 2 }}>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={handleOpenAddDialog}
-          >
-            {addButtonLabel}
-          </Button>
+          <Tooltip title={addButtonLabel}>
+            <IconButton color="primary" onClick={handleOpenAddDialog} aria-label={addButtonLabel}>
+              <AddIcon />
+            </IconButton>
+          </Tooltip>
         </Box>
 
         <Paper sx={{ maxHeight: 400, overflow: 'auto' }}>
@@ -455,20 +455,19 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
 
             {itemType === 'file' && (
               <Box sx={{ mt: 2 }}>
-                <Button
-                  variant="outlined"
-                  component="label"
-                  fullWidth
-                  disabled={uploading}
-                >
-                  Choose File
-                  <input
-                    type="file"
-                    hidden
-                    accept={acceptedFileTypes}
-                    onChange={handleFileChange}
-                  />
-                </Button>
+                <Tooltip title="Choose File">
+                  <span>
+                    <IconButton component="label" disabled={uploading} aria-label="Choose File">
+                      <UploadFileIcon />
+                      <input
+                        type="file"
+                        hidden
+                        accept={acceptedFileTypes}
+                        onChange={handleFileChange}
+                      />
+                    </IconButton>
+                  </span>
+                </Tooltip>
                 {selectedFile && !uploading && (
                   <Box sx={{ mt: 1 }}>
                     <strong>Selected:</strong> {selectedFile.name} ({(selectedFile.size / 1024).toFixed(2)} KB)
@@ -489,9 +488,9 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
             )}
           </DialogContent>
           <DialogActions>
-            <Button onClick={handleCloseAddDialog} disabled={uploading}>Cancel</Button>
-            <Button onClick={handleAdd} variant="contained" disabled={uploading}>
-              {uploading ? 'Uploading...' : 'Add'}
+            <Button onClick={handleCloseAddDialog} disabled={uploading} color="inherit">Cancel</Button>
+            <Button onClick={handleAdd} color="primary" variant="contained" disabled={uploading} startIcon={uploading ? <CircularProgress size={16} /> : undefined}>
+              {uploading ? 'Uploading...' : addButtonLabel}
             </Button>
           </DialogActions>
         </Dialog>
@@ -513,8 +512,8 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
             />
           </DialogContent>
           <DialogActions>
-            <Button onClick={handleCloseEditDialog}>Cancel</Button>
-            <Button onClick={handleEdit} variant="contained">Save</Button>
+            <Button onClick={handleCloseEditDialog} color="inherit">Cancel</Button>
+            <Button onClick={handleEdit} color="primary" variant="contained">Save</Button>
           </DialogActions>
         </Dialog>
       </div>

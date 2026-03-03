@@ -1849,10 +1849,13 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
 
   // For parent-only case
   if (children.length === 0) {
-    return `import Button from '@mui/material/Button';
+    return `import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';
-import Link from '@mui/material/Link';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}
+import Link from '@mui/material/Link';
+import EditIcon from '@mui/icons-material/Edit';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}
   import FormControlLabel from '@mui/material/FormControlLabel';
   import Checkbox from '@mui/material/Checkbox';
 import AuditInfo from '../AuditInfo';
@@ -1865,9 +1868,21 @@ ${enumIntegerViewOptionSetups ? enumIntegerViewOptionSetups + '\n' : ''}  return
         <h1>${parentTitle}</h1>
         <div>
         {canEdit && (
-          <Link href={\`/${parent}/edit/\${src.id}\`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+          <Tooltip title="Edit">
+            <Link href={\`/${parent}/edit/\${src.id}\`} sx={{ mx: 1 }} aria-label="Edit">
+              <IconButton component="span" color="primary" tabIndex={-1}>
+                <EditIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         )}
-          <Link href="/${parent}"><Button variant="outlined">Back to List</Button></Link>
+          <Tooltip title="Back to List">
+            <Link href="/${parent}" aria-label="Back to List">
+              <IconButton component="span" tabIndex={-1}>
+                <ArrowBackIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         </div>
       </div>
 ${parentTextFields}
@@ -1945,11 +1960,14 @@ ${parentTextFields}
   const columnImportLine = columnImports ? `\nimport { ${columnImports} } from '../${parent}/column_def';` : '';
   
   return `${needsClientDirective ? "'use client';\n\n" : ''}${hasCommentChildren ? "import { useRouter } from 'next/navigation';\n" : ''}import { GridColDef } from '@mui/x-data-grid';
-import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';
 import Link from '@mui/material/Link';
-import FieldsViewGrid from '../FieldsViewGrid';${columnImportLine}${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}${listImport}${commentImport}
+import FieldsViewGrid from '../FieldsViewGrid';${columnImportLine}
+import EditIcon from '@mui/icons-material/Edit';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}${listImport}${commentImport}
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import AuditInfo from '../AuditInfo';
@@ -1963,9 +1981,21 @@ ${enumIntegerViewOptionSetups ? enumIntegerViewOptionSetups + '\n' : ''}${column
         <h1>${parentTitle}</h1>
         <div>
           {canEdit && (
-            <Link href={\`/${parent}/edit/\${src.id}\`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+            <Tooltip title="Edit">
+              <Link href={\`/${parent}/edit/\${src.id}\`} sx={{ mx: 1 }} aria-label="Edit">
+                <IconButton component="span" color="primary" tabIndex={-1}>
+                  <EditIcon />
+                </IconButton>
+              </Link>
+            </Tooltip>
           )}
-          <Link href="/${parent}"><Button variant="outlined">Back to List</Button></Link>
+          <Tooltip title="Back to List">
+            <Link href="/${parent}" aria-label="Back to List">
+              <IconButton component="span" tabIndex={-1}>
+                <ArrowBackIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         </div>
       </div>
 ${parentTextFields}

@@ -2,12 +2,15 @@
 
 import { useRouter } from 'next/navigation';
 import { GridColDef } from '@mui/x-data-grid';
-import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/db_table/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
 import { fields_columns } from '../db_table/column_def';
+import EditIcon from '@mui/icons-material/Edit';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CommentListWrapper from '../CommentListWrapper';
 import { addDbTableComment, updateDbTableComment, deleteDbTableComment } from '@/lib/db_table/actions';
 import FormControlLabel from '@mui/material/FormControlLabel';
@@ -23,9 +26,21 @@ export default function FormView({ src, permissions }: FormViewProps) {
         <h1>Db Table</h1>
         <div>
           {canEdit && (
-            <Link href={`/db_table/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+            <Tooltip title="Edit">
+              <Link href={`/db_table/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
+                <IconButton component="span" color="primary" tabIndex={-1}>
+                  <EditIcon />
+                </IconButton>
+              </Link>
+            </Tooltip>
           )}
-          <Link href="/db_table"><Button variant="outlined">Back to List</Button></Link>
+          <Tooltip title="Back to List">
+            <Link href="/db_table" aria-label="Back to List">
+              <IconButton component="span" tabIndex={-1}>
+                <ArrowBackIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         </div>
       </div>
       <TextField

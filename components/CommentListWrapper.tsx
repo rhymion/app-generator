@@ -3,13 +3,19 @@
 import { Fragment, useState, useTransition } from 'react';
 import Avatar from '@mui/material/Avatar';
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
 import Divider from '@mui/material/Divider';
+import IconButton from '@mui/material/IconButton';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import Paper from '@mui/material/Paper';
 import TextField from '@mui/material/TextField';
+import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
+import SaveIcon from '@mui/icons-material/Save';
+import CloseIcon from '@mui/icons-material/Close';
+import SendIcon from '@mui/icons-material/Send';
 import type { ModelPermissions } from '@/lib/authz';
 
 export type CommentItem = {
@@ -124,18 +130,25 @@ function CommentItemComponent({ comment, canDelete, onUpdate, onDelete }: Commen
                 size="small"
                 disabled={isPending}
               />
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 1 }}>
-                <Button size="small" onClick={handleCancel} disabled={isPending}>
-                  Cancel
-                </Button>
-                <Button
-                  size="small"
-                  variant="contained"
-                  onClick={handleSave}
-                  disabled={isPending || !editMessage.trim()}
-                >
-                  Save
-                </Button>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5, mt: 1 }}>
+                <Tooltip title="Cancel">
+                  <IconButton size="small" onClick={handleCancel} disabled={isPending} aria-label="Cancel">
+                    <CloseIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Save">
+                  <span>
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      onClick={handleSave}
+                      disabled={isPending || !editMessage.trim()}
+                      aria-label="Save"
+                    >
+                      <SaveIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
               </Box>
             </>
           ) : (
@@ -144,16 +157,20 @@ function CommentItemComponent({ comment, canDelete, onUpdate, onDelete }: Commen
                 {comment.message}
               </Typography>
               {(canDelete) && (
-                <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 0.5 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5, mt: 0.5 }}>
                   {canDelete && onUpdate && (
-                    <Button size="small" onClick={() => setIsEditing(true)} disabled={isPending}>
-                      Edit
-                    </Button>
+                    <Tooltip title="Edit">
+                      <IconButton size="small" onClick={() => setIsEditing(true)} disabled={isPending} aria-label="Edit">
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                   )}
                   {canDelete && onDelete && (
-                    <Button size="small" color="error" onClick={handleDelete} disabled={isPending}>
-                      Delete
-                    </Button>
+                    <Tooltip title="Delete">
+                      <IconButton size="small" color="error" onClick={handleDelete} disabled={isPending} aria-label="Delete">
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                   )}
                 </Box>
               )}
@@ -215,7 +232,7 @@ export default function CommentListWrapper({
         {permissions.create && onCreateComment && (
           <>
             <Divider sx={{ my: 2 }} />
-            <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
               <TextField
                 placeholder="Write a comment..."
                 value={newMessage}
@@ -226,14 +243,19 @@ export default function CommentListWrapper({
                 size="small"
                 disabled={isPending}
               />
-              <Button
-                variant="contained"
-                onClick={handleCreate}
-                disabled={isPending || !newMessage.trim()}
-                sx={{ flexShrink: 0, mt: 0.5 }}
-              >
-                Submit
-              </Button>
+              <Tooltip title="Submit">
+                <span>
+                  <IconButton
+                    color="primary"
+                    onClick={handleCreate}
+                    disabled={isPending || !newMessage.trim()}
+                    aria-label="Submit"
+                    sx={{ flexShrink: 0, mt: 0.5 }}
+                  >
+                    <SendIcon />
+                  </IconButton>
+                </span>
+              </Tooltip>
             </Box>
           </>
         )}

@@ -864,7 +864,7 @@ export function generateTestSpec(
 
       lines.push(`        cy.visit('/en/${parent}');`);
       lines.push(`        cy.contains('${title} 1').click();`);
-      lines.push(`        cy.contains('Edit').click();`);
+      lines.push(`        cy.get('[aria-label="Edit"]').click();`);
       lines.push(`        cy.url().should('include', '/${parent}/edit');`);
 
       // Fill optional fields
@@ -936,7 +936,7 @@ export function generateTestSpec(
 
       lines.push(`        cy.visit('/en/${parent}');`);
       lines.push(`        cy.contains('${title} 1').click();`);
-      lines.push(`        cy.contains('Edit').click();`);
+      lines.push(`        cy.get('[aria-label="Edit"]').click();`);
       lines.push(`        cy.url().should('include', '/${parent}/edit');`);
 
       // Clear optional fields
@@ -968,7 +968,7 @@ export function generateTestSpec(
     lines.push(`      cy.task<any[]>('db:populate${pascal}', 1).then((records) => {`);
     lines.push(`        cy.visit('/en/${parent}');`);
     lines.push(`        cy.contains('${title} 1').click();`);
-    lines.push(`        cy.contains('Edit').click();`);
+    lines.push(`        cy.get('[aria-label="Edit"]').click();`);
 
     // Change name
     lines.push(`        cy.clearAndFillField('Name', 'Updated ${title}');`);
@@ -1034,7 +1034,7 @@ export function generateTestSpec(
       lines.push(`      cy.task('db:populate${pascal}', 1);`);
       lines.push(`      cy.visit('/en/${parent}');`);
       lines.push(`      cy.contains('${title} 1').click();`);
-      lines.push(`      cy.contains('Edit').click();`);
+      lines.push(`      cy.get('[aria-label="Edit"]').click();`);
       lines.push(`      cy.url().should('include', '/${parent}/edit');`);
       lines.push(`      cy.clickButton('Delete ${title}');`);
       lines.push(`      cy.get('div[role="dialog"]').find('button').contains('Delete').click();`);
@@ -1140,7 +1140,7 @@ export function generateTestSpec(
       lines.push(`      cy.task('db:populate${pascal}', 1);`);
       lines.push(`      cy.visit('/en/${parent}');`);
       lines.push(`      cy.contains('${title} 1').click();`);
-      lines.push(`      cy.contains('Edit').click();`);
+      lines.push(`      cy.get('[aria-label="Edit"]').click();`);
       lines.push(genClearCommand(fieldToClear, '      '));
       lines.push(`      cy.clickButton('Save');`);
       lines.push(`      cy.url().should('include', '/${parent}/edit');`);
@@ -1159,7 +1159,7 @@ export function generateTestSpec(
       lines.push(`        cy.task('db:populate${pascal}${childPascal}', { parentId: records[0].id, length: 1 });`);
       lines.push(`        cy.visit('/en/${parent}');`);
       lines.push(`        cy.contains('${title} 1').click();`);
-      lines.push(`        cy.contains('Edit').click();`);
+      lines.push(`        cy.get('[aria-label="Edit"]').click();`);
       lines.push(`        // Clear required child field`);
 
       // For DataGrid, we need to double-click the cell and clear it

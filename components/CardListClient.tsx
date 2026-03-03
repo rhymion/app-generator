@@ -3,7 +3,8 @@
 import { useState, useTransition } from 'react';
 import dayjs from 'dayjs';
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import Card from '@mui/material/Card';
 import CardActions from '@mui/material/CardActions';
 import CardContent from '@mui/material/CardContent';
@@ -15,6 +16,10 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
 import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
+import Button from '@mui/material/Button';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
 import type { ModelPermissions } from '@/lib/authz';
 
 interface BaseEntity {
@@ -93,21 +98,29 @@ export default function CardListClient<T extends BaseEntity>({
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+      <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
         {permissions.create && (
           <Link href={`${basePath}/new`}>
-            <Button variant="contained">Create New {entityLabel}</Button>
+            <Tooltip title={`Create New ${entityLabel}`}>
+              <IconButton color="primary" aria-label={`Create New ${entityLabel}`}>
+                <AddIcon />
+              </IconButton>
+            </Tooltip>
           </Link>
         )}
         {permissions.delete && (
-          <Button
-            variant="contained"
-            color="error"
-            onClick={() => setOpenDeleteDialog(true)}
-            disabled={selectedIds.size === 0}
-          >
-            Delete Selected
-          </Button>
+          <Tooltip title="Delete Selected">
+            <span>
+              <IconButton
+                color="error"
+                onClick={() => setOpenDeleteDialog(true)}
+                aria-label="Delete Selected"
+                disabled={selectedIds.size === 0}
+              >
+                <DeleteIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
         )}
       </Box>
 
@@ -160,9 +173,11 @@ export default function CardListClient<T extends BaseEntity>({
                 {permissions.update && (
                   <CardActions sx={{ justifyContent: 'flex-end' }}>
                     <Link href={`${basePath}/edit/${item.id}`}>
-                      <Button size="small" variant="contained">
-                        Edit
-                      </Button>
+                      <Tooltip title="Edit">
+                        <IconButton size="small" color="primary" aria-label="Edit">
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                     </Link>
                   </CardActions>
                 )}
@@ -180,12 +195,8 @@ export default function CardListClient<T extends BaseEntity>({
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenDeleteDialog(false)} color="inherit">
-            Cancel
-          </Button>
-          <Button onClick={handleDeleteConfirm} color="error" variant="contained">
-            Delete
-          </Button>
+          <Button onClick={() => setOpenDeleteDialog(false)} color="inherit">Cancel</Button>
+          <Button onClick={handleDeleteConfirm} color="error" variant="contained" aria-label="Delete">Delete</Button>
         </DialogActions>
       </Dialog>
     </Box>

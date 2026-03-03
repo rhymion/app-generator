@@ -3,7 +3,8 @@
 import { useState, forwardRef, useImperativeHandle, useEffect } from 'react';
 import { DataGrid, GridColDef, GridRowsProp, GridValidRowModel, useGridApiRef, GridRowSelectionModel } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
-import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -22,6 +23,11 @@ import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
+import Button from '@mui/material/Button';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
+import SaveIcon from '@mui/icons-material/Save';
 
 interface OrderedFieldsDataGridProps {
   initialFields?: GridRowsProp;
@@ -266,7 +272,11 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
       return (
         <div>
           {showTitle && <h2>{title}</h2>}
-          <Button onClick={addField} variant="contained" sx={{ mb: 2 }}>{addButtonLabel}</Button>
+          <Tooltip title={addButtonLabel}>
+            <IconButton color="primary" onClick={addField} aria-label={addButtonLabel} sx={{ mb: 2 }}>
+              <AddIcon />
+            </IconButton>
+          </Tooltip>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {fields.length === 0 ? (
               <Typography color="text.secondary">No items.</Typography>
@@ -295,8 +305,16 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
                       <Button size="small" disabled={index === fields.length - 1} onClick={() => moveRowDown(index)} variant="outlined">↓</Button>
                     </Box>
                     <Box>
-                      <Button size="small" onClick={() => openEditDialog(row)} sx={{ mr: 0.5 }}>Edit</Button>
-                      <Button size="small" color="error" onClick={() => setDeleteRowId(String(row.id))}>Delete</Button>
+                      <Tooltip title="Edit">
+                        <IconButton size="small" onClick={() => openEditDialog(row)} aria-label="Edit">
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Delete">
+                        <IconButton size="small" color="error" onClick={() => setDeleteRowId(String(row.id))} aria-label="Delete">
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                     </Box>
                   </CardActions>
                 </Card>
@@ -319,7 +337,7 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
             </DialogContent>
             <DialogActions>
               <Button onClick={() => setEditDialogOpen(false)} color="inherit">Cancel</Button>
-              <Button onClick={handleEditSave} variant="contained">Save</Button>
+              <Button onClick={handleEditSave} color="primary" variant="contained">Save</Button>
             </DialogActions>
           </Dialog>
 
@@ -333,7 +351,7 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
             </DialogContent>
             <DialogActions>
               <Button onClick={() => setDeleteRowId(null)} color="inherit">Cancel</Button>
-              <Button onClick={handleDeleteRow} color="error" variant="contained">Delete</Button>
+              <Button onClick={handleDeleteRow} color="error" variant="contained" aria-label="Delete">Delete</Button>
             </DialogActions>
           </Dialog>
         </div>
@@ -343,8 +361,24 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
     return (
       <div>
         {showTitle && <h2>{title}</h2>}
-        <Button onClick={addField} variant="contained" sx={{ mb: 2, mr: 2 }}>{addButtonLabel}</Button>
-        <Button onClick={deleteSelected} variant="contained" color="error" sx={{ mb: 2 }} disabled={selectedRowIds.ids.size === 0}>Delete Selected</Button>
+        <Tooltip title={addButtonLabel}>
+          <IconButton color="primary" onClick={addField} aria-label={addButtonLabel} sx={{ mb: 2, mr: 1 }}>
+            <AddIcon />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Delete Selected">
+          <span>
+            <IconButton
+              onClick={deleteSelected}
+              color="error"
+              aria-label="Delete Selected"
+              disabled={selectedRowIds.ids.size === 0}
+              sx={{ mb: 2 }}
+            >
+              <DeleteIcon />
+            </IconButton>
+          </span>
+        </Tooltip>
         <Paper sx={{ height: 400, width: '100%' }}>
           <DataGrid
             apiRef={apiRef}
@@ -374,7 +408,7 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setOpenDeleteSelectedDialog(false)} color="inherit">Cancel</Button>
-            <Button onClick={deleteSelectedConfirmed} color="error" variant="contained">Delete</Button>
+            <Button onClick={deleteSelectedConfirmed} color="error" variant="contained" aria-label="Delete">Delete</Button>
           </DialogActions>
         </Dialog>
       </div>

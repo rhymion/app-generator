@@ -1,10 +1,13 @@
 import { GridColDef } from '@mui/x-data-grid';
-import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/xxxxx_xxxxx/types';
 import Link from '@mui/material/Link';
 import FieldsViewGrid from '../FieldsViewGrid';
 import { yyyyy_yyyyys_columns } from '../xxxxx_xxxxx/column_def';
+import EditIcon from '@mui/icons-material/Edit';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import AuditInfo from '../AuditInfo';
@@ -18,9 +21,21 @@ export default function FormView({ src, permissions }: FormViewProps) {
         <h1>Xxxxx Xxxxx</h1>
         <div>
           {canEdit && (
-            <Link href={`/xxxxx_xxxxx/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+            <Tooltip title="Edit">
+              <Link href={`/xxxxx_xxxxx/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
+                <IconButton component="span" color="primary" tabIndex={-1}>
+                  <EditIcon />
+                </IconButton>
+              </Link>
+            </Tooltip>
           )}
-          <Link href="/xxxxx_xxxxx"><Button variant="outlined">Back to List</Button></Link>
+          <Tooltip title="Back to List">
+            <Link href="/xxxxx_xxxxx" aria-label="Back to List">
+              <IconButton component="span" tabIndex={-1}>
+                <ArrowBackIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         </div>
       </div>
       <TextField
