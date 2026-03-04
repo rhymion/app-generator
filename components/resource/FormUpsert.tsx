@@ -15,6 +15,7 @@ import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
 import OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';
   
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allOrganizations = [], organizationPermissions }: FormUpsertProps) {
   const router = useRouter();
@@ -47,6 +48,11 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     label: f.name,
     originalId: f.id,
   })));
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+    organization_id: organizationId,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -165,6 +171,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         showTitle={true}
         title="Resource Images"
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );

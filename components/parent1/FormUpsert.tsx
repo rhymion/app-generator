@@ -18,6 +18,7 @@ import OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
 import ImageUpload from '../ImageUpload';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allOrganizations = [], organizationPermissions }: FormUpsertProps) {
   const router = useRouter();
@@ -75,6 +76,12 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     label: f.name,
     originalId: f.id,
   })));
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+    due_date: dueDate,
+    organization_id: organizationId,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -241,6 +248,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );

@@ -12,6 +12,7 @@ import AuditInfo from '../AuditInfo';
 
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allRoles = [], rolePermissions }: FormUpsertProps) {
   const router = useRouter();
@@ -33,6 +34,15 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
       label: item.name,
     }));
   }, [allRoles]);
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+    role_id: roleId,
+    create: create,
+    read: read,
+    update: update,
+    delete: deleteValue,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -113,6 +123,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         control={<Checkbox checked={deleteValue} onChange={(e) => setDeleteValue(e.target.checked)} />}
         label="Delete"
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );

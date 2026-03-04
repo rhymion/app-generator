@@ -12,6 +12,7 @@ import CommentListWrapper from '../CommentListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
   import { fields_columns } from '../db_table/column_def';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, currentUserId, allDbTables = [], dbTablePermissions }: FormUpsertProps) {
   const router = useRouter();
@@ -40,6 +41,10 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
     regex: '',
     required: true,
     db_table_id: src.id,
+  });
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
   });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -141,6 +146,7 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
         showTitle={true}
         title="Fields"
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );

@@ -10,6 +10,8 @@ import FormWithChildGrid from '../FormWithChildGrid';
 import AuditInfo from '../AuditInfo';
 
 import ImageUpload from '../ImageUpload';
+import ApiKey from './api_key';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
   const router = useRouter();
@@ -19,11 +21,16 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
   const [avatar, setAvatar] = useState<string>(src.avatar || '');
+  const [apiKey, setApiKey] = useState<string>(src.api_key ?? '');
 
   const nameRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
-  const api_keyRef = useRef<HTMLInputElement>(null);
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+    api_key: apiKey,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -38,8 +45,8 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
     formData.set('name', nameRef.current?.value || '');
     formData.set('email', emailRef.current?.value || '');
     formData.set('password', passwordRef.current?.value || '');
-    formData.set('api_key', api_keyRef.current?.value || '');
     formData.set('avatar', avatar);
+    formData.set('api_key', apiKey);
 
     try {
       startTransition(async () => {
@@ -94,20 +101,12 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         multiline={false}
         rows={undefined}
       />
-      <TextField
-        label="Api Key"
-        inputRef={api_keyRef}
-        defaultValue={src.api_key || ''}
-        fullWidth
-        margin="normal"
-        
-        multiline={false}
-        rows={undefined}
-      />
       <ImageUpload
         value={avatar}
         onChange={setAvatar}
       />
+      <ApiKey value={apiKey} onChange={setApiKey} isEdit={isEdit} />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );

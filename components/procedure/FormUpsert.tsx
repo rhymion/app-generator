@@ -14,6 +14,7 @@ import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWra
 import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
   
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allProcedures = [], allUserAccounts = [], procedurePermissions, userAccountPermissions }: FormUpsertProps) {
   const router = useRouter();
@@ -59,6 +60,12 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
     label: f.name,
     originalId: f.id,
   })));
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+    parent_id: parentId,
+    assignee_id: assigneeId,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -234,6 +241,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         }))}
         excludeOptionIds={[src.id]}
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );

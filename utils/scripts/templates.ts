@@ -1630,6 +1630,18 @@ ${childSerialize}
     return `import ${componentName} from './${p}';`;
   }).join('\n');
 
+  // Build validation values object — all reactive (state-based) form values
+  const validationValuesEntries = [
+    '    isEdit,',
+    '    id: src.id,',
+    ...dateTimeProps.map(p => `    ${p}: ${safeVarName(p)},`),
+    ...parentRelationships.map(r => `    ${r.propName}: ${safeVarName(r.propName)},`),
+    ...booleanProps.map(p => `    ${p}: ${safeVarName(p)},`),
+    ...enumIntegerProps.map(p => `    ${p}: ${safeVarName(p)},`),
+    ...customUpsertProps.map(p => `    ${p}: ${safeVarName(p)},`),
+  ].join('\n');
+  const validationCall = `  const validationError = useFormValidation({\n${validationValuesEntries}\n  });`;
+
   return `'use client';
 
 import { useMemo, useRef, useState } from 'react';
@@ -1641,6 +1653,7 @@ import type { FormUpsertProps } from '@/lib/${parent}/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import AuditInfo from '../AuditInfo';${hasCommentChildren ? "\nimport CommentListWrapper from '../CommentListWrapper';" : ''}
 ${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${imageProps.length > 0 ? '\nimport ImageUpload from \'../ImageUpload\';' : ''}${booleanImports}${customUpsertImports ? '\n' + customUpsertImports : ''}
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert(${formUpsertParams}) {
   const router = useRouter();
@@ -1651,6 +1664,7 @@ export default function FormUpsert(${formUpsertParams}) {
 ${allStates ? '\n' + allStates : ''}
 ${childVariables}
 ${parentRefs}${enumIntegerOptionSetups ? `\n${enumIntegerOptionSetups}` : ''}${relationshipOptionSetups ? `\n${relationshipOptionSetups}` : ''}${childEntityRelOptionSetups ? `\n${childEntityRelOptionSetups}` : ''}${childGridSetup}
+${validationCall}
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1702,6 +1716,7 @@ ${hasCommentChildren ? `
   const formFields = (
     <>
 ${parentTextFields}${childGridComponents.length > 0 ? '\n' + childGridComponents : '' }
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );
@@ -2390,6 +2405,13 @@ ${queryRangeCode}
       basePath="/${parent}"
     />
   );
+}
+`;
+}
+
+export function generateFormValidationStub(): string {
+  return `export function useFormValidation(_values: Record<string, unknown>): string | null {
+  return null;
 }
 `;
 }

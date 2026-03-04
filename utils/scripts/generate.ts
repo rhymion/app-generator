@@ -18,6 +18,7 @@ import {
   generateApiDetailRoute,
   generateChartGetters,
   generatePageChart,
+  generateFormValidationStub,
 } from './templates';
 import {
   generateTestHelper,
@@ -280,6 +281,11 @@ function generate(inputPath: string, outputDir: string) {
     // Generate FormUpsert only if new or edit is enabled
     if (generateConfig.new || generateConfig.edit) {
       fs.writeFileSync(path.join(componentsDir, 'FormUpsert.tsx'), generateFormUpsert(parent, children, schema, generateConfig, modelName, definitionKey));
+      // Write validation stub only if file doesn't exist (user may have customized it)
+      const validationStubPath = path.join(componentsDir, 'form_validation.ts');
+      if (!fs.existsSync(validationStubPath)) {
+        fs.writeFileSync(validationStubPath, generateFormValidationStub());
+      }
     }
 
     // Generate FormView only if view is enabled

@@ -15,6 +15,7 @@ import { GridRowsProp } from '@mui/x-data-grid';
   
 import ImageUpload from '../ImageUpload';
 import ApiKey from './api_key';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allRoles = [], rolePermissions }: FormUpsertProps) {
   const router = useRouter();
@@ -35,6 +36,11 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
     label: f.name,
     originalId: f.id,
   })));
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+    api_key: apiKey,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -140,6 +146,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         }))}
         excludeOptionIds={[src.id]}
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );

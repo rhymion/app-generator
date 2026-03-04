@@ -1,43 +1,29 @@
 'use client';
 
-import { useMemo, useRef, useState, useEffect } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import { upsertBooking, removeBooking } from '@/lib/booking/actions';
-import { checkBookingOverlap } from '@/lib/booking/overlap';
 import type { FormUpsertProps } from '@/lib/booking/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import AuditInfo from '../AuditInfo';
 
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allResources = [], resourcePermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [overlapError, setOverlapError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
   const [startTime, setStartTime] = useState<Dayjs | null>(src.start_time ? dayjs(src.start_time) : null);
   const [endTime, setEndTime] = useState<Dayjs | null>(src.end_time ? dayjs(src.end_time) : null);
   const [resourceId, setResourceId] = useState<string | null>(src.resource_id || null);
-
-  useEffect(() => {
-    if (!resourceId || !startTime || !endTime) {
-      setOverlapError(null);
-      return;
-    }
-    const excludeId = isEdit ? src.id : null;
-    checkBookingOverlap(resourceId, startTime.toISOString(), endTime.toISOString(), excludeId)
-      .then((hasOverlap) => {
-        setOverlapError(hasOverlap ? 'Booking time overlaps with an existing booking for this resource' : null);
-      })
-      .catch(() => setOverlapError(null));
-  }, [resourceId, startTime, endTime, isEdit, src.id]);
 
   const nameRef = useRef<HTMLInputElement>(null);
   const resourceIdOptions = useMemo(() => {
@@ -46,6 +32,13 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
       label: item.name,
     }));
   }, [allResources]);
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+    start_time: startTime,
+    end_time: endTime,
+    resource_id: resourceId,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -118,7 +111,7 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
         date_time={endTime ? endTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setEndTime(newValue)}
       />
-      {overlapError && <p style={{ color: 'red' }}>{overlapError}</p>}
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );

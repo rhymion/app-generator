@@ -11,6 +11,7 @@ import AuditInfo from '../AuditInfo';
 import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
   import { yyyyy_yyyyys_columns } from '../xxxxx_xxxxx/column_def';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
   const router = useRouter();
@@ -37,6 +38,10 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
     required: true,
     written_by: '',
     xxxxx_xxxxx_id: src.id,
+  });
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
   });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -134,6 +139,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         showTitle={true}
         title="Yyyyy Yyyyys"
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );

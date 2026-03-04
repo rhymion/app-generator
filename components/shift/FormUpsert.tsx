@@ -12,6 +12,7 @@ import AuditInfo from '../AuditInfo';
 
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allUserAccounts = [], userAccountPermissions }: FormUpsertProps) {
   const router = useRouter();
@@ -33,6 +34,14 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
       label: item.name,
     }));
   }, [allUserAccounts]);
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+    start_time: startTime,
+    end_time: endTime,
+    user_account_id: userAccountId,
+    status: status,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -107,6 +116,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         date_time={endTime ? endTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setEndTime(newValue)}
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );

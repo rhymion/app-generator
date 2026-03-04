@@ -11,6 +11,7 @@ import AuditInfo from '../AuditInfo';
 
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '../DateTimeWrapper';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
   const router = useRouter();
@@ -24,6 +25,12 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
 
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+    login_time: loginTime,
+    logout_time: logoutTime,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -93,6 +100,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         date_time={logoutTime ? logoutTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setLogoutTime(newValue)}
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );
