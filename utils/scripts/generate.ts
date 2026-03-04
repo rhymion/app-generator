@@ -299,7 +299,7 @@ function generate(inputPath: string, outputDir: string) {
     // Conditionally generate pages based on config
     if (generateConfig.list && showTable) {
       fs.mkdirSync(appDir, { recursive: true });
-      fs.writeFileSync(path.join(appDir, 'page.tsx'), generatePageList(parent, schema, generateConfig, modelName));
+      fs.writeFileSync(path.join(appDir, 'page.tsx'), generatePageList(parent, schema, generateConfig, modelName, definitionKey));
     }
 
     if (showChart) {

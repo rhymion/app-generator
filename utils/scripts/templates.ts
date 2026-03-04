@@ -942,7 +942,13 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const relationshipProps = parentRelationships.map(r => r.propName);
   const nonRelationshipProps = parentProps.filter(p => !relationshipProps.includes(p));
 
-  // Categorize parent properties by type
+  // Identify properties that delegate rendering to a custom component in FormUpsert
+  const customUpsertProps = nonRelationshipProps.filter(p => {
+    const xc = (filteredProps[p] as any)?.['x-custom-component'];
+    return Array.isArray(xc?.target) && (xc.target as string[]).includes('upsert');
+  });
+
+  // Categorize parent properties by type (skip custom component props)
   const dateTimeProps: string[] = [];
   const numberProps: string[] = [];
   const enumIntegerProps: string[] = []; // integer fields with enum → rendered as Autocomplete
@@ -951,6 +957,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const textProps: string[] = [];
 
   nonRelationshipProps.forEach(p => {
+    if (customUpsertProps.includes(p)) return; // handled by custom component
     const prop = filteredProps[p];
     const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
     const format = (prop as any).format;
@@ -1006,7 +1013,13 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     return `  const [${stateName}, set${stateSetter}] = useState<string | null>(src.${r.propName} || null);`;
   }).join('\n');
 
-  const allStates = [dateTimeStates, imageStates, booleanStates, enumIntegerStates, relationshipStates].filter(s => s).join('\n');
+  const customUpsertStates = customUpsertProps.map(p => {
+    const stateName = safeVarName(p);
+    const stateSetter = toPascalCaseFromVar(stateName);
+    return `  const [${stateName}, set${stateSetter}] = useState<string>(src.${p} ?? '');`;
+  }).join('\n');
+
+  const allStates = [dateTimeStates, imageStates, booleanStates, enumIntegerStates, relationshipStates, customUpsertStates].filter(s => s).join('\n');
   
   // Generate form fields
   const textFields = textProps.map(p => {
@@ -1129,7 +1142,14 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
       />`;
   }).join('\n');
 
-  const parentTextFields = [textFields, relationshipFields, numberFields, enumIntegerFields, booleanFields, dateTimeFields, imageFields].filter(f => f).join('\n');
+  const customUpsertFieldsJsx = customUpsertProps.map(p => {
+    const componentName = toPascalCase(p);
+    const stateName = safeVarName(p);
+    const stateSetter = toPascalCaseFromVar(stateName);
+    return `      <${componentName} value={${stateName}} onChange={set${stateSetter}} isEdit={isEdit} />`;
+  }).join('\n');
+
+  const parentTextFields = [textFields, relationshipFields, numberFields, enumIntegerFields, booleanFields, dateTimeFields, imageFields, customUpsertFieldsJsx].filter(f => f).join('\n');
   
   // Generate FormData sets
   const textFormDataSets = textProps.map(p => 
@@ -1165,7 +1185,12 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     return `    formData.set('${p}', ${stateName} !== null ? String(${stateName}) : '');`;
   }).join('\n');
 
-  const parentFormDataSets = [textFormDataSets, relationshipFormDataSets, numberFormDataSets, enumIntegerFormDataSets, booleanFormDataSets, dateTimeFormDataSets, imageFormDataSets].filter(s => s).join('\n');
+  const customUpsertFormDataSets = customUpsertProps.map(p => {
+    const stateName = safeVarName(p);
+    return `    formData.set('${p}', ${stateName});`;
+  }).join('\n');
+
+  const parentFormDataSets = [textFormDataSets, relationshipFormDataSets, numberFormDataSets, enumIntegerFormDataSets, booleanFormDataSets, dateTimeFormDataSets, imageFormDataSets, customUpsertFormDataSets].filter(s => s).join('\n');
   
   // Determine if we have children
   const hasChildren = children.length > 0;
@@ -1600,6 +1625,11 @@ ${childSerialize}
     ? "\nimport FormControlLabel from '@mui/material/FormControlLabel';\nimport Checkbox from '@mui/material/Checkbox';"
     : '';
 
+  const customUpsertImports = customUpsertProps.map(p => {
+    const componentName = toPascalCase(p);
+    return `import ${componentName} from './${p}';`;
+  }).join('\n');
+
   return `'use client';
 
 import { useMemo, useRef, useState } from 'react';
@@ -1610,7 +1640,7 @@ import { upsert${parentPascal}${canDelete ? `, remove${parentPascal}` : ''}${has
 import type { FormUpsertProps } from '@/lib/${parent}/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import AuditInfo from '../AuditInfo';${hasCommentChildren ? "\nimport CommentListWrapper from '../CommentListWrapper';" : ''}
-${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${imageProps.length > 0 ? '\nimport ImageUpload from \'../ImageUpload\';' : ''}${booleanImports}
+${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${imageProps.length > 0 ? '\nimport ImageUpload from \'../ImageUpload\';' : ''}${booleanImports}${customUpsertImports ? '\n' + customUpsertImports : ''}
 
 export default function FormUpsert(${formUpsertParams}) {
   const router = useRouter();
@@ -1732,6 +1762,12 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
     k !== 'id' && k !== 'created_at' && k !== 'updated_at' && k !== 'creator_id'
   );
   
+  // Identify properties that delegate rendering to a custom component in FormView
+  const customViewProps = parentProps.filter(p => {
+    const xc = (filteredProps[p] as any)?.['x-custom-component'];
+    return Array.isArray(xc?.target) && (xc.target as string[]).includes('view');
+  });
+
   // Separate Date and Image fields from other fields
   const dateTimeFields: string[] = [];
   const imageFields: string[] = [];
@@ -1740,6 +1776,7 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   const otherFields: string[] = [];
 
   parentProps.forEach(p => {
+    if (customViewProps.includes(p)) return; // handled by custom component
     const prop = filteredProps[p];
     const propType = Array.isArray(prop.type) ? prop.type.find((t: string) => t !== 'null') : prop.type;
     const format = (prop as any).format;
@@ -1827,8 +1864,14 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
       />`;
   }).join('\n');
 
-  const parentTextFields = [textFields, enumIntegerViewFieldsJsx, booleanFieldsJsx, dateTimeFieldsJsx, imageFieldsJsx].filter(f => f).join('\n');
-  
+  const customViewFieldsJsx = customViewProps.map(p => {
+    const componentName = toPascalCase(p);
+    const stateName = safeVarName(p);
+    return `      <${componentName} value={src.${stateName}} />`;
+  }).join('\n');
+
+  const parentTextFields = [textFields, enumIntegerViewFieldsJsx, booleanFieldsJsx, dateTimeFieldsJsx, imageFieldsJsx, customViewFieldsJsx].filter(f => f).join('\n');
+
   // Check if any child has DateTime fields or many-to-one relationships
   // (both require 'use client' due to functions in column definitions)
   // Comments also require 'use client' for interactive callbacks + router.refresh()
@@ -1847,6 +1890,11 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
     });
   });
 
+  const customViewImports = customViewProps.map(p => {
+    const componentName = toPascalCase(p);
+    return `import ${componentName} from './${p}';`;
+  }).join('\n');
+
   // For parent-only case
   if (children.length === 0) {
     return `import IconButton from '@mui/material/IconButton';
@@ -1858,7 +1906,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}
   import FormControlLabel from '@mui/material/FormControlLabel';
   import Checkbox from '@mui/material/Checkbox';
-import AuditInfo from '../AuditInfo';
+import AuditInfo from '../AuditInfo';${customViewImports ? '\n' + customViewImports : ''}
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
@@ -1970,7 +2018,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}${listImport}${commentImport}
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
-import AuditInfo from '../AuditInfo';
+import AuditInfo from '../AuditInfo';${customViewImports ? '\n' + customViewImports : ''}
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const canEdit = permissions?.update ?? true;
@@ -2007,12 +2055,17 @@ ${childViewGrids}
 `;
 }
 
-export function generatePageList(parent: string, schema: Schema, generateConfig?: any, modelName?: string): string {
+export function generatePageList(parent: string, schema: Schema, generateConfig?: any, modelName?: string, definitionKey?: string): string {
   const model = modelName ?? parent;
+  const defKey = definitionKey ?? `${parent}_detail`;
   const parentPascal = toPascalCase(parent);
   const parentTitle = toTitleCase(parent);
   const parentCamel = toCamelCase(parent);
   const canDelete = generateConfig?.delete !== false;
+
+  // Check for entity-level custom component on the detail definition
+  const detailDef = schema.definitions[defKey];
+  const entityCustomComponent: string | undefined = (detailDef as any)?.['x-custom-component']?.name;
 
   // Check for x-display configuration in the model definition
   const modelDef = schema.definitions[model];
@@ -2088,22 +2141,40 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
     ? `import CardListClient from '@/components/CardListClient';`
     : `import ResponsiveListClient from '@/components/ResponsiveListClient';`;
 
+  const needsButtonBar = hasChart || !!entityCustomComponent;
+
   const chartImports = hasChart
     ? `\nimport Link from '@mui/material/Link';\nimport Button from '@mui/material/Button';\nimport Box from '@mui/material/Box';\nimport BarChartIcon from '@mui/icons-material/BarChart';`
+    : needsButtonBar
+      ? `\nimport Box from '@mui/material/Box';`
+      : '';
+
+  const entityCustomImport = entityCustomComponent
+    ? `\nimport ${entityCustomComponent} from '@/components/${parent}/${entityCustomComponent}';`
     : '';
 
-  if (hasChart) {
+  const chartButtonJsx = hasChart
+    ? `        <Link href="/${parent}/chart" underline="none">
+          <Button variant="outlined" size="medium" startIcon={<BarChartIcon />}>Chart</Button>
+        </Link>`
+    : '';
+
+  const entityCustomJsx = entityCustomComponent
+    ? `        <${entityCustomComponent} permissions={userPermissions} />`
+    : '';
+
+  const buttonBarItems = [chartButtonJsx, entityCustomJsx].filter(s => s).join('\n');
+
+  if (needsButtonBar) {
     return `import { get${parentPascal}ListPageData } from '@/lib/${parent}/getters';
-${listComponentImport}${removeImport}${chartImports}
+${listComponentImport}${removeImport}${chartImports}${entityCustomImport}
 
 export default async function ${parentPascal}sPage() {
   const { ${parentCamel}s, userPermissions } = await get${parentPascal}ListPageData();
 ${formattingBlock}  return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 1 }}>
-        <Link href="/${parent}/chart" underline="none">
-          <Button variant="outlined" size="medium" startIcon={<BarChartIcon />}>Chart</Button>
-        </Link>
+${buttonBarItems}
       </Box>
       <${listComponent} src={${srcVar}} basePath="/${parent}"${removeActionProp} entityLabel="${parentTitle}"${primaryFieldCode}${displayFieldsCode}
         permissions={userPermissions} />
