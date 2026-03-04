@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, normalizeChildRefs, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
 type TransactionClient = Pick<typeof prisma, 'parent1'>;
 
@@ -38,6 +39,14 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
 export async function addParent1(creatorId: string, name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { name: string }[]) {
   return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
+      name: name,
+      organization_id: organizationId,
+      description: description,
+      price: price,
+      due_date: dueDate,
+      image_url: imageUrl,
+    });
     return await tx.parent1.create({
       data: {
         name: name,
@@ -83,6 +92,14 @@ export async function updateParent1(updaterId: string, id: string, name: string,
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
+    await validateOnUpdate(tx, id, {
+      name: name,
+      organization_id: organizationId,
+      description: description,
+      price: price,
+      due_date: dueDate,
+      image_url: imageUrl,
+    });
     return await tx.parent1.update({
       where: { id },
       data: {

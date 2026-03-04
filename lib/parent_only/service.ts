@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
 type TransactionClient = Pick<typeof prisma, 'parent_only'>;
 
@@ -28,6 +29,12 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
 export async function addParentOnly(creatorId: string, name: string, description: string | null, loginTime: Date | null, logoutTime: Date | null) {
   return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
+      name: name,
+      description: description,
+      login_time: loginTime,
+      logout_time: logoutTime,
+    });
     return await tx.parent_only.create({
       data: {
         name: name,
@@ -46,6 +53,12 @@ export async function updateParentOnly(updaterId: string, id: string, name: stri
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
+    await validateOnUpdate(tx, id, {
+      name: name,
+      description: description,
+      login_time: loginTime,
+      logout_time: logoutTime,
+    });
     return await tx.parent_only.update({
       where: { id },
       data: {

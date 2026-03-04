@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
 type TransactionClient = Pick<typeof prisma, 'user_account'>;
 
@@ -29,6 +30,13 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
 export async function addSetting1(creatorId: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null) {
   return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
+      name: name,
+      email: email,
+      password: password,
+      api_key: apiKey,
+      avatar: avatar,
+    });
     return await tx.user_account.create({
       data: {
         name: name,
@@ -48,6 +56,13 @@ export async function updateSetting1(updaterId: string, id: string, name: string
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
+    await validateOnUpdate(tx, id, {
+      name: name,
+      email: email,
+      password: password,
+      api_key: apiKey,
+      avatar: avatar,
+    });
     return await tx.user_account.update({
       where: { id },
       data: {

@@ -2416,6 +2416,13 @@ export function generateFormValidationStub(): string {
 `;
 }
 
+export function generateServiceValidationStub(): string {
+  return `export async function validateOnAdd(_tx: unknown, _data: Record<string, unknown>): Promise<void> {}
+
+export async function validateOnUpdate(_tx: unknown, _id: string, _data: Record<string, unknown>): Promise<void> {}
+`;
+}
+
 export function generatePageNew(parent: string, children: ChildInfo[], schema: Schema, modelName?: string, definitionKey?: string): string {
   const model = modelName ?? parent;
   const defKey = definitionKey ?? `${parent}_detail`;
@@ -2651,6 +2658,7 @@ export function generateService(parent: string, children: ChildInfo[], schema: S
     : '';
 
   const parentDataObj = parentPropInfos.map(p => `        ${p.prop}: ${p.varName},`).join('\n');
+  const validationDataObj = parentPropInfos.map(p => `      ${p.prop}: ${p.varName},`).join('\n');
 
   const normalizeKind = (def: SchemaProperty): 'date' | 'number' | 'boolean' | 'string' | 'other' => {
     const propType = Array.isArray(def.type) ? def.type.find(t => t !== 'null') : def.type;
@@ -2675,7 +2683,7 @@ export function generateService(parent: string, children: ChildInfo[], schema: S
 
   // Shared utility code
   const utilityCode = `import prisma from '@/lib/prisma';
-import { normalizeValue,${nonCommentChildren.length > 0 ? ' normalizeChildRefs,' : ''}${canUpdate ? ' assertNotStale,' : ''} type NormalizedSnapshot } from '@/lib/normalize';
+import { normalizeValue,${nonCommentChildren.length > 0 ? ' normalizeChildRefs,' : ''}${canUpdate ? ' assertNotStale,' : ''} type NormalizedSnapshot } from '@/lib/normalize';${(canCreate || canUpdate) ? "\nimport { validateOnAdd, validateOnUpdate } from './service_validation';" : ''}
 
 type TransactionClient = Pick<typeof prisma, '${model}'>;
 
@@ -2705,6 +2713,9 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 ${canCreate ? `
 export async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}) {
   return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
+${validationDataObj}
+    });
     return await tx.${model}.create({
       data: {
 ${parentDataObj}
@@ -2720,6 +2731,9 @@ export async function update${parentPascal}(updaterId: string, id: string, ${par
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
+    await validateOnUpdate(tx, id, {
+${validationDataObj}
+    });
     return await tx.${model}.update({
       where: { id },
       data: {
@@ -2854,6 +2868,9 @@ export async function delete${parentPascal}(ids: string[]) {
 ${canCreate ? `
 export async function add${parentPascal}(creatorId: string, ${parentParamsWithTypes}${parentParamsWithTypes && childParamsForAdd ? ', ' : ''}${childParamsForAdd}) {${selfChildValidation ? `\n  const id = null;${selfChildValidation}` : ''}
   return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
+${validationDataObj}
+    });
     return await tx.${model}.create({
       data: {
 ${parentDataObj}
@@ -2870,6 +2887,9 @@ export async function update${parentPascal}(updaterId: string, id: string${paren
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
+    await validateOnUpdate(tx, id, {
+${validationDataObj}
+    });
     return await tx.${model}.update({
       where: { id },
       data: {

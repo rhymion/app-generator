@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
 type TransactionClient = Pick<typeof prisma, 'booking'>;
 
@@ -28,6 +29,12 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
 export async function addBooking(creatorId: string, name: string, resourceId: string, startTime: Date, endTime: Date) {
   return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
+      name: name,
+      resource_id: resourceId,
+      start_time: startTime,
+      end_time: endTime,
+    });
     return await tx.booking.create({
       data: {
         name: name,
@@ -46,6 +53,12 @@ export async function updateBooking(updaterId: string, id: string, name: string,
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
+    await validateOnUpdate(tx, id, {
+      name: name,
+      resource_id: resourceId,
+      start_time: startTime,
+      end_time: endTime,
+    });
     return await tx.booking.update({
       where: { id },
       data: {

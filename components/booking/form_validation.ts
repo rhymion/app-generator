@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { checkBookingOverlap } from '@/lib/booking/overlap';
+import { checkBookingOverlap } from '@/lib/booking/service_validation';
 import type { Dayjs } from 'dayjs';
 
 export function useFormValidation(values: Record<string, unknown>): string | null {

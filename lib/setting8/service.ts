@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
 type TransactionClient = Pick<typeof prisma, 'user_account'>;
 
@@ -27,6 +28,11 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
 export async function addSetting8(creatorId: string, name: string, email: string, password: string) {
   return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
+      name: name,
+      email: email,
+      password: password,
+    });
     return await tx.user_account.create({
       data: {
         name: name,

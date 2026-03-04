@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
 type TransactionClient = Pick<typeof prisma, 'shift_template'>;
 
@@ -28,6 +29,12 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
 export async function addShiftTemplate(creatorId: string, userAccountId: string, dayOfWeek: number, startTime: Date, endTime: Date) {
   return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
+      user_account_id: userAccountId,
+      day_of_week: dayOfWeek,
+      start_time: startTime,
+      end_time: endTime,
+    });
     return await tx.shift_template.create({
       data: {
         user_account_id: userAccountId,
@@ -46,6 +53,12 @@ export async function updateShiftTemplate(updaterId: string, id: string, userAcc
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
+    await validateOnUpdate(tx, id, {
+      user_account_id: userAccountId,
+      day_of_week: dayOfWeek,
+      start_time: startTime,
+      end_time: endTime,
+    });
     return await tx.shift_template.update({
       where: { id },
       data: {

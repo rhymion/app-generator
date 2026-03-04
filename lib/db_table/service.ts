@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, normalizeChildRefs, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
 type TransactionClient = Pick<typeof prisma, 'db_table'>;
 
@@ -30,6 +31,10 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
 export async function addDbTable(creatorId: string, name: string, description: string | null, fieldsItems: { name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean }[]) {
   return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
+      name: name,
+      description: description,
+    });
     return await tx.db_table.create({
       data: {
         name: name,
@@ -57,6 +62,10 @@ export async function updateDbTable(updaterId: string, id: string, name: string,
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
+    await validateOnUpdate(tx, id, {
+      name: name,
+      description: description,
+    });
     return await tx.db_table.update({
       where: { id },
       data: {

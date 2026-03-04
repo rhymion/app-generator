@@ -19,6 +19,7 @@ import {
   generateChartGetters,
   generatePageChart,
   generateFormValidationStub,
+  generateServiceValidationStub,
 } from './templates';
 import {
   generateTestHelper,
@@ -251,6 +252,13 @@ function generate(inputPath: string, outputDir: string) {
     // Generate service layer (shared DB operations for actions and API routes)
     if (generateConfig.new || generateConfig.edit || generateConfig.delete) {
       fs.writeFileSync(path.join(libDir, 'service.ts'), generateService(parent, children, schema, generateConfig, modelName));
+      // Write service validation stub only if file doesn't exist
+      if (generateConfig.new || generateConfig.edit) {
+        const serviceValidationStubPath = path.join(libDir, 'service_validation.ts');
+        if (!fs.existsSync(serviceValidationStubPath)) {
+          fs.writeFileSync(serviceValidationStubPath, generateServiceValidationStub());
+        }
+      }
     }
 
     // Generate actions only if new, edit, or delete is enabled

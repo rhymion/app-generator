@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
 type TransactionClient = Pick<typeof prisma, 'permission'>;
 
@@ -30,6 +31,14 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
 export async function addPermission(creatorId: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null) {
   return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
+      name: name,
+      create: create,
+      read: read,
+      update: update,
+      delete: deleteValue,
+      role_id: roleId,
+    });
     return await tx.permission.create({
       data: {
         name: name,
@@ -50,6 +59,14 @@ export async function updatePermission(updaterId: string, id: string, name: stri
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
+    await validateOnUpdate(tx, id, {
+      name: name,
+      create: create,
+      read: read,
+      update: update,
+      delete: deleteValue,
+      role_id: roleId,
+    });
     return await tx.permission.update({
       where: { id },
       data: {

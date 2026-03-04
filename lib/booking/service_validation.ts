@@ -38,7 +38,7 @@ async function hasOverlap(
   return false;
 }
 
-// Server action: called from FormUpsert client component to validate before submit
+// Server action: called from form_validation.ts (client component) for real-time feedback
 export async function checkBookingOverlap(
   resourceId: string,
   startTimeStr: string,
@@ -49,8 +49,34 @@ export async function checkBookingOverlap(
   return hasOverlap(prisma, resourceId, new Date(startTimeStr), new Date(endTimeStr), excludeId);
 }
 
-// Called inside Prisma transactions in service.ts as a safety net
-export async function assertNoBookingOverlap(
+// Called by generateService boilerplate inside Prisma transactions
+export async function validateOnAdd(_tx: unknown, data: Record<string, unknown>): Promise<void> {
+  const { resource_id, start_time, end_time } = data as {
+    resource_id: string;
+    start_time: Date;
+    end_time: Date;
+  };
+  if (!resource_id || !start_time || !end_time) return;
+  if (start_time >= end_time) {
+    throw new Error('Start time must be before end time');
+  }
+  await assertNoBookingOverlap(prisma, resource_id, start_time, end_time);
+}
+
+export async function validateOnUpdate(_tx: unknown, id: string, data: Record<string, unknown>): Promise<void> {
+  const { resource_id, start_time, end_time } = data as {
+    resource_id: string;
+    start_time: Date;
+    end_time: Date;
+  };
+  if (!resource_id || !start_time || !end_time) return;
+  if (start_time >= end_time) {
+    throw new Error('Start time must be before end time');
+  }
+  await assertNoBookingOverlap(prisma, resource_id, start_time, end_time, id);
+}
+
+async function assertNoBookingOverlap(
   tx: TransactionClient,
   resourceId: string,
   startTime: Date,
