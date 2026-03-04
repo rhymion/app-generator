@@ -14,9 +14,6 @@ export async function getAllUserAccounts(): Promise<UserAccount[]> {
   return userAccounts.map((userAccount) => ({
     id: userAccount.id,
     name: userAccount.name,
-    email: userAccount.email,
-    password: userAccount.password,
-    api_key: userAccount.api_key,
     avatar: userAccount.avatar,
   }));
 }

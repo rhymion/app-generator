@@ -4,8 +4,8 @@ import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import TextField from '@mui/material/TextField';
-import { upsertUserAccount, removeUserAccount } from '@/lib/user_account/actions';
-import type { FormUpsertProps } from '@/lib/user_account/types';
+import { upsertSetting } from '@/lib/setting/actions';
+import type { FormUpsertProps } from '@/lib/setting/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import AuditInfo from '../AuditInfo';
 import type { Role } from '@/lib/role/types';
@@ -14,6 +14,7 @@ import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
   
 import ImageUpload from '../ImageUpload';
+import ApiKey from './api_key';
 import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allRoles = [], rolePermissions }: FormUpsertProps) {
@@ -24,8 +25,11 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
   const [avatar, setAvatar] = useState<string>(src.avatar || '');
+  const [apiKey, setApiKey] = useState<string>(src.api_key ?? '');
   const rolesRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
   const [initialRoles] = useState<EditableListWrapperItem[]>(() => src.roles.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
@@ -35,6 +39,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   const validationError = useFormValidation({
     isEdit,
     id: src.id,
+    api_key: apiKey,
   });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -48,7 +53,10 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
       formData.set('__src_snapshot', srcSnapshot);
     }
     formData.set('name', nameRef.current?.value || '');
+    formData.set('email', emailRef.current?.value || '');
+    formData.set('password', passwordRef.current?.value || '');
     formData.set('avatar', avatar);
+    formData.set('api_key', apiKey);
     const roles = rolesRef.current?.getItems?.() || [];
 
     roles.forEach((item) => {
@@ -66,21 +74,15 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
 
     try {
       startTransition(async () => {
-        await upsertUserAccount(formData);
+        await upsertSetting(formData);
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     }
   };
 
-  const handleDelete = async () => {
-    const formData = new FormData();
-    formData.set('id', src.id);
-    await removeUserAccount(formData);
-  };
-
   const handleBack = () => {
-    router.push('/user_account');
+    router.push('/setting');
     router.refresh();
   };
 
@@ -97,10 +99,31 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         multiline={false}
         rows={undefined}
       />
+      <TextField
+        label="Email"
+        inputRef={emailRef}
+        defaultValue={src.email || ''}
+        fullWidth
+        margin="normal"
+        required
+        multiline={false}
+        rows={undefined}
+      />
+      <TextField
+        label="Password"
+        inputRef={passwordRef}
+        defaultValue={src.password || ''}
+        fullWidth
+        margin="normal"
+        required
+        multiline={false}
+        rows={undefined}
+      />
       <ImageUpload
         value={avatar}
         onChange={setAvatar}
       />
+      <ApiKey value={apiKey} onChange={setApiKey} isEdit={isEdit} />
       <EditableListWrapper
         ref={rolesRef}
         initialItems={initialRoles}
@@ -125,13 +148,13 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} User Account`}
+        title={`${isEdit ? 'Edit' : 'Add'} Setting`}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
-        onDelete={isEdit && canDelete ? handleDelete : undefined}
+        onDelete={undefined}
         onBack={handleBack}
-        deleteEntityLabel="User Account"
+        deleteEntityLabel="Setting"
         submitButtonLabel="Save"
         error={error}
       />

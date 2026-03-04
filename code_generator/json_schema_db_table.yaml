@@ -417,9 +417,8 @@ definitions:
     x-display:
       table:
         - name: 
+            primary: true
             width: 150
-        - email: 
-            width: 400
     properties:
       id:
         type: string
@@ -465,9 +464,38 @@ definitions:
     x-generate:
       list: true
       view: true
-      new: true
+      new: false
       edit: true
       delete: true
+      invalidate: false
+      api: true
+      fields:
+        - name
+        - avatar
+        - roles
+    x-relationships:
+      roles:
+        type: many-to-many
+        target: role
+    allOf:
+      - $ref: "#/definitions/user_account"
+      - type: object
+        required:
+          - roles
+        properties:
+          roles:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/role"
+
+  setting:
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: true
+      delete: false
       invalidate: false
       api: true
     x-relationships:
@@ -485,18 +513,6 @@ definitions:
             x-outputType: list
             items:
               $ref: "#/definitions/role"
-
-  # setting:
-  #   x-generate:
-  #     list: false
-  #     view: true
-  #     new: false
-  #     edit: true
-  #     delete: false
-  #     invalidate: false
-  #     api: true
-  #   allOf:
-  #     - $ref: "#/definitions/user_account"
 
   setting1:
     x-generate:

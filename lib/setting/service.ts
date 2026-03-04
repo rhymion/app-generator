@@ -9,6 +9,9 @@ function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined)
   return {
     id: String(safeSnapshot.id ?? ''),
     name: normalizeValue(safeSnapshot.name, 'string'),
+    email: normalizeValue(safeSnapshot.email, 'string'),
+    password: normalizeValue(safeSnapshot.password, 'string'),
+    api_key: normalizeValue(safeSnapshot.api_key, 'string'),
     avatar: normalizeValue(safeSnapshot.avatar, 'string'),
     roles: normalizeChildRefs(safeSnapshot.roles),
   };
@@ -29,19 +32,25 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
   return normalizeSnapshot(current as Record<string, unknown>);
 }
 
-export async function updateUserAccount(updaterId: string, id: string, name: string, avatar: string | null, rolesIds: string[], srcSnapshotRaw?: string | null) {
+export async function updateSetting(updaterId: string, id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, rolesIds: string[], srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
     await validateOnUpdate(tx, id, {
       name: name,
+      email: email,
+      password: password,
+      api_key: apiKey,
       avatar: avatar,
     });
     return await tx.user_account.update({
       where: { id },
       data: {
         name: name,
+        email: email,
+        password: password,
+        api_key: apiKey,
         avatar: avatar,
         updater_id: updaterId,
       roles: {
@@ -50,12 +59,4 @@ export async function updateUserAccount(updaterId: string, id: string, name: str
       },
     });
   });
-}
-
-export async function deleteUserAccount(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.user_account.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.user_account.deleteMany({ where: { id: { in: ids } } });
-  }
 }

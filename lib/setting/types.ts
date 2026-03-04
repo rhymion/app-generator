@@ -1,13 +1,16 @@
 import type { ModelPermissions } from '@/lib/authz';
 
-export type UserAccount = {
+export type Setting = {
   id: string;
   name: string;
+  email: string;
+  password: string;
+  api_key: string | null;
   avatar: string | null;
 
 };
 
-export type UserAccountDetail = UserAccount & {
+export type SettingDetail = Setting & {
   roles: Role[];
 };
 
@@ -16,7 +19,7 @@ export type Role = {
   name: string;
   description: string | null;
 };
-export type UserAccountDetailPageProps = Readonly<{
+export type SettingDetailPageProps = Readonly<{
   params: Promise<{
     id: string;
   }>
@@ -26,6 +29,9 @@ export type FormViewProps = Readonly<{
   src: {
     id: string;
     name: string;
+    email: string;
+    password: string;
+    api_key: string | null;
     avatar: string | null;
     roles: Role[];
     created_at?: string | Date;

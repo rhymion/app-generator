@@ -355,9 +355,9 @@ ${relationshipMapping}` : ''}
 
 export async function get${parentPascal}ListPageData(isAssertPermission: boolean = true) {${shouldFilterByOrganization ? `
   const userId = await getSessionUserIdOrThrow();` : ''}
-  const userPermissions = await getModelPermissions('${model}'${shouldFilterByOrganization ? ', userId' : ''});
+  const userPermissions = await getModelPermissions('${parent}'${shouldFilterByOrganization ? ', userId' : ''});
   if (isAssertPermission) {
-    await assertPermission(userPermissions, 'read', '${model}');
+    await assertPermission(userPermissions, 'read', '${parent}');
   }
   const ${parentCamel}s = await getAll${parentPascal}s(${shouldFilterByOrganization ? 'userId' : ''});
   return { ${parentCamel}s, userPermissions };
@@ -366,14 +366,14 @@ export async function get${parentPascal}ListPageData(isAssertPermission: boolean
 export async function get${parentPascal}DetailPageData(id: string, operation: Operation = 'read') {${shouldFilterByOrganization ? `
   const userId = await getSessionUserIdOrThrow();` : ''}
   const ${parentCamel} = await get${parentPascal}Detail(id${shouldFilterByOrganization ? ', userId' : ''});
-  const userPermissions = await getModelPermissions('${model}', ${shouldFilterByOrganization ? 'userId' : 'undefined'}, ${parentCamel});
-  await assertPermission(userPermissions, operation, '${model}');
+  const userPermissions = await getModelPermissions('${parent}', ${shouldFilterByOrganization ? 'userId' : 'undefined'}, ${parentCamel});
+  await assertPermission(userPermissions, operation, '${parent}');
   return { ${parentCamel}, userPermissions };
 }
 
 export async function get${parentPascal}NewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('${model}');
-  await assertPermission(userPermissions, 'create', '${model}');
+  const userPermissions = await getModelPermissions('${parent}');
+  await assertPermission(userPermissions, 'create', '${parent}');
   return userPermissions;
 }
 `;
