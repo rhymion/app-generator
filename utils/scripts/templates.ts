@@ -1825,8 +1825,9 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
     const prop = filteredProps[p];
     const format = (prop as any).format;
     const showTime = format === 'date-time' || format === 'time';
+    const showDateStr = filteredProps[p].format === 'time' ? ' show_date={false}' : '';
 
-    return `      <DateTimeWrapper label="${label}" date_time={src.${p}}${showTime ? '' : ' show_time={false}'} readOnly />`;
+    return `      <DateTimeWrapper label="${label}" date_time={src.${p}}${showTime ? '' : ' show_time={false}'}${showDateStr} readOnly />`;
   }).join('\n');
   
   const imageFieldsJsx = imageFields.map(p => {
