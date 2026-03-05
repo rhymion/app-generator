@@ -14,9 +14,6 @@ export type OrganizationDetail = Organization & {
 export type UserAccount = {
   id: string;
   name: string;
-  email: string;
-  password: string;
-  api_key: string | null;
   avatar: string | null;
 };
 export type OrganizationDetailPageProps = Readonly<{

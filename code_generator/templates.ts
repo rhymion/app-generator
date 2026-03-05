@@ -147,7 +147,12 @@ ${parentExtraProps.join('\n')}
 
     if (childDef?.properties) {
       const childProps: string[] = [];
-      for (const [key, prop] of Object.entries(childDef.properties)) {
+      // Apply field filtering from the child's detail definition (e.g. user_account_detail x-generate.fields)
+      // so the generated type only includes fields that are actually fetched by the child's getter.
+      const childDetailDef = schema.definitions[`${child.name}_detail`];
+      const childGenerateFields = childDetailDef?.['x-generate']?.fields as string[] | undefined;
+      const filteredChildProperties = filterFields(childDef.properties, childGenerateFields);
+      for (const [key, prop] of Object.entries(filteredChildProperties)) {
         const tsType = getTsType(prop);
         childProps.push(`  ${key}: ${tsType};`);
       }
