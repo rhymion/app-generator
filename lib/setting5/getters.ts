@@ -9,22 +9,22 @@ import { getServerSession } from 'next-auth/next';
 
 export async function getAllSetting5s(): Promise<Setting5[]> {
 
-  const setting5s = await prisma.user_account.findMany({
+  const setting5s = await prisma.xxxxx_xxxxx.findMany({
   });
   return setting5s.map((setting5) => ({
     id: setting5.id,
     name: setting5.name,
-    email: setting5.email,
   }));
 }
 
 export async function getSetting5Detail(id: string): Promise<Setting5Detail | null> {
   
-  const setting5 = await prisma.user_account.findUnique({
+  const setting5 = await prisma.xxxxx_xxxxx.findUnique({
     where: { 
       id,
     },
     include: { 
+      yyyyy_yyyyys: true, 
       creator: { select: { id: true, 
       name: true } }, 
       updater: { select: { id: true, 
@@ -38,6 +38,7 @@ export async function getSetting5Detail(id: string): Promise<Setting5Detail | nu
 
   return {
     ...setting5,
+    yyyyy_yyyyys: setting5.yyyyy_yyyyys,
   };
 }
 

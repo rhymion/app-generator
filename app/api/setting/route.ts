@@ -5,7 +5,7 @@ import { getAllSettings } from '@/lib/setting/getters';
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, 'user_account', 'read');
+    await requireApiPermission(userId, 'setting', 'read');
     const items = await getAllSettings();
     return NextResponse.json(items);
   } catch (error) {

@@ -9,11 +9,10 @@ import { addSetting2 } from './service';
 export async function upsertSetting2(data: FormData) {
   await requirePermission('setting2', 'create');
   const name = data.get('name') as string;
-  const email = data.get('email') as string;
-  const password = data.get('password') as string;
+  const description = data.get('description') as string | null;
 
   const userId = await getSessionUserIdOrThrow();
-  await addSetting2(userId, name, email, password);
+  await addSetting2(userId, name, description);
 
   revalidatePath('/');
   redirect('/setting2');

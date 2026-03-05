@@ -42,15 +42,8 @@ export default function FormView({ src, permissions }: FormViewProps) {
         aria-readonly
       />
       <TextField
-        label="Email"
-        value={src.email || ''}
-        fullWidth
-        margin="normal"
-        aria-readonly
-      />
-      <TextField
-        label="Password"
-        value={src.password || ''}
+        label="Description"
+        value={src.description || ''}
         fullWidth
         margin="normal"
         aria-readonly

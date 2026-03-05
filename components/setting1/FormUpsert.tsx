@@ -8,9 +8,9 @@ import { upsertSetting1, removeSetting1 } from '@/lib/setting1/actions';
 import type { FormUpsertProps } from '@/lib/setting1/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import AuditInfo from '../AuditInfo';
-
-import ImageUpload from '../ImageUpload';
-import ApiKey from './api_key';
+import { GridRowsProp } from '@mui/x-data-grid';
+  import FieldsDataGrid from '../FieldsDataGrid';
+  import { yyyyy_yyyyys_columns } from '../setting1/column_def';
 import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
@@ -20,16 +20,28 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
-  const [avatar, setAvatar] = useState<string>(src.avatar || '');
-  const [apiKey, setApiKey] = useState<string>(src.api_key ?? '');
-
+  const yyyyyYyyyysRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
-  const emailRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLInputElement>(null);
+  const teamRef = useRef<HTMLInputElement>(null);
+  const yyyyyYyyyysColumns = yyyyy_yyyyys_columns(true);
+
+  const [initialYyyyyYyyyys] = useState<GridRowsProp>(() => src.yyyyy_yyyyys.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` })));
+
+  const createNewYyyyyYyyyys = () => ({
+    id: `temp-${Date.now()}-${Math.random()}`,
+    name: '',
+    type: '',
+    max_length: null,
+    max: null,
+    regex: '',
+    required: true,
+    written_by: '',
+    xxxxx_xxxxx_id: src.id,
+  });
   const validationError = useFormValidation({
     isEdit,
     id: src.id,
-    api_key: apiKey,
   });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -43,10 +55,25 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
       formData.set('__src_snapshot', srcSnapshot);
     }
     formData.set('name', nameRef.current?.value || '');
-    formData.set('email', emailRef.current?.value || '');
-    formData.set('password', passwordRef.current?.value || '');
-    formData.set('avatar', avatar);
-    formData.set('api_key', apiKey);
+    formData.set('description', descriptionRef.current?.value || '');
+    formData.set('team', teamRef.current?.value || '');
+    const yyyyyYyyyys = yyyyyYyyyysRef.current?.getFields?.() || [];
+
+    (yyyyyYyyyys as GridRowsProp).forEach((field) => {
+      formData.append(
+        'yyyyy_yyyyy[]',
+        JSON.stringify({
+          id: field.id.startsWith('temp-') ? undefined : field.id,
+          name: field.name,
+          type: field.type,
+          max_length: field.max_length,
+          max: field.max,
+          regex: field.regex,
+          required: field.required,
+          written_by: field.written_by,
+        })
+      );
+    });
 
     try {
       startTransition(async () => {
@@ -82,30 +109,36 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         rows={undefined}
       />
       <TextField
-        label="Email"
-        inputRef={emailRef}
-        defaultValue={src.email || ''}
+        label="Description"
+        inputRef={descriptionRef}
+        defaultValue={src.description || ''}
         fullWidth
         margin="normal"
-        required
-        multiline={false}
-        rows={undefined}
+        
+        multiline={true}
+        rows={4}
       />
       <TextField
-        label="Password"
-        inputRef={passwordRef}
-        defaultValue={src.password || ''}
+        label="Team"
+        inputRef={teamRef}
+        defaultValue={src.team || ''}
         fullWidth
         margin="normal"
-        required
+        
         multiline={false}
         rows={undefined}
       />
-      <ImageUpload
-        value={avatar}
-        onChange={setAvatar}
+      <FieldsDataGrid
+        ref={yyyyyYyyyysRef}
+        initialFields={initialYyyyyYyyyys}
+        columns={yyyyyYyyyysColumns}
+        createNewRow={createNewYyyyyYyyyys}
+        addButtonLabel="Add Yyyyy Yyyyys"
+        deleteDialogTitle="Delete Selected Yyyyy Yyyyys?"
+        deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
+        showTitle={true}
+        title="Yyyyy Yyyyys"
       />
-      <ApiKey value={apiKey} onChange={setApiKey} isEdit={isEdit} />
       {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>

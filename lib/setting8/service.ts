@@ -2,20 +2,19 @@ import prisma from '@/lib/prisma';
 import { normalizeValue, type NormalizedSnapshot } from '@/lib/normalize';
 import { validateOnAdd, validateOnUpdate } from './service_validation';
 
-type TransactionClient = Pick<typeof prisma, 'user_account'>;
+type TransactionClient = Pick<typeof prisma, 'xxxxx_xxxxx'>;
 
 function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {
   const safeSnapshot = (snapshot ?? {}) as Record<string, unknown>;
   return {
     id: String(safeSnapshot.id ?? ''),
     name: normalizeValue(safeSnapshot.name, 'string'),
-    email: normalizeValue(safeSnapshot.email, 'string'),
-    password: normalizeValue(safeSnapshot.password, 'string'),
+    description: normalizeValue(safeSnapshot.description, 'string'),
   };
 }
 
 async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
-  const current = await tx.user_account.findUnique({
+  const current = await tx.xxxxx_xxxxx.findUnique({
     where: { id }
   });
 
@@ -26,18 +25,16 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
   return normalizeSnapshot(current as Record<string, unknown>);
 }
 
-export async function addSetting8(creatorId: string, name: string, email: string, password: string) {
+export async function addSetting8(creatorId: string, name: string, description: string | null) {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
       name: name,
-      email: email,
-      password: password,
+      description: description,
     });
-    return await tx.user_account.create({
+    return await tx.xxxxx_xxxxx.create({
       data: {
         name: name,
-        email: email,
-        password: password,
+        description: description,
         creator_id: creatorId,
         updater_id: creatorId,
       },
@@ -47,8 +44,8 @@ export async function addSetting8(creatorId: string, name: string, email: string
 
 export async function deleteSetting8(ids: string[]) {
   if (ids.length === 1) {
-    await prisma.user_account.delete({ where: { id: ids[0] } });
+    await prisma.xxxxx_xxxxx.delete({ where: { id: ids[0] } });
   } else {
-    await prisma.user_account.deleteMany({ where: { id: { in: ids } } });
+    await prisma.xxxxx_xxxxx.deleteMany({ where: { id: { in: ids } } });
   }
 }

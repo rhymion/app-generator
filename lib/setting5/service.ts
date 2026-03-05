@@ -1,21 +1,24 @@
 import prisma from '@/lib/prisma';
-import { normalizeValue, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { normalizeValue, normalizeChildRefs, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
 import { validateOnAdd, validateOnUpdate } from './service_validation';
 
-type TransactionClient = Pick<typeof prisma, 'user_account'>;
+type TransactionClient = Pick<typeof prisma, 'xxxxx_xxxxx'>;
 
 function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {
   const safeSnapshot = (snapshot ?? {}) as Record<string, unknown>;
   return {
     id: String(safeSnapshot.id ?? ''),
     name: normalizeValue(safeSnapshot.name, 'string'),
-    email: normalizeValue(safeSnapshot.email, 'string'),
+    yyyyy_yyyyys: normalizeChildRefs(safeSnapshot.yyyyy_yyyyys),
   };
 }
 
 async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
-  const current = await tx.user_account.findUnique({
-    where: { id }
+  const current = await tx.xxxxx_xxxxx.findUnique({
+    where: { id },
+    include: {
+      yyyyy_yyyyys: { select: { id: true } }
+    }
   });
 
   if (!current) {
@@ -25,21 +28,31 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
   return normalizeSnapshot(current as Record<string, unknown>);
 }
 
-export async function updateSetting5(updaterId: string, id: string, name: string, email: string, srcSnapshotRaw?: string | null) {
+export async function updateSetting5(updaterId: string, id: string, name: string, yyyyyYyyyysItems: { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
     await validateOnUpdate(tx, id, {
       name: name,
-      email: email,
     });
-    return await tx.user_account.update({
+    return await tx.xxxxx_xxxxx.update({
       where: { id },
       data: {
         name: name,
-        email: email,
         updater_id: updaterId,
+      yyyyy_yyyyys: {
+        deleteMany: {},
+        create: yyyyyYyyyysItems.map(f => ({
+          name: f.name,
+          type: f.type,
+          max_length: f.max_length,
+          max: f.max,
+          regex: f.regex,
+          required: f.required,
+          written_by: f.written_by,
+        })),
+      },
       },
     });
   });

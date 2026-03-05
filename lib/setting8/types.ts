@@ -3,8 +3,7 @@ import type { ModelPermissions } from '@/lib/authz';
 export type Setting8 = {
   id: string;
   name: string;
-  email: string;
-  password: string;
+  description: string | null;
 
 };
 
@@ -20,8 +19,7 @@ export type FormViewProps = Readonly<{
   src: {
     id: string;
     name: string;
-    email: string;
-    password: string;
+    description: string | null;
     created_at?: string | Date;
     updated_at?: string | Date;
     creator?: { id: string; name: string } | null;

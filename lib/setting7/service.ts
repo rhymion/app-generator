@@ -2,22 +2,20 @@ import prisma from '@/lib/prisma';
 import { normalizeValue, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
 import { validateOnAdd, validateOnUpdate } from './service_validation';
 
-type TransactionClient = Pick<typeof prisma, 'user_account'>;
+type TransactionClient = Pick<typeof prisma, 'xxxxx_xxxxx'>;
 
 function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {
   const safeSnapshot = (snapshot ?? {}) as Record<string, unknown>;
   return {
     id: String(safeSnapshot.id ?? ''),
     name: normalizeValue(safeSnapshot.name, 'string'),
-    email: normalizeValue(safeSnapshot.email, 'string'),
-    password: normalizeValue(safeSnapshot.password, 'string'),
-    api_key: normalizeValue(safeSnapshot.api_key, 'string'),
-    avatar: normalizeValue(safeSnapshot.avatar, 'string'),
+    description: normalizeValue(safeSnapshot.description, 'string'),
+    team: normalizeValue(safeSnapshot.team, 'string'),
   };
 }
 
 async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
-  const current = await tx.user_account.findUnique({
+  const current = await tx.xxxxx_xxxxx.findUnique({
     where: { id }
   });
 
@@ -28,22 +26,18 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
   return normalizeSnapshot(current as Record<string, unknown>);
 }
 
-export async function addSetting7(creatorId: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null) {
+export async function addSetting7(creatorId: string, name: string, description: string | null, team: string | null) {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
       name: name,
-      email: email,
-      password: password,
-      api_key: apiKey,
-      avatar: avatar,
+      description: description,
+      team: team,
     });
-    return await tx.user_account.create({
+    return await tx.xxxxx_xxxxx.create({
       data: {
         name: name,
-        email: email,
-        password: password,
-        api_key: apiKey,
-        avatar: avatar,
+        description: description,
+        team: team,
         creator_id: creatorId,
         updater_id: creatorId,
       },
@@ -51,26 +45,22 @@ export async function addSetting7(creatorId: string, name: string, email: string
   });
 }
 
-export async function updateSetting7(updaterId: string, id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, srcSnapshotRaw?: string | null) {
+export async function updateSetting7(updaterId: string, id: string, name: string, description: string | null, team: string | null, srcSnapshotRaw?: string | null) {
   return await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
     await validateOnUpdate(tx, id, {
       name: name,
-      email: email,
-      password: password,
-      api_key: apiKey,
-      avatar: avatar,
+      description: description,
+      team: team,
     });
-    return await tx.user_account.update({
+    return await tx.xxxxx_xxxxx.update({
       where: { id },
       data: {
         name: name,
-        email: email,
-        password: password,
-        api_key: apiKey,
-        avatar: avatar,
+        description: description,
+        team: team,
         updater_id: updaterId,
       },
     });

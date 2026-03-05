@@ -6,7 +6,7 @@ import { addSetting1 } from '@/lib/setting1/service';
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, 'user_account', 'read');
+    await requireApiPermission(userId, 'setting1', 'read');
     const items = await getAllSetting1s();
     return NextResponse.json(items);
   } catch (error) {
@@ -17,10 +17,10 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, 'user_account', 'create');
+    await requireApiPermission(userId, 'setting1', 'create');
     const body = await request.json();
-    const { name, email, password, api_key: apiKey, avatar } = body;
-    const result = await addSetting1(userId, name, email, password, apiKey ?? null, avatar ?? null);
+    const { name, description, team, yyyyy_yyyyys } = body;
+    const result = await addSetting1(userId, name, description ?? null, team ?? null, yyyyy_yyyyys ?? []);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     return handleApiError(error);

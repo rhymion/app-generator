@@ -14,7 +14,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(userId, 'user_account', 'read', item);
+    await requireApiPermission(userId, 'setting', 'read', item);
     return NextResponse.json(item);
   } catch (error) {
     return handleApiError(error);
@@ -29,7 +29,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(userId, 'user_account', 'update', existing);
+    await requireApiPermission(userId, 'setting', 'update', existing);
     const body = await request.json();
     const { name, email, password, api_key: apiKey, avatar, roles_ids } = body;
     const result = await updateSetting(userId, id, name, email, password, apiKey ?? null, avatar ?? null, roles_ids ?? []);

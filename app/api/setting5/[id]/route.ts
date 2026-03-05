@@ -14,7 +14,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(userId, 'user_account', 'read', item);
+    await requireApiPermission(userId, 'setting5', 'read', item);
     return NextResponse.json(item);
   } catch (error) {
     return handleApiError(error);
@@ -25,14 +25,14 @@ export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    const existing = await prisma.user_account.findUnique({ where: { id }, select: { creator_id: true } });
+    const existing = await prisma.xxxxx_xxxxx.findUnique({ where: { id }, select: { creator_id: true } });
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(userId, 'user_account', 'update', existing);
+    await requireApiPermission(userId, 'setting5', 'update', existing);
     const body = await request.json();
-    const { name, email } = body;
-    const result = await updateSetting5(userId, id, name, email);
+    const { name, yyyyy_yyyyys } = body;
+    const result = await updateSetting5(userId, id, name, yyyyy_yyyyys ?? []);
     return NextResponse.json(result);
   } catch (error) {
     return handleApiError(error);

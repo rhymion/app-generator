@@ -20,8 +20,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
 
 
   const nameRef = useRef<HTMLInputElement>(null);
-  const emailRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLInputElement>(null);
   const validationError = useFormValidation({
     isEdit,
     id: src.id,
@@ -38,8 +37,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
       formData.set('__src_snapshot', srcSnapshot);
     }
     formData.set('name', nameRef.current?.value || '');
-    formData.set('email', emailRef.current?.value || '');
-    formData.set('password', passwordRef.current?.value || '');
+    formData.set('description', descriptionRef.current?.value || '');
 
     try {
       startTransition(async () => {
@@ -69,24 +67,14 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         rows={undefined}
       />
       <TextField
-        label="Email"
-        inputRef={emailRef}
-        defaultValue={src.email || ''}
+        label="Description"
+        inputRef={descriptionRef}
+        defaultValue={src.description || ''}
         fullWidth
         margin="normal"
-        required
-        multiline={false}
-        rows={undefined}
-      />
-      <TextField
-        label="Password"
-        inputRef={passwordRef}
-        defaultValue={src.password || ''}
-        fullWidth
-        margin="normal"
-        required
-        multiline={false}
-        rows={undefined}
+        
+        multiline={true}
+        rows={4}
       />
       {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}

@@ -524,7 +524,15 @@ definitions:
       invalidate: false
       api: true
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/xxxxx_xxxxx"
+      - type: object
+        required:
+          - yyyyy_yyyyys
+        properties:
+          yyyyy_yyyyys:
+            type: array
+            items:
+              $ref: "#/definitions/yyyyy_yyyyy"
 
   setting2:
     x-generate:
@@ -537,10 +545,9 @@ definitions:
       api: false
       fields:
         - name
-        - email
-        - password
+        - description
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/xxxxx_xxxxx"
 
   setting3:
     x-generate:
@@ -553,9 +560,9 @@ definitions:
       api: false
       fields:
         - name
-        - email
+        - description
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/xxxxx_xxxxx"
 
   setting4:
     x-generate:
@@ -567,7 +574,7 @@ definitions:
       invalidate: false
       api: true
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/xxxxx_xxxxx"
 
   setting5:
     x-generate:
@@ -580,9 +587,17 @@ definitions:
       api: true
       fields:
         - name
-        - email
+        - yyyyy_yyyyys
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/xxxxx_xxxxx"
+      - type: object
+        required:
+          - yyyyy_yyyyys
+        properties:
+          yyyyy_yyyyys:
+            type: array
+            items:
+              $ref: "#/definitions/yyyyy_yyyyy"
 
   setting6:
     x-generate:
@@ -594,7 +609,15 @@ definitions:
       invalidate: false
       api: false
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/xxxxx_xxxxx"
+      - type: object
+        required:
+          - yyyyy_yyyyys
+        properties:
+          yyyyy_yyyyys:
+            type: array
+            items:
+              $ref: "#/definitions/yyyyy_yyyyy"
 
   setting7:
     x-generate:
@@ -606,7 +629,7 @@ definitions:
       invalidate: false
       api: false
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/xxxxx_xxxxx"
 
   setting8:
     x-generate:
@@ -619,10 +642,9 @@ definitions:
       api: true
       fields:
         - name
-        - email
-        - password
+        - description
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/xxxxx_xxxxx"
 
   role_detail:
     x-generate:

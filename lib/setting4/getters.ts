@@ -9,21 +9,19 @@ import { getServerSession } from 'next-auth/next';
 
 export async function getAllSetting4s(): Promise<Setting4[]> {
 
-  const setting4s = await prisma.user_account.findMany({
+  const setting4s = await prisma.xxxxx_xxxxx.findMany({
   });
   return setting4s.map((setting4) => ({
     id: setting4.id,
     name: setting4.name,
-    email: setting4.email,
-    password: setting4.password,
-    api_key: setting4.api_key,
-    avatar: setting4.avatar,
+    description: setting4.description,
+    team: setting4.team,
   }));
 }
 
 export async function getSetting4Detail(id: string): Promise<Setting4Detail | null> {
   
-  const setting4 = await prisma.user_account.findUnique({
+  const setting4 = await prisma.xxxxx_xxxxx.findUnique({
     where: { 
       id,
     },

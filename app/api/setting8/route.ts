@@ -5,10 +5,10 @@ import { addSetting8 } from '@/lib/setting8/service';
 export async function POST(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, 'user_account', 'create');
+    await requireApiPermission(userId, 'setting8', 'create');
     const body = await request.json();
-    const { name, email, password } = body;
-    const result = await addSetting8(userId, name, email, password);
+    const { name, description } = body;
+    const result = await addSetting8(userId, name, description ?? null);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     return handleApiError(error);

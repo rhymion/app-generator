@@ -9,8 +9,6 @@ import type { FormUpsertProps } from '@/lib/setting7/types';
 import FormWithChildGrid from '../FormWithChildGrid';
 import AuditInfo from '../AuditInfo';
 
-import ImageUpload from '../ImageUpload';
-import ApiKey from './api_key';
 import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
@@ -20,16 +18,13 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
-  const [avatar, setAvatar] = useState<string>(src.avatar || '');
-  const [apiKey, setApiKey] = useState<string>(src.api_key ?? '');
 
   const nameRef = useRef<HTMLInputElement>(null);
-  const emailRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLInputElement>(null);
+  const teamRef = useRef<HTMLInputElement>(null);
   const validationError = useFormValidation({
     isEdit,
     id: src.id,
-    api_key: apiKey,
   });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -43,10 +38,8 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
       formData.set('__src_snapshot', srcSnapshot);
     }
     formData.set('name', nameRef.current?.value || '');
-    formData.set('email', emailRef.current?.value || '');
-    formData.set('password', passwordRef.current?.value || '');
-    formData.set('avatar', avatar);
-    formData.set('api_key', apiKey);
+    formData.set('description', descriptionRef.current?.value || '');
+    formData.set('team', teamRef.current?.value || '');
 
     try {
       startTransition(async () => {
@@ -76,30 +69,25 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         rows={undefined}
       />
       <TextField
-        label="Email"
-        inputRef={emailRef}
-        defaultValue={src.email || ''}
+        label="Description"
+        inputRef={descriptionRef}
+        defaultValue={src.description || ''}
         fullWidth
         margin="normal"
-        required
-        multiline={false}
-        rows={undefined}
+        
+        multiline={true}
+        rows={4}
       />
       <TextField
-        label="Password"
-        inputRef={passwordRef}
-        defaultValue={src.password || ''}
+        label="Team"
+        inputRef={teamRef}
+        defaultValue={src.team || ''}
         fullWidth
         margin="normal"
-        required
+        
         multiline={false}
         rows={undefined}
       />
-      <ImageUpload
-        value={avatar}
-        onChange={setAvatar}
-      />
-      <ApiKey value={apiKey} onChange={setApiKey} isEdit={isEdit} />
       {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>

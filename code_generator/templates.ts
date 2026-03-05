@@ -2972,7 +2972,7 @@ ${canList ? `
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '${model}', 'read');
+    await requireApiPermission(userId, '${parent}', 'read');
     const items = await getAll${parentPascal}s(${shouldFilterByOrganization ? 'userId' : ''});
     return NextResponse.json(items);
   } catch (error) {
@@ -2983,7 +2983,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '${model}', 'create');
+    await requireApiPermission(userId, '${parent}', 'create');
     const body = await request.json();
     const { ${allBodyFields} } = body;
     const result = await add${parentPascal}(${serviceArgsForCreate});
@@ -3073,7 +3073,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(userId, '${model}', 'read', item);
+    await requireApiPermission(userId, '${parent}', 'read', item);
     return NextResponse.json(item);
   } catch (error) {
     return handleApiError(error);
@@ -3088,7 +3088,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(userId, '${model}', 'update', existing);
+    await requireApiPermission(userId, '${parent}', 'update', existing);
     const body = await request.json();
     const { ${allBodyFields} } = body;
     const result = await update${parentPascal}(userId, ${serviceArgsForUpdate});
@@ -3106,7 +3106,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(userId, '${model}', 'delete', existing);
+    await requireApiPermission(userId, '${parent}', 'delete', existing);
     await delete${parentPascal}([id]);
     return new NextResponse(null, { status: 204 });
   } catch (error) {

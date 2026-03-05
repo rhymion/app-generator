@@ -6,10 +6,8 @@ export default async function AddSetting7Page() {
   const src = {
     id: '',
     name: '',
-    email: '',
-    password: '',
-    api_key: '',
-    avatar: '',
+    description: '',
+    team: '',
   };
   return <FormUpsert src={src} isEdit={false} permissions={userPermissions} />;
 }
