@@ -42,9 +42,9 @@ export async function getSetting3Detail(id: string): Promise<Setting3Detail | nu
 }
 
 export async function getSetting3ListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('user_account');
+  const userPermissions = await getModelPermissions('setting3');
   if (isAssertPermission) {
-    await assertPermission(userPermissions, 'read', 'user_account');
+    await assertPermission(userPermissions, 'read', 'setting3');
   }
   const setting3s = await getAllSetting3s();
   return { setting3s, userPermissions };
@@ -52,13 +52,13 @@ export async function getSetting3ListPageData(isAssertPermission: boolean = true
 
 export async function getSetting3DetailPageData(id: string, operation: Operation = 'read') {
   const setting3 = await getSetting3Detail(id);
-  const userPermissions = await getModelPermissions('user_account', undefined, setting3);
-  await assertPermission(userPermissions, operation, 'user_account');
+  const userPermissions = await getModelPermissions('setting3', undefined, setting3);
+  await assertPermission(userPermissions, operation, 'setting3');
   return { setting3, userPermissions };
 }
 
 export async function getSetting3NewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('user_account');
-  await assertPermission(userPermissions, 'create', 'user_account');
+  const userPermissions = await getModelPermissions('setting3');
+  await assertPermission(userPermissions, 'create', 'setting3');
   return userPermissions;
 }

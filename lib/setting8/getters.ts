@@ -43,9 +43,9 @@ export async function getSetting8Detail(id: string): Promise<Setting8Detail | nu
 }
 
 export async function getSetting8ListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('user_account');
+  const userPermissions = await getModelPermissions('setting8');
   if (isAssertPermission) {
-    await assertPermission(userPermissions, 'read', 'user_account');
+    await assertPermission(userPermissions, 'read', 'setting8');
   }
   const setting8s = await getAllSetting8s();
   return { setting8s, userPermissions };
@@ -53,13 +53,13 @@ export async function getSetting8ListPageData(isAssertPermission: boolean = true
 
 export async function getSetting8DetailPageData(id: string, operation: Operation = 'read') {
   const setting8 = await getSetting8Detail(id);
-  const userPermissions = await getModelPermissions('user_account', undefined, setting8);
-  await assertPermission(userPermissions, operation, 'user_account');
+  const userPermissions = await getModelPermissions('setting8', undefined, setting8);
+  await assertPermission(userPermissions, operation, 'setting8');
   return { setting8, userPermissions };
 }
 
 export async function getSetting8NewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('user_account');
-  await assertPermission(userPermissions, 'create', 'user_account');
+  const userPermissions = await getModelPermissions('setting8');
+  await assertPermission(userPermissions, 'create', 'setting8');
   return userPermissions;
 }

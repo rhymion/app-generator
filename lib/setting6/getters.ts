@@ -45,9 +45,9 @@ export async function getSetting6Detail(id: string): Promise<Setting6Detail | nu
 }
 
 export async function getSetting6ListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('user_account');
+  const userPermissions = await getModelPermissions('setting6');
   if (isAssertPermission) {
-    await assertPermission(userPermissions, 'read', 'user_account');
+    await assertPermission(userPermissions, 'read', 'setting6');
   }
   const setting6s = await getAllSetting6s();
   return { setting6s, userPermissions };
@@ -55,13 +55,13 @@ export async function getSetting6ListPageData(isAssertPermission: boolean = true
 
 export async function getSetting6DetailPageData(id: string, operation: Operation = 'read') {
   const setting6 = await getSetting6Detail(id);
-  const userPermissions = await getModelPermissions('user_account', undefined, setting6);
-  await assertPermission(userPermissions, operation, 'user_account');
+  const userPermissions = await getModelPermissions('setting6', undefined, setting6);
+  await assertPermission(userPermissions, operation, 'setting6');
   return { setting6, userPermissions };
 }
 
 export async function getSetting6NewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('user_account');
-  await assertPermission(userPermissions, 'create', 'user_account');
+  const userPermissions = await getModelPermissions('setting6');
+  await assertPermission(userPermissions, 'create', 'setting6');
   return userPermissions;
 }

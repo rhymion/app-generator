@@ -45,9 +45,9 @@ export async function getSetting7Detail(id: string): Promise<Setting7Detail | nu
 }
 
 export async function getSetting7ListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('user_account');
+  const userPermissions = await getModelPermissions('setting7');
   if (isAssertPermission) {
-    await assertPermission(userPermissions, 'read', 'user_account');
+    await assertPermission(userPermissions, 'read', 'setting7');
   }
   const setting7s = await getAllSetting7s();
   return { setting7s, userPermissions };
@@ -55,13 +55,13 @@ export async function getSetting7ListPageData(isAssertPermission: boolean = true
 
 export async function getSetting7DetailPageData(id: string, operation: Operation = 'read') {
   const setting7 = await getSetting7Detail(id);
-  const userPermissions = await getModelPermissions('user_account', undefined, setting7);
-  await assertPermission(userPermissions, operation, 'user_account');
+  const userPermissions = await getModelPermissions('setting7', undefined, setting7);
+  await assertPermission(userPermissions, operation, 'setting7');
   return { setting7, userPermissions };
 }
 
 export async function getSetting7NewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('user_account');
-  await assertPermission(userPermissions, 'create', 'user_account');
+  const userPermissions = await getModelPermissions('setting7');
+  await assertPermission(userPermissions, 'create', 'setting7');
   return userPermissions;
 }
