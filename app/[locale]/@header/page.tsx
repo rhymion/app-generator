@@ -75,9 +75,11 @@ export default function HeaderPage() {
       <div className="flex items-center gap-3 shrink-0">
         {session?.user ? (
           <>
-            <span className="hidden sm:block text-sm opacity-75 truncate max-w-40">
-              {session.user.name ?? session.user.email}
-            </span>
+            <Link href={`/setting/view/${session.user.id}`} className={`flex items-center gap-2 no-underline`}>
+              <span className="hidden sm:block text-sm opacity-75 truncate max-w-40">
+                {session.user.name ?? session.user.email}
+              </span>
+            </Link>
             <button
               onClick={() => signOut({ callbackUrl: `/${locale}/login` })}
               className={themeConfig.header.authButton}

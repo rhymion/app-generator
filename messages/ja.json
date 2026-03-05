@@ -32,6 +32,8 @@
     "haveAccount": "既にアカウントをお持ちの方はこちら",
     "invalidCredentials": "認証情報が正しくありません",
     "loginError": "ログイン中にエラーが発生しました",
+    "confirmPasswordPlaceholder": "パスワード（確認）",
+    "passwordMismatch": "パスワードが一致しません",
     "emailInUse": "このメールアドレスは既に使用されています",
     "registrationFailed": "登録に失敗しました"
   }

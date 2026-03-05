@@ -14,6 +14,7 @@ import { GridRowsProp } from '@mui/x-data-grid';
   import FieldsDataGrid from '../FieldsDataGrid';
   
 import ImageUpload from '../ImageUpload';
+import Password from './password';
 import ApiKey from './api_key';
 import { useFormValidation } from './form_validation';
 
@@ -25,11 +26,11 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 
   const [avatar, setAvatar] = useState<string>(src.avatar || '');
+  const [password, setPassword] = useState<string>(src.password ?? '');
   const [apiKey, setApiKey] = useState<string>(src.api_key ?? '');
   const rolesRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
   const [initialRoles] = useState<EditableListWrapperItem[]>(() => src.roles.map(f => ({
     id: f.id || `temp-${Date.now()}-${Math.random()}`,
     value: f.id,
@@ -39,6 +40,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   const validationError = useFormValidation({
     isEdit,
     id: src.id,
+    password: password,
     api_key: apiKey,
   });
 
@@ -54,8 +56,8 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
     }
     formData.set('name', nameRef.current?.value || '');
     formData.set('email', emailRef.current?.value || '');
-    formData.set('password', passwordRef.current?.value || '');
     formData.set('avatar', avatar);
+    formData.set('password', password);
     formData.set('api_key', apiKey);
     const roles = rolesRef.current?.getItems?.() || [];
 
@@ -109,20 +111,11 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         multiline={false}
         rows={undefined}
       />
-      <TextField
-        label="Password"
-        inputRef={passwordRef}
-        defaultValue={src.password || ''}
-        fullWidth
-        margin="normal"
-        required
-        multiline={false}
-        rows={undefined}
-      />
       <ImageUpload
         value={avatar}
         onChange={setAvatar}
       />
+      <Password value={password} onChange={setPassword} isEdit={isEdit} />
       <ApiKey value={apiKey} onChange={setApiKey} isEdit={isEdit} />
       <EditableListWrapper
         ref={rolesRef}

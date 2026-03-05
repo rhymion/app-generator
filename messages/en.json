@@ -32,6 +32,8 @@
     "haveAccount": "Already have an account? Sign in",
     "invalidCredentials": "Invalid credentials",
     "loginError": "An error occurred during login",
+    "confirmPasswordPlaceholder": "Confirm password",
+    "passwordMismatch": "Passwords do not match",
     "emailInUse": "Email address is already in use",
     "registrationFailed": "Registration failed"
   }

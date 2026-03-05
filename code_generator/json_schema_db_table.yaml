@@ -430,6 +430,9 @@ definitions:
         type: string
       password:
         type: string
+        x-custom-component:
+          target:
+            - upsert
       api_key:
         type:
           - string
