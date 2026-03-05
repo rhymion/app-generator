@@ -2294,7 +2294,7 @@ export async function get${parentPascal}sForChart(startDate: Date, endDate: Date
   return items.map((item) => ({
     id: item.id,
     ${fkField}: item.${fkField},
-    ${rowBy}_name: (item.${rowBy} as any).${labelField},
+    ${rowBy}_name: (item.${rowBy} as { ${labelField}: string }).${labelField},
     ${startField}: (item.${startField} as Date).toISOString(),
     ${endField}: (item.${endField} as Date).toISOString(),
 ${extraSelectLines}

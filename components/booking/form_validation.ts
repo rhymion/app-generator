@@ -14,10 +14,12 @@ export function useFormValidation(values: Record<string, unknown>): string | nul
 
   useEffect(() => {
     if (!resource_id || !start_time || !end_time) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setError(null);
       return;
     }
     if (start_time.isAfter(end_time) || start_time.isSame(end_time)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setError('Start time must be before end time');
       return;
     }

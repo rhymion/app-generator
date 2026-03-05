@@ -28,7 +28,7 @@ export async function getShiftsForChart(startDate: Date, endDate: Date): Promise
   return items.map((item) => ({
     id: item.id,
     user_account_id: item.user_account_id,
-    user_account_name: (item.user_account as any).name,
+    user_account_name: (item.user_account as { name: string }).name,
     start_time: (item.start_time as Date).toISOString(),
     end_time: (item.end_time as Date).toISOString(),
     status: item.status,

@@ -28,7 +28,7 @@ export async function getBookingsForChart(startDate: Date, endDate: Date): Promi
   return items.map((item) => ({
     id: item.id,
     resource_id: item.resource_id,
-    resource_name: (item.resource as any).name,
+    resource_name: (item.resource as { name: string }).name,
     start_time: (item.start_time as Date).toISOString(),
     end_time: (item.end_time as Date).toISOString(),
     name: item.name,

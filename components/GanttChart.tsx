@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from '@/i18n/navigation';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -82,10 +82,9 @@ function fmtDateShort(date: Date, tz: string): string {
 export default function GanttChart({ items, periodStart, span, basePath }: Props) {
   const router = useRouter();
 
-  const [resolvedTz, setResolvedTz] = useState('UTC');
-  useEffect(() => {
-    setResolvedTz(Intl.DateTimeFormat().resolvedOptions().timeZone);
-  }, []);
+  const [resolvedTz] = useState(() =>
+    typeof window !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC'
+  );
 
   // Stable color index per row across the whole chart
   const rowColorIndex = useMemo(() => {

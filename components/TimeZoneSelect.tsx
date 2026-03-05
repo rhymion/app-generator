@@ -38,7 +38,7 @@ export default function TimeZoneSelect({
   disabled,
   fullWidth,
 }: Props) {
-  const options = useMemo(getTimezones, []);
+  const options = useMemo(() => getTimezones(), []);
 
   return (
     <Autocomplete
