@@ -282,7 +282,7 @@ function generate(inputPath: string, outputDir: string) {
     }
 
     // Generate column_def only if there are children and list is enabled
-    if (hasChildren && generateConfig.list) {
+    if (hasChildren && (generateConfig.view || generateConfig.edit)) {
       fs.writeFileSync(path.join(componentsDir, 'column_def.tsx'), generateColumnDef(parent, children, schema, modelName, definitionKey));
     }
 
