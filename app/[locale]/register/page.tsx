@@ -15,6 +15,10 @@ export default function RegisterPage() {
     try {
       event.preventDefault();
       const formData = new FormData(event.currentTarget);
+      if (formData.get('password') !== formData.get('confirm_password')) {
+        setError(t("passwordMismatch"));
+        return;
+      }
       const signInResult = await signIn("credentials", {
         ...Object.fromEntries(formData),
         redirect: false,
@@ -77,8 +81,21 @@ export default function RegisterPage() {
                 name="password"
                 type="password"
                 required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-hidden focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-hidden focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
                 placeholder={t("passwordPlaceholder")}
+              />
+            </div>
+            <div>
+              <label htmlFor="confirm_password" className="sr-only">
+                {t("confirmPasswordPlaceholder")}
+              </label>
+              <input
+                id="confirm_password"
+                name="confirm_password"
+                type="password"
+                required
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-hidden focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                placeholder={t("confirmPasswordPlaceholder")}
               />
             </div>
           </div>
