@@ -22,6 +22,8 @@ vi.mock("next-intl", () => ({
       namePlaceholder: "Full name",
       emailPlaceholder: "Email address",
       passwordPlaceholder: "Password",
+      confirmPasswordPlaceholder: "Confirm password",
+      passwordMismatch: "Passwords do not match",
       registerButton: "Register",
       haveAccount: "Already have an account? Sign in",
       emailInUse: "Email address is already in use",
@@ -52,6 +54,7 @@ describe("RegisterPage", () => {
     expect(screen.getByPlaceholderText("Full name")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Email address")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Password")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Confirm password")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /register/i })).toBeInTheDocument();
   });
 
@@ -61,10 +64,12 @@ describe("RegisterPage", () => {
 
     const nameInput = screen.getByPlaceholderText("Full name");
     const passwordInput = screen.getByPlaceholderText("Password");
+    const confirmPasswordInput = screen.getByPlaceholderText("Confirm password");
     const registerButton = screen.getByRole("button", { name: /register/i });
 
     await user.type(nameInput, "John Doe");
     await user.type(passwordInput, "password123");
+    await user.type(confirmPasswordInput, "password123");
 
     // The email field is required in HTML, so try to submit
     // HTML5 validation should prevent submission
@@ -103,11 +108,13 @@ describe("RegisterPage", () => {
     const nameInput = screen.getByPlaceholderText("Full name");
     const emailInput = screen.getByPlaceholderText("Email address");
     const passwordInput = screen.getByPlaceholderText("Password");
+    const confirmPasswordInput = screen.getByPlaceholderText("Confirm password");
     const registerButton = screen.getByRole("button", { name: /register/i });
 
     await user.type(nameInput, "John Doe");
     await user.type(emailInput, "john@example.com");
     await user.type(passwordInput, "password123");
+    await user.type(confirmPasswordInput, "password123");
     await user.click(registerButton);
 
     await waitFor(() => {
@@ -115,6 +122,7 @@ describe("RegisterPage", () => {
         name: "John Doe",
         email: "john@example.com",
         password: "password123",
+        confirm_password: "password123",
         redirect: false,
       });
     });
@@ -137,11 +145,13 @@ describe("RegisterPage", () => {
     const nameInput = screen.getByPlaceholderText("Full name");
     const emailInput = screen.getByPlaceholderText("Email address");
     const passwordInput = screen.getByPlaceholderText("Password");
+    const confirmPasswordInput = screen.getByPlaceholderText("Confirm password");
     const registerButton = screen.getByRole("button", { name: /register/i });
 
     await user.type(nameInput, "Jane Doe");
     await user.type(emailInput, "existing@example.com");
     await user.type(passwordInput, "password456");
+    await user.type(confirmPasswordInput, "password456");
     await user.click(registerButton);
 
     await waitFor(() => {
@@ -149,6 +159,7 @@ describe("RegisterPage", () => {
         name: "Jane Doe",
         email: "existing@example.com",
         password: "password456",
+        confirm_password: "password456",
         redirect: false,
       });
     });
