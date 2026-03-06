@@ -55,6 +55,8 @@
     "fields": "Fields",
     "followedBy": "Followed By",
     "imageUrl": "Image URL",
+    "loginTime": "Login Time",
+    "logoutTime": "Logout Time",
     "name": "Name",
     "parent": "Parent",
     "parent1Child1s": "Parent1 Child1s",
@@ -77,7 +79,7 @@
     "update": "Update",
     "userAccount": "User",
     "userAccounts": "Users",
-    "yyyyyYyyyys": "Yyyyy Yyyyy"
+    "yyyyyYyyyys": "Yyyyy Yyyyys"
   },
   "Chart": {
     "month": "Month",

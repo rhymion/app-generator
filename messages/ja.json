@@ -55,6 +55,8 @@
     "fields": "フィールド",
     "followedBy": "後続要素",
     "imageUrl": "画像URL",
+    "loginTime": "ログイン時間",
+    "logoutTime": "ログアウト時間",
     "name": "名前",
     "organization": "組織",
     "parent": "親要素",
