@@ -1,21 +1,19 @@
+import { getTranslations } from 'next-intl/server';
 import { getShiftTemplateListPageData } from '@/lib/shift_template/getters';
 import ResponsiveListClient from '@/components/ResponsiveListClient';
 import { removeShiftTemplate } from '@/lib/shift_template/actions';
 import Box from '@mui/material/Box';
 import CopyShiftsButton from '@/components/shift_template/CopyShiftsButton';
-import { getTranslations } from 'next-intl/server';
 
 export default async function ShiftTemplatesPage() {
-  const [t, tf, td] = await Promise.all([
+  const { shiftTemplates, userPermissions } = await getShiftTemplateListPageData();
+  const [t, tf] = await Promise.all([
     getTranslations('EntityLabel'),
     getTranslations('Fields'),
-    getTranslations('DayOfWeek'),
   ]);
-  const { shiftTemplates, userPermissions } = await getShiftTemplateListPageData();
-  const dayLabels = [td('sunday'), td('monday'), td('tuesday'), td('wednesday'), td('thursday'), td('friday'), td('saturday')];
   const formattedShiftTemplates = shiftTemplates.map(item => ({
     ...item,
-    day_of_week: dayLabels[item.day_of_week as number] ?? '',
+    day_of_week: (['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const)[item.day_of_week as number] ?? '',
   }));
   return (
     <Box>
