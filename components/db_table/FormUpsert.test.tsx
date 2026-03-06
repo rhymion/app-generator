@@ -4,6 +4,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FormUpsert from './FormUpsert';
+import { NextIntlClientProvider } from 'next-intl';
+import messages from '@/messages/en.json';
+
+function renderWithIntl(ui: React.ReactElement) {
+  return render(
+    <NextIntlClientProvider locale="en" messages={messages}>
+      {ui}
+    </NextIntlClientProvider>
+  );
+}
 
 // Mock the actions
 vi.mock('@/lib/db_table/actions', () => ({
@@ -37,7 +47,7 @@ describe('FormUpsert', () => {
   });
 
   it('renders form fields correctly', () => {
-    render(<FormUpsert src={mockSrc} isEdit={false} />);
+    renderWithIntl(<FormUpsert src={mockSrc} isEdit={false} />);
     const nameInput = screen.getByDisplayValue('Test Table');
     const descInput = screen.getByDisplayValue('Test Description');
     expect(nameInput).toBeInTheDocument();
@@ -45,7 +55,7 @@ describe('FormUpsert', () => {
   });
 
   it('has Add, Delete Selected, Save and Back to List buttons for non-edit mode', () => {
-    render(<FormUpsert src={mockSrc} isEdit={false} />);
+    renderWithIntl(<FormUpsert src={mockSrc} isEdit={false} />);
     expect(screen.getByRole('button', { name: /add/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /delete selected/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
@@ -54,7 +64,7 @@ describe('FormUpsert', () => {
   });
 
   it('has Add, Delete Selected, Save, Delete Table and Back to List buttons for edit mode', () => {
-    render(<FormUpsert src={mockSrc} isEdit={true} />);
+    renderWithIntl(<FormUpsert src={mockSrc} isEdit={true} />);
     expect(screen.getByRole('button', { name: /add/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /delete selected/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
@@ -63,14 +73,14 @@ describe('FormUpsert', () => {
   });
 
   it('renders FieldsDataGrid component', () => {
-    render(<FormUpsert src={mockSrc} isEdit={false} />);
+    renderWithIntl(<FormUpsert src={mockSrc} isEdit={false} />);
     expect(screen.getByText('Fields')).toBeInTheDocument();
     expect(screen.getByText('field1')).toBeInTheDocument();
     expect(screen.getByText('field2')).toBeInTheDocument();
   });
 
   it('updates name field when user types', async () => {
-    render(<FormUpsert src={mockSrc} isEdit={false} />);
+    renderWithIntl(<FormUpsert src={mockSrc} isEdit={false} />);
     const nameInput = screen.getByDisplayValue('Test Table');
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, 'New Table Name');
@@ -78,7 +88,7 @@ describe('FormUpsert', () => {
   });
 
   it('updates description field when user types', async () => {
-    render(<FormUpsert src={mockSrc} isEdit={false} />);
+    renderWithIntl(<FormUpsert src={mockSrc} isEdit={false} />);
     const descInput = screen.getByDisplayValue('Test Description');
     await userEvent.clear(descInput);
     await userEvent.type(descInput, 'New Description');
@@ -86,7 +96,7 @@ describe('FormUpsert', () => {
   });
 
   it('shows confirmation dialog when clicking Delete Table button', async () => {
-    render(<FormUpsert src={mockSrc} isEdit={true} />);
+    renderWithIntl(<FormUpsert src={mockSrc} isEdit={true} />);
     const deleteTableButton = screen.getByRole('button', { name: /delete db table/i });
     await userEvent.click(deleteTableButton);
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
@@ -95,7 +105,7 @@ describe('FormUpsert', () => {
   });
 
   it('cancels deletion when clicking Cancel in Delete Table dialog', async () => {
-    render(<FormUpsert src={mockSrc} isEdit={true} />);
+    renderWithIntl(<FormUpsert src={mockSrc} isEdit={true} />);
     const deleteTableButton = screen.getByRole('button', { name: /delete db table/i });
     await userEvent.click(deleteTableButton);
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
@@ -105,7 +115,7 @@ describe('FormUpsert', () => {
   });
 
   it('shows confirmation dialog when clicking Back to List button', async () => {
-    render(<FormUpsert src={mockSrc} isEdit={false} />);
+    renderWithIntl(<FormUpsert src={mockSrc} isEdit={false} />);
     const backButton = screen.getByRole('button', { name: /back to list/i });
     await userEvent.click(backButton);
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
@@ -113,7 +123,7 @@ describe('FormUpsert', () => {
   });
 
   it('cancels navigation when clicking Cancel in Back to List dialog', async () => {
-    render(<FormUpsert src={mockSrc} isEdit={false} />);
+    renderWithIntl(<FormUpsert src={mockSrc} isEdit={false} />);
     const backButton = screen.getByRole('button', { name: /back to list/i });
     await userEvent.click(backButton);
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());

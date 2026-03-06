@@ -3,6 +3,16 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import DataGridClient from './DataGridClient';
 import { TickTestUtils } from '../cypress/support/tick';
+import { NextIntlClientProvider } from 'next-intl';
+import messages from '../messages/en.json';
+
+function renderWithIntl(ui: React.ReactElement) {
+  return render(
+    <NextIntlClientProvider locale="en" messages={messages}>
+      {ui}
+    </NextIntlClientProvider>
+  );
+}
 
 // Mock Next.js Link component
 vi.mock('next/link', () => ({
@@ -36,7 +46,7 @@ describe('DataGridClient', () => {
   describe('Pagination', () => {
     it('disables both previous and next buttons when records are equal to page size', async () => {
       const mockData = createMockData(10); // Default page size is 10
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
@@ -55,7 +65,7 @@ describe('DataGridClient', () => {
 
     it('disables both previous and next buttons when records are less than page size', async () => {
       const mockData = createMockData(5);
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
@@ -74,7 +84,7 @@ describe('DataGridClient', () => {
 
     it('enables next button when records exceed page size', async () => {
       const mockData = createMockData(15);
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
@@ -93,7 +103,7 @@ describe('DataGridClient', () => {
 
     it('enables previous button and disables next when on last page', async () => {
       const mockData = createMockData(15);
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
@@ -120,7 +130,7 @@ describe('DataGridClient', () => {
 
     it('enables both buttons when on middle page', async () => {
       const mockData = createMockData(25);
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
@@ -144,7 +154,7 @@ describe('DataGridClient', () => {
   describe('Filtering and Sorting', () => {
     it('allows filtering by name', async () => {
       const mockData = createMockData(5);
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
@@ -180,7 +190,7 @@ describe('DataGridClient', () => {
         { id: '3', name: 'Mango', description: 'Middle' },
       ];
       
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
@@ -211,7 +221,7 @@ describe('DataGridClient', () => {
         { id: '3', name: 'Item C', description: 'Mango' },
       ];
       
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
@@ -236,7 +246,7 @@ describe('DataGridClient', () => {
     it('does not allow sorting on Actions column', async () => {
       const mockData = createMockData(3);
       
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
@@ -258,7 +268,7 @@ describe('DataGridClient', () => {
   describe('Additional Functionality', () => {
     it('renders create new button with correct label', async () => {
       const mockData = createMockData(2);
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
@@ -272,7 +282,7 @@ describe('DataGridClient', () => {
 
     it('renders links with correct base path', async () => {
       const mockData = createMockData(2);
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/books"
@@ -289,7 +299,7 @@ describe('DataGridClient', () => {
 
     it('renders delete selected button', async () => {
       const mockData = createMockData(2);
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
@@ -303,7 +313,7 @@ describe('DataGridClient', () => {
 
     it('cancels delete selected dialog', async () => {
       const mockData = createMockData(3);
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
@@ -327,7 +337,7 @@ describe('DataGridClient', () => {
 
     it('disables delete selected dialog when no row is ticked', async () => {
       const mockData = createMockData(3);
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
@@ -346,7 +356,7 @@ describe('DataGridClient', () => {
 
     it('displays correct number of rows', async () => {
       const mockData = createMockData(5);
-      render(
+      renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
