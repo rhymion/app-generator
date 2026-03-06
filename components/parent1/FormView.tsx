@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { GridColDef } from '@mui/x-data-grid';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
@@ -18,13 +19,15 @@ import Checkbox from '@mui/material/Checkbox';
 import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
   const canEdit = permissions?.update ?? true;
   const parent1Child1sColumns: GridColDef[] = parent1_child1s_columns(false);
   const parent1Child2sColumns: GridColDef[] = parent1_child2s_columns(false);
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>Parent1</h1>
+        <h1>{te('parent1')}</h1>
         <div>
           {canEdit && (
             <Tooltip title="Edit">
@@ -45,35 +48,35 @@ export default function FormView({ src, permissions }: FormViewProps) {
         </div>
       </div>
       <TextField
-        label="Name"
+        label={tf('name')}
         value={src.name || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Organization Id"
+        label={tf('organizationId')}
         value={src.organization?.name || src.organization_id || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         value={src.description || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Price"
+        label={tf('price')}
         value={src.price || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
-      <DateTimeWrapper label="Due Date" date_time={src.due_date} readOnly />
-      <ImageDisplay url={src.image_url} alt="Image Url" />
+      <DateTimeWrapper label={tf('dueDate')} date_time={src.due_date} readOnly />
+      <ImageDisplay url={src.image_url} alt={tf('imageUrl')} />
       <div>
         <h2>Parent1 Child1s</h2>
         <FieldsViewGrid fields={src.parent1_child1s} columns={parent1Child1sColumns} />

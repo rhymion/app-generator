@@ -925,7 +925,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const model = modelName ?? parent;
   const defKey = definitionKey ?? `${parent}_detail`;
   const parentPascal = toPascalCase(parent);
-  const parentTitle = toTitleCase(parent);
+  const parentCamel = toCamelCase(parent);
   const modelDef = schema.definitions[model];
   const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
   const canDelete = generateConfig?.delete !== false;
@@ -1030,7 +1030,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const textFields = textProps.map(p => {
     const prop = filteredProps[p];
     const isRequired = modelDef.required?.includes(p);
-    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const fieldKey = toCamelCase(p);
     const minLength = (prop as any).minLength;
     const maxLength = (prop as any).maxLength;
     
@@ -1043,7 +1043,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     }
     
     return `      <TextField
-        label="${label}"
+        label={tf('${fieldKey}')}
         inputRef={${p}Ref}
         defaultValue={src.${p} || ''}
         fullWidth
@@ -1056,7 +1056,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
 
   const relationshipFields = parentRelationships.map(r => {
     const labelBase = r.propName.replace(/_id$/, '');
-    const label = toTitleCase(labelBase);
+    const labelFieldKey = toCamelCase(labelBase);
     const stateName = safeVarName(r.propName);
     const stateSetter = toPascalCaseFromVar(stateName);
     const targetPascal = toPascalCase(r.target);
@@ -1070,7 +1070,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
         renderInput={(params) => (
           <TextField
             {...params}
-            label="${label}"
+            label={tf('${labelFieldKey}')}
             margin="normal"
             ${r.required ? 'required' : ''}
           />
@@ -1080,26 +1080,26 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   
   const numberFields = numberProps.map(p => {
     const prop = filteredProps[p];
-    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const fieldKey = toCamelCase(p);
     const min = (prop as any).minimum ?? 0;
     const max = (prop as any).maximum ?? 1000000;
     
     return `      <NumberField 
-        label="${label}" 
-        inputRef={${p}Ref} 
-        defaultValue={src.${p} || 0} 
+        label={tf('${fieldKey}')}
+        inputRef={${p}Ref}
+        defaultValue={src.${p} || 0}
         min={${min}}
         max={${max}}
       />`;
   }).join('\n');
   
   const dateTimeFields = dateTimeProps.map(p => {
-    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const fieldKey = toCamelCase(p);
     const camelCase = safeVarName(p);
     const pascalCase = toPascalCaseFromVar(camelCase);
     const showDateStr = filteredProps[p].format === 'time' ? '\n        show_date={false}' : '';
     return `      <DateTimeWrapper 
-        label="${label}" ${showDateStr}
+        label={tf('${fieldKey}')} ${showDateStr}
         date_time={${camelCase} ? ${camelCase}.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => set${pascalCase}(newValue)}
       />`;
@@ -1116,17 +1116,17 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   }).join('\n');
   
   const booleanFields = booleanProps.map(p => {
-    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const fieldKey = toCamelCase(p);
     const stateName = safeVarName(p);
     const stateSetter = toPascalCaseFromVar(stateName);
     return `      <FormControlLabel
         control={<Checkbox checked={${stateName}} onChange={(e) => set${stateSetter}(e.target.checked)} />}
-        label="${label}"
+        label={tf('${fieldKey}')}
       />`;
   }).join('\n');
 
   const enumIntegerFields = enumIntegerProps.map(p => {
-    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const fieldKey = toCamelCase(p);
     const stateName = safeVarName(p);
     const stateSetter = toPascalCaseFromVar(stateName);
     const optionsVar = `${stateName}Options`;
@@ -1139,7 +1139,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
         renderInput={(params) => (
           <TextField
             {...params}
-            label="${label}"
+            label={tf('${fieldKey}')}
             margin="normal"
             ${isRequired ? 'required' : ''}
           />
@@ -1201,12 +1201,34 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   const hasChildren = children.length > 0;
   const hasManyToOne = parentRelationships.length > 0;
   
+  // Collect unique enum namespaces for translation hooks
+  const enumNamespaces = new Set<string>();
+  enumIntegerProps.forEach(p => {
+    const ns = (filteredProps[p] as any)['x-enum-namespace'];
+    if (ns) enumNamespaces.add(ns);
+  });
+  const enumNamespaceHooksCode = Array.from(enumNamespaces).map(ns =>
+    `  const t${ns} = useTranslations('${ns}');`
+  ).join('\n');
+
   // Generate named option constants for enum integer fields
   const enumIntegerOptionSetups = enumIntegerProps.map(p => {
     const prop = filteredProps[p];
     const stateName = safeVarName(p);
     const enumValues: (string | number)[] = (prop as any).enum;
-    const options = enumValues.map((v, i) => intEnumOption(v, i)).join(', ');
+    const ns: string | undefined = (prop as any)['x-enum-namespace'];
+    let options: string;
+    if (ns) {
+      options = enumValues.map((v, i) => {
+        const key = typeof v === 'string' && isNaN(Number(v))
+          ? v.charAt(0).toLowerCase() + v.slice(1)
+          : String(v);
+        const value = typeof v === 'number' ? v : (isNaN(Number(v)) ? i : Number(v));
+        return `{ value: ${value}, label: t${ns}('${key}') }`;
+      }).join(', ');
+    } else {
+      options = enumValues.map((v, i) => intEnumOption(v, i)).join(', ');
+    }
     return `  const ${stateName}Options = [${options}];`;
   }).join('\n');
 
@@ -1652,6 +1674,7 @@ ${childSerialize}
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';${(hasManyToOne || enumIntegerProps.length > 0) ? "\nimport Autocomplete from '@mui/material/Autocomplete';" : ''}${numberProps.length > 0 ? '\nimport NumberField from \'../NumberField\';' : ''}
 import { upsert${parentPascal}${canDelete ? `, remove${parentPascal}` : ''}${hasCommentChildren ? `, add${parentPascal}Comment, update${parentPascal}Comment, delete${parentPascal}Comment` : ''} } from '@/lib/${parent}/actions';
 import type { FormUpsertProps } from '@/lib/${parent}/types';
@@ -1663,7 +1686,10 @@ import { useFormValidation } from './form_validation';
 export default function FormUpsert(${formUpsertParams}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
+${enumNamespaceHooksCode ? enumNamespaceHooksCode + '\n' : ''}  const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 ${allStates ? '\n' + allStates : ''}
@@ -1729,14 +1755,14 @@ ${parentTextFields}${childGridComponents.length > 0 ? '\n' + childGridComponents
   return (
     <>
       <FormWithChildGrid
-        title={\`\${isEdit ? 'Edit' : 'Add'} ${parentTitle}\`}
+        title={isEdit ? tc('editEntity', { entity: te('${parentCamel}') }) : tc('addEntity', { entity: te('${parentCamel}') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={${canDelete ? 'isEdit && canDelete ? handleDelete : undefined' : 'undefined'}}
         onBack={handleBack}
-        deleteEntityLabel="${parentTitle}"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('${parentCamel}')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
 ${hasCommentChildren ? commentChildren.map(childInfo => {
@@ -1764,7 +1790,7 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   const model = modelName ?? parent;
   const defKey = definitionKey ?? `${parent}_detail`;
   const parentPascal = toPascalCase(parent);
-  const parentTitle = toTitleCase(parent);
+  const parentCamel = toCamelCase(parent);
   const modelDef = schema.definitions[model];
   const filteredProps = filterFields(modelDef.properties ?? {}, generateConfig?.fields);
   const parentRelationships = getParentRelationships({ ...modelDef, properties: filteredProps }).map((rel) => ({
@@ -1819,12 +1845,12 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   const needsImageDisplay = imageFields.length > 0;
   
   const textFields = otherFields.map(p => {
-    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const fieldKey = toCamelCase(p);
     const rel = relationshipByProp.get(p);
     if (rel) {
       const labelField = rel.labelField ?? 'name';
       return `      <TextField
-        label="${label}"
+        label={tf('${fieldKey}')}
         value={src.${rel.relationName}?.${labelField} || src.${p} || ''}
         fullWidth
         margin="normal"
@@ -1832,7 +1858,7 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
       />`;
     }
     return `      <TextField
-        label="${label}"
+        label={tf('${fieldKey}')}
         value={src.${p} || ''}
         fullWidth
         margin="normal"
@@ -1841,43 +1867,65 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
   }).join('\n');
   
   const dateTimeFieldsJsx = dateTimeFields.map(p => {
-    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const fieldKey = toCamelCase(p);
     const prop = filteredProps[p];
     const format = (prop as any).format;
     const showTime = format === 'date-time' || format === 'time';
     const showDateStr = filteredProps[p].format === 'time' ? ' show_date={false}' : '';
 
-    return `      <DateTimeWrapper label="${label}" date_time={src.${p}}${showTime ? '' : ' show_time={false}'}${showDateStr} readOnly />`;
+    return `      <DateTimeWrapper label={tf('${fieldKey}')} date_time={src.${p}}${showTime ? '' : ' show_time={false}'}${showDateStr} readOnly />`;
   }).join('\n');
-  
+
   const imageFieldsJsx = imageFields.map(p => {
-    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-    
-    return `      <ImageDisplay url={src.${p}} alt="${label}" />`;
+    const fieldKey = toCamelCase(p);
+
+    return `      <ImageDisplay url={src.${p}} alt={tf('${fieldKey}')} />`;
   }).join('\n');
 
   const booleanFieldsJsx = booleanFields.map(p => {
-    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const fieldKey = toCamelCase(p);
     return `      <FormControlLabel
         control={<Checkbox checked={Boolean(src.${p})} readOnly />}
-        label="${label}"
+        label={tf('${fieldKey}')}
       />`;
   }).join('\n');
+
+  // Collect unique enum namespaces for translation hooks (view)
+  const viewEnumNamespaces = new Set<string>();
+  enumIntegerViewFields.forEach(p => {
+    const ns = (filteredProps[p] as any)['x-enum-namespace'];
+    if (ns) viewEnumNamespaces.add(ns);
+  });
+  const viewEnumNamespaceHooksCode = Array.from(viewEnumNamespaces).map(ns =>
+    `  const t${ns} = useTranslations('${ns}');`
+  ).join('\n');
 
   // Generate option constants and read-only TextFields for integer enum fields
   const enumIntegerViewOptionSetups = enumIntegerViewFields.map(p => {
     const prop = filteredProps[p];
     const stateName = safeVarName(p);
     const enumValues: (string | number)[] = (prop as any).enum;
-    const options = enumValues.map((v, i) => intEnumOption(v, i)).join(', ');
+    const ns: string | undefined = (prop as any)['x-enum-namespace'];
+    let options: string;
+    if (ns) {
+      options = enumValues.map((v, i) => {
+        const key = typeof v === 'string' && isNaN(Number(v))
+          ? v.charAt(0).toLowerCase() + v.slice(1)
+          : String(v);
+        const value = typeof v === 'number' ? v : (isNaN(Number(v)) ? i : Number(v));
+        return `{ value: ${value}, label: t${ns}('${key}') }`;
+      }).join(', ');
+    } else {
+      options = enumValues.map((v, i) => intEnumOption(v, i)).join(', ');
+    }
     return `  const ${stateName}Options = [${options}];`;
   }).join('\n');
 
   const enumIntegerViewFieldsJsx = enumIntegerViewFields.map(p => {
-    const label = p.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const fieldKey = toCamelCase(p);
     const stateName = safeVarName(p);
     return `      <TextField
-        label="${label}"
+        label={tf('${fieldKey}')}
         value={${stateName}Options.find(o => o.value === src.${p})?.label ?? ''}
         fullWidth
         margin="normal"
@@ -1893,23 +1941,7 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
 
   const parentTextFields = [textFields, enumIntegerViewFieldsJsx, booleanFieldsJsx, dateTimeFieldsJsx, imageFieldsJsx, customViewFieldsJsx].filter(f => f).join('\n');
 
-  // Check if any child has DateTime fields or many-to-one relationships
-  // (both require 'use client' due to functions in column definitions)
-  // Comments also require 'use client' for interactive callbacks + router.refresh()
   const hasCommentChildren = children.some(c => c.outputType === 'comments');
-  const needsClientDirective = hasCommentChildren || children.some(childInfo => {
-    const child = childInfo.name;
-    const childDef = schema.definitions[child];
-    if (!childDef?.properties) return false;
-
-    return Object.entries(childDef.properties).some(([key, prop]) => {
-      const propType = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
-      const format = (prop as any).format;
-      const rel = (prop as any)['x-relationship'];
-      return (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time'))
-        || (rel && rel.type === 'many-to-one');
-    });
-  });
 
   const customViewImports = customViewProps.map(p => {
     const componentName = toPascalCase(p);
@@ -1918,23 +1950,28 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
 
   // For parent-only case
   if (children.length === 0) {
-    return `import IconButton from '@mui/material/IconButton';
+    return `'use client';
+
+import { useTranslations } from 'next-intl';
+import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';
 import Link from '@mui/material/Link';
 import EditIcon from '@mui/icons-material/Edit';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}
-  import FormControlLabel from '@mui/material/FormControlLabel';
-  import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
 import AuditInfo from '../AuditInfo';${customViewImports ? '\n' + customViewImports : ''}
 
 export default function FormView({ src, permissions }: FormViewProps) {
-  const canEdit = permissions?.update ?? true;
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+${viewEnumNamespaceHooksCode ? viewEnumNamespaceHooksCode + '\n' : ''}  const canEdit = permissions?.update ?? true;
 ${enumIntegerViewOptionSetups ? enumIntegerViewOptionSetups + '\n' : ''}  return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>${parentTitle}</h1>
+        <h1>{te('${parentCamel}')}</h1>
         <div>
         {canEdit && (
           <Tooltip title="Edit">
@@ -2028,7 +2065,10 @@ ${parentTextFields}
   
   const columnImportLine = columnImports ? `\nimport { ${columnImports} } from '../${parent}/column_def';` : '';
   
-  return `${needsClientDirective ? "'use client';\n\n" : ''}${hasCommentChildren ? "import { useRouter } from 'next/navigation';\n" : ''}import { GridColDef } from '@mui/x-data-grid';
+  return `'use client';
+
+import { useTranslations } from 'next-intl';
+${hasCommentChildren ? "import { useRouter } from 'next/navigation';\n" : ''}import { GridColDef } from '@mui/x-data-grid';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
@@ -2042,12 +2082,14 @@ import Checkbox from '@mui/material/Checkbox';
 import AuditInfo from '../AuditInfo';${customViewImports ? '\n' + customViewImports : ''}
 
 export default function FormView({ src, permissions }: FormViewProps) {
-  const canEdit = permissions?.update ?? true;
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+${viewEnumNamespaceHooksCode ? viewEnumNamespaceHooksCode + '\n' : ''}  const canEdit = permissions?.update ?? true;
 ${enumIntegerViewOptionSetups ? enumIntegerViewOptionSetups + '\n' : ''}${columnVariables}
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>${parentTitle}</h1>
+        <h1>{te('${parentCamel}')}</h1>
         <div>
           {canEdit && (
             <Tooltip title="Edit">
@@ -2080,7 +2122,6 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
   const model = modelName ?? parent;
   const defKey = definitionKey ?? `${parent}_detail`;
   const parentPascal = toPascalCase(parent);
-  const parentTitle = toTitleCase(parent);
   const parentCamel = toCamelCase(parent);
   const canDelete = generateConfig?.delete !== false;
 
@@ -2105,13 +2146,15 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
   const modelProps = modelDef?.properties ?? {};
   const formattingEntries: string[] = []; // e.g. `day_of_week: labels[item.day_of_week] ?? ''`
 
+  // Collect enum namespace info for fields in xDisplayTable
+  interface EnumNsEntry { varName: string; ns: string; keys: string[] }
+  const enumNsEntries: EnumNsEntry[] = [];
+
   if (xDisplayTable) {
     const fields = xDisplayTable.map((item: any) => {
       const fieldName = Object.keys(item)[0];
       const config = item[fieldName];
-      const headerName = fieldName.split('_').map((word: string) =>
-        word.charAt(0).toUpperCase() + word.slice(1)
-      ).join(' ');
+      const fieldKey = toCamelCase(fieldName);
       const width = config?.width || 200;
 
       // Collect formatting for fields that need it
@@ -2120,18 +2163,27 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
         const propType = Array.isArray(prop.type) ? prop.type.find((t: string) => t !== 'null') : prop.type;
         const format = (prop as any).format;
         const enumValues: (string | number)[] | undefined = (prop as any).enum;
+        const enumNs: string | undefined = (prop as any)['x-enum-namespace'];
 
         if ((propType === 'integer' || propType === 'number') && Array.isArray(enumValues) && hasStringLabels(enumValues)) {
-          // Integer field with string labels: map index → label
-          const labels = enumValues.map(v => `'${v}'`).join(', ');
-          formattingEntries.push(`    ${fieldName}: ([${labels}] as const)[item.${fieldName} as number] ?? '',`);
+          if (enumNs) {
+            const keys = enumValues.map(v =>
+              typeof v === 'string' && isNaN(Number(v)) ? v.charAt(0).toLowerCase() + v.slice(1) : String(v)
+            );
+            const varName = `${toCamelCase(fieldName)}Labels`;
+            enumNsEntries.push({ varName, ns: enumNs, keys });
+            formattingEntries.push(`    ${fieldName}: ${varName}[item.${fieldName} as number] ?? '',`);
+          } else {
+            const labels = enumValues.map(v => `'${v}'`).join(', ');
+            formattingEntries.push(`    ${fieldName}: ([${labels}] as const)[item.${fieldName} as number] ?? '',`);
+          }
         } else if (propType === 'string' && (format === 'date' || format === 'date-time' || format === 'time')) {
           // Date/datetime/time: format as Swedish locale string for a YYYY-MM-DD HH:MM:SS display
           formattingEntries.push(`    ${fieldName}: item.${fieldName} ? new Date(item.${fieldName}).toLocaleString('sv-SE') : '',`);
         }
       }
 
-      return `    { field: '${fieldName}', headerName: '${headerName}', width: ${width} }`;
+      return `    { field: '${fieldName}', headerName: tf('${fieldKey}'), width: ${width} }`;
     }).join(',\n');
 
     displayFieldsCode = ` displayFields={[\n${fields}\n  ]}`;
@@ -2163,6 +2215,8 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
     : `import ResponsiveListClient from '@/components/ResponsiveListClient';`;
 
   const needsButtonBar = hasChart || !!entityCustomComponent;
+  const needsTf = !!xDisplayTable;
+  const needsTc = hasChart;
 
   const chartImports = hasChart
     ? `\nimport Link from '@mui/material/Link';\nimport Button from '@mui/material/Button';\nimport Box from '@mui/material/Box';\nimport BarChartIcon from '@mui/icons-material/BarChart';`
@@ -2174,9 +2228,31 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
     ? `\nimport ${entityCustomComponent} from '@/components/${parent}/${entityCustomComponent}';`
     : '';
 
+  // Build translation setup code for inside the async function
+  const uniqueNs = [...new Set(enumNsEntries.map(e => e.ns))];
+  const allTranslationCalls: string[] = [
+    `getTranslations('EntityLabel')`,
+    ...(needsTf ? [`getTranslations('Fields')`] : []),
+    ...(needsTc ? [`getTranslations('Common')`] : []),
+    ...uniqueNs.map(ns => `getTranslations('${ns}')`),
+  ];
+  const allTranslationVars: string[] = [
+    't',
+    ...(needsTf ? ['tf'] : []),
+    ...(needsTc ? ['tc'] : []),
+    ...uniqueNs.map(ns => `t${ns}`),
+  ];
+  const translationSetupCode = allTranslationCalls.length === 1
+    ? `  const t = await getTranslations('EntityLabel');`
+    : `  const [${allTranslationVars.join(', ')}] = await Promise.all([\n    ${allTranslationCalls.join(',\n    ')},\n  ]);`;
+
+  const enumNsLabelArraysCode = enumNsEntries.map(e =>
+    `  const ${e.varName} = [${e.keys.map(k => `t${e.ns}('${k}')`).join(', ')}];`
+  ).join('\n');
+
   const chartButtonJsx = hasChart
     ? `        <Link href="/${parent}/chart" underline="none">
-          <Button variant="outlined" size="medium" startIcon={<BarChartIcon />}>Chart</Button>
+          <Button variant="outlined" size="medium" startIcon={<BarChartIcon />}>{tc('chart')}</Button>
         </Link>`
     : '';
 
@@ -2187,17 +2263,19 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
   const buttonBarItems = [chartButtonJsx, entityCustomJsx].filter(s => s).join('\n');
 
   if (needsButtonBar) {
-    return `import { get${parentPascal}ListPageData } from '@/lib/${parent}/getters';
+    return `import { getTranslations } from 'next-intl/server';
+import { get${parentPascal}ListPageData } from '@/lib/${parent}/getters';
 ${listComponentImport}${removeImport}${chartImports}${entityCustomImport}
 
 export default async function ${parentPascal}sPage() {
   const { ${parentCamel}s, userPermissions } = await get${parentPascal}ListPageData();
-${formattingBlock}  return (
+${translationSetupCode}
+${enumNsLabelArraysCode ? enumNsLabelArraysCode + '\n' : ''}${formattingBlock}  return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 1 }}>
 ${buttonBarItems}
       </Box>
-      <${listComponent} src={${srcVar}} basePath="/${parent}"${removeActionProp} entityLabel="${parentTitle}"${primaryFieldCode}${displayFieldsCode}
+      <${listComponent} src={${srcVar}} basePath="/${parent}"${removeActionProp} entityLabel={t('${parentCamel}')}${primaryFieldCode}${displayFieldsCode}
         permissions={userPermissions} />
     </Box>
   );
@@ -2205,12 +2283,14 @@ ${buttonBarItems}
 `;
   }
 
-  return `import { get${parentPascal}ListPageData } from '@/lib/${parent}/getters';
+  return `import { getTranslations } from 'next-intl/server';
+import { get${parentPascal}ListPageData } from '@/lib/${parent}/getters';
 ${listComponentImport}${removeImport}
 
 export default async function ${parentPascal}sPage() {
   const { ${parentCamel}s, userPermissions } = await get${parentPascal}ListPageData();
-${formattingBlock}  return <${listComponent} src={${srcVar}} basePath="/${parent}"${removeActionProp} entityLabel="${parentTitle}"${primaryFieldCode}${displayFieldsCode}
+${translationSetupCode}
+${enumNsLabelArraysCode ? enumNsLabelArraysCode + '\n' : ''}${formattingBlock}  return <${listComponent} src={${srcVar}} basePath="/${parent}"${removeActionProp} entityLabel={t('${parentCamel}')}${primaryFieldCode}${displayFieldsCode}
     permissions={userPermissions} />;
 }
 `;

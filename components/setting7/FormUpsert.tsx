@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertSetting7 } from '@/lib/setting7/actions';
 import type { FormUpsertProps } from '@/lib/setting7/types';
@@ -14,6 +15,9 @@ import { useFormValidation } from './form_validation';
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -58,7 +62,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -69,7 +73,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         rows={undefined}
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         inputRef={descriptionRef}
         defaultValue={src.description || ''}
         fullWidth
@@ -79,7 +83,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         rows={4}
       />
       <TextField
-        label="Team"
+        label={tf('team')}
         inputRef={teamRef}
         defaultValue={src.team || ''}
         fullWidth
@@ -96,14 +100,14 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Setting7`}
+        title={isEdit ? tc('editEntity', { entity: te('setting7') }) : tc('addEntity', { entity: te('setting7') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={undefined}
         onBack={handleBack}
-        deleteEntityLabel="Setting7"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('setting7')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
 

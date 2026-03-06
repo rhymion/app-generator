@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import { upsertBooking, removeBooking } from '@/lib/booking/actions';
@@ -17,6 +18,9 @@ import { useFormValidation } from './form_validation';
 export default function FormUpsert({ src, isEdit, permissions, allResources = [], resourcePermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -78,7 +82,7 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -95,19 +99,19 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
         renderInput={(params) => (
           <TextField
             {...params}
-            label="Resource"
+            label={tf('resource')}
             margin="normal"
             required
           />
         )}
       />
       <DateTimeWrapper 
-        label="Start Time" 
+        label={tf('startTime')} 
         date_time={startTime ? startTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setStartTime(newValue)}
       />
       <DateTimeWrapper 
-        label="End Time" 
+        label={tf('endTime')} 
         date_time={endTime ? endTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setEndTime(newValue)}
       />
@@ -119,14 +123,14 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Booking`}
+        title={isEdit ? tc('editEntity', { entity: te('booking') }) : tc('addEntity', { entity: te('booking') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Booking"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('booking')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
 

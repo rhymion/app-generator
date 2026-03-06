@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import NumberField from '../NumberField';
@@ -23,6 +24,9 @@ import { useFormValidation } from './form_validation';
 export default function FormUpsert({ src, isEdit, permissions, allOrganizations = [], organizationPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -167,7 +171,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -178,7 +182,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         rows={undefined}
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         inputRef={descriptionRef}
         defaultValue={src.description || ''}
         fullWidth
@@ -194,21 +198,21 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         renderInput={(params) => (
           <TextField
             {...params}
-            label="Organization"
+            label={tf('organization')}
             margin="normal"
             required
           />
         )}
       />
       <NumberField 
-        label="Price" 
-        inputRef={priceRef} 
-        defaultValue={src.price || 0} 
+        label={tf('price')}
+        inputRef={priceRef}
+        defaultValue={src.price || 0}
         min={0}
         max={1000000}
       />
       <DateTimeWrapper 
-        label="Due Date" 
+        label={tf('dueDate')} 
         date_time={dueDate ? dueDate.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setDueDate(newValue)}
       />
@@ -256,14 +260,14 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Parent1`}
+        title={isEdit ? tc('editEntity', { entity: te('parent1') }) : tc('addEntity', { entity: te('parent1') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Parent1"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('parent1')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
 

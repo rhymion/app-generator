@@ -1,3 +1,6 @@
+'use client';
+
+import { useTranslations } from 'next-intl';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
@@ -6,16 +9,18 @@ import Link from '@mui/material/Link';
 import EditIcon from '@mui/icons-material/Edit';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DateTimeWrapper from '../DateTimeWrapper';
-  import FormControlLabel from '@mui/material/FormControlLabel';
-  import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
 import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
   const canEdit = permissions?.update ?? true;
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>Parent Only</h1>
+        <h1>{te('parentOnly')}</h1>
         <div>
         {canEdit && (
           <Tooltip title="Edit">
@@ -36,21 +41,21 @@ export default function FormView({ src, permissions }: FormViewProps) {
         </div>
       </div>
       <TextField
-        label="Name"
+        label={tf('name')}
         value={src.name || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         value={src.description || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
-      <DateTimeWrapper label="Login Time" date_time={src.login_time} readOnly />
-      <DateTimeWrapper label="Logout Time" date_time={src.logout_time} readOnly />
+      <DateTimeWrapper label={tf('loginTime')} date_time={src.login_time} readOnly />
+      <DateTimeWrapper label={tf('logoutTime')} date_time={src.logout_time} readOnly />
       <AuditInfo src={src} />
     </div>
   );

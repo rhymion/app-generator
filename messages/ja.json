@@ -1,4 +1,65 @@
 {
+  "Home": {
+    "welcome": "生成されたアプリへようこそ"
+  },
+  "Common": {
+    "chart": "チャート",
+    "edit": "編集",
+    "add": "追加",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "goBack": "戻る",
+    "addEntity": "{entity}を追加",
+    "editEntity": "{entity}を編集"
+  },
+  "EntityLabel": {
+    "booking": "予約",
+    "dbTable": "DBテーブル",
+    "organization": "組織",
+    "parent1": "親1",
+    "parentOnly": "親のみ",
+    "permission": "権限",
+    "procedure": "手順",
+    "resource": "リソース",
+    "role": "ロール",
+    "setting": "設定",
+    "setting1": "設定1",
+    "setting2": "設定2",
+    "setting3": "設定3",
+    "setting4": "設定4",
+    "shift": "シフト",
+    "shiftTemplate": "シフトテンプレート",
+    "userAccount": "ユーザーアカウント",
+    "xxxxxXxxxx": "Xxxxx Xxxxx"
+  },
+  "Fields": {
+    "name": "名前",
+    "description": "説明",
+    "email": "メールアドレス",
+    "role": "ロール",
+    "resource": "リソース",
+    "organization": "組織",
+    "startTime": "開始時刻",
+    "endTime": "終了時刻",
+    "userAccount": "ユーザーアカウント",
+    "dayOfWeek": "曜日",
+    "status": "ステータス"
+  },
+  "ShiftStatus": {
+    "scheduled": "予定",
+    "approved": "承認済み",
+    "cancelled": "キャンセル"
+  },
+  "DayOfWeek": {
+    "sunday": "日曜日",
+    "monday": "月曜日",
+    "tuesday": "火曜日",
+    "wednesday": "水曜日",
+    "thursday": "木曜日",
+    "friday": "金曜日",
+    "saturday": "土曜日"
+  },
   "Header": {
     "signIn": "ログイン",
     "signOut": "ログアウト",

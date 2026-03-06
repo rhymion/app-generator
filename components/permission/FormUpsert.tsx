@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import { upsertPermission, removePermission } from '@/lib/permission/actions';
@@ -17,6 +18,9 @@ import { useFormValidation } from './form_validation';
 export default function FormUpsert({ src, isEdit, permissions, allRoles = [], rolePermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -84,7 +88,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -101,7 +105,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         renderInput={(params) => (
           <TextField
             {...params}
-            label="Role"
+            label={tf('role')}
             margin="normal"
             
           />
@@ -109,19 +113,19 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
       />
       <FormControlLabel
         control={<Checkbox checked={create} onChange={(e) => setCreate(e.target.checked)} />}
-        label="Create"
+        label={tf('create')}
       />
       <FormControlLabel
         control={<Checkbox checked={read} onChange={(e) => setRead(e.target.checked)} />}
-        label="Read"
+        label={tf('read')}
       />
       <FormControlLabel
         control={<Checkbox checked={update} onChange={(e) => setUpdate(e.target.checked)} />}
-        label="Update"
+        label={tf('update')}
       />
       <FormControlLabel
         control={<Checkbox checked={deleteValue} onChange={(e) => setDeleteValue(e.target.checked)} />}
-        label="Delete"
+        label={tf('delete')}
       />
       {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
@@ -131,14 +135,14 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Permission`}
+        title={isEdit ? tc('editEntity', { entity: te('permission') }) : tc('addEntity', { entity: te('permission') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Permission"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('permission')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
 

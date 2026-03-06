@@ -1,3 +1,6 @@
+'use client';
+
+import { useTranslations } from 'next-intl';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
@@ -5,16 +8,18 @@ import type { FormViewProps } from '@/lib/setting2/types';
 import Link from '@mui/material/Link';
 import EditIcon from '@mui/icons-material/Edit';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-  import FormControlLabel from '@mui/material/FormControlLabel';
-  import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
 import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
   const canEdit = permissions?.update ?? true;
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>Setting2</h1>
+        <h1>{te('setting2')}</h1>
         <div>
         {canEdit && (
           <Tooltip title="Edit">
@@ -35,14 +40,14 @@ export default function FormView({ src, permissions }: FormViewProps) {
         </div>
       </div>
       <TextField
-        label="Name"
+        label={tf('name')}
         value={src.name || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         value={src.description || ''}
         fullWidth
         margin="normal"

@@ -1,3 +1,6 @@
+'use client';
+
+import { useTranslations } from 'next-intl';
 import { GridColDef } from '@mui/x-data-grid';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
@@ -14,12 +17,14 @@ import Checkbox from '@mui/material/Checkbox';
 import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
   const canEdit = permissions?.update ?? true;
 
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>Setting</h1>
+        <h1>{te('setting')}</h1>
         <div>
           {canEdit && (
             <Tooltip title="Edit">
@@ -40,34 +45,34 @@ export default function FormView({ src, permissions }: FormViewProps) {
         </div>
       </div>
       <TextField
-        label="Name"
+        label={tf('name')}
         value={src.name || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Email"
+        label={tf('email')}
         value={src.email || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Password"
+        label={tf('password')}
         value={src.password || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Api Key"
+        label={tf('apiKey')}
         value={src.api_key || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
-      <ImageDisplay url={src.avatar} alt="Avatar" />
+      <ImageDisplay url={src.avatar} alt={tf('avatar')} />
       <div>
         <ListWrapper
           items={src.roles.map(f => ({

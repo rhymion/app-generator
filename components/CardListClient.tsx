@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import dayjs from 'dayjs';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
@@ -69,9 +70,10 @@ export default function CardListClient<T extends BaseEntity>({
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  const tf = useTranslations('Fields');
   const defaultDisplayFields: DisplayFieldConfig<T>[] = displayFields ?? [
-    { field: 'name' as keyof T, headerName: 'Name' },
-    { field: 'description' as keyof T, headerName: 'Description' },
+    { field: 'name' as keyof T, headerName: tf('name') },
+    { field: 'description' as keyof T, headerName: tf('description') },
   ];
 
   const secondaryFields = defaultDisplayFields.filter((f) => f.field !== primaryField);

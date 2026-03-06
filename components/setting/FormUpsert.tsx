@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertSetting } from '@/lib/setting/actions';
 import type { FormUpsertProps } from '@/lib/setting/types';
@@ -21,6 +22,9 @@ import { useFormValidation } from './form_validation';
 export default function FormUpsert({ src, isEdit, permissions, allRoles = [], rolePermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -91,7 +95,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -102,7 +106,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         rows={undefined}
       />
       <TextField
-        label="Email"
+        label={tf('email')}
         inputRef={emailRef}
         defaultValue={src.email || ''}
         fullWidth
@@ -141,14 +145,14 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Setting`}
+        title={isEdit ? tc('editEntity', { entity: te('setting') }) : tc('addEntity', { entity: te('setting') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={undefined}
         onBack={handleBack}
-        deleteEntityLabel="Setting"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('setting')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
 

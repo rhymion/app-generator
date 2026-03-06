@@ -1,10 +1,15 @@
+import { getTranslations } from 'next-intl/server';
 import { getSettingListPageData } from '@/lib/setting/getters';
 import ResponsiveListClient from '@/components/ResponsiveListClient';
 
 export default async function SettingsPage() {
   const { settings, userPermissions } = await getSettingListPageData();
-  return <ResponsiveListClient src={settings} basePath="/setting" entityLabel="Setting" primaryField="name" displayFields={[
-    { field: 'name', headerName: 'Name', width: 150 }
+  const [t, tf] = await Promise.all([
+    getTranslations('EntityLabel'),
+    getTranslations('Fields'),
+  ]);
+  return <ResponsiveListClient src={settings} basePath="/setting" entityLabel={t('setting')} primaryField="name" displayFields={[
+    { field: 'name', headerName: tf('name'), width: 150 }
   ]}
     permissions={userPermissions} />;
 }

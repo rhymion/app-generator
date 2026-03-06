@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import { upsertResource, removeResource } from '@/lib/resource/actions';
@@ -20,6 +21,9 @@ import { useFormValidation } from './form_validation';
 export default function FormUpsert({ src, isEdit, permissions, allOrganizations = [], organizationPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -118,7 +122,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -129,7 +133,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         rows={undefined}
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         inputRef={descriptionRef}
         defaultValue={src.description || ''}
         fullWidth
@@ -145,7 +149,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         renderInput={(params) => (
           <TextField
             {...params}
-            label="Organization"
+            label={tf('organization')}
             margin="normal"
             required
           />
@@ -179,14 +183,14 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Resource`}
+        title={isEdit ? tc('editEntity', { entity: te('resource') }) : tc('addEntity', { entity: te('resource') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Resource"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('resource')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
 

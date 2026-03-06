@@ -1,3 +1,6 @@
+'use client';
+
+import { useTranslations } from 'next-intl';
 import { GridColDef } from '@mui/x-data-grid';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
@@ -13,12 +16,14 @@ import Checkbox from '@mui/material/Checkbox';
 import AuditInfo from '../AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
   const canEdit = permissions?.update ?? true;
   const yyyyyYyyyysColumns: GridColDef[] = yyyyy_yyyyys_columns(false);
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>Setting5</h1>
+        <h1>{te('setting5')}</h1>
         <div>
           {canEdit && (
             <Tooltip title="Edit">
@@ -39,7 +44,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
         </div>
       </div>
       <TextField
-        label="Name"
+        label={tf('name')}
         value={src.name || ''}
         fullWidth
         margin="normal"

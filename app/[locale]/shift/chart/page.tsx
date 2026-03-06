@@ -1,6 +1,7 @@
 import { getShiftsForChart } from '@/lib/shift/chart-getters';
 import GanttChart from '@/components/GanttChart';
 import type { GanttItem } from '@/components/GanttChart';
+import { getTranslations } from 'next-intl/server';
 
 function parsePeriodStart(dateStr: string | undefined): Date {
   if (dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
@@ -17,6 +18,7 @@ export default async function ShiftChartPage({
 }: {
   searchParams: Promise<{ start?: string }>;
 }) {
+  const ts = await getTranslations('ShiftStatus');
   const { start } = await searchParams;
   const periodStart = parsePeriodStart(start);
   const periodStartStr = periodStart.toISOString().slice(0, 10);
@@ -24,13 +26,14 @@ export default async function ShiftChartPage({
   const queryStart = new Date(periodStart.getTime() - DAY_MS);
   const queryEnd   = new Date(periodStart.getTime() + 8 * DAY_MS);
   const items = await getShiftsForChart(queryStart, queryEnd);
+  const statusLabels = [ts('scheduled'), ts('approved'), ts('cancelled')];
   const ganttItems: GanttItem[] = items.map((item) => ({
     id: item.id,
     start_time: item.start_time,
     end_time: item.end_time,
     row_id: item.user_account_id,
     row_label: item.user_account_name,
-    tooltip: (['Scheduled', 'Approved', 'Cancelled'] as const)[item.status as number] ?? String(item.status),
+    tooltip: statusLabels[item.status as number] ?? String(item.status),
   }));
 
   return (

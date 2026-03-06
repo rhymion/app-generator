@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertDbTable, removeDbTable, addDbTableComment, updateDbTableComment, deleteDbTableComment } from '@/lib/db_table/actions';
 import type { FormUpsertProps } from '@/lib/db_table/types';
@@ -17,6 +18,9 @@ import { useFormValidation } from './form_validation';
 export default function FormUpsert({ src, isEdit, permissions, currentUserId, allDbTables = [], dbTablePermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -115,7 +119,7 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -126,7 +130,7 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
         rows={undefined}
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         inputRef={descriptionRef}
         defaultValue={src.description || ''}
         fullWidth
@@ -154,14 +158,14 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Db Table`}
+        title={isEdit ? tc('editEntity', { entity: te('dbTable') }) : tc('addEntity', { entity: te('dbTable') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Db Table"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('dbTable')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
       {isEdit && (

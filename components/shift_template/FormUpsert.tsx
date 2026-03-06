@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import { upsertShiftTemplate, removeShiftTemplate } from '@/lib/shift_template/actions';
@@ -17,6 +18,9 @@ import { useFormValidation } from './form_validation';
 export default function FormUpsert({ src, isEdit, permissions, allUserAccounts = [], userAccountPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -87,7 +91,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         renderInput={(params) => (
           <TextField
             {...params}
-            label="User Account"
+            label={tf('userAccount')}
             margin="normal"
             required
           />
@@ -100,20 +104,20 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         renderInput={(params) => (
           <TextField
             {...params}
-            label="Day Of Week"
+            label={tf('dayOfWeek')}
             margin="normal"
             required
           />
         )}
       />
       <DateTimeWrapper 
-        label="Start Time" 
+        label={tf('startTime')} 
         show_date={false}
         date_time={startTime ? startTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setStartTime(newValue)}
       />
       <DateTimeWrapper 
-        label="End Time" 
+        label={tf('endTime')} 
         show_date={false}
         date_time={endTime ? endTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setEndTime(newValue)}
@@ -126,14 +130,14 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Shift Template`}
+        title={isEdit ? tc('editEntity', { entity: te('shiftTemplate') }) : tc('addEntity', { entity: te('shiftTemplate') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Shift Template"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('shiftTemplate')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
 

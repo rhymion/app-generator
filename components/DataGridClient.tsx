@@ -1,5 +1,6 @@
 'use client';
 import { useState, useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import { DataGrid, GridColDef, gridRowSelectionManagerSelector, useGridApiRef, GridRowSelectionModel } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
 import IconButton from '@mui/material/IconButton';
@@ -86,10 +87,11 @@ export default function DataGridClient<T extends BaseEntity>({
     setOpenDeleteDialog(false);
   };
 
+  const tf = useTranslations('Fields');
   // Build dynamic columns based on displayFields, with name as default first column
   const defaultDisplayFields: DisplayFieldConfig<T>[] = displayFields || [
-    { field: 'name' as keyof T, headerName: 'Name', width: 200 },
-    { field: 'description' as keyof T, headerName: 'Description', width: 400 }
+    { field: 'name' as keyof T, headerName: tf('name'), width: 200 },
+    { field: 'description' as keyof T, headerName: tf('description'), width: 400 }
   ];
 
   const dataColumns: GridColDef<T>[] = defaultDisplayFields.map(fieldConfig => {

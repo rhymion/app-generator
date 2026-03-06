@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertOrganization, removeOrganization } from '@/lib/organization/actions';
 import type { FormUpsertProps } from '@/lib/organization/types';
@@ -18,6 +19,9 @@ import { useFormValidation } from './form_validation';
 export default function FormUpsert({ src, isEdit, permissions, allUserAccounts = [], userAccountPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -86,7 +90,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -97,7 +101,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         rows={undefined}
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         inputRef={descriptionRef}
         defaultValue={src.description || ''}
         fullWidth
@@ -130,14 +134,14 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Organization`}
+        title={isEdit ? tc('editEntity', { entity: te('organization') }) : tc('addEntity', { entity: te('organization') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Organization"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('organization')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
 

@@ -1,4 +1,65 @@
 {
+  "Home": {
+    "welcome": "Welcome to our generated app"
+  },
+  "Common": {
+    "chart": "Chart",
+    "edit": "Edit",
+    "add": "Add",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "goBack": "Go Back",
+    "addEntity": "Add {entity}",
+    "editEntity": "Edit {entity}"
+  },
+  "EntityLabel": {
+    "booking": "Booking",
+    "dbTable": "DB Table",
+    "organization": "Organization",
+    "parent1": "Parent1",
+    "parentOnly": "Parent Only",
+    "permission": "Permission",
+    "procedure": "Procedure",
+    "resource": "Resource",
+    "role": "Role",
+    "setting": "Setting",
+    "setting1": "Setting1",
+    "setting2": "Setting2",
+    "setting3": "Setting3",
+    "setting4": "Setting4",
+    "shift": "Shift",
+    "shiftTemplate": "Shift Template",
+    "userAccount": "User Account",
+    "xxxxxXxxxx": "Xxxxx Xxxxx"
+  },
+  "Fields": {
+    "name": "Name",
+    "description": "Description",
+    "email": "Email",
+    "role": "Role",
+    "resource": "Resource",
+    "organization": "Organization",
+    "startTime": "Start Time",
+    "endTime": "End Time",
+    "userAccount": "User Account",
+    "dayOfWeek": "Day Of Week",
+    "status": "Status"
+  },
+  "ShiftStatus": {
+    "scheduled": "Scheduled",
+    "approved": "Approved",
+    "cancelled": "Cancelled"
+  },
+  "DayOfWeek": {
+    "sunday": "Sunday",
+    "monday": "Monday",
+    "tuesday": "Tuesday",
+    "wednesday": "Wednesday",
+    "thursday": "Thursday",
+    "friday": "Friday",
+    "saturday": "Saturday"
+  },
   "Header": {
     "signIn": "Sign In",
     "signOut": "Sign Out",

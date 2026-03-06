@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertParentOnly, removeParentOnly } from '@/lib/parent_only/actions';
 import type { FormUpsertProps } from '@/lib/parent_only/types';
@@ -16,6 +17,9 @@ import { useFormValidation } from './form_validation';
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -70,7 +74,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -81,7 +85,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         rows={undefined}
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         inputRef={descriptionRef}
         defaultValue={src.description || ''}
         fullWidth
@@ -91,12 +95,12 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         rows={4}
       />
       <DateTimeWrapper 
-        label="Login Time" 
+        label={tf('loginTime')} 
         date_time={loginTime ? loginTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setLoginTime(newValue)}
       />
       <DateTimeWrapper 
-        label="Logout Time" 
+        label={tf('logoutTime')} 
         date_time={logoutTime ? logoutTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setLogoutTime(newValue)}
       />
@@ -108,14 +112,14 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Parent Only`}
+        title={isEdit ? tc('editEntity', { entity: te('parentOnly') }) : tc('addEntity', { entity: te('parentOnly') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Parent Only"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('parentOnly')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
 
