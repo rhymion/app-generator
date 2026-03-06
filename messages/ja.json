@@ -6,6 +6,8 @@
     "chart": "チャート",
     "edit": "編集",
     "add": "追加",
+    "adding": "追加中...",
+    "close": "閉じる",
     "save": "保存",
     "cancel": "キャンセル",
     "delete": "削除",
@@ -48,6 +50,7 @@
     "description": "説明",
     "dueDate": "期限",
     "email": "メールアドレス",
+    "endDate": "終了日",
     "endTime": "終了時刻",
     "fields": "フィールド",
     "followedBy": "後続要素",
@@ -67,6 +70,7 @@
     "resourceImages": "リソース画像",
     "role": "ロール",
     "roles": "ロール",
+    "startDate": "開始日",
     "startTime": "開始時刻",
     "status": "ステータス",
     "team": "チーム",
@@ -75,10 +79,25 @@
     "userAccounts": "ユーザー",
     "yyyyyYyyyys": "Yyyyy Yyyyy"
   },
+  "Chart": {
+    "month": "月",
+    "nextWeek": "翌週",
+    "nextMonth": "翌月",
+    "nextYear": "翌年",
+    "prevWeek": "前週",
+    "prevMonth": "前月",
+    "prevYear": "前年",
+    "weekStart": "週開始日",
+    "year": "年"
+  },
   "ShiftStatus": {
     "scheduled": "予定",
     "approved": "承認済み",
     "cancelled": "キャンセル"
+  },
+  "ShiftTemplate": {
+    "copyToShifts": "シフトにコピー",
+    "copyToShiftsExplanation": "テンプレートをシフトにコピーします"
   },
   "DayOfWeek": {
     "sunday": "日曜日",

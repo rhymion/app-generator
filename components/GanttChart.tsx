@@ -16,6 +16,7 @@ import timezonePlugin from 'dayjs/plugin/timezone';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 
 dayjs.extend(utcPlugin);
 dayjs.extend(timezonePlugin);
@@ -81,6 +82,7 @@ function fmtDateShort(date: Date, tz: string): string {
 
 export default function GanttChart({ items, periodStart, span, basePath }: Props) {
   const router = useRouter();
+  const tc = useTranslations('Chart');
 
   const [resolvedTz] = useState(() =>
     typeof window !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC'
@@ -128,9 +130,9 @@ export default function GanttChart({ items, periodStart, span, basePath }: Props
     : span === 'month'
       ? ['year', 'month'] as const
       : undefined;
-  const pickerLabel = span === 'week' ? 'Week start' : span === 'month' ? 'Month' : 'Year';
-  const backLabel   = span === 'week' ? 'Prev week'  : span === 'month' ? 'Prev month' : 'Prev year';
-  const fwdLabel    = span === 'week' ? 'Next week'  : span === 'month' ? 'Next month' : 'Next year';
+  const pickerLabel = span === 'week' ? 'weekStart' : span === 'month' ? 'month' : 'year';
+  const backLabel   = span === 'week' ? 'prevWeek'  : span === 'month' ? 'prevMonth' : 'prevYear';
+  const fwdLabel    = span === 'week' ? 'nextWeek'  : span === 'month' ? 'nextMonth' : 'nextYear';
 
   // ── Week-specific data ───────────────────────────────────────────────────────
 
@@ -218,11 +220,11 @@ export default function GanttChart({ items, periodStart, span, basePath }: Props
       {/* Navigation header */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3, flexWrap: 'wrap' }}>
         <Button variant="outlined" size="small" startIcon={<ChevronLeftIcon />} onClick={() => navigate(-1)}>
-          {backLabel}
+          {tc(backLabel)}
         </Button>
         <LocalizationProvider dateAdapter={AdapterDayjs}>
           <DatePicker
-            label={pickerLabel}
+            label={tc(pickerLabel)}
             value={dayjs(periodStart)}
             onChange={handleDateChange}
             views={pickerViews}
@@ -231,7 +233,7 @@ export default function GanttChart({ items, periodStart, span, basePath }: Props
           />
         </LocalizationProvider>
         <Button variant="outlined" size="small" endIcon={<ChevronRightIcon />} onClick={() => navigate(1)}>
-          {fwdLabel}
+          {tc(fwdLabel)}
         </Button>
       </Box>
 

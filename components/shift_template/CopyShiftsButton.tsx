@@ -13,6 +13,7 @@ import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import type { Dayjs } from 'dayjs';
 import type { ModelPermissions } from '@/lib/authz';
 import { copyShiftTemplatesToShifts, type CopyShiftsResult } from '@/lib/shift_template/copy-shifts';
+import { useTranslations } from 'next-intl';
 
 interface CopyShiftsButtonProps {
   permissions: ModelPermissions;
@@ -25,6 +26,9 @@ export default function CopyShiftsButton({ permissions }: CopyShiftsButtonProps)
   const [timezone, setTimezone] = useState('UTC');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<CopyShiftsResult | null>(null);
+  const t = useTranslations('ShiftTemplate');
+  const tf = useTranslations('Fields');
+  const tc = useTranslations('Common');
 
   // Set browser local timezone once on mount
   useEffect(() => {
@@ -58,21 +62,21 @@ export default function CopyShiftsButton({ permissions }: CopyShiftsButtonProps)
   return (
     <>
       <Button variant="outlined" onClick={() => setOpen(true)}>
-        Copy to Shifts
+        {t('copyToShifts')}
       </Button>
       <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-        <DialogTitle>Copy Shift Templates to Shifts</DialogTitle>
+        <DialogTitle>{t('copyToShiftsExplanation')}</DialogTitle>
         <DialogContent>
           <LocalizationProvider dateAdapter={AdapterDayjs}>
             <DatePicker
-              label="Start Date"
+              label={tf('startDate')}
               value={startDate}
               onChange={setStartDate}
               disabled={!!result}
               slotProps={{ textField: { fullWidth: true, margin: 'normal' } }}
             />
             <DatePicker
-              label="End Date"
+              label={tf('endDate')}
               value={endDate}
               onChange={setEndDate}
               minDate={startDate ?? undefined}
@@ -109,10 +113,10 @@ export default function CopyShiftsButton({ permissions }: CopyShiftsButtonProps)
               disabled={!startDate || !endDate || loading}
               variant="contained"
             >
-              {loading ? 'Adding...' : 'Add'}
+              {loading ? tc('adding') : tc('add')}
             </Button>
           )}
-          <Button onClick={handleClose}>Close</Button>
+          <Button onClick={handleClose}>{tc('close')}</Button>
         </DialogActions>
       </Dialog>
     </>

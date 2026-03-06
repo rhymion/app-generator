@@ -6,6 +6,8 @@
     "chart": "Chart",
     "edit": "Edit",
     "add": "Add",
+    "adding": "Adding...",
+    "close": "Close",
     "save": "Save",
     "cancel": "Cancel",
     "delete": "Delete",
@@ -47,6 +49,7 @@
     "delete": "Delete",
     "description": "Description",
     "dueDate": "Due Date",
+    "endDate": "End Date",
     "endTime": "End Time",
     "email": "Email",
     "fields": "Fields",
@@ -67,6 +70,7 @@
     "resourceImages": "Resource Images",
     "role": "Role",
     "roles": "Roles",
+    "startDate": "Start Date",
     "startTime": "Start Time",
     "status": "Status",
     "team": "Team",
@@ -75,10 +79,25 @@
     "userAccounts": "Users",
     "yyyyyYyyyys": "Yyyyy Yyyyy"
   },
+  "Chart": {
+    "month": "Month",
+    "nextWeek": "Next Week",
+    "nextMonth": "Next Month",
+    "nextYear": "Next Year",
+    "prevWeek": "Prev Week",
+    "prevMonth": "Prev Month",
+    "prevYear": "Prev Year",
+    "weekStart": "Week Start",
+    "year": "Year"
+  },
   "ShiftStatus": {
     "scheduled": "Scheduled",
     "approved": "Approved",
     "cancelled": "Cancelled"
+  },
+  "ShiftTemplate": {
+    "copyToShifts": "Copy to Shifts",
+    "copyToShiftsExplanation": "Copy Shift Templates to Shifts"
   },
   "DayOfWeek": {
     "sunday": "Sunday",
