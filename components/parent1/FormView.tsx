@@ -55,7 +55,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
         aria-readonly
       />
       <TextField
-        label={tf('organizationId')}
+        label={tf('organization')}
         value={src.organization?.name || src.organization_id || ''}
         fullWidth
         margin="normal"

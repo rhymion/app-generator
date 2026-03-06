@@ -58,14 +58,14 @@ export default function FormView({ src, permissions }: FormViewProps) {
         aria-readonly
       />
       <TextField
-        label={tf('parentId')}
+        label={tf('parent')}
         value={src.parent?.name || src.parent_id || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label={tf('assigneeId')}
+        label={tf('assignee')}
         value={src.assignee?.name || src.assignee_id || ''}
         fullWidth
         margin="normal"

@@ -1849,8 +1849,9 @@ export function generateFormView(parent: string, children: ChildInfo[], schema: 
     const rel = relationshipByProp.get(p);
     if (rel) {
       const labelField = rel.labelField ?? 'name';
+      const labelFieldKey = fieldKey.replace(/Id$/, '');
       return `      <TextField
-        label={tf('${fieldKey}')}
+        label={tf('${labelFieldKey}')}
         value={src.${rel.relationName}?.${labelField} || src.${p} || ''}
         fullWidth
         margin="normal"

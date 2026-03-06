@@ -48,7 +48,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
         aria-readonly
       />
       <TextField
-        label={tf('resourceId')}
+        label={tf('resource')}
         value={src.resource?.name || src.resource_id || ''}
         fullWidth
         margin="normal"

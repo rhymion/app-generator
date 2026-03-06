@@ -126,7 +126,7 @@ export default function DataGridClient<T extends BaseEntity>({
   if (permissions.update) columns.push(
     {
       field: 'actions',
-      headerName: 'Actions',
+      headerName: tf('actions'),
       width: 80,
       sortable: false,
       filterable: false,

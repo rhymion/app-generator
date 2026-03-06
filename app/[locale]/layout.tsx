@@ -10,7 +10,7 @@ import { routing } from '@/i18n/routing';
 
 export const metadata: Metadata = {
   title: siteConfig.title,
-  description: '自分が読んだ書籍の記録を残すためのアプリ',
+  description: 'App generator PoC site',
 };
 
 export function generateStaticParams() {

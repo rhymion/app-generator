@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import TextField from '@mui/material/TextField';
+import { useTranslations } from 'next-intl';
 
 interface ImageUploadProps {
   value: string;
@@ -13,12 +14,13 @@ interface ImageUploadProps {
 export default function ImageUpload({ 
   value, 
   onChange, 
-  label = 'Image URL',
+  label = 'imageUrl',
   helperText = 'You can paste a URL or upload a file'
 }: ImageUploadProps) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
+  const tf = useTranslations('Fields');
+  
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -61,7 +63,7 @@ export default function ImageUpload({
       />
       <label htmlFor="image-upload-button">
         <TextField
-          label={label}
+          label={tf(label)}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           fullWidth

@@ -11,7 +11,8 @@
     "delete": "削除",
     "goBack": "戻る",
     "addEntity": "{entity}を追加",
-    "editEntity": "{entity}を編集"
+    "editEntity": "{entity}を編集",
+    "imageUrl": "画像URL"
   },
   "EntityLabel": {
     "booking": "予約",
@@ -36,15 +37,25 @@
   "Fields": {
     "name": "名前",
     "description": "説明",
+    "actions": "アクション",
     "email": "メールアドレス",
     "role": "ロール",
     "resource": "リソース",
     "organization": "組織",
     "startTime": "開始時刻",
     "endTime": "終了時刻",
+    "dueDate": "期限",
     "userAccount": "ユーザーアカウント",
     "dayOfWeek": "曜日",
-    "status": "ステータス"
+    "status": "ステータス",
+    "price": "価格",
+    "create": "作成",
+    "read": "読取",
+    "update": "更新",
+    "delete": "削除",
+    "parent": "親要素",
+    "assignee": "担当者",
+    "imageUrl": "画像URL"
   },
   "ShiftStatus": {
     "scheduled": "予定",

@@ -42,7 +42,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
         </div>
       </div>
       <TextField
-        label={tf('userAccountId')}
+        label={tf('userAccount')}
         value={src.user_account?.name || src.user_account_id || ''}
         fullWidth
         margin="normal"

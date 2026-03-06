@@ -11,7 +11,8 @@
     "delete": "Delete",
     "goBack": "Go Back",
     "addEntity": "Add {entity}",
-    "editEntity": "Edit {entity}"
+    "editEntity": "Edit {entity}",
+    "imageUrl": "Image URL"
   },
   "EntityLabel": {
     "booking": "Booking",
@@ -36,15 +37,25 @@
   "Fields": {
     "name": "Name",
     "description": "Description",
+    "actions": "Actions",
     "email": "Email",
     "role": "Role",
     "resource": "Resource",
     "organization": "Organization",
     "startTime": "Start Time",
     "endTime": "End Time",
+    "dueDate": "Due Date",
     "userAccount": "User Account",
     "dayOfWeek": "Day Of Week",
-    "status": "Status"
+    "status": "Status",
+    "price": "Price",
+    "create": "Create",
+    "read": "Read",
+    "update": "Update",
+    "delete": "Delete",
+    "parent": "Parent",
+    "assignee": "Assignee",
+    "imageUrl": "Image URL"
   },
   "ShiftStatus": {
     "scheduled": "Scheduled",
