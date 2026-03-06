@@ -75,7 +75,8 @@ function fmtTimeInTz(date: Date, tz: string): string {
 }
 
 function fmtDateShort(date: Date, tz: string): string {
-  return date.toLocaleDateString(undefined, { timeZone: tz, month: 'short', day: 'numeric' });
+  // Use 'sv-SE' locale to get consistent YYYY-MM-DD format regardless of user locale
+  return date.toLocaleDateString('sv-SE', { timeZone: tz });
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
