@@ -78,11 +78,11 @@ export default function FormView({ src, permissions }: FormViewProps) {
       <DateTimeWrapper label={tf('dueDate')} date_time={src.due_date} readOnly />
       <ImageDisplay url={src.image_url} alt={tf('imageUrl')} />
       <div>
-        <h2>Parent1 Child1s</h2>
+        <h2>{tf('parent1Child1s')}</h2>
         <FieldsViewGrid fields={src.parent1_child1s} columns={parent1Child1sColumns} />
       </div>
       <div>
-        <h2>Parent1 Child2s</h2>
+        <h2>{tf('parent1Child2s')}</h2>
         <FieldsViewGrid fields={src.parent1_child2s} columns={parent1Child2sColumns} />
       </div>
       <div>
@@ -94,7 +94,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           }))}
           itemType="text"
           showTitle={true}
-          title="Parent1 Lists"
+          title={tf('parent1Lists')}
         />
       </div>
       <AuditInfo src={src} />

@@ -80,7 +80,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           }))}
           itemType="text"
           showTitle={true}
-          title="Children"
+          title={tf('children')}
         />
       </div>
       <div>
@@ -92,7 +92,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           }))}
           itemType="text"
           showTitle={true}
-          title="Preceded By"
+          title={tf('precededBy')}
         />
       </div>
       <div>
@@ -104,7 +104,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           }))}
           itemType="text"
           showTitle={true}
-          title="Followed By"
+          title={tf('followedBy')}
         />
       </div>
       <AuditInfo src={src} />

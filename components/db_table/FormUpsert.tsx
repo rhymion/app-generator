@@ -148,7 +148,7 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
         deleteDialogTitle="Delete Selected Fields?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="Fields"
+        title={tf('fields')}
       />
       {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
@@ -172,7 +172,7 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
         <CommentListWrapper
           comments={src.db_table_comments}
           showTitle={true}
-          title="Db Table Comments"
+          title={tf('dbTableComments')}
           currentUserId={currentUserId}
           permissions={{ create: permissions?.update ?? false, delete: permissions?.update ?? false }}
           onCreateComment={handleCreateComment}

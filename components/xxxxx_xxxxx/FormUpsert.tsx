@@ -141,7 +141,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         deleteDialogTitle="Delete Selected Yyyyy Yyyyys?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="Yyyyy Yyyyys"
+        title={tf('yyyyyYyyyys')}
       />
       {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}

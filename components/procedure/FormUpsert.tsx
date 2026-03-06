@@ -203,7 +203,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         itemType="autocomplete"
         addButtonLabel="Add Children"
         showTitle={true}
-        title="Children"
+        title={tf('children')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         allAutocompleteOptions={allProcedures.filter(item => !item.parent_id || item.parent_id === src.id).map(item => ({
@@ -219,7 +219,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         itemType="autocomplete"
         addButtonLabel="Add Preceded By"
         showTitle={true}
-        title="Preceded By"
+        title={tf('precededBy')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         allAutocompleteOptions={allProcedures.map(item => ({
@@ -235,7 +235,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         itemType="autocomplete"
         addButtonLabel="Add Followed By"
         showTitle={true}
-        title="Followed By"
+        title={tf('followedBy')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         allAutocompleteOptions={allProcedures.map(item => ({

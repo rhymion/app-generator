@@ -1510,7 +1510,8 @@ ${childSerialize}
       const childPascal = childPascalName(childInfo);
       const childTitleLabel = childTitle(childInfo);
       const childDef = schema.definitions[child];
-      
+      const childCamel = toCamelCase(childInfo.propertyName);
+
       // For many-to-many relationships, use EditableListWrapper with autocomplete
       if (childInfo.relationship?.type === 'many-to-many') {
         const targetPascal = toPascalCase(childInfo.relationship.target);
@@ -1520,7 +1521,7 @@ ${childSerialize}
         itemType="autocomplete"
         addButtonLabel="Add ${childTitleLabel}"
         showTitle={true}
-        title="${childTitleLabel}"
+        title={tf('${childCamel}')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         allAutocompleteOptions={all${targetPascal}s.map(item => ({
@@ -1551,7 +1552,7 @@ ${childSerialize}
         itemType="autocomplete"
         addButtonLabel="Add ${childTitleLabel}"
         showTitle={true}
-        title="${childTitleLabel}"
+        title={tf('${childCamel}')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         allAutocompleteOptions={all${targetPascal}s${filterLogic}.map(item => ({
@@ -1576,7 +1577,7 @@ ${childSerialize}
         acceptedFileTypes="${acceptedTypes}"
         addButtonLabel="Add ${childTitleLabel}"
         showTitle={true}
-        title="${childTitleLabel}"
+        title={tf('${childCamel}')}
       />`;
         }
         return `      <${listComponent}
@@ -1585,7 +1586,7 @@ ${childSerialize}
         itemType="text"
         addButtonLabel="Add ${childTitleLabel}"
         showTitle={true}
-        title="${childTitleLabel}"
+        title={tf('${childCamel}')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
       />`;
@@ -1604,7 +1605,7 @@ ${childSerialize}
         deleteDialogTitle="Delete Selected ${childTitleLabel}?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="${childTitleLabel}"
+        title={tf('${childCamel}')}
       />`;
     }).join('\n');
   }
@@ -1767,11 +1768,12 @@ ${parentTextFields}${childGridComponents.length > 0 ? '\n' + childGridComponents
       />
 ${hasCommentChildren ? commentChildren.map(childInfo => {
   const childTitleLabel = childTitle(childInfo);
+  const childCamel = toCamelCase(childInfo.propertyName);
   return `      {isEdit && (
         <CommentListWrapper
           comments={src.${childInfo.propertyName}}
           showTitle={true}
-          title="${childTitleLabel}"
+          title={tf('${childCamel}')}
           currentUserId={currentUserId}
           permissions={{ create: permissions?.update ?? false, delete: permissions?.update ?? false }}
           onCreateComment={handleCreateComment}
@@ -2012,13 +2014,14 @@ ${parentTextFields}
 
   const childViewGrids = children.map(childInfo => {
     const childTitleLabel = childTitle(childInfo);
+    const childCamel = toCamelCase(childInfo.propertyName);
 
     // For comments output type, use CommentListWrapper with interactive callbacks
     if (childInfo.outputType === 'comments') {
       return `      <CommentListWrapper
         comments={src.${childInfo.propertyName}}
         showTitle={true}
-        title="${childTitleLabel}"
+        title={tf('${childCamel}')}
         permissions={{ create: false, delete: false }}
       />`;
     }
@@ -2036,7 +2039,7 @@ ${parentTextFields}
           itemType="file"
           fileVariant="${childInfo.fileType}"
           showTitle={true}
-          title="${childTitleLabel}"
+          title={tf('${childCamel}')}
         />
       </div>`;
       }
@@ -2049,13 +2052,13 @@ ${parentTextFields}
           }))}
           itemType="text"
           showTitle={true}
-          title="${childTitleLabel}"
+          title={tf('${childCamel}')}
         />
       </div>`;
     }
     
     return `      <div>
-        <h2>${childTitleLabel}</h2>
+        <h2>{tf('${childCamel}')}</h2>
         <FieldsViewGrid fields={src.${childInfo.propertyName}} columns={${childVarName(childInfo)}Columns} />
       </div>`;
   }).join('\n');

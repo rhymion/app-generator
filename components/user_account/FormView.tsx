@@ -61,7 +61,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           }))}
           itemType="text"
           showTitle={true}
-          title="Roles"
+          title={tf('roles')}
         />
       </div>
       <AuditInfo src={src} />

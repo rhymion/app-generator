@@ -74,7 +74,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           itemType="file"
           fileVariant="file"
           showTitle={true}
-          title="Resource Attachments"
+          title={tf('resourceAttachments')}
         />
       </div>
       <div>
@@ -87,7 +87,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           itemType="file"
           fileVariant="image"
           showTitle={true}
-          title="Resource Images"
+          title={tf('resourceImages')}
         />
       </div>
       <AuditInfo src={src} />

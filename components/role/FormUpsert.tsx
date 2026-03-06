@@ -116,7 +116,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         itemType="autocomplete"
         addButtonLabel="Add User Accounts"
         showTitle={true}
-        title="User Accounts"
+        title={tf('userAccounts')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         allAutocompleteOptions={allUserAccounts.map(item => ({

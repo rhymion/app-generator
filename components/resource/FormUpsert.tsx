@@ -163,7 +163,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         acceptedFileTypes=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip"
         addButtonLabel="Add Resource Attachments"
         showTitle={true}
-        title="Resource Attachments"
+        title={tf('resourceAttachments')}
       />
       <EditableListWrapper
         ref={resourceImagesRef}
@@ -173,7 +173,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         acceptedFileTypes="image/jpeg,image/png,image/gif,image/webp"
         addButtonLabel="Add Resource Images"
         showTitle={true}
-        title="Resource Images"
+        title={tf('resourceImages')}
       />
       {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}

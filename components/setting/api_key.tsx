@@ -6,6 +6,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import Button from '@mui/material/Button';
 import { getSessionUserIdOrThrow } from '@/lib/authz';
 import { randomBytes } from 'crypto';
+import { useTranslations } from 'next-intl';
 //import { revalidatePath } from 'next/cache';
 
 export async function generateApiKey(): Promise<string> {
@@ -17,11 +18,11 @@ export async function generateApiKey(): Promise<string> {
 }
 
 export default function ApiKey({value, onChange, isEdit}: {value: string, onChange: (key: string) => void, isEdit: boolean}) {
-
+  const tf = useTranslations('Fields');
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 2, mb: 1 }}>
     <TextField
-        label="Api Key"
+        label={tf('apiKey')}
         value={value}
         fullWidth
         slotProps={{

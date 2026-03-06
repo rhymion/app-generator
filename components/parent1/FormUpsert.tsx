@@ -229,7 +229,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         deleteDialogTitle="Delete Selected Parent1 Child1s?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="Parent1 Child1s"
+        title={tf('parent1Child1s')}
       />
       <FieldsDataGrid
         ref={parent1Child2sRef}
@@ -240,7 +240,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         deleteDialogTitle="Delete Selected Parent1 Child2s?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="Parent1 Child2s"
+        title={tf('parent1Child2s')}
       />
       <EditableListWrapper
         ref={parent1ListsRef}
@@ -248,7 +248,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         itemType="text"
         addButtonLabel="Add Parent1 Lists"
         showTitle={true}
-        title="Parent1 Lists"
+        title={tf('parent1Lists')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
       />

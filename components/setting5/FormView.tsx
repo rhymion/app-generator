@@ -51,7 +51,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
         aria-readonly
       />
       <div>
-        <h2>Yyyyy Yyyyys</h2>
+        <h2>{tf('yyyyyYyyyys')}</h2>
         <FieldsViewGrid fields={src.yyyyy_yyyyys} columns={yyyyyYyyyysColumns} />
       </div>
       <AuditInfo src={src} />

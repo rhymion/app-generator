@@ -61,13 +61,13 @@ export default function FormView({ src, permissions }: FormViewProps) {
         aria-readonly
       />
       <div>
-        <h2>Fields</h2>
+        <h2>{tf('fields')}</h2>
         <FieldsViewGrid fields={src.fields} columns={fieldsColumns} />
       </div>
       <CommentListWrapper
         comments={src.db_table_comments}
         showTitle={true}
-        title="Db Table Comments"
+        title={tf('dbTableComments')}
         permissions={{ create: false, delete: false }}
       />
       <AuditInfo src={src} />

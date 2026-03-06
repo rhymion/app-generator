@@ -111,7 +111,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         itemType="autocomplete"
         addButtonLabel="Add Roles"
         showTitle={true}
-        title="Roles"
+        title={tf('roles')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         allAutocompleteOptions={allRoles.map(item => ({
