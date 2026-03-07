@@ -57,6 +57,8 @@ export default function DataGridClient<T extends BaseEntity>({
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [selectedRowIds, setSelectedRowIds] = useState<GridRowSelectionModel>({ type: 'include', ids: new Set() });
   const apiRef = useGridApiRef();
+  const tc = useTranslations('Common');
+  const tf = useTranslations('Fields');
 
   function moveRowUp(index: number) {
     setItems(prev => {
@@ -87,7 +89,6 @@ export default function DataGridClient<T extends BaseEntity>({
     setOpenDeleteDialog(false);
   };
 
-  const tf = useTranslations('Fields');
   // Build dynamic columns based on displayFields, with name as default first column
   const defaultDisplayFields: DisplayFieldConfig<T>[] = displayFields || [
     { field: 'name' as keyof T, headerName: tf('name'), width: 200 },
@@ -194,12 +195,12 @@ export default function DataGridClient<T extends BaseEntity>({
         <DialogTitle id="delete-dialog-title">Delete {entityLabel}(s)?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Are you sure you want to delete the {entityLabel}(s)? This action cannot be undone.
+            {tc('deleteMessage', { entity: entityLabel.toLowerCase() })}
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenDeleteDialog(false)} color="inherit">Cancel</Button>
-          <Button onClick={deleteConfirmed} color="error" variant="contained" aria-label="Delete">Delete</Button>
+          <Button onClick={() => setOpenDeleteDialog(false)} color="inherit">{tc('cancel')}</Button>
+          <Button onClick={deleteConfirmed} color="error" variant="contained" aria-label="Delete">{tc('delete')}</Button>
         </DialogActions>
       </Dialog>
     </div>

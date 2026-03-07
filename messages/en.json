@@ -3,18 +3,22 @@
     "welcome": "Welcome to our app generation PoC site"
   },
   "Common": {
-    "chart": "Chart",
-    "edit": "Edit",
     "add": "Add",
-    "adding": "Adding...",
-    "close": "Close",
-    "save": "Save",
-    "cancel": "Cancel",
-    "delete": "Delete",
-    "goBack": "Go Back",
     "addEntity": "Add {entity}",
+    "adding": "Adding...",
+    "backDialogTitle": "Return to List",
+    "backMessage": "All unsaved messages will be lost. Are you sure you want to return to the list?",
+    "cancel": "Cancel",
+    "chart": "Chart",
+    "close": "Close",
+    "delete": "Delete",
+    "deleteDialogTitle": "Delete {entity}",
+    "deleteMessage": "Are you sure you want to delete this {entity}? Deleted data cannot be recovered.",
+    "edit": "Edit",
     "editEntity": "Edit {entity}",
-    "imageUrl": "Image URL"
+    "goBack": "Go Back",
+    "imageUrl": "Image URL",
+    "save": "Save"
   },
   "EntityLabel": {
     "booking": "Booking",

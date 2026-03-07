@@ -12,6 +12,7 @@ import DialogActions from '@mui/material/DialogActions';
 import SaveIcon from '@mui/icons-material/Save';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { useTranslations } from 'next-intl';
 
 interface FormWithChildGridProps {
   title: string;
@@ -38,6 +39,8 @@ export default function FormWithChildGrid({
 }: FormWithChildGridProps) {
   const [openDeleteEntityDialog, setOpenDeleteEntityDialog] = useState(false);
   const [openBackDialog, setOpenBackDialog] = useState(false);
+  const tc = useTranslations('Common');
+  const tf = useTranslations('Fields');
 
   const handleDeleteConfirmed = async () => {
     if (onDelete) {
@@ -95,16 +98,16 @@ export default function FormWithChildGrid({
           aria-labelledby="delete-entity-dialog-title"
         >
           <DialogTitle id="delete-entity-dialog-title">
-            Delete {deleteEntityLabel}?
+            {tc('deleteDialogTitle', { entity: deleteEntityLabel })}
           </DialogTitle>
           <DialogContent>
             <DialogContentText>
-              Are you sure you want to delete this {deleteEntityLabel.toLowerCase()}? This action cannot be undone.
+              {tc('deleteMessage', { entity: deleteEntityLabel.toLowerCase() })}
             </DialogContentText>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setOpenDeleteEntityDialog(false)} color="inherit">Cancel</Button>
-            <Button onClick={handleDeleteConfirmed} color="error" variant="contained" aria-label="Delete">Delete</Button>
+            <Button onClick={() => setOpenDeleteEntityDialog(false)} color="inherit">{tc('cancel')}</Button>
+            <Button onClick={handleDeleteConfirmed} color="error" variant="contained" aria-label="Delete">{tc('delete')}</Button>
           </DialogActions>
         </Dialog>
       )}
@@ -115,15 +118,15 @@ export default function FormWithChildGrid({
         onClose={() => setOpenBackDialog(false)}
         aria-labelledby="back-dialog-title"
       >
-        <DialogTitle id="back-dialog-title">Go Back?</DialogTitle>
+        <DialogTitle id="back-dialog-title">{tc('backDialogTitle')}</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Any unsaved changes will be lost. Are you sure you want to go back to the list?
+            {tc('backMessage')}
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenBackDialog(false)} color="inherit">Cancel</Button>
-          <Button onClick={handleBackConfirmed} color="primary" variant="contained">Go Back</Button>
+          <Button onClick={() => setOpenBackDialog(false)} color="inherit">{tc('cancel')}</Button>
+          <Button onClick={handleBackConfirmed} color="primary" variant="contained">{tc('goBack')}</Button>
         </DialogActions>
       </Dialog>
     </div>

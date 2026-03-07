@@ -3,18 +3,22 @@
     "welcome": "アプリ自動生成PoCサイトへようこそ"
   },
   "Common": {
-    "chart": "チャート",
-    "edit": "編集",
     "add": "追加",
-    "adding": "追加中...",
-    "close": "閉じる",
-    "save": "保存",
-    "cancel": "キャンセル",
-    "delete": "削除",
-    "goBack": "戻る",
     "addEntity": "{entity}を追加",
+    "adding": "追加中...",
+    "backDialogTitle": "リストに戻る",
+    "backMessage": "保存されていないメッセージはすべて失われます。本当にリストに戻りますか？",
+    "cancel": "キャンセル",
+    "chart": "チャート",
+    "close": "閉じる",
+    "delete": "削除",
+    "deleteDialogTitle": "{entity}を削除",
+    "deleteMessage": "本当にこの{entity}を削除してもよろしいですか？削除されたデータは復元できません。",
+    "edit": "編集",
     "editEntity": "{entity}を編集",
-    "imageUrl": "画像URL"
+    "goBack": "戻る",
+    "imageUrl": "画像URL",
+    "save": "保存"
   },
   "EntityLabel": {
     "booking": "予約",
