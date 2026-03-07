@@ -1,37 +1,40 @@
 import { GridColDef, GridRenderEditCellParams } from '@mui/x-data-grid';
+import { useTranslations } from 'next-intl';
 import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
 import dayjs from 'dayjs';
 
 export function parent1_child1s_columns(editable: boolean = false): GridColDef[] {
+  const t = useTranslations('Fields');
   return [
-    { field: 'order', headerName: 'No.', width: 50, editable: false, type: 'number' },
-    { field: 'name', headerName: 'Name', width: 150, editable: editable },
-    { field: 'type', headerName: 'Type', width: 150, editable: editable },
-    { field: 'max_length', headerName: 'Max Length', width: 100, editable: editable, type: 'number' },
-    { field: 'max', headerName: 'Max', width: 150, editable: editable, type: 'singleSelect' as const, valueOptions: [{ value: '' as const, label: '-- None --' }, { value: 100, label: '100' }, { value: 255, label: '255' }, { value: 65535, label: '65535' }],
+    { field: 'order', headerName: t('order'), width: 50, editable: false, type: 'number' },
+    { field: 'name', headerName: t('name'), width: 150, editable: editable },
+    { field: 'type', headerName: t('type'), width: 150, editable: editable },
+    { field: 'max_length', headerName: t('maxLength'), width: 100, editable: editable, type: 'number' },
+    { field: 'max', headerName: t('max'), width: 150, editable: editable, type: 'singleSelect' as const, valueOptions: [{ value: '' as const, label: '-- None --' }, { value: 100, label: '100' }, { value: 255, label: '255' }, { value: 65535, label: '65535' }],
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       valueGetter: (value: any) => value ?? '',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       valueSetter: (value: any, row: any) => ({ ...row, max: value === '' ? null : value }) },
-    { field: 'regex', headerName: 'Regex', width: 150, editable: editable },
-    { field: 'required', headerName: 'Required', width: 100, editable: editable, type: 'boolean' },
-    { field: 'written_by', headerName: 'Written By', width: 150, editable: editable },
+    { field: 'regex', headerName: t('regex'), width: 150, editable: editable },
+    { field: 'required', headerName: t('required'), width: 100, editable: editable, type: 'boolean' },
+    { field: 'written_by', headerName: t('writtenBy'), width: 150, editable: editable },
   ];
 }
 
 export function parent1_child2s_columns(editable: boolean = false): GridColDef[] {
+  const t = useTranslations('Fields');
   return [
-    { field: 'name', headerName: 'Name', width: 150, editable: editable },
-    { field: 'required', headerName: 'Required', width: 100, editable: editable, type: 'boolean' },
+    { field: 'name', headerName: t('name'), width: 150, editable: editable },
+    { field: 'required', headerName: t('required'), width: 100, editable: editable, type: 'boolean' },
     {
       field: 'start_date',
-      headerName: 'Start Date',
+      headerName: t('startDate'),
       width: 250,
       editable: editable,
       type: 'dateTime',
       renderEditCell: (params: GridRenderEditCellParams) => (
         <DateTimeWrapper
-          label="Start Date"
+          label={t('startDate')}
           date_time={params.value ? new Date(params.value) : null}
           onChange={(newValue: dayjs.Dayjs | null) => {
             params.api.setEditCellValue({
@@ -49,13 +52,13 @@ export function parent1_child2s_columns(editable: boolean = false): GridColDef[]
     },
     {
       field: 'end_date',
-      headerName: 'End Date',
+      headerName: t('endDate'),
       width: 250,
       editable: editable,
       type: 'dateTime',
       renderEditCell: (params: GridRenderEditCellParams) => (
         <DateTimeWrapper
-          label="End Date"
+          label={t('endDate')}
           date_time={params.value ? new Date(params.value) : null}
           onChange={(newValue: dayjs.Dayjs | null) => {
             params.api.setEditCellValue({
@@ -75,7 +78,8 @@ export function parent1_child2s_columns(editable: boolean = false): GridColDef[]
 }
 
 export function parent1_lists_columns(editable: boolean = false): GridColDef[] {
+  const t = useTranslations('Fields');
   return [
-    { field: 'name', headerName: 'Name', width: 150, editable: editable },
+    { field: 'name', headerName: t('name'), width: 150, editable: editable },
   ];
 }

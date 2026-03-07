@@ -790,6 +790,7 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
     
     if (!childDef?.properties) {
       return `export function ${childSnake}_columns(editable: boolean = false): GridColDef[] {
+  const t = useTranslations('Fields');
   return [];
 }`;
     }
@@ -815,18 +816,19 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
       const relationship = (prop as any)['x-relationship'];
       if (relationship && relationship.type === 'many-to-one') {
         const labelBase = key.replace(/_id$/, '');
-        const headerName = toTitleCase(labelBase);
+        const headerCamel = toCamelCase(labelBase);
         const propCamel = toCamelCase(key);
         const paramName = `${propCamel}Options`;
         const relName = labelBase; // e.g. 'reference' from 'reference_id'
         columns.push(`    ...(${paramName} && ${paramName}.length > 0
-      ? [{ field: '${key}', headerName: '${headerName}', width: 200, editable: editable, type: 'singleSelect' as const, valueOptions: ${paramName} }]
+      ? [{ field: '${key}', headerName: t('${headerCamel}'), width: 200, editable: editable, type: 'singleSelect' as const, valueOptions: ${paramName} }]
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      : [{ field: '${key}', headerName: '${headerName}', width: 200, editable: false, valueGetter: (_value: any, row: any) => row.${relName}?.name ?? '' }]),`);
+      : [{ field: '${key}', headerName: t('${headerCamel}'), width: 200, editable: false, valueGetter: (_value: any, row: any) => row.${relName}?.name ?? '' }]),`);
         continue;
       }
 
-      const headerName = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      //const headerName = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      const headerCamel = toCamelCase(key);
       let width = 150;
       let typeStr = '';
 
@@ -837,7 +839,7 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
       if (key === 'order') {
         typeStr = ", type: 'number'";
         width = 50;
-        columns.push(`    { field: '${key}', headerName: 'No.', width: ${width}, editable: false${typeStr} },`);
+        columns.push(`    { field: '${key}', headerName: t('${key}'), width: ${width}, editable: false${typeStr} },`);
         continue;
       }
 
@@ -853,7 +855,7 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
         const nullableExtras = isNullable
           ? `,\n      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n      valueGetter: (value: any) => value ?? '',\n      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n      valueSetter: (value: any, row: any) => ({ ...row, ${key}: value === '' ? null : value })`
           : '';
-        columns.push(`    { field: '${key}', headerName: '${headerName}', width: 150, editable: editable, type: 'singleSelect' as const, valueOptions: [${valueOptions}]${nullableExtras} },`);
+        columns.push(`    { field: '${key}', headerName: t('${headerCamel}'), width: 150, editable: editable, type: 'singleSelect' as const, valueOptions: [${valueOptions}]${nullableExtras} },`);
         continue;
       } else if (prop.type === 'integer' || (Array.isArray(prop.type) && prop.type.includes('integer'))) {
         typeStr = ", type: 'number'";
@@ -865,13 +867,13 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
 
         columns.push(`    {
       field: '${key}',
-      headerName: '${headerName}',
+      headerName: t('${headerCamel}'),
       width: ${width},
       editable: editable,
       type: 'dateTime',
       renderEditCell: (params: GridRenderEditCellParams) => (
         <DateTimeWrapper
-          label="${headerName}"${showDateStr}
+          label={t('${headerCamel}')}${showDateStr}
           date_time={params.value ? new Date(params.value) : null}
           onChange={(newValue: dayjs.Dayjs | null) => {
             params.api.setEditCellValue({
@@ -890,12 +892,13 @@ export function generateColumnDef(parent: string, children: ChildInfo[], schema:
         continue;
       }
 
-      columns.push(`    { field: '${key}', headerName: '${headerName}', width: ${width}, editable: editable${typeStr} },`);
+      columns.push(`    { field: '${key}', headerName: t('${headerCamel}'), width: ${width}, editable: editable${typeStr} },`);
     }
 
     const relParamsStr = childRelParams.length > 0 ? `, ${childRelParams.join(', ')}` : '';
 
     return `export function ${childSnake}_columns(editable: boolean = false${relParamsStr}): GridColDef[] {
+  const t = useTranslations('Fields');
   return [
 ${columns.join('\n')}
   ];
@@ -915,7 +918,7 @@ ${columns.join('\n')}
     });
   });
   
-  return `import { GridColDef${needsDateTimeImports ? ', GridRenderEditCellParams' : ''} } from '@mui/x-data-grid';${needsDateTimeImports ? '\nimport DateTimeWrapper from \'@/components/_standard/DateTimeWrapper\';\nimport dayjs from \'dayjs\';' : ''}
+  return `import { GridColDef${needsDateTimeImports ? ', GridRenderEditCellParams' : ''} } from '@mui/x-data-grid';\nimport { useTranslations } from 'next-intl';${needsDateTimeImports ? '\nimport DateTimeWrapper from \'@/components/_standard/DateTimeWrapper\';\nimport dayjs from \'dayjs\';' : ''}
 
 ${columnFunctions}
 `;
