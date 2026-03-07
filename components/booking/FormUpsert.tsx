@@ -8,11 +8,11 @@ import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import { upsertBooking, removeBooking } from '@/lib/booking/actions';
 import type { FormUpsertProps } from '@/lib/booking/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
 
 import dayjs, { Dayjs } from 'dayjs';
-import DateTimeWrapper from '../DateTimeWrapper';
+import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
 import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allResources = [], resourcePermissions }: FormUpsertProps) {

@@ -6,19 +6,19 @@ import { useTransition } from 'react';
 import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
-import NumberField from '../NumberField';
+import NumberField from '@/components/_standard/NumberField';
 import { upsertParent1, removeParent1 } from '@/lib/parent1/actions';
 import type { FormUpsertProps } from '@/lib/parent1/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
-import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
+import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '../FieldsDataGrid';
-import OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';
+  import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';
+import OrderedFieldsDataGrid from '@/components/_standard/OrderedFieldsDataGrid';
   import { parent1_child1s_columns, parent1_child2s_columns } from '../parent1/column_def';
 import dayjs, { Dayjs } from 'dayjs';
-import DateTimeWrapper from '../DateTimeWrapper';
-import ImageUpload from '../ImageUpload';
+import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
+import ImageUpload from '@/components/_standard/ImageUpload';
 import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allOrganizations = [], organizationPermissions }: FormUpsertProps) {

@@ -8,10 +8,10 @@ import type { FormViewProps } from '@/lib/booking/types';
 import Link from '@mui/material/Link';
 import EditIcon from '@mui/icons-material/Edit';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import DateTimeWrapper from '../DateTimeWrapper';
+import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
-import AuditInfo from '../AuditInfo';
+import AuditInfo from '@/components/_standard/AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const tf = useTranslations('Fields');

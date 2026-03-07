@@ -7,12 +7,12 @@ import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertOrganization, removeOrganization } from '@/lib/organization/actions';
 import type { FormUpsertProps } from '@/lib/organization/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
 import type { UserAccount } from '@/lib/user_account/types';
-import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
+import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '../FieldsDataGrid';
+  import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';
   
 import { useFormValidation } from './form_validation';
 

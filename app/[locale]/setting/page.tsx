@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getSettingListPageData } from '@/lib/setting/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 
 export default async function SettingsPage() {
   const { settings, userPermissions } = await getSettingListPageData();

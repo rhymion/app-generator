@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getDbTableListPageData } from '@/lib/db_table/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { removeDbTable } from '@/lib/db_table/actions';
 
 export default async function DbTablesPage() {

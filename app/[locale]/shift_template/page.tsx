@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getShiftTemplateListPageData } from '@/lib/shift_template/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { removeShiftTemplate } from '@/lib/shift_template/actions';
 import Box from '@mui/material/Box';
 import CopyShiftsButton from '@/components/shift_template/CopyShiftsButton';

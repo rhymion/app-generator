@@ -7,11 +7,11 @@ import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertParentOnly, removeParentOnly } from '@/lib/parent_only/actions';
 import type { FormUpsertProps } from '@/lib/parent_only/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
 
 import dayjs, { Dayjs } from 'dayjs';
-import DateTimeWrapper from '../DateTimeWrapper';
+import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
 import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {

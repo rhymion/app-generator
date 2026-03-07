@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getParentOnlyListPageData } from '@/lib/parent_only/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { removeParentOnly } from '@/lib/parent_only/actions';
 
 export default async function ParentOnlysPage() {

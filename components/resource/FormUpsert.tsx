@@ -8,13 +8,13 @@ import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import { upsertResource, removeResource } from '@/lib/resource/actions';
 import type { FormUpsertProps } from '@/lib/resource/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
-import OrderedEditableListWrapper from '../OrderedEditableListWrapper';
-import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
+import OrderedEditableListWrapper from '@/components/_standard/OrderedEditableListWrapper';
+import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '../FieldsDataGrid';
-import OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';
+  import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';
+import OrderedFieldsDataGrid from '@/components/_standard/OrderedFieldsDataGrid';
   
 import { useFormValidation } from './form_validation';
 

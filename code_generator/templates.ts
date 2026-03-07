@@ -915,7 +915,7 @@ ${columns.join('\n')}
     });
   });
   
-  return `import { GridColDef${needsDateTimeImports ? ', GridRenderEditCellParams' : ''} } from '@mui/x-data-grid';${needsDateTimeImports ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';\nimport dayjs from \'dayjs\';' : ''}
+  return `import { GridColDef${needsDateTimeImports ? ', GridRenderEditCellParams' : ''} } from '@mui/x-data-grid';${needsDateTimeImports ? '\nimport DateTimeWrapper from \'@/components/_standard/DateTimeWrapper\';\nimport dayjs from \'dayjs\';' : ''}
 
 ${columnFunctions}
 `;
@@ -1270,8 +1270,8 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
     });
     
     const dataGridImports = hasOrderedChildren 
-      ? `import FieldsDataGrid from '../FieldsDataGrid';\nimport OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';`
-      : `import FieldsDataGrid from '../FieldsDataGrid';`;
+      ? `import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';\nimport OrderedFieldsDataGrid from '@/components/_standard/OrderedFieldsDataGrid';`
+      : `import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';`;
 
     const hasListChildren = children.some(c => c.outputType === 'list' || c.relationship?.type === 'many-to-many');
     childImports = `import { GridRowsProp } from '@mui/x-data-grid';
@@ -1279,7 +1279,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
   ${columnImports ? `import { ${columnImports} } from '../${parent}/column_def';` : ''}`;
     
     if (hasListChildren) {
-      childImports = `import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';\n` + childImports;
+      childImports = `import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';\n` + childImports;
 
       const hasOrderedListChildren = children.some(c => {
         if (c.outputType !== 'list' || c.relationship?.type === 'many-to-many') return false;
@@ -1287,7 +1287,7 @@ export function generateFormUpsert(parent: string, children: ChildInfo[], schema
         return childDef?.properties && 'order' in childDef.properties;
       });
       if (hasOrderedListChildren) {
-        childImports = `import OrderedEditableListWrapper from '../OrderedEditableListWrapper';\n` + childImports;
+        childImports = `import OrderedEditableListWrapper from '@/components/_standard/OrderedEditableListWrapper';\n` + childImports;
       }
     }
     
@@ -1676,12 +1676,12 @@ import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import { useTranslations } from 'next-intl';
-import TextField from '@mui/material/TextField';${(hasManyToOne || enumIntegerProps.length > 0) ? "\nimport Autocomplete from '@mui/material/Autocomplete';" : ''}${numberProps.length > 0 ? '\nimport NumberField from \'../NumberField\';' : ''}
+import TextField from '@mui/material/TextField';${(hasManyToOne || enumIntegerProps.length > 0) ? "\nimport Autocomplete from '@mui/material/Autocomplete';" : ''}${numberProps.length > 0 ? '\nimport NumberField from \'@/components/_standard/NumberField\';' : ''}
 import { upsert${parentPascal}${canDelete ? `, remove${parentPascal}` : ''}${hasCommentChildren ? `, add${parentPascal}Comment, update${parentPascal}Comment, delete${parentPascal}Comment` : ''} } from '@/lib/${parent}/actions';
 import type { FormUpsertProps } from '@/lib/${parent}/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';${hasCommentChildren ? "\nimport CommentListWrapper from '../CommentListWrapper';" : ''}
-${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${imageProps.length > 0 ? '\nimport ImageUpload from \'../ImageUpload\';' : ''}${booleanImports}${customUpsertImports ? '\n' + customUpsertImports : ''}
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';${hasCommentChildren ? "\nimport CommentListWrapper from '@/components/_standard/CommentListWrapper';" : ''}
+${childImports}${dateTimeProps.length > 0 ? '\nimport dayjs, { Dayjs } from \'dayjs\';\nimport DateTimeWrapper from \'@/components/_standard/DateTimeWrapper\';' : ''}${imageProps.length > 0 ? '\nimport ImageUpload from \'@/components/_standard/ImageUpload\';' : ''}${booleanImports}${customUpsertImports ? '\n' + customUpsertImports : ''}
 import { useFormValidation } from './form_validation';
 
 export default function FormUpsert(${formUpsertParams}) {
@@ -1962,10 +1962,10 @@ import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';
 import Link from '@mui/material/Link';
 import EditIcon from '@mui/icons-material/Edit';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'@/components/_standard/DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'@/components/_standard/ImageDisplay\';' : ''}
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
-import AuditInfo from '../AuditInfo';${customViewImports ? '\n' + customViewImports : ''}
+import AuditInfo from '@/components/_standard/AuditInfo';${customViewImports ? '\n' + customViewImports : ''}
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const tf = useTranslations('Fields');
@@ -2004,9 +2004,9 @@ ${parentTextFields}
   
   // For with-children case - generate view grids for all children
   const hasListChildren = children.some(c => c.outputType === 'list');
-  const listImport = hasListChildren ? '\nimport ListWrapper from \'../ListWrapper\';' : '';
+  const listImport = hasListChildren ? '\nimport ListWrapper from \'@/components/_standard/ListWrapper\';' : '';
   const commentImport = hasCommentChildren
-    ? `\nimport CommentListWrapper from '../CommentListWrapper';\nimport { add${parentPascal}Comment, update${parentPascal}Comment, delete${parentPascal}Comment } from '@/lib/${parent}/actions';`
+    ? `\nimport CommentListWrapper from '@/components/_standard/CommentListWrapper';\nimport { add${parentPascal}Comment, update${parentPascal}Comment, delete${parentPascal}Comment } from '@/lib/${parent}/actions';`
     : '';
 
   const gridChildren = children.filter(c => c.outputType !== 'list' && c.outputType !== 'comments');
@@ -2078,12 +2078,12 @@ import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/${parent}/types';
 import Link from '@mui/material/Link';
-import FieldsViewGrid from '../FieldsViewGrid';${columnImportLine}
+import FieldsViewGrid from '@/components/_standard/FieldsViewGrid';${columnImportLine}
 import EditIcon from '@mui/icons-material/Edit';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'../DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'../ImageDisplay\';' : ''}${listImport}${commentImport}
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';${needsDateTimeWrapper ? '\nimport DateTimeWrapper from \'@/components/_standard/DateTimeWrapper\';' : ''}${needsImageDisplay ? '\nimport ImageDisplay from \'@/components/_standard/ImageDisplay\';' : ''}${listImport}${commentImport}
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
-import AuditInfo from '../AuditInfo';${customViewImports ? '\n' + customViewImports : ''}
+import AuditInfo from '@/components/_standard/AuditInfo';${customViewImports ? '\n' + customViewImports : ''}
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const tf = useTranslations('Fields');
@@ -2215,8 +2215,8 @@ export function generatePageList(parent: string, schema: Schema, generateConfig?
   const forceCards = generateConfig?.listDisplay === 'cards';
   const listComponent = forceCards ? 'CardListClient' : 'ResponsiveListClient';
   const listComponentImport = forceCards
-    ? `import CardListClient from '@/components/CardListClient';`
-    : `import ResponsiveListClient from '@/components/ResponsiveListClient';`;
+    ? `import CardListClient from '@/components/_standard/CardListClient';`
+    : `import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';`;
 
   const needsButtonBar = hasChart || !!entityCustomComponent;
   const needsTf = !!xDisplayTable;
@@ -2461,8 +2461,8 @@ export function generatePageChart(parent: string, schema: Schema, modelName?: st
   const queryEnd   = new Date(Date.UTC(periodStart.getUTCFullYear() + 1, 0, 2));`;
 
   return `import { get${parentPascal}sForChart } from '@/lib/${parent}/chart-getters';
-import GanttChart from '@/components/GanttChart';
-import type { GanttItem } from '@/components/GanttChart';
+import GanttChart from '@/components/_standard/GanttChart';
+import type { GanttItem } from '@/components/_standard/GanttChart';
 
 function parsePeriodStart(dateStr: string | undefined): Date {
 ${parseFnBody}

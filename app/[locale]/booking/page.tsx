@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getBookingListPageData } from '@/lib/booking/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { removeBooking } from '@/lib/booking/actions';
 import Link from '@mui/material/Link';
 import Button from '@mui/material/Button';

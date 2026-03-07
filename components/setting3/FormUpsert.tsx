@@ -7,8 +7,8 @@ import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertSetting3, removeSetting3 } from '@/lib/setting3/actions';
 import type { FormUpsertProps } from '@/lib/setting3/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
 
 import { useFormValidation } from './form_validation';
 

@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { removeUserAccount } from '@/lib/user_account/actions';
 
 export default async function UserAccountsPage() {

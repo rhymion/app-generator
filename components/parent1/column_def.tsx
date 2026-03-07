@@ -1,5 +1,5 @@
 import { GridColDef, GridRenderEditCellParams } from '@mui/x-data-grid';
-import DateTimeWrapper from '../DateTimeWrapper';
+import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
 import dayjs from 'dayjs';
 
 export function parent1_child1s_columns(editable: boolean = false): GridColDef[] {

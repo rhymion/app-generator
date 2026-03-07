@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getRoleListPageData } from '@/lib/role/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { removeRole } from '@/lib/role/actions';
 
 export default async function RolesPage() {

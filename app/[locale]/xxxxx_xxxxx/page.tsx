@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getXxxxxXxxxxListPageData } from '@/lib/xxxxx_xxxxx/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { removeXxxxxXxxxx } from '@/lib/xxxxx_xxxxx/actions';
 
 export default async function XxxxxXxxxxsPage() {

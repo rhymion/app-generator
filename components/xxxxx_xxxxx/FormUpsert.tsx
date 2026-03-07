@@ -7,10 +7,10 @@ import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertXxxxxXxxxx, removeXxxxxXxxxx } from '@/lib/xxxxx_xxxxx/actions';
 import type { FormUpsertProps } from '@/lib/xxxxx_xxxxx/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
 import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '../FieldsDataGrid';
+  import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';
   import { yyyyy_yyyyys_columns } from '../xxxxx_xxxxx/column_def';
 import { useFormValidation } from './form_validation';
 

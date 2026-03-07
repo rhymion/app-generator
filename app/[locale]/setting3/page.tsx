@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getSetting3ListPageData } from '@/lib/setting3/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { removeSetting3 } from '@/lib/setting3/actions';
 
 export default async function Setting3sPage() {

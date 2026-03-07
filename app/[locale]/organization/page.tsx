@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getOrganizationListPageData } from '@/lib/organization/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { removeOrganization } from '@/lib/organization/actions';
 
 export default async function OrganizationsPage() {

@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getResourceListPageData } from '@/lib/resource/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { removeResource } from '@/lib/resource/actions';
 
 export default async function ResourcesPage() {

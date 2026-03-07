@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getProcedureListPageData } from '@/lib/procedure/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { removeProcedure } from '@/lib/procedure/actions';
 
 export default async function ProceduresPage() {

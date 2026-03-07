@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getParent1ListPageData } from '@/lib/parent1/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { removeParent1 } from '@/lib/parent1/actions';
 
 export default async function Parent1sPage() {

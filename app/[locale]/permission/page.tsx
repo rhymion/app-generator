@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getPermissionListPageData } from '@/lib/permission/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { removePermission } from '@/lib/permission/actions';
 
 export default async function PermissionsPage() {
