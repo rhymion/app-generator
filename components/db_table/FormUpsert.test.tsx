@@ -110,7 +110,7 @@ describe('FormUpsert', () => {
     const backButton = screen.getByRole('button', { name: /back to list/i });
     await userEvent.click(backButton);
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByRole('heading', { name: /go back/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: /go back to list/i })).toBeInTheDocument());
   });
 
   it('cancels navigation when clicking Cancel in Back to List dialog', async () => {
