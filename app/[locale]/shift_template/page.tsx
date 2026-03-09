@@ -18,7 +18,7 @@ export default async function ShiftTemplateListPage() {
   return (
     <>
       <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-        <CopyShiftsButton />
+        <CopyShiftsButton permissions={userPermissions} />
       </Box>
       <ResponsiveListClient
         entityLabel={t('shiftTemplate')}
