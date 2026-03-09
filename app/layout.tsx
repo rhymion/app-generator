@@ -15,7 +15,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const locale = await getLocale();
   return (
     <html lang={locale}>
-      <body className={fnt.className}>{children}</body>
+      <body className={fnt.className}>
+        {children}
+      </body>
     </html>
   );
 }

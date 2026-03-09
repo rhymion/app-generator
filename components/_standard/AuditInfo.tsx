@@ -19,8 +19,8 @@ export default function AuditInfo({ src }: AuditInfoProps) {
   };
 
   return (
-    <div style={{ marginTop: 16, padding: 12, backgroundColor: '#f5f5f5', borderRadius: 4 }}>
-      <Typography variant="body2" color="text.secondary">
+    <div style={{ marginTop: 16, padding: 12, borderRadius: 4, backgroundColor: 'var(--mui-palette-action-hover)' }}>
+      <Typography variant="body2" color="text.secondary" suppressHydrationWarning>
         {src.created_at && (
           <>Created: {formatDate(src.created_at)}{src.creator && ` by ${src.creator.name}`}</>
         )}

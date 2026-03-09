@@ -108,12 +108,12 @@ function CommentItemComponent({ comment, canDelete, onUpdate, onDelete }: Commen
             </Typography>
             <Box sx={{ textAlign: 'right', flexShrink: 0 }}>
               {comment.created_at && (
-                <Typography variant="caption" color="text.secondary" display="block">
+                <Typography variant="caption" color="text.secondary" display="block" suppressHydrationWarning>
                   {formatDate(comment.created_at)}
                 </Typography>
               )}
               {wasEdited && comment.updated_at && (
-                <Typography variant="caption" color="text.secondary" display="block">
+                <Typography variant="caption" color="text.secondary" display="block" suppressHydrationWarning>
                   Edited: {formatDate(comment.updated_at)}
                 </Typography>
               )}
