@@ -26,8 +26,7 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addShiftTemplate(creatorId: string, userAccountId: string, dayOfWeek: number, startTime: Date, endTime: Date) {
+export async function addShiftTemplate(userId: string, userAccountId: string, dayOfWeek: number, startTime: Date, endTime: Date): Promise<{ id: string }> {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
       user_account_id: userAccountId,
@@ -35,21 +34,21 @@ export async function addShiftTemplate(creatorId: string, userAccountId: string,
       start_time: startTime,
       end_time: endTime,
     });
-    return await tx.shift_template.create({
+    const created = await tx.shift_template.create({
       data: {
+        creator_id: userId,
+        updater_id: userId,
         user_account_id: userAccountId,
         day_of_week: dayOfWeek,
         start_time: startTime,
         end_time: endTime,
-        creator_id: creatorId,
-        updater_id: creatorId,
       },
     });
+    return { id: created.id };
   });
 }
-
-export async function updateShiftTemplate(updaterId: string, id: string, userAccountId: string, dayOfWeek: number, startTime: Date, endTime: Date, srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateShiftTemplate(userId: string, id: string, userAccountId: string, dayOfWeek: number, startTime: Date, endTime: Date, srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -59,23 +58,18 @@ export async function updateShiftTemplate(updaterId: string, id: string, userAcc
       start_time: startTime,
       end_time: endTime,
     });
-    return await tx.shift_template.update({
+    await tx.shift_template.update({
       where: { id },
       data: {
+        updater_id: userId,
         user_account_id: userAccountId,
         day_of_week: dayOfWeek,
         start_time: startTime,
         end_time: endTime,
-        updater_id: updaterId,
       },
     });
   });
 }
-
-export async function deleteShiftTemplate(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.shift_template.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.shift_template.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteShiftTemplate(ids: string[]): Promise<void> {
+  await prisma.shift_template.deleteMany({ where: { id: { in: ids } } });
 }

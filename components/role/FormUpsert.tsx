@@ -11,9 +11,6 @@ import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
 import type { UserAccount } from '@/lib/user_account/types';
 import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';
-import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';
-  
 import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allUserAccounts = [], userAccountPermissions }: FormUpsertProps) {
@@ -25,7 +22,6 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
-
   const userAccountsRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
@@ -144,7 +140,6 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

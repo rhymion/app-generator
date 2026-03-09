@@ -11,7 +11,6 @@ import { getAssociatedOrganizations } from '@/lib/organization/getters_associate
 export async function getAllResources(userId: string): Promise<Resource[]> {
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
-
   const resources = await prisma.resource.findMany({
     where: {
       organization_id: { in: associatedOrganizationIds },
@@ -30,20 +29,13 @@ export async function getAllResources(userId: string): Promise<Resource[]> {
 export async function getResourceDetail(id: string, userId: string): Promise<ResourceDetail | null> {
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
-
   const resource = await prisma.resource.findFirst({
-    where: { 
+    where: {
       id,
       organization_id: { in: associatedOrganizationIds },
     },
-    include: { 
-      resource_attachments: true, 
-      resource_images: true, 
-      organization: true, 
-      creator: { select: { id: true, 
-      name: true } }, 
-      updater: { select: { id: true, 
-      name: true } } 
+    include: {
+      resource_attachments: true, resource_images: true, organization: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
     },
   });
 

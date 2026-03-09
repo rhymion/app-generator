@@ -16,3 +16,4 @@ export function fields_columns(editable: boolean = false, referenceIdOptions?: A
     { field: 'required', headerName: t('required'), width: 100, editable: editable, type: 'boolean' },
   ];
 }
+

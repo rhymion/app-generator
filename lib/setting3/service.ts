@@ -24,9 +24,8 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function updateSetting3(updaterId: string, id: string, name: string, description: string | null, srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateSetting3(userId: string, id: string, name: string, description: string | null, srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -34,21 +33,16 @@ export async function updateSetting3(updaterId: string, id: string, name: string
       name: name,
       description: description,
     });
-    return await tx.xxxxx_xxxxx.update({
+    await tx.xxxxx_xxxxx.update({
       where: { id },
       data: {
+        updater_id: userId,
         name: name,
         description: description,
-        updater_id: updaterId,
       },
     });
   });
 }
-
-export async function deleteSetting3(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.xxxxx_xxxxx.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.xxxxx_xxxxx.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteSetting3(ids: string[]): Promise<void> {
+  await prisma.xxxxx_xxxxx.deleteMany({ where: { id: { in: ids } } });
 }

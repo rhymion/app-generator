@@ -8,7 +8,6 @@ import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
 export async function getAllProcedures(): Promise<Procedure[]> {
-
   const procedures = await prisma.procedure.findMany({
     include: { parent: true, assignee: true },
   });
@@ -24,24 +23,12 @@ export async function getAllProcedures(): Promise<Procedure[]> {
 }
 
 export async function getProcedureDetail(id: string): Promise<ProcedureDetail | null> {
-  
   const procedure = await prisma.procedure.findUnique({
-    where: { 
+    where: {
       id,
     },
-    include: { 
-      children: { include: { parent: true, 
-      assignee: true } }, 
-      preceded_by: { include: { parent: true, 
-      assignee: true } }, 
-      followed_by: { include: { parent: true, 
-      assignee: true } }, 
-      parent: true, 
-      assignee: true, 
-      creator: { select: { id: true, 
-      name: true } }, 
-      updater: { select: { id: true, 
-      name: true } } 
+    include: {
+      children: { include: { parent: true, assignee: true } }, preceded_by: { include: { parent: true, assignee: true } }, followed_by: { include: { parent: true, assignee: true } }, parent: true, assignee: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
     },
   });
 

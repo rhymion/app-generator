@@ -8,3 +8,4 @@ export function roles_columns(editable: boolean = false): GridColDef[] {
     { field: 'description', headerName: t('description'), width: 150, editable: editable },
   ];
 }
+

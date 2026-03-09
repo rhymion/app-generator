@@ -13,3 +13,4 @@ export function yyyyy_yyyyys_columns(editable: boolean = false): GridColDef[] {
     { field: 'written_by', headerName: t('writtenBy'), width: 150, editable: editable },
   ];
 }
+

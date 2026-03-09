@@ -1,11 +1,22 @@
 import { getTranslations } from 'next-intl/server';
-import { getResourceListPageData } from '@/lib/resource/getters';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
+import { getResourceListPageData } from '@/lib/resource/getters';
 import { removeResource } from '@/lib/resource/actions';
 
-export default async function ResourcesPage() {
+export default async function ResourceListPage() {
+  const [t] = await Promise.all([
+    getTranslations('EntityLabel'),
+  ]);
   const { resources, userPermissions } = await getResourceListPageData();
-  const t = await getTranslations('EntityLabel');
-  return <ResponsiveListClient src={resources} basePath="/resource" removeAction={removeResource} entityLabel={t('resource')}
-    permissions={userPermissions} />;
+  return (
+    <>
+      <ResponsiveListClient
+        entityLabel={t('resource')}
+        src={resources}
+        permissions={userPermissions}
+        basePath="/resource"
+        removeAction={removeResource}
+      />
+    </>
+  );
 }

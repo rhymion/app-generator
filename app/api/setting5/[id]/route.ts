@@ -5,7 +5,6 @@ import { getSetting5Detail } from '@/lib/setting5/getters';
 import { updateSetting5 } from '@/lib/setting5/service';
 
 type Params = { params: Promise<{ id: string }> };
-
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
@@ -20,7 +19,6 @@ export async function GET(request: NextRequest, { params }: Params) {
     return handleApiError(error);
   }
 }
-
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
@@ -32,7 +30,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, 'setting5', 'update', existing);
     const body = await request.json();
     const { name, yyyyy_yyyyys } = body;
-    const result = await updateSetting5(userId, id, name, yyyyy_yyyyys ?? []);
+    const result = await updateSetting5(userId, id, name, yyyyy_yyyyys ?? [], null);
     return NextResponse.json(result);
   } catch (error) {
     return handleApiError(error);

@@ -11,3 +11,4 @@ export function user_accounts_columns(editable: boolean = false): GridColDef[] {
     { field: 'avatar', headerName: t('avatar'), width: 150, editable: editable },
   ];
 }
+

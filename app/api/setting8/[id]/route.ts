@@ -4,7 +4,6 @@ import prisma from '@/lib/prisma';
 import { deleteSetting8 } from '@/lib/setting8/service';
 
 type Params = { params: Promise<{ id: string }> };
-
 export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;

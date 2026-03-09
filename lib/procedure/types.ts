@@ -1,5 +1,4 @@
 import type { ModelPermissions } from '@/lib/authz';
-
 import type { UserAccount } from '@/lib/user_account/types';
 
 export type Procedure = {
@@ -54,7 +53,6 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   allProcedures?: Procedure[];
   allUserAccounts?: UserAccount[];
   currentUserId?: string | null;
-
   procedurePermissions?: ModelPermissions;
   userAccountPermissions?: ModelPermissions;
 }>;

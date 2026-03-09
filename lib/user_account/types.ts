@@ -4,7 +4,6 @@ export type UserAccount = {
   id: string;
   name: string;
   avatar: string | null;
-
 };
 
 export type UserAccountDetail = UserAccount & {
@@ -16,6 +15,7 @@ export type Role = {
   name: string;
   description: string | null;
 };
+
 export type UserAccountDetailPageProps = Readonly<{
   params: Promise<{
     id: string;
@@ -40,6 +40,5 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allRoles?: Role[];
   currentUserId?: string | null;
-
   rolePermissions?: ModelPermissions;
 }>;

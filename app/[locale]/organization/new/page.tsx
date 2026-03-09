@@ -4,7 +4,7 @@ import { getOrganizationNewPageAccessCheck } from '@/lib/organization/getters';
 
 export default async function AddOrganizationPage() {
   const userAccountsData = await getUserAccountListPageData(false);
-  const userPermissions =await getOrganizationNewPageAccessCheck();
+  const userPermissions = await getOrganizationNewPageAccessCheck();
   const src = {
     id: '',
     name: '',

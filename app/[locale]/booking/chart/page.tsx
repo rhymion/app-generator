@@ -29,9 +29,7 @@ export default async function BookingChartPage({
     start_time: item.start_time,
     end_time: item.end_time,
     row_id: item.resource_id,
-    row_label: item.resource_name,
-    tooltip: item.name,
-  }));
+    row_label: item.resource_name,    tooltip: item.name,  }));
 
   return (
     <GanttChart

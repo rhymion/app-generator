@@ -28,37 +28,36 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addDbTable(creatorId: string, name: string, description: string | null, fieldsItems: { name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean }[]) {
+export async function addDbTable(userId: string, name: string, description: string | null, fieldsItems: { name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean }[]): Promise<{ id: string }> {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
       name: name,
       description: description,
     });
-    return await tx.db_table.create({
+    const created = await tx.db_table.create({
       data: {
+        creator_id: userId,
+        updater_id: userId,
         name: name,
         description: description,
-        creator_id: creatorId,
-        updater_id: creatorId,
-        fields: {
-          create: fieldsItems.map(f => ({
+      fields: {
+        create: fieldsItems.map(f => ({
           name: f.name,
           type: f.type,
-          reference_id: f.reference_id || null,
+          reference_id: f.reference_id,
           max_length: f.max_length,
           max: f.max,
           regex: f.regex,
           required: f.required,
-          })),
-        },
+        })),
+      },
       },
     });
+    return { id: created.id };
   });
 }
-
-export async function updateDbTable(updaterId: string, id: string, name: string, description: string | null, fieldsItems: { id?: string; name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean }[], srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateDbTable(userId: string, id: string, name: string, description: string | null, fieldsItems: { name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean }[], srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -66,18 +65,18 @@ export async function updateDbTable(updaterId: string, id: string, name: string,
       name: name,
       description: description,
     });
-    return await tx.db_table.update({
+    await tx.db_table.update({
       where: { id },
       data: {
+        updater_id: userId,
         name: name,
         description: description,
-        updater_id: updaterId,
       fields: {
         deleteMany: {},
         create: fieldsItems.map(f => ({
           name: f.name,
           type: f.type,
-          reference_id: f.reference_id || null,
+          reference_id: f.reference_id,
           max_length: f.max_length,
           max: f.max,
           regex: f.regex,
@@ -88,11 +87,6 @@ export async function updateDbTable(updaterId: string, id: string, name: string,
     });
   });
 }
-
-export async function deleteDbTable(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.db_table.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.db_table.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteDbTable(ids: string[]): Promise<void> {
+  await prisma.db_table.deleteMany({ where: { id: { in: ids } } });
 }

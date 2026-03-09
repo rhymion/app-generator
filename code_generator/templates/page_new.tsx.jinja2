@@ -1,0 +1,28 @@
+import FormUpsert from '@/components/{{ parent }}/FormUpsert';
+{% for target in selection_targets %}
+{% if target == 'organization' %}
+import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';
+{% else %}
+import { get{{ target | pascal_case }}ListPageData } from '@/lib/{{ target }}/getters';
+{% endif %}
+{% endfor %}
+import { get{{ parent_pascal }}NewPageAccessCheck } from '@/lib/{{ parent }}/getters';
+
+export default async function Add{{ parent_pascal }}Page() {
+{% for target in selection_targets %}
+{% if target == 'organization' %}
+  const organizationsData = await getAssociatedOrganizationListPageData();
+{% else %}
+  const {{ target | camel_case }}sData = await get{{ target | pascal_case }}ListPageData(false);
+{% endif %}
+{% endfor %}
+  const userPermissions = await get{{ parent_pascal }}NewPageAccessCheck();
+  const src = {
+    id: '',
+{{ parent_default_props }}
+{% for child in children_raw %}
+    {{ child.property_name }}: [],
+{% endfor %}
+  };
+  return <FormUpsert src={src} isEdit={false} permissions={userPermissions}{% for target in selection_targets %} all{{ target | pascal_case }}s={{ '{' }}{{ target | camel_case }}sData.{{ target | camel_case }}s{{ '}' }} {{ target | camel_case }}Permissions={{ '{' }}{{ target | camel_case }}sData.userPermissions{{ '}' }}{% endfor %} />;
+}

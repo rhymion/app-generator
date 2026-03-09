@@ -48,3 +48,4 @@ export function followed_by_columns(editable: boolean = false, parentIdOptions?:
       : [{ field: 'assignee_id', headerName: t('assignee'), width: 200, editable: false, valueGetter: (_value: any, row: any) => row.assignee?.name ?? '' }]),
   ];
 }
+

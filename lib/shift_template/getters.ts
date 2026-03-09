@@ -8,7 +8,6 @@ import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
 export async function getAllShiftTemplates(): Promise<ShiftTemplate[]> {
-
   const shiftTemplates = await prisma.shift_template.findMany({
     include: { user_account: true },
   });
@@ -23,17 +22,12 @@ export async function getAllShiftTemplates(): Promise<ShiftTemplate[]> {
 }
 
 export async function getShiftTemplateDetail(id: string): Promise<ShiftTemplateDetail | null> {
-  
   const shiftTemplate = await prisma.shift_template.findUnique({
-    where: { 
+    where: {
       id,
     },
-    include: { 
-      user_account: true, 
-      creator: { select: { id: true, 
-      name: true } }, 
-      updater: { select: { id: true, 
-      name: true } } 
+    include: {
+      user_account: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
     },
   });
 

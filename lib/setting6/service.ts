@@ -28,11 +28,6 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function deleteSetting6(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.xxxxx_xxxxx.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.xxxxx_xxxxx.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteSetting6(ids: string[]): Promise<void> {
+  await prisma.xxxxx_xxxxx.deleteMany({ where: { id: { in: ids } } });
 }

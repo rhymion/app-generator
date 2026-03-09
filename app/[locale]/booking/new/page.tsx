@@ -4,7 +4,7 @@ import { getBookingNewPageAccessCheck } from '@/lib/booking/getters';
 
 export default async function AddBookingPage() {
   const resourcesData = await getResourceListPageData(false);
-  const userPermissions =await getBookingNewPageAccessCheck();
+  const userPermissions = await getBookingNewPageAccessCheck();
   const src = {
     id: '',
     name: '',

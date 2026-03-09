@@ -5,7 +5,6 @@ import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addParentOnly, updateParentOnly, deleteParentOnly } from './service';
-
 export async function upsertParentOnly(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
@@ -32,7 +31,6 @@ export async function upsertParentOnly(data: FormData) {
   revalidatePath('/');
   redirect('/parent_only');
 }
-
 export async function removeParentOnly(data: FormData | string[]) {
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   const items = await prisma.parent_only.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
@@ -43,3 +41,4 @@ export async function removeParentOnly(data: FormData | string[]) {
   revalidatePath('/');
   redirect('/parent_only');
 }
+

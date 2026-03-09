@@ -8,7 +8,6 @@ import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
 export async function getAllOrganizations(): Promise<Organization[]> {
-
   const organizations = await prisma.organization.findMany({
   });
   return organizations.map((organization) => ({
@@ -19,17 +18,12 @@ export async function getAllOrganizations(): Promise<Organization[]> {
 }
 
 export async function getOrganizationDetail(id: string): Promise<OrganizationDetail | null> {
-  
   const organization = await prisma.organization.findUnique({
-    where: { 
+    where: {
       id,
     },
-    include: { 
-      user_accounts: true, 
-      creator: { select: { id: true, 
-      name: true } }, 
-      updater: { select: { id: true, 
-      name: true } } 
+    include: {
+      user_accounts: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
     },
   });
 

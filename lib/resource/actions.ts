@@ -5,7 +5,6 @@ import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addResource, updateResource, deleteResource } from './service';
-
 export async function upsertResource(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
@@ -19,9 +18,9 @@ export async function upsertResource(data: FormData) {
   const description = data.get('description') as string | null;
   const organizationId = data.get('organization_id') as string;
   const resourceAttachmentsRaw = data.getAll('resource_attachment[]') as string[];
-  const resourceAttachmentsItems = resourceAttachmentsRaw.map(f => JSON.parse(f) as { id?: string; order: number; name: string; path: string });
+  const resourceAttachmentsItems = resourceAttachmentsRaw.map(f => JSON.parse(f) as { order: number; name: string; path: string });
   const resourceImagesRaw = data.getAll('resource_image[]') as string[];
-  const resourceImagesItems = resourceImagesRaw.map(f => JSON.parse(f) as { id?: string; name: string; path: string });
+  const resourceImagesItems = resourceImagesRaw.map(f => JSON.parse(f) as { name: string; path: string });
   const userId = await getSessionUserIdOrThrow();
 
   if (id) {
@@ -33,7 +32,6 @@ export async function upsertResource(data: FormData) {
   revalidatePath('/');
   redirect('/resource');
 }
-
 export async function removeResource(data: FormData | string[]) {
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   const items = await prisma.resource.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
@@ -44,3 +42,4 @@ export async function removeResource(data: FormData | string[]) {
   revalidatePath('/');
   redirect('/resource');
 }
+

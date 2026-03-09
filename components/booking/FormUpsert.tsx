@@ -10,7 +10,6 @@ import { upsertBooking, removeBooking } from '@/lib/booking/actions';
 import type { FormUpsertProps } from '@/lib/booking/types';
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
-
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
 import { useFormValidation } from './form_validation';
@@ -28,7 +27,6 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
   const [startTime, setStartTime] = useState<Dayjs | null>(src.start_time ? dayjs(src.start_time) : null);
   const [endTime, setEndTime] = useState<Dayjs | null>(src.end_time ? dayjs(src.end_time) : null);
   const [resourceId, setResourceId] = useState<string | null>(src.resource_id || null);
-
   const nameRef = useRef<HTMLInputElement>(null);
   const resourceIdOptions = useMemo(() => {
     return allResources.map((item) => ({
@@ -105,12 +103,12 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
           />
         )}
       />
-      <DateTimeWrapper 
+      <DateTimeWrapper
         label={tf('startTime')} 
         date_time={startTime ? startTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setStartTime(newValue)}
       />
-      <DateTimeWrapper 
+      <DateTimeWrapper
         label={tf('endTime')} 
         date_time={endTime ? endTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setEndTime(newValue)}
@@ -133,7 +131,6 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
         submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

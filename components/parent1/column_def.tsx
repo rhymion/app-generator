@@ -83,3 +83,4 @@ export function parent1_lists_columns(editable: boolean = false): GridColDef[] {
     { field: 'name', headerName: t('name'), width: 150, editable: editable },
   ];
 }
+

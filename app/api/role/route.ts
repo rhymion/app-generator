@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
 import { getAllRoles } from '@/lib/role/getters';
 import { addRole } from '@/lib/role/service';
-
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
@@ -13,7 +12,6 @@ export async function GET(request: NextRequest) {
     return handleApiError(error);
   }
 }
-
 export async function POST(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);

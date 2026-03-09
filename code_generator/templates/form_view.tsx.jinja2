@@ -1,0 +1,86 @@
+'use client';
+
+import { useTranslations } from 'next-intl';
+{% if has_comment_children %}
+import { useRouter } from 'next/navigation';
+{% endif %}
+{% if has_grid_children or children_raw %}
+import { GridColDef } from '@mui/x-data-grid';
+{% endif %}
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
+import TextField from '@mui/material/TextField';
+import type { FormViewProps } from '@/lib/{{ parent }}/types';
+import Link from '@mui/material/Link';
+{% if has_grid_children %}
+import FieldsViewGrid from '@/components/_standard/FieldsViewGrid';
+{% if col_fn_names %}
+import { {{ col_fn_names | join(', ') }} } from '../{{ parent }}/column_def';
+{% endif %}
+{% endif %}
+import EditIcon from '@mui/icons-material/Edit';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+{% if needs_datetime_wrapper %}
+import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
+{% endif %}
+{% if needs_image_display %}
+import ImageDisplay from '@/components/_standard/ImageDisplay';
+{% endif %}
+{% if has_list_children %}
+import ListWrapper from '@/components/_standard/ListWrapper';
+{% endif %}
+{% if has_comment_children %}
+import CommentListWrapper from '@/components/_standard/CommentListWrapper';
+import { add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment } from '@/lib/{{ parent }}/actions';
+{% endif %}
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '@/components/_standard/AuditInfo';
+{% if custom_view_imports %}
+{{ custom_view_imports }}
+{% endif %}
+
+export default function FormView({ src, permissions }: FormViewProps) {
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+{% if view_enum_ns_hooks %}
+{{ view_enum_ns_hooks }}
+{% endif %}
+  const canEdit = permissions?.update ?? true;
+{% if view_enum_opt_setups %}
+{{ view_enum_opt_setups }}
+{% endif %}
+{% if column_variables %}
+{{ column_variables }}
+{% endif %}
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-4">
+        <h1>{te('{{ parent_camel }}')}</h1>
+        <div>
+        {canEdit && (
+          <Tooltip title="Edit">
+            <Link href={`/{{ parent }}/edit/${src.id}`} sx={{ '{{' }} mx: 1 {{ '}}' }} aria-label="Edit">
+              <IconButton component="span" color="primary" tabIndex={-1}>
+                <EditIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
+        )}
+          <Tooltip title="Back to List">
+            <Link href="/{{ parent }}" aria-label="Back to List">
+              <IconButton component="span" tabIndex={-1}>
+                <ArrowBackIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
+        </div>
+      </div>
+{{ all_parent_fields }}
+{% if child_view_grids %}
+{{ child_view_grids }}
+{% endif %}
+      <AuditInfo src={src} />
+    </div>
+  );
+}

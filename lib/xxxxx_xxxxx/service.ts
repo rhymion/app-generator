@@ -29,23 +29,22 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addXxxxxXxxxx(creatorId: string, name: string, description: string | null, team: string | null, yyyyyYyyyysItems: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]) {
+export async function addXxxxxXxxxx(userId: string, name: string, description: string | null, team: string | null, yyyyyYyyyysItems: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]): Promise<{ id: string }> {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
       name: name,
       description: description,
       team: team,
     });
-    return await tx.xxxxx_xxxxx.create({
+    const created = await tx.xxxxx_xxxxx.create({
       data: {
+        creator_id: userId,
+        updater_id: userId,
         name: name,
         description: description,
         team: team,
-        creator_id: creatorId,
-        updater_id: creatorId,
-        yyyyy_yyyyys: {
-          create: yyyyyYyyyysItems.map(f => ({
+      yyyyy_yyyyys: {
+        create: yyyyyYyyyysItems.map(f => ({
           name: f.name,
           type: f.type,
           max_length: f.max_length,
@@ -53,15 +52,15 @@ export async function addXxxxxXxxxx(creatorId: string, name: string, description
           regex: f.regex,
           required: f.required,
           written_by: f.written_by,
-          })),
-        },
+        })),
+      },
       },
     });
+    return { id: created.id };
   });
 }
-
-export async function updateXxxxxXxxxx(updaterId: string, id: string, name: string, description: string | null, team: string | null, yyyyyYyyyysItems: { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateXxxxxXxxxx(userId: string, id: string, name: string, description: string | null, team: string | null, yyyyyYyyyysItems: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -70,13 +69,13 @@ export async function updateXxxxxXxxxx(updaterId: string, id: string, name: stri
       description: description,
       team: team,
     });
-    return await tx.xxxxx_xxxxx.update({
+    await tx.xxxxx_xxxxx.update({
       where: { id },
       data: {
+        updater_id: userId,
         name: name,
         description: description,
         team: team,
-        updater_id: updaterId,
       yyyyy_yyyyys: {
         deleteMany: {},
         create: yyyyyYyyyysItems.map(f => ({
@@ -93,11 +92,6 @@ export async function updateXxxxxXxxxx(updaterId: string, id: string, name: stri
     });
   });
 }
-
-export async function deleteXxxxxXxxxx(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.xxxxx_xxxxx.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.xxxxx_xxxxx.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteXxxxxXxxxx(ids: string[]): Promise<void> {
+  await prisma.xxxxx_xxxxx.deleteMany({ where: { id: { in: ids } } });
 }

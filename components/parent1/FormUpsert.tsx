@@ -13,9 +13,9 @@ import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
 import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';
+import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';
 import OrderedFieldsDataGrid from '@/components/_standard/OrderedFieldsDataGrid';
-  import { parent1_child1s_columns, parent1_child2s_columns } from '../parent1/column_def';
+import { parent1_child1s_columns, parent1_child2s_columns } from '../parent1/column_def';
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
 import ImageUpload from '@/components/_standard/ImageUpload';
@@ -204,14 +204,14 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
           />
         )}
       />
-      <NumberField 
+      <NumberField
         label={tf('price')}
         inputRef={priceRef}
         defaultValue={src.price || 0}
         min={0}
         max={1000000}
       />
-      <DateTimeWrapper 
+      <DateTimeWrapper
         label={tf('dueDate')} 
         date_time={dueDate ? dueDate.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setDueDate(newValue)}
@@ -270,7 +270,6 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

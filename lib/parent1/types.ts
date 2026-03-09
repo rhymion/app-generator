@@ -1,5 +1,4 @@
 import type { ModelPermissions } from '@/lib/authz';
-
 import type { Organization } from '@/lib/organization/types';
 
 export type Parent1 = {
@@ -49,6 +48,7 @@ export type Parent1List = {
   id: string;
   name: string;
 };
+
 export type Parent1DetailPageProps = Readonly<{
   params: Promise<{
     id: string;
@@ -80,6 +80,5 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allOrganizations?: Organization[];
   currentUserId?: string | null;
-
   organizationPermissions?: ModelPermissions;
 }>;

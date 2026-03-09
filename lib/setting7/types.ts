@@ -5,7 +5,6 @@ export type Setting7 = {
   name: string;
   description: string | null;
   team: string | null;
-
 };
 
 export type Setting7Detail = Setting7;
@@ -33,5 +32,4 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   currentUserId?: string | null;
-
 }>;

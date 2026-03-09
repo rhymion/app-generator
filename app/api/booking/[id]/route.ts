@@ -5,7 +5,6 @@ import { getBookingDetail } from '@/lib/booking/getters';
 import { updateBooking, deleteBooking } from '@/lib/booking/service';
 
 type Params = { params: Promise<{ id: string }> };
-
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
@@ -20,7 +19,6 @@ export async function GET(request: NextRequest, { params }: Params) {
     return handleApiError(error);
   }
 }
-
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
@@ -32,13 +30,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, 'booking', 'update', existing);
     const body = await request.json();
     const { name, resource_id: resourceId, start_time: startTime, end_time: endTime } = body;
-    const result = await updateBooking(userId, id, name, resourceId, startTime, endTime);
+    const result = await updateBooking(userId, id, name, resourceId, startTime, endTime, null);
     return NextResponse.json(result);
   } catch (error) {
     return handleApiError(error);
   }
 }
-
 export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;

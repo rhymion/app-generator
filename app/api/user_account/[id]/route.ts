@@ -5,7 +5,6 @@ import { getUserAccountDetail } from '@/lib/user_account/getters';
 import { updateUserAccount, deleteUserAccount } from '@/lib/user_account/service';
 
 type Params = { params: Promise<{ id: string }> };
-
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
@@ -20,7 +19,6 @@ export async function GET(request: NextRequest, { params }: Params) {
     return handleApiError(error);
   }
 }
-
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
@@ -32,13 +30,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, 'user_account', 'update', existing);
     const body = await request.json();
     const { name, avatar, roles_ids } = body;
-    const result = await updateUserAccount(userId, id, name, avatar ?? null, roles_ids ?? []);
+    const result = await updateUserAccount(userId, id, name, avatar ?? null, roles_ids ?? [], null);
     return NextResponse.json(result);
   } catch (error) {
     return handleApiError(error);
   }
 }
-
 export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;

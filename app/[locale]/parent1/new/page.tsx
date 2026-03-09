@@ -4,7 +4,7 @@ import { getParent1NewPageAccessCheck } from '@/lib/parent1/getters';
 
 export default async function AddParent1Page() {
   const organizationsData = await getAssociatedOrganizationListPageData();
-  const userPermissions =await getParent1NewPageAccessCheck();
+  const userPermissions = await getParent1NewPageAccessCheck();
   const src = {
     id: '',
     name: '',

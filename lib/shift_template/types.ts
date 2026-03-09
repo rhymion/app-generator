@@ -1,5 +1,4 @@
 import type { ModelPermissions } from '@/lib/authz';
-
 import type { UserAccount } from '@/lib/user_account/types';
 
 export type ShiftTemplate = {
@@ -44,6 +43,5 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allUserAccounts?: UserAccount[];
   currentUserId?: string | null;
-
   userAccountPermissions?: ModelPermissions;
 }>;

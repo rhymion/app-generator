@@ -7,7 +7,6 @@ import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/role/types';
 import Link from '@mui/material/Link';
-import FieldsViewGrid from '@/components/_standard/FieldsViewGrid';
 import EditIcon from '@mui/icons-material/Edit';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ListWrapper from '@/components/_standard/ListWrapper';
@@ -19,21 +18,20 @@ export default function FormView({ src, permissions }: FormViewProps) {
   const tf = useTranslations('Fields');
   const te = useTranslations('EntityLabel');
   const canEdit = permissions?.update ?? true;
-
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <h1>{te('role')}</h1>
         <div>
-          {canEdit && (
-            <Tooltip title="Edit">
-              <Link href={`/role/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
-                <IconButton component="span" color="primary" tabIndex={-1}>
-                  <EditIcon />
-                </IconButton>
-              </Link>
-            </Tooltip>
-          )}
+        {canEdit && (
+          <Tooltip title="Edit">
+            <Link href={`/role/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
+              <IconButton component="span" color="primary" tabIndex={-1}>
+                <EditIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
+        )}
           <Tooltip title="Back to List">
             <Link href="/role" aria-label="Back to List">
               <IconButton component="span" tabIndex={-1}>

@@ -10,7 +10,6 @@ import { upsertShiftTemplate, removeShiftTemplate } from '@/lib/shift_template/a
 import type { FormUpsertProps } from '@/lib/shift_template/types';
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
-
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
 import { useFormValidation } from './form_validation';
@@ -29,8 +28,6 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
   const [endTime, setEndTime] = useState<Dayjs | null>(src.end_time ? dayjs(src.end_time) : null);
   const [dayOfWeek, setDayOfWeek] = useState<number | null>(src.day_of_week ?? null);
   const [userAccountId, setUserAccountId] = useState<string | null>(src.user_account_id || null);
-
-
   const dayOfWeekOptions = [{ value: 0, label: 'Sunday' }, { value: 1, label: 'Monday' }, { value: 2, label: 'Tuesday' }, { value: 3, label: 'Wednesday' }, { value: 4, label: 'Thursday' }, { value: 5, label: 'Friday' }, { value: 6, label: 'Saturday' }];
   const userAccountIdOptions = useMemo(() => {
     return allUserAccounts.map((item) => ({
@@ -110,13 +107,13 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
           />
         )}
       />
-      <DateTimeWrapper 
+      <DateTimeWrapper
         label={tf('startTime')} 
         show_date={false}
         date_time={startTime ? startTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setStartTime(newValue)}
       />
-      <DateTimeWrapper 
+      <DateTimeWrapper
         label={tf('endTime')} 
         show_date={false}
         date_time={endTime ? endTime.toDate() : null}
@@ -140,7 +137,6 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

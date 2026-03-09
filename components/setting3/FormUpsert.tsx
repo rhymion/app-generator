@@ -9,7 +9,6 @@ import { upsertSetting3, removeSetting3 } from '@/lib/setting3/actions';
 import type { FormUpsertProps } from '@/lib/setting3/types';
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
-
 import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
@@ -21,8 +20,6 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
-
-
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const validationError = useFormValidation({
@@ -104,7 +101,6 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

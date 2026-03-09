@@ -17,3 +17,4 @@ export function resource_images_columns(editable: boolean = false): GridColDef[]
     { field: 'path', headerName: t('path'), width: 150, editable: editable },
   ];
 }
+

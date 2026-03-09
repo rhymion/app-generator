@@ -1,0 +1,40 @@
+'use server';
+
+import prisma from '@/lib/prisma';
+import { assertPermission, getModelPermissions } from '@/lib/authz';
+
+export type {{ parent_pascal }}ForChart = {
+  id: string;
+  {{ fk_field }}: string;
+  {{ row_by }}_name: string;
+  {{ start_field }}: string;
+  {{ end_field }}: string;
+{% for field in extra_fields %}
+  {{ field.name }}: {{ field.ts_type }};
+{% endfor %}
+};
+
+export async function get{{ parent_pascal }}sForChart(startDate: Date, endDate: Date): Promise<{{ parent_pascal }}ForChart[]> {
+  const userPermissions = await getModelPermissions('{{ model }}');
+  await assertPermission(userPermissions, 'read', '{{ model }}');
+
+  const items = await prisma.{{ model }}.findMany({
+    where: {
+      {{ start_field }}: { lt: endDate },
+      {{ end_field }}: { gt: startDate },
+    },
+    include: { {{ row_by }}: true },
+    orderBy: [{ {{ start_field }}: 'asc' }],
+  });
+
+  return items.map((item) => ({
+    id: item.id,
+    {{ fk_field }}: item.{{ fk_field }},
+    {{ row_by }}_name: (item.{{ row_by }} as { {{ label_field }}: string }).{{ label_field }},
+    {{ start_field }}: (item.{{ start_field }} as Date).toISOString(),
+    {{ end_field }}: (item.{{ end_field }} as Date).toISOString(),
+{% for sel in extra_selects %}
+    {{ sel }}
+{% endfor %}
+  }));
+}

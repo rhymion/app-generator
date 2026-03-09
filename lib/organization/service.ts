@@ -28,29 +28,28 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addOrganization(creatorId: string, name: string, description: string | null, userAccountsIds: string[]) {
+export async function addOrganization(userId: string, name: string, description: string | null, userAccountsIds: string[]): Promise<{ id: string }> {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
       name: name,
       description: description,
     });
-    return await tx.organization.create({
+    const created = await tx.organization.create({
       data: {
+        creator_id: userId,
+        updater_id: userId,
         name: name,
         description: description,
-        creator_id: creatorId,
-        updater_id: creatorId,
       user_accounts: {
         connect: userAccountsIds.map((id) => ({ id })),
       },
       },
     });
+    return { id: created.id };
   });
 }
-
-export async function updateOrganization(updaterId: string, id: string, name: string, description: string | null, userAccountsIds: string[], srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateOrganization(userId: string, id: string, name: string, description: string | null, userAccountsIds: string[], srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -58,12 +57,12 @@ export async function updateOrganization(updaterId: string, id: string, name: st
       name: name,
       description: description,
     });
-    return await tx.organization.update({
+    await tx.organization.update({
       where: { id },
       data: {
+        updater_id: userId,
         name: name,
         description: description,
-        updater_id: updaterId,
       user_accounts: {
         set: userAccountsIds.map((id) => ({ id })),
       },
@@ -71,11 +70,6 @@ export async function updateOrganization(updaterId: string, id: string, name: st
     });
   });
 }
-
-export async function deleteOrganization(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.organization.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.organization.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteOrganization(ids: string[]): Promise<void> {
+  await prisma.organization.deleteMany({ where: { id: { in: ids } } });
 }

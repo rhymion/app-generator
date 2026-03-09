@@ -11,7 +11,6 @@ import { getAssociatedOrganizations } from '@/lib/organization/getters_associate
 export async function getAllParent1s(userId: string): Promise<Parent1[]> {
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
-
   const parent1s = await prisma.parent1.findMany({
     where: {
       organization_id: { in: associatedOrganizationIds },
@@ -33,21 +32,13 @@ export async function getAllParent1s(userId: string): Promise<Parent1[]> {
 export async function getParent1Detail(id: string, userId: string): Promise<Parent1Detail | null> {
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
-
   const parent1 = await prisma.parent1.findFirst({
-    where: { 
+    where: {
       id,
       organization_id: { in: associatedOrganizationIds },
     },
-    include: { 
-      parent1_child1s: true, 
-      parent1_child2s: true, 
-      parent1_lists: true, 
-      organization: true, 
-      creator: { select: { id: true, 
-      name: true } }, 
-      updater: { select: { id: true, 
-      name: true } } 
+    include: {
+      parent1_child1s: true, parent1_child2s: true, parent1_lists: true, organization: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
     },
   });
 

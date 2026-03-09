@@ -5,7 +5,6 @@ import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addDbTable, updateDbTable, deleteDbTable } from './service';
-
 export async function upsertDbTable(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
@@ -18,7 +17,7 @@ export async function upsertDbTable(data: FormData) {
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;
   const fieldsRaw = data.getAll('field[]') as string[];
-  const fieldsItems = fieldsRaw.map(f => JSON.parse(f) as { id?: string; name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean });
+  const fieldsItems = fieldsRaw.map(f => JSON.parse(f) as { name: string; type: string; reference_id: string | null; max_length: number | null; max: number | null; regex: string | null; required: boolean });
   const userId = await getSessionUserIdOrThrow();
 
   if (id) {
@@ -30,7 +29,6 @@ export async function upsertDbTable(data: FormData) {
   revalidatePath('/');
   redirect('/db_table');
 }
-
 export async function removeDbTable(data: FormData | string[]) {
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   const items = await prisma.db_table.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });

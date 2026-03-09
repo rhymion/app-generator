@@ -2,7 +2,7 @@ import FormUpsert from '@/components/xxxxx_xxxxx/FormUpsert';
 import { getXxxxxXxxxxNewPageAccessCheck } from '@/lib/xxxxx_xxxxx/getters';
 
 export default async function AddXxxxxXxxxxPage() {
-  const userPermissions =await getXxxxxXxxxxNewPageAccessCheck();
+  const userPermissions = await getXxxxxXxxxxNewPageAccessCheck();
   const src = {
     id: '',
     name: '',

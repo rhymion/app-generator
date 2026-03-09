@@ -4,7 +4,7 @@ import { getShiftTemplateNewPageAccessCheck } from '@/lib/shift_template/getters
 
 export default async function AddShiftTemplatePage() {
   const userAccountsData = await getUserAccountListPageData(false);
-  const userPermissions =await getShiftTemplateNewPageAccessCheck();
+  const userPermissions = await getShiftTemplateNewPageAccessCheck();
   const src = {
     id: '',
     user_account_id: '',

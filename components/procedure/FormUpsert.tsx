@@ -12,9 +12,6 @@ import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
 import type { Procedure } from '@/lib/procedure/types';
 import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';
-import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';
-  
 import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allProcedures = [], allUserAccounts = [], procedurePermissions, userAccountPermissions }: FormUpsertProps) {
@@ -263,7 +260,6 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

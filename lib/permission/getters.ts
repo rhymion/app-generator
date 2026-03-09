@@ -8,7 +8,6 @@ import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
 export async function getAllPermissions(): Promise<Permission[]> {
-
   const permissions = await prisma.permission.findMany({
     include: { role: true },
   });
@@ -25,17 +24,12 @@ export async function getAllPermissions(): Promise<Permission[]> {
 }
 
 export async function getPermissionDetail(id: string): Promise<PermissionDetail | null> {
-  
   const permission = await prisma.permission.findUnique({
-    where: { 
+    where: {
       id,
     },
-    include: { 
-      role: true, 
-      creator: { select: { id: true, 
-      name: true } }, 
-      updater: { select: { id: true, 
-      name: true } } 
+    include: {
+      role: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
     },
   });
 

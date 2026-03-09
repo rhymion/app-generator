@@ -25,15 +25,15 @@ export default function FormView({ src, permissions }: FormViewProps) {
       <div className="flex justify-between items-center mb-4">
         <h1>{te('setting1')}</h1>
         <div>
-          {canEdit && (
-            <Tooltip title="Edit">
-              <Link href={`/setting1/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
-                <IconButton component="span" color="primary" tabIndex={-1}>
-                  <EditIcon />
-                </IconButton>
-              </Link>
-            </Tooltip>
-          )}
+        {canEdit && (
+          <Tooltip title="Edit">
+            <Link href={`/setting1/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
+              <IconButton component="span" color="primary" tabIndex={-1}>
+                <EditIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
+        )}
           <Tooltip title="Back to List">
             <Link href="/setting1" aria-label="Back to List">
               <IconButton component="span" tabIndex={-1}>

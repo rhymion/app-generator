@@ -29,9 +29,7 @@ export default async function ShiftChartPage({
     start_time: item.start_time,
     end_time: item.end_time,
     row_id: item.user_account_id,
-    row_label: item.user_account_name,
-    tooltip: (['Scheduled', 'Approved', 'Cancelled'] as const)[item.status as number] ?? String(item.status),
-  }));
+    row_label: item.user_account_name,    tooltip: (['Scheduled', 'Approved', 'Cancelled'] as const)[item.status as number] ?? String(item.status),  }));
 
   return (
     <GanttChart

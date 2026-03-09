@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
 import { getAllUserAccounts } from '@/lib/user_account/getters';
-
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);

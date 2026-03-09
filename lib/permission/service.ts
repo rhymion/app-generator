@@ -28,8 +28,7 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addPermission(creatorId: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null) {
+export async function addPermission(userId: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null): Promise<{ id: string }> {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
       name: name,
@@ -39,23 +38,23 @@ export async function addPermission(creatorId: string, name: string, create: boo
       delete: deleteValue,
       role_id: roleId,
     });
-    return await tx.permission.create({
+    const created = await tx.permission.create({
       data: {
+        creator_id: userId,
+        updater_id: userId,
         name: name,
         create: create,
         read: read,
         update: update,
         delete: deleteValue,
         role_id: roleId,
-        creator_id: creatorId,
-        updater_id: creatorId,
       },
     });
+    return { id: created.id };
   });
 }
-
-export async function updatePermission(updaterId: string, id: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null, srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updatePermission(userId: string, id: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null, srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -67,25 +66,20 @@ export async function updatePermission(updaterId: string, id: string, name: stri
       delete: deleteValue,
       role_id: roleId,
     });
-    return await tx.permission.update({
+    await tx.permission.update({
       where: { id },
       data: {
+        updater_id: userId,
         name: name,
         create: create,
         read: read,
         update: update,
         delete: deleteValue,
         role_id: roleId,
-        updater_id: updaterId,
       },
     });
   });
 }
-
-export async function deletePermission(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.permission.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.permission.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deletePermission(ids: string[]): Promise<void> {
+  await prisma.permission.deleteMany({ where: { id: { in: ids } } });
 }

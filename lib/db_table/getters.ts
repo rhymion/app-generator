@@ -8,7 +8,6 @@ import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
 export async function getAllDbTables(): Promise<DbTable[]> {
-
   const dbTables = await prisma.db_table.findMany({
   });
   return dbTables.map((dbTable) => ({
@@ -19,21 +18,12 @@ export async function getAllDbTables(): Promise<DbTable[]> {
 }
 
 export async function getDbTableDetail(id: string): Promise<DbTableDetail | null> {
-  
   const dbTable = await prisma.db_table.findUnique({
-    where: { 
+    where: {
       id,
     },
-    include: { 
-      fields: { include: { reference: true } }, 
-      db_table_comments: { include: { creator: { select: { id: true, 
-      name: true, 
-      avatar: true } } }, 
-      orderBy: { created_at: 'asc' } }, 
-      creator: { select: { id: true, 
-      name: true } }, 
-      updater: { select: { id: true, 
-      name: true } } 
+    include: {
+      fields: { include: { reference: true } }, db_table_comments: { include: { creator: { select: { id: true, name: true, avatar: true } } }, orderBy: { created_at: 'asc' } }, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
     },
   });
 

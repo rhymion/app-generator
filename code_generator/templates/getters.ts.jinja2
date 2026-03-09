@@ -1,0 +1,96 @@
+'use server';
+
+import prisma from '@/lib/prisma';
+import type { {{ parent_pascal }}, {{ parent_pascal }}Detail } from '@/lib/{{ parent }}/types';
+import type { ModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions{% if should_filter_by_org %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
+import type { Operation } from '@/lib/authz';
+import { getServerSession } from 'next-auth/next';
+{% if should_filter_by_org %}
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}
+
+export async function getAll{{ parent_pascal }}s({% if should_filter_by_org %}userId: string{% endif %}): Promise<{{ parent_pascal }}[]> {
+{% if should_filter_by_org %}
+  const associatedOrganizations = await getAssociatedOrganizations(userId);
+  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
+{% endif %}
+  const {{ parent_camel }}s = await prisma.{{ model }}.findMany({
+{% if should_filter_by_org %}
+    where: {
+      organization_id: { in: associatedOrganizationIds },
+    },
+{% endif %}
+{% if include_props_list %}
+    include: { {{ include_props_list }} },
+{% endif %}
+  });
+  return {{ parent_camel }}s.map(({{ parent_camel }}) => ({
+{{ parent_mapping }}
+{% if relationship_mapping %}
+{{ relationship_mapping }}
+{% endif %}
+  }));
+}
+
+export async function get{{ parent_pascal }}Detail(id: string{% if should_filter_by_org %}, userId: string{% endif %}): Promise<{{ parent_pascal }}Detail | null> {
+{% if should_filter_by_org %}
+  const associatedOrganizations = await getAssociatedOrganizations(userId);
+  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
+{% endif %}
+  const {{ parent_camel }} = await prisma.{{ model }}.{% if should_filter_by_org %}findFirst{% else %}findUnique{% endif %}({
+    where: {
+      id,
+{% if should_filter_by_org %}
+      organization_id: { in: associatedOrganizationIds },
+{% endif %}
+    },
+{% if include_props_detail %}
+    include: {
+      {{ include_props_detail }}
+    },
+{% endif %}
+  });
+
+  if (!{{ parent_camel }}) {
+    return null;
+  }
+
+  return {
+    ...{{ parent_camel }},
+{% if child_mappings %}
+{{ child_mappings }}
+{% endif %}
+{% if relationship_mapping %}
+{{ relationship_mapping }}
+{% endif %}
+  };
+}
+
+export async function get{{ parent_pascal }}ListPageData(isAssertPermission: boolean = true) {
+{% if should_filter_by_org %}
+  const userId = await getSessionUserIdOrThrow();
+{% endif %}
+  const userPermissions = await getModelPermissions('{{ parent }}'{% if should_filter_by_org %}, userId{% endif %});
+  if (isAssertPermission) {
+    await assertPermission(userPermissions, 'read', '{{ parent }}');
+  }
+  const {{ parent_camel }}s = await getAll{{ parent_pascal }}s({% if should_filter_by_org %}userId{% endif %});
+  return { {{ parent_camel }}s, userPermissions };
+}
+
+export async function get{{ parent_pascal }}DetailPageData(id: string, operation: Operation = 'read') {
+{% if should_filter_by_org %}
+  const userId = await getSessionUserIdOrThrow();
+{% endif %}
+  const {{ parent_camel }} = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org %}, userId{% endif %});
+  const userPermissions = await getModelPermissions('{{ parent }}', {% if should_filter_by_org %}userId{% else %}undefined{% endif %}, {{ parent_camel }});
+  await assertPermission(userPermissions, operation, '{{ parent }}');
+  return { {{ parent_camel }}, userPermissions };
+}
+
+export async function get{{ parent_pascal }}NewPageAccessCheck() {
+  const userPermissions = await getModelPermissions('{{ parent }}');
+  await assertPermission(userPermissions, 'create', '{{ parent }}');
+  return userPermissions;
+}

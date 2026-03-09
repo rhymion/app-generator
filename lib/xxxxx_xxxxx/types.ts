@@ -5,7 +5,6 @@ export type XxxxxXxxxx = {
   name: string;
   description: string | null;
   team: string | null;
-
 };
 
 export type XxxxxXxxxxDetail = XxxxxXxxxx & {
@@ -23,6 +22,7 @@ export type YyyyyYyyyy = {
   required: boolean;
   written_by: string;
 };
+
 export type XxxxxXxxxxDetailPageProps = Readonly<{
   params: Promise<{
     id: string;
@@ -47,5 +47,4 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   currentUserId?: string | null;
-
 }>;

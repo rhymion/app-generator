@@ -1,0 +1,85 @@
+import type { ModelPermissions } from '@/lib/authz';
+{% for target in import_targets %}
+import type { {{ target | pascal_case }} } from '@/lib/{{ target }}/types';
+{% endfor %}
+
+export type {{ parent | pascal_case }} = {
+{% for field in parent_fields %}
+  {{ field.name }}: {{ field.ts_type }};
+{% endfor %}
+{% for rel in parent_rels %}
+  {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+{% endfor %}
+};
+
+{% for rel in option_types %}
+export type {{ rel.target | pascal_case }}Option = {
+  id: string;
+  {{ rel.label_field }}: string;
+};
+
+{% endfor %}
+{% if children %}
+export type {{ parent | pascal_case }}Detail = {{ parent | pascal_case }} & {
+{% for child in children %}
+  {{ child.property_name }}: {{ child.name | pascal_case }}[];
+{% endfor %}
+};
+
+{% for child in children %}
+{% if child.declare_type %}
+export type {{ child.name | pascal_case }} = {
+{% for field in child.fields %}
+  {{ field.name }}: {{ field.ts_type }};
+{% endfor %}
+{% for rel in child.relationships %}
+  {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+{% endfor %}
+{% if child.output_type == 'comments' %}
+  created_at?: string | Date | null;
+  updated_at?: string | Date | null;
+  creator?: { id: string; name: string; avatar?: string | null } | null;
+{% endif %}
+};
+
+{% endif %}
+{% endfor %}
+{% else %}
+export type {{ parent | pascal_case }}Detail = {{ parent | pascal_case }};
+
+{% endif %}
+export type {{ parent | pascal_case }}DetailPageProps = Readonly<{
+  params: Promise<{
+    id: string;
+  }>
+}>;
+
+export type FormViewProps = Readonly<{
+  src: {
+{% for field in form_view_fields %}
+    {{ field.name }}: {{ field.ts_type }};
+{% endfor %}
+{% for rel in parent_rels %}
+    {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+{% endfor %}
+{% for child in children %}
+    {{ child.property_name }}: {{ child.name | pascal_case }}[];
+{% endfor %}
+    created_at?: string | Date;
+    updated_at?: string | Date;
+    creator?: { id: string; name: string } | null;
+    updater?: { id: string; name: string } | null;
+  };
+  permissions?: ModelPermissions;
+}>;
+
+export type FormUpsertProps = Readonly<FormViewProps & {
+  isEdit: boolean;
+{% for target in all_option_targets %}
+  all{{ target | pascal_case }}s?: {{ target | pascal_case }}[];
+{% endfor %}
+  currentUserId?: string | null;
+{% for target in all_option_targets %}
+  {{ target | camel_case }}Permissions?: ModelPermissions;
+{% endfor %}
+}>;
