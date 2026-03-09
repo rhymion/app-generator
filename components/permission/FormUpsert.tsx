@@ -8,9 +8,8 @@ import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import { upsertPermission, removePermission } from '@/lib/permission/actions';
 import type { FormUpsertProps } from '@/lib/permission/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
-
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import { useFormValidation } from './form_validation';
@@ -30,7 +29,6 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   const [update, setUpdate] = useState<boolean>(Boolean(src.update));
   const [deleteValue, setDeleteValue] = useState<boolean>(Boolean(src.delete));
   const [roleId, setRoleId] = useState<string | null>(src.role_id || null);
-
   const nameRef = useRef<HTMLInputElement>(null);
   const roleIdOptions = useMemo(() => {
     return allRoles.map((item) => ({
@@ -145,7 +143,6 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

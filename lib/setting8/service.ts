@@ -24,28 +24,23 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addSetting8(creatorId: string, name: string, description: string | null) {
+export async function addSetting8(userId: string, name: string, description: string | null): Promise<{ id: string }> {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
       name: name,
       description: description,
     });
-    return await tx.xxxxx_xxxxx.create({
+    const created = await tx.xxxxx_xxxxx.create({
       data: {
+        creator_id: userId,
+        updater_id: userId,
         name: name,
         description: description,
-        creator_id: creatorId,
-        updater_id: creatorId,
       },
     });
+    return { id: created.id };
   });
 }
-
-export async function deleteSetting8(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.xxxxx_xxxxx.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.xxxxx_xxxxx.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteSetting8(ids: string[]): Promise<void> {
+  await prisma.xxxxx_xxxxx.deleteMany({ where: { id: { in: ids } } });
 }

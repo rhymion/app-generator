@@ -1,10 +1,20 @@
 import { getTranslations } from 'next-intl/server';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getSetting2ListPageData } from '@/lib/setting2/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
 
-export default async function Setting2sPage() {
+export default async function Setting2ListPage() {
+  const [t] = await Promise.all([
+    getTranslations('EntityLabel'),
+  ]);
   const { setting2s, userPermissions } = await getSetting2ListPageData();
-  const t = await getTranslations('EntityLabel');
-  return <ResponsiveListClient src={setting2s} basePath="/setting2" entityLabel={t('setting2')}
-    permissions={userPermissions} />;
+  return (
+    <>
+      <ResponsiveListClient
+        entityLabel={t('setting2')}
+        src={setting2s}
+        permissions={userPermissions}
+        basePath="/setting2"
+      />
+    </>
+  );
 }

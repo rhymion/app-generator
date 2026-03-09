@@ -31,41 +31,40 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addResource(creatorId: string, name: string, description: string | null, organizationId: string, resourceAttachmentsItems: { order: number; name: string; path: string }[], resourceImagesItems: { name: string; path: string }[]) {
+export async function addResource(userId: string, name: string, description: string | null, organizationId: string, resourceAttachmentsItems: { order: number; name: string; path: string }[], resourceImagesItems: { name: string; path: string }[]): Promise<{ id: string }> {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
       name: name,
       description: description,
       organization_id: organizationId,
     });
-    return await tx.resource.create({
+    const created = await tx.resource.create({
       data: {
+        creator_id: userId,
+        updater_id: userId,
         name: name,
         description: description,
         organization_id: organizationId,
-        creator_id: creatorId,
-        updater_id: creatorId,
-        resource_attachments: {
-          create: resourceAttachmentsItems.map(f => ({
+      resource_attachments: {
+        create: resourceAttachmentsItems.map(f => ({
           order: f.order,
           name: f.name,
           path: f.path,
-          })),
-        },
-        resource_images: {
-          create: resourceImagesItems.map(f => ({
+        })),
+      },
+      resource_images: {
+        create: resourceImagesItems.map(f => ({
           name: f.name,
           path: f.path,
-          })),
-        },
+        })),
+      },
       },
     });
+    return { id: created.id };
   });
 }
-
-export async function updateResource(updaterId: string, id: string, name: string, description: string | null, organizationId: string, resourceAttachmentsItems: { id?: string; order: number; name: string; path: string }[], resourceImagesItems: { id?: string; name: string; path: string }[], srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateResource(userId: string, id: string, name: string, description: string | null, organizationId: string, resourceAttachmentsItems: { order: number; name: string; path: string }[], resourceImagesItems: { name: string; path: string }[], srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -74,13 +73,13 @@ export async function updateResource(updaterId: string, id: string, name: string
       description: description,
       organization_id: organizationId,
     });
-    return await tx.resource.update({
+    await tx.resource.update({
       where: { id },
       data: {
+        updater_id: userId,
         name: name,
         description: description,
         organization_id: organizationId,
-        updater_id: updaterId,
       resource_attachments: {
         deleteMany: {},
         create: resourceAttachmentsItems.map(f => ({
@@ -100,11 +99,6 @@ export async function updateResource(updaterId: string, id: string, name: string
     });
   });
 }
-
-export async function deleteResource(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.resource.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.resource.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteResource(ids: string[]): Promise<void> {
+  await prisma.resource.deleteMany({ where: { id: { in: ids } } });
 }

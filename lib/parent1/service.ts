@@ -36,8 +36,7 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addParent1(creatorId: string, name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { name: string }[]) {
+export async function addParent1(userId: string, name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { name: string }[]): Promise<{ id: string }> {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
       name: name,
@@ -47,18 +46,18 @@ export async function addParent1(creatorId: string, name: string, organizationId
       due_date: dueDate,
       image_url: imageUrl,
     });
-    return await tx.parent1.create({
+    const created = await tx.parent1.create({
       data: {
+        creator_id: userId,
+        updater_id: userId,
         name: name,
         organization_id: organizationId,
         description: description,
         price: price,
         due_date: dueDate,
         image_url: imageUrl,
-        creator_id: creatorId,
-        updater_id: creatorId,
-        parent1_child1s: {
-          create: parent1Child1sItems.map(f => ({
+      parent1_child1s: {
+        create: parent1Child1sItems.map(f => ({
           order: f.order,
           name: f.name,
           type: f.type,
@@ -67,28 +66,28 @@ export async function addParent1(creatorId: string, name: string, organizationId
           regex: f.regex,
           required: f.required,
           written_by: f.written_by,
-          })),
-        },
-        parent1_child2s: {
-          create: parent1Child2sItems.map(f => ({
+        })),
+      },
+      parent1_child2s: {
+        create: parent1Child2sItems.map(f => ({
           name: f.name,
           required: f.required,
           start_date: f.start_date,
           end_date: f.end_date,
-          })),
-        },
-        parent1_lists: {
-          create: parent1ListsItems.map(f => ({
+        })),
+      },
+      parent1_lists: {
+        create: parent1ListsItems.map(f => ({
           name: f.name,
-          })),
-        },
+        })),
+      },
       },
     });
+    return { id: created.id };
   });
 }
-
-export async function updateParent1(updaterId: string, id: string, name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { id?: string; order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { id?: string; name: string }[], srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateParent1(userId: string, id: string, name: string, organizationId: string, description: string | null, price: number, dueDate: Date, imageUrl: string | null, parent1Child1sItems: { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], parent1Child2sItems: { name: string; required: boolean; start_date: Date | null; end_date: Date }[], parent1ListsItems: { name: string }[], srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -100,16 +99,16 @@ export async function updateParent1(updaterId: string, id: string, name: string,
       due_date: dueDate,
       image_url: imageUrl,
     });
-    return await tx.parent1.update({
+    await tx.parent1.update({
       where: { id },
       data: {
+        updater_id: userId,
         name: name,
         organization_id: organizationId,
         description: description,
         price: price,
         due_date: dueDate,
         image_url: imageUrl,
-        updater_id: updaterId,
       parent1_child1s: {
         deleteMany: {},
         create: parent1Child1sItems.map(f => ({
@@ -142,11 +141,6 @@ export async function updateParent1(updaterId: string, id: string, name: string,
     });
   });
 }
-
-export async function deleteParent1(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.parent1.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.parent1.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteParent1(ids: string[]): Promise<void> {
+  await prisma.parent1.deleteMany({ where: { id: { in: ids } } });
 }

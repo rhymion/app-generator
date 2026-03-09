@@ -8,7 +8,6 @@ import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
 export async function getAllParentOnlys(): Promise<ParentOnly[]> {
-
   const parentOnlys = await prisma.parent_only.findMany({
   });
   return parentOnlys.map((parentOnly) => ({
@@ -21,16 +20,12 @@ export async function getAllParentOnlys(): Promise<ParentOnly[]> {
 }
 
 export async function getParentOnlyDetail(id: string): Promise<ParentOnlyDetail | null> {
-  
   const parentOnly = await prisma.parent_only.findUnique({
-    where: { 
+    where: {
       id,
     },
-    include: { 
-      creator: { select: { id: true, 
-      name: true } }, 
-      updater: { select: { id: true, 
-      name: true } } 
+    include: {
+      creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
     },
   });
 

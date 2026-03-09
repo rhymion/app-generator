@@ -26,8 +26,7 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addBooking(creatorId: string, name: string, resourceId: string, startTime: Date, endTime: Date) {
+export async function addBooking(userId: string, name: string, resourceId: string, startTime: Date, endTime: Date): Promise<{ id: string }> {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
       name: name,
@@ -35,21 +34,21 @@ export async function addBooking(creatorId: string, name: string, resourceId: st
       start_time: startTime,
       end_time: endTime,
     });
-    return await tx.booking.create({
+    const created = await tx.booking.create({
       data: {
+        creator_id: userId,
+        updater_id: userId,
         name: name,
         resource_id: resourceId,
         start_time: startTime,
         end_time: endTime,
-        creator_id: creatorId,
-        updater_id: creatorId,
       },
     });
+    return { id: created.id };
   });
 }
-
-export async function updateBooking(updaterId: string, id: string, name: string, resourceId: string, startTime: Date, endTime: Date, srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateBooking(userId: string, id: string, name: string, resourceId: string, startTime: Date, endTime: Date, srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -59,23 +58,18 @@ export async function updateBooking(updaterId: string, id: string, name: string,
       start_time: startTime,
       end_time: endTime,
     });
-    return await tx.booking.update({
+    await tx.booking.update({
       where: { id },
       data: {
+        updater_id: userId,
         name: name,
         resource_id: resourceId,
         start_time: startTime,
         end_time: endTime,
-        updater_id: updaterId,
       },
     });
   });
 }
-
-export async function deleteBooking(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.booking.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.booking.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteBooking(ids: string[]): Promise<void> {
+  await prisma.booking.deleteMany({ where: { id: { in: ids } } });
 }

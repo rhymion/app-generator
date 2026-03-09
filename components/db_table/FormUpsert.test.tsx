@@ -1,19 +1,10 @@
 // We recommend installing an extension to run vitest tests.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FormUpsert from './FormUpsert';
-import { NextIntlClientProvider } from 'next-intl';
-import messages from '@/messages/en.json';
-
-function renderWithIntl(ui: React.ReactElement) {
-  return render(
-    <NextIntlClientProvider locale="en" messages={messages}>
-      {ui}
-    </NextIntlClientProvider>
-  );
-}
+import { renderWithIntl } from '../../vitest/i18n';
 
 // Mock the actions
 vi.mock('@/lib/db_table/actions', () => ({
@@ -119,7 +110,7 @@ describe('FormUpsert', () => {
     const backButton = screen.getByRole('button', { name: /back to list/i });
     await userEvent.click(backButton);
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByRole('heading', { name: /go back/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: /go back to list/i })).toBeInTheDocument());
   });
 
   it('cancels navigation when clicking Cancel in Back to List dialog', async () => {

@@ -5,7 +5,6 @@ import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addSetting7, updateSetting7 } from './service';
-
 export async function upsertSetting7(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
@@ -29,3 +28,4 @@ export async function upsertSetting7(data: FormData) {
   revalidatePath('/');
   redirect('/setting7');
 }
+

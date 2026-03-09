@@ -7,13 +7,10 @@ import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertRole, removeRole } from '@/lib/role/actions';
 import type { FormUpsertProps } from '@/lib/role/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
 import type { UserAccount } from '@/lib/user_account/types';
-import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
-import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '../FieldsDataGrid';
-  
+import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';
 import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allUserAccounts = [], userAccountPermissions }: FormUpsertProps) {
@@ -25,7 +22,6 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
-
   const userAccountsRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
@@ -144,7 +140,6 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

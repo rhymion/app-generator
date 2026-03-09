@@ -5,7 +5,6 @@ import { getSetting1Detail } from '@/lib/setting1/getters';
 import { updateSetting1, deleteSetting1 } from '@/lib/setting1/service';
 
 type Params = { params: Promise<{ id: string }> };
-
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
@@ -20,7 +19,6 @@ export async function GET(request: NextRequest, { params }: Params) {
     return handleApiError(error);
   }
 }
-
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
@@ -32,13 +30,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, 'setting1', 'update', existing);
     const body = await request.json();
     const { name, description, team, yyyyy_yyyyys } = body;
-    const result = await updateSetting1(userId, id, name, description ?? null, team ?? null, yyyyy_yyyyys ?? []);
-    return NextResponse.json(result);
+    await updateSetting1(userId, id, name, description ?? null, team ?? null, yyyyy_yyyyys ?? [], null);
+    return NextResponse.json({ success: true });
   } catch (error) {
     return handleApiError(error);
   }
 }
-
 export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;

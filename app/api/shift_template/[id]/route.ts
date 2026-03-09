@@ -5,7 +5,6 @@ import { getShiftTemplateDetail } from '@/lib/shift_template/getters';
 import { updateShiftTemplate, deleteShiftTemplate } from '@/lib/shift_template/service';
 
 type Params = { params: Promise<{ id: string }> };
-
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
@@ -20,7 +19,6 @@ export async function GET(request: NextRequest, { params }: Params) {
     return handleApiError(error);
   }
 }
-
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
@@ -32,13 +30,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, 'shift_template', 'update', existing);
     const body = await request.json();
     const { user_account_id: userAccountId, day_of_week: dayOfWeek, start_time: startTime, end_time: endTime } = body;
-    const result = await updateShiftTemplate(userId, id, userAccountId, dayOfWeek, startTime, endTime);
-    return NextResponse.json(result);
+    await updateShiftTemplate(userId, id, userAccountId, dayOfWeek, startTime, endTime, null);
+    return NextResponse.json({ success: true });
   } catch (error) {
     return handleApiError(error);
   }
 }
-
 export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;

@@ -7,13 +7,13 @@ import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/setting6/types';
 import Link from '@mui/material/Link';
-import FieldsViewGrid from '../FieldsViewGrid';
+import FieldsViewGrid from '@/components/_standard/FieldsViewGrid';
 import { yyyyy_yyyyys_columns } from '../setting6/column_def';
 import EditIcon from '@mui/icons-material/Edit';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
-import AuditInfo from '../AuditInfo';
+import AuditInfo from '@/components/_standard/AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const tf = useTranslations('Fields');
@@ -25,15 +25,15 @@ export default function FormView({ src, permissions }: FormViewProps) {
       <div className="flex justify-between items-center mb-4">
         <h1>{te('setting6')}</h1>
         <div>
-          {canEdit && (
-            <Tooltip title="Edit">
-              <Link href={`/setting6/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
-                <IconButton component="span" color="primary" tabIndex={-1}>
-                  <EditIcon />
-                </IconButton>
-              </Link>
-            </Tooltip>
-          )}
+        {canEdit && (
+          <Tooltip title="Edit">
+            <Link href={`/setting6/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
+              <IconButton component="span" color="primary" tabIndex={-1}>
+                <EditIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
+        )}
           <Tooltip title="Back to List">
             <Link href="/setting6" aria-label="Back to List">
               <IconButton component="span" tabIndex={-1}>

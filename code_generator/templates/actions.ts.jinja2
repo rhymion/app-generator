@@ -1,0 +1,30 @@
+'use server';
+
+import { redirect } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import prisma from '@/lib/prisma';
+{% if service_imports %}
+import { {{ service_imports }} } from './service';
+{% endif %}
+{% if can_create or can_update %}
+export async function upsert{{ parent_pascal }}(data: FormData) {
+{{ upsert_body }}
+
+  revalidatePath('/');
+  redirect('/{{ parent }}');
+}
+{% endif %}
+{% if can_delete %}
+export async function remove{{ parent_pascal }}(data: FormData | string[]) {
+  const ids = Array.isArray(data) ? data : [data.get('id') as string];
+  const items = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true{% if has_assignee_id %}, assignee_id: true{% endif %} } });
+  for (const item of items) {
+    await requirePermission('{{ parent }}', 'delete', item);
+  }
+  await delete{{ parent_pascal }}(ids);
+  revalidatePath('/');
+  redirect('/{{ parent }}');
+}
+{% endif %}
+{{ comment_actions_code }}

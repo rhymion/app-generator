@@ -5,7 +5,6 @@ import { getParent1Detail } from '@/lib/parent1/getters';
 import { updateParent1, deleteParent1 } from '@/lib/parent1/service';
 
 type Params = { params: Promise<{ id: string }> };
-
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
@@ -20,7 +19,6 @@ export async function GET(request: NextRequest, { params }: Params) {
     return handleApiError(error);
   }
 }
-
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
@@ -32,13 +30,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, 'parent1', 'update', existing);
     const body = await request.json();
     const { name, organization_id: organizationId, description, price, due_date: dueDate, image_url: imageUrl, parent1_child1s, parent1_child2s, parent1_lists } = body;
-    const result = await updateParent1(userId, id, name, organizationId, description ?? null, price, dueDate, imageUrl ?? null, parent1_child1s ?? [], parent1_child2s ?? [], parent1_lists ?? []);
-    return NextResponse.json(result);
+    await updateParent1(userId, id, name, organizationId, description ?? null, price, dueDate, imageUrl ?? null, parent1_child1s ?? [], parent1_child2s ?? [], parent1_lists ?? [], null);
+    return NextResponse.json({ success: true });
   } catch (error) {
     return handleApiError(error);
   }
 }
-
 export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;

@@ -27,20 +27,19 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function updateSetting5(updaterId: string, id: string, name: string, yyyyyYyyyysItems: { id?: string; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateSetting5(userId: string, id: string, name: string, yyyyyYyyyysItems: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
     await validateOnUpdate(tx, id, {
       name: name,
     });
-    return await tx.xxxxx_xxxxx.update({
+    await tx.xxxxx_xxxxx.update({
       where: { id },
       data: {
+        updater_id: userId,
         name: name,
-        updater_id: updaterId,
       yyyyy_yyyyys: {
         deleteMany: {},
         create: yyyyyYyyyysItems.map(f => ({

@@ -3,7 +3,6 @@ import type { ModelPermissions } from '@/lib/authz';
 export type Setting5 = {
   id: string;
   name: string;
-
 };
 
 export type Setting5Detail = Setting5 & {
@@ -21,6 +20,7 @@ export type YyyyyYyyyy = {
   required: boolean;
   written_by: string;
 };
+
 export type Setting5DetailPageProps = Readonly<{
   params: Promise<{
     id: string;
@@ -43,5 +43,4 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   currentUserId?: string | null;
-
 }>;

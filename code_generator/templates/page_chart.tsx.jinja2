@@ -1,0 +1,36 @@
+import { get{{ parent_pascal }}sForChart } from '@/lib/{{ parent }}/chart-getters';
+import GanttChart from '@/components/_standard/GanttChart';
+import type { GanttItem } from '@/components/_standard/GanttChart';
+
+function parsePeriodStart(dateStr: string | undefined): Date {
+{{ parse_fn_body }}
+}
+
+export default async function {{ parent_pascal }}ChartPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ start?: string }>;
+}) {
+  const { start } = await searchParams;
+  const periodStart = parsePeriodStart(start);
+  const periodStartStr = periodStart.toISOString().slice(0, 10);
+{{ query_range_code }}
+  const items = await get{{ parent_pascal }}sForChart(queryStart, queryEnd);
+  const ganttItems: GanttItem[] = items.map((item) => ({
+    id: item.id,
+    start_time: item.{{ start_field }},
+    end_time: item.{{ end_field }},
+    row_id: item.{{ fk_field }},
+    row_label: item.{{ row_by }}_name,{% if tooltip_prop %}
+    tooltip: {{ tooltip_prop }},{% endif %}
+  }));
+
+  return (
+    <GanttChart
+      items={ganttItems}
+      periodStart={periodStartStr}
+      span="{{ span }}"
+      basePath="/{{ parent }}"
+    />
+  );
+}

@@ -1,6 +1,6 @@
 import { getBookingsForChart } from '@/lib/booking/chart-getters';
-import GanttChart from '@/components/GanttChart';
-import type { GanttItem } from '@/components/GanttChart';
+import GanttChart from '@/components/_standard/GanttChart';
+import type { GanttItem } from '@/components/_standard/GanttChart';
 
 function parsePeriodStart(dateStr: string | undefined): Date {
   if (dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
@@ -29,9 +29,7 @@ export default async function BookingChartPage({
     start_time: item.start_time,
     end_time: item.end_time,
     row_id: item.resource_id,
-    row_label: item.resource_name,
-    tooltip: item.name,
-  }));
+    row_label: item.resource_name,    tooltip: item.name,  }));
 
   return (
     <GanttChart

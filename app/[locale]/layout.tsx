@@ -4,7 +4,7 @@ import type { Metadata } from 'next';
 import Providers from "./providers";
 import Header from './@header/page';
 import Footer from './@footer/page';
-import SessionSidebar from '@/components/SessionSidebar';
+import SessionSidebar from '@/components/_standard/SessionSidebar';
 import { siteConfig } from '@/lib/site-config';
 import { routing } from '@/i18n/routing';
 

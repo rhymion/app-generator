@@ -1,0 +1,48 @@
+{{ utility_code }}
+{% if can_create %}
+export async function add{{ parent_pascal }}(userId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}): Promise<{ id: string }> {
+  return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
+{{ validation_data_obj }}
+    });
+    const created = await tx.{{ model }}.create({
+      data: {
+        creator_id: userId,
+        updater_id: userId,
+{{ parent_data_obj }}
+{% if child_nested_create %}
+{{ child_nested_create }}
+{% endif %}
+      },
+    });
+    return { id: created.id };
+  });
+}
+{% endif %}
+{% if can_update %}
+export async function update{{ parent_pascal }}(userId: string, id: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_update %}, {{ child_params_for_update }}{% endif %}, srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    if (srcSnapshotRaw) {
+      await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
+    }
+    await validateOnUpdate(tx, id, {
+{{ validation_data_obj }}
+    });
+    await tx.{{ model }}.update({
+      where: { id },
+      data: {
+        updater_id: userId,
+{{ parent_data_obj }}
+{% if child_nested_update %}
+{{ child_nested_update }}
+{% endif %}
+      },
+    });
+  });
+}
+{% endif %}
+{% if can_delete %}
+export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
+  await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+}
+{% endif %}

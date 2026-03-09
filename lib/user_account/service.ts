@@ -28,9 +28,8 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function updateUserAccount(updaterId: string, id: string, name: string, avatar: string | null, rolesIds: string[], srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateUserAccount(userId: string, id: string, name: string, avatar: string | null, rolesIds: string[], srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -38,12 +37,12 @@ export async function updateUserAccount(updaterId: string, id: string, name: str
       name: name,
       avatar: avatar,
     });
-    return await tx.user_account.update({
+    await tx.user_account.update({
       where: { id },
       data: {
+        updater_id: userId,
         name: name,
         avatar: avatar,
-        updater_id: updaterId,
       roles: {
         set: rolesIds.map((id) => ({ id })),
       },
@@ -51,11 +50,6 @@ export async function updateUserAccount(updaterId: string, id: string, name: str
     });
   });
 }
-
-export async function deleteUserAccount(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.user_account.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.user_account.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteUserAccount(ids: string[]): Promise<void> {
+  await prisma.user_account.deleteMany({ where: { id: { in: ids } } });
 }

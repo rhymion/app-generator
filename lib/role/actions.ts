@@ -5,7 +5,6 @@ import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addRole, updateRole, deleteRole } from './service';
-
 export async function upsertRole(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
@@ -33,7 +32,6 @@ export async function upsertRole(data: FormData) {
   revalidatePath('/');
   redirect('/role');
 }
-
 export async function removeRole(data: FormData | string[]) {
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   const items = await prisma.role.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
@@ -44,3 +42,4 @@ export async function removeRole(data: FormData | string[]) {
   revalidatePath('/');
   redirect('/role');
 }
+

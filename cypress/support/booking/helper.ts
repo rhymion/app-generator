@@ -42,7 +42,8 @@ export async function populateBookingData(length: number) {
     });
     records.push(record);
   }
-  return records;
+  // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
+  return JSON.parse(JSON.stringify(records));
 }
 
 export const populateBookingFullData = populateBookingData;

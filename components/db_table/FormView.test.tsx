@@ -1,19 +1,10 @@
 // We recommend installing an extension to run vitest tests.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FormView from './FormView';
-import { NextIntlClientProvider } from 'next-intl';
-import messages from '@/messages/en.json';
-
-function renderWithIntl(ui: React.ReactElement) {
-  return render(
-    <NextIntlClientProvider locale="en" messages={messages}>
-      {ui}
-    </NextIntlClientProvider>
-  );
-}
+import { renderWithIntl } from '../../vitest/i18n';
 
 describe('FormView', () => {
   const mockSrc = {

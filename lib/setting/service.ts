@@ -31,9 +31,8 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function updateSetting(updaterId: string, id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, rolesIds: string[], srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateSetting(userId: string, id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, rolesIds: string[], srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -44,15 +43,15 @@ export async function updateSetting(updaterId: string, id: string, name: string,
       api_key: apiKey,
       avatar: avatar,
     });
-    return await tx.user_account.update({
+    await tx.user_account.update({
       where: { id },
       data: {
+        updater_id: userId,
         name: name,
         email: email,
         password: password,
         api_key: apiKey,
         avatar: avatar,
-        updater_id: updaterId,
       roles: {
         set: rolesIds.map((id) => ({ id })),
       },

@@ -4,7 +4,7 @@ import { getResourceNewPageAccessCheck } from '@/lib/resource/getters';
 
 export default async function AddResourcePage() {
   const organizationsData = await getAssociatedOrganizationListPageData();
-  const userPermissions =await getResourceNewPageAccessCheck();
+  const userPermissions = await getResourceNewPageAccessCheck();
   const src = {
     id: '',
     name: '',

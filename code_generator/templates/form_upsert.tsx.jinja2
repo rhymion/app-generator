@@ -1,0 +1,163 @@
+'use client';
+
+import { useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
+import TextField from '@mui/material/TextField';
+{% if has_many_to_one %}
+import Autocomplete from '@mui/material/Autocomplete';
+{% endif %}
+{% if has_number_props %}
+import NumberField from '@/components/_standard/NumberField';
+{% endif %}
+import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}{% endif %}{% if has_comment_children %}, add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment{% endif %} } from '@/lib/{{ parent }}/actions';
+import type { FormUpsertProps } from '@/lib/{{ parent }}/types';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
+{% if has_comment_children %}
+import CommentListWrapper from '@/components/_standard/CommentListWrapper';
+{% endif %}
+{% if child_imports %}
+{{ child_imports }}
+{% endif %}
+{% if has_datetime_props %}
+import dayjs, { Dayjs } from 'dayjs';
+import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
+{% endif %}
+{% if has_image_props %}
+import ImageUpload from '@/components/_standard/ImageUpload';
+{% endif %}
+{% if has_boolean_props %}
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
+{% endif %}
+{% if custom_upsert_imports %}
+{{ custom_upsert_imports }}
+{% endif %}
+import { useFormValidation } from './form_validation';
+
+export default function FormUpsert({{ form_upsert_params }}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
+{% if enum_ns_hooks %}
+{{ enum_ns_hooks }}
+{% endif %}
+  const [error, setError] = useState<string | null>(null);
+  const canDelete = permissions ? permissions.delete : true;
+  const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
+{% if all_states %}
+
+{{ all_states }}
+{% endif %}
+{% if child_variables %}
+{{ child_variables }}
+{% endif %}
+{% if parent_refs %}
+{{ parent_refs }}
+{% endif %}
+{% if enum_opt_setups %}
+{{ enum_opt_setups }}
+{% endif %}
+{% if rel_opt_setups %}
+{{ rel_opt_setups }}
+{% endif %}
+{% if child_entity_rel_opt %}
+{{ child_entity_rel_opt }}
+{% endif %}
+{% if child_grid_setup %}
+{{ child_grid_setup }}
+{% endif %}
+{{ validation_call }}
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (isPending) return;
+
+    const formData = new FormData();
+    formData.set('id', src.id);
+    if (isEdit) {
+      formData.set('__src_snapshot', srcSnapshot);
+    }
+{% if parent_form_data_sets %}
+{{ parent_form_data_sets }}
+{% endif %}
+{% if child_form_data_handling %}
+{{ child_form_data_handling }}
+{% endif %}
+
+    try {
+      startTransition(async () => {
+        await upsert{{ parent_pascal }}(formData);
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+    }
+  };
+{% if can_delete %}
+
+  const handleDelete = async () => {
+    const formData = new FormData();
+    formData.set('id', src.id);
+    await remove{{ parent_pascal }}(formData);
+  };
+{% endif %}
+
+  const handleBack = () => {
+    router.push('/{{ parent }}');
+    router.refresh();
+  };
+{% if has_comment_children %}
+
+  const handleCreateComment = async (message: string) => {
+    await add{{ parent_pascal }}Comment(src.id, message);
+    router.refresh();
+  };
+
+  const handleUpdateComment = async (commentId: string, message: string) => {
+    await update{{ parent_pascal }}Comment(commentId, message);
+    router.refresh();
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    await delete{{ parent_pascal }}Comment(commentId);
+    router.refresh();
+  };
+{% endif %}
+
+  const formFields = (
+    <>
+{% if all_parent_fields_jsx %}
+{{ all_parent_fields_jsx }}
+{% endif %}
+{% if child_grid_components %}
+{{ child_grid_components }}
+{% endif %}
+      {validationError && <p style={{ '{{' }} color: 'red' {{ '}}' }}>{validationError}</p>}
+      {isEdit && <AuditInfo src={src} />}
+    </>
+  );
+
+  return (
+    <>
+      <FormWithChildGrid
+        title={isEdit ? tc('editEntity', { entity: te('{{ parent_camel }}') }) : tc('addEntity', { entity: te('{{ parent_camel }}') })}
+        isEdit={isEdit}
+        formFields={formFields}
+        onSubmit={handleSubmit}
+        onDelete={ {{- 'isEdit && canDelete ? handleDelete : undefined' if can_delete else 'undefined' -}} }
+        onBack={handleBack}
+        deleteEntityLabel={te('{{ parent_camel }}')}
+        submitButtonLabel={tc('save')}
+        error={error}
+      />
+{% if comment_children_jsx %}
+{{ comment_children_jsx }}
+{% endif %}
+    </>
+  );
+}

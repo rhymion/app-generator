@@ -7,14 +7,11 @@ import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertSetting } from '@/lib/setting/actions';
 import type { FormUpsertProps } from '@/lib/setting/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
 import type { Role } from '@/lib/role/types';
-import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
-import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '../FieldsDataGrid';
-  
-import ImageUpload from '../ImageUpload';
+import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';
+import ImageUpload from '@/components/_standard/ImageUpload';
 import Password from './password';
 import ApiKey from './api_key';
 import { useFormValidation } from './form_validation';
@@ -155,7 +152,6 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
         submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

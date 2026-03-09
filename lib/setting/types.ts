@@ -7,7 +7,6 @@ export type Setting = {
   password: string;
   api_key: string | null;
   avatar: string | null;
-
 };
 
 export type SettingDetail = Setting & {
@@ -19,6 +18,7 @@ export type Role = {
   name: string;
   description: string | null;
 };
+
 export type SettingDetailPageProps = Readonly<{
   params: Promise<{
     id: string;
@@ -46,6 +46,5 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allRoles?: Role[];
   currentUserId?: string | null;
-
   rolePermissions?: ModelPermissions;
 }>;

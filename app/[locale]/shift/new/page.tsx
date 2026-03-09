@@ -4,7 +4,7 @@ import { getShiftNewPageAccessCheck } from '@/lib/shift/getters';
 
 export default async function AddShiftPage() {
   const userAccountsData = await getUserAccountListPageData(false);
-  const userPermissions =await getShiftNewPageAccessCheck();
+  const userPermissions = await getShiftNewPageAccessCheck();
   const src = {
     id: '',
     user_account_id: '',

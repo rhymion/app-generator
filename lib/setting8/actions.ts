@@ -5,7 +5,6 @@ import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addSetting8, deleteSetting8 } from './service';
-
 export async function upsertSetting8(data: FormData) {
   await requirePermission('setting8', 'create');
   const name = data.get('name') as string;
@@ -17,7 +16,6 @@ export async function upsertSetting8(data: FormData) {
   revalidatePath('/');
   redirect('/setting8');
 }
-
 export async function removeSetting8(data: FormData | string[]) {
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   const items = await prisma.xxxxx_xxxxx.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
@@ -28,3 +26,4 @@ export async function removeSetting8(data: FormData | string[]) {
   revalidatePath('/');
   redirect('/setting8');
 }
+

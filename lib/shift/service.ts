@@ -26,8 +26,7 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addShift(creatorId: string, userAccountId: string, startTime: Date, endTime: Date, status: number) {
+export async function addShift(userId: string, userAccountId: string, startTime: Date, endTime: Date, status: number): Promise<{ id: string }> {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
       user_account_id: userAccountId,
@@ -35,21 +34,21 @@ export async function addShift(creatorId: string, userAccountId: string, startTi
       end_time: endTime,
       status: status,
     });
-    return await tx.shift.create({
+    const created = await tx.shift.create({
       data: {
+        creator_id: userId,
+        updater_id: userId,
         user_account_id: userAccountId,
         start_time: startTime,
         end_time: endTime,
         status: status,
-        creator_id: creatorId,
-        updater_id: creatorId,
       },
     });
+    return { id: created.id };
   });
 }
-
-export async function updateShift(updaterId: string, id: string, userAccountId: string, startTime: Date, endTime: Date, status: number, srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateShift(userId: string, id: string, userAccountId: string, startTime: Date, endTime: Date, status: number, srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -59,23 +58,18 @@ export async function updateShift(updaterId: string, id: string, userAccountId: 
       end_time: endTime,
       status: status,
     });
-    return await tx.shift.update({
+    await tx.shift.update({
       where: { id },
       data: {
+        updater_id: userId,
         user_account_id: userAccountId,
         start_time: startTime,
         end_time: endTime,
         status: status,
-        updater_id: updaterId,
       },
     });
   });
 }
-
-export async function deleteShift(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.shift.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.shift.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteShift(ids: string[]): Promise<void> {
+  await prisma.shift.deleteMany({ where: { id: { in: ids } } });
 }

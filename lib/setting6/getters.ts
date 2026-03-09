@@ -8,7 +8,6 @@ import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
 export async function getAllSetting6s(): Promise<Setting6[]> {
-
   const setting6s = await prisma.xxxxx_xxxxx.findMany({
   });
   return setting6s.map((setting6) => ({
@@ -20,17 +19,12 @@ export async function getAllSetting6s(): Promise<Setting6[]> {
 }
 
 export async function getSetting6Detail(id: string): Promise<Setting6Detail | null> {
-  
   const setting6 = await prisma.xxxxx_xxxxx.findUnique({
-    where: { 
+    where: {
       id,
     },
-    include: { 
-      yyyyy_yyyyys: true, 
-      creator: { select: { id: true, 
-      name: true } }, 
-      updater: { select: { id: true, 
-      name: true } } 
+    include: {
+      yyyyy_yyyyys: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
     },
   });
 

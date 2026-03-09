@@ -25,28 +25,27 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addSetting7(creatorId: string, name: string, description: string | null, team: string | null) {
+export async function addSetting7(userId: string, name: string, description: string | null, team: string | null): Promise<{ id: string }> {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
       name: name,
       description: description,
       team: team,
     });
-    return await tx.xxxxx_xxxxx.create({
+    const created = await tx.xxxxx_xxxxx.create({
       data: {
+        creator_id: userId,
+        updater_id: userId,
         name: name,
         description: description,
         team: team,
-        creator_id: creatorId,
-        updater_id: creatorId,
       },
     });
+    return { id: created.id };
   });
 }
-
-export async function updateSetting7(updaterId: string, id: string, name: string, description: string | null, team: string | null, srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateSetting7(userId: string, id: string, name: string, description: string | null, team: string | null, srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -55,13 +54,13 @@ export async function updateSetting7(updaterId: string, id: string, name: string
       description: description,
       team: team,
     });
-    return await tx.xxxxx_xxxxx.update({
+    await tx.xxxxx_xxxxx.update({
       where: { id },
       data: {
+        updater_id: userId,
         name: name,
         description: description,
         team: team,
-        updater_id: updaterId,
       },
     });
   });

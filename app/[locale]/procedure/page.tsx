@@ -1,11 +1,22 @@
 import { getTranslations } from 'next-intl/server';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getProcedureListPageData } from '@/lib/procedure/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
 import { removeProcedure } from '@/lib/procedure/actions';
 
-export default async function ProceduresPage() {
+export default async function ProcedureListPage() {
+  const [t] = await Promise.all([
+    getTranslations('EntityLabel'),
+  ]);
   const { procedures, userPermissions } = await getProcedureListPageData();
-  const t = await getTranslations('EntityLabel');
-  return <ResponsiveListClient src={procedures} basePath="/procedure" removeAction={removeProcedure} entityLabel={t('procedure')}
-    permissions={userPermissions} />;
+  return (
+    <>
+      <ResponsiveListClient
+        entityLabel={t('procedure')}
+        src={procedures}
+        permissions={userPermissions}
+        basePath="/procedure"
+        removeAction={removeProcedure}
+      />
+    </>
+  );
 }

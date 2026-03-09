@@ -1,6 +1,6 @@
 "use client";
 import { useSession, signOut } from "next-auth/react";
-import { useSidebar } from "@/components/SidebarContext";
+import { useSidebar } from "@/components/_standard/SidebarContext";
 import { siteConfig, themeConfig } from "@/lib/site-config";
 import { useTranslations, useLocale } from "next-intl";
 import { Link, useRouter, usePathname } from "@/i18n/navigation";

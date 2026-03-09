@@ -4,7 +4,7 @@ import { getPermissionNewPageAccessCheck } from '@/lib/permission/getters';
 
 export default async function AddPermissionPage() {
   const rolesData = await getRoleListPageData(false);
-  const userPermissions =await getPermissionNewPageAccessCheck();
+  const userPermissions = await getPermissionNewPageAccessCheck();
   const src = {
     id: '',
     name: '',

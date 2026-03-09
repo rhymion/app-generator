@@ -1,11 +1,22 @@
 import { getTranslations } from 'next-intl/server';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getSetting3ListPageData } from '@/lib/setting3/getters';
-import ResponsiveListClient from '@/components/ResponsiveListClient';
 import { removeSetting3 } from '@/lib/setting3/actions';
 
-export default async function Setting3sPage() {
+export default async function Setting3ListPage() {
+  const [t] = await Promise.all([
+    getTranslations('EntityLabel'),
+  ]);
   const { setting3s, userPermissions } = await getSetting3ListPageData();
-  const t = await getTranslations('EntityLabel');
-  return <ResponsiveListClient src={setting3s} basePath="/setting3" removeAction={removeSetting3} entityLabel={t('setting3')}
-    permissions={userPermissions} />;
+  return (
+    <>
+      <ResponsiveListClient
+        entityLabel={t('setting3')}
+        src={setting3s}
+        permissions={userPermissions}
+        basePath="/setting3"
+        removeAction={removeSetting3}
+      />
+    </>
+  );
 }

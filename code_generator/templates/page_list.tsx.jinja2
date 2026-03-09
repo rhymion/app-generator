@@ -1,0 +1,83 @@
+import { getTranslations } from 'next-intl/server';
+{% if list_component == 'CardListClient' %}
+import CardListClient from '@/components/_standard/CardListClient';
+{% else %}
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
+{% endif %}
+import { get{{ parent_pascal }}ListPageData } from '@/lib/{{ parent }}/getters';
+{% if can_delete %}
+import { remove{{ parent_pascal }} } from '@/lib/{{ parent }}/actions';
+{% endif %}
+{% if has_chart %}
+import Link from '@mui/material/Link';
+import Button from '@mui/material/Button';
+import Box from '@mui/material/Box';
+import BarChartIcon from '@mui/icons-material/BarChart';
+{% elif entity_custom_component %}
+import Box from '@mui/material/Box';
+{% endif %}
+{% if entity_custom_component %}
+import {{ entity_custom_component }} from '@/components/{{ parent }}/{{ entity_custom_component }}';
+{% endif %}
+
+export default async function {{ parent_pascal }}ListPage() {
+  const [t{% if xdisplay_table %}, tf{% endif %}{% if has_chart %}, tc{% endif %}{% for ns in enum_ns_list %}, {{ ns.var_name }}T{% endfor %}] = await Promise.all([
+    getTranslations('EntityLabel'),
+{% if xdisplay_table %}
+    getTranslations('Fields'),
+{% endif %}
+{% if has_chart %}
+    getTranslations('Common'),
+{% endif %}
+{% for ns in enum_ns_list %}
+    getTranslations('{{ ns.ns }}'),
+{% endfor %}
+  ]);
+{% for ns in enum_ns_list %}
+  const {{ ns.var_name }} = {
+{% for key in ns.keys %}
+    {{ key }}: {{ ns.var_name }}T('{{ key }}'),
+{% endfor %}
+  } as Record<number, string>;
+{% endfor %}
+  const { {{ parent_camel }}s, userPermissions } = await get{{ parent_pascal }}ListPageData();
+{% if needs_formatting %}
+  const formatted{{ parent_pascal }}s = {{ parent_camel }}s.map(item => ({
+    ...item,
+{{ formatting_entries }}
+  }));
+{% endif %}
+  return (
+    <>
+{% if has_chart or entity_custom_component %}
+      <Box sx={{ '{{' }} display: 'flex', gap: 1, mb: 1 {{ '}}' }}>
+{% if has_chart %}
+        <Button component={Link} href="/{{ parent }}/chart" variant="outlined" startIcon={<BarChartIcon />}>
+          {tc('chart')}
+        </Button>
+{% endif %}
+{% if entity_custom_component %}
+        <{{ entity_custom_component }} permissions={userPermissions} />
+{% endif %}
+      </Box>
+{% endif %}
+      <{{ list_component }}
+        entityLabel={t('{{ parent_camel }}')}
+        src={{ '{' }}{{ src_var }}{{ '}' }}
+        permissions={userPermissions}
+        basePath="/{{ parent }}"
+{% if can_delete %}
+        removeAction={remove{{ parent_pascal }}}
+{% endif %}
+{% if display_fields_code %}
+        displayFields={[
+{{ display_fields_code }}
+        ]}
+{% endif %}
+{% if primary_field %}
+        primaryField="{{ primary_field }}"
+{% endif %}
+      />
+    </>
+  );
+}

@@ -6,7 +6,7 @@ import { getProcedureNewPageAccessCheck } from '@/lib/procedure/getters';
 export default async function AddProcedurePage() {
   const proceduresData = await getProcedureListPageData(false);
   const userAccountsData = await getUserAccountListPageData(false);
-  const userPermissions =await getProcedureNewPageAccessCheck();
+  const userPermissions = await getProcedureNewPageAccessCheck();
   const src = {
     id: '',
     name: '',
