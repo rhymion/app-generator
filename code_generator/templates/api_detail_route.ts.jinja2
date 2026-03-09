@@ -37,8 +37,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, '{{ parent }}', 'update', existing);
     const body = await request.json();
     const { {{ all_body_fields_create }} } = body;
-    const result = await update{{ parent_pascal }}({{ service_args_for_update }}, null);
-    return NextResponse.json(result);
+    await update{{ parent_pascal }}({{ service_args_for_update }}, null);
+    return NextResponse.json({ success: true });
   } catch (error) {
     return handleApiError(error);
   }

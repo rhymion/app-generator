@@ -30,8 +30,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, 'booking', 'update', existing);
     const body = await request.json();
     const { name, resource_id: resourceId, start_time: startTime, end_time: endTime } = body;
-    const result = await updateBooking(userId, id, name, resourceId, startTime, endTime, null);
-    return NextResponse.json(result);
+    await updateBooking(userId, id, name, resourceId, startTime, endTime, null);
+    return NextResponse.json({ success: true });
   } catch (error) {
     return handleApiError(error);
   }

@@ -30,8 +30,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, 'setting5', 'update', existing);
     const body = await request.json();
     const { name, yyyyy_yyyyys } = body;
-    const result = await updateSetting5(userId, id, name, yyyyy_yyyyys ?? [], null);
-    return NextResponse.json(result);
+    await updateSetting5(userId, id, name, yyyyy_yyyyys ?? [], null);
+    return NextResponse.json({ success: true });
   } catch (error) {
     return handleApiError(error);
   }

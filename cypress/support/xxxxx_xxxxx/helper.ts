@@ -27,7 +27,8 @@ export async function populateXxxxxXxxxxData(length: number) {
     });
     records.push(record);
   }
-  return records;
+  // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
+  return JSON.parse(JSON.stringify(records));
 }
 
 export async function populateXxxxxXxxxxFullData(length: number) {
@@ -45,7 +46,8 @@ export async function populateXxxxxXxxxxFullData(length: number) {
     });
     records.push(record);
   }
-  return records;
+  // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
+  return JSON.parse(JSON.stringify(records));
 }
 
 export async function populateXxxxxXxxxxYyyyyYyyyyData(parentId: string, length: number) {
@@ -65,6 +67,7 @@ export async function populateXxxxxXxxxxYyyyyYyyyyData(parentId: string, length:
     });
     records.push(record);
   }
-  return records;
+  // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
+  return JSON.parse(JSON.stringify(records));
 }
 

@@ -30,8 +30,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, 'shift', 'update', existing);
     const body = await request.json();
     const { user_account_id: userAccountId, start_time: startTime, end_time: endTime, status } = body;
-    const result = await updateShift(userId, id, userAccountId, startTime, endTime, status, null);
-    return NextResponse.json(result);
+    await updateShift(userId, id, userAccountId, startTime, endTime, status, null);
+    return NextResponse.json({ success: true });
   } catch (error) {
     return handleApiError(error);
   }

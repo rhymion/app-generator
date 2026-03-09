@@ -30,8 +30,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(userId, 'shift_template', 'update', existing);
     const body = await request.json();
     const { user_account_id: userAccountId, day_of_week: dayOfWeek, start_time: startTime, end_time: endTime } = body;
-    const result = await updateShiftTemplate(userId, id, userAccountId, dayOfWeek, startTime, endTime, null);
-    return NextResponse.json(result);
+    await updateShiftTemplate(userId, id, userAccountId, dayOfWeek, startTime, endTime, null);
+    return NextResponse.json({ success: true });
   } catch (error) {
     return handleApiError(error);
   }
