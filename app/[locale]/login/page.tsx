@@ -5,6 +5,12 @@ import { useRouter } from "@/i18n/navigation";
 import { useState } from "react";
 import { Link } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
+import Paper from "@mui/material/Paper";
+import Alert from "@mui/material/Alert";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -33,62 +39,37 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            {t("signInTitle")}
-          </h2>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="rounded-md shadow-xs -space-y-px">
-            <div>
-              <label htmlFor="email" className="sr-only">
-                {t("emailPlaceholder")}
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-hidden focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder={t("emailPlaceholder")}
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="sr-only">
-                {t("passwordPlaceholder")}
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-hidden focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder={t("passwordPlaceholder")}
-              />
-            </div>
-          </div>
-
-          {error && (
-            <div className="text-red-500 text-sm text-center">{error}</div>
-          )}
-
-          <div>
-            <button
-              type="submit"
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
-              {t("signInButton")}
-            </button>
-          </div>
-        </form>
-        <div className="text-center">
-          <Link href="/register" className="text-blue-600 hover:underline">
-            {t("noAccount")}
-          </Link>
-        </div>
-      </div>
-    </div>
+    <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+      <Paper elevation={3} sx={{ p: 4, width: "100%", maxWidth: 400 }}>
+        <Typography variant="h5" fontWeight="bold" textAlign="center" mb={3}>
+          {t("signInTitle")}
+        </Typography>
+        <Box component="form" onSubmit={handleSubmit} display="flex" flexDirection="column" gap={2}>
+          <TextField
+            id="email"
+            name="email"
+            type="email"
+            label={t("emailPlaceholder")}
+            required
+            fullWidth
+          />
+          <TextField
+            id="password"
+            name="password"
+            type="password"
+            label={t("passwordPlaceholder")}
+            required
+            fullWidth
+          />
+          {error && <Alert severity="error">{error}</Alert>}
+          <Button type="submit" variant="contained" fullWidth>
+            {t("signInButton")}
+          </Button>
+        </Box>
+        <Typography textAlign="center" mt={2} variant="body2">
+          <Link href="/register">{t("noAccount")}</Link>
+        </Typography>
+      </Paper>
+    </Box>
   );
 }

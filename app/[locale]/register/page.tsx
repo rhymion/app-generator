@@ -5,6 +5,12 @@ import { useRouter } from "@/i18n/navigation";
 import { Link } from "@/i18n/navigation";
 import { signIn } from "next-auth/react";
 import { useTranslations } from "next-intl";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
+import Paper from "@mui/material/Paper";
+import Alert from "@mui/material/Alert";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -37,88 +43,53 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            {t("registerTitle")}
-          </h2>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="rounded-md shadow-xs -space-y-px">
-            <div>
-              <label htmlFor="name" className="sr-only">
-                {t("namePlaceholder")}
-              </label>
-              <input
-                id="name"
-                name="name"
-                type="text"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-hidden focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder={t("namePlaceholder")}
-              />
-            </div>
-            <div>
-              <label htmlFor="email" className="sr-only">
-                {t("emailPlaceholder")}
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-hidden focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder={t("emailPlaceholder")}
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="sr-only">
-                {t("passwordPlaceholder")}
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-hidden focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder={t("passwordPlaceholder")}
-              />
-            </div>
-            <div>
-              <label htmlFor="confirm_password" className="sr-only">
-                {t("confirmPasswordPlaceholder")}
-              </label>
-              <input
-                id="confirm_password"
-                name="confirm_password"
-                type="password"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-hidden focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder={t("confirmPasswordPlaceholder")}
-              />
-            </div>
-          </div>
-
-          {error && (
-            <div className="text-red-500 text-sm text-center">{error}</div>
-          )}
-
-          <div>
-            <button
-              type="submit"
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
-              {t("registerButton")}
-            </button>
-          </div>
-        </form>
-        <div className="text-center">
-          <Link href="/login" className="text-blue-600 hover:underline">
-            {t("haveAccount")}
-          </Link>
-        </div>
-      </div>
-    </div>
+    <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+      <Paper elevation={3} sx={{ p: 4, width: "100%", maxWidth: 400 }}>
+        <Typography variant="h5" fontWeight="bold" textAlign="center" mb={3}>
+          {t("registerTitle")}
+        </Typography>
+        <Box component="form" onSubmit={handleSubmit} display="flex" flexDirection="column" gap={2}>
+          <TextField
+            id="name"
+            name="name"
+            type="text"
+            label={t("namePlaceholder")}
+            required
+            fullWidth
+          />
+          <TextField
+            id="email"
+            name="email"
+            type="email"
+            label={t("emailPlaceholder")}
+            required
+            fullWidth
+          />
+          <TextField
+            id="password"
+            name="password"
+            type="password"
+            label={t("passwordPlaceholder")}
+            required
+            fullWidth
+          />
+          <TextField
+            id="confirm_password"
+            name="confirm_password"
+            type="password"
+            label={t("confirmPasswordPlaceholder")}
+            required
+            fullWidth
+          />
+          {error && <Alert severity="error">{error}</Alert>}
+          <Button type="submit" variant="contained" fullWidth>
+            {t("registerButton")}
+          </Button>
+        </Box>
+        <Typography textAlign="center" mt={2} variant="body2">
+          <Link href="/login">{t("haveAccount")}</Link>
+        </Typography>
+      </Paper>
+    </Box>
   );
 }
