@@ -658,6 +658,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     x-relationships:
       user_accounts:
         type: many-to-many

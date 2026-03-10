@@ -31,6 +31,18 @@ export function getGeneratedTasks() {
       const { populateParentOnlyFullData } = require('./parent_only/helper');
       return await populateParentOnlyFullData(length);
     },
+    async 'db:populateRoleDependencies'() {
+      const { populateRoleDependencies } = require('./role/helper');
+      return await populateRoleDependencies();
+    },
+    async 'db:populateRole'(length: number) {
+      const { populateRoleData } = require('./role/helper');
+      return await populateRoleData(length);
+    },
+    async 'db:populateRoleFull'(length: number) {
+      const { populateRoleFullData } = require('./role/helper');
+      return await populateRoleFullData(length);
+    },
     async 'db:populateBookingDependencies'() {
       const { populateBookingDependencies } = require('./booking/helper');
       return await populateBookingDependencies();
