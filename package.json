@@ -11,6 +11,7 @@
     "vercel-build": "prisma generate && next build",
     "test": "vitest",
     "test:coverage": "vitest --coverage",
+    "generate-code": "python3 code_generator/generate.py code_generator/json_schema_db_table.yaml ./",
     "cy:open": "cypress open",
     "cy:run": "cypress run --browser chromium",
     "cy:test": "start-server-and-test dev:test http://localhost:3000 cy:run",
