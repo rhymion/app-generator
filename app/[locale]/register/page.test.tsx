@@ -51,10 +51,10 @@ describe("RegisterPage", () => {
     render(<RegisterPage />);
 
     expect(screen.getByText("Create your account")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Full name")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Email address")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Password")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Confirm password")).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /full name/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /email/i })).toBeInTheDocument();
+    expect(screen.getByTestId("password")).toBeInTheDocument();
+    expect(screen.getByTestId("confirm-password")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /register/i })).toBeInTheDocument();
   });
 
@@ -62,9 +62,9 @@ describe("RegisterPage", () => {
     const user = userEvent.setup();
     render(<RegisterPage />);
 
-    const nameInput = screen.getByPlaceholderText("Full name");
-    const passwordInput = screen.getByPlaceholderText("Password");
-    const confirmPasswordInput = screen.getByPlaceholderText("Confirm password");
+    const nameInput = screen.getByRole('textbox', { name: /full name/i });
+    const passwordInput = screen.getByTestId("password");
+    const confirmPasswordInput = screen.getByTestId("confirm-password");
     const registerButton = screen.getByRole("button", { name: /register/i });
 
     await user.type(nameInput, "John Doe");
@@ -84,8 +84,8 @@ describe("RegisterPage", () => {
     const user = userEvent.setup();
     render(<RegisterPage />);
 
-    const nameInput = screen.getByPlaceholderText("Full name");
-    const emailInput = screen.getByPlaceholderText("Email address");
+    const nameInput = screen.getByRole('textbox', { name: /full name/i });
+    const emailInput = screen.getByRole('textbox', { name: /email/i });
     const registerButton = screen.getByRole("button", { name: /register/i });
 
     await user.type(nameInput, "John Doe");
@@ -105,10 +105,10 @@ describe("RegisterPage", () => {
 
     render(<RegisterPage />);
 
-    const nameInput = screen.getByPlaceholderText("Full name");
-    const emailInput = screen.getByPlaceholderText("Email address");
-    const passwordInput = screen.getByPlaceholderText("Password");
-    const confirmPasswordInput = screen.getByPlaceholderText("Confirm password");
+    const nameInput = screen.getByRole('textbox', { name: /full name/i });
+    const emailInput = screen.getByRole('textbox', { name: /email/i });
+    const passwordInput = screen.getByTestId("password");
+    const confirmPasswordInput = screen.getByTestId("confirm-password");
     const registerButton = screen.getByRole("button", { name: /register/i });
 
     await user.type(nameInput, "John Doe");
@@ -142,10 +142,10 @@ describe("RegisterPage", () => {
 
     render(<RegisterPage />);
 
-    const nameInput = screen.getByPlaceholderText("Full name");
-    const emailInput = screen.getByPlaceholderText("Email address");
-    const passwordInput = screen.getByPlaceholderText("Password");
-    const confirmPasswordInput = screen.getByPlaceholderText("Confirm password");
+    const nameInput = screen.getByRole('textbox', { name: /full name/i });
+    const emailInput = screen.getByRole('textbox', { name: /email/i });
+    const passwordInput = screen.getByTestId("password");
+    const confirmPasswordInput = screen.getByTestId("confirm-password");
     const registerButton = screen.getByRole("button", { name: /register/i });
 
     await user.type(nameInput, "Jane Doe");
