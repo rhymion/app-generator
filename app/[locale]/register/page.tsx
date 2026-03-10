@@ -70,6 +70,11 @@ export default function RegisterPage() {
             name="password"
             type="password"
             label={t("passwordPlaceholder")}
+            slotProps={{
+              htmlInput: {
+                "data-testid": "password",
+              },
+            }}
             required
             fullWidth
           />
@@ -78,6 +83,11 @@ export default function RegisterPage() {
             name="confirm_password"
             type="password"
             label={t("confirmPasswordPlaceholder")}
+            slotProps={{
+              htmlInput: {
+                "data-testid": "confirm-password",
+              },
+            }}
             required
             fullWidth
           />
