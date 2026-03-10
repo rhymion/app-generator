@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, normalizeChildRefs, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
 type TransactionClient = Pick<typeof prisma, 'procedure'>;
 
@@ -33,42 +34,22 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addProcedure(creatorId: string, name: string, description: string | null, parentId: string | null, assigneeId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[]) {
-  const id = null;
-  if (childrenIds.length > 0) {
-    if (id && childrenIds.includes(id)) {
-      throw new Error('Cannot set an item as its own child.');
-    }
-    const invalidChildren = await prisma.procedure.findMany({
-      where: id
-        ? {
-            id: { in: childrenIds },
-            AND: [
-              { parent_id: { not: null } },
-              { NOT: { parent_id: id } },
-            ],
-          }
-        : {
-            id: { in: childrenIds },
-            parent_id: { not: null },
-          },
-      select: { id: true },
-    });
-
-    if (invalidChildren.length > 0) {
-      throw new Error('One or more selected children already belong to another parent.');
-    }
-  }
-
-  return await prisma.procedure.create({
-    data: {
+export async function addProcedure(userId: string, name: string, description: string | null, parentId: string | null, assigneeId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[]): Promise<{ id: string }> {
+  return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
       name: name,
       description: description,
       parent_id: parentId,
       assignee_id: assigneeId,
-      creator_id: creatorId,
-      updater_id: creatorId,
+    });
+    const created = await tx.procedure.create({
+      data: {
+        creator_id: userId,
+        updater_id: userId,
+        name: name,
+        description: description,
+        parent_id: parentId,
+        assignee_id: assigneeId,
       children: {
         connect: childrenIds.map((id) => ({ id })),
       },
@@ -78,48 +59,30 @@ export async function addProcedure(creatorId: string, name: string, description:
       followed_by: {
         connect: followedByIds.map((id) => ({ id })),
       },
-    },
+      },
+    });
+    return { id: created.id };
   });
 }
-
-export async function updateProcedure(updaterId: string, id: string, name: string, description: string | null, parentId: string | null, assigneeId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[], srcSnapshotRaw?: string | null) {
-  if (childrenIds.length > 0) {
-    if (id && childrenIds.includes(id)) {
-      throw new Error('Cannot set an item as its own child.');
-    }
-    const invalidChildren = await prisma.procedure.findMany({
-      where: id
-        ? {
-            id: { in: childrenIds },
-            AND: [
-              { parent_id: { not: null } },
-              { NOT: { parent_id: id } },
-            ],
-          }
-        : {
-            id: { in: childrenIds },
-            parent_id: { not: null },
-          },
-      select: { id: true },
-    });
-
-    if (invalidChildren.length > 0) {
-      throw new Error('One or more selected children already belong to another parent.');
-    }
-  }
-
-  return await prisma.$transaction(async (tx) => {
+export async function updateProcedure(userId: string, id: string, name: string, description: string | null, parentId: string | null, assigneeId: string | null, childrenIds: string[], precededByIds: string[], followedByIds: string[], srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
-    return await tx.procedure.update({
-      where: { id },
-      data: {
+    await validateOnUpdate(tx, id, {
       name: name,
       description: description,
       parent_id: parentId,
       assignee_id: assigneeId,
-        updater_id: updaterId,
+    });
+    await tx.procedure.update({
+      where: { id },
+      data: {
+        updater_id: userId,
+        name: name,
+        description: description,
+        parent_id: parentId,
+        assignee_id: assigneeId,
       children: {
         set: childrenIds.map((id) => ({ id })),
       },
@@ -133,11 +96,6 @@ export async function updateProcedure(updaterId: string, id: string, name: strin
     });
   });
 }
-
-export async function deleteProcedure(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.procedure.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.procedure.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteProcedure(ids: string[]): Promise<void> {
+  await prisma.procedure.deleteMany({ where: { id: { in: ids } } });
 }

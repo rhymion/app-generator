@@ -3,22 +3,26 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertXxxxxXxxxx, removeXxxxxXxxxx } from '@/lib/xxxxx_xxxxx/actions';
 import type { FormUpsertProps } from '@/lib/xxxxx_xxxxx/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
 import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '../FieldsDataGrid';
-  import { yyyyy_yyyyys_columns } from '../xxxxx_xxxxx/column_def';
+import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';
+import { yyyyy_yyyyys_columns } from '../xxxxx_xxxxx/column_def';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
-
   const yyyyyYyyyysRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
@@ -37,6 +41,10 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
     required: true,
     written_by: '',
     xxxxx_xxxxx_id: src.id,
+  });
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
   });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -93,7 +101,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -104,7 +112,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         rows={undefined}
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         inputRef={descriptionRef}
         defaultValue={src.description || ''}
         fullWidth
@@ -114,7 +122,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         rows={4}
       />
       <TextField
-        label="Team"
+        label={tf('team')}
         inputRef={teamRef}
         defaultValue={src.team || ''}
         fullWidth
@@ -132,8 +140,9 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         deleteDialogTitle="Delete Selected Yyyyy Yyyyys?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="Yyyyy Yyyyys"
+        title={tf('yyyyyYyyyys')}
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );
@@ -141,17 +150,16 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Xxxxx Xxxxx`}
+        title={isEdit ? tc('editEntity', { entity: te('xxxxxXxxxx') }) : tc('addEntity', { entity: te('xxxxxXxxxx') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Xxxxx Xxxxx"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('xxxxxXxxxx')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

@@ -1,33 +1,53 @@
-import Button from '@mui/material/Button';
+'use client';
+
+import { useTranslations } from 'next-intl';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/permission/types';
 import Link from '@mui/material/Link';
-  import FormControlLabel from '@mui/material/FormControlLabel';
-  import Checkbox from '@mui/material/Checkbox';
-import AuditInfo from '../AuditInfo';
+import EditIcon from '@mui/icons-material/Edit';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '@/components/_standard/AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
   const canEdit = permissions?.update ?? true;
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>Permission</h1>
+        <h1>{te('permission')}</h1>
         <div>
         {canEdit && (
-          <Link href={`/permission/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+          <Tooltip title="Edit">
+            <Link href={`/permission/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
+              <IconButton component="span" color="primary" tabIndex={-1}>
+                <EditIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         )}
-          <Link href="/permission"><Button variant="outlined">Back to List</Button></Link>
+          <Tooltip title="Back to List">
+            <Link href="/permission" aria-label="Back to List">
+              <IconButton component="span" tabIndex={-1}>
+                <ArrowBackIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         </div>
       </div>
       <TextField
-        label="Name"
+        label={tf('name')}
         value={src.name || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Role Id"
+        label={tf('role')}
         value={src.role?.name || src.role_id || ''}
         fullWidth
         margin="normal"
@@ -35,19 +55,19 @@ export default function FormView({ src, permissions }: FormViewProps) {
       />
       <FormControlLabel
         control={<Checkbox checked={Boolean(src.create)} readOnly />}
-        label="Create"
+        label={tf('create')}
       />
       <FormControlLabel
         control={<Checkbox checked={Boolean(src.read)} readOnly />}
-        label="Read"
+        label={tf('read')}
       />
       <FormControlLabel
         control={<Checkbox checked={Boolean(src.update)} readOnly />}
-        label="Update"
+        label={tf('update')}
       />
       <FormControlLabel
         control={<Checkbox checked={Boolean(src.delete)} readOnly />}
-        label="Delete"
+        label={tf('delete')}
       />
       <AuditInfo src={src} />
     </div>

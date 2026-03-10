@@ -3,19 +3,23 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import { upsertBooking, removeBooking } from '@/lib/booking/actions';
 import type { FormUpsertProps } from '@/lib/booking/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
-
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
 import dayjs, { Dayjs } from 'dayjs';
-import DateTimeWrapper from '../DateTimeWrapper';
+import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allResources = [], resourcePermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -23,7 +27,6 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
   const [startTime, setStartTime] = useState<Dayjs | null>(src.start_time ? dayjs(src.start_time) : null);
   const [endTime, setEndTime] = useState<Dayjs | null>(src.end_time ? dayjs(src.end_time) : null);
   const [resourceId, setResourceId] = useState<string | null>(src.resource_id || null);
-
   const nameRef = useRef<HTMLInputElement>(null);
   const resourceIdOptions = useMemo(() => {
     return allResources.map((item) => ({
@@ -31,6 +34,13 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
       label: item.name,
     }));
   }, [allResources]);
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+    start_time: startTime,
+    end_time: endTime,
+    resource_id: resourceId,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -70,7 +80,7 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -87,22 +97,23 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
         renderInput={(params) => (
           <TextField
             {...params}
-            label="Resource"
+            label={tf('resource')}
             margin="normal"
             required
           />
         )}
       />
-      <DateTimeWrapper 
-        label="Start Time" 
+      <DateTimeWrapper
+        label={tf('startTime')} 
         date_time={startTime ? startTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setStartTime(newValue)}
       />
-      <DateTimeWrapper 
-        label="End Time" 
+      <DateTimeWrapper
+        label={tf('endTime')} 
         date_time={endTime ? endTime.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setEndTime(newValue)}
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );
@@ -110,17 +121,16 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Booking`}
+        title={isEdit ? tc('editEntity', { entity: te('booking') }) : tc('addEntity', { entity: te('booking') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Booking"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('booking')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

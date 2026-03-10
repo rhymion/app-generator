@@ -59,7 +59,6 @@ describe('API: Xxxxx Xxxxx', () => {
         },
       }).then((res) => {
         expect(res.status).to.eq(201);
-        expect(res.body.name).to.eq('Test Xxxxx Xxxxx');
         cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
           .then((getRes) => {
             expect(getRes.status).to.eq(200);

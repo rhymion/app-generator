@@ -4,13 +4,13 @@ import type { Metadata } from 'next';
 import Providers from "./providers";
 import Header from './@header/page';
 import Footer from './@footer/page';
-import SessionSidebar from '@/components/SessionSidebar';
+import SessionSidebar from '@/components/_standard/SessionSidebar';
 import { siteConfig } from '@/lib/site-config';
 import { routing } from '@/i18n/routing';
 
 export const metadata: Metadata = {
   title: siteConfig.title,
-  description: '自分が読んだ書籍の記録を残すためのアプリ',
+  description: 'App generator PoC site',
 };
 
 export function generateStaticParams() {

@@ -4,14 +4,14 @@ import { getParent1NewPageAccessCheck } from '@/lib/parent1/getters';
 
 export default async function AddParent1Page() {
   const organizationsData = await getAssociatedOrganizationListPageData();
-  const userPermissions =await getParent1NewPageAccessCheck();
+  const userPermissions = await getParent1NewPageAccessCheck();
   const src = {
     id: '',
     name: '',
     organization_id: '',
     description: '',
     price: 0,
-    due_date: new Date(),
+    due_date: null,
     image_url: '',
     parent1_child1s: [],
     parent1_child2s: [],

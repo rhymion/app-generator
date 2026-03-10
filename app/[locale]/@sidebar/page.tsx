@@ -14,6 +14,10 @@ const navTranslationKeys: Record<string, string> = {
   "/role": "role",
   "/organization": "organization",
   "/permission": "permission",
+  "/resource": "resource",
+  "/booking": "booking",
+  "/shift_template": "shiftTemplate",
+  "/shift": "shift",
 };
 
 export default function Sidebar() {

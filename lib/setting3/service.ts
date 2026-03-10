@@ -1,19 +1,20 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
-type TransactionClient = Pick<typeof prisma, 'user_account'>;
+type TransactionClient = Pick<typeof prisma, 'xxxxx_xxxxx'>;
 
 function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {
   const safeSnapshot = (snapshot ?? {}) as Record<string, unknown>;
   return {
     id: String(safeSnapshot.id ?? ''),
     name: normalizeValue(safeSnapshot.name, 'string'),
-    email: normalizeValue(safeSnapshot.email, 'string'),
+    description: normalizeValue(safeSnapshot.description, 'string'),
   };
 }
 
 async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
-  const current = await tx.user_account.findUnique({
+  const current = await tx.xxxxx_xxxxx.findUnique({
     where: { id }
   });
 
@@ -23,27 +24,25 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function updateSetting3(updaterId: string, id: string, name: string, email: string, srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateSetting3(userId: string, id: string, name: string, description: string | null, srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
-    return await tx.user_account.update({
+    await validateOnUpdate(tx, id, {
+      name: name,
+      description: description,
+    });
+    await tx.xxxxx_xxxxx.update({
       where: { id },
       data: {
-      name: name,
-      email: email,
-        updater_id: updaterId,
+        updater_id: userId,
+        name: name,
+        description: description,
       },
     });
   });
 }
-
-export async function deleteSetting3(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.user_account.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.user_account.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteSetting3(ids: string[]): Promise<void> {
+  await prisma.xxxxx_xxxxx.deleteMany({ where: { id: { in: ids } } });
 }

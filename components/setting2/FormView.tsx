@@ -1,41 +1,54 @@
-import Button from '@mui/material/Button';
+'use client';
+
+import { useTranslations } from 'next-intl';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/setting2/types';
 import Link from '@mui/material/Link';
-  import FormControlLabel from '@mui/material/FormControlLabel';
-  import Checkbox from '@mui/material/Checkbox';
-import AuditInfo from '../AuditInfo';
+import EditIcon from '@mui/icons-material/Edit';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '@/components/_standard/AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
   const canEdit = permissions?.update ?? true;
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>Setting2</h1>
+        <h1>{te('setting2')}</h1>
         <div>
         {canEdit && (
-          <Link href={`/setting2/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+          <Tooltip title="Edit">
+            <Link href={`/setting2/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
+              <IconButton component="span" color="primary" tabIndex={-1}>
+                <EditIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         )}
-          <Link href="/setting2"><Button variant="outlined">Back to List</Button></Link>
+          <Tooltip title="Back to List">
+            <Link href="/setting2" aria-label="Back to List">
+              <IconButton component="span" tabIndex={-1}>
+                <ArrowBackIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         </div>
       </div>
       <TextField
-        label="Name"
+        label={tf('name')}
         value={src.name || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Email"
-        value={src.email || ''}
-        fullWidth
-        margin="normal"
-        aria-readonly
-      />
-      <TextField
-        label="Password"
-        value={src.password || ''}
+        label={tf('description')}
+        value={src.description || ''}
         fullWidth
         margin="normal"
         aria-readonly

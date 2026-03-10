@@ -8,7 +8,6 @@ import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
 export async function getAllBookings(): Promise<Booking[]> {
-
   const bookings = await prisma.booking.findMany({
     include: { resource: true },
   });
@@ -23,17 +22,12 @@ export async function getAllBookings(): Promise<Booking[]> {
 }
 
 export async function getBookingDetail(id: string): Promise<BookingDetail | null> {
-  
   const booking = await prisma.booking.findUnique({
-    where: { 
+    where: {
       id,
     },
-    include: { 
-      resource: true, 
-      creator: { select: { id: true, 
-      name: true } }, 
-      updater: { select: { id: true, 
-      name: true } } 
+    include: {
+      resource: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
     },
   });
 

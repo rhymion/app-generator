@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, normalizeChildRefs, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
 type TransactionClient = Pick<typeof prisma, 'role'>;
 
@@ -27,32 +28,41 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addRole(creatorId: string, name: string, description: string | null, userAccountsIds: string[]) {
-  return await prisma.role.create({
-    data: {
+export async function addRole(userId: string, name: string, description: string | null, userAccountsIds: string[]): Promise<{ id: string }> {
+  return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
       name: name,
       description: description,
-      creator_id: creatorId,
-      updater_id: creatorId,
+    });
+    const created = await tx.role.create({
+      data: {
+        creator_id: userId,
+        updater_id: userId,
+        name: name,
+        description: description,
       user_accounts: {
         connect: userAccountsIds.map((id) => ({ id })),
       },
-    },
+      },
+    });
+    return { id: created.id };
   });
 }
-
-export async function updateRole(updaterId: string, id: string, name: string, description: string | null, userAccountsIds: string[], srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateRole(userId: string, id: string, name: string, description: string | null, userAccountsIds: string[], srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
-    return await tx.role.update({
-      where: { id },
-      data: {
+    await validateOnUpdate(tx, id, {
       name: name,
       description: description,
-        updater_id: updaterId,
+    });
+    await tx.role.update({
+      where: { id },
+      data: {
+        updater_id: userId,
+        name: name,
+        description: description,
       user_accounts: {
         set: userAccountsIds.map((id) => ({ id })),
       },
@@ -60,11 +70,6 @@ export async function updateRole(updaterId: string, id: string, name: string, de
     });
   });
 }
-
-export async function deleteRole(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.role.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.role.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteRole(ids: string[]): Promise<void> {
+  await prisma.role.deleteMany({ where: { id: { in: ids } } });
 }

@@ -4,7 +4,7 @@ import { getRoleNewPageAccessCheck } from '@/lib/role/getters';
 
 export default async function AddRolePage() {
   const userAccountsData = await getUserAccountListPageData(false);
-  const userPermissions =await getRoleNewPageAccessCheck();
+  const userPermissions = await getRoleNewPageAccessCheck();
   const src = {
     id: '',
     name: '',

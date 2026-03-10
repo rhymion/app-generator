@@ -3,24 +3,29 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertSetting2 } from '@/lib/setting2/actions';
 import type { FormUpsertProps } from '@/lib/setting2/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
-
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
-
-
   const nameRef = useRef<HTMLInputElement>(null);
-  const emailRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLInputElement>(null);
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -33,8 +38,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
       formData.set('__src_snapshot', srcSnapshot);
     }
     formData.set('name', nameRef.current?.value || '');
-    formData.set('email', emailRef.current?.value || '');
-    formData.set('password', passwordRef.current?.value || '');
+    formData.set('description', descriptionRef.current?.value || '');
 
     try {
       startTransition(async () => {
@@ -53,7 +57,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -64,25 +68,16 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         rows={undefined}
       />
       <TextField
-        label="Email"
-        inputRef={emailRef}
-        defaultValue={src.email || ''}
+        label={tf('description')}
+        inputRef={descriptionRef}
+        defaultValue={src.description || ''}
         fullWidth
         margin="normal"
-        required
-        multiline={false}
-        rows={undefined}
+        
+        multiline={true}
+        rows={4}
       />
-      <TextField
-        label="Password"
-        inputRef={passwordRef}
-        defaultValue={src.password || ''}
-        fullWidth
-        margin="normal"
-        required
-        multiline={false}
-        rows={undefined}
-      />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );
@@ -90,17 +85,16 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Setting2`}
+        title={isEdit ? tc('editEntity', { entity: te('setting2') }) : tc('addEntity', { entity: te('setting2') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={undefined}
         onBack={handleBack}
-        deleteEntityLabel="Setting2"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('setting2')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

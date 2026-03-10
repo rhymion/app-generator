@@ -5,7 +5,6 @@ import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addParent1, updateParent1, deleteParent1 } from './service';
-
 export async function upsertParent1(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
@@ -23,11 +22,11 @@ export async function upsertParent1(data: FormData) {
   const dueDate = new Date(dueDateStr);
   const imageUrl = data.get('image_url') as string | null;
   const parent1Child1sRaw = data.getAll('parent1_child1[]') as string[];
-  const parent1Child1sItems = parent1Child1sRaw.map(f => JSON.parse(f) as { id?: string; order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });
+  const parent1Child1sItems = parent1Child1sRaw.map(f => JSON.parse(f) as { order: number; name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string });
   const parent1Child2sRaw = data.getAll('parent1_child2[]') as string[];
-  const parent1Child2sItems = parent1Child2sRaw.map(f => JSON.parse(f) as { id?: string; name: string; required: boolean; start_date: Date | null; end_date: Date });
+  const parent1Child2sItems = parent1Child2sRaw.map(f => JSON.parse(f) as { name: string; required: boolean; start_date: Date | null; end_date: Date });
   const parent1ListsRaw = data.getAll('parent1_list[]') as string[];
-  const parent1ListsItems = parent1ListsRaw.map(f => JSON.parse(f) as { id?: string; name: string });
+  const parent1ListsItems = parent1ListsRaw.map(f => JSON.parse(f) as { name: string });
   const userId = await getSessionUserIdOrThrow();
 
   if (id) {
@@ -39,7 +38,6 @@ export async function upsertParent1(data: FormData) {
   revalidatePath('/');
   redirect('/parent1');
 }
-
 export async function removeParent1(data: FormData | string[]) {
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   const items = await prisma.parent1.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
@@ -50,3 +48,4 @@ export async function removeParent1(data: FormData | string[]) {
   revalidatePath('/');
   redirect('/parent1');
 }
+

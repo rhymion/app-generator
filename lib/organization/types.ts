@@ -4,7 +4,6 @@ export type Organization = {
   id: string;
   name: string;
   description: string | null;
-
 };
 
 export type OrganizationDetail = Organization & {
@@ -14,11 +13,9 @@ export type OrganizationDetail = Organization & {
 export type UserAccount = {
   id: string;
   name: string;
-  email: string;
-  password: string;
-  api_key: string | null;
   avatar: string | null;
 };
+
 export type OrganizationDetailPageProps = Readonly<{
   params: Promise<{
     id: string;
@@ -43,6 +40,5 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allUserAccounts?: UserAccount[];
   currentUserId?: string | null;
-
   userAccountPermissions?: ModelPermissions;
 }>;

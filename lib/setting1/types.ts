@@ -3,14 +3,25 @@ import type { ModelPermissions } from '@/lib/authz';
 export type Setting1 = {
   id: string;
   name: string;
-  email: string;
-  password: string;
-  api_key: string | null;
-  avatar: string | null;
-
+  description: string | null;
+  team: string | null;
 };
 
-export type Setting1Detail = Setting1;
+export type Setting1Detail = Setting1 & {
+  yyyyy_yyyyys: YyyyyYyyyy[];
+};
+
+export type YyyyyYyyyy = {
+  id: string;
+  name: string;
+  type: string;
+  xxxxx_xxxxx_id: string;
+  max_length: number | null;
+  max: number | null;
+  regex: string | null;
+  required: boolean;
+  written_by: string;
+};
 
 export type Setting1DetailPageProps = Readonly<{
   params: Promise<{
@@ -22,10 +33,9 @@ export type FormViewProps = Readonly<{
   src: {
     id: string;
     name: string;
-    email: string;
-    password: string;
-    api_key: string | null;
-    avatar: string | null;
+    description: string | null;
+    team: string | null;
+    yyyyy_yyyyys: YyyyyYyyyy[];
     created_at?: string | Date;
     updated_at?: string | Date;
     creator?: { id: string; name: string } | null;
@@ -37,5 +47,4 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   currentUserId?: string | null;
-
 }>;

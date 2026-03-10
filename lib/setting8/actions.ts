@@ -5,23 +5,20 @@ import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addSetting8, deleteSetting8 } from './service';
-
 export async function upsertSetting8(data: FormData) {
   await requirePermission('setting8', 'create');
   const name = data.get('name') as string;
-  const email = data.get('email') as string;
-  const password = data.get('password') as string;
+  const description = data.get('description') as string | null;
 
   const userId = await getSessionUserIdOrThrow();
-  await addSetting8(userId, name, email, password);
+  await addSetting8(userId, name, description);
 
   revalidatePath('/');
   redirect('/setting8');
 }
-
 export async function removeSetting8(data: FormData | string[]) {
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
-  const items = await prisma.user_account.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
+  const items = await prisma.xxxxx_xxxxx.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
   for (const item of items) {
     await requirePermission('setting8', 'delete', item);
   }
@@ -29,3 +26,4 @@ export async function removeSetting8(data: FormData | string[]) {
   revalidatePath('/');
   redirect('/setting8');
 }
+

@@ -1,23 +1,26 @@
 import prisma from '@/lib/prisma';
-import { normalizeValue, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { normalizeValue, normalizeChildRefs, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
-type TransactionClient = Pick<typeof prisma, 'user_account'>;
+type TransactionClient = Pick<typeof prisma, 'xxxxx_xxxxx'>;
 
 function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {
   const safeSnapshot = (snapshot ?? {}) as Record<string, unknown>;
   return {
     id: String(safeSnapshot.id ?? ''),
     name: normalizeValue(safeSnapshot.name, 'string'),
-    email: normalizeValue(safeSnapshot.email, 'string'),
-    password: normalizeValue(safeSnapshot.password, 'string'),
-    api_key: normalizeValue(safeSnapshot.api_key, 'string'),
-    avatar: normalizeValue(safeSnapshot.avatar, 'string'),
+    description: normalizeValue(safeSnapshot.description, 'string'),
+    team: normalizeValue(safeSnapshot.team, 'string'),
+    yyyyy_yyyyys: normalizeChildRefs(safeSnapshot.yyyyy_yyyyys),
   };
 }
 
 async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
-  const current = await tx.user_account.findUnique({
-    where: { id }
+  const current = await tx.xxxxx_xxxxx.findUnique({
+    where: { id },
+    include: {
+      yyyyy_yyyyys: { select: { id: true } }
+    }
   });
 
   if (!current) {
@@ -26,44 +29,69 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addSetting1(creatorId: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null) {
-  return await prisma.user_account.create({
-    data: {
+export async function addSetting1(userId: string, name: string, description: string | null, team: string | null, yyyyyYyyyysItems: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[]): Promise<{ id: string }> {
+  return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
       name: name,
-      email: email,
-      password: password,
-      api_key: apiKey,
-      avatar: avatar,
-      creator_id: creatorId,
-      updater_id: creatorId,
-    },
+      description: description,
+      team: team,
+    });
+    const created = await tx.xxxxx_xxxxx.create({
+      data: {
+        creator_id: userId,
+        updater_id: userId,
+        name: name,
+        description: description,
+        team: team,
+      yyyyy_yyyyys: {
+        create: yyyyyYyyyysItems.map(f => ({
+          name: f.name,
+          type: f.type,
+          max_length: f.max_length,
+          max: f.max,
+          regex: f.regex,
+          required: f.required,
+          written_by: f.written_by,
+        })),
+      },
+      },
+    });
+    return { id: created.id };
   });
 }
-
-export async function updateSetting1(updaterId: string, id: string, name: string, email: string, password: string, apiKey: string | null, avatar: string | null, srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updateSetting1(userId: string, id: string, name: string, description: string | null, team: string | null, yyyyyYyyyysItems: { name: string; type: string; max_length: number | null; max: number | null; regex: string | null; required: boolean; written_by: string }[], srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
-    return await tx.user_account.update({
+    await validateOnUpdate(tx, id, {
+      name: name,
+      description: description,
+      team: team,
+    });
+    await tx.xxxxx_xxxxx.update({
       where: { id },
       data: {
-      name: name,
-      email: email,
-      password: password,
-      api_key: apiKey,
-      avatar: avatar,
-        updater_id: updaterId,
+        updater_id: userId,
+        name: name,
+        description: description,
+        team: team,
+      yyyyy_yyyyys: {
+        deleteMany: {},
+        create: yyyyyYyyyysItems.map(f => ({
+          name: f.name,
+          type: f.type,
+          max_length: f.max_length,
+          max: f.max,
+          regex: f.regex,
+          required: f.required,
+          written_by: f.written_by,
+        })),
+      },
       },
     });
   });
 }
-
-export async function deleteSetting1(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.user_account.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.user_account.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteSetting1(ids: string[]): Promise<void> {
+  await prisma.xxxxx_xxxxx.deleteMany({ where: { id: { in: ids } } });
 }

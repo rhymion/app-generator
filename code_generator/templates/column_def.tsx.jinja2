@@ -1,0 +1,11 @@
+import { GridColDef{% if needs_datetime_imports %}, GridRenderEditCellParams{% endif %} } from '@mui/x-data-grid';
+import { useTranslations } from 'next-intl';
+{% if needs_datetime_imports %}
+import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
+import dayjs from 'dayjs';
+{% endif %}
+
+{% for child in column_children %}
+{{ child.fn_code }}
+
+{% endfor %}

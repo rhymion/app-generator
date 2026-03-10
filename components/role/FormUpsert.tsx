@@ -3,24 +3,25 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertRole, removeRole } from '@/lib/role/actions';
 import type { FormUpsertProps } from '@/lib/role/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
 import type { UserAccount } from '@/lib/user_account/types';
-import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
-import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '../FieldsDataGrid';
-  
+import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allUserAccounts = [], userAccountPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
-
   const userAccountsRef = useRef<{ getItems: () => EditableListWrapperItem[] }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
@@ -30,6 +31,10 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
     label: f.name,
     originalId: f.id,
   })));
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -81,7 +86,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -92,7 +97,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         rows={undefined}
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         inputRef={descriptionRef}
         defaultValue={src.description || ''}
         fullWidth
@@ -107,7 +112,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         itemType="autocomplete"
         addButtonLabel="Add User Accounts"
         showTitle={true}
-        title="User Accounts"
+        title={tf('userAccounts')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         allAutocompleteOptions={allUserAccounts.map(item => ({
@@ -117,6 +122,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
         }))}
         excludeOptionIds={[src.id]}
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );
@@ -124,17 +130,16 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Role`}
+        title={isEdit ? tc('editEntity', { entity: te('role') }) : tc('addEntity', { entity: te('role') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Role"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('role')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

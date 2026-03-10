@@ -8,31 +8,22 @@ import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
 export async function getAllUserAccounts(): Promise<UserAccount[]> {
-
   const userAccounts = await prisma.user_account.findMany({
   });
   return userAccounts.map((userAccount) => ({
     id: userAccount.id,
     name: userAccount.name,
-    email: userAccount.email,
-    password: userAccount.password,
-    api_key: userAccount.api_key,
     avatar: userAccount.avatar,
   }));
 }
 
 export async function getUserAccountDetail(id: string): Promise<UserAccountDetail | null> {
-  
   const userAccount = await prisma.user_account.findUnique({
-    where: { 
+    where: {
       id,
     },
-    include: { 
-      roles: true, 
-      creator: { select: { id: true, 
-      name: true } }, 
-      updater: { select: { id: true, 
-      name: true } } 
+    include: {
+      roles: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
     },
   });
 

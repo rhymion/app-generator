@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, assertNotStale, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
 type TransactionClient = Pick<typeof prisma, 'permission'>;
 
@@ -27,46 +28,58 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addPermission(creatorId: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null) {
-  return await prisma.permission.create({
-    data: {
+export async function addPermission(userId: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null): Promise<{ id: string }> {
+  return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
       name: name,
       create: create,
       read: read,
       update: update,
       delete: deleteValue,
       role_id: roleId,
-      creator_id: creatorId,
-      updater_id: creatorId,
-    },
+    });
+    const created = await tx.permission.create({
+      data: {
+        creator_id: userId,
+        updater_id: userId,
+        name: name,
+        create: create,
+        read: read,
+        update: update,
+        delete: deleteValue,
+        role_id: roleId,
+      },
+    });
+    return { id: created.id };
   });
 }
-
-export async function updatePermission(updaterId: string, id: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null, srcSnapshotRaw?: string | null) {
-  return await prisma.$transaction(async (tx) => {
+export async function updatePermission(userId: string, id: string, name: string, create: boolean, read: boolean, update: boolean, deleteValue: boolean, roleId: string | null, srcSnapshotRaw: string | null): Promise<void> {
+  await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
-    return await tx.permission.update({
-      where: { id },
-      data: {
+    await validateOnUpdate(tx, id, {
       name: name,
       create: create,
       read: read,
       update: update,
       delete: deleteValue,
       role_id: roleId,
-        updater_id: updaterId,
+    });
+    await tx.permission.update({
+      where: { id },
+      data: {
+        updater_id: userId,
+        name: name,
+        create: create,
+        read: read,
+        update: update,
+        delete: deleteValue,
+        role_id: roleId,
       },
     });
   });
 }
-
-export async function deletePermission(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.permission.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.permission.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deletePermission(ids: string[]): Promise<void> {
+  await prisma.permission.deleteMany({ where: { id: { in: ids } } });
 }

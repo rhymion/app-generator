@@ -78,7 +78,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
       cy.task<any[]>('db:populateXxxxxXxxxx', 1).then((records) => {
         cy.visit('/en/xxxxx_xxxxx');
         cy.contains('Xxxxx Xxxxx 1').click();
-        cy.contains('Edit').click();
+        cy.get('[aria-label="Edit"]').click();
         cy.url().should('include', '/xxxxx_xxxxx/edit');
         cy.fillField('Description', 'Test Description');
         cy.fillField('Team', 'Test Team');
@@ -100,13 +100,13 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
         cy.task('db:populateXxxxxXxxxxYyyyyYyyyy', { parentId: records[0].id, length: 1 });
         cy.visit('/en/xxxxx_xxxxx');
         cy.contains('Xxxxx Xxxxx 1').click();
-        cy.contains('Edit').click();
+        cy.get('[aria-label="Edit"]').click();
         cy.url().should('include', '/xxxxx_xxxxx/edit');
         cy.clearField('Description');
         cy.clearField('Team');
         // Delete child: Yyyyy Yyyyys
         cy.selectDataGridRows([0]);
-        cy.clickButton('Delete Selected');
+        cy.contains('h2', 'Yyyyy Yyyyys').parent().find('button[aria-label="Delete Selected"]').click();
         cy.get('div[role="dialog"]').find('button').contains('Delete').click();
         cy.clickButton('Save');
         cy.url().should('include', '/xxxxx_xxxxx');
@@ -118,7 +118,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
       cy.task<any[]>('db:populateXxxxxXxxxx', 1).then((records) => {
         cy.visit('/en/xxxxx_xxxxx');
         cy.contains('Xxxxx Xxxxx 1').click();
-        cy.contains('Edit').click();
+        cy.get('[aria-label="Edit"]').click();
         cy.clearAndFillField('Name', 'Updated Xxxxx Xxxxx');
         cy.fillField('Description', 'Updated Description');
         cy.clickButton('Save');
@@ -137,7 +137,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
       cy.task('db:populateXxxxxXxxxx', 2);
       cy.visit('/en/xxxxx_xxxxx');
       cy.selectDataGridRows([0]);
-      cy.clickButton('Delete Selected');
+      cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       getDataGridRowCount().should('eq', 1);
     });
@@ -146,7 +146,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
       cy.task('db:populateXxxxxXxxxx', 3);
       cy.visit('/en/xxxxx_xxxxx');
       cy.selectDataGridRows([0, 1]);
-      cy.clickButton('Delete Selected');
+      cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       getDataGridRowCount().should('eq', 1);
     });
@@ -155,7 +155,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
       cy.task('db:populateXxxxxXxxxx', 1);
       cy.visit('/en/xxxxx_xxxxx');
       cy.contains('Xxxxx Xxxxx 1').click();
-      cy.contains('Edit').click();
+      cy.get('[aria-label="Edit"]').click();
       cy.url().should('include', '/xxxxx_xxxxx/edit');
       cy.clickButton('Delete Xxxxx Xxxxx');
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
@@ -186,7 +186,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
       cy.task('db:populateXxxxxXxxxx', 1);
       cy.visit('/en/xxxxx_xxxxx');
       cy.contains('Xxxxx Xxxxx 1').click();
-      cy.contains('Edit').click();
+      cy.get('[aria-label="Edit"]').click();
       cy.clearField('Name');
       cy.clickButton('Save');
       cy.url().should('include', '/xxxxx_xxxxx/edit');
@@ -197,7 +197,7 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
         cy.task('db:populateXxxxxXxxxxYyyyyYyyyy', { parentId: records[0].id, length: 1 });
         cy.visit('/en/xxxxx_xxxxx');
         cy.contains('Xxxxx Xxxxx 1').click();
-        cy.contains('Edit').click();
+        cy.get('[aria-label="Edit"]').click();
         // Clear required child field
         cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="name"]').dblclick();
         cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="name"] input').clear().type('{enter}');

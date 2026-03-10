@@ -1,5 +1,4 @@
 import type { ModelPermissions } from '@/lib/authz';
-
 import type { Resource } from '@/lib/resource/types';
 
 export type Booking = {
@@ -29,8 +28,8 @@ export type FormViewProps = Readonly<{
     id: string;
     name: string;
     resource_id: string;
-    start_time: Date;
-    end_time: Date;
+    start_time: Date | null;
+    end_time: Date | null;
     resource?: Resource | null;
     created_at?: string | Date;
     updated_at?: string | Date;
@@ -44,6 +43,5 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allResources?: Resource[];
   currentUserId?: string | null;
-
   resourcePermissions?: ModelPermissions;
 }>;

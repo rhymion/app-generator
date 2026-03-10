@@ -1,5 +1,4 @@
 import type { ModelPermissions } from '@/lib/authz';
-
 import type { Role } from '@/lib/role/types';
 
 export type Permission = {
@@ -48,6 +47,5 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allRoles?: Role[];
   currentUserId?: string | null;
-
   rolePermissions?: ModelPermissions;
 }>;

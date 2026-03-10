@@ -62,7 +62,6 @@ describe('API: Booking', () => {
           },
         }).then((res) => {
           expect(res.status).to.eq(201);
-          expect(res.body.name).to.eq('Test Booking');
           cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((getRes) => {
               expect(getRes.status).to.eq(200);

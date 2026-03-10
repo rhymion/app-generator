@@ -1,20 +1,20 @@
 import prisma from '@/lib/prisma';
 import { normalizeValue, type NormalizedSnapshot } from '@/lib/normalize';
+import { validateOnAdd, validateOnUpdate } from './service_validation';
 
-type TransactionClient = Pick<typeof prisma, 'user_account'>;
+type TransactionClient = Pick<typeof prisma, 'xxxxx_xxxxx'>;
 
 function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {
   const safeSnapshot = (snapshot ?? {}) as Record<string, unknown>;
   return {
     id: String(safeSnapshot.id ?? ''),
     name: normalizeValue(safeSnapshot.name, 'string'),
-    email: normalizeValue(safeSnapshot.email, 'string'),
-    password: normalizeValue(safeSnapshot.password, 'string'),
+    description: normalizeValue(safeSnapshot.description, 'string'),
   };
 }
 
 async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
-  const current = await tx.user_account.findUnique({
+  const current = await tx.xxxxx_xxxxx.findUnique({
     where: { id }
   });
 
@@ -24,15 +24,20 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function addSetting2(creatorId: string, name: string, email: string, password: string) {
-  return await prisma.user_account.create({
-    data: {
+export async function addSetting2(userId: string, name: string, description: string | null): Promise<{ id: string }> {
+  return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, {
       name: name,
-      email: email,
-      password: password,
-      creator_id: creatorId,
-      updater_id: creatorId,
-    },
+      description: description,
+    });
+    const created = await tx.xxxxx_xxxxx.create({
+      data: {
+        creator_id: userId,
+        updater_id: userId,
+        name: name,
+        description: description,
+      },
+    });
+    return { id: created.id };
   });
 }

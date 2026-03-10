@@ -8,28 +8,22 @@ import type { Operation } from '@/lib/authz';
 import { getServerSession } from 'next-auth/next';
 
 export async function getAllSetting8s(): Promise<Setting8[]> {
-
-  const setting8s = await prisma.user_account.findMany({
+  const setting8s = await prisma.xxxxx_xxxxx.findMany({
   });
   return setting8s.map((setting8) => ({
     id: setting8.id,
     name: setting8.name,
-    email: setting8.email,
-    password: setting8.password,
+    description: setting8.description,
   }));
 }
 
 export async function getSetting8Detail(id: string): Promise<Setting8Detail | null> {
-  
-  const setting8 = await prisma.user_account.findUnique({
-    where: { 
+  const setting8 = await prisma.xxxxx_xxxxx.findUnique({
+    where: {
       id,
     },
-    include: { 
-      creator: { select: { id: true, 
-      name: true } }, 
-      updater: { select: { id: true, 
-      name: true } } 
+    include: {
+      creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
     },
   });
 
@@ -43,9 +37,9 @@ export async function getSetting8Detail(id: string): Promise<Setting8Detail | nu
 }
 
 export async function getSetting8ListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('user_account');
+  const userPermissions = await getModelPermissions('setting8');
   if (isAssertPermission) {
-    await assertPermission(userPermissions, 'read', 'user_account');
+    await assertPermission(userPermissions, 'read', 'setting8');
   }
   const setting8s = await getAllSetting8s();
   return { setting8s, userPermissions };
@@ -53,13 +47,13 @@ export async function getSetting8ListPageData(isAssertPermission: boolean = true
 
 export async function getSetting8DetailPageData(id: string, operation: Operation = 'read') {
   const setting8 = await getSetting8Detail(id);
-  const userPermissions = await getModelPermissions('user_account', undefined, setting8);
-  await assertPermission(userPermissions, operation, 'user_account');
+  const userPermissions = await getModelPermissions('setting8', undefined, setting8);
+  await assertPermission(userPermissions, operation, 'setting8');
   return { setting8, userPermissions };
 }
 
 export async function getSetting8NewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('user_account');
-  await assertPermission(userPermissions, 'create', 'user_account');
+  const userPermissions = await getModelPermissions('setting8');
+  await assertPermission(userPermissions, 'create', 'setting8');
   return userPermissions;
 }

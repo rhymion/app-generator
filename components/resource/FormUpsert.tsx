@@ -3,22 +3,23 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import { upsertResource, removeResource } from '@/lib/resource/actions';
 import type { FormUpsertProps } from '@/lib/resource/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
-import OrderedEditableListWrapper from '../OrderedEditableListWrapper';
-import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
-import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '../FieldsDataGrid';
-import OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';
-  
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
+import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';
+import OrderedEditableListWrapper from '@/components/_standard/OrderedEditableListWrapper';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allOrganizations = [], organizationPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -47,6 +48,11 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     label: f.name,
     originalId: f.id,
   })));
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+    organization_id: organizationId,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -112,7 +118,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -123,7 +129,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         rows={undefined}
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         inputRef={descriptionRef}
         defaultValue={src.description || ''}
         fullWidth
@@ -139,7 +145,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         renderInput={(params) => (
           <TextField
             {...params}
-            label="Organization"
+            label={tf('organization')}
             margin="normal"
             required
           />
@@ -153,7 +159,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         acceptedFileTypes=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip"
         addButtonLabel="Add Resource Attachments"
         showTitle={true}
-        title="Resource Attachments"
+        title={tf('resourceAttachments')}
       />
       <EditableListWrapper
         ref={resourceImagesRef}
@@ -163,8 +169,9 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         acceptedFileTypes="image/jpeg,image/png,image/gif,image/webp"
         addButtonLabel="Add Resource Images"
         showTitle={true}
-        title="Resource Images"
+        title={tf('resourceImages')}
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );
@@ -172,17 +179,16 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Resource`}
+        title={isEdit ? tc('editEntity', { entity: te('resource') }) : tc('addEntity', { entity: te('resource') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Resource"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('resource')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

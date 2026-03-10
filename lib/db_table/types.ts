@@ -4,7 +4,6 @@ export type DbTable = {
   id: string;
   name: string;
   description: string | null;
-
 };
 
 export type DbTableDetail = DbTable & {
@@ -33,6 +32,7 @@ export type DbTableComment = {
   updated_at?: string | Date | null;
   creator?: { id: string; name: string; avatar?: string | null } | null;
 };
+
 export type DbTableDetailPageProps = Readonly<{
   params: Promise<{
     id: string;
@@ -58,6 +58,5 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allDbTables?: DbTable[];
   currentUserId?: string | null;
-
   dbTablePermissions?: ModelPermissions;
 }>;

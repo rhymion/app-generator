@@ -3,25 +3,30 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
-import NumberField from '../NumberField';
+import NumberField from '@/components/_standard/NumberField';
 import { upsertParent1, removeParent1 } from '@/lib/parent1/actions';
 import type { FormUpsertProps } from '@/lib/parent1/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
-import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
+import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '../FieldsDataGrid';
-import OrderedFieldsDataGrid from '../OrderedFieldsDataGrid';
-  import { parent1_child1s_columns, parent1_child2s_columns } from '../parent1/column_def';
+import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';
+import OrderedFieldsDataGrid from '@/components/_standard/OrderedFieldsDataGrid';
+import { parent1_child1s_columns, parent1_child2s_columns } from '../parent1/column_def';
 import dayjs, { Dayjs } from 'dayjs';
-import DateTimeWrapper from '../DateTimeWrapper';
-import ImageUpload from '../ImageUpload';
+import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
+import ImageUpload from '@/components/_standard/ImageUpload';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allOrganizations = [], organizationPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -75,6 +80,12 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
     label: f.name,
     originalId: f.id,
   })));
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+    due_date: dueDate,
+    organization_id: organizationId,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -160,7 +171,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -171,7 +182,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         rows={undefined}
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         inputRef={descriptionRef}
         defaultValue={src.description || ''}
         fullWidth
@@ -187,21 +198,21 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         renderInput={(params) => (
           <TextField
             {...params}
-            label="Organization"
+            label={tf('organization')}
             margin="normal"
             required
           />
         )}
       />
-      <NumberField 
-        label="Price" 
-        inputRef={priceRef} 
-        defaultValue={src.price || 0} 
+      <NumberField
+        label={tf('price')}
+        inputRef={priceRef}
+        defaultValue={src.price || 0}
         min={0}
         max={1000000}
       />
-      <DateTimeWrapper 
-        label="Due Date" 
+      <DateTimeWrapper
+        label={tf('dueDate')} 
         date_time={dueDate ? dueDate.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setDueDate(newValue)}
       />
@@ -218,7 +229,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         deleteDialogTitle="Delete Selected Parent1 Child1s?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="Parent1 Child1s"
+        title={tf('parent1Child1s')}
       />
       <FieldsDataGrid
         ref={parent1Child2sRef}
@@ -229,7 +240,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         deleteDialogTitle="Delete Selected Parent1 Child2s?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="Parent1 Child2s"
+        title={tf('parent1Child2s')}
       />
       <EditableListWrapper
         ref={parent1ListsRef}
@@ -237,10 +248,11 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
         itemType="text"
         addButtonLabel="Add Parent1 Lists"
         showTitle={true}
-        title="Parent1 Lists"
+        title={tf('parent1Lists')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );
@@ -248,17 +260,16 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Parent1`}
+        title={isEdit ? tc('editEntity', { entity: te('parent1') }) : tc('addEntity', { entity: te('parent1') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Parent1"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('parent1')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

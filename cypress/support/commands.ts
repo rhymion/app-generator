@@ -38,10 +38,10 @@ Cypress.Commands.add('fillField', (label: string, value: string) => {
 });
 
 /**
- * Click a button by text
+ * Click a button or link by aria-label
  */
 Cypress.Commands.add('clickButton', (text: string) => {
-  cy.contains('button', text).click();
+  cy.get(`[aria-label="${text}"]`).click();
 });
 
 /**

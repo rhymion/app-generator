@@ -1,41 +1,61 @@
-import Button from '@mui/material/Button';
+'use client';
+
+import { useTranslations } from 'next-intl';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/parent_only/types';
 import Link from '@mui/material/Link';
-import DateTimeWrapper from '../DateTimeWrapper';
-  import FormControlLabel from '@mui/material/FormControlLabel';
-  import Checkbox from '@mui/material/Checkbox';
-import AuditInfo from '../AuditInfo';
+import EditIcon from '@mui/icons-material/Edit';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
+import AuditInfo from '@/components/_standard/AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
   const canEdit = permissions?.update ?? true;
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>Parent Only</h1>
+        <h1>{te('parentOnly')}</h1>
         <div>
         {canEdit && (
-          <Link href={`/parent_only/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
+          <Tooltip title="Edit">
+            <Link href={`/parent_only/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
+              <IconButton component="span" color="primary" tabIndex={-1}>
+                <EditIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         )}
-          <Link href="/parent_only"><Button variant="outlined">Back to List</Button></Link>
+          <Tooltip title="Back to List">
+            <Link href="/parent_only" aria-label="Back to List">
+              <IconButton component="span" tabIndex={-1}>
+                <ArrowBackIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         </div>
       </div>
       <TextField
-        label="Name"
+        label={tf('name')}
         value={src.name || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         value={src.description || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
-      <DateTimeWrapper label="Login Time" date_time={src.login_time} readOnly />
-      <DateTimeWrapper label="Logout Time" date_time={src.logout_time} readOnly />
+      <DateTimeWrapper label={tf('loginTime')} date_time={src.login_time} readOnly />
+      <DateTimeWrapper label={tf('logoutTime')} date_time={src.logout_time} readOnly />
       <AuditInfo src={src} />
     </div>
   );

@@ -4,7 +4,7 @@ import { getDbTableNewPageAccessCheck } from '@/lib/db_table/getters';
 
 export default async function AddDbTablePage() {
   const dbTablesData = await getDbTableListPageData(false);
-  const userPermissions =await getDbTableNewPageAccessCheck();
+  const userPermissions = await getDbTableNewPageAccessCheck();
   const src = {
     id: '',
     name: '',

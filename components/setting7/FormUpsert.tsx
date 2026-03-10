@@ -3,27 +3,30 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertSetting7 } from '@/lib/setting7/actions';
 import type { FormUpsertProps } from '@/lib/setting7/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
-
-import ImageUpload from '../ImageUpload';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
-
-  const [avatar, setAvatar] = useState<string>(src.avatar || '');
-
   const nameRef = useRef<HTMLInputElement>(null);
-  const emailRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
-  const api_keyRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLInputElement>(null);
+  const teamRef = useRef<HTMLInputElement>(null);
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -36,10 +39,8 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
       formData.set('__src_snapshot', srcSnapshot);
     }
     formData.set('name', nameRef.current?.value || '');
-    formData.set('email', emailRef.current?.value || '');
-    formData.set('password', passwordRef.current?.value || '');
-    formData.set('api_key', api_keyRef.current?.value || '');
-    formData.set('avatar', avatar);
+    formData.set('description', descriptionRef.current?.value || '');
+    formData.set('team', teamRef.current?.value || '');
 
     try {
       startTransition(async () => {
@@ -58,7 +59,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -69,39 +70,26 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
         rows={undefined}
       />
       <TextField
-        label="Email"
-        inputRef={emailRef}
-        defaultValue={src.email || ''}
+        label={tf('description')}
+        inputRef={descriptionRef}
+        defaultValue={src.description || ''}
         fullWidth
         margin="normal"
-        required
-        multiline={false}
-        rows={undefined}
+        
+        multiline={true}
+        rows={4}
       />
       <TextField
-        label="Password"
-        inputRef={passwordRef}
-        defaultValue={src.password || ''}
-        fullWidth
-        margin="normal"
-        required
-        multiline={false}
-        rows={undefined}
-      />
-      <TextField
-        label="Api Key"
-        inputRef={api_keyRef}
-        defaultValue={src.api_key || ''}
+        label={tf('team')}
+        inputRef={teamRef}
+        defaultValue={src.team || ''}
         fullWidth
         margin="normal"
         
         multiline={false}
         rows={undefined}
       />
-      <ImageUpload
-        value={avatar}
-        onChange={setAvatar}
-      />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );
@@ -109,17 +97,16 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Setting7`}
+        title={isEdit ? tc('editEntity', { entity: te('setting7') }) : tc('addEntity', { entity: te('setting7') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={undefined}
         onBack={handleBack}
-        deleteEntityLabel="Setting7"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('setting7')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

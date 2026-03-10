@@ -1,23 +1,25 @@
 import prisma from '@/lib/prisma';
-import { normalizeValue, type NormalizedSnapshot } from '@/lib/normalize';
+import { normalizeValue, normalizeChildRefs, type NormalizedSnapshot } from '@/lib/normalize';
 
-type TransactionClient = Pick<typeof prisma, 'user_account'>;
+type TransactionClient = Pick<typeof prisma, 'xxxxx_xxxxx'>;
 
 function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {
   const safeSnapshot = (snapshot ?? {}) as Record<string, unknown>;
   return {
     id: String(safeSnapshot.id ?? ''),
     name: normalizeValue(safeSnapshot.name, 'string'),
-    email: normalizeValue(safeSnapshot.email, 'string'),
-    password: normalizeValue(safeSnapshot.password, 'string'),
-    api_key: normalizeValue(safeSnapshot.api_key, 'string'),
-    avatar: normalizeValue(safeSnapshot.avatar, 'string'),
+    description: normalizeValue(safeSnapshot.description, 'string'),
+    team: normalizeValue(safeSnapshot.team, 'string'),
+    yyyyy_yyyyys: normalizeChildRefs(safeSnapshot.yyyyy_yyyyys),
   };
 }
 
 async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {
-  const current = await tx.user_account.findUnique({
-    where: { id }
+  const current = await tx.xxxxx_xxxxx.findUnique({
+    where: { id },
+    include: {
+      yyyyy_yyyyys: { select: { id: true } }
+    }
   });
 
   if (!current) {
@@ -26,11 +28,6 @@ async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<No
 
   return normalizeSnapshot(current as Record<string, unknown>);
 }
-
-export async function deleteSetting6(ids: string[]) {
-  if (ids.length === 1) {
-    await prisma.user_account.delete({ where: { id: ids[0] } });
-  } else {
-    await prisma.user_account.deleteMany({ where: { id: { in: ids } } });
-  }
+export async function deleteSetting6(ids: string[]): Promise<void> {
+  await prisma.xxxxx_xxxxx.deleteMany({ where: { id: { in: ids } } });
 }

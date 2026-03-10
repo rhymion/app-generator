@@ -3,21 +3,23 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import { upsertProcedure, removeProcedure } from '@/lib/procedure/actions';
 import type { FormUpsertProps } from '@/lib/procedure/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
 import type { Procedure } from '@/lib/procedure/types';
-import EditableListWrapper, { EditableListWrapperItem } from '../EditableListWrapper';
-import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '../FieldsDataGrid';
-  
+import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, allProcedures = [], allUserAccounts = [], procedurePermissions, userAccountPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
@@ -59,6 +61,12 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
     label: f.name,
     originalId: f.id,
   })));
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
+    parent_id: parentId,
+    assignee_id: assigneeId,
+  });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -140,7 +148,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -151,7 +159,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         rows={undefined}
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         inputRef={descriptionRef}
         defaultValue={src.description || ''}
         fullWidth
@@ -167,7 +175,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         renderInput={(params) => (
           <TextField
             {...params}
-            label="Parent"
+            label={tf('parent')}
             margin="normal"
             
           />
@@ -180,7 +188,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         renderInput={(params) => (
           <TextField
             {...params}
-            label="Assignee"
+            label={tf('assignee')}
             margin="normal"
             
           />
@@ -192,7 +200,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         itemType="autocomplete"
         addButtonLabel="Add Children"
         showTitle={true}
-        title="Children"
+        title={tf('children')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         allAutocompleteOptions={allProcedures.filter(item => !item.parent_id || item.parent_id === src.id).map(item => ({
@@ -208,7 +216,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         itemType="autocomplete"
         addButtonLabel="Add Preceded By"
         showTitle={true}
-        title="Preceded By"
+        title={tf('precededBy')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         allAutocompleteOptions={allProcedures.map(item => ({
@@ -224,7 +232,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         itemType="autocomplete"
         addButtonLabel="Add Followed By"
         showTitle={true}
-        title="Followed By"
+        title={tf('followedBy')}
         textFieldLabel="Name"
         textFieldPlaceholder="Enter name"
         allAutocompleteOptions={allProcedures.map(item => ({
@@ -234,6 +242,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
         }))}
         excludeOptionIds={[src.id]}
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );
@@ -241,17 +250,16 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Procedure`}
+        title={isEdit ? tc('editEntity', { entity: te('procedure') }) : tc('addEntity', { entity: te('procedure') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Procedure"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('procedure')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
-
     </>
   );
 }

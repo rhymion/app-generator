@@ -84,7 +84,7 @@ describe('Testing Booking pages and their behavior', () => {
       cy.task<any[]>('db:populateBooking', 1).then((records) => {
         cy.visit('/en/booking');
         cy.contains('Booking 1').click();
-        cy.contains('Edit').click();
+        cy.get('[aria-label="Edit"]').click();
         cy.clearAndFillField('Name', 'Updated Booking');
         cy.clickButton('Save');
         cy.url().should('include', '/booking');
@@ -102,7 +102,7 @@ describe('Testing Booking pages and their behavior', () => {
       cy.task('db:populateBooking', 2);
       cy.visit('/en/booking');
       cy.selectDataGridRows([0]);
-      cy.clickButton('Delete Selected');
+      cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       getDataGridRowCount().should('eq', 1);
     });
@@ -111,7 +111,7 @@ describe('Testing Booking pages and their behavior', () => {
       cy.task('db:populateBooking', 3);
       cy.visit('/en/booking');
       cy.selectDataGridRows([0, 1]);
-      cy.clickButton('Delete Selected');
+      cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       getDataGridRowCount().should('eq', 1);
     });
@@ -120,7 +120,7 @@ describe('Testing Booking pages and their behavior', () => {
       cy.task('db:populateBooking', 1);
       cy.visit('/en/booking');
       cy.contains('Booking 1').click();
-      cy.contains('Edit').click();
+      cy.get('[aria-label="Edit"]').click();
       cy.url().should('include', '/booking/edit');
       cy.clickButton('Delete Booking');
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
@@ -148,7 +148,7 @@ describe('Testing Booking pages and their behavior', () => {
       cy.task('db:populateBooking', 1);
       cy.visit('/en/booking');
       cy.contains('Booking 1').click();
-      cy.contains('Edit').click();
+      cy.get('[aria-label="Edit"]').click();
       cy.clearField('Name');
       cy.clickButton('Save');
       cy.url().should('include', '/booking/edit');

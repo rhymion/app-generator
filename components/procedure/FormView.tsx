@@ -1,53 +1,69 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { GridColDef } from '@mui/x-data-grid';
-import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/procedure/types';
 import Link from '@mui/material/Link';
-import FieldsViewGrid from '../FieldsViewGrid';
-import ListWrapper from '../ListWrapper';
+import EditIcon from '@mui/icons-material/Edit';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ListWrapper from '@/components/_standard/ListWrapper';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
-import AuditInfo from '../AuditInfo';
+import AuditInfo from '@/components/_standard/AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
   const canEdit = permissions?.update ?? true;
-
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>Procedure</h1>
+        <h1>{te('procedure')}</h1>
         <div>
-          {canEdit && (
-            <Link href={`/procedure/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
-          )}
-          <Link href="/procedure"><Button variant="outlined">Back to List</Button></Link>
+        {canEdit && (
+          <Tooltip title="Edit">
+            <Link href={`/procedure/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
+              <IconButton component="span" color="primary" tabIndex={-1}>
+                <EditIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
+        )}
+          <Tooltip title="Back to List">
+            <Link href="/procedure" aria-label="Back to List">
+              <IconButton component="span" tabIndex={-1}>
+                <ArrowBackIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         </div>
       </div>
       <TextField
-        label="Name"
+        label={tf('name')}
         value={src.name || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         value={src.description || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Parent Id"
+        label={tf('parent')}
         value={src.parent?.name || src.parent_id || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
       <TextField
-        label="Assignee Id"
+        label={tf('assignee')}
         value={src.assignee?.name || src.assignee_id || ''}
         fullWidth
         margin="normal"
@@ -62,7 +78,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           }))}
           itemType="text"
           showTitle={true}
-          title="Children"
+          title={tf('children')}
         />
       </div>
       <div>
@@ -74,7 +90,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           }))}
           itemType="text"
           showTitle={true}
-          title="Preceded By"
+          title={tf('precededBy')}
         />
       </div>
       <div>
@@ -86,7 +102,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           }))}
           itemType="text"
           showTitle={true}
-          title="Followed By"
+          title={tf('followedBy')}
         />
       </div>
       <AuditInfo src={src} />

@@ -1,6 +1,6 @@
 "use client";
 import { useSession, signOut } from "next-auth/react";
-import { useSidebar } from "@/components/SidebarContext";
+import { useSidebar } from "@/components/_standard/SidebarContext";
 import { siteConfig, themeConfig } from "@/lib/site-config";
 import { useTranslations, useLocale } from "next-intl";
 import { Link, useRouter, usePathname } from "@/i18n/navigation";
@@ -75,9 +75,11 @@ export default function HeaderPage() {
       <div className="flex items-center gap-3 shrink-0">
         {session?.user ? (
           <>
-            <span className="hidden sm:block text-sm opacity-75 truncate max-w-40">
-              {session.user.name ?? session.user.email}
-            </span>
+            <Link href={`/setting/view/${session.user.id}`} className={`flex items-center gap-2 no-underline`}>
+              <span className="hidden sm:block text-sm opacity-75 truncate max-w-40">
+                {session.user.name ?? session.user.email}
+              </span>
+            </Link>
             <button
               onClick={() => signOut({ callbackUrl: `/${locale}/login` })}
               className={themeConfig.header.authButton}

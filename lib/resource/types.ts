@@ -1,5 +1,4 @@
 import type { ModelPermissions } from '@/lib/authz';
-
 import type { Organization } from '@/lib/organization/types';
 
 export type Resource = {
@@ -32,6 +31,7 @@ export type ResourceImage = {
   name: string;
   path: string;
 };
+
 export type ResourceDetailPageProps = Readonly<{
   params: Promise<{
     id: string;
@@ -59,6 +59,5 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
   allOrganizations?: Organization[];
   currentUserId?: string | null;
-
   organizationPermissions?: ModelPermissions;
 }>;

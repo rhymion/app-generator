@@ -1,58 +1,55 @@
+'use client';
+
+import { useTranslations } from 'next-intl';
 import { GridColDef } from '@mui/x-data-grid';
-import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/user_account/types';
 import Link from '@mui/material/Link';
-import FieldsViewGrid from '../FieldsViewGrid';
-import ImageDisplay from '../ImageDisplay';
-import ListWrapper from '../ListWrapper';
+import EditIcon from '@mui/icons-material/Edit';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ImageDisplay from '@/components/_standard/ImageDisplay';
+import ListWrapper from '@/components/_standard/ListWrapper';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
-import AuditInfo from '../AuditInfo';
+import AuditInfo from '@/components/_standard/AuditInfo';
 
 export default function FormView({ src, permissions }: FormViewProps) {
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
   const canEdit = permissions?.update ?? true;
-
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1>User Account</h1>
+        <h1>{te('userAccount')}</h1>
         <div>
-          {canEdit && (
-            <Link href={`/user_account/edit/${src.id}`} sx={{ mx: 2 }}><Button variant="contained">Edit</Button></Link>
-          )}
-          <Link href="/user_account"><Button variant="outlined">Back to List</Button></Link>
+        {canEdit && (
+          <Tooltip title="Edit">
+            <Link href={`/user_account/edit/${src.id}`} sx={{ mx: 1 }} aria-label="Edit">
+              <IconButton component="span" color="primary" tabIndex={-1}>
+                <EditIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
+        )}
+          <Tooltip title="Back to List">
+            <Link href="/user_account" aria-label="Back to List">
+              <IconButton component="span" tabIndex={-1}>
+                <ArrowBackIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         </div>
       </div>
       <TextField
-        label="Name"
+        label={tf('name')}
         value={src.name || ''}
         fullWidth
         margin="normal"
         aria-readonly
       />
-      <TextField
-        label="Email"
-        value={src.email || ''}
-        fullWidth
-        margin="normal"
-        aria-readonly
-      />
-      <TextField
-        label="Password"
-        value={src.password || ''}
-        fullWidth
-        margin="normal"
-        aria-readonly
-      />
-      <TextField
-        label="Api Key"
-        value={src.api_key || ''}
-        fullWidth
-        margin="normal"
-        aria-readonly
-      />
-      <ImageDisplay url={src.avatar} alt="Avatar" />
+      <ImageDisplay url={src.avatar} alt={tf('avatar')} />
       <div>
         <ListWrapper
           items={src.roles.map(f => ({
@@ -62,7 +59,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
           }))}
           itemType="text"
           showTitle={true}
-          title="Roles"
+          title={tf('roles')}
         />
       </div>
       <AuditInfo src={src} />

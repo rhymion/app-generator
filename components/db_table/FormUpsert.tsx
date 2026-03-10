@@ -3,23 +3,27 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 import { upsertDbTable, removeDbTable, addDbTableComment, updateDbTableComment, deleteDbTableComment } from '@/lib/db_table/actions';
 import type { FormUpsertProps } from '@/lib/db_table/types';
-import FormWithChildGrid from '../FormWithChildGrid';
-import AuditInfo from '../AuditInfo';
-import CommentListWrapper from '../CommentListWrapper';
+import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
+import AuditInfo from '@/components/_standard/AuditInfo';
+import CommentListWrapper from '@/components/_standard/CommentListWrapper';
 import { GridRowsProp } from '@mui/x-data-grid';
-  import FieldsDataGrid from '../FieldsDataGrid';
-  import { fields_columns } from '../db_table/column_def';
+import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';
+import { fields_columns } from '../db_table/column_def';
+import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({ src, isEdit, permissions, currentUserId, allDbTables = [], dbTablePermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const tf = useTranslations('Fields');
+  const te = useTranslations('EntityLabel');
+  const tc = useTranslations('Common');
   const [error, setError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
-
   const fieldsRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
@@ -40,6 +44,10 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
     regex: '',
     required: true,
     db_table_id: src.id,
+  });
+  const validationError = useFormValidation({
+    isEdit,
+    id: src.id,
   });
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -110,7 +118,7 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
   const formFields = (
     <>
       <TextField
-        label="Name"
+        label={tf('name')}
         inputRef={nameRef}
         defaultValue={src.name || ''}
         fullWidth
@@ -121,7 +129,7 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
         rows={undefined}
       />
       <TextField
-        label="Description"
+        label={tf('description')}
         inputRef={descriptionRef}
         defaultValue={src.description || ''}
         fullWidth
@@ -139,8 +147,9 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
         deleteDialogTitle="Delete Selected Fields?"
         deleteDialogMessage="Are you sure you want to delete the selected item(s)? This action cannot be undone."
         showTitle={true}
-        title="Fields"
+        title={tf('fields')}
       />
+      {validationError && <p style={{ color: 'red' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}
     </>
   );
@@ -148,21 +157,21 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
   return (
     <>
       <FormWithChildGrid
-        title={`${isEdit ? 'Edit' : 'Add'} Db Table`}
+        title={isEdit ? tc('editEntity', { entity: te('dbTable') }) : tc('addEntity', { entity: te('dbTable') })}
         isEdit={isEdit}
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={isEdit && canDelete ? handleDelete : undefined}
         onBack={handleBack}
-        deleteEntityLabel="Db Table"
-        submitButtonLabel="Save"
+        deleteEntityLabel={te('dbTable')}
+        submitButtonLabel={tc('save')}
         error={error}
       />
       {isEdit && (
         <CommentListWrapper
           comments={src.db_table_comments}
           showTitle={true}
-          title="Db Table Comments"
+          title={tf('dbTableComments')}
           currentUserId={currentUserId}
           permissions={{ create: permissions?.update ?? false, delete: permissions?.update ?? false }}
           onCreateComment={handleCreateComment}

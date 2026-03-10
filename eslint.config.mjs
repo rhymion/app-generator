@@ -20,7 +20,7 @@ const eslintConfig = defineConfig([
   },
   // Generator scripts and Cypress test infrastructure — relax strict TS rules.
   {
-    files: ["utils/scripts/**", "cypress/**", "cypress.config.ts"],
+    files: ["utils/scripts/**", "code_generator/**", "cypress/**", "cypress.config.ts"],
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-require-imports": "off",
