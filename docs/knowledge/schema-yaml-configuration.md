@@ -587,7 +587,7 @@ description  String?
 
 ### Timestamps
 
-Every entity that has `created_at` or `updated_at` in the YAML should have the Prisma defaults:
+The code generator assumes that every entity has `created_at` or `updated_at` while they are not explicitly stated in the YAML. So they should have the Prisma defaults:
 
 ```prisma
 created_at DateTime @default(now())
@@ -678,7 +678,7 @@ No Prisma-level enum type is needed; the generator treats them as plain scalars.
 
 ### `creator_id` / `updater_id`
 
-Every entity that should track who created/edited it must have these columns:
+Every entity that can be independently updated, which means an entity has `x-generate` or is referred with `x-outputType: comments` should track who created/edited it must have these columns:
 
 ```prisma
 creator_id String
