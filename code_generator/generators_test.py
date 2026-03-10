@@ -1,9 +1,7 @@
 """
 generators_test.py — Cypress E2E test code generation.
 
-Port of templates-test.ts to Python.
-
-Generates:
+Builds Jinja2 template contexts for:
   - cypress/support/{entity}/helper.ts  (Prisma data population helpers)
   - cypress/e2e/{entity}.cy.ts          (E2E test spec)
   - cypress/support/generated-tasks.ts  (task registry for cypress.config.ts)
@@ -482,21 +480,22 @@ def gen_child_full_datagrid_object(child_meta: dict) -> str:
     return '{ ' + ', '.join(entries) + ' }'
 
 
+
 # ---------------------------------------------------------------------------
-# generateTestHelper
+# Context builders (Jinja2 template contexts)
 # ---------------------------------------------------------------------------
 
-def generate_test_helper(
+def test_helper_context(
     parent: str,
     children: list,
     schema: dict,
     model_name: str,
     definition_key: str,
     generate_config: dict,
-) -> str:
+) -> dict:
     parent_def = schema['definitions'].get(model_name)
     if not parent_def or not parent_def.get('properties'):
-        return '// No properties found for entity\n'
+        return {}
 
     title = to_title_case(parent)
     pascal = to_pascal_case(parent)
@@ -513,166 +512,73 @@ def generate_test_helper(
     child_metas = analyze_children(children, schema, model_name)
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
 
-    lines = []
+    # Enrich deps with title and has_user_accounts
+    enriched_deps = []
+    for dep in deps:
+        dep_def = schema['definitions'].get(dep['target'] + '_detail', {})
+        x_rels = dep_def.get('x-relationships', {})
+        enriched_deps.append({
+            **dep,
+            'title': to_title_case(dep['target']),
+            'has_user_accounts': x_rels.get('user_accounts', {}).get('target') == 'user_account',
+        })
 
-    # Header
-    lines.append('// AUTO-GENERATED - DO NOT EDIT')
-    lines.append("import { prisma } from '../db-helpers';")
-    lines.append("import { TEST_CREDENTIALS } from '../test-credentials';")
-    lines.append('')
-
-    # getTestUser
-    lines.append('async function getTestUser() {')
-    lines.append('  const testUser = await prisma.user_account.findUnique({')
-    lines.append('    where: { email: TEST_CREDENTIALS.email },')
-    lines.append('  });')
-    lines.append("  if (!testUser) throw new Error('Test user not found. Make sure db:seed has run first.');")
-    lines.append('  return testUser;')
-    lines.append('}')
-    lines.append('')
-
-    # populateDependencies
-    lines.append(f'export async function populate{pascal}Dependencies() {{')
-    if not deps:
-        lines.append('  return {};')
-    else:
-        lines.append('  const testUser = await getTestUser();')
-        for dep in deps:
-            dep_def = schema['definitions'].get(dep['target'] + '_detail', {})
-            dep_title = to_title_case(dep['target'])
-            data_fields = [f"name: 'Test {dep_title}'"]
-            for fk in dep['fk_deps']:
-                data_fields.append(f"{fk['prop_name']}: {fk['dep_var_name']}.id")
-            data_fields.append('creator_id: testUser.id')
-            data_fields.append('updater_id: testUser.id')
-
-            x_rels = dep_def.get('x-relationships', {})
-            if x_rels.get('user_accounts', {}).get('target') == 'user_account':
-                data_fields.append(
-                    '\n      user_accounts: {\n'
-                    '        connect: [testUser.id].map((id) => ({ id }))\n'
-                    '      }\n   '
-                )
-
-            data_str = ', '.join(data_fields)
-            lines.append(f'  const {dep["var_name"]} = await prisma.{dep["target"]}.create({{')
-            lines.append(f'    data: {{ {data_str} }},')
-            lines.append('  });')
-
-        return_obj = ', '.join(d['var_name'] for d in deps)
-        lines.append(f'  return {{ {return_obj} }};')
-    lines.append('}')
-    lines.append('')
-
-    # populateData (required fields only)
-    lines.append(f'export async function populate{pascal}Data(length: number) {{')
-    lines.append('  const testUser = await getTestUser();')
-    if deps:
-        lines.append(f'  const deps = await populate{pascal}Dependencies();')
-    lines.append('  const records = [];')
-    lines.append('  for (let i = 1; i <= length; i++) {')
-    lines.append(f'    const record = await prisma.{model_name}.create({{')
-    lines.append('      data: {')
-
-    for field in required_field_metas:
-        if field['category'] == 'autocomplete':
-            dep = next((d for d in entity_fk_deps if d['prop_name'] == field['prop_name']), None)
-            if dep:
-                lines.append(f"        {field['prop_name']}: deps.{dep['dep_var_name']}.id,")
+    def _enrich_field_prisma(field: dict, entity_title: str) -> dict:
+        f = dict(field)
+        if f['category'] == 'autocomplete':
+            dep = next((d for d in entity_fk_deps if d['prop_name'] == f['prop_name']), None)
+            f['dep_var_name'] = dep['dep_var_name'] if dep else None
+            f['prisma_val'] = None
         else:
-            lines.append(f"        {field['prop_name']}: {prisma_value(field, 'i', title)},")
+            f['prisma_val'] = prisma_value(f, 'i', entity_title)
+            f['dep_var_name'] = None
+        return f
 
-    lines.append('        creator_id: testUser.id,')
-    lines.append('        updater_id: testUser.id,')
-    lines.append('      },')
-    lines.append('    });')
-    lines.append('    records.push(record);')
-    lines.append('  }')
-    lines.append('  // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results')
-    lines.append('  return JSON.parse(JSON.stringify(records));')
-    lines.append('}')
-    lines.append('')
+    required_fields_prisma = [_enrich_field_prisma(f, title) for f in required_field_metas]
+    all_fields_prisma = [_enrich_field_prisma(f, title) for f in fields]
 
-    # populateFullData (all fields)
-    if optional_field_metas:
-        lines.append(f'export async function populate{pascal}FullData(length: number) {{')
-        lines.append('  const testUser = await getTestUser();')
-        if deps:
-            lines.append(f'  const deps = await populate{pascal}Dependencies();')
-        lines.append('  const records = [];')
-        lines.append('  for (let i = 1; i <= length; i++) {')
-        lines.append(f'    const record = await prisma.{model_name}.create({{')
-        lines.append('      data: {')
-
-        for field in fields:
-            if field['category'] == 'autocomplete':
-                dep = next((d for d in entity_fk_deps if d['prop_name'] == field['prop_name']), None)
-                if dep:
-                    lines.append(f"        {field['prop_name']}: deps.{dep['dep_var_name']}.id,")
-            else:
-                lines.append(f"        {field['prop_name']}: {prisma_value(field, 'i', title)},")
-
-        lines.append('        creator_id: testUser.id,')
-        lines.append('        updater_id: testUser.id,')
-        lines.append('      },')
-        lines.append('    });')
-        lines.append('    records.push(record);')
-        lines.append('  }')
-        lines.append('  // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results')
-        lines.append('  return JSON.parse(JSON.stringify(records));')
-        lines.append('}')
-        lines.append('')
-    else:
-        lines.append(f'export const populate{pascal}FullData = populate{pascal}Data;')
-        lines.append('')
-
-    # Child populate functions (one-to-many DataGrid children)
+    enriched_datagrid_children = []
     for child_meta in datagrid_children:
         child_name = child_meta['child']['name']
         child_pascal = to_pascal_case(child_name)
         child_title = to_title_case(child_name)
         child_def = schema['definitions'].get(child_name, {})
+        child_fields_prisma = [
+            {**f, 'prisma_val': prisma_value(f, 'i', child_title)}
+            for f in child_meta['fields']
+        ]
+        enriched_datagrid_children.append({
+            'model_name': child_name,
+            'pascal': child_pascal,
+            'parent_fk_prop': child_meta['parent_fk_prop'],
+            'has_order': bool(child_def.get('properties', {}).get('order')),
+            'fields_prisma': child_fields_prisma,
+        })
 
-        lines.append(f'export async function populate{pascal}{child_pascal}Data(parentId: string, length: number) {{')
-        lines.append('  const records = [];')
-        lines.append('  for (let i = 1; i <= length; i++) {')
-        lines.append(f'    const record = await prisma.{child_name}.create({{')
-        lines.append('      data: {')
-        lines.append(f'        {child_meta["parent_fk_prop"]}: parentId,')
-
-        if child_def.get('properties', {}).get('order'):
-            lines.append('        order: i,')
-
-        for field in child_meta['fields']:
-            lines.append(f"        {field['prop_name']}: {prisma_value(field, 'i', child_title)},")
-
-        lines.append('      },')
-        lines.append('    });')
-        lines.append('    records.push(record);')
-        lines.append('  }')
-        lines.append('  // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results')
-        lines.append('  return JSON.parse(JSON.stringify(records));')
-        lines.append('}')
-        lines.append('')
-
-    return '\n'.join(lines) + '\n'
+    return {
+        'pascal': pascal,
+        'title': title,
+        'model_name': model_name,
+        'deps': enriched_deps,
+        'deps_return': ', '.join(d['var_name'] for d in deps),
+        'required_fields_prisma': required_fields_prisma,
+        'all_fields_prisma': all_fields_prisma,
+        'has_optional': bool(optional_field_metas),
+        'datagrid_children': enriched_datagrid_children,
+    }
 
 
-# ---------------------------------------------------------------------------
-# generateTestSpec
-# ---------------------------------------------------------------------------
-
-def generate_test_spec(
+def test_spec_context(
     parent: str,
     children: list,
     schema: dict,
     model_name: str,
     definition_key: str,
     generate_config: dict,
-) -> str:
+) -> dict:
     parent_def = schema['definitions'].get(model_name)
     if not parent_def or not parent_def.get('properties'):
-        return '// No properties found for entity\n'
+        return {}
 
     title = to_title_case(parent)
     pascal = to_pascal_case(parent)
@@ -690,12 +596,6 @@ def generate_test_spec(
     child_metas = analyze_children(children, schema, model_name)
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
     list_children = [c for c in child_metas if c['render_type'] in ('editable-list-text', 'editable-list-autocomplete')]
-    has_children = bool(child_metas)
-    has_datagrid_children = bool(datagrid_children)
-
-    # Indent inside .then() wrapper vs direct
-    I = '        ' if has_deps else '      '
-    has_optional = bool(optional_field_metas)
 
     can_list   = generate_config.get('list', True)
     can_new    = generate_config.get('new', True)
@@ -703,521 +603,197 @@ def generate_test_spec(
     can_delete = generate_config.get('delete', True)
     can_view   = generate_config.get('view', True)
 
-    lines = []
-
-    # Imports
-    lines.append('// AUTO-GENERATED - DO NOT EDIT')
-    lines.append("import { TEST_CREDENTIALS } from '../support/test-credentials';")
-    if has_datagrid_children:
-        lines.append("import { fillDataGridRow, assertDataGridEmpty, getDataGridRowCount, assertDataGridRowData } from '../support/datagrid-helpers';")
-    else:
-        lines.append("import { assertDataGridEmpty, getDataGridRowCount } from '../support/datagrid-helpers';")
-    lines.append('')
-
-    # Main describe
-    lines.append(f"describe('Testing {title} pages and their behavior', () => {{")
-
-    # beforeEach
-    lines.append("  beforeEach(() => {")
-    lines.append("    cy.task('db:reset');")
-    lines.append("    cy.task('db:seed');")
-    lines.append("    Cypress.session.clearAllSavedSessions();")
-    lines.append("    cy.clearCookies();")
-    lines.append("    cy.clearLocalStorage();")
-    lines.append("    cy.visit('/en/');")
-    lines.append("    cy.window().then((win) => { win.sessionStorage.clear(); });")
-    lines.append("    cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);")
-    lines.append("  });")
-    lines.append('')
-
-    # ---- 1. Display list ----
-    if can_list:
-        lines.append("  describe('Display list', () => {")
-
-        lines.append("    it('1.1 shows empty state with no items', () => {")
-        lines.append(f"      cy.visit('/en/{parent}');")
-        lines.append("      assertDataGridEmpty();")
-        lines.append("    });")
-        lines.append('')
-
-        lines.append("    it('1.2 shows list with one item', () => {")
-        lines.append(f"      cy.task('db:populate{pascal}', 1);")
-        lines.append(f"      cy.visit('/en/{parent}');")
-        lines.append(f"      cy.contains('{title} 1').should('be.visible');")
-        lines.append("      getDataGridRowCount().should('eq', 1);")
-        lines.append("    });")
-        lines.append('')
-
-        lines.append("    it('1.3 shows list with multiple items', () => {")
-        lines.append(f"      cy.task('db:populate{pascal}', 3);")
-        lines.append(f"      cy.visit('/en/{parent}');")
-        lines.append(f"      cy.contains('{title} 1').should('be.visible');")
-        lines.append("      getDataGridRowCount().should('eq', 3);")
-        lines.append("    });")
-
-        lines.append("  });")
-        lines.append('')
-
-    # ---- 2. Create ----
-    if can_new:
-        lines.append("  describe('Create', () => {")
-
-        # 2.1 minimal data
-        lines.append("    it('2.1 creates with minimal data (required fields only)', () => {")
-        if has_deps:
-            lines.append(f"      cy.task<any>('db:populate{pascal}Dependencies').then((deps) => {{")
-        lines.append(f"{I}cy.visit('/en/{parent}');")
-        lines.append(f"{I}cy.clickButton('Create New {title}');")
-
-        for line in gen_fill_commands(required_field_metas, title, I):
-            lines.append(line)
-
-        # Add required DataGrid children
-        detail_def = schema['definitions'].get(definition_key, {})
-        detail_required: list = list(detail_def.get('required') or [])
-        for item in detail_def.get('allOf', []):
-            if item.get('required'):
-                detail_required.extend(item['required'])
-
-        for child_meta in datagrid_children:
-            if child_meta['child']['property_name'] in detail_required:
-                child_title = child_meta['names']['title']
-                lines.append(f"{I}// Add required child: {child_title}")
-                lines.append(f"{I}cy.clickButton('Add {child_title}');")
-                lines.append(f"{I}fillDataGridRow(0, {gen_child_datagrid_object(child_meta, 'create')});")
-
-        lines.append(f"{I}cy.clickButton('Save');")
-        lines.append(f"{I}cy.url().should('include', '/{parent}');")
-        lines.append(f"{I}cy.contains('Test {title}').should('be.visible');")
-
-        if can_view:
-            lines.append(f"{I}// Verify on view page")
-            lines.append(f"{I}cy.contains('Test {title}').click();")
-            lines.append(f"{I}cy.url().should('include', '/{parent}/view');")
-            for line in gen_assert_commands([f for f in required_field_metas if f['category'] != 'boolean'], title, I):
-                lines.append(line)
-
-        if has_deps:
-            lines.append("      });")
-        lines.append("    });")
-        lines.append('')
-
-        # 2.2 full data
-        lines.append("    it('2.2 creates with full data (all fields and children)', () => {")
-        if has_deps:
-            lines.append(f"      cy.task<any>('db:populate{pascal}Dependencies').then((deps) => {{")
-
-        for child_meta in list_children:
-            rel = child_meta['child'].get('relationship') or {}
-            if child_meta['render_type'] == 'editable-list-autocomplete' and rel.get('target'):
-                target = rel['target']
-                if target != model_name:
-                    target_pascal = to_pascal_case(target)
-                    lines.append(f"{I}cy.task('db:populate{target_pascal}', 2);")
-
-        lines.append(f"{I}cy.visit('/en/{parent}');")
-        lines.append(f"{I}cy.clickButton('Create New {title}');")
-
-        for line in gen_fill_commands(fields, title, I):
-            lines.append(line)
-
-        for child_meta in datagrid_children:
-            child_title = child_meta['names']['title']
-            lines.append(f"{I}// Add child: {child_title}")
-            lines.append(f"{I}cy.clickButton('Add {child_title}');")
-            lines.append(f"{I}fillDataGridRow(0, {gen_child_full_datagrid_object(child_meta)});")
-
-        for child_meta in list_children:
-            rel = child_meta['child'].get('relationship') or {}
-            singular_pascal = child_meta['names']['singular_pascal_name']
-            child_title = child_meta['names']['title']
-            if child_meta['render_type'] == 'editable-list-text':
-                lines.append(f"{I}// Add list item: {child_title}")
-                lines.append(f"{I}cy.clickButton('Add {singular_pascal}');")
-                lines.append(f"{I}cy.get('div[role=\"dialog\"]').find('input').type('Test {child_title} Item');")
-                lines.append(f"{I}cy.get('div[role=\"dialog\"]').find('button').contains('Add').click();")
-            elif child_meta['render_type'] == 'editable-list-autocomplete' and rel.get('target'):
-                target_title = to_title_case(rel['target'])
-                lines.append(f"{I}// Add list item: {child_title}")
-                lines.append(f"{I}cy.clickButton('Add {singular_pascal}');")
-                lines.append(f"{I}cy.get('div[role=\"dialog\"]').find('input').type('{target_title} 1');")
-                lines.append(f"{I}cy.get('.MuiAutocomplete-popper li').contains('{target_title} 1').click();")
-                lines.append(f"{I}cy.get('div[role=\"dialog\"]').find('button').contains('Add').click();")
-
-        lines.append(f"{I}cy.clickButton('Save');")
-        lines.append(f"{I}cy.url().should('include', '/{parent}');")
-        lines.append(f"{I}cy.contains('Test {title}').should('be.visible');")
-
-        if can_view:
-            lines.append(f"{I}// Verify on view page")
-            lines.append(f"{I}cy.contains('Test {title}').click();")
-            lines.append(f"{I}cy.url().should('include', '/{parent}/view');")
-            for line in gen_assert_commands([f for f in fields if f['category'] != 'boolean'], title, I):
-                lines.append(line)
-
-        if has_deps:
-            lines.append("      });")
-        lines.append("    });")
-
-        lines.append("  });")
-        lines.append('')
-
-    # ---- 3. Edit ----
-    if can_edit:
-        lines.append("  describe('Edit', () => {")
-
-        # 3.1 Add optional data
-        if has_optional or has_children:
-            lines.append("    it('3.1 adds optional data and child items', () => {")
-            lines.append(f"      cy.task<any[]>('db:populate{pascal}', 1).then((records) => {{")
-
-            for child_meta in list_children:
-                rel = child_meta['child'].get('relationship') or {}
-                if child_meta['render_type'] == 'editable-list-autocomplete' and rel.get('target'):
-                    target = rel['target']
-                    if target != model_name:
-                        target_pascal = to_pascal_case(target)
-                        lines.append(f"        cy.task('db:populate{target_pascal}', 2);")
-
-            lines.append(f"        cy.visit('/en/{parent}');")
-            lines.append(f"        cy.contains('{title} 1').click();")
-            lines.append("        cy.get('[aria-label=\"Edit\"]').click();")
-            lines.append(f"        cy.url().should('include', '/{parent}/edit');")
-
-            for field in optional_field_metas:
-                if field['category'] != 'autocomplete':
-                    value = cypress_create_value(field, title)
-                    lines.append(gen_fill_command(field, value, '        '))
-
-            for child_meta in datagrid_children:
-                child_title = child_meta['names']['title']
-                lines.append(f"        // Add child: {child_title}")
-                lines.append(f"        cy.clickButton('Add {child_title}');")
-                lines.append(f"        fillDataGridRow(0, {gen_child_datagrid_object(child_meta, 'create')});")
-
-            for child_meta in list_children:
-                rel = child_meta['child'].get('relationship') or {}
-                singular_pascal = child_meta['names']['singular_pascal_name']
-                child_title = child_meta['names']['title']
-                if child_meta['render_type'] == 'editable-list-text':
-                    lines.append(f"        cy.clickButton('Add {singular_pascal}');")
-                    lines.append(f"        cy.get('div[role=\"dialog\"]').find('input').type('Test {child_title} Item');")
-                    lines.append(f"        cy.get('div[role=\"dialog\"]').find('button').contains('Add').click();")
-                elif child_meta['render_type'] == 'editable-list-autocomplete' and rel.get('target'):
-                    target_title = to_title_case(rel['target'])
-                    lines.append(f"        cy.clickButton('Add {singular_pascal}');")
-                    lines.append(f"        cy.get('div[role=\"dialog\"]').find('input').type('{target_title} 1');")
-                    lines.append(f"        cy.get('.MuiAutocomplete-popper li').contains('{target_title} 1').click();")
-                    lines.append(f"        cy.get('div[role=\"dialog\"]').find('button').contains('Add').click();")
-
-            lines.append("        cy.clickButton('Save');")
-            lines.append(f"        cy.url().should('include', '/{parent}');")
-            lines.append(f"        cy.contains('{title} 1').should('be.visible');")
-
-            if can_view:
-                lines.append("        // Verify on view page")
-                lines.append(f"        cy.contains('{title} 1').click();")
-                lines.append(f"        cy.url().should('include', '/{parent}/view');")
-                lines.append("        cy.checkField('Name', '" + f"{title} 1" + "');")
-
-            lines.append("      });")
-            lines.append("    });")
-            lines.append('')
-
-        # 3.2 Remove optional data
-        if has_optional or has_children:
-            lines.append("    it('3.2 removes optional data and child items', () => {")
-            if optional_field_metas:
-                lines.append(f"      cy.task<any[]>('db:populate{pascal}Full', 1).then((records) => {{")
-            else:
-                lines.append(f"      cy.task<any[]>('db:populate{pascal}', 1).then((records) => {{")
-
-            for child_meta in datagrid_children:
-                child_pascal = to_pascal_case(child_meta['child']['name'])
-                lines.append(f"        cy.task('db:populate{pascal}{child_pascal}', {{ parentId: records[0].id, length: 1 }});")
-
-            lines.append(f"        cy.visit('/en/{parent}');")
-            lines.append(f"        cy.contains('{title} 1').click();")
-            lines.append("        cy.get('[aria-label=\"Edit\"]').click();")
-            lines.append(f"        cy.url().should('include', '/{parent}/edit');")
-
-            for field in optional_field_metas:
-                if field['category'] != 'autocomplete':
-                    lines.append(gen_clear_command(field, '        '))
-
-            for child_meta in datagrid_children:
-                child_title = child_meta['names']['title']
-                lines.append(f"        // Delete child: {child_title}")
-                lines.append("        cy.selectDataGridRows([0]);")
-                lines.append(f"        cy.contains('h2', '{child_title}').parent().find('button[aria-label=\"Delete Selected\"]').click();")
-                lines.append("        cy.get('div[role=\"dialog\"]').find('button').contains('Delete').click();")
-
-            lines.append("        cy.clickButton('Save');")
-            lines.append(f"        cy.url().should('include', '/{parent}');")
-            lines.append(f"        cy.contains('{title} 1').should('be.visible');")
-
-            lines.append("      });")
-            lines.append("    });")
-            lines.append('')
-
-        # 3.3 Mixed changes
-        lines.append("    it('3.3 edits with mixed changes', () => {")
-        lines.append(f"      cy.task<any[]>('db:populate{pascal}', 1).then((records) => {{")
-        lines.append(f"        cy.visit('/en/{parent}');")
-        lines.append(f"        cy.contains('{title} 1').click();")
-        lines.append("        cy.get('[aria-label=\"Edit\"]').click();")
-        lines.append(f"        cy.clearAndFillField('Name', 'Updated {title}');")
-
-        if optional_field_metas:
-            first_opt = optional_field_metas[0]
-            if first_opt['category'] != 'autocomplete':
-                value = cypress_edit_value(first_opt, title)
-                lines.append(gen_fill_command(first_opt, value, '        '))
-
-        lines.append("        cy.clickButton('Save');")
-        lines.append(f"        cy.url().should('include', '/{parent}');")
-        lines.append(f"        cy.contains('Updated {title}').should('be.visible');")
-
-        if can_view:
-            lines.append("        // Verify on view page")
-            lines.append(f"        cy.contains('Updated {title}').click();")
-            lines.append(f"        cy.url().should('include', '/{parent}/view');")
-            lines.append(f"        cy.checkField('Name', 'Updated {title}');")
-
-        lines.append("      });")
-        lines.append("    });")
-
-        lines.append("  });")
-        lines.append('')
-
-    # ---- 4. Delete ----
-    if can_delete:
-        lines.append("  describe('Delete', () => {")
-
-        if can_list:
-            lines.append("    it('4.1 deletes a single item from list view', () => {")
-            lines.append(f"      cy.task('db:populate{pascal}', 2);")
-            lines.append(f"      cy.visit('/en/{parent}');")
-            lines.append("      cy.selectDataGridRows([0]);")
-            lines.append("      cy.get('div').find('button[aria-label=\"Delete Selected\"]').click();")
-            lines.append("      cy.get('div[role=\"dialog\"]').find('button').contains('Delete').click();")
-            lines.append("      getDataGridRowCount().should('eq', 1);")
-            lines.append("    });")
-            lines.append('')
-
-            lines.append("    it('4.2 deletes multiple items from list view', () => {")
-            lines.append(f"      cy.task('db:populate{pascal}', 3);")
-            lines.append(f"      cy.visit('/en/{parent}');")
-            lines.append("      cy.selectDataGridRows([0, 1]);")
-            lines.append("      cy.get('div').find('button[aria-label=\"Delete Selected\"]').click();")
-            lines.append("      cy.get('div[role=\"dialog\"]').find('button').contains('Delete').click();")
-            lines.append("      getDataGridRowCount().should('eq', 1);")
-            lines.append("    });")
-            lines.append('')
-
-        if can_edit:
-            lines.append("    it('4.3 deletes an item from edit page', () => {")
-            lines.append(f"      cy.task('db:populate{pascal}', 1);")
-            lines.append(f"      cy.visit('/en/{parent}');")
-            lines.append(f"      cy.contains('{title} 1').click();")
-            lines.append("      cy.get('[aria-label=\"Edit\"]').click();")
-            lines.append(f"      cy.url().should('include', '/{parent}/edit');")
-            lines.append(f"      cy.clickButton('Delete {title}');")
-            lines.append("      cy.get('div[role=\"dialog\"]').find('button').contains('Delete').click();")
-            lines.append(f"      cy.url().should('include', '/{parent}');")
-            lines.append(f"      cy.contains('{title} 1').should('not.exist');")
-            lines.append("    });")
-
-        lines.append("  });")
-        lines.append('')
-
-    # ---- 5. Fail create ----
-    if can_new:
-        lines.append("  describe('Fail create', () => {")
-
-        if non_autocomplete_required:
-            field_to_skip = next(
-                (f for f in non_autocomplete_required if f['prop_name'] == 'name'),
-                non_autocomplete_required[0],
-            )
-            fields_to_fill = [f for f in required_field_metas if f['prop_name'] != field_to_skip['prop_name']]
-
-            lines.append("    it('5.1 fails when required parent field is missing', () => {")
-            if has_deps:
-                lines.append(f"      cy.task<any>('db:populate{pascal}Dependencies').then((deps) => {{")
-            lines.append(f"{I}cy.visit('/en/{parent}/new');")
-
-            for line in gen_fill_commands(fields_to_fill, title, I):
-                lines.append(line)
-
-            lines.append(f"{I}cy.clickButton('Save');")
-            lines.append(f"{I}cy.url().should('include', '/{parent}/new');")
-
-            if has_deps:
-                lines.append("      });")
-            lines.append("    });")
-            lines.append('')
-
-        # 5.2 required child field missing
-        children_with_required = [c for c in datagrid_children if c['required_fields']]
-        if children_with_required:
-            test_child = children_with_required[0]
-            req_child_fields = test_child['required_fields']
-            if len(req_child_fields) > 1:
-                skip_field = req_child_fields[-1]
-                partial_fields = [f for f in req_child_fields if f['prop_name'] != skip_field['prop_name']]
-                partial_obj = []
-                for field in partial_fields:
-                    value = cypress_create_value(field, test_child['names']['title'])
-                    if field['category'] in ('boolean', 'number'):
-                        partial_obj.append(f"{field['prop_name']}: {value}")
-                    else:
-                        partial_obj.append(f"{field['prop_name']}: '{value}'")
-
-                lines.append("    it('5.2 fails when required child field is missing', () => {")
-                if has_deps:
-                    lines.append(f"      cy.task<any>('db:populate{pascal}Dependencies').then((deps) => {{")
-                lines.append(f"{I}cy.visit('/en/{parent}/new');")
-
-                for line in gen_fill_commands(required_field_metas, title, I):
-                    lines.append(line)
-
-                child_title = test_child['names']['title']
-                lines.append(f"{I}cy.clickButton('Add {child_title}');")
-                lines.append(f"{I}fillDataGridRow(0, {{ {', '.join(partial_obj)} }});")
-                lines.append(f"{I}cy.clickButton('Save');")
-                lines.append(f"{I}cy.url().should('include', '/{parent}/new');")
-
-                if has_deps:
-                    lines.append("      });")
-                lines.append("    });")
-
-        lines.append("  });")
-        lines.append('')
-
-    # ---- 6. Fail edit ----
-    if can_edit:
-        lines.append("  describe('Fail edit', () => {")
-
-        if non_autocomplete_required:
-            field_to_clear = next(
-                (f for f in non_autocomplete_required if f['prop_name'] == 'name'),
-                non_autocomplete_required[0],
-            )
-
-            lines.append("    it('6.1 fails when required parent field is cleared', () => {")
-            lines.append(f"      cy.task('db:populate{pascal}', 1);")
-            lines.append(f"      cy.visit('/en/{parent}');")
-            lines.append(f"      cy.contains('{title} 1').click();")
-            lines.append("      cy.get('[aria-label=\"Edit\"]').click();")
-            lines.append(gen_clear_command(field_to_clear, '      '))
-            lines.append("      cy.clickButton('Save');")
-            lines.append(f"      cy.url().should('include', '/{parent}/edit');")
-            lines.append("    });")
-            lines.append('')
-
-        # 6.2 required child field cleared
-        children_with_req = [c for c in datagrid_children if c['required_fields']]
-        if children_with_req:
-            test_child = children_with_req[0]
-            child_pascal = to_pascal_case(test_child['child']['name'])
-            field_to_clear = next(
-                (f for f in test_child['required_fields'] if f['category'] == 'text'),
-                test_child['required_fields'][0],
-            )
-
-            lines.append("    it('6.2 fails when required child field is cleared', () => {")
-            lines.append(f"      cy.task<any[]>('db:populate{pascal}', 1).then((records) => {{")
-            lines.append(f"        cy.task('db:populate{pascal}{child_pascal}', {{ parentId: records[0].id, length: 1 }});")
-            lines.append(f"        cy.visit('/en/{parent}');")
-            lines.append(f"        cy.contains('{title} 1').click();")
-            lines.append("        cy.get('[aria-label=\"Edit\"]').click();")
-            lines.append("        // Clear required child field")
-            lines.append(f"        cy.get('div[role=\"row\"][data-rowindex=\"0\"]').find('div[data-field=\"{field_to_clear['prop_name']}\"]').dblclick();")
-            lines.append(f"        cy.get('div[role=\"row\"][data-rowindex=\"0\"]').find('div[data-field=\"{field_to_clear['prop_name']}\"] input').clear().type('{{enter}}');")
-            lines.append("        cy.clickButton('Save');")
-            lines.append(f"        cy.url().should('include', '/{parent}/edit');")
-            lines.append("      });")
-            lines.append("    });")
-
-        lines.append("  });")
-
-    lines.append('});')
-    lines.append('')
-
-    return '\n'.join(lines)
-
-
-# ---------------------------------------------------------------------------
-# generateTestTasksRegistry
-# ---------------------------------------------------------------------------
-
-def generate_test_tasks_registry(entities: list, schema: dict) -> str:
-    """Port of generateTestTasksRegistry().
+    # Indentation for .then((deps) => {}) wrapper in sections 2 and 5
+    I = '        ' if has_deps else '      '
+
+    # Pre-compute fill/assert command lists (indent already baked in)
+    required_fill_cmds = gen_fill_commands(required_field_metas, title, I)
+    all_fill_cmds = gen_fill_commands(fields, title, I)
+    required_assert_cmds_no_bool = gen_assert_commands(
+        [f for f in required_field_metas if f['category'] != 'boolean'], title, I)
+    all_assert_cmds_no_bool = gen_assert_commands(
+        [f for f in fields if f['category'] != 'boolean'], title, I)
+
+    # detail_required: which children are required in the parent form
+    detail_def = schema['definitions'].get(definition_key, {})
+    detail_required: list = list(detail_def.get('required') or [])
+    for item in detail_def.get('allOf', []):
+        if item.get('required'):
+            detail_required.extend(item['required'])
+
+    # Datagrid children data
+    datagrid_children_data = []
+    for child_meta in datagrid_children:
+        child_name = child_meta['child']['name']
+        datagrid_children_data.append({
+            'title': child_meta['names']['title'],
+            'pascal': to_pascal_case(child_name),
+            'is_required_in_parent': child_meta['child']['property_name'] in detail_required,
+            'create_obj': gen_child_datagrid_object(child_meta, 'create'),
+            'full_create_obj': gen_child_full_datagrid_object(child_meta),
+        })
+
+    # List children data
+    list_children_data = []
+    for child_meta in list_children:
+        rel = child_meta['child'].get('relationship') or {}
+        rel_target = rel.get('target', '')
+        list_children_data.append({
+            'singular_pascal': child_meta['names']['singular_pascal_name'],
+            'title': child_meta['names']['title'],
+            'render_type': child_meta['render_type'],
+            'rel_target': rel_target,
+            'rel_target_title': to_title_case(rel_target) if rel_target else '',
+            'target_pascal': to_pascal_case(rel_target) if rel_target else '',
+            'is_external_target': bool(rel_target and rel_target != model_name),
+        })
+
+    # Section 3.1: optional fill commands (8-space indent, non-autocomplete only)
+    opt_fill_cmds_3_1 = [
+        gen_fill_command(f, cypress_create_value(f, title), '        ')
+        for f in optional_field_metas
+        if f['category'] != 'autocomplete'
+    ]
+
+    # Section 3.2: optional clear commands (8-space indent, non-autocomplete only)
+    opt_clear_cmds_3_2 = [
+        gen_clear_command(f, '        ')
+        for f in optional_field_metas
+        if f['category'] != 'autocomplete'
+    ]
+
+    # Section 3.3: edit value for first non-autocomplete optional field
+    edit_fill_cmd_3_3 = None
+    if optional_field_metas:
+        first_opt = optional_field_metas[0]
+        if first_opt['category'] != 'autocomplete':
+            edit_fill_cmd_3_3 = gen_fill_command(first_opt, cypress_edit_value(first_opt, title), '        ')
+
+    # Section 5.1: fill all required fields except one
+    fail_create_5_1 = None
+    if non_autocomplete_required:
+        field_to_skip = next(
+            (f for f in non_autocomplete_required if f['prop_name'] == 'name'),
+            non_autocomplete_required[0],
+        )
+        fields_to_fill_5_1 = [f for f in required_field_metas if f['prop_name'] != field_to_skip['prop_name']]
+        fail_create_5_1 = {'fill_cmds': gen_fill_commands(fields_to_fill_5_1, title, I)}
+
+    # Section 5.2: required child field missing
+    fail_create_5_2 = None
+    children_with_required = [c for c in datagrid_children if c['required_fields']]
+    if children_with_required:
+        test_child = children_with_required[0]
+        req_child_fields = test_child['required_fields']
+        if len(req_child_fields) > 1:
+            skip_field = req_child_fields[-1]
+            partial_fields = [f for f in req_child_fields if f['prop_name'] != skip_field['prop_name']]
+            partial_entries = []
+            for field in partial_fields:
+                value = cypress_create_value(field, test_child['names']['title'])
+                if field['category'] in ('boolean', 'number'):
+                    partial_entries.append(f"{field['prop_name']}: {value}")
+                else:
+                    partial_entries.append(f"{field['prop_name']}: '{value}'")
+            fail_create_5_2 = {
+                'title': test_child['names']['title'],
+                'partial_obj': '{ ' + ', '.join(partial_entries) + ' }',
+                'fill_cmds': gen_fill_commands(required_field_metas, title, I),
+            }
+
+    # Section 6.1: clear a required field
+    fail_edit_6_1 = None
+    if non_autocomplete_required:
+        field_to_clear = next(
+            (f for f in non_autocomplete_required if f['prop_name'] == 'name'),
+            non_autocomplete_required[0],
+        )
+        fail_edit_6_1 = {'clear_cmd': gen_clear_command(field_to_clear, '      ')}
+
+    # Section 6.2: clear required child field
+    fail_edit_6_2 = None
+    children_with_req = [c for c in datagrid_children if c['required_fields']]
+    if children_with_req:
+        test_child = children_with_req[0]
+        child_field_to_clear = next(
+            (f for f in test_child['required_fields'] if f['category'] == 'text'),
+            test_child['required_fields'][0],
+        )
+        fail_edit_6_2 = {
+            'child_pascal': to_pascal_case(test_child['child']['name']),
+            'field_prop_name': child_field_to_clear['prop_name'],
+        }
+
+    return {
+        'parent': parent,
+        'pascal': pascal,
+        'title': title,
+        'model_name': model_name,
+        'can_list': can_list,
+        'can_new': can_new,
+        'can_edit': can_edit,
+        'can_delete': can_delete,
+        'can_view': can_view,
+        'has_deps': has_deps,
+        'has_optional': bool(optional_field_metas),
+        'has_children': bool(child_metas),
+        'has_datagrid_children': bool(datagrid_children),
+        'I': I,
+        'required_fill_cmds': required_fill_cmds,
+        'all_fill_cmds': all_fill_cmds,
+        'required_assert_cmds_no_bool': required_assert_cmds_no_bool,
+        'all_assert_cmds_no_bool': all_assert_cmds_no_bool,
+        'datagrid_children_data': datagrid_children_data,
+        'list_children_data': list_children_data,
+        'opt_fill_cmds_3_1': opt_fill_cmds_3_1,
+        'opt_clear_cmds_3_2': opt_clear_cmds_3_2,
+        'edit_fill_cmd_3_3': edit_fill_cmd_3_3,
+        'fail_create_5_1': fail_create_5_1,
+        'fail_create_5_2': fail_create_5_2,
+        'fail_edit_6_1': fail_edit_6_1,
+        'fail_edit_6_2': fail_edit_6_2,
+    }
+
+
+def test_tasks_registry_context(entities: list, schema: dict) -> dict:
+    """Build context for the generated-tasks.ts registry template.
 
     `entities` is a list of dicts: {parent, model_name, children}.
     """
-    lines = []
-    lines.append('// AUTO-GENERATED - DO NOT EDIT')
-    lines.append('// Import this in cypress.config.ts and spread into on(\'task\', { ...getGeneratedTasks() })')
-    lines.append('')
-    lines.append('export function getGeneratedTasks() {')
-    lines.append('  return {')
-
+    enriched_entities = []
     for entity in entities:
-        pascal = to_pascal_case(entity['parent'])
-        helper_path = f'./{entity["parent"]}/helper'
-
-        lines.append(f"    async 'db:populate{pascal}Dependencies'() {{")
-        lines.append(f"      const {{ populate{pascal}Dependencies }} = require('{helper_path}');")
-        lines.append(f"      return await populate{pascal}Dependencies();")
-        lines.append("    },")
-
-        lines.append(f"    async 'db:populate{pascal}'(length: number) {{")
-        lines.append(f"      const {{ populate{pascal}Data }} = require('{helper_path}');")
-        lines.append(f"      return await populate{pascal}Data(length);")
-        lines.append("    },")
-
-        lines.append(f"    async 'db:populate{pascal}Full'(length: number) {{")
-        lines.append(f"      const {{ populate{pascal}FullData }} = require('{helper_path}');")
-        lines.append(f"      return await populate{pascal}FullData(length);")
-        lines.append("    },")
-
+        parent = entity['parent']
+        pascal = to_pascal_case(parent)
         child_metas = analyze_children(entity['children'], schema, entity['model_name'])
         datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
-
-        for child_meta in datagrid_children:
-            child_pascal = to_pascal_case(child_meta['child']['name'])
-            lines.append(f"    async 'db:populate{pascal}{child_pascal}'(params: {{ parentId: string; length?: number }}) {{")
-            lines.append(f"      const {{ populate{pascal}{child_pascal}Data }} = require('{helper_path}');")
-            lines.append(f"      return await populate{pascal}{child_pascal}Data(params.parentId, params.length || 1);")
-            lines.append("    },")
-
-    lines.append('  };')
-    lines.append('}')
-    lines.append('')
-
-    return '\n'.join(lines)
+        enriched_entities.append({
+            'parent': parent,
+            'pascal': pascal,
+            'helper_path': f'./{parent}/helper',
+            'datagrid_children': [
+                {'pascal': to_pascal_case(c['child']['name'])}
+                for c in datagrid_children
+            ],
+        })
+    return {'entities': enriched_entities}
 
 
-# ---------------------------------------------------------------------------
-# generateApiTestSpec
-# ---------------------------------------------------------------------------
-
-def generate_api_test_spec(
+def test_api_spec_context(
     parent: str,
     children: list,
     schema: dict,
     model_name: str | None = None,
     definition_key: str | None = None,
     generate_config: dict | None = None,
-) -> str:
+) -> dict:
     model = model_name or parent
     parent_pascal = to_pascal_case(parent)
     title = to_title_case(parent)
+    api_path = f'/api/{parent}'
+
     model_def = schema['definitions'].get(model)
     if not model_def:
-        return ''
+        return {}
 
     gen_cfg = generate_config or {}
     filtered_props = filter_fields(model_def.get('properties') or {}, gen_cfg.get('fields'))
@@ -1233,13 +809,14 @@ def generate_api_test_spec(
     child_metas = analyze_children(children, schema, model)
     api_child_metas = [c for c in child_metas if c['render_type'] != 'file']
 
-    # PUT body props: all filtered props except id/created_at/updated_at/creator_id
     put_body_props = [
         k for k in filtered_props
         if k not in ('id', 'created_at', 'updated_at', 'creator_id')
     ]
 
-    def build_post_body_lines(name_val: str | None, indent: str) -> list[str]:
+    I = '        ' if has_deps else '      '
+
+    def _post_body(name_val: str | None, indent: str) -> list[str]:
         out = []
         for field in all_field_metas:
             if not field['required']:
@@ -1257,7 +834,7 @@ def generate_api_test_spec(
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
-    def build_put_body_lines(name_val: str, indent: str) -> list[str]:
+    def _put_body(name_val: str, indent: str) -> list[str]:
         out = []
         for prop in put_body_props:
             if prop == 'name':
@@ -1268,220 +845,22 @@ def generate_api_test_spec(
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
-    lines = []
-    api_path = f'/api/{parent}'
-
-    lines.append('// AUTO-GENERATED - DO NOT EDIT')
-    lines.append("import { TEST_API_KEY } from '../../support/test-credentials';")
-    lines.append('')
-    lines.append(f"const API_BASE = '{api_path}';")
-    lines.append('')
-    lines.append(f"describe('API: {title}', () => {{")
-    lines.append("  beforeEach(() => {")
-    lines.append("    cy.task('db:reset');")
-    lines.append("    cy.task('db:seed');")
-    lines.append("  });")
-    lines.append('')
-
-    # --- 1. GET list ---
-    if gen_cfg.get('list', True) is not False:
-        lines.append(f"  describe('GET {api_path}', () => {{")
-        lines.append("    it('1.1 returns empty list when no items', () => {")
-        lines.append("      cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })")
-        lines.append("        .then((res) => {")
-        lines.append("          expect(res.status).to.eq(200);")
-        lines.append("          expect(res.body).to.deep.eq([]);")
-        lines.append("        });")
-        lines.append("    });")
-        lines.append('')
-        lines.append("    it('1.2 returns list with items', () => {")
-        lines.append(f"      cy.task('db:populate{parent_pascal}', 1);")
-        lines.append("      cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })")
-        lines.append("        .then((res) => {")
-        lines.append("          expect(res.status).to.eq(200);")
-        lines.append("          expect(res.body).to.have.length(1);")
-        lines.append("        });")
-        lines.append("    });")
-        lines.append("  });")
-        lines.append('')
-
-    # --- 2. GET detail ---
-    if gen_cfg.get('view', True) is not False:
-        lines.append(f"  describe('GET {api_path}/:id', () => {{")
-        lines.append("    it('2.1 returns item detail by id', () => {")
-        lines.append(f"      cy.task<any[]>('db:populate{parent_pascal}', 1).then((records) => {{")
-        lines.append("        cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })")
-        lines.append("          .then((res) => {")
-        lines.append("            expect(res.status).to.eq(200);")
-        lines.append("            expect(res.body.id).to.eq(records[0].id);")
-        lines.append("          });")
-        lines.append("      });")
-        lines.append("    });")
-        lines.append('')
-        lines.append("    it('2.2 returns 404 for non-existent id', () => {")
-        lines.append("      cy.request({ url: `${API_BASE}/non-existent-id`, headers: { 'X-API-Key': TEST_API_KEY }, failOnStatusCode: false })")
-        lines.append("        .then((res) => {")
-        lines.append("          expect(res.status).to.eq(404);")
-        lines.append("        });")
-        lines.append("    });")
-        lines.append("  });")
-        lines.append('')
-
-    # --- 3. POST create + 5.1 fail ---
-    if gen_cfg.get('new', True) is not False:
-        I = '        ' if has_deps else '      '
-        lines.append(f"  describe('POST {api_path}', () => {{")
-
-        # 3.1 success
-        lines.append("    it('3.1 creates with required fields, verified by GET', () => {")
-        if has_deps:
-            lines.append(f"      cy.task<any>('db:populate{parent_pascal}Dependencies').then((deps) => {{")
-        lines.append(f"{I}cy.request({{")
-        lines.append(f"{I}  method: 'POST',")
-        lines.append(f"{I}  url: API_BASE,")
-        lines.append(f"{I}  headers: {{ 'X-API-Key': TEST_API_KEY }},")
-        lines.append(f"{I}  body: {{")
-        for ln in build_post_body_lines(f"'Test {title}'", f'{I}    '):
-            lines.append(ln)
-        lines.append(f"{I}  }},")
-        lines.append(f"{I}}}).then((res) => {{")
-        lines.append(f"{I}  expect(res.status).to.eq(201);")
-        # lines.append(f"{I}  expect(res.body.name).to.eq('Test {title}');")
-        lines.append(f"{I}  cy.request({{ url: `${{API_BASE}}/${{res.body.id}}`, headers: {{ 'X-API-Key': TEST_API_KEY }} }})")
-        lines.append(f"{I}    .then((getRes) => {{")
-        lines.append(f"{I}      expect(getRes.status).to.eq(200);")
-        lines.append(f"{I}      expect(getRes.body.name).to.eq('Test {title}');")
-        lines.append(f"{I}    }});")
-        lines.append(f"{I}}});")
-        if has_deps:
-            lines.append("      });")
-        lines.append("    });")
-        lines.append('')
-
-        # 5.1 fail: missing name
-        lines.append("    it('5.1 fails when required field name is missing', () => {")
-        if has_deps:
-            lines.append(f"      cy.task<any>('db:populate{parent_pascal}Dependencies').then((deps) => {{")
-        lines.append(f"{I}cy.request({{")
-        lines.append(f"{I}  method: 'POST',")
-        lines.append(f"{I}  url: API_BASE,")
-        lines.append(f"{I}  headers: {{ 'X-API-Key': TEST_API_KEY }},")
-        lines.append(f"{I}  body: {{")
-        for ln in build_post_body_lines(None, f'{I}    '):
-            lines.append(ln)
-        lines.append(f"{I}  }},")
-        lines.append(f"{I}  failOnStatusCode: false,")
-        lines.append(f"{I}}}).then((res) => {{")
-        lines.append(f"{I}  expect(res.status).to.be.gte(400);")
-        lines.append(f"{I}}});")
-        if has_deps:
-            lines.append("      });")
-        lines.append("    });")
-        lines.append("  });")
-        lines.append('')
-
-    # --- 4.1 PUT update ---
-    if gen_cfg.get('edit', True) is not False:
-        lines.append(f"  describe('PUT {api_path}/:id', () => {{")
-        lines.append("    it('4.1 updates, verified by GET', () => {")
-        lines.append(f"      cy.task<any[]>('db:populate{parent_pascal}', 1).then((records) => {{")
-        lines.append("        cy.request({")
-        lines.append("          method: 'PUT',")
-        lines.append("          url: `${API_BASE}/${records[0].id}`,")
-        lines.append("          headers: { 'X-API-Key': TEST_API_KEY },")
-        lines.append("          body: {")
-        for ln in build_put_body_lines(f"'Updated {title}'", '            '):
-            lines.append(ln)
-        lines.append("          },")
-        lines.append("        }).then((res) => {")
-        lines.append("          expect(res.status).to.eq(200);")
-        lines.append("          cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })")
-        lines.append("            .then((getRes) => {")
-        lines.append("              expect(getRes.status).to.eq(200);")
-        lines.append(f"              expect(getRes.body.name).to.eq('Updated {title}');")
-        lines.append("            });")
-        lines.append("        });")
-        lines.append("      });")
-        lines.append("    });")
-        lines.append("  });")
-        lines.append('')
-
-    # --- 4.2 DELETE ---
-    if gen_cfg.get('delete', True) is not False:
-        lines.append(f"  describe('DELETE {api_path}/:id', () => {{")
-        lines.append("    it('4.2 deletes item, verified by GET returning 404', () => {")
-        lines.append(f"      cy.task<any[]>('db:populate{parent_pascal}', 1).then((records) => {{")
-        lines.append("        cy.request({")
-        lines.append("          method: 'DELETE',")
-        lines.append("          url: `${API_BASE}/${records[0].id}`,")
-        lines.append("          headers: { 'X-API-Key': TEST_API_KEY },")
-        lines.append("        }).then((res) => {")
-        lines.append("          expect(res.status).to.eq(204);")
-        lines.append("          cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY }, failOnStatusCode: false })")
-        lines.append("            .then((getRes) => {")
-        lines.append("              expect(getRes.status).to.eq(404);")
-        lines.append("            });")
-        lines.append("        });")
-        lines.append("      });")
-        lines.append("    });")
-        lines.append("  });")
-        lines.append('')
-
-    # --- 6. Auth errors ---
-    lines.append("  describe('Authentication errors', () => {")
-    lines.append("    it('6.1 returns 401 without API key', () => {")
-    lines.append("      cy.request({ url: API_BASE, failOnStatusCode: false })")
-    lines.append("        .then((res) => {")
-    lines.append("          expect(res.status).to.eq(401);")
-    lines.append("        });")
-    lines.append("    });")
-    lines.append('')
-    lines.append("    it('6.2 returns 401 with invalid API key', () => {")
-    lines.append("      cy.request({ url: API_BASE, headers: { 'X-API-Key': 'invalid_key' }, failOnStatusCode: false })")
-    lines.append("        .then((res) => {")
-    lines.append("          expect(res.status).to.eq(401);")
-    lines.append("        });")
-    lines.append("    });")
-    lines.append("  });")
-    lines.append('')
-
-    # --- 7. Permission errors ---
-    lines.append("  describe('Permission errors', () => {")
-    lines.append("    it('7.1 returns 403 for GET list when permission denied', () => {")
-    lines.append(f"      cy.task<string>('db:createLimitedApiUser', '{model}').then((limitedKey) => {{")
-    lines.append("        cy.request({ url: API_BASE, headers: { 'X-API-Key': limitedKey }, failOnStatusCode: false })")
-    lines.append("          .then((res) => {")
-    lines.append("            expect(res.status).to.eq(403);")
-    lines.append("          });")
-    lines.append("      });")
-    lines.append("    });")
-
-    if gen_cfg.get('new', True) is not False:
-        I7 = '        ' if has_deps else '      '
-        lines.append('')
-        lines.append("    it('7.2 returns 403 for POST when permission denied', () => {")
-        if has_deps:
-            lines.append(f"      cy.task<any>('db:populate{parent_pascal}Dependencies').then((deps) => {{")
-        lines.append(f"{I7}cy.task<string>('db:createLimitedApiUser', '{model}').then((limitedKey) => {{")
-        lines.append(f"{I7}  cy.request({{")
-        lines.append(f"{I7}    method: 'POST',")
-        lines.append(f"{I7}    url: API_BASE,")
-        lines.append(f"{I7}    headers: {{ 'X-API-Key': limitedKey }},")
-        lines.append(f"{I7}    body: {{")
-        for ln in build_post_body_lines(f"'Test {title}'", f'{I7}      '):
-            lines.append(ln)
-        lines.append(f"{I7}    }},")
-        lines.append(f"{I7}    failOnStatusCode: false,")
-        lines.append(f"{I7}  }}).then((res) => {{")
-        lines.append(f"{I7}    expect(res.status).to.eq(403);")
-        lines.append(f"{I7}  }});")
-        lines.append(f"{I7}}});")
-        if has_deps:
-            lines.append("      });")
-        lines.append("    });")
-
-    lines.append("  });")
-    lines.append('});')
-    lines.append('')
-
-    return '\n'.join(lines)
+    return {
+        'parent': parent,
+        'pascal': parent_pascal,
+        'title': title,
+        'model': model,
+        'api_path': api_path,
+        'has_deps': has_deps,
+        'can_list': gen_cfg.get('list', True) is not False,
+        'can_view': gen_cfg.get('view', True) is not False,
+        'can_new': gen_cfg.get('new', True) is not False,
+        'can_edit': gen_cfg.get('edit', True) is not False,
+        'can_delete': gen_cfg.get('delete', True) is not False,
+        'I': I,
+        'I7': I,  # same indentation level as I for section 7
+        'post_body_create': _post_body(f"'Test {title}'", f'{I}    '),
+        'post_body_missing_name': _post_body(None, f'{I}    '),
+        'put_body_update': _put_body(f"'Updated {title}'", '            '),
+        'i7_post_body': _post_body(f"'Test {title}'", f'{I}      '),
+    }

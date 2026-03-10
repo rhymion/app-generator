@@ -1,0 +1,27 @@
+// AUTO-GENERATED - DO NOT EDIT
+// Import this in cypress.config.ts and spread into on('task', { ...getGeneratedTasks() })
+
+export function getGeneratedTasks() {
+  return {
+{% for entity in entities %}
+    async 'db:populate{{ entity.pascal }}Dependencies'() {
+      const { populate{{ entity.pascal }}Dependencies } = require('{{ entity.helper_path }}');
+      return await populate{{ entity.pascal }}Dependencies();
+    },
+    async 'db:populate{{ entity.pascal }}'(length: number) {
+      const { populate{{ entity.pascal }}Data } = require('{{ entity.helper_path }}');
+      return await populate{{ entity.pascal }}Data(length);
+    },
+    async 'db:populate{{ entity.pascal }}Full'(length: number) {
+      const { populate{{ entity.pascal }}FullData } = require('{{ entity.helper_path }}');
+      return await populate{{ entity.pascal }}FullData(length);
+    },
+{% for child in entity.datagrid_children %}
+    async 'db:populate{{ entity.pascal }}{{ child.pascal }}'(params: { parentId: string; length?: number }) {
+      const { populate{{ entity.pascal }}{{ child.pascal }}Data } = require('{{ entity.helper_path }}');
+      return await populate{{ entity.pascal }}{{ child.pascal }}Data(params.parentId, params.length || 1);
+    },
+{% endfor %}
+{% endfor %}
+  };
+}

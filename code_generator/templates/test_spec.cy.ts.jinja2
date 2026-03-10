@@ -1,0 +1,336 @@
+// AUTO-GENERATED - DO NOT EDIT
+import { TEST_CREDENTIALS } from '../support/test-credentials';
+{% if has_datagrid_children %}
+import { fillDataGridRow, assertDataGridEmpty, getDataGridRowCount, assertDataGridRowData } from '../support/datagrid-helpers';
+{% else %}
+import { assertDataGridEmpty, getDataGridRowCount } from '../support/datagrid-helpers';
+{% endif %}
+
+describe('Testing {{ title }} pages and their behavior', () => {
+  beforeEach(() => {
+    cy.task('db:reset');
+    cy.task('db:seed');
+    Cypress.session.clearAllSavedSessions();
+    cy.clearCookies();
+    cy.clearLocalStorage();
+    cy.visit('/en/');
+    cy.window().then((win) => { win.sessionStorage.clear(); });
+    cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+  });
+{% if can_list %}
+
+  describe('Display list', () => {
+    it('1.1 shows empty state with no items', () => {
+      cy.visit('/en/{{ parent }}');
+      assertDataGridEmpty();
+    });
+
+    it('1.2 shows list with one item', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.visit('/en/{{ parent }}');
+      cy.contains('{{ title }} 1').should('be.visible');
+      getDataGridRowCount().should('eq', 1);
+    });
+
+    it('1.3 shows list with multiple items', () => {
+      cy.task('db:populate{{ pascal }}', 3);
+      cy.visit('/en/{{ parent }}');
+      cy.contains('{{ title }} 1').should('be.visible');
+      getDataGridRowCount().should('eq', 3);
+    });
+  });
+{% endif %}
+{% if can_new %}
+
+  describe('Create', () => {
+    it('2.1 creates with minimal data (required fields only)', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I }}cy.visit('/en/{{ parent }}');
+{{ I }}cy.clickButton('Create New {{ title }}');
+{% for cmd in required_fill_cmds %}
+{{ cmd }}
+{% endfor %}
+{% for child in datagrid_children_data %}
+{% if child.is_required_in_parent %}
+{{ I }}// Add required child: {{ child.title }}
+{{ I }}cy.clickButton('Add {{ child.title }}');
+{{ I }}fillDataGridRow(0, {{ child.create_obj }});
+{% endif %}
+{% endfor %}
+{{ I }}cy.clickButton('Save');
+{{ I }}cy.url().should('include', '/{{ parent }}');
+{{ I }}cy.contains('Test {{ title }}').should('be.visible');
+{% if can_view %}
+{{ I }}// Verify on view page
+{{ I }}cy.contains('Test {{ title }}').click();
+{{ I }}cy.url().should('include', '/{{ parent }}/view');
+{% for cmd in required_assert_cmds_no_bool %}
+{{ cmd }}
+{% endfor %}
+{% endif %}
+{% if has_deps %}
+      });
+{% endif %}
+    });
+
+    it('2.2 creates with full data (all fields and children)', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{% for child in list_children_data %}
+{% if child.render_type == 'editable-list-autocomplete' and child.is_external_target %}
+{{ I }}cy.task('db:populate{{ child.target_pascal }}', 2);
+{% endif %}
+{% endfor %}
+{{ I }}cy.visit('/en/{{ parent }}');
+{{ I }}cy.clickButton('Create New {{ title }}');
+{% for cmd in all_fill_cmds %}
+{{ cmd }}
+{% endfor %}
+{% for child in datagrid_children_data %}
+{{ I }}// Add child: {{ child.title }}
+{{ I }}cy.clickButton('Add {{ child.title }}');
+{{ I }}fillDataGridRow(0, {{ child.full_create_obj }});
+{% endfor %}
+{% for child in list_children_data %}
+{% if child.render_type == 'editable-list-text' %}
+{{ I }}// Add list item: {{ child.title }}
+{{ I }}cy.clickButton('Add {{ child.singular_pascal }}');
+{{ I }}cy.get('div[role="dialog"]').find('input').type('Test {{ child.title }} Item');
+{{ I }}cy.get('div[role="dialog"]').find('button').contains('Add').click();
+{% elif child.render_type == 'editable-list-autocomplete' and child.rel_target %}
+{{ I }}// Add list item: {{ child.title }}
+{{ I }}cy.clickButton('Add {{ child.singular_pascal }}');
+{{ I }}cy.get('div[role="dialog"]').find('input').type('{{ child.rel_target_title }} 1');
+{{ I }}cy.get('.MuiAutocomplete-popper li').contains('{{ child.rel_target_title }} 1').click();
+{{ I }}cy.get('div[role="dialog"]').find('button').contains('Add').click();
+{% endif %}
+{% endfor %}
+{{ I }}cy.clickButton('Save');
+{{ I }}cy.url().should('include', '/{{ parent }}');
+{{ I }}cy.contains('Test {{ title }}').should('be.visible');
+{% if can_view %}
+{{ I }}// Verify on view page
+{{ I }}cy.contains('Test {{ title }}').click();
+{{ I }}cy.url().should('include', '/{{ parent }}/view');
+{% for cmd in all_assert_cmds_no_bool %}
+{{ cmd }}
+{% endfor %}
+{% endif %}
+{% if has_deps %}
+      });
+{% endif %}
+    });
+  });
+{% endif %}
+{% if can_edit %}
+
+  describe('Edit', () => {
+{% if has_optional or has_children %}
+    it('3.1 adds optional data and child items', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+{% for child in list_children_data %}
+{% if child.render_type == 'editable-list-autocomplete' and child.is_external_target %}
+        cy.task('db:populate{{ child.target_pascal }}', 2);
+{% endif %}
+{% endfor %}
+        cy.visit('/en/{{ parent }}');
+        cy.contains('{{ title }} 1').click();
+        cy.get('[aria-label="Edit"]').click();
+        cy.url().should('include', '/{{ parent }}/edit');
+{% for cmd in opt_fill_cmds_3_1 %}
+{{ cmd }}
+{% endfor %}
+{% for child in datagrid_children_data %}
+        // Add child: {{ child.title }}
+        cy.clickButton('Add {{ child.title }}');
+        fillDataGridRow(0, {{ child.create_obj }});
+{% endfor %}
+{% for child in list_children_data %}
+{% if child.render_type == 'editable-list-text' %}
+        cy.clickButton('Add {{ child.singular_pascal }}');
+        cy.get('div[role="dialog"]').find('input').type('Test {{ child.title }} Item');
+        cy.get('div[role="dialog"]').find('button').contains('Add').click();
+{% elif child.render_type == 'editable-list-autocomplete' and child.rel_target %}
+        cy.clickButton('Add {{ child.singular_pascal }}');
+        cy.get('div[role="dialog"]').find('input').type('{{ child.rel_target_title }} 1');
+        cy.get('.MuiAutocomplete-popper li').contains('{{ child.rel_target_title }} 1').click();
+        cy.get('div[role="dialog"]').find('button').contains('Add').click();
+{% endif %}
+{% endfor %}
+        cy.clickButton('Save');
+        cy.url().should('include', '/{{ parent }}');
+        cy.contains('{{ title }} 1').should('be.visible');
+{% if can_view %}
+        // Verify on view page
+        cy.contains('{{ title }} 1').click();
+        cy.url().should('include', '/{{ parent }}/view');
+        cy.checkField('Name', '{{ title }} 1');
+{% endif %}
+      });
+    });
+
+    it('3.2 removes optional data and child items', () => {
+{% if has_optional %}
+      cy.task<any[]>('db:populate{{ pascal }}Full', 1).then((records) => {
+{% else %}
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+{% endif %}
+{% for child in datagrid_children_data %}
+        cy.task('db:populate{{ pascal }}{{ child.pascal }}', { parentId: records[0].id, length: 1 });
+{% endfor %}
+        cy.visit('/en/{{ parent }}');
+        cy.contains('{{ title }} 1').click();
+        cy.get('[aria-label="Edit"]').click();
+        cy.url().should('include', '/{{ parent }}/edit');
+{% for cmd in opt_clear_cmds_3_2 %}
+{{ cmd }}
+{% endfor %}
+{% for child in datagrid_children_data %}
+        // Delete child: {{ child.title }}
+        cy.selectDataGridRows([0]);
+        cy.contains('h2', '{{ child.title }}').parent().find('button[aria-label="Delete Selected"]').click();
+        cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+{% endfor %}
+        cy.clickButton('Save');
+        cy.url().should('include', '/{{ parent }}');
+        cy.contains('{{ title }} 1').should('be.visible');
+      });
+    });
+
+{% endif %}
+    it('3.3 edits with mixed changes', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.visit('/en/{{ parent }}');
+        cy.contains('{{ title }} 1').click();
+        cy.get('[aria-label="Edit"]').click();
+        cy.clearAndFillField('Name', 'Updated {{ title }}');
+{% if edit_fill_cmd_3_3 %}
+{{ edit_fill_cmd_3_3 }}
+{% endif %}
+        cy.clickButton('Save');
+        cy.url().should('include', '/{{ parent }}');
+        cy.contains('Updated {{ title }}').should('be.visible');
+{% if can_view %}
+        // Verify on view page
+        cy.contains('Updated {{ title }}').click();
+        cy.url().should('include', '/{{ parent }}/view');
+        cy.checkField('Name', 'Updated {{ title }}');
+{% endif %}
+      });
+    });
+  });
+{% endif %}
+{% if can_delete %}
+
+  describe('Delete', () => {
+{% if can_list %}
+    it('4.1 deletes a single item from list view', () => {
+      cy.task('db:populate{{ pascal }}', 2);
+      cy.visit('/en/{{ parent }}');
+      cy.selectDataGridRows([0]);
+      cy.get('div').find('button[aria-label="Delete Selected"]').click();
+      cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+      getDataGridRowCount().should('eq', 1);
+    });
+
+    it('4.2 deletes multiple items from list view', () => {
+      cy.task('db:populate{{ pascal }}', 3);
+      cy.visit('/en/{{ parent }}');
+      cy.selectDataGridRows([0, 1]);
+      cy.get('div').find('button[aria-label="Delete Selected"]').click();
+      cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+      getDataGridRowCount().should('eq', 1);
+    });
+
+{% endif %}
+{% if can_edit %}
+    it('4.3 deletes an item from edit page', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.visit('/en/{{ parent }}');
+      cy.contains('{{ title }} 1').click();
+      cy.get('[aria-label="Edit"]').click();
+      cy.url().should('include', '/{{ parent }}/edit');
+      cy.clickButton('Delete {{ title }}');
+      cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+      cy.url().should('include', '/{{ parent }}');
+      cy.contains('{{ title }} 1').should('not.exist');
+    });
+{% endif %}
+  });
+{% endif %}
+{% if can_new %}
+
+  describe('Fail create', () => {
+{% if fail_create_5_1 %}
+    it('5.1 fails when required parent field is missing', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I }}cy.visit('/en/{{ parent }}/new');
+{% for cmd in fail_create_5_1.fill_cmds %}
+{{ cmd }}
+{% endfor %}
+{{ I }}cy.clickButton('Save');
+{{ I }}cy.url().should('include', '/{{ parent }}/new');
+{% if has_deps %}
+      });
+{% endif %}
+    });
+
+{% endif %}
+{% if fail_create_5_2 %}
+    it('5.2 fails when required child field is missing', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I }}cy.visit('/en/{{ parent }}/new');
+{% for cmd in fail_create_5_2.fill_cmds %}
+{{ cmd }}
+{% endfor %}
+{{ I }}cy.clickButton('Add {{ fail_create_5_2.title }}');
+{{ I }}fillDataGridRow(0, {{ fail_create_5_2.partial_obj }});
+{{ I }}cy.clickButton('Save');
+{{ I }}cy.url().should('include', '/{{ parent }}/new');
+{% if has_deps %}
+      });
+{% endif %}
+    });
+{% endif %}
+  });
+{% endif %}
+{% if can_edit %}
+
+  describe('Fail edit', () => {
+{% if fail_edit_6_1 %}
+    it('6.1 fails when required parent field is cleared', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.visit('/en/{{ parent }}');
+      cy.contains('{{ title }} 1').click();
+      cy.get('[aria-label="Edit"]').click();
+{{ fail_edit_6_1.clear_cmd }}
+      cy.clickButton('Save');
+      cy.url().should('include', '/{{ parent }}/edit');
+    });
+
+{% endif %}
+{% if fail_edit_6_2 %}
+    it('6.2 fails when required child field is cleared', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task('db:populate{{ pascal }}{{ fail_edit_6_2.child_pascal }}', { parentId: records[0].id, length: 1 });
+        cy.visit('/en/{{ parent }}');
+        cy.contains('{{ title }} 1').click();
+        cy.get('[aria-label="Edit"]').click();
+        // Clear required child field
+        cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="{{ fail_edit_6_2.field_prop_name }}"]').dblclick();
+        cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="{{ fail_edit_6_2.field_prop_name }}"] input').clear().type('{enter}');
+        cy.clickButton('Save');
+        cy.url().should('include', '/{{ parent }}/edit');
+      });
+    });
+{% endif %}
+  });
+{% endif %}
+});
