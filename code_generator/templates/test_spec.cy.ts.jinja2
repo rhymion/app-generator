@@ -28,14 +28,14 @@ describe('Testing {{ title }} pages and their behavior', () => {
     it('1.2 shows list with one item', () => {
       cy.task('db:populate{{ pascal }}', 1);
       cy.visit('/en/{{ parent }}');
-      cy.contains('{{ title }} 1').should('be.visible');
+      cy.contains('{{ list_id_1 }}').should('be.visible');
       getDataGridRowCount().should('eq', 1);
     });
 
     it('1.3 shows list with multiple items', () => {
       cy.task('db:populate{{ pascal }}', 3);
       cy.visit('/en/{{ parent }}');
-      cy.contains('{{ title }} 1').should('be.visible');
+      cy.contains('{{ list_id_1 }}').should('be.visible');
       getDataGridRowCount().should('eq', 3);
     });
   });
@@ -61,10 +61,18 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {{ I }}cy.clickButton('Save');
 {{ I }}cy.url().should('include', '/{{ parent }}');
-{{ I }}cy.contains('Test {{ title }}').should('be.visible');
+{% if after_create_id_is_expr %}
+{{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).should('be.visible');
+{% else %}
+{{ I }}cy.contains('{{ after_create_id }}').should('be.visible');
+{% endif %}
 {% if can_view %}
 {{ I }}// Verify on view page
-{{ I }}cy.contains('Test {{ title }}').click();
+{% if after_create_id_is_expr %}
+{{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
+{% else %}
+{{ I }}cy.contains('{{ after_create_id }}').click();
+{% endif %}
 {{ I }}cy.url().should('include', '/{{ parent }}/view');
 {% for cmd in required_assert_cmds_no_bool %}
 {{ cmd }}
@@ -110,10 +118,18 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {{ I }}cy.clickButton('Save');
 {{ I }}cy.url().should('include', '/{{ parent }}');
-{{ I }}cy.contains('Test {{ title }}').should('be.visible');
+{% if after_create_id_is_expr %}
+{{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).should('be.visible');
+{% else %}
+{{ I }}cy.contains('{{ after_create_id }}').should('be.visible');
+{% endif %}
 {% if can_view %}
 {{ I }}// Verify on view page
-{{ I }}cy.contains('Test {{ title }}').click();
+{% if after_create_id_is_expr %}
+{{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
+{% else %}
+{{ I }}cy.contains('{{ after_create_id }}').click();
+{% endif %}
 {{ I }}cy.url().should('include', '/{{ parent }}/view');
 {% for cmd in all_assert_cmds_no_bool %}
 {{ cmd }}
@@ -137,7 +153,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endif %}
 {% endfor %}
         cy.visit('/en/{{ parent }}');
-        cy.contains('{{ title }} 1').click();
+        cy.contains('{{ list_id_1 }}').click();
         cy.get('[aria-label="Edit"]').click();
         cy.url().should('include', '/{{ parent }}/edit');
 {% for cmd in opt_fill_cmds_3_1 %}
@@ -162,12 +178,12 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}');
-        cy.contains('{{ title }} 1').should('be.visible');
+        cy.contains('{{ list_id_1 }}').should('be.visible');
 {% if can_view %}
         // Verify on view page
-        cy.contains('{{ title }} 1').click();
+        cy.contains('{{ list_id_1 }}').click();
         cy.url().should('include', '/{{ parent }}/view');
-        cy.checkField('Name', '{{ title }} 1');
+        cy.checkField('{{ check_field_label }}', '{{ check_field_value_1 }}');
 {% endif %}
       });
     });
@@ -182,7 +198,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.task('db:populate{{ pascal }}{{ child.pascal }}', { parentId: records[0].id, length: 1 });
 {% endfor %}
         cy.visit('/en/{{ parent }}');
-        cy.contains('{{ title }} 1').click();
+        cy.contains('{{ list_id_1 }}').click();
         cy.get('[aria-label="Edit"]').click();
         cy.url().should('include', '/{{ parent }}/edit');
 {% for cmd in opt_clear_cmds_3_2 %}
@@ -196,7 +212,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}');
-        cy.contains('{{ title }} 1').should('be.visible');
+        cy.contains('{{ list_id_1 }}').should('be.visible');
       });
     });
 
@@ -204,20 +220,22 @@ describe('Testing {{ title }} pages and their behavior', () => {
     it('3.3 edits with mixed changes', () => {
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
         cy.visit('/en/{{ parent }}');
-        cy.contains('{{ title }} 1').click();
+        cy.contains('{{ list_id_1 }}').click();
         cy.get('[aria-label="Edit"]').click();
-        cy.clearAndFillField('Name', 'Updated {{ title }}');
+{% if has_edit_primary %}
+        cy.clearAndFillField('{{ edit_field_label }}', '{{ edit_update_value }}');
+{% endif %}
 {% if edit_fill_cmd_3_3 %}
 {{ edit_fill_cmd_3_3 }}
 {% endif %}
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}');
-        cy.contains('Updated {{ title }}').should('be.visible');
+        cy.contains('{{ list_id_updated }}').should('be.visible');
 {% if can_view %}
         // Verify on view page
-        cy.contains('Updated {{ title }}').click();
+        cy.contains('{{ list_id_updated }}').click();
         cy.url().should('include', '/{{ parent }}/view');
-        cy.checkField('Name', 'Updated {{ title }}');
+        cy.checkField('{{ check_field_label }}', '{{ check_field_updated }}');
 {% endif %}
       });
     });
@@ -250,13 +268,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
     it('4.3 deletes an item from edit page', () => {
       cy.task('db:populate{{ pascal }}', 1);
       cy.visit('/en/{{ parent }}');
-      cy.contains('{{ title }} 1').click();
+      cy.contains('{{ list_id_1 }}').click();
       cy.get('[aria-label="Edit"]').click();
       cy.url().should('include', '/{{ parent }}/edit');
       cy.clickButton('Delete {{ title }}');
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       cy.url().should('include', '/{{ parent }}');
-      cy.contains('{{ title }} 1').should('not.exist');
+      cy.contains('{{ list_id_1 }}').should('not.exist');
     });
 {% endif %}
   });
@@ -308,7 +326,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
     it('6.1 fails when required parent field is cleared', () => {
       cy.task('db:populate{{ pascal }}', 1);
       cy.visit('/en/{{ parent }}');
-      cy.contains('{{ title }} 1').click();
+      cy.contains('{{ list_id_1 }}').click();
       cy.get('[aria-label="Edit"]').click();
 {{ fail_edit_6_1.clear_cmd }}
       cy.clickButton('Save');
@@ -321,7 +339,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
         cy.task('db:populate{{ pascal }}{{ fail_edit_6_2.child_pascal }}', { parentId: records[0].id, length: 1 });
         cy.visit('/en/{{ parent }}');
-        cy.contains('{{ title }} 1').click();
+        cy.contains('{{ list_id_1 }}').click();
         cy.get('[aria-label="Edit"]').click();
         // Clear required child field
         cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="{{ fail_edit_6_2.field_prop_name }}"]').dblclick();

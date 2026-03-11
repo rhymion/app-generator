@@ -692,7 +692,23 @@ def test_spec_context(
     relationships = get_parent_relationships(parent_def)
     fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'))
     deps = resolve_dependencies(model_name, schema)
-    has_deps = bool(deps)
+
+    # User_account FK fields required by the entity (e.g. customer_id → Customer autocomplete)
+    ua_dep_fields_spec = []
+    for r in relationships:
+        if (r['target'] == 'user_account'
+                and r['prop_name'] in required_fields
+                and r['prop_name'] not in ('creator_id', 'updater_id')):
+            var_name = to_camel_case(re.sub(r'_id$', '', r['prop_name']))
+            field_label = to_title_case(re.sub(r'_id$', '', r['prop_name']))
+            ua_dep_fields_spec.append({
+                'prop_name': r['prop_name'],
+                'dep_var_name': var_name,
+                'label': field_label,
+                'dep_name': f'Test {to_title_case(var_name)}',
+            })
+
+    has_deps = bool(deps) or bool(ua_dep_fields_spec)
 
     required_field_metas = [f for f in fields if f['required']]
     optional_field_metas = [f for f in fields if not f['required']]
@@ -718,6 +734,83 @@ def test_spec_context(
         [f for f in required_field_metas if f['category'] != 'boolean'], title, I)
     all_assert_cmds_no_bool = gen_assert_commands(
         [f for f in fields if f['category'] != 'boolean'], title, I)
+
+    # Append user_account FK fill/assert commands
+    for ua in ua_dep_fields_spec:
+        required_fill_cmds.append(f"{I}cy.selectAutocomplete('{ua['label']}', deps.{ua['dep_var_name']}.name);")
+        all_fill_cmds.append(f"{I}cy.selectAutocomplete('{ua['label']}', deps.{ua['dep_var_name']}.name);")
+        required_assert_cmds_no_bool.append(f"{I}cy.checkField('{ua['label']}', '{ua['dep_name']}');")
+        all_assert_cmds_no_bool.append(f"{I}cy.checkField('{ua['label']}', '{ua['dep_name']}');")
+
+    # Compute list identifiers based on primary display field
+    prim = _get_primary_display_field_name(parent_def)
+    prim_is_fk = bool(prim and f'{prim}_id' in (parent_def.get('properties') or {}))
+    has_name = any(f['prop_name'] == 'name' for f in fields)
+
+    if has_name:
+        list_id_1 = f'{title} 1'
+        after_create_id = f'Test {title}'
+        after_create_id_is_expr = False
+        primary_dep_var_for_list = None
+        list_id_updated = f'Updated {title}'
+        has_edit_primary = True
+        edit_field_label = 'Name'
+        edit_update_value = f'Updated {title}'
+        check_field_label = 'Name'
+        check_field_value_1 = f'{title} 1'
+        check_field_updated = f'Updated {title}'
+    elif prim_is_fk:
+        dep_title = to_title_case(prim)
+        list_id_1 = f'Test {dep_title}'
+        after_create_id = None
+        after_create_id_is_expr = True
+        primary_dep_var_for_list = to_camel_case(prim)
+        list_id_updated = list_id_1
+        has_edit_primary = False
+        edit_field_label = None
+        edit_update_value = None
+        check_field_label = dep_title
+        check_field_value_1 = list_id_1
+        check_field_updated = list_id_1
+    elif prim:
+        prim_meta = next((f for f in fields if f['prop_name'] == prim), None)
+        if prim_meta:
+            lbl = prim_meta.get('label', to_title_case(prim))
+            list_id_1 = f'Test {lbl} 1'
+            after_create_id = cypress_create_value(prim_meta, title)
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = f'Updated {lbl}'
+            has_edit_primary = True
+            edit_field_label = lbl
+            edit_update_value = f'Updated {lbl}'
+            check_field_label = lbl
+            check_field_value_1 = list_id_1
+            check_field_updated = list_id_updated
+        else:
+            list_id_1 = f'{title} 1'
+            after_create_id = f'Test {title}'
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = f'Updated {title}'
+            has_edit_primary = True
+            edit_field_label = 'Name'
+            edit_update_value = f'Updated {title}'
+            check_field_label = 'Name'
+            check_field_value_1 = f'{title} 1'
+            check_field_updated = f'Updated {title}'
+    else:
+        list_id_1 = f'{title} 1'
+        after_create_id = f'Test {title}'
+        after_create_id_is_expr = False
+        primary_dep_var_for_list = None
+        list_id_updated = f'Updated {title}'
+        has_edit_primary = True
+        edit_field_label = 'Name'
+        edit_update_value = f'Updated {title}'
+        check_field_label = 'Name'
+        check_field_value_1 = f'{title} 1'
+        check_field_updated = f'Updated {title}'
 
     # detail_required: which children are required in the parent form
     detail_def = schema['definitions'].get(definition_key, {})
@@ -857,6 +950,18 @@ def test_spec_context(
         'fail_create_5_2': fail_create_5_2,
         'fail_edit_6_1': fail_edit_6_1,
         'fail_edit_6_2': fail_edit_6_2,
+        # List identifiers
+        'list_id_1': list_id_1,
+        'after_create_id': after_create_id,
+        'after_create_id_is_expr': after_create_id_is_expr,
+        'primary_dep_var_for_list': primary_dep_var_for_list,
+        'list_id_updated': list_id_updated,
+        'has_edit_primary': has_edit_primary,
+        'edit_field_label': edit_field_label,
+        'edit_update_value': edit_update_value,
+        'check_field_label': check_field_label,
+        'check_field_value_1': check_field_value_1,
+        'check_field_updated': check_field_updated,
     }
 
 
@@ -940,6 +1045,8 @@ def test_api_spec_context(
     I = '        ' if has_deps else '      '
 
     # Compute assertions for 3.1 and 4.1 based on primary display field
+    # Fallback: use 'name' field if no x-display primary is set
+    has_name_field = any(f['prop_name'] == 'name' for f in all_field_metas)
     if primary_is_fk:
         assert_create = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}.name);'
         assert_update = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}2.name);'
@@ -953,9 +1060,15 @@ def test_api_spec_context(
         else:
             assert_create = 'expect(getRes.body.id).to.exist;'
             assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
+    elif has_name_field:
+        assert_create = f"expect(getRes.body.name).to.eq('Test {title}');"
+        assert_update = f"expect(getRes.body.name).to.eq('Updated {title}');"
     else:
         assert_create = 'expect(getRes.body.id).to.exist;'
         assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
+
+    # For the name-fallback case, _put_body_impl also needs to change 'name'
+    has_name_fallback = has_name_field and not primary_field_name and not primary_is_fk
 
     # 5.1: choose which required non-autocomplete field to omit
     non_ac_required = [f for f in all_field_metas if f['required'] and f['category'] != 'autocomplete']
@@ -995,6 +1108,8 @@ def test_api_spec_context(
                 primary_meta = next((f for f in all_field_metas if f['prop_name'] == prop), None)
                 update_label = primary_meta.get('label', to_title_case(prop)) if primary_meta else to_title_case(prop)
                 out.append(f"{indent}{prop}: 'Updated {update_label}',")
+            elif has_name_fallback and prop == 'name':
+                out.append(f"{indent}name: 'Updated {title}',")
             else:
                 out.append(f"{indent}{prop}: records[0].{prop},")
         for c in api_child_metas:
