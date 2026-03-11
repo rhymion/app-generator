@@ -55,5 +55,45 @@ export function getGeneratedTasks() {
       const { populateBookingFullData } = require('./booking/helper');
       return await populateBookingFullData(length);
     },
+    async 'db:populateProductDependencies'() {
+      const { populateProductDependencies } = require('./product/helper');
+      return await populateProductDependencies();
+    },
+    async 'db:populateProduct'(length: number) {
+      const { populateProductData } = require('./product/helper');
+      return await populateProductData(length);
+    },
+    async 'db:populateProductFull'(length: number) {
+      const { populateProductFullData } = require('./product/helper');
+      return await populateProductFullData(length);
+    },
+    async 'db:populateInventoryDependencies'() {
+      const { populateInventoryDependencies } = require('./inventory/helper');
+      return await populateInventoryDependencies();
+    },
+    async 'db:populateInventory'(length: number) {
+      const { populateInventoryData } = require('./inventory/helper');
+      return await populateInventoryData(length);
+    },
+    async 'db:populateInventoryFull'(length: number) {
+      const { populateInventoryFullData } = require('./inventory/helper');
+      return await populateInventoryFullData(length);
+    },
+    async 'db:populatePurchaseOrderDependencies'() {
+      const { populatePurchaseOrderDependencies } = require('./purchase_order/helper');
+      return await populatePurchaseOrderDependencies();
+    },
+    async 'db:populatePurchaseOrder'(length: number) {
+      const { populatePurchaseOrderData } = require('./purchase_order/helper');
+      return await populatePurchaseOrderData(length);
+    },
+    async 'db:populatePurchaseOrderFull'(length: number) {
+      const { populatePurchaseOrderFullData } = require('./purchase_order/helper');
+      return await populatePurchaseOrderFullData(length);
+    },
+    async 'db:populatePurchaseOrderPurchasePerItem'(params: { parentId: string; length?: number }) {
+      const { populatePurchaseOrderPurchasePerItemData } = require('./purchase_order/helper');
+      return await populatePurchaseOrderPurchasePerItemData(params.parentId, params.length || 1);
+    },
   };
 }
