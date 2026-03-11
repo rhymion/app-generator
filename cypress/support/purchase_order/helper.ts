@@ -11,7 +11,17 @@ async function getTestUser() {
 }
 
 export async function populatePurchaseOrderDependencies() {
-  return {};
+  const testUser = await getTestUser();
+  const product = await prisma.product.create({
+    data: {
+      code: `TEST-CODE-${Date.now()}`,
+      name: 'Test Product',
+      price: 100,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+  return { product };
 }
 
 export async function populatePurchaseOrderData(length: number) {
@@ -21,6 +31,7 @@ export async function populatePurchaseOrderData(length: number) {
     const record = await prisma.purchase_order.create({
       data: {
         order_no: `Test Order No ${i}`,
+        customer_id: testUser.id,
         creator_id: testUser.id,
         updater_id: testUser.id,
       },
@@ -35,11 +46,12 @@ export const populatePurchaseOrderFullData = populatePurchaseOrderData;
 
 export async function populatePurchaseOrderPurchasePerItemData(parentId: string, length: number) {
   const records = [];
+  const deps = await populatePurchaseOrderDependencies();
   for (let i = 1; i <= length; i++) {
     const record = await prisma.purchase_per_item.create({
       data: {
         purchase_order_id: parentId,
-        product_id: ,
+        product_id: deps.product.id,
         quantity: Math.max(1, i * 100),
         price: Math.max(0, i * 100),
       },

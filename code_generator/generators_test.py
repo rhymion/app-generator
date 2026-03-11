@@ -38,6 +38,40 @@ def get_child_names(child: dict) -> dict:
 # Dependency resolution
 # ---------------------------------------------------------------------------
 
+def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
+    """Return required non-system, non-name, non-FK fields for a dep entity.
+
+    Used to emit extra required fields (e.g. code, price for product) when
+    creating the dep record in populateDependencies().
+    """
+    dep_def = schema['definitions'].get(dep_target)
+    if not dep_def:
+        return []
+    props = dep_def.get('properties', {})
+    required = set(dep_def.get('required') or [])
+    rel_props = {r['prop_name'] for r in get_parent_relationships(dep_def)}
+    exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props
+
+    result = []
+    for prop_name, prop in props.items():
+        if prop_name not in required or prop_name in exclude:
+            continue
+        prop_type = prop.get('type')
+        actual = next((t for t in prop_type if t != 'null'), None) if isinstance(prop_type, list) else prop_type
+        fmt = prop.get('format')
+        if prop_name == 'name':
+            val = f"'Test {to_title_case(dep_target)}'"
+        elif actual == 'string' and fmt in ('date', 'date-time', 'time'):
+            val = 'new Date(2025, 0, 1).toISOString()'
+        elif actual in ('integer', 'number'):
+            mn = prop.get('minimum', 0)
+            val = f'Math.max({mn}, 100)' if mn else '100'
+        else:
+            val = f'`TEST-{prop_name.upper()}-${{Date.now()}}`'
+        result.append({'prop_name': prop_name, 'prisma_val': val})
+    return result
+
+
 def resolve_dependencies(model_name: str, schema: dict) -> list[dict]:
     """Port of resolveDependencies().
 
@@ -512,7 +546,29 @@ def test_helper_context(
     child_metas = analyze_children(children, schema, model_name)
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
 
-    # Enrich deps with title and has_user_accounts
+    # Extend deps to include FK deps needed by datagrid children
+    # (e.g. purchase_per_item needs product, but parent purchase_order doesn't)
+    existing_dep_targets = {d['target'] for d in deps}
+    for child_meta in datagrid_children:
+        for field in child_meta['fields']:
+            target = field.get('dep_target')
+            if (field['category'] == 'autocomplete'
+                    and target
+                    and target != 'user_account'
+                    and target != model_name
+                    and target not in existing_dep_targets):
+                deps.append({'target': target, 'var_name': to_camel_case(target), 'fk_deps': []})
+                existing_dep_targets.add(target)
+
+    # Collect user_account FK fields required by the parent (e.g. customer_id)
+    user_account_fk_fields = [
+        r['prop_name'] for r in relationships
+        if r['target'] == 'user_account'
+        and r['prop_name'] in required_fields
+        and r['prop_name'] not in ('creator_id', 'updater_id')
+    ]
+
+    # Enrich deps with title, has_user_accounts, and extra required fields
     enriched_deps = []
     for dep in deps:
         dep_def = schema['definitions'].get(dep['target'] + '_detail', {})
@@ -521,6 +577,7 @@ def test_helper_context(
             **dep,
             'title': to_title_case(dep['target']),
             'has_user_accounts': x_rels.get('user_accounts', {}).get('target') == 'user_account',
+            'extra_required_fields': _get_dep_extra_required_fields(dep['target'], schema),
         })
 
     def _enrich_field_prisma(field: dict, entity_title: str) -> dict:
@@ -543,16 +600,22 @@ def test_helper_context(
         child_pascal = to_pascal_case(child_name)
         child_title = to_title_case(child_name)
         child_def = schema['definitions'].get(child_name, {})
-        child_fields_prisma = [
-            {**f, 'prisma_val': prisma_value(f, 'i', child_title)}
-            for f in child_meta['fields']
-        ]
+        has_fk_deps = False
+        child_fields_prisma = []
+        for f in child_meta['fields']:
+            target = f.get('dep_target')
+            if f['category'] == 'autocomplete' and target and target != 'user_account':
+                has_fk_deps = True
+                child_fields_prisma.append({**f, 'prisma_val': f'deps.{to_camel_case(target)}.id'})
+            else:
+                child_fields_prisma.append({**f, 'prisma_val': prisma_value(f, 'i', child_title)})
         enriched_datagrid_children.append({
             'model_name': child_name,
             'pascal': child_pascal,
             'parent_fk_prop': child_meta['parent_fk_prop'],
             'has_order': bool(child_def.get('properties', {}).get('order')),
             'fields_prisma': child_fields_prisma,
+            'has_fk_deps': has_fk_deps,
         })
 
     return {
@@ -561,6 +624,8 @@ def test_helper_context(
         'model_name': model_name,
         'deps': enriched_deps,
         'deps_return': ', '.join(d['var_name'] for d in deps),
+        'has_parent_deps': bool(entity_fk_deps),
+        'user_account_fk_fields': user_account_fk_fields,
         'required_fields_prisma': required_fields_prisma,
         'all_fields_prisma': all_fields_prisma,
         'has_optional': bool(optional_field_metas),

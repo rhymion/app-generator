@@ -14,7 +14,9 @@ export async function populateInventoryDependencies() {
   const testUser = await getTestUser();
   const product = await prisma.product.create({
     data: {
+      code: `TEST-CODE-${Date.now()}`,
       name: 'Test Product',
+      price: 100,
       creator_id: testUser.id,
       updater_id: testUser.id,
     },
