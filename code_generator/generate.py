@@ -31,6 +31,7 @@ from generators import (
     form_view_context,
     form_upsert_context,
 )
+from generators_i18n import update_i18n_and_config
 from generators_test import (
     test_helper_context,
     test_spec_context,
@@ -245,6 +246,10 @@ def generate(schema_path: str, output_dir: str) -> None:
         registry_ctx = test_tasks_registry_context(registry_infos, schema)
         _write(cypress_support / 'generated-tasks.ts',
                _render(env, 'test_tasks_registry.ts.jinja2', registry_ctx))
+
+    # --- i18n / config updates ---
+    print('\nUpdating i18n and navigation config...')
+    update_i18n_and_config(entities, schema, out)
 
     print('\nCode generation complete!')
 
