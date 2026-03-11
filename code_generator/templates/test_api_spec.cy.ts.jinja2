@@ -71,7 +71,7 @@ describe('API: {{ title }}', () => {
 {{ I }}  cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
 {{ I }}    .then((getRes) => {
 {{ I }}      expect(getRes.status).to.eq(200);
-{{ I }}      expect(getRes.body.name).to.eq('Test {{ title }}');
+{{ I }}      {{ assert_create }}
 {{ I }}    });
 {{ I }}});
 {% if has_deps %}
@@ -79,7 +79,7 @@ describe('API: {{ title }}', () => {
 {% endif %}
     });
 
-    it('5.1 fails when required field name is missing', () => {
+    it('5.1 fails when a required field is missing', () => {
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
@@ -88,7 +88,7 @@ describe('API: {{ title }}', () => {
 {{ I }}  url: API_BASE,
 {{ I }}  headers: { 'X-API-Key': TEST_API_KEY },
 {{ I }}  body: {
-{% for ln in post_body_missing_name %}
+{% for ln in post_body_missing_field %}
 {{ ln }}
 {% endfor %}
 {{ I }}  },
@@ -106,6 +106,29 @@ describe('API: {{ title }}', () => {
 
   describe('PUT {{ api_path }}/:id', () => {
     it('4.1 updates, verified by GET', () => {
+{% if primary_is_fk %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {
+{% for ln in put_body_update_fk %}
+{{ ln }}
+{% endfor %}
+            },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                expect(getRes.status).to.eq(200);
+                {{ assert_update }}
+              });
+          });
+        });
+      });
+{% else %}
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
         cy.request({
           method: 'PUT',
@@ -121,10 +144,11 @@ describe('API: {{ title }}', () => {
           cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
-              expect(getRes.body.name).to.eq('Updated {{ title }}');
+              {{ assert_update }}
             });
         });
       });
+{% endif %}
     });
   });
 {% endif %}

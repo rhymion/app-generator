@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["ES2017", "dom"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "types": ["cypress"],
+    "paths": {
+      "@/*": ["../*"]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ]
+}

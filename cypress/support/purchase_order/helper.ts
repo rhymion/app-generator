@@ -21,17 +21,27 @@ export async function populatePurchaseOrderDependencies() {
       updater_id: testUser.id,
     },
   });
-  return { product };
+  const customer = await prisma.user_account.create({
+    data: {
+      name: 'Test Customer',
+      email: `test-customer-${Date.now()}@example.com`,
+      password: 'test-password',
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+  return { product, customer };
 }
 
 export async function populatePurchaseOrderData(length: number) {
   const testUser = await getTestUser();
+  const deps = await populatePurchaseOrderDependencies();
   const records = [];
   for (let i = 1; i <= length; i++) {
     const record = await prisma.purchase_order.create({
       data: {
         order_no: `Test Order No ${i}`,
-        customer_id: testUser.id,
+        customer_id: deps.customer.id,
         creator_id: testUser.id,
         updater_id: testUser.id,
       },

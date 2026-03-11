@@ -16,6 +16,17 @@ export async function populate{{ pascal }}Dependencies() {
 {% else %}
   const testUser = await getTestUser();
 {% for dep in deps %}
+{% if dep.is_user_account %}
+  const {{ dep.var_name }} = await prisma.user_account.create({
+    data: {
+      name: 'Test {{ dep.title }}',
+      email: `test-{{ dep.var_name }}-${Date.now()}@example.com`,
+      password: 'test-password',
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+{% else %}
   const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
     data: {
 {% for ef in dep.extra_required_fields %}
@@ -33,6 +44,21 @@ export async function populate{{ pascal }}Dependencies() {
 {% endif %}
     },
   });
+{% if dep.needs_second %}
+  const {{ dep.var_name }}2 = await prisma.{{ dep.target }}.create({
+    data: {
+{% for ef in dep.extra_required_fields %}
+      {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+{% for fk in dep.fk_deps %}
+      {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
+{% endfor %}
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+{% endif %}
+{% endif %}
 {% endfor %}
   return { {{ deps_return }} };
 {% endif %}
@@ -54,8 +80,8 @@ export async function populate{{ pascal }}Data(length: number) {
         {{ field.prop_name }}: {{ field.prisma_val }},
 {% endif %}
 {% endfor %}
-{% for ua_field in user_account_fk_fields %}
-        {{ ua_field }}: testUser.id,
+{% for ua_dep in ua_dep_fields %}
+        {{ ua_dep.prop_name }}: deps.{{ ua_dep.dep_var_name }}.id,
 {% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,
@@ -84,8 +110,8 @@ export async function populate{{ pascal }}FullData(length: number) {
         {{ field.prop_name }}: {{ field.prisma_val }},
 {% endif %}
 {% endfor %}
-{% for ua_field in user_account_fk_fields %}
-        {{ ua_field }}: testUser.id,
+{% for ua_dep in ua_dep_fields %}
+        {{ ua_dep.prop_name }}: deps.{{ ua_dep.dep_var_name }}.id,
 {% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,

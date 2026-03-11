@@ -49,36 +49,41 @@ describe('API: Purchase Order', () => {
 
   describe('POST /api/purchase_order', () => {
     it('3.1 creates with required fields, verified by GET', () => {
-      cy.request({
-        method: 'POST',
-        url: API_BASE,
-        headers: { 'X-API-Key': TEST_API_KEY },
-        body: {
-          order_no: 'Test Order No',
-          items: [],
-        },
-      }).then((res) => {
-        expect(res.status).to.eq(201);
-        cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
-          .then((getRes) => {
-            expect(getRes.status).to.eq(200);
-            expect(getRes.body.name).to.eq('Test Purchase Order');
-          });
+      cy.task<any>('db:populatePurchaseOrderDependencies').then((deps) => {
+        cy.request({
+          method: 'POST',
+          url: API_BASE,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: {
+            order_no: 'Test Order No',
+            customer_id: deps.customer.id,
+            items: [],
+          },
+        }).then((res) => {
+          expect(res.status).to.eq(201);
+          cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+            .then((getRes) => {
+              expect(getRes.status).to.eq(200);
+              expect(getRes.body.order_no).to.eq('Test Order No');
+            });
+        });
       });
     });
 
-    it('5.1 fails when required field name is missing', () => {
-      cy.request({
-        method: 'POST',
-        url: API_BASE,
-        headers: { 'X-API-Key': TEST_API_KEY },
-        body: {
-          order_no: 'Test Order No',
-          items: [],
-        },
-        failOnStatusCode: false,
-      }).then((res) => {
-        expect(res.status).to.be.gte(400);
+    it('5.1 fails when a required field is missing', () => {
+      cy.task<any>('db:populatePurchaseOrderDependencies').then((deps) => {
+        cy.request({
+          method: 'POST',
+          url: API_BASE,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: {
+            customer_id: deps.customer.id,
+            items: [],
+          },
+          failOnStatusCode: false,
+        }).then((res) => {
+          expect(res.status).to.be.gte(400);
+        });
       });
     });
   });
@@ -91,7 +96,7 @@ describe('API: Purchase Order', () => {
           url: `${API_BASE}/${records[0].id}`,
           headers: { 'X-API-Key': TEST_API_KEY },
           body: {
-            order_no: records[0].order_no,
+            order_no: 'Updated Order No',
             customer_id: records[0].customer_id,
             items: [],
           },
@@ -100,7 +105,7 @@ describe('API: Purchase Order', () => {
           cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
-              expect(getRes.body.name).to.eq('Updated Purchase Order');
+              expect(getRes.body.order_no).to.eq('Updated Order No');
             });
         });
       });
@@ -152,18 +157,21 @@ describe('API: Purchase Order', () => {
     });
 
     it('7.2 returns 403 for POST when permission denied', () => {
-      cy.task<string>('db:createLimitedApiUser', 'purchase_order').then((limitedKey) => {
-        cy.request({
-          method: 'POST',
-          url: API_BASE,
-          headers: { 'X-API-Key': limitedKey },
-          body: {
-            order_no: 'Test Order No',
-            items: [],
-          },
-          failOnStatusCode: false,
-        }).then((res) => {
-          expect(res.status).to.eq(403);
+      cy.task<any>('db:populatePurchaseOrderDependencies').then((deps) => {
+        cy.task<string>('db:createLimitedApiUser', 'purchase_order').then((limitedKey) => {
+          cy.request({
+            method: 'POST',
+            url: API_BASE,
+            headers: { 'X-API-Key': limitedKey },
+            body: {
+              order_no: 'Test Order No',
+              customer_id: deps.customer.id,
+              items: [],
+            },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(403);
+          });
         });
       });
     });

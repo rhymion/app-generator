@@ -63,12 +63,12 @@ describe('API: Product', () => {
         cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
           .then((getRes) => {
             expect(getRes.status).to.eq(200);
-            expect(getRes.body.name).to.eq('Test Product');
+            expect(getRes.body.code).to.eq('Test Code');
           });
       });
     });
 
-    it('5.1 fails when required field name is missing', () => {
+    it('5.1 fails when a required field is missing', () => {
       cy.request({
         method: 'POST',
         url: API_BASE,
@@ -92,8 +92,8 @@ describe('API: Product', () => {
           url: `${API_BASE}/${records[0].id}`,
           headers: { 'X-API-Key': TEST_API_KEY },
           body: {
-            code: records[0].code,
-            name: 'Updated Product',
+            code: 'Updated Code',
+            name: records[0].name,
             price: records[0].price,
           },
         }).then((res) => {
@@ -101,7 +101,7 @@ describe('API: Product', () => {
           cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
-              expect(getRes.body.name).to.eq('Updated Product');
+              expect(getRes.body.code).to.eq('Updated Code');
             });
         });
       });

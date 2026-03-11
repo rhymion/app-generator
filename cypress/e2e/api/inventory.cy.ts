@@ -64,13 +64,13 @@ describe('API: Inventory', () => {
           cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
-              expect(getRes.body.name).to.eq('Test Inventory');
+              expect(getRes.body.product.name).to.eq(deps.product.name);
             });
         });
       });
     });
 
-    it('5.1 fails when required field name is missing', () => {
+    it('5.1 fails when a required field is missing', () => {
       cy.task<any>('db:populateInventoryDependencies').then((deps) => {
         cy.request({
           method: 'POST',
@@ -78,7 +78,6 @@ describe('API: Inventory', () => {
           headers: { 'X-API-Key': TEST_API_KEY },
           body: {
             product_id: deps.product.id,
-            quantity: 100,
             reserved_quantity: 100,
           },
           failOnStatusCode: false,
@@ -91,26 +90,28 @@ describe('API: Inventory', () => {
 
   describe('PUT /api/inventory/:id', () => {
     it('4.1 updates, verified by GET', () => {
-      cy.task<any[]>('db:populateInventory', 1).then((records) => {
-        cy.request({
-          method: 'PUT',
-          url: `${API_BASE}/${records[0].id}`,
-          headers: { 'X-API-Key': TEST_API_KEY },
-          body: {
-            product_id: records[0].product_id,
-            quantity: records[0].quantity,
-            reserved_quantity: records[0].reserved_quantity,
-            location: records[0].location,
-            lot_number: records[0].lot_number,
-            expiration_date: records[0].expiration_date,
-          },
-        }).then((res) => {
-          expect(res.status).to.eq(200);
-          cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
-            .then((getRes) => {
-              expect(getRes.status).to.eq(200);
-              expect(getRes.body.name).to.eq('Updated Inventory');
-            });
+      cy.task<any>('db:populateInventoryDependencies').then((deps) => {
+        cy.task<any[]>('db:populateInventory', 1).then((records) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {
+              product_id: deps.product2.id,
+              quantity: records[0].quantity,
+              reserved_quantity: records[0].reserved_quantity,
+              location: records[0].location,
+              lot_number: records[0].lot_number,
+              expiration_date: records[0].expiration_date,
+            },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                expect(getRes.status).to.eq(200);
+                expect(getRes.body.product.name).to.eq(deps.product2.name);
+              });
+          });
         });
       });
     });

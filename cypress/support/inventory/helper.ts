@@ -21,7 +21,16 @@ export async function populateInventoryDependencies() {
       updater_id: testUser.id,
     },
   });
-  return { product };
+  const product2 = await prisma.product.create({
+    data: {
+      code: `TEST-CODE-${Date.now()}`,
+      name: 'Test Product',
+      price: 100,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+  return { product, product2 };
 }
 
 export async function populateInventoryData(length: number) {

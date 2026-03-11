@@ -38,6 +38,16 @@ def get_child_names(child: dict) -> dict:
 # Dependency resolution
 # ---------------------------------------------------------------------------
 
+def _get_primary_display_field_name(model_def: dict) -> str | None:
+    """Returns the primary display field name from x-display.table, or None."""
+    table = model_def.get('x-display', {}).get('table', [])
+    for item in table:
+        for field_name, cfg in item.items():
+            if cfg.get('primary'):
+                return field_name
+    return None
+
+
 def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
     """Return required non-system, non-name, non-FK fields for a dep entity.
 
@@ -546,6 +556,14 @@ def test_helper_context(
     child_metas = analyze_children(children, schema, model_name)
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
 
+    # Detect primary display field (for needs_second on FK primary deps)
+    primary_field_name_h = _get_primary_display_field_name(parent_def)
+    primary_is_fk_h = bool(
+        primary_field_name_h
+        and f'{primary_field_name_h}_id' in (parent_def.get('properties') or {})
+    )
+    primary_fk_dep_target = primary_field_name_h if primary_is_fk_h else None
+
     # Extend deps to include FK deps needed by datagrid children
     # (e.g. purchase_per_item needs product, but parent purchase_order doesn't)
     existing_dep_targets = {d['target'] for d in deps}
@@ -561,24 +579,46 @@ def test_helper_context(
                 existing_dep_targets.add(target)
 
     # Collect user_account FK fields required by the parent (e.g. customer_id)
-    user_account_fk_fields = [
-        r['prop_name'] for r in relationships
-        if r['target'] == 'user_account'
-        and r['prop_name'] in required_fields
-        and r['prop_name'] not in ('creator_id', 'updater_id')
-    ]
+    # and add each as a separate user_account dep (creates a distinct user)
+    ua_dep_fields = []  # [{prop_name, dep_var_name}] for use in populateData
+    for r in relationships:
+        if (r['target'] == 'user_account'
+                and r['prop_name'] in required_fields
+                and r['prop_name'] not in ('creator_id', 'updater_id')):
+            var_name = to_camel_case(re.sub(r'_id$', '', r['prop_name']))
+            deps.append({'target': 'user_account', 'var_name': var_name, 'fk_deps': [], 'is_user_account': True})
+            ua_dep_fields.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
 
-    # Enrich deps with title, has_user_accounts, and extra required fields
+    # Enrich deps with title, has_user_accounts, extra required fields, and needs_second
     enriched_deps = []
     for dep in deps:
-        dep_def = schema['definitions'].get(dep['target'] + '_detail', {})
-        x_rels = dep_def.get('x-relationships', {})
-        enriched_deps.append({
-            **dep,
-            'title': to_title_case(dep['target']),
-            'has_user_accounts': x_rels.get('user_accounts', {}).get('target') == 'user_account',
-            'extra_required_fields': _get_dep_extra_required_fields(dep['target'], schema),
-        })
+        is_ua = dep.get('is_user_account', False)
+        if is_ua:
+            enriched_deps.append({
+                **dep,
+                'title': to_title_case(dep['var_name']),
+                'has_user_accounts': False,
+                'extra_required_fields': [],
+                'needs_second': False,
+            })
+        else:
+            dep_def = schema['definitions'].get(dep['target'] + '_detail', {})
+            x_rels = dep_def.get('x-relationships', {})
+            enriched_deps.append({
+                **dep,
+                'title': to_title_case(dep['target']),
+                'has_user_accounts': x_rels.get('user_accounts', {}).get('target') == 'user_account',
+                'extra_required_fields': _get_dep_extra_required_fields(dep['target'], schema),
+                'needs_second': dep['target'] == primary_fk_dep_target,
+            })
+
+    # Compute deps_return including second instances for FK primary deps
+    deps_return_parts = []
+    for dep in enriched_deps:
+        deps_return_parts.append(dep['var_name'])
+        if dep.get('needs_second'):
+            deps_return_parts.append(f"{dep['var_name']}2")
+    deps_return = ', '.join(deps_return_parts)
 
     def _enrich_field_prisma(field: dict, entity_title: str) -> dict:
         f = dict(field)
@@ -623,9 +663,9 @@ def test_helper_context(
         'title': title,
         'model_name': model_name,
         'deps': enriched_deps,
-        'deps_return': ', '.join(d['var_name'] for d in deps),
-        'has_parent_deps': bool(entity_fk_deps),
-        'user_account_fk_fields': user_account_fk_fields,
+        'deps_return': deps_return,
+        'has_parent_deps': bool(entity_fk_deps) or bool(ua_dep_fields),
+        'ua_dep_fields': ua_dep_fields,
         'required_fields_prisma': required_fields_prisma,
         'all_fields_prisma': all_fields_prisma,
         'has_optional': bool(optional_field_metas),
@@ -869,7 +909,6 @@ def test_api_spec_context(
 
     deps = resolve_dependencies(model, schema)
     entity_fk_deps = get_entity_fk_deps(model, schema, deps)
-    has_deps = bool(entity_fk_deps)
 
     child_metas = analyze_children(children, schema, model)
     api_child_metas = [c for c in child_metas if c['render_type'] != 'file']
@@ -879,31 +918,83 @@ def test_api_spec_context(
         if k not in ('id', 'created_at', 'updated_at', 'creator_id')
     ]
 
+    # Primary display field detection
+    primary_field_name = _get_primary_display_field_name(model_def)
+    primary_is_fk = bool(
+        primary_field_name
+        and f'{primary_field_name}_id' in (model_def.get('properties') or {})
+    )
+    primary_dep_var = to_camel_case(primary_field_name) if primary_is_fk else None
+
+    # User_account FK fields required by the entity (e.g. customer_id)
+    ua_fk_fields_for_api = [
+        {'prop_name': r['prop_name'], 'var_name': to_camel_case(re.sub(r'_id$', '', r['prop_name']))}
+        for r in relationships
+        if r['target'] == 'user_account'
+        and r['prop_name'] in required_fields_list
+        and r['prop_name'] not in ('creator_id', 'updater_id')
+    ]
+
+    has_deps = bool(entity_fk_deps) or bool(ua_fk_fields_for_api)
+
     I = '        ' if has_deps else '      '
 
-    def _post_body(name_val: str | None, indent: str) -> list[str]:
+    # Compute assertions for 3.1 and 4.1 based on primary display field
+    if primary_is_fk:
+        assert_create = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}.name);'
+        assert_update = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}2.name);'
+    elif primary_field_name:
+        primary_meta = next((f for f in all_field_metas if f['prop_name'] == primary_field_name), None)
+        if primary_meta:
+            create_val = api_value(primary_meta, title)
+            update_label = primary_meta.get('label', to_title_case(primary_field_name))
+            assert_create = f"expect(getRes.body.{primary_field_name}).to.eq({create_val});"
+            assert_update = f"expect(getRes.body.{primary_field_name}).to.eq('Updated {update_label}');"
+        else:
+            assert_create = 'expect(getRes.body.id).to.exist;'
+            assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
+    else:
+        assert_create = 'expect(getRes.body.id).to.exist;'
+        assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
+
+    # 5.1: choose which required non-autocomplete field to omit
+    non_ac_required = [f for f in all_field_metas if f['required'] and f['category'] != 'autocomplete']
+    field_to_skip_5_1 = None
+    if non_ac_required:
+        field_to_skip_5_1 = next(
+            (f['prop_name'] for f in non_ac_required if f['prop_name'] == 'name'),
+            non_ac_required[0]['prop_name'],
+        )
+
+    def _post_body_impl(skip_field: str | None, indent: str) -> list[str]:
         out = []
         for field in all_field_metas:
             if not field['required']:
+                continue
+            if field['prop_name'] == skip_field:
                 continue
             if field['category'] == 'autocomplete':
                 dep = next((d for d in entity_fk_deps if d['prop_name'] == field['prop_name']), None)
                 if dep:
                     out.append(f"{indent}{field['prop_name']}: deps.{dep['dep_var_name']}.id,")
-            elif field['prop_name'] == 'name':
-                if name_val is not None:
-                    out.append(f"{indent}name: {name_val},")
             else:
                 out.append(f"{indent}{field['prop_name']}: {api_value(field, title)},")
+        for ua in ua_fk_fields_for_api:
+            if ua['prop_name'] != skip_field:
+                out.append(f"{indent}{ua['prop_name']}: deps.{ua['var_name']}.id,")
         for c in api_child_metas:
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
-    def _put_body(name_val: str, indent: str) -> list[str]:
+    def _put_body_impl(indent: str) -> list[str]:
         out = []
         for prop in put_body_props:
-            if prop == 'name':
-                out.append(f"{indent}name: {name_val},")
+            if primary_is_fk and prop == f'{primary_field_name}_id':
+                out.append(f"{indent}{prop}: deps.{primary_dep_var}2.id,")
+            elif not primary_is_fk and primary_field_name and prop == primary_field_name:
+                primary_meta = next((f for f in all_field_metas if f['prop_name'] == prop), None)
+                update_label = primary_meta.get('label', to_title_case(prop)) if primary_meta else to_title_case(prop)
+                out.append(f"{indent}{prop}: 'Updated {update_label}',")
             else:
                 out.append(f"{indent}{prop}: records[0].{prop},")
         for c in api_child_metas:
@@ -917,6 +1008,7 @@ def test_api_spec_context(
         'model': model,
         'api_path': api_path,
         'has_deps': has_deps,
+        'primary_is_fk': primary_is_fk,
         'can_list': gen_cfg.get('list', True) is not False,
         'can_view': gen_cfg.get('view', True) is not False,
         'can_new': gen_cfg.get('new', True) is not False,
@@ -924,8 +1016,11 @@ def test_api_spec_context(
         'can_delete': gen_cfg.get('delete', True) is not False,
         'I': I,
         'I7': I,  # same indentation level as I for section 7
-        'post_body_create': _post_body(f"'Test {title}'", f'{I}    '),
-        'post_body_missing_name': _post_body(None, f'{I}    '),
-        'put_body_update': _put_body(f"'Updated {title}'", '            '),
-        'i7_post_body': _post_body(f"'Test {title}'", f'{I}      '),
+        'assert_create': assert_create,
+        'assert_update': assert_update,
+        'post_body_create': _post_body_impl(None, f'{I}    '),
+        'post_body_missing_field': _post_body_impl(field_to_skip_5_1, f'{I}    '),
+        'put_body_update': _put_body_impl('            '),
+        'put_body_update_fk': _put_body_impl('              '),
+        'i7_post_body': _post_body_impl(None, f'{I}      '),
     }
