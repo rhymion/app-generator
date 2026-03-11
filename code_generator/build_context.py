@@ -271,7 +271,7 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
 # ---------------------------------------------------------------------------
 
 def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict],
-                           schema: dict) -> list[str]:
+                           schema: dict, model: str = '') -> list[str]:
     m2m_targets = [
         c['relationship']['target']
         for c in children_raw
@@ -289,6 +289,7 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
         if child_def.get('properties'):
             child_entity_rel_targets.extend(
                 r['target'] for r in get_parent_relationships(child_def)
+                if r['target'] != model  # exclude back-reference to the parent entity
             )
 
     return _dedupe_ordered([*m2m_targets, *many_to_one_targets, *child_entity_rel_targets])
@@ -478,7 +479,7 @@ def build_context(entity: dict, schema: dict) -> dict:
     )
 
     # Selection targets (page_new, page_edit)
-    selection_targets = _get_selection_targets(children_raw, parent_rels_raw, schema)
+    selection_targets = _get_selection_targets(children_raw, parent_rels_raw, schema, model)
 
     # Field categorisation (for FormUpsert / FormView)
     field_categories = _categorize_form_fields(filtered_props, parent_rels_raw, gen_cfg)

@@ -15,7 +15,7 @@ import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';
 import { items_columns } from '../purchase_order/column_def';
 import { useFormValidation } from './form_validation';
 
-export default function FormUpsert({ src, isEdit, permissions, allUserAccounts = [], allPurchaseOrders = [], allProducts = [], userAccountPermissions, purchaseOrderPermissions, productPermissions }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, permissions, allUserAccounts = [], allProducts = [], userAccountPermissions, productPermissions }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const tf = useTranslations('Fields');
@@ -34,13 +34,10 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
       label: item.name,
     }));
   }, [allUserAccounts]);
-  const purchaseOrderIdOptions = useMemo(() =>
-    (allPurchaseOrders ?? []).map(item => ({ value: item.id, label: item.name })),
-  [allPurchaseOrders]);
   const productIdOptions = useMemo(() =>
     (allProducts ?? []).map(item => ({ value: item.id, label: item.name })),
   [allProducts]);
-  const itemsColumns = items_columns(true, purchaseOrderIdOptions, productIdOptions);
+  const itemsColumns = items_columns(true, productIdOptions);
 
   const [initialItems] = useState<GridRowsProp>(() => src.items.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` })));
 

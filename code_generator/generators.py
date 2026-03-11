@@ -390,6 +390,8 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
 
         rel_params = []
         for key, prop in child_props.items():
+            if key == f'{model}_id':
+                continue
             rel = prop.get('x-relationship', {})
             if rel.get('type') == 'many-to-one':
                 param_camel = to_camel_case(key)
@@ -1107,8 +1109,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 )
             continue
 
-        # Grid child
-        child_rels = get_parent_relationships(child_def)
+        # Grid child — exclude the back-reference to the parent entity
+        child_rels = [r for r in get_parent_relationships(child_def) if r['target'] != model]
         rel_opt_args = ', '.join(f'{to_camel_case(r["prop_name"])}Options' for r in child_rels)
         rel_args_str = f', {rel_opt_args}' if rel_opt_args else ''
 
@@ -1153,7 +1155,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         if c.get('output_type') == 'list' or (c.get('relationship') or {}).get('type') == 'many-to-many':
             continue
         cdef = schema['definitions'].get(c['name'], {})
-        all_child_rels.extend(_gpr(cdef))
+        all_child_rels.extend(r for r in _gpr(cdef) if r['target'] != model)
     seen_rel = set()
     child_entity_rel_opt = []
     for r in all_child_rels:

@@ -1,7 +1,7 @@
 import { GridColDef } from '@mui/x-data-grid';
 import { useTranslations } from 'next-intl';
 
-export function items_columns(editable: boolean = false, purchaseOrderIdOptions?: Array<{ value: string | null; label: string }>, productIdOptions?: Array<{ value: string | null; label: string }>): GridColDef[] {
+export function items_columns(editable: boolean = false, productIdOptions?: Array<{ value: string | null; label: string }>): GridColDef[] {
   const t = useTranslations('Fields');
   return [
     ...(productIdOptions && productIdOptions.length > 0
