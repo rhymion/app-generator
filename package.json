@@ -32,6 +32,7 @@
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^7.3.7",
     "@mui/material": "^7.3.7",
+    "@mui/material-nextjs": "^7.3.9",
     "@mui/x-data-grid": "^8.25.0",
     "@mui/x-date-pickers": "^8.26.0",
     "@next-auth/prisma-adapter": "^1.0.7",
