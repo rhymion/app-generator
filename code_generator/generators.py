@@ -870,9 +870,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         setter  = _setter(sn)
         fmt     = prop.get('format')
         show_date_str = '\n        show_date={false}' if fmt == 'time' else ''
+        show_time_str = '\n        show_time={false}' if fmt == 'date' else ''
         dt_jsxs.append(
             f"      <DateTimeWrapper\n"
-            f"        label={{tf('{fk}')}} {show_date_str}\n"
+            f"        label={{tf('{fk}')}} {show_date_str}{show_time_str}\n"
             f"        date_time={{{sn} ? {sn}.toDate() : null}}\n"
             f"        onChange={{(newValue: dayjs.Dayjs | null) => set{setter}(newValue)}}\n"
             f"      />"

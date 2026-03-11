@@ -64,7 +64,7 @@ describe('Testing Inventory pages and their behavior', () => {
         cy.fillField('Reserved Quantity', '100');
         cy.fillField('Location', 'Test Location');
         cy.fillField('Lot Number', 'Test Lot Number');
-        cy.fillDateTime('Expiration Date', '01/15/2025');
+        cy.fillDate('Expiration Date', '01/15/2025');
         cy.clickButton('Save');
         cy.url().should('include', '/inventory');
         cy.contains(deps.product.name).should('be.visible');
@@ -90,7 +90,7 @@ describe('Testing Inventory pages and their behavior', () => {
         cy.url().should('include', '/inventory/edit');
         cy.fillField('Location', 'Test Location');
         cy.fillField('Lot Number', 'Test Lot Number');
-        cy.fillDateTime('Expiration Date', '01/15/2025');
+        cy.fillDate('Expiration Date', '01/15/2025');
         cy.clickButton('Save');
         cy.url().should('include', '/inventory');
         cy.contains('Test Product').should('be.visible');

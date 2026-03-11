@@ -438,6 +438,11 @@ def gen_fill_command(field: dict, value: str, indent: str) -> str:
     if cat in ('text', 'number'):
         return f"{indent}cy.fillField('{label}', '{value}');"
     elif cat == 'datetime':
+        fmt = field.get('format')
+        if fmt == 'date':
+            return f"{indent}cy.fillDate('{label}', '{value}');"
+        elif fmt == 'time':
+            return f"{indent}cy.fillTime('{label}', '{value}');"
         return f"{indent}cy.fillDateTime('{label}', '{value}');"
     elif cat == 'boolean':
         return f"{indent}cy.setCheckbox('{label}', {value});"

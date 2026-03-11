@@ -132,6 +132,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProducts = [],
       />
       <DateTimeWrapper
         label={tf('expirationDate')} 
+        show_time={false}
         date_time={expirationDate ? expirationDate.toDate() : null}
         onChange={(newValue: dayjs.Dayjs | null) => setExpirationDate(newValue)}
       />
