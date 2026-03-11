@@ -62,7 +62,7 @@ describe('API: Xxxxx Xxxxx', () => {
         cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
           .then((getRes) => {
             expect(getRes.status).to.eq(200);
-            expect(getRes.body.id).to.exist;
+            expect(getRes.body.name).to.eq('Test Xxxxx Xxxxx');
           });
       });
     });
@@ -90,7 +90,7 @@ describe('API: Xxxxx Xxxxx', () => {
           url: `${API_BASE}/${records[0].id}`,
           headers: { 'X-API-Key': TEST_API_KEY },
           body: {
-            name: records[0].name,
+            name: 'Updated Xxxxx Xxxxx',
             description: records[0].description,
             team: records[0].team,
             yyyyy_yyyyys: [],
@@ -100,7 +100,7 @@ describe('API: Xxxxx Xxxxx', () => {
           cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
-              expect(getRes.body.id).to.eq(records[0].id);
+              expect(getRes.body.name).to.eq('Updated Xxxxx Xxxxx');
             });
         });
       });

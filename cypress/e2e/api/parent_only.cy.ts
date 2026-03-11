@@ -61,7 +61,7 @@ describe('API: Parent Only', () => {
         cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
           .then((getRes) => {
             expect(getRes.status).to.eq(200);
-            expect(getRes.body.id).to.exist;
+            expect(getRes.body.name).to.eq('Test Parent Only');
           });
       });
     });
@@ -88,7 +88,7 @@ describe('API: Parent Only', () => {
           url: `${API_BASE}/${records[0].id}`,
           headers: { 'X-API-Key': TEST_API_KEY },
           body: {
-            name: records[0].name,
+            name: 'Updated Parent Only',
             description: records[0].description,
             login_time: records[0].login_time,
             logout_time: records[0].logout_time,
@@ -98,7 +98,7 @@ describe('API: Parent Only', () => {
           cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
-              expect(getRes.body.id).to.eq(records[0].id);
+              expect(getRes.body.name).to.eq('Updated Parent Only');
             });
         });
       });

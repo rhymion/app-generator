@@ -62,7 +62,7 @@ describe('API: Role', () => {
         cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
           .then((getRes) => {
             expect(getRes.status).to.eq(200);
-            expect(getRes.body.id).to.exist;
+            expect(getRes.body.name).to.eq('Test Role');
           });
       });
     });
@@ -90,7 +90,7 @@ describe('API: Role', () => {
           url: `${API_BASE}/${records[0].id}`,
           headers: { 'X-API-Key': TEST_API_KEY },
           body: {
-            name: records[0].name,
+            name: 'Updated Role',
             description: records[0].description,
             user_accounts: [],
           },
@@ -99,7 +99,7 @@ describe('API: Role', () => {
           cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
-              expect(getRes.body.id).to.eq(records[0].id);
+              expect(getRes.body.name).to.eq('Updated Role');
             });
         });
       });
