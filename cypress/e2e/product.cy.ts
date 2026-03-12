@@ -23,14 +23,14 @@ describe('Testing Product pages and their behavior', () => {
     it('1.2 shows list with one item', () => {
       cy.task('db:populateProduct', 1);
       cy.visit('/en/product');
-      cy.contains('Product 1').should('be.visible');
+      cy.contains('Test Code 1').should('be.visible');
       getDataGridRowCount().should('eq', 1);
     });
 
     it('1.3 shows list with multiple items', () => {
       cy.task('db:populateProduct', 3);
       cy.visit('/en/product');
-      cy.contains('Product 1').should('be.visible');
+      cy.contains('Test Code 1').should('be.visible');
       getDataGridRowCount().should('eq', 3);
     });
   });
@@ -44,9 +44,9 @@ describe('Testing Product pages and their behavior', () => {
       cy.fillField('Price', '100');
       cy.clickButton('Save');
       cy.url().should('include', '/product');
-      cy.contains('Test Product').should('be.visible');
+      cy.contains('Test Code').should('be.visible');
       // Verify on view page
-      cy.contains('Test Product').click();
+      cy.contains('Test Code').click();
       cy.url().should('include', '/product/view');
       cy.checkField('Code', 'Test Code');
       cy.checkField('Name', 'Test Product');
@@ -61,9 +61,9 @@ describe('Testing Product pages and their behavior', () => {
       cy.fillField('Price', '100');
       cy.clickButton('Save');
       cy.url().should('include', '/product');
-      cy.contains('Test Product').should('be.visible');
+      cy.contains('Test Code').should('be.visible');
       // Verify on view page
-      cy.contains('Test Product').click();
+      cy.contains('Test Code').click();
       cy.url().should('include', '/product/view');
       cy.checkField('Code', 'Test Code');
       cy.checkField('Name', 'Test Product');
@@ -75,16 +75,16 @@ describe('Testing Product pages and their behavior', () => {
     it('3.3 edits with mixed changes', () => {
       cy.task<any[]>('db:populateProduct', 1).then((records) => {
         cy.visit('/en/product');
-        cy.contains('Product 1').click();
+        cy.contains('Test Code 1').click();
         cy.get('[aria-label="Edit"]').click();
-        cy.clearAndFillField('Name', 'Updated Product');
+        cy.clearAndFillField('Code', 'Updated Code');
         cy.clickButton('Save');
         cy.url().should('include', '/product');
-        cy.contains('Updated Product').should('be.visible');
+        cy.contains('Updated Code').should('be.visible');
         // Verify on view page
-        cy.contains('Updated Product').click();
+        cy.contains('Updated Code').click();
         cy.url().should('include', '/product/view');
-        cy.checkField('Name', 'Updated Product');
+        cy.checkField('Code', 'Updated Code');
       });
     });
   });
@@ -111,13 +111,13 @@ describe('Testing Product pages and their behavior', () => {
     it('4.3 deletes an item from edit page', () => {
       cy.task('db:populateProduct', 1);
       cy.visit('/en/product');
-      cy.contains('Product 1').click();
+      cy.contains('Test Code 1').click();
       cy.get('[aria-label="Edit"]').click();
       cy.url().should('include', '/product/edit');
       cy.clickButton('Delete Product');
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       cy.url().should('include', '/product');
-      cy.contains('Product 1').should('not.exist');
+      cy.contains('Test Code 1').should('not.exist');
     });
   });
 
@@ -136,7 +136,7 @@ describe('Testing Product pages and their behavior', () => {
     it('6.1 fails when required parent field is cleared', () => {
       cy.task('db:populateProduct', 1);
       cy.visit('/en/product');
-      cy.contains('Product 1').click();
+      cy.contains('Test Code 1').click();
       cy.get('[aria-label="Edit"]').click();
       cy.clearField('Name');
       cy.clickButton('Save');

@@ -95,5 +95,25 @@ export function getGeneratedTasks() {
       const { populatePurchaseOrderPurchasePerItemData } = require('./purchase_order/helper');
       return await populatePurchaseOrderPurchasePerItemData(params.parentId, params.length || 1);
     },
+    async 'db:populateUserAccount'(length: number) {
+      const prisma = require('../../lib/prisma').default;
+      const { TEST_CREDENTIALS } = require('./test-credentials');
+      const testUser = await prisma.user_account.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+      if (!testUser) throw new Error('Test user not found. Run db:seed first.');
+      const records = [];
+      for (let i = 1; i <= length; i++) {
+        const record = await prisma.user_account.create({
+          data: {
+            name: `User Account ${i}`,
+            email: `test-ua-${i}-${Date.now()}@example.com`,
+            password: 'test-password',
+            creator_id: testUser.id,
+            updater_id: testUser.id,
+          },
+        });
+        records.push(record);
+      }
+      return JSON.parse(JSON.stringify(records));
+    },
   };
 }

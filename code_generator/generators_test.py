@@ -760,24 +760,14 @@ def test_spec_context(
         required_assert_cmds_no_bool.append(f"{I}cy.checkField('{ua['label']}', '{ua['dep_name']}');")
         all_assert_cmds_no_bool.append(f"{I}cy.checkField('{ua['label']}', '{ua['dep_name']}');")
 
-    # Compute list identifiers based on primary display field
+    # Compute list identifiers based on primary display field.
+    # Priority: FK primary → explicit non-name primary → name → fallback.
     prim = _get_primary_display_field_name(parent_def)
     prim_is_fk = bool(prim and f'{prim}_id' in (parent_def.get('properties') or {}))
     has_name = any(f['prop_name'] == 'name' for f in fields)
+    prim_meta = next((f for f in fields if f['prop_name'] == prim), None) if prim else None
 
-    if has_name:
-        list_id_1 = f'{title} 1'
-        after_create_id = f'Test {title}'
-        after_create_id_is_expr = False
-        primary_dep_var_for_list = None
-        list_id_updated = f'Updated {title}'
-        has_edit_primary = True
-        edit_field_label = 'Name'
-        edit_update_value = f'Updated {title}'
-        check_field_label = 'Name'
-        check_field_value_1 = f'{title} 1'
-        check_field_updated = f'Updated {title}'
-    elif prim_is_fk:
+    if prim_is_fk:
         dep_title = to_title_case(prim)
         list_id_1 = f'Test {dep_title}'
         after_create_id = None
@@ -790,33 +780,33 @@ def test_spec_context(
         check_field_label = dep_title
         check_field_value_1 = list_id_1
         check_field_updated = list_id_1
-    elif prim:
-        prim_meta = next((f for f in fields if f['prop_name'] == prim), None)
-        if prim_meta:
-            lbl = prim_meta.get('label', to_title_case(prim))
-            list_id_1 = f'Test {lbl} 1'
-            after_create_id = cypress_create_value(prim_meta, title)
-            after_create_id_is_expr = False
-            primary_dep_var_for_list = None
-            list_id_updated = f'Updated {lbl}'
-            has_edit_primary = True
-            edit_field_label = lbl
-            edit_update_value = f'Updated {lbl}'
-            check_field_label = lbl
-            check_field_value_1 = list_id_1
-            check_field_updated = list_id_updated
-        else:
-            list_id_1 = f'{title} 1'
-            after_create_id = f'Test {title}'
-            after_create_id_is_expr = False
-            primary_dep_var_for_list = None
-            list_id_updated = f'Updated {title}'
-            has_edit_primary = True
-            edit_field_label = 'Name'
-            edit_update_value = f'Updated {title}'
-            check_field_label = 'Name'
-            check_field_value_1 = f'{title} 1'
-            check_field_updated = f'Updated {title}'
+    elif prim and prim != 'name' and prim_meta:
+        # Explicit non-name primary field (e.g., product.code).
+        # Link in the list is on this column, so use it for all click navigation.
+        lbl = prim_meta.get('label', to_title_case(prim))
+        list_id_1 = f'Test {lbl} 1'
+        after_create_id = cypress_create_value(prim_meta, title)
+        after_create_id_is_expr = False
+        primary_dep_var_for_list = None
+        list_id_updated = f'Updated {lbl}'
+        has_edit_primary = True
+        edit_field_label = lbl
+        edit_update_value = f'Updated {lbl}'
+        check_field_label = lbl
+        check_field_value_1 = list_id_1
+        check_field_updated = list_id_updated
+    elif has_name:
+        list_id_1 = f'{title} 1'
+        after_create_id = f'Test {title}'
+        after_create_id_is_expr = False
+        primary_dep_var_for_list = None
+        list_id_updated = f'Updated {title}'
+        has_edit_primary = True
+        edit_field_label = 'Name'
+        edit_update_value = f'Updated {title}'
+        check_field_label = 'Name'
+        check_field_value_1 = f'{title} 1'
+        check_field_updated = f'Updated {title}'
     else:
         list_id_1 = f'{title} 1'
         after_create_id = f'Test {title}'
@@ -940,19 +930,20 @@ def test_spec_context(
         )
         fail_edit_6_1 = {'clear_cmd': gen_clear_command(field_to_clear, '      ')}
 
-    # Section 6.2: clear required child field
+    # Section 6.2: clear a non-FK required child field (singleSelect cannot be cleared via input)
     fail_edit_6_2 = None
     children_with_req = [c for c in datagrid_children if c['required_fields']]
     if children_with_req:
         test_child = children_with_req[0]
         child_field_to_clear = next(
-            (f for f in test_child['required_fields'] if f['category'] == 'text'),
-            test_child['required_fields'][0],
+            (f for f in test_child['required_fields'] if f['category'] != 'autocomplete'),
+            None,
         )
-        fail_edit_6_2 = {
-            'child_pascal': to_pascal_case(test_child['child']['name']),
-            'field_prop_name': child_field_to_clear['prop_name'],
-        }
+        if child_field_to_clear:
+            fail_edit_6_2 = {
+                'child_pascal': to_pascal_case(test_child['child']['name']),
+                'field_prop_name': child_field_to_clear['prop_name'],
+            }
 
     return {
         'parent': parent,
@@ -1005,11 +996,17 @@ def test_tasks_registry_context(entities: list, schema: dict) -> dict:
     `entities` is a list of dicts: {parent, model_name, children}.
     """
     enriched_entities = []
+    has_user_account_populate = False
     for entity in entities:
         parent = entity['parent']
         pascal = to_pascal_case(parent)
         child_metas = analyze_children(entity['children'], schema, entity['model_name'])
         datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
+        list_children = [c for c in child_metas if c['render_type'] in ('editable-list-autocomplete', 'editable-list-text')]
+        for lc in list_children:
+            rel = lc['child'].get('relationship') or {}
+            if rel.get('target') == 'user_account':
+                has_user_account_populate = True
         enriched_entities.append({
             'parent': parent,
             'pascal': pascal,
@@ -1019,7 +1016,7 @@ def test_tasks_registry_context(entities: list, schema: dict) -> dict:
                 for c in datagrid_children
             ],
         })
-    return {'entities': enriched_entities}
+    return {'entities': enriched_entities, 'has_user_account_populate': has_user_account_populate}
 
 
 def test_api_spec_context(
