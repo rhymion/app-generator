@@ -56,7 +56,7 @@ describe('Testing Role pages and their behavior', () => {
       cy.fillField('Name', 'Test Role');
       cy.fillField('Description', 'Test Description');
       // Add list item: User Accounts
-      cy.clickButton('Add UserAccount');
+      cy.clickButton('Add User Accounts');
       cy.get('div[role="dialog"]').find('input').type('User Account 1');
       cy.get('.MuiAutocomplete-popper li').contains('User Account 1').click();
       cy.get('div[role="dialog"]').find('button').contains('Add').click();
@@ -80,7 +80,7 @@ describe('Testing Role pages and their behavior', () => {
         cy.get('[aria-label="Edit"]').click();
         cy.url().should('include', '/role/edit');
         cy.fillField('Description', 'Test Description');
-        cy.clickButton('Add UserAccount');
+        cy.clickButton('Add User Accounts');
         cy.get('div[role="dialog"]').find('input').type('User Account 1');
         cy.get('.MuiAutocomplete-popper li').contains('User Account 1').click();
         cy.get('div[role="dialog"]').find('button').contains('Add').click();

@@ -117,12 +117,12 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for child in list_children_data %}
 {% if child.render_type == 'editable-list-text' %}
 {{ I }}// Add list item: {{ child.title }}
-{{ I }}cy.clickButton('Add {{ child.singular_pascal }}');
+{{ I }}cy.clickButton('Add {{ child.title }}');
 {{ I }}cy.get('div[role="dialog"]').find('input').type('Test {{ child.title }} Item');
 {{ I }}cy.get('div[role="dialog"]').find('button').contains('Add').click();
 {% elif child.render_type == 'editable-list-autocomplete' and child.rel_target %}
 {{ I }}// Add list item: {{ child.title }}
-{{ I }}cy.clickButton('Add {{ child.singular_pascal }}');
+{{ I }}cy.clickButton('Add {{ child.title }}');
 {{ I }}cy.get('div[role="dialog"]').find('input').type('{{ child.rel_target_title }} 1');
 {{ I }}cy.get('.MuiAutocomplete-popper li').contains('{{ child.rel_target_title }} 1').click();
 {{ I }}cy.get('div[role="dialog"]').find('button').contains('Add').click();
@@ -183,11 +183,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {% for child in list_children_data %}
 {% if child.render_type == 'editable-list-text' %}
-        cy.clickButton('Add {{ child.singular_pascal }}');
+        cy.clickButton('Add {{ child.title }}');
         cy.get('div[role="dialog"]').find('input').type('Test {{ child.title }} Item');
         cy.get('div[role="dialog"]').find('button').contains('Add').click();
 {% elif child.render_type == 'editable-list-autocomplete' and child.rel_target %}
-        cy.clickButton('Add {{ child.singular_pascal }}');
+        cy.clickButton('Add {{ child.title }}');
         cy.get('div[role="dialog"]').find('input').type('{{ child.rel_target_title }} 1');
         cy.get('.MuiAutocomplete-popper li').contains('{{ child.rel_target_title }} 1').click();
         cy.get('div[role="dialog"]').find('button').contains('Add').click();

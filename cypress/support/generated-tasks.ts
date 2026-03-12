@@ -96,7 +96,7 @@ export function getGeneratedTasks() {
       return await populatePurchaseOrderPurchasePerItemData(params.parentId, params.length || 1);
     },
     async 'db:populateUserAccount'(length: number) {
-      const prisma = require('../../lib/prisma').default;
+      const { prisma } = require('./db-helpers');
       const { TEST_CREDENTIALS } = require('./test-credentials');
       const testUser = await prisma.user_account.findUnique({ where: { email: TEST_CREDENTIALS.email } });
       if (!testUser) throw new Error('Test user not found. Run db:seed first.');
