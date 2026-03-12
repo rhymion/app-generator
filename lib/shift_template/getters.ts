@@ -42,23 +42,34 @@ export async function getShiftTemplateDetail(id: string): Promise<ShiftTemplateD
 }
 
 export async function getShiftTemplateListPageData(isAssertPermission: boolean = true) {
+  const t0 = performance.now();
   const userPermissions = await getModelPermissions('shift_template');
+  console.log(`getModelPermissions: ${(performance.now() - t0).toFixed(1)}ms`);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'shift_template');
   }
+  console.log(`assertPermission: ${(performance.now() - t0).toFixed(1)}ms`);
   const shiftTemplates = await getAllShiftTemplates();
+  console.log(`getShiftTemplateListPageData: ${(performance.now() - t0).toFixed(1)}ms`);
   return { shiftTemplates, userPermissions };
 }
 
 export async function getShiftTemplateDetailPageData(id: string, operation: Operation = 'read') {
+  const t0 = performance.now();
   const shiftTemplate = await getShiftTemplateDetail(id);
+  console.log(`getShiftTemplateDetail: ${(performance.now() - t0).toFixed(1)}ms`);
   const userPermissions = await getModelPermissions('shift_template', undefined, shiftTemplate);
+  console.log(`getModelPermissions: ${(performance.now() - t0).toFixed(1)}ms`);
   await assertPermission(userPermissions, operation, 'shift_template');
+  console.log(`getShiftTemplateDetailPageData: ${(performance.now() - t0).toFixed(1)}ms`);
   return { shiftTemplate, userPermissions };
 }
 
 export async function getShiftTemplateNewPageAccessCheck() {
+  const t0 = performance.now();
   const userPermissions = await getModelPermissions('shift_template');
+  console.log(`getModelPermissions: ${(performance.now() - t0).toFixed(1)}ms`);
   await assertPermission(userPermissions, 'create', 'shift_template');
+  console.log(`getShiftTemplateNewPageAccessCheck: ${(performance.now() - t0).toFixed(1)}ms`);
   return userPermissions;
 }

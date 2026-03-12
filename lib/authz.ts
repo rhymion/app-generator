@@ -3,11 +3,12 @@
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/auth';
 import prisma from '@/lib/prisma';
+import { cache } from 'react';
 
-export async function getSessionUserId(): Promise<string | null> {
+export const getSessionUserId = cache(async function getSessionUserId(): Promise<string | null> {
   const session = await getServerSession(authOptions);
   return session?.user?.id ?? null;
-}
+});
 
 export async function getSessionUserIdOrThrow(): Promise<string> {
   const userId = await getSessionUserId();
@@ -44,11 +45,11 @@ async function getUserRoleIds(userId: string): Promise<string[]> {
   return user?.roles?.map((role) => role.id) ?? [];
 }
 
-export async function getModelPermissions(
+export const getModelPermissions = cache(async (
   model: ModelName,
   userId?: string | null,
   item?: ItemContext,
-): Promise<ModelPermissions> {
+): Promise<ModelPermissions> => {
   const resolvedUserId = userId ?? (await getSessionUserId());
   if (!resolvedUserId) {
     return { ...EMPTY_PERMISSIONS };
@@ -124,7 +125,7 @@ export async function getModelPermissions(
     },
     { ...EMPTY_PERMISSIONS },
   );
-}
+});
 
 export async function canAccess(
   model: ModelName,

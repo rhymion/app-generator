@@ -10,7 +10,7 @@ const createPrismaClient = async () => {
     const accelerateUrl = process.env.PRISMA_DATABASE_URL
     const client = new PrismaClient({
       accelerateUrl,
-      log: process.env.NODE_ENV === 'development' ? ['query'] : [],
+      log: process.env.NODE_ENV === 'development' ? ['query'] : ['query', 'info'],
     }).$extends(withAccelerate());
     return client;
   } else {
@@ -20,7 +20,7 @@ const createPrismaClient = async () => {
     // Dynamic import to avoid bundling @prisma/adapter-pg in production
     const { PrismaPg } = await import('@prisma/adapter-pg');
     const adapter = new PrismaPg({ connectionString });
-    const client = new PrismaClient({ adapter })
+    const client = new PrismaClient({ adapter, log: ['query', 'info'] })
     return client;
   }
 };

@@ -42,23 +42,34 @@ export async function getShiftDetail(id: string): Promise<ShiftDetail | null> {
 }
 
 export async function getShiftListPageData(isAssertPermission: boolean = true) {
+  const t0 = performance.now();
   const userPermissions = await getModelPermissions('shift');
+  console.log(`getModelPermissions: ${(performance.now() - t0).toFixed(1)}ms`);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'shift');
   }
+  console.log(`assertPermission: ${(performance.now() - t0).toFixed(1)}ms`);
   const shifts = await getAllShifts();
+  console.log(`getShiftListPageData: ${(performance.now() - t0).toFixed(1)}ms`);
   return { shifts, userPermissions };
 }
 
 export async function getShiftDetailPageData(id: string, operation: Operation = 'read') {
+  const t0 = performance.now();
   const shift = await getShiftDetail(id);
+  console.log(`getShiftDetail: ${(performance.now() - t0).toFixed(1)}ms`);
   const userPermissions = await getModelPermissions('shift', undefined, shift);
+  console.log(`getModelPermissions: ${(performance.now() - t0).toFixed(1)}ms`);
   await assertPermission(userPermissions, operation, 'shift');
+  console.log(`getShiftDetailPageData: ${(performance.now() - t0).toFixed(1)}ms`);
   return { shift, userPermissions };
 }
 
 export async function getShiftNewPageAccessCheck() {
+  const t0 = performance.now();
   const userPermissions = await getModelPermissions('shift');
+  console.log(`getModelPermissions: ${(performance.now() - t0).toFixed(1)}ms`);
   await assertPermission(userPermissions, 'create', 'shift');
+  console.log(`getShiftNewPageAccessCheck: ${(performance.now() - t0).toFixed(1)}ms`);
   return userPermissions;
 }
