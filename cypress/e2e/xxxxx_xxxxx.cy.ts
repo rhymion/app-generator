@@ -171,14 +171,15 @@ describe('Testing Xxxxx Xxxxx pages and their behavior', () => {
       cy.url().should('include', '/xxxxx_xxxxx/new');
     });
 
-    it('5.2 fails when required child field is missing', () => {
+    it('5.2 fails when required child scalar field is missing', () => {
       cy.visit('/en/xxxxx_xxxxx/new');
       cy.fillField('Name', 'Test Xxxxx Xxxxx');
       cy.clickButton('Add Yyyyy Yyyyys');
-      fillDataGridRow(0, { name: 'Test Yyyyy Yyyyys', type: 'string', required: true });
+      fillDataGridRow(0, { type: 'string', required: true, written_by: 'Test Written By' });
       cy.clickButton('Save');
       cy.url().should('include', '/xxxxx_xxxxx/new');
     });
+
   });
 
   describe('Fail edit', () => {

@@ -1,6 +1,6 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { TEST_CREDENTIALS } from '../support/test-credentials';
-import { fillDataGridRow, assertDataGridEmpty, getDataGridRowCount, assertDataGridRowData } from '../support/datagrid-helpers';
+import { fillDataGridRow, selectDataGridSingleSelect, assertDataGridEmpty, getDataGridRowCount, assertDataGridRowData } from '../support/datagrid-helpers';
 
 describe('Testing Purchase Order pages and their behavior', () => {
   beforeEach(() => {
@@ -44,7 +44,8 @@ describe('Testing Purchase Order pages and their behavior', () => {
         cy.selectAutocomplete('Customer', deps.customer.name);
         // Add required child: Items
         cy.clickButton('Add Items');
-        fillDataGridRow(0, { product_id: '', quantity: 100 });
+        selectDataGridSingleSelect(0, 'product_id', 'Test Product');
+        fillDataGridRow(0, { quantity: 100 });
         cy.clickButton('Save');
         cy.url().should('include', '/purchase_order');
         cy.contains('Test Order No').should('be.visible');
@@ -64,7 +65,8 @@ describe('Testing Purchase Order pages and their behavior', () => {
         cy.selectAutocomplete('Customer', deps.customer.name);
         // Add child: Items
         cy.clickButton('Add Items');
-        fillDataGridRow(0, { product_id: '', quantity: 100, price: 100 });
+        selectDataGridSingleSelect(0, 'product_id', 'Test Product');
+        fillDataGridRow(0, { quantity: 100, price: 100 });
         cy.clickButton('Save');
         cy.url().should('include', '/purchase_order');
         cy.contains('Test Order No').should('be.visible');
@@ -86,7 +88,8 @@ describe('Testing Purchase Order pages and their behavior', () => {
         cy.url().should('include', '/purchase_order/edit');
         // Add child: Items
         cy.clickButton('Add Items');
-        fillDataGridRow(0, { product_id: '', quantity: 100 });
+        selectDataGridSingleSelect(0, 'product_id', 'Test Product');
+        fillDataGridRow(0, { quantity: 100 });
         cy.clickButton('Save');
         cy.url().should('include', '/purchase_order');
         cy.contains('Test Order No 1').should('be.visible');
@@ -172,12 +175,23 @@ describe('Testing Purchase Order pages and their behavior', () => {
       });
     });
 
-    it('5.2 fails when required child field is missing', () => {
+    it('5.2 fails when required child scalar field is missing', () => {
       cy.task<any>('db:populatePurchaseOrderDependencies').then((deps) => {
         cy.visit('/en/purchase_order/new');
         cy.fillField('Order No', 'Test Order No');
         cy.clickButton('Add Items');
-        fillDataGridRow(0, { product_id: '' });
+        selectDataGridSingleSelect(0, 'product_id', 'Test Product');
+        cy.clickButton('Save');
+        cy.url().should('include', '/purchase_order/new');
+      });
+    });
+
+    it('5.3 fails when required child FK field is missing', () => {
+      cy.task<any>('db:populatePurchaseOrderDependencies').then((deps) => {
+        cy.visit('/en/purchase_order/new');
+        cy.fillField('Order No', 'Test Order No');
+        cy.clickButton('Add Items');
+        fillDataGridRow(0, { quantity: 100 });
         cy.clickButton('Save');
         cy.url().should('include', '/purchase_order/new');
       });
@@ -202,8 +216,8 @@ describe('Testing Purchase Order pages and their behavior', () => {
         cy.contains('Test Order No 1').click();
         cy.get('[aria-label="Edit"]').click();
         // Clear required child field
-        cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="product_id"]').dblclick();
-        cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="product_id"] input').clear().type('{enter}');
+        cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="quantity"]').dblclick();
+        cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="quantity"] input').clear().type('{enter}');
         cy.clickButton('Save');
         cy.url().should('include', '/purchase_order/edit');
       });

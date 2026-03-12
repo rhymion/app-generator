@@ -504,29 +504,42 @@ def gen_assert_commands(fields: list, entity_title: str, indent: str) -> list[st
 # Child DataGrid object helpers
 # ---------------------------------------------------------------------------
 
-def gen_child_datagrid_object(child_meta: dict, action: str) -> str:
-    fields = child_meta['required_fields'] if action == 'create' else child_meta['fields']
-    title = child_meta['names']['title']
+def _child_scalar_entries(fields: list, title: str, value_fn) -> list[str]:
+    """Return JS object entries for scalar (non-autocomplete) datagrid child fields."""
     entries = []
     for field in fields:
-        value = cypress_create_value(field, title) if action == 'create' else cypress_edit_value(field, title)
+        if field['category'] == 'autocomplete':
+            continue
+        value = value_fn(field, title)
         if field['category'] in ('boolean', 'number'):
             entries.append(f"{field['prop_name']}: {value}")
         else:
             entries.append(f"{field['prop_name']}: '{value}'")
+    return entries
+
+
+def gen_child_datagrid_object(child_meta: dict, action: str) -> str:
+    """Generate fillDataGridRow object (scalar fields only; FK fields use selectDataGridSingleSelect)."""
+    fields = child_meta['required_fields'] if action == 'create' else child_meta['fields']
+    title = child_meta['names']['title']
+    value_fn = cypress_create_value if action == 'create' else cypress_edit_value
+    entries = _child_scalar_entries(fields, title, value_fn)
     return '{ ' + ', '.join(entries) + ' }'
 
 
 def gen_child_full_datagrid_object(child_meta: dict) -> str:
-    title = child_meta['names']['title']
-    entries = []
-    for field in child_meta['fields']:
-        value = cypress_create_value(field, title)
-        if field['category'] in ('boolean', 'number'):
-            entries.append(f"{field['prop_name']}: {value}")
-        else:
-            entries.append(f"{field['prop_name']}: '{value}'")
+    """Generate fillDataGridRow object for all fields (scalar only)."""
+    entries = _child_scalar_entries(child_meta['fields'], child_meta['names']['title'], cypress_create_value)
     return '{ ' + ', '.join(entries) + ' }'
+
+
+def gen_child_datagrid_fk_fields(fields: list) -> list[dict]:
+    """Return [{field, label}] for FK (singleSelect) fields in a datagrid child."""
+    return [
+        {'field': f['prop_name'], 'label': f"Test {to_title_case(f['dep_target'])}"}
+        for f in fields
+        if f['category'] == 'autocomplete' and f.get('dep_target')
+    ]
 
 
 
@@ -828,12 +841,16 @@ def test_spec_context(
     datagrid_children_data = []
     for child_meta in datagrid_children:
         child_name = child_meta['child']['name']
+        fk_create_fields = gen_child_datagrid_fk_fields(child_meta['required_fields'])
+        fk_full_fields = gen_child_datagrid_fk_fields(child_meta['fields'])
         datagrid_children_data.append({
             'title': child_meta['names']['title'],
             'pascal': to_pascal_case(child_name),
             'is_required_in_parent': child_meta['child']['property_name'] in detail_required,
             'create_obj': gen_child_datagrid_object(child_meta, 'create'),
             'full_create_obj': gen_child_full_datagrid_object(child_meta),
+            'fk_create_fields': fk_create_fields,
+            'fk_full_fields': fk_full_fields,
         })
 
     # List children data
@@ -882,25 +899,35 @@ def test_spec_context(
         fields_to_fill_5_1 = [f for f in required_field_metas if f['prop_name'] != field_to_skip['prop_name']]
         fail_create_5_1 = {'fill_cmds': gen_fill_commands(fields_to_fill_5_1, title, I)}
 
-    # Section 5.2: required child field missing
-    fail_create_5_2 = None
+    # Section 5.2: missing scalar required child field; 5.3: missing FK required child field
+    fail_create_5_2_scalar = None
+    fail_create_5_2_fk = None
     children_with_required = [c for c in datagrid_children if c['required_fields']]
     if children_with_required:
         test_child = children_with_required[0]
         req_child_fields = test_child['required_fields']
-        if len(req_child_fields) > 1:
-            skip_field = req_child_fields[-1]
-            partial_fields = [f for f in req_child_fields if f['prop_name'] != skip_field['prop_name']]
-            partial_entries = []
-            for field in partial_fields:
-                value = cypress_create_value(field, test_child['names']['title'])
-                if field['category'] in ('boolean', 'number'):
-                    partial_entries.append(f"{field['prop_name']}: {value}")
-                else:
-                    partial_entries.append(f"{field['prop_name']}: '{value}'")
-            fail_create_5_2 = {
-                'title': test_child['names']['title'],
-                'partial_obj': '{ ' + ', '.join(partial_entries) + ' }',
+        child_title = test_child['names']['title']
+        scalar_required = [f for f in req_child_fields if f['category'] != 'autocomplete']
+        fk_required = [f for f in req_child_fields if f['category'] == 'autocomplete']
+
+        # 5.2: add child with all FK fields selected but one scalar field missing
+        if scalar_required:
+            skip_scalar = scalar_required[0]
+            partial_scalar = [f for f in scalar_required if f['prop_name'] != skip_scalar['prop_name']]
+            entries = _child_scalar_entries(partial_scalar, child_title, cypress_create_value)
+            fail_create_5_2_scalar = {
+                'title': child_title,
+                'partial_obj': ('{ ' + ', '.join(entries) + ' }') if entries else None,
+                'fk_fields': gen_child_datagrid_fk_fields(fk_required),
+                'fill_cmds': gen_fill_commands(required_field_metas, title, I),
+            }
+
+        # 5.3: add child with all scalar fields filled but no FK selection
+        if fk_required:
+            entries = _child_scalar_entries(scalar_required, child_title, cypress_create_value)
+            fail_create_5_2_fk = {
+                'title': child_title,
+                'partial_obj': ('{ ' + ', '.join(entries) + ' }') if entries else None,
                 'fill_cmds': gen_fill_commands(required_field_metas, title, I),
             }
 
@@ -941,6 +968,7 @@ def test_spec_context(
         'has_optional': bool(optional_field_metas),
         'has_children': bool(child_metas),
         'has_datagrid_children': bool(datagrid_children),
+        'has_datagrid_fk_children': any(c['fk_create_fields'] or c['fk_full_fields'] for c in datagrid_children_data),
         'I': I,
         'required_fill_cmds': required_fill_cmds,
         'all_fill_cmds': all_fill_cmds,
@@ -952,7 +980,8 @@ def test_spec_context(
         'opt_clear_cmds_3_2': opt_clear_cmds_3_2,
         'edit_fill_cmd_3_3': edit_fill_cmd_3_3,
         'fail_create_5_1': fail_create_5_1,
-        'fail_create_5_2': fail_create_5_2,
+        'fail_create_5_2_scalar': fail_create_5_2_scalar,
+        'fail_create_5_2_fk': fail_create_5_2_fk,
         'fail_edit_6_1': fail_edit_6_1,
         'fail_edit_6_2': fail_edit_6_2,
         # List identifiers

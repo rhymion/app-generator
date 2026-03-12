@@ -61,7 +61,8 @@ export function toggleDataGridCheckbox(
 }
 
 /**
- * Fill multiple cells in a DataGrid row
+ * Fill multiple cells in a DataGrid row (text/number/boolean fields only).
+ * For FK/singleSelect fields, use selectDataGridSingleSelect instead.
  * @param rowIndex - 0-based row index
  * @param data - Object with field names as keys and values to fill
  * @param submitLast - Whether to press Enter on the last field (default: true)
@@ -72,11 +73,11 @@ export function fillDataGridRow(
   submitLast: boolean = true
 ) {
   const fields = Object.keys(data);
-  
+
   fields.forEach((field, index) => {
     const value = data[field];
     const isLast = index === fields.length - 1;
-    
+
     if (typeof value === 'boolean') {
       toggleDataGridCheckbox(rowIndex, field, value);
       if (isLast && submitLast) {
@@ -86,6 +87,25 @@ export function fillDataGridRow(
       editDataGridCell(rowIndex, field, value, isLast && submitLast);
     }
   });
+}
+
+/**
+ * Select a value from a MUI DataGrid singleSelect (FK) cell.
+ * Double-clicks the cell to open the Select dropdown, then clicks the matching option.
+ * @param rowIndex - 0-based row index
+ * @param field - Field name (column)
+ * @param label - Display label of the option to select
+ */
+export function selectDataGridSingleSelect(rowIndex: number, field: string, label: string) {
+  getDataGridCell(rowIndex, field).dblclick();
+  getDataGridCell(rowIndex, field).click();
+  cy.get('[role="option"]').contains(label).click();
+  // Wait for the edit state to settle before proceeding.
+  // The singleSelect cell runs async preProcessEditCellProps validation; without this,
+  // fillDataGridRow may commit the row before product_id is written, sending product_id: ''.
+  getDataGridCell(rowIndex, field).should('contain.text', label);
+  cy.press(Cypress.Keyboard.Keys.TAB);
+  cy.get(`div[role="row"][aria-rowindex="1"]`).find(`input[type="checkbox"]`).click();
 }
 
 /**

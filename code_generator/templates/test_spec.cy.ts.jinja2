@@ -1,6 +1,8 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { TEST_CREDENTIALS } from '../support/test-credentials';
-{% if has_datagrid_children %}
+{% if has_datagrid_children and has_datagrid_fk_children %}
+import { fillDataGridRow, selectDataGridSingleSelect, assertDataGridEmpty, getDataGridRowCount, assertDataGridRowData } from '../support/datagrid-helpers';
+{% elif has_datagrid_children %}
 import { fillDataGridRow, assertDataGridEmpty, getDataGridRowCount, assertDataGridRowData } from '../support/datagrid-helpers';
 {% else %}
 import { assertDataGridEmpty, getDataGridRowCount } from '../support/datagrid-helpers';
@@ -56,7 +58,12 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if child.is_required_in_parent %}
 {{ I }}// Add required child: {{ child.title }}
 {{ I }}cy.clickButton('Add {{ child.title }}');
+{% for fk in child.fk_create_fields %}
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', '{{ fk.label }}');
+{% endfor %}
+{% if child.create_obj != '{}' %}
 {{ I }}fillDataGridRow(0, {{ child.create_obj }});
+{% endif %}
 {% endif %}
 {% endfor %}
 {{ I }}cy.clickButton('Save');
@@ -100,7 +107,12 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for child in datagrid_children_data %}
 {{ I }}// Add child: {{ child.title }}
 {{ I }}cy.clickButton('Add {{ child.title }}');
+{% for fk in child.fk_full_fields %}
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', '{{ fk.label }}');
+{% endfor %}
+{% if child.full_create_obj != '{}' %}
 {{ I }}fillDataGridRow(0, {{ child.full_create_obj }});
+{% endif %}
 {% endfor %}
 {% for child in list_children_data %}
 {% if child.render_type == 'editable-list-text' %}
@@ -162,7 +174,12 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for child in datagrid_children_data %}
         // Add child: {{ child.title }}
         cy.clickButton('Add {{ child.title }}');
+{% for fk in child.fk_create_fields %}
+        selectDataGridSingleSelect(0, '{{ fk.field }}', '{{ fk.label }}');
+{% endfor %}
+{% if child.create_obj != '{}' %}
         fillDataGridRow(0, {{ child.create_obj }});
+{% endif %}
 {% endfor %}
 {% for child in list_children_data %}
 {% if child.render_type == 'editable-list-text' %}
@@ -299,17 +316,43 @@ describe('Testing {{ title }} pages and their behavior', () => {
     });
 
 {% endif %}
-{% if fail_create_5_2 %}
-    it('5.2 fails when required child field is missing', () => {
+{% if fail_create_5_2_scalar %}
+    it('5.2 fails when required child scalar field is missing', () => {
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
 {{ I }}cy.visit('/en/{{ parent }}/new');
-{% for cmd in fail_create_5_2.fill_cmds %}
+{% for cmd in fail_create_5_2_scalar.fill_cmds %}
 {{ cmd }}
 {% endfor %}
-{{ I }}cy.clickButton('Add {{ fail_create_5_2.title }}');
-{{ I }}fillDataGridRow(0, {{ fail_create_5_2.partial_obj }});
+{{ I }}cy.clickButton('Add {{ fail_create_5_2_scalar.title }}');
+{% for fk in fail_create_5_2_scalar.fk_fields %}
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', '{{ fk.label }}');
+{% endfor %}
+{% if fail_create_5_2_scalar.partial_obj %}
+{{ I }}fillDataGridRow(0, {{ fail_create_5_2_scalar.partial_obj }});
+{% endif %}
+{{ I }}cy.clickButton('Save');
+{{ I }}cy.url().should('include', '/{{ parent }}/new');
+{% if has_deps %}
+      });
+{% endif %}
+    });
+
+{% endif %}
+{% if fail_create_5_2_fk %}
+    it('5.3 fails when required child FK field is missing', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I }}cy.visit('/en/{{ parent }}/new');
+{% for cmd in fail_create_5_2_fk.fill_cmds %}
+{{ cmd }}
+{% endfor %}
+{{ I }}cy.clickButton('Add {{ fail_create_5_2_fk.title }}');
+{% if fail_create_5_2_fk.partial_obj %}
+{{ I }}fillDataGridRow(0, {{ fail_create_5_2_fk.partial_obj }});
+{% endif %}
 {{ I }}cy.clickButton('Save');
 {{ I }}cy.url().should('include', '/{{ parent }}/new');
 {% if has_deps %}
