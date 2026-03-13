@@ -1,9 +1,19 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getPurchaseOrderListPageData } from '@/lib/purchase_order/getters';
 import { removePurchaseOrder } from '@/lib/purchase_order/actions';
 
-export default async function PurchaseOrderListPage() {
+export default function PurchaseOrderListPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <PurchaseOrderListContent />
+    </Suspense>
+  );
+}
+
+async function PurchaseOrderListContent() {
   const [t, tf] = await Promise.all([
     getTranslations('EntityLabel'),
     getTranslations('Fields'),

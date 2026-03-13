@@ -1,10 +1,22 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import FormUpsert from '@/components/inventory/FormUpsert';
 import { getProductListPageData } from '@/lib/product/getters';
 import { getInventoryNewPageAccessCheck } from '@/lib/inventory/getters';
 
-export default async function AddInventoryPage() {
-  const productsData = await getProductListPageData(false);
-  const userPermissions = await getInventoryNewPageAccessCheck();
+export default function AddInventoryPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <InventoryNewContent />
+    </Suspense>
+  );
+}
+
+async function InventoryNewContent() {
+  const [userPermissions, productsData] = await Promise.all([
+    getInventoryNewPageAccessCheck(),
+    getProductListPageData(false),
+  ]);
   const src = {
     id: '',
     product_id: '',

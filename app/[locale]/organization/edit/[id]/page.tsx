@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import FormUpsert from '@/components/organization/FormUpsert';
 import { getOrganizationDetailPageData } from '@/lib/organization/getters';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
@@ -6,6 +8,14 @@ import { notFound } from 'next/navigation';
 
 export default async function EditOrganizationPage({ params }: OrganizationDetailPageProps) {
   const { id } = await params;
+  return (
+    <Suspense fallback={<Loading />}>
+      <OrganizationEditContent id={id} />
+    </Suspense>
+  );
+}
+
+async function OrganizationEditContent({ id }: { id: string }) {
   const [detail, userAccountsData] = await Promise.all([
     getOrganizationDetailPageData(id, 'update'),
     getUserAccountListPageData(false),

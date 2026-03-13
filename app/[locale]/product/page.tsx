@@ -1,9 +1,19 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getProductListPageData } from '@/lib/product/getters';
 import { removeProduct } from '@/lib/product/actions';
 
-export default async function ProductListPage() {
+export default function ProductListPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <ProductListContent />
+    </Suspense>
+  );
+}
+
+async function ProductListContent() {
   const [t, tf] = await Promise.all([
     getTranslations('EntityLabel'),
     getTranslations('Fields'),

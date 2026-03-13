@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getBookingListPageData } from '@/lib/booking/getters';
@@ -7,7 +9,15 @@ import Button from '@mui/material/Button';
 import Box from '@mui/material/Box';
 import BarChartIcon from '@mui/icons-material/BarChart';
 
-export default async function BookingListPage() {
+export default function BookingListPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <BookingListContent />
+    </Suspense>
+  );
+}
+
+async function BookingListContent() {
   const [t, tf, tc] = await Promise.all([
     getTranslations('EntityLabel'),
     getTranslations('Fields'),

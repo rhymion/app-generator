@@ -1,9 +1,19 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getInventoryListPageData } from '@/lib/inventory/getters';
 import { removeInventory } from '@/lib/inventory/actions';
 
-export default async function InventoryListPage() {
+export default function InventoryListPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <InventoryListContent />
+    </Suspense>
+  );
+}
+
+async function InventoryListContent() {
   const [t, tf] = await Promise.all([
     getTranslations('EntityLabel'),
     getTranslations('Fields'),

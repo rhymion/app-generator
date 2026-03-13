@@ -1,9 +1,19 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getSetting1ListPageData } from '@/lib/setting1/getters';
 import { removeSetting1 } from '@/lib/setting1/actions';
 
-export default async function Setting1ListPage() {
+export default function Setting1ListPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <Setting1ListContent />
+    </Suspense>
+  );
+}
+
+async function Setting1ListContent() {
   const [t] = await Promise.all([
     getTranslations('EntityLabel'),
   ]);

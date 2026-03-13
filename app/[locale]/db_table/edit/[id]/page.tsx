@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import FormUpsert from '@/components/db_table/FormUpsert';
 import { getDbTableDetailPageData } from '@/lib/db_table/getters';
 import { getSessionUserId } from '@/lib/authz';
@@ -6,6 +8,14 @@ import { notFound } from 'next/navigation';
 
 export default async function EditDbTablePage({ params }: DbTableDetailPageProps) {
   const { id } = await params;
+  return (
+    <Suspense fallback={<Loading />}>
+      <DbTableEditContent id={id} />
+    </Suspense>
+  );
+}
+
+async function DbTableEditContent({ id }: { id: string }) {
   const detail = await getDbTableDetailPageData(id, 'update');
   const currentUserId = await getSessionUserId();
   if (!detail.dbTable) {

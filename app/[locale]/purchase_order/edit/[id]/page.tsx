@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import FormUpsert from '@/components/purchase_order/FormUpsert';
 import { getPurchaseOrderDetailPageData } from '@/lib/purchase_order/getters';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
@@ -7,6 +9,14 @@ import { notFound } from 'next/navigation';
 
 export default async function EditPurchaseOrderPage({ params }: PurchaseOrderDetailPageProps) {
   const { id } = await params;
+  return (
+    <Suspense fallback={<Loading />}>
+      <PurchaseOrderEditContent id={id} />
+    </Suspense>
+  );
+}
+
+async function PurchaseOrderEditContent({ id }: { id: string }) {
   const [detail, userAccountsData, productsData] = await Promise.all([
     getPurchaseOrderDetailPageData(id, 'update'),
     getUserAccountListPageData(false),

@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getShiftListPageData } from '@/lib/shift/getters';
@@ -7,7 +9,15 @@ import Button from '@mui/material/Button';
 import Box from '@mui/material/Box';
 import BarChartIcon from '@mui/icons-material/BarChart';
 
-export default async function ShiftListPage() {
+export default function ShiftListPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <ShiftListContent />
+    </Suspense>
+  );
+}
+
+async function ShiftListContent() {
   const [t, tf, tc] = await Promise.all([
     getTranslations('EntityLabel'),
     getTranslations('Fields'),

@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import FormView from '@/components/{{ parent }}/FormView';
 import { get{{ parent_pascal }}DetailPageData } from '@/lib/{{ parent }}/getters';
 import { {{ parent_pascal }}DetailPageProps } from '@/lib/{{ parent }}/types';
@@ -5,6 +7,14 @@ import { notFound } from 'next/navigation';
 
 export default async function View{{ parent_pascal }}Page({ params }: {{ parent_pascal }}DetailPageProps) {
   const { id } = await params;
+  return (
+    <Suspense fallback={<Loading />}>
+      <{{ parent_pascal }}ViewContent id={id} />
+    </Suspense>
+  );
+}
+
+async function {{ parent_pascal }}ViewContent({ id }: { id: string }) {
   const { {{ parent_camel }}, userPermissions } = await get{{ parent_pascal }}DetailPageData(id);
   if (!{{ parent_camel }}) {
     notFound();

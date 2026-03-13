@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import { getTranslations } from 'next-intl/server';
 {% if list_component == 'CardListClient' %}
 import CardListClient from '@/components/_standard/CardListClient';
@@ -20,7 +22,15 @@ import Box from '@mui/material/Box';
 import {{ entity_custom_component }} from '@/components/{{ parent }}/{{ entity_custom_component }}';
 {% endif %}
 
-export default async function {{ parent_pascal }}ListPage() {
+export default function {{ parent_pascal }}ListPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <{{ parent_pascal }}ListContent />
+    </Suspense>
+  );
+}
+
+async function {{ parent_pascal }}ListContent() {
   const [t{% if xdisplay_table %}, tf{% endif %}{% if has_chart %}, tc{% endif %}{% for ns in enum_ns_list %}, {{ ns.var_name }}T{% endfor %}] = await Promise.all([
     getTranslations('EntityLabel'),
 {% if xdisplay_table %}

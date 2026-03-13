@@ -1,9 +1,19 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getParentOnlyListPageData } from '@/lib/parent_only/getters';
 import { removeParentOnly } from '@/lib/parent_only/actions';
 
-export default async function ParentOnlyListPage() {
+export default function ParentOnlyListPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <ParentOnlyListContent />
+    </Suspense>
+  );
+}
+
+async function ParentOnlyListContent() {
   const [t] = await Promise.all([
     getTranslations('EntityLabel'),
   ]);

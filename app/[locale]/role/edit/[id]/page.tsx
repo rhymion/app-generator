@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import FormUpsert from '@/components/role/FormUpsert';
 import { getRoleDetailPageData } from '@/lib/role/getters';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
@@ -6,6 +8,14 @@ import { notFound } from 'next/navigation';
 
 export default async function EditRolePage({ params }: RoleDetailPageProps) {
   const { id } = await params;
+  return (
+    <Suspense fallback={<Loading />}>
+      <RoleEditContent id={id} />
+    </Suspense>
+  );
+}
+
+async function RoleEditContent({ id }: { id: string }) {
   const [detail, userAccountsData] = await Promise.all([
     getRoleDetailPageData(id, 'update'),
     getUserAccountListPageData(false),

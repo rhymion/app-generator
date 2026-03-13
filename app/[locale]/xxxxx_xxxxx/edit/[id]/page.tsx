@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import FormUpsert from '@/components/xxxxx_xxxxx/FormUpsert';
 import { getXxxxxXxxxxDetailPageData } from '@/lib/xxxxx_xxxxx/getters';
 import { XxxxxXxxxxDetailPageProps } from '@/lib/xxxxx_xxxxx/types';
@@ -5,6 +7,14 @@ import { notFound } from 'next/navigation';
 
 export default async function EditXxxxxXxxxxPage({ params }: XxxxxXxxxxDetailPageProps) {
   const { id } = await params;
+  return (
+    <Suspense fallback={<Loading />}>
+      <XxxxxXxxxxEditContent id={id} />
+    </Suspense>
+  );
+}
+
+async function XxxxxXxxxxEditContent({ id }: { id: string }) {
   const detail = await getXxxxxXxxxxDetailPageData(id, 'update');
   if (!detail.xxxxxXxxxx) {
     notFound();

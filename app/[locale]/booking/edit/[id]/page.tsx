@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import FormUpsert from '@/components/booking/FormUpsert';
 import { getBookingDetailPageData } from '@/lib/booking/getters';
 import { getResourceListPageData } from '@/lib/resource/getters';
@@ -6,6 +8,14 @@ import { notFound } from 'next/navigation';
 
 export default async function EditBookingPage({ params }: BookingDetailPageProps) {
   const { id } = await params;
+  return (
+    <Suspense fallback={<Loading />}>
+      <BookingEditContent id={id} />
+    </Suspense>
+  );
+}
+
+async function BookingEditContent({ id }: { id: string }) {
   const [detail, resourcesData] = await Promise.all([
     getBookingDetailPageData(id, 'update'),
     getResourceListPageData(false),

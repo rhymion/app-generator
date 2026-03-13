@@ -1,9 +1,19 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getOrganizationListPageData } from '@/lib/organization/getters';
 import { removeOrganization } from '@/lib/organization/actions';
 
-export default async function OrganizationListPage() {
+export default function OrganizationListPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <OrganizationListContent />
+    </Suspense>
+  );
+}
+
+async function OrganizationListContent() {
   const [t] = await Promise.all([
     getTranslations('EntityLabel'),
   ]);

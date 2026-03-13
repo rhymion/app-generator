@@ -1,7 +1,17 @@
+import { Suspense } from 'react';
+import Loading from '@/app/[locale]/loading';
 import FormUpsert from '@/components/db_table/FormUpsert';
 import { getDbTableNewPageAccessCheck } from '@/lib/db_table/getters';
 
-export default async function AddDbTablePage() {
+export default function AddDbTablePage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <DbTableNewContent />
+    </Suspense>
+  );
+}
+
+async function DbTableNewContent() {
   const userPermissions = await getDbTableNewPageAccessCheck();
   const src = {
     id: '',
