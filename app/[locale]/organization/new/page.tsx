@@ -1,12 +1,12 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/organization/FormUpsert';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
 import { getOrganizationNewPageAccessCheck } from '@/lib/organization/getters';
 
 export default function AddOrganizationPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <OrganizationNewContent />
     </Suspense>
   );

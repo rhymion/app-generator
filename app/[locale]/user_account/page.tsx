@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import TableSkeleton from '@/components/_standard/TableSkeleton';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
@@ -7,7 +7,7 @@ import { removeUserAccount } from '@/lib/user_account/actions';
 
 export default function UserAccountListPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<TableSkeleton />}>
       <UserAccountListContent />
     </Suspense>
   );

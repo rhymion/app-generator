@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import TableSkeleton from '@/components/_standard/TableSkeleton';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getProcedureListPageData } from '@/lib/procedure/getters';
@@ -7,7 +7,7 @@ import { removeProcedure } from '@/lib/procedure/actions';
 
 export default function ProcedureListPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<TableSkeleton />}>
       <ProcedureListContent />
     </Suspense>
   );

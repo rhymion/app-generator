@@ -1,12 +1,12 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/booking/FormUpsert';
 import { getResourceListPageData } from '@/lib/resource/getters';
 import { getBookingNewPageAccessCheck } from '@/lib/booking/getters';
 
 export default function AddBookingPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <BookingNewContent />
     </Suspense>
   );

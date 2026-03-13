@@ -1,11 +1,11 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/parent_only/FormUpsert';
 import { getParentOnlyNewPageAccessCheck } from '@/lib/parent_only/getters';
 
 export default function AddParentOnlyPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <ParentOnlyNewContent />
     </Suspense>
   );

@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormView from '@/components/user_account/FormView';
 import { getUserAccountDetailPageData } from '@/lib/user_account/getters';
 import { UserAccountDetailPageProps } from '@/lib/user_account/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function ViewUserAccountPage({ params }: UserAccountDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <UserAccountViewContent id={id} />
     </Suspense>
   );

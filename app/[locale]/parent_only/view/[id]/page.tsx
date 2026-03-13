@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormView from '@/components/parent_only/FormView';
 import { getParentOnlyDetailPageData } from '@/lib/parent_only/getters';
 import { ParentOnlyDetailPageProps } from '@/lib/parent_only/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function ViewParentOnlyPage({ params }: ParentOnlyDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <ParentOnlyViewContent id={id} />
     </Suspense>
   );

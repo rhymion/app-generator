@@ -1,11 +1,11 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/setting7/FormUpsert';
 import { getSetting7NewPageAccessCheck } from '@/lib/setting7/getters';
 
 export default function AddSetting7Page() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <Setting7NewContent />
     </Suspense>
   );

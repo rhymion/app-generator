@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormView from '@/components/permission/FormView';
 import { getPermissionDetailPageData } from '@/lib/permission/getters';
 import { PermissionDetailPageProps } from '@/lib/permission/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function ViewPermissionPage({ params }: PermissionDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <PermissionViewContent id={id} />
     </Suspense>
   );

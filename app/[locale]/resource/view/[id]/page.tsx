@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormView from '@/components/resource/FormView';
 import { getResourceDetailPageData } from '@/lib/resource/getters';
 import { ResourceDetailPageProps } from '@/lib/resource/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function ViewResourcePage({ params }: ResourceDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <ResourceViewContent id={id} />
     </Suspense>
   );

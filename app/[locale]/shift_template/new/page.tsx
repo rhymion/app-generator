@@ -1,12 +1,12 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/shift_template/FormUpsert';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
 import { getShiftTemplateNewPageAccessCheck } from '@/lib/shift_template/getters';
 
 export default function AddShiftTemplatePage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <ShiftTemplateNewContent />
     </Suspense>
   );

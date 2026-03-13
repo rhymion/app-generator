@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/{{ parent }}/FormUpsert';
 import { get{{ parent_pascal }}DetailPageData } from '@/lib/{{ parent }}/getters';
 {% for target in selection_targets %}
@@ -18,7 +18,7 @@ import { notFound } from 'next/navigation';
 export default async function Edit{{ parent_pascal }}Page({ params }: {{ parent_pascal }}DetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <{{ parent_pascal }}EditContent id={id} />
     </Suspense>
   );

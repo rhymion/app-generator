@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/procedure/FormUpsert';
 import { getProcedureListPageData } from '@/lib/procedure/getters';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
@@ -7,7 +7,7 @@ import { getProcedureNewPageAccessCheck } from '@/lib/procedure/getters';
 
 export default function AddProcedurePage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <ProcedureNewContent />
     </Suspense>
   );

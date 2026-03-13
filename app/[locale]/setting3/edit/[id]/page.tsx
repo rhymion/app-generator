@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/setting3/FormUpsert';
 import { getSetting3DetailPageData } from '@/lib/setting3/getters';
 import { Setting3DetailPageProps } from '@/lib/setting3/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function EditSetting3Page({ params }: Setting3DetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <Setting3EditContent id={id} />
     </Suspense>
   );

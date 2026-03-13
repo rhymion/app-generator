@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import TableSkeleton from '@/components/_standard/TableSkeleton';
 import { getTranslations } from 'next-intl/server';
 {% if list_component == 'CardListClient' %}
 import CardListClient from '@/components/_standard/CardListClient';
@@ -24,7 +24,7 @@ import {{ entity_custom_component }} from '@/components/{{ parent }}/{{ entity_c
 
 export default function {{ parent_pascal }}ListPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<TableSkeleton />}>
       <{{ parent_pascal }}ListContent />
     </Suspense>
   );

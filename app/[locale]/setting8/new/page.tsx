@@ -1,11 +1,11 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/setting8/FormUpsert';
 import { getSetting8NewPageAccessCheck } from '@/lib/setting8/getters';
 
 export default function AddSetting8Page() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <Setting8NewContent />
     </Suspense>
   );

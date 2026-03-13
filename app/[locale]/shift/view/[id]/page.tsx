@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormView from '@/components/shift/FormView';
 import { getShiftDetailPageData } from '@/lib/shift/getters';
 import { ShiftDetailPageProps } from '@/lib/shift/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function ViewShiftPage({ params }: ShiftDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <ShiftViewContent id={id} />
     </Suspense>
   );

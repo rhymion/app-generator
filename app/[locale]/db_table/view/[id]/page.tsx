@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormView from '@/components/db_table/FormView';
 import { getDbTableDetailPageData } from '@/lib/db_table/getters';
 import { DbTableDetailPageProps } from '@/lib/db_table/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function ViewDbTablePage({ params }: DbTableDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <DbTableViewContent id={id} />
     </Suspense>
   );

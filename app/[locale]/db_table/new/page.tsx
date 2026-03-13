@@ -1,11 +1,11 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/db_table/FormUpsert';
 import { getDbTableNewPageAccessCheck } from '@/lib/db_table/getters';
 
 export default function AddDbTablePage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <DbTableNewContent />
     </Suspense>
   );

@@ -1,11 +1,11 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/product/FormUpsert';
 import { getProductNewPageAccessCheck } from '@/lib/product/getters';
 
 export default function AddProductPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <ProductNewContent />
     </Suspense>
   );

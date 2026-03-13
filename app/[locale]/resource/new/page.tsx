@@ -1,12 +1,12 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/resource/FormUpsert';
 import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';
 import { getResourceNewPageAccessCheck } from '@/lib/resource/getters';
 
 export default function AddResourcePage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <ResourceNewContent />
     </Suspense>
   );

@@ -1,12 +1,12 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/role/FormUpsert';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
 import { getRoleNewPageAccessCheck } from '@/lib/role/getters';
 
 export default function AddRolePage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <RoleNewContent />
     </Suspense>
   );

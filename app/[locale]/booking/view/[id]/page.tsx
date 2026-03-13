@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormView from '@/components/booking/FormView';
 import { getBookingDetailPageData } from '@/lib/booking/getters';
 import { BookingDetailPageProps } from '@/lib/booking/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function ViewBookingPage({ params }: BookingDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <BookingViewContent id={id} />
     </Suspense>
   );

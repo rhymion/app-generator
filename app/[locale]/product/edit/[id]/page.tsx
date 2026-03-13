@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/product/FormUpsert';
 import { getProductDetailPageData } from '@/lib/product/getters';
 import { ProductDetailPageProps } from '@/lib/product/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function EditProductPage({ params }: ProductDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <ProductEditContent id={id} />
     </Suspense>
   );

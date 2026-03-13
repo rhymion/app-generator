@@ -1,12 +1,12 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/parent1/FormUpsert';
 import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';
 import { getParent1NewPageAccessCheck } from '@/lib/parent1/getters';
 
 export default function AddParent1Page() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <Parent1NewContent />
     </Suspense>
   );

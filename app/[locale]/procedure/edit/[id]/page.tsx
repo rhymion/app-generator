@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/procedure/FormUpsert';
 import { getProcedureDetailPageData } from '@/lib/procedure/getters';
 import { getProcedureListPageData } from '@/lib/procedure/getters';
@@ -10,7 +10,7 @@ import { notFound } from 'next/navigation';
 export default async function EditProcedurePage({ params }: ProcedureDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <ProcedureEditContent id={id} />
     </Suspense>
   );

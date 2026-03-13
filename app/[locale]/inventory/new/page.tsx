@@ -1,12 +1,12 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/inventory/FormUpsert';
 import { getProductListPageData } from '@/lib/product/getters';
 import { getInventoryNewPageAccessCheck } from '@/lib/inventory/getters';
 
 export default function AddInventoryPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <InventoryNewContent />
     </Suspense>
   );

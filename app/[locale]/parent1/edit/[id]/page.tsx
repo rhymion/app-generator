@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/parent1/FormUpsert';
 import { getParent1DetailPageData } from '@/lib/parent1/getters';
 import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';
@@ -9,7 +9,7 @@ import { notFound } from 'next/navigation';
 export default async function EditParent1Page({ params }: Parent1DetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <Parent1EditContent id={id} />
     </Suspense>
   );

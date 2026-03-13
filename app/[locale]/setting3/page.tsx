@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import TableSkeleton from '@/components/_standard/TableSkeleton';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getSetting3ListPageData } from '@/lib/setting3/getters';
@@ -7,7 +7,7 @@ import { removeSetting3 } from '@/lib/setting3/actions';
 
 export default function Setting3ListPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<TableSkeleton />}>
       <Setting3ListContent />
     </Suspense>
   );

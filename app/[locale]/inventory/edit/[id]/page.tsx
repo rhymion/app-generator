@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/inventory/FormUpsert';
 import { getInventoryDetailPageData } from '@/lib/inventory/getters';
 import { getProductListPageData } from '@/lib/product/getters';
@@ -9,7 +9,7 @@ import { notFound } from 'next/navigation';
 export default async function EditInventoryPage({ params }: InventoryDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <InventoryEditContent id={id} />
     </Suspense>
   );

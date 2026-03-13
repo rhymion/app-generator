@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/role/FormUpsert';
 import { getRoleDetailPageData } from '@/lib/role/getters';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
@@ -9,7 +9,7 @@ import { notFound } from 'next/navigation';
 export default async function EditRolePage({ params }: RoleDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <RoleEditContent id={id} />
     </Suspense>
   );

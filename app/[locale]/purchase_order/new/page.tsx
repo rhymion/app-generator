@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/purchase_order/FormUpsert';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
 import { getProductListPageData } from '@/lib/product/getters';
@@ -7,7 +7,7 @@ import { getPurchaseOrderNewPageAccessCheck } from '@/lib/purchase_order/getters
 
 export default function AddPurchaseOrderPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <PurchaseOrderNewContent />
     </Suspense>
   );

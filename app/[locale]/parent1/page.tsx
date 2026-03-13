@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import TableSkeleton from '@/components/_standard/TableSkeleton';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getParent1ListPageData } from '@/lib/parent1/getters';
@@ -7,7 +7,7 @@ import { removeParent1 } from '@/lib/parent1/actions';
 
 export default function Parent1ListPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<TableSkeleton />}>
       <Parent1ListContent />
     </Suspense>
   );

@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import TableSkeleton from '@/components/_standard/TableSkeleton';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getPermissionListPageData } from '@/lib/permission/getters';
@@ -7,7 +7,7 @@ import { removePermission } from '@/lib/permission/actions';
 
 export default function PermissionListPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<TableSkeleton />}>
       <PermissionListContent />
     </Suspense>
   );

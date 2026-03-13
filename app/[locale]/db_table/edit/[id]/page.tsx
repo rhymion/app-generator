@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/db_table/FormUpsert';
 import { getDbTableDetailPageData } from '@/lib/db_table/getters';
 import { getSessionUserId } from '@/lib/authz';
@@ -9,7 +9,7 @@ import { notFound } from 'next/navigation';
 export default async function EditDbTablePage({ params }: DbTableDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <DbTableEditContent id={id} />
     </Suspense>
   );

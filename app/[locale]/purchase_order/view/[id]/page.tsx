@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormView from '@/components/purchase_order/FormView';
 import { getPurchaseOrderDetailPageData } from '@/lib/purchase_order/getters';
 import { PurchaseOrderDetailPageProps } from '@/lib/purchase_order/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function ViewPurchaseOrderPage({ params }: PurchaseOrderDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <PurchaseOrderViewContent id={id} />
     </Suspense>
   );

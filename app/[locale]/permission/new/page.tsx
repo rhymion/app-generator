@@ -1,12 +1,12 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/permission/FormUpsert';
 import { getRoleListPageData } from '@/lib/role/getters';
 import { getPermissionNewPageAccessCheck } from '@/lib/permission/getters';
 
 export default function AddPermissionPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <PermissionNewContent />
     </Suspense>
   );

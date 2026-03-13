@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormView from '@/components/role/FormView';
 import { getRoleDetailPageData } from '@/lib/role/getters';
 import { RoleDetailPageProps } from '@/lib/role/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function ViewRolePage({ params }: RoleDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <RoleViewContent id={id} />
     </Suspense>
   );

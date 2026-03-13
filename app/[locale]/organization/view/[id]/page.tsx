@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormView from '@/components/organization/FormView';
 import { getOrganizationDetailPageData } from '@/lib/organization/getters';
 import { OrganizationDetailPageProps } from '@/lib/organization/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function ViewOrganizationPage({ params }: OrganizationDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <OrganizationViewContent id={id} />
     </Suspense>
   );

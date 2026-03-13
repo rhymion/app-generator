@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormView from '@/components/setting/FormView';
 import { getSettingDetailPageData } from '@/lib/setting/getters';
 import { SettingDetailPageProps } from '@/lib/setting/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function ViewSettingPage({ params }: SettingDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <SettingViewContent id={id} />
     </Suspense>
   );

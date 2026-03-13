@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormView from '@/components/xxxxx_xxxxx/FormView';
 import { getXxxxxXxxxxDetailPageData } from '@/lib/xxxxx_xxxxx/getters';
 import { XxxxxXxxxxDetailPageProps } from '@/lib/xxxxx_xxxxx/types';
@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation';
 export default async function ViewXxxxxXxxxxPage({ params }: XxxxxXxxxxDetailPageProps) {
   const { id } = await params;
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<FormSkeleton />}>
       <XxxxxXxxxxViewContent id={id} />
     </Suspense>
   );

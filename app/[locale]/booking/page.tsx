@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import Loading from '@/app/[locale]/loading';
+import TableSkeleton from '@/components/_standard/TableSkeleton';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getBookingListPageData } from '@/lib/booking/getters';
@@ -11,7 +11,7 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 
 export default function BookingListPage() {
   return (
-    <Suspense fallback={<Loading />}>
+    <Suspense fallback={<TableSkeleton />}>
       <BookingListContent />
     </Suspense>
   );
