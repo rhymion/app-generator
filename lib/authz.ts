@@ -37,14 +37,6 @@ const EMPTY_PERMISSIONS: ModelPermissions = {
 
 const SPECIAL_ROLE_NAMES = ['Creator', 'Assignee'] as const;
 
-async function getUserRoleIds(userId: string): Promise<string[]> {
-  const user = await prisma.user_account.findUnique({
-    where: { id: userId },
-    select: { roles: { select: { id: true } } },
-  });
-  return user?.roles?.map((role) => role.id) ?? [];
-}
-
 export const getModelPermissions = cache(async (
   model: ModelName,
   userId?: string | null,
@@ -55,21 +47,18 @@ export const getModelPermissions = cache(async (
     return { ...EMPTY_PERMISSIONS };
   }
 
-  const roleIds = await getUserRoleIds(resolvedUserId);
-
   // Build OR conditions for the permission query
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const orConditions: any[] = [
     { role_id: null }, // Global permissions (no role)
+    // Regular roles: roles the user belongs to, excluding Creator/Assignee special roles
+    {
+      role: {
+        user_accounts: { some: { id: resolvedUserId } },
+        name: { notIn: [...SPECIAL_ROLE_NAMES] },
+      },
+    },
   ];
-
-  // Regular roles: user's roles EXCEPT Creator/Assignee (ignore direct assignments)
-  if (roleIds.length > 0) {
-    orConditions.push({
-      role_id: { in: roleIds },
-      role: { name: { notIn: [...SPECIAL_ROLE_NAMES] } },
-    });
-  }
 
   // Special roles based on item context
   if (item) {
