@@ -39,11 +39,13 @@ export async function getXxxxxXxxxxDetail(id: string): Promise<XxxxxXxxxxDetail 
 }
 
 export async function getXxxxxXxxxxListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('xxxxx_xxxxx');
+  const [userPermissions, xxxxxXxxxxs] = await Promise.all([
+    getModelPermissions('xxxxx_xxxxx'),
+    getAllXxxxxXxxxxs(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'xxxxx_xxxxx');
   }
-  const xxxxxXxxxxs = await getAllXxxxxXxxxxs();
   return { xxxxxXxxxxs, userPermissions };
 }
 

@@ -70,12 +70,19 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 export async function get{{ parent_pascal }}ListPageData(isAssertPermission: boolean = true) {
 {% if should_filter_by_org %}
   const userId = await getSessionUserIdOrThrow();
+  const [userPermissions, {{ parent_camel }}s] = await Promise.all([
+    getModelPermissions('{{ parent }}', userId),
+    getAll{{ parent_pascal }}s(userId),
+  ]);
+{% else %}
+  const [userPermissions, {{ parent_camel }}s] = await Promise.all([
+    getModelPermissions('{{ parent }}'),
+    getAll{{ parent_pascal }}s(),
+  ]);
 {% endif %}
-  const userPermissions = await getModelPermissions('{{ parent }}'{% if should_filter_by_org %}, userId{% endif %});
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', '{{ parent }}');
   }
-  const {{ parent_camel }}s = await getAll{{ parent_pascal }}s({% if should_filter_by_org %}userId{% endif %});
   return { {{ parent_camel }}s, userPermissions };
 }
 

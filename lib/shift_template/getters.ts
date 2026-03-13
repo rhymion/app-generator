@@ -43,13 +43,14 @@ export async function getShiftTemplateDetail(id: string): Promise<ShiftTemplateD
 
 export async function getShiftTemplateListPageData(isAssertPermission: boolean = true) {
   const t0 = performance.now();
-  const userPermissions = await getModelPermissions('shift_template');
+  const [userPermissions, shiftTemplates] = await Promise.all([
+    getModelPermissions('shift_template'),
+    getAllShiftTemplates(),
+  ]);
   console.log(`getModelPermissions: ${(performance.now() - t0).toFixed(1)}ms`);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'shift_template');
   }
-  console.log(`assertPermission: ${(performance.now() - t0).toFixed(1)}ms`);
-  const shiftTemplates = await getAllShiftTemplates();
   console.log(`getShiftTemplateListPageData: ${(performance.now() - t0).toFixed(1)}ms`);
   return { shiftTemplates, userPermissions };
 }

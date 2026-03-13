@@ -41,11 +41,13 @@ export async function getPurchaseOrderDetail(id: string): Promise<PurchaseOrderD
 }
 
 export async function getPurchaseOrderListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('purchase_order');
+  const [userPermissions, purchaseOrders] = await Promise.all([
+    getModelPermissions('purchase_order'),
+    getAllPurchaseOrders(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'purchase_order');
   }
-  const purchaseOrders = await getAllPurchaseOrders();
   return { purchaseOrders, userPermissions };
 }
 

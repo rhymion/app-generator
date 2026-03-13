@@ -44,11 +44,13 @@ export async function getPermissionDetail(id: string): Promise<PermissionDetail 
 }
 
 export async function getPermissionListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('permission');
+  const [userPermissions, permissions] = await Promise.all([
+    getModelPermissions('permission'),
+    getAllPermissions(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'permission');
   }
-  const permissions = await getAllPermissions();
   return { permissions, userPermissions };
 }
 

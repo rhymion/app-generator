@@ -47,11 +47,13 @@ export async function getProcedureDetail(id: string): Promise<ProcedureDetail | 
 }
 
 export async function getProcedureListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('procedure');
+  const [userPermissions, procedures] = await Promise.all([
+    getModelPermissions('procedure'),
+    getAllProcedures(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'procedure');
   }
-  const procedures = await getAllProcedures();
   return { procedures, userPermissions };
 }
 

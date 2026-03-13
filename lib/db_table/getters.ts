@@ -39,11 +39,13 @@ export async function getDbTableDetail(id: string): Promise<DbTableDetail | null
 }
 
 export async function getDbTableListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('db_table');
+  const [userPermissions, dbTables] = await Promise.all([
+    getModelPermissions('db_table'),
+    getAllDbTables(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'db_table');
   }
-  const dbTables = await getAllDbTables();
   return { dbTables, userPermissions };
 }
 

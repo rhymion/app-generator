@@ -39,11 +39,13 @@ export async function getProductDetail(id: string): Promise<ProductDetail | null
 }
 
 export async function getProductListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('product');
+  const [userPermissions, products] = await Promise.all([
+    getModelPermissions('product'),
+    getAllProducts(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'product');
   }
-  const products = await getAllProducts();
   return { products, userPermissions };
 }
 

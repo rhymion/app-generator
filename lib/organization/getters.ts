@@ -38,11 +38,13 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
 }
 
 export async function getOrganizationListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('organization');
+  const [userPermissions, organizations] = await Promise.all([
+    getModelPermissions('organization'),
+    getAllOrganizations(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'organization');
   }
-  const organizations = await getAllOrganizations();
   return { organizations, userPermissions };
 }
 

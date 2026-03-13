@@ -44,11 +44,13 @@ export async function getInventoryDetail(id: string): Promise<InventoryDetail | 
 }
 
 export async function getInventoryListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('inventory');
+  const [userPermissions, inventorys] = await Promise.all([
+    getModelPermissions('inventory'),
+    getAllInventorys(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'inventory');
   }
-  const inventorys = await getAllInventorys();
   return { inventorys, userPermissions };
 }
 

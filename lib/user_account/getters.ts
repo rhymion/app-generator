@@ -38,11 +38,13 @@ export async function getUserAccountDetail(id: string): Promise<UserAccountDetai
 }
 
 export async function getUserAccountListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('user_account');
+  const [userPermissions, userAccounts] = await Promise.all([
+    getModelPermissions('user_account'),
+    getAllUserAccounts(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'user_account');
   }
-  const userAccounts = await getAllUserAccounts();
   return { userAccounts, userPermissions };
 }
 

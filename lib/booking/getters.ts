@@ -42,11 +42,13 @@ export async function getBookingDetail(id: string): Promise<BookingDetail | null
 }
 
 export async function getBookingListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('booking');
+  const [userPermissions, bookings] = await Promise.all([
+    getModelPermissions('booking'),
+    getAllBookings(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'booking');
   }
-  const bookings = await getAllBookings();
   return { bookings, userPermissions };
 }
 

@@ -38,11 +38,13 @@ export async function getRoleDetail(id: string): Promise<RoleDetail | null> {
 }
 
 export async function getRoleListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('role');
+  const [userPermissions, roles] = await Promise.all([
+    getModelPermissions('role'),
+    getAllRoles(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'role');
   }
-  const roles = await getAllRoles();
   return { roles, userPermissions };
 }
 

@@ -57,11 +57,13 @@ export async function getParent1Detail(id: string, userId: string): Promise<Pare
 
 export async function getParent1ListPageData(isAssertPermission: boolean = true) {
   const userId = await getSessionUserIdOrThrow();
-  const userPermissions = await getModelPermissions('parent1', userId);
+  const [userPermissions, parent1s] = await Promise.all([
+    getModelPermissions('parent1', userId),
+    getAllParent1s(userId),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'parent1');
   }
-  const parent1s = await getAllParent1s(userId);
   return { parent1s, userPermissions };
 }
 

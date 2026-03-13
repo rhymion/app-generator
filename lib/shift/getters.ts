@@ -43,13 +43,14 @@ export async function getShiftDetail(id: string): Promise<ShiftDetail | null> {
 
 export async function getShiftListPageData(isAssertPermission: boolean = true) {
   const t0 = performance.now();
-  const userPermissions = await getModelPermissions('shift');
+  const [userPermissions, shifts] = await Promise.all([
+    getModelPermissions('shift'),
+    getAllShifts(),
+  ]);
   console.log(`getModelPermissions: ${(performance.now() - t0).toFixed(1)}ms`);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'shift');
   }
-  console.log(`assertPermission: ${(performance.now() - t0).toFixed(1)}ms`);
-  const shifts = await getAllShifts();
   console.log(`getShiftListPageData: ${(performance.now() - t0).toFixed(1)}ms`);
   return { shifts, userPermissions };
 }

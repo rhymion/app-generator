@@ -39,11 +39,13 @@ export async function getSetting6Detail(id: string): Promise<Setting6Detail | nu
 }
 
 export async function getSetting6ListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('setting6');
+  const [userPermissions, setting6s] = await Promise.all([
+    getModelPermissions('setting6'),
+    getAllSetting6s(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'setting6');
   }
-  const setting6s = await getAllSetting6s();
   return { setting6s, userPermissions };
 }
 

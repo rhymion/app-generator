@@ -53,11 +53,13 @@ export async function getResourceDetail(id: string, userId: string): Promise<Res
 
 export async function getResourceListPageData(isAssertPermission: boolean = true) {
   const userId = await getSessionUserIdOrThrow();
-  const userPermissions = await getModelPermissions('resource', userId);
+  const [userPermissions, resources] = await Promise.all([
+    getModelPermissions('resource', userId),
+    getAllResources(userId),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'resource');
   }
-  const resources = await getAllResources(userId);
   return { resources, userPermissions };
 }
 
