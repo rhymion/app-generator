@@ -5,6 +5,21 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python Debugger: Current File with Arguments",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "code_generator/generate.py",
+            "console": "integratedTerminal",
+            "args": ["code_generator/json_schema_db_table.yaml", "./"]
+        },
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+        {
             "type": "chrome",
             "request": "launch",
             "name": "Launch Chrome against localhost",
@@ -16,10 +31,17 @@
             "request": "launch",
             "name": "Debug generate.ts",
             "runtimeExecutable": "npx",
-            "runtimeArgs": ["tsx", "utils/scripts/generate.ts", "utils/scripts/json_schema_db_table.yaml", "."],
+            "runtimeArgs": [
+                "tsx",
+                "utils/scripts/generate.ts",
+                "utils/scripts/json_schema_db_table.yaml",
+                "."
+            ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "skipFiles": ["<node_internals>/**"]
+            "skipFiles": [
+                "<node_internals>/**"
+            ]
         }
     ]
 }
