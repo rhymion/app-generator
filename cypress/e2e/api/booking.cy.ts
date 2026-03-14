@@ -71,7 +71,7 @@ describe('API: Booking', () => {
       });
     });
 
-    it('5.1 fails when required field name is missing', () => {
+    it('5.1 fails when a required field is missing', () => {
       cy.task<any>('db:populateBookingDependencies').then((deps) => {
         cy.request({
           method: 'POST',
@@ -98,7 +98,7 @@ describe('API: Booking', () => {
           url: `${API_BASE}/${records[0].id}`,
           headers: { 'X-API-Key': TEST_API_KEY },
           body: {
-            name: 'Updated Booking',
+            name: 'Updated Name',
             resource_id: records[0].resource_id,
             start_time: records[0].start_time,
             end_time: records[0].end_time,
@@ -108,7 +108,7 @@ describe('API: Booking', () => {
           cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
-              expect(getRes.body.name).to.eq('Updated Booking');
+              expect(getRes.body.name).to.eq('Updated Name');
             });
         });
       });

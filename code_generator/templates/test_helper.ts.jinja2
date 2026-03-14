@@ -1,0 +1,152 @@
+// AUTO-GENERATED - DO NOT EDIT
+import { prisma } from '../db-helpers';
+import { TEST_CREDENTIALS } from '../test-credentials';
+
+async function getTestUser() {
+  const testUser = await prisma.user_account.findUnique({
+    where: { email: TEST_CREDENTIALS.email },
+  });
+  if (!testUser) throw new Error('Test user not found. Make sure db:seed has run first.');
+  return testUser;
+}
+
+export async function populate{{ pascal }}Dependencies() {
+{% if not deps %}
+  return {};
+{% else %}
+  const testUser = await getTestUser();
+{% for dep in deps %}
+{% if dep.is_user_account %}
+  const {{ dep.var_name }} = await prisma.user_account.create({
+    data: {
+      name: 'Test {{ dep.title }}',
+      email: `test-{{ dep.var_name }}-${Date.now()}@example.com`,
+      password: 'test-password',
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+{% else %}
+  const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
+    data: {
+{% for ef in dep.extra_required_fields %}
+      {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+{% for fk in dep.fk_deps %}
+      {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
+{% endfor %}
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+{% if dep.has_user_accounts %}
+      user_accounts: {
+        connect: [testUser.id].map((id) => ({ id })),
+      },
+{% endif %}
+    },
+  });
+{% if dep.needs_second %}
+  const {{ dep.var_name }}2 = await prisma.{{ dep.target }}.create({
+    data: {
+{% for ef in dep.extra_required_fields %}
+      {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+{% for fk in dep.fk_deps %}
+      {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
+{% endfor %}
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+{% endif %}
+{% endif %}
+{% endfor %}
+  return { {{ deps_return }} };
+{% endif %}
+}
+
+export async function populate{{ pascal }}Data(length: number) {
+  const testUser = await getTestUser();
+{% if has_parent_deps %}
+  const deps = await populate{{ pascal }}Dependencies();
+{% endif %}
+  const records = [];
+  for (let i = 1; i <= length; i++) {
+    const record = await prisma.{{ model_name }}.create({
+      data: {
+{% for field in required_fields_prisma %}
+{% if field.category == 'autocomplete' and field.dep_var_name %}
+        {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
+{% elif field.category != 'autocomplete' %}
+        {{ field.prop_name }}: {{ field.prisma_val }},
+{% endif %}
+{% endfor %}
+{% for ua_dep in ua_dep_fields %}
+        {{ ua_dep.prop_name }}: deps.{{ ua_dep.dep_var_name }}.id,
+{% endfor %}
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
+    records.push(record);
+  }
+  // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
+  return JSON.parse(JSON.stringify(records));
+}
+
+{% if has_optional %}
+export async function populate{{ pascal }}FullData(length: number) {
+  const testUser = await getTestUser();
+{% if has_parent_deps %}
+  const deps = await populate{{ pascal }}Dependencies();
+{% endif %}
+  const records = [];
+  for (let i = 1; i <= length; i++) {
+    const record = await prisma.{{ model_name }}.create({
+      data: {
+{% for field in all_fields_prisma %}
+{% if field.category == 'autocomplete' and field.dep_var_name %}
+        {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
+{% elif field.category != 'autocomplete' %}
+        {{ field.prop_name }}: {{ field.prisma_val }},
+{% endif %}
+{% endfor %}
+{% for ua_dep in ua_dep_fields %}
+        {{ ua_dep.prop_name }}: deps.{{ ua_dep.dep_var_name }}.id,
+{% endfor %}
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
+    records.push(record);
+  }
+  // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
+  return JSON.parse(JSON.stringify(records));
+}
+{% else %}
+export const populate{{ pascal }}FullData = populate{{ pascal }}Data;
+{% endif %}
+{% for child in datagrid_children %}
+
+export async function populate{{ pascal }}{{ child.pascal }}Data(parentId: string, length: number) {
+  const records = [];
+{% if child.has_fk_deps %}
+  const deps = await populate{{ pascal }}Dependencies();
+{% endif %}
+  for (let i = 1; i <= length; i++) {
+    const record = await prisma.{{ child.model_name }}.create({
+      data: {
+        {{ child.parent_fk_prop }}: parentId,
+{% if child.has_order %}
+        order: i,
+{% endif %}
+{% for field in child.fields_prisma %}
+        {{ field.prop_name }}: {{ field.prisma_val }},
+{% endfor %}
+      },
+    });
+    records.push(record);
+  }
+  // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
+  return JSON.parse(JSON.stringify(records));
+}
+{% endfor %}

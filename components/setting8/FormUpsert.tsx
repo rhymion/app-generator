@@ -57,7 +57,6 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
 
   const handleBack = () => {
     router.push('/setting8');
-    router.refresh();
   };
 
   const formFields = (

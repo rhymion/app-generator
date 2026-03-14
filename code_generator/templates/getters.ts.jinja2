@@ -2,10 +2,8 @@
 
 import prisma from '@/lib/prisma';
 import type { {{ parent_pascal }}, {{ parent_pascal }}Detail } from '@/lib/{{ parent }}/types';
-import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions{% if should_filter_by_org %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions{% if should_filter_by_org %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';
 {% if should_filter_by_org %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
@@ -58,39 +56,56 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 
   return {
     ...{{ parent_camel }},
-{% if child_mappings %}
-{{ child_mappings }}
-{% endif %}
-{% if relationship_mapping %}
-{{ relationship_mapping }}
-{% endif %}
   };
 }
 
 export async function get{{ parent_pascal }}ListPageData(isAssertPermission: boolean = true) {
 {% if should_filter_by_org %}
   const userId = await getSessionUserIdOrThrow();
+  const [{ permissions: userPermissions }, {{ parent_camel }}s] = await Promise.all([
+    getModelPermissions('{{ parent }}', userId),
+    getAll{{ parent_pascal }}s(userId),
+  ]);
+{% else %}
+  const [{ permissions: userPermissions, userId }, {{ parent_camel }}s] = await Promise.all([
+    getModelPermissions('{{ parent }}'),
+    getAll{{ parent_pascal }}s(),
+  ]);
 {% endif %}
-  const userPermissions = await getModelPermissions('{{ parent }}'{% if should_filter_by_org %}, userId{% endif %});
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', '{{ parent }}');
   }
-  const {{ parent_camel }}s = await getAll{{ parent_pascal }}s({% if should_filter_by_org %}userId{% endif %});
-  return { {{ parent_camel }}s, userPermissions };
+  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
+  const filtered{{ parent_pascal }}s = userPermissions.general.read
+    ? {{ parent_camel }}s
+    : {{ parent_camel }}s.filter(item =>
+        (userPermissions.creator?.read && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
+      );
+  return { {{ parent_camel }}s: filtered{{ parent_pascal }}s, userPermissions: await toPermissions(userPermissions) };
 }
 
 export async function get{{ parent_pascal }}DetailPageData(id: string, operation: Operation = 'read') {
 {% if should_filter_by_org %}
   const userId = await getSessionUserIdOrThrow();
+  const [{{ parent_camel }}, { permissions: basePermissions }] = await Promise.all([
+    get{{ parent_pascal }}Detail(id, userId),
+    getModelPermissions('{{ parent }}', userId),
+  ]);
+{% else %}
+  const [{{ parent_camel }}, { permissions: basePermissions, userId }] = await Promise.all([
+    get{{ parent_pascal }}Detail(id),
+    getModelPermissions('{{ parent }}'),
+  ]);
 {% endif %}
-  const {{ parent_camel }} = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org %}, userId{% endif %});
-  const userPermissions = await getModelPermissions('{{ parent }}', {% if should_filter_by_org %}userId{% else %}undefined{% endif %}, {{ parent_camel }});
-  await assertPermission(userPermissions, operation, '{{ parent }}');
-  return { {{ parent_camel }}, userPermissions };
+  const resolved = await resolvePermissions(basePermissions, {{ parent_camel }}, userId ?? '');
+  await assertPermission(resolved, operation, '{{ parent }}');
+  return { {{ parent_camel }}, userPermissions: await toPermissions(resolved) };
 }
 
 export async function get{{ parent_pascal }}NewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('{{ parent }}');
-  await assertPermission(userPermissions, 'create', '{{ parent }}');
-  return userPermissions;
+  const { permissions: richPermissions } = await getModelPermissions('{{ parent }}');
+  await assertPermission(richPermissions.general, 'create', '{{ parent }}');
+  return richPermissions.general;
 }

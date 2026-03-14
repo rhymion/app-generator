@@ -1,10 +1,22 @@
+import { Suspense } from 'react';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/booking/FormUpsert';
 import { getResourceListPageData } from '@/lib/resource/getters';
 import { getBookingNewPageAccessCheck } from '@/lib/booking/getters';
 
-export default async function AddBookingPage() {
-  const resourcesData = await getResourceListPageData(false);
-  const userPermissions = await getBookingNewPageAccessCheck();
+export default function AddBookingPage() {
+  return (
+    <Suspense fallback={<FormSkeleton />}>
+      <BookingNewContent />
+    </Suspense>
+  );
+}
+
+async function BookingNewContent() {
+  const [userPermissions, resourcesData] = await Promise.all([
+    getBookingNewPageAccessCheck(),
+    getResourceListPageData(false),
+  ]);
   const src = {
     id: '',
     name: '',

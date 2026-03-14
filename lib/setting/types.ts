@@ -7,6 +7,7 @@ export type Setting = {
   password: string;
   api_key: string | null;
   avatar: string | null;
+  creator_id: string | null;
 };
 
 export type SettingDetail = Setting & {

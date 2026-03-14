@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addShiftTemplate, updateShiftTemplate, deleteShiftTemplate } from './service';
@@ -28,7 +27,6 @@ export async function upsertShiftTemplate(data: FormData) {
     await addShiftTemplate(userId, userAccountId, dayOfWeek, startTime, endTime);
   }
 
-  revalidatePath('/');
   redirect('/shift_template');
 }
 export async function removeShiftTemplate(data: FormData | string[]) {
@@ -38,7 +36,6 @@ export async function removeShiftTemplate(data: FormData | string[]) {
     await requirePermission('shift_template', 'delete', item);
   }
   await deleteShiftTemplate(ids);
-  revalidatePath('/');
   redirect('/shift_template');
 }
 

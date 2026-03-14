@@ -7,6 +7,7 @@ export type Procedure = {
   description: string | null;
   parent_id: string | null;
   assignee_id: string | null;
+  creator_id: string | null;
   parent?: Procedure | null;
   assignee?: UserAccount | null;
 };

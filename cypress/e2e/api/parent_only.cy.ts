@@ -66,7 +66,7 @@ describe('API: Parent Only', () => {
       });
     });
 
-    it('5.1 fails when required field name is missing', () => {
+    it('5.1 fails when a required field is missing', () => {
       cy.request({
         method: 'POST',
         url: API_BASE,

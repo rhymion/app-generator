@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/permission/FormUpsert';
 import { getPermissionDetailPageData } from '@/lib/permission/getters';
 import { getRoleListPageData } from '@/lib/role/getters';
@@ -6,6 +8,14 @@ import { notFound } from 'next/navigation';
 
 export default async function EditPermissionPage({ params }: PermissionDetailPageProps) {
   const { id } = await params;
+  return (
+    <Suspense fallback={<FormSkeleton />}>
+      <PermissionEditContent id={id} />
+    </Suspense>
+  );
+}
+
+async function PermissionEditContent({ id }: { id: string }) {
   const [detail, rolesData] = await Promise.all([
     getPermissionDetailPageData(id, 'update'),
     getRoleListPageData(false),

@@ -32,6 +32,10 @@ export const siteConfig = {
     { label: "Booking", href: "/booking" },
     { label: "Shift Template", href: "/shift_template" },
     { label: "Shift", href: "/shift" },
+    { label: "Procedure", href: "/procedure" },
+    { label: "Product", href: "/product" },
+    { label: "Inventory", href: "/inventory" },
+    { label: "Purchase Order", href: "/purchase_order" },
   ] satisfies NavLink[],
 };
 

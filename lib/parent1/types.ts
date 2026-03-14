@@ -9,6 +9,7 @@ export type Parent1 = {
   price: number;
   due_date: Date;
   image_url: string | null;
+  creator_id: string | null;
   organization?: Organization | null;
 };
 

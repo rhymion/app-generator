@@ -13,7 +13,7 @@ export type BookingForChart = {
 };
 
 export async function getBookingsForChart(startDate: Date, endDate: Date): Promise<BookingForChart[]> {
-  const userPermissions = await getModelPermissions('booking');
+  const { permissions: userPermissions, userId } = await getModelPermissions('booking');
   await assertPermission(userPermissions, 'read', 'booking');
 
   const items = await prisma.booking.findMany({

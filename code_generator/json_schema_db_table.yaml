@@ -658,6 +658,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     x-relationships:
       user_accounts:
         type: many-to-many
@@ -1137,3 +1138,225 @@ definitions:
         properties:
           user_account:
             $ref: "#/definitions/user_account"
+
+  product:
+    type: object
+    required:
+      - id
+      - code
+      - name
+      - price
+    x-display:
+      table:
+        - code: 
+            primary: true
+            width: 150
+        - name:
+            width: 200
+        - price:
+            width: 100
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      code:
+        type: string
+        minLength: 1
+      name:
+        type: string
+        minLength: 1
+      price:
+        type: integer
+        minimum: 0
+
+  product_image:
+    type: object
+    required:
+      - id
+      - name
+      - path
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+      path:
+        type: string
+        format: uri
+
+  product_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true 
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    allOf:
+      - $ref: "#/definitions/product"
+      - type: object
+        required:
+          - product_images
+        properties:
+          images:
+            type: array
+            x-outputType: list
+            x-fileType: image
+            items:
+              $ref: "#/definitions/product_image"
+
+  inventory:
+    type: object
+    required:
+      - id
+      - product_id
+      - quantity
+      - reserved_quantity
+    x-display:
+      table:
+        - product: 
+            primary: true
+            width: 200
+        - quantity:
+            width: 100
+        - reserved_quantity:
+            width: 100
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      product_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: product
+          labelField: name
+      quantity:
+        type: integer
+        minimum: 0
+      reserved_quantity:
+        type: integer
+        minimum: 0
+      location:
+        type:
+          - string
+          - "null"
+      lot_number:
+        type:
+          - string
+          - "null"
+      expiration_date:
+        type:
+          - string
+          - "null"
+        format: date
+
+  inventory_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    allOf:
+      - $ref: "#/definitions/inventory"
+      - type: object
+        required:
+          - product
+        properties:
+          product:
+            $ref: "#/definitions/product"
+
+  purchase_order:
+    type: object
+    required:
+      - id
+      - order_no
+      - customer_id
+    x-display:
+      table:
+        - order_no: 
+            primary: true
+            width: 150
+        - customer:
+            width: 200
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      order_no:
+        type: string
+        minLength: 1
+      customer_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: user_account
+          labelField: name
+
+  purchase_per_item:
+    type: object
+    required:
+      - id
+      - purchase_order_id
+      - product_id
+      - quantity
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      purchase_order_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: purchase_order
+          labelField: order_no
+      product_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: product
+          labelField: name
+      quantity:
+        type: integer
+        minimum: 1
+      price:
+        type: 
+          - integer
+          - "null"
+        minimum: 0
+
+  purchase_order_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    allOf:
+      - $ref: "#/definitions/purchase_order"
+      - type: object
+        required:
+          - customer
+          - items
+        properties:
+          customer:
+            $ref: "#/definitions/user_account"
+          items:
+            type: array
+            items:
+              $ref: "#/definitions/purchase_per_item"

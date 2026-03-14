@@ -2,10 +2,8 @@
 
 import prisma from '@/lib/prisma';
 import type { Setting3, Setting3Detail } from '@/lib/setting3/types';
-import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';
 
 export async function getAllSetting3s(): Promise<Setting3[]> {
   const setting3s = await prisma.xxxxx_xxxxx.findMany({
@@ -14,6 +12,7 @@ export async function getAllSetting3s(): Promise<Setting3[]> {
     id: setting3.id,
     name: setting3.name,
     description: setting3.description,
+    creator_id: setting3.creator_id,
   }));
 }
 
@@ -21,9 +20,6 @@ export async function getSetting3Detail(id: string): Promise<Setting3Detail | nu
   const setting3 = await prisma.xxxxx_xxxxx.findUnique({
     where: {
       id,
-    },
-    include: {
-      creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
     },
   });
 
@@ -37,23 +33,36 @@ export async function getSetting3Detail(id: string): Promise<Setting3Detail | nu
 }
 
 export async function getSetting3ListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('setting3');
+  const [{ permissions: userPermissions, userId }, setting3s] = await Promise.all([
+    getModelPermissions('setting3'),
+    getAllSetting3s(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'setting3');
   }
-  const setting3s = await getAllSetting3s();
-  return { setting3s, userPermissions };
+  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
+  const filteredSetting3s = userPermissions.general.read
+    ? setting3s
+    : setting3s.filter(item =>
+        (userPermissions.creator?.read && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
+      );
+  return { setting3s: filteredSetting3s, userPermissions: await toPermissions(userPermissions) };
 }
 
 export async function getSetting3DetailPageData(id: string, operation: Operation = 'read') {
-  const setting3 = await getSetting3Detail(id);
-  const userPermissions = await getModelPermissions('setting3', undefined, setting3);
-  await assertPermission(userPermissions, operation, 'setting3');
-  return { setting3, userPermissions };
+  const [setting3, { permissions: basePermissions, userId }] = await Promise.all([
+    getSetting3Detail(id),
+    getModelPermissions('setting3'),
+  ]);
+  const resolved = await resolvePermissions(basePermissions, setting3, userId ?? '');
+  await assertPermission(resolved, operation, 'setting3');
+  return { setting3, userPermissions: await toPermissions(resolved) };
 }
 
 export async function getSetting3NewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('setting3');
-  await assertPermission(userPermissions, 'create', 'setting3');
-  return userPermissions;
+  const { permissions: richPermissions } = await getModelPermissions('setting3');
+  await assertPermission(richPermissions.general, 'create', 'setting3');
+  return richPermissions.general;
 }

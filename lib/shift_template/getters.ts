@@ -2,10 +2,8 @@
 
 import prisma from '@/lib/prisma';
 import type { ShiftTemplate, ShiftTemplateDetail } from '@/lib/shift_template/types';
-import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';
 
 export async function getAllShiftTemplates(): Promise<ShiftTemplate[]> {
   const shiftTemplates = await prisma.shift_template.findMany({
@@ -17,6 +15,7 @@ export async function getAllShiftTemplates(): Promise<ShiftTemplate[]> {
     day_of_week: shiftTemplate.day_of_week,
     start_time: shiftTemplate.start_time,
     end_time: shiftTemplate.end_time,
+    creator_id: shiftTemplate.creator_id,
     user_account: shiftTemplate.user_account,
   }));
 }
@@ -27,7 +26,7 @@ export async function getShiftTemplateDetail(id: string): Promise<ShiftTemplateD
       id,
     },
     include: {
-      user_account: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      user_account: true
     },
   });
 
@@ -37,28 +36,40 @@ export async function getShiftTemplateDetail(id: string): Promise<ShiftTemplateD
 
   return {
     ...shiftTemplate,
-    user_account: shiftTemplate.user_account,
   };
 }
 
 export async function getShiftTemplateListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('shift_template');
+  const [{ permissions: userPermissions, userId }, shiftTemplates] = await Promise.all([
+    getModelPermissions('shift_template'),
+    getAllShiftTemplates(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'shift_template');
   }
-  const shiftTemplates = await getAllShiftTemplates();
-  return { shiftTemplates, userPermissions };
+  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
+  const filteredShiftTemplates = userPermissions.general.read
+    ? shiftTemplates
+    : shiftTemplates.filter(item =>
+        (userPermissions.creator?.read && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
+      );
+  return { shiftTemplates: filteredShiftTemplates, userPermissions: await toPermissions(userPermissions) };
 }
 
 export async function getShiftTemplateDetailPageData(id: string, operation: Operation = 'read') {
-  const shiftTemplate = await getShiftTemplateDetail(id);
-  const userPermissions = await getModelPermissions('shift_template', undefined, shiftTemplate);
-  await assertPermission(userPermissions, operation, 'shift_template');
-  return { shiftTemplate, userPermissions };
+  const [shiftTemplate, { permissions: basePermissions, userId }] = await Promise.all([
+    getShiftTemplateDetail(id),
+    getModelPermissions('shift_template'),
+  ]);
+  const resolved = await resolvePermissions(basePermissions, shiftTemplate, userId ?? '');
+  await assertPermission(resolved, operation, 'shift_template');
+  return { shiftTemplate, userPermissions: await toPermissions(resolved) };
 }
 
 export async function getShiftTemplateNewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('shift_template');
-  await assertPermission(userPermissions, 'create', 'shift_template');
-  return userPermissions;
+  const { permissions: richPermissions } = await getModelPermissions('shift_template');
+  await assertPermission(richPermissions.general, 'create', 'shift_template');
+  return richPermissions.general;
 }

@@ -1,0 +1,218 @@
+"""
+generators_i18n.py — Update i18n message files and config files with new entity keys.
+
+Called once after all entities are generated. Only adds missing keys — never
+removes or overwrites existing values so manual translations are preserved.
+
+Updates:
+  messages/en.json         Nav, EntityLabel, Fields sections
+  messages/ja.json         same (placeholder values for manual translation)
+  lib/site-config.ts       navLinks array
+  app/[locale]/@sidebar/page.tsx  navTranslationKeys object
+"""
+import json
+import re
+from pathlib import Path
+
+from helpers.naming import to_camel_case, to_title_case
+from helpers.schema_helpers import filter_fields
+
+
+# ---------------------------------------------------------------------------
+# Field key collection
+# ---------------------------------------------------------------------------
+
+_SYSTEM_PROPS = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
+
+
+def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
+    """Return {camelCaseKey: 'Title Case Label'} for every field across all entities."""
+    keys: dict[str, str] = {}
+
+    for entity in entities:
+        model = entity['model']
+        gen_cfg = entity['generate_config']
+
+        model_def = schema['definitions'].get(model, {})
+        props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
+
+        for prop_name, prop in props.items():
+            if prop_name in _SYSTEM_PROPS:
+                continue
+
+            rel = prop.get('x-relationship', {})
+            if rel.get('type') == 'many-to-one':
+                # FK field: strip _id suffix for the display key
+                base = prop_name[:-3] if prop_name.endswith('_id') else prop_name
+                key = to_camel_case(base)
+                label = to_title_case(base)
+            else:
+                key = to_camel_case(prop_name)
+                label = to_title_case(prop_name)
+
+            keys.setdefault(key, label)
+
+        # Child array property names
+        for child in entity.get('children', []):
+            prop_name = child['property_name']
+            key = to_camel_case(prop_name)
+            keys.setdefault(key, to_title_case(prop_name))
+
+    return keys
+
+
+# ---------------------------------------------------------------------------
+# JSON file updater
+# ---------------------------------------------------------------------------
+
+def _update_json(path: Path, additions: dict[str, dict[str, str]]) -> bool:
+    """
+    Deep-merge additions into the JSON file at `path`.
+    `additions` is {sectionName: {key: value}}.
+    Returns True if the file was changed.
+    """
+    with open(path, encoding='utf-8') as f:
+        data = json.load(f)
+
+    changed = False
+    for section, entries in additions.items():
+        if section not in data:
+            data[section] = {}
+            changed = True
+        for key, value in entries.items():
+            if key not in data[section]:
+                data[section][key] = value
+                changed = True
+
+    # Sort keys within each section that has additions
+    for section in additions:
+        if section in data:
+            sorted_section = dict(sorted(data[section].items(), key=lambda x: x[0].lower()))
+            if list(data[section].keys()) != list(sorted_section.keys()):
+                data[section] = sorted_section
+                changed = True
+
+    if changed:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write('\n')
+
+    return changed
+
+
+# ---------------------------------------------------------------------------
+# site-config.ts updater
+# ---------------------------------------------------------------------------
+
+def _update_site_config(path: Path, nav_entities: list) -> bool:
+    content = path.read_text(encoding='utf-8')
+
+    existing_hrefs = set(re.findall(r'href:\s*"(/[^"]*)"', content))
+
+    new_lines = []
+    for entity in nav_entities:
+        href = f'/{entity["parent"]}'
+        if href not in existing_hrefs:
+            label = to_title_case(entity['parent'])
+            new_lines.append(f'    {{ label: "{label}", href: "{href}" }},')
+
+    if not new_lines:
+        return False
+
+    insertion = '\n'.join(new_lines)
+    content = content.replace(
+        '] satisfies NavLink[]',
+        f'{insertion}\n  ] satisfies NavLink[]',
+    )
+    path.write_text(content, encoding='utf-8')
+    return True
+
+
+# ---------------------------------------------------------------------------
+# sidebar/page.tsx updater
+# ---------------------------------------------------------------------------
+
+def _update_sidebar(path: Path, nav_entities: list) -> bool:
+    content = path.read_text(encoding='utf-8')
+
+    # Match entries inside the navTranslationKeys object
+    existing_hrefs = set(re.findall(r'"(/[^"]+)":\s*"[^"]+"', content))
+
+    new_lines = []
+    for entity in nav_entities:
+        href = f'/{entity["parent"]}'
+        if href not in existing_hrefs:
+            nav_key = to_camel_case(entity['parent'])
+            new_lines.append(f'  "{href}": "{nav_key}",')
+
+    if not new_lines:
+        return False
+
+    insertion = '\n'.join(new_lines)
+    # Insert before the closing '}' of navTranslationKeys
+    content = content.replace(
+        '};\n\nexport default function Sidebar',
+        f'{insertion}\n}};\n\nexport default function Sidebar',
+    )
+    path.write_text(content, encoding='utf-8')
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> None:
+    """
+    Update i18n message files and navigation config for all entities.
+
+    `entities` — the full list returned by extract_entities().
+    `output_dir` — project root (same as passed to generate()).
+    """
+    # Entities that appear in the sidebar nav:
+    # must be a "primary" entity (parent == model) with a list page.
+    nav_entities = [
+        e for e in entities
+        if e['parent'] == e['model'] and e['generate_config'].get('list', True)
+    ]
+
+    # EntityLabel keys for all entities (including alternate-model entities like setting*)
+    entity_label_entries = {
+        to_camel_case(e['parent']): to_title_case(e['parent'])
+        for e in entities
+    }
+
+    # Nav keys (same set as nav_entities)
+    nav_entries = {
+        to_camel_case(e['parent']): to_title_case(e['parent'])
+        for e in nav_entities
+    }
+
+    # Field keys across all entities
+    field_keys = _collect_field_keys(entities, schema)
+
+    # --- messages/*.json ---
+    messages_dir = output_dir / 'messages'
+    for lang_file in sorted(messages_dir.glob('*.json')):
+        additions: dict[str, dict[str, str]] = {
+            'EntityLabel': entity_label_entries,
+            'Nav': nav_entries,
+            'Fields': field_keys,
+        }
+        changed = _update_json(lang_file, additions)
+        status = 'Updated' if changed else 'No changes'
+        print(f'  {status}: {lang_file.relative_to(output_dir)}')
+
+    # --- lib/site-config.ts ---
+    site_config = output_dir / 'lib' / 'site-config.ts'
+    if site_config.exists():
+        changed = _update_site_config(site_config, nav_entities)
+        status = 'Updated' if changed else 'No changes'
+        print(f'  {status}: {site_config.relative_to(output_dir)}')
+
+    # --- app/[locale]/@sidebar/page.tsx ---
+    sidebar = output_dir / 'app' / '[locale]' / '@sidebar' / 'page.tsx'
+    if sidebar.exists():
+        changed = _update_sidebar(sidebar, nav_entities)
+        status = 'Updated' if changed else 'No changes'
+        print(f'  {status}: {sidebar.relative_to(output_dir)}')

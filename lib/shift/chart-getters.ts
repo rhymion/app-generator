@@ -13,7 +13,7 @@ export type ShiftForChart = {
 };
 
 export async function getShiftsForChart(startDate: Date, endDate: Date): Promise<ShiftForChart[]> {
-  const userPermissions = await getModelPermissions('shift');
+  const { permissions: userPermissions, userId } = await getModelPermissions('shift');
   await assertPermission(userPermissions, 'read', 'shift');
 
   const items = await prisma.shift.findMany({

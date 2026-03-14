@@ -1,8 +1,18 @@
+import { Suspense } from 'react';
+import TableSkeleton from '@/components/_standard/TableSkeleton';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getSettingListPageData } from '@/lib/setting/getters';
 
-export default async function SettingListPage() {
+export default function SettingListPage() {
+  return (
+    <Suspense fallback={<TableSkeleton />}>
+      <SettingListContent />
+    </Suspense>
+  );
+}
+
+async function SettingListContent() {
   const [t, tf] = await Promise.all([
     getTranslations('EntityLabel'),
     getTranslations('Fields'),

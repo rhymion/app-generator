@@ -143,6 +143,31 @@ Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
     .type(month + day + year + hour + minute + ampmChar);
 });
 
+Cypress.Commands.add('fillDate', (label: string, dateString: string) => {
+  const parts = dateString.match(/^(\d{2})\/(\d{2})\/(\d{4})$/i);
+  if (!parts) throw new Error(`fillDate: Expected "MM/DD/YYYY", got "${dateString}"`);
+  const [, month, day, year] = parts;
+
+  cy.contains('label', label)
+    .parent()
+    .find('input')
+    .click()
+    .type(month + day + year);
+});
+
+Cypress.Commands.add('fillTime', (label: string, dateString: string) => {
+  const parts = dateString.match(/^(\d{2}):(\d{2})\s+(AM|PM)$/i);
+  if (!parts) throw new Error(`fillTime: Expected "HH:MM AM/PM", got "${dateString}"`);
+  const [, hour, minute, ampm] = parts;
+  const ampmChar = ampm.toUpperCase() === 'AM' ? 'a' : 'p';
+
+  cy.contains('label', label)
+    .parent()
+    .find('input')
+    .click()
+    .type(hour + minute + ampmChar);
+});
+
 /**
  * Clear MUI DateTimePicker by clicking its clear button.
  * Requires DateTimeWrapper to have clearable={true} on the field slot.
@@ -174,6 +199,8 @@ declare global {
       clearAutocomplete(label: string): Chainable<void>;
       setCheckbox(label: string, checked: boolean): Chainable<void>;
       fillDateTime(label: string, dateString: string): Chainable<void>;
+      fillDate(label: string, dateString: string): Chainable<void>;
+      fillTime(label: string, dateString: string): Chainable<void>;
       clearDateTime(label: string): Chainable<void>;
       selectDataGridRows(indices: number[]): Chainable<void>;
     }

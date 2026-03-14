@@ -74,7 +74,6 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
 
   const handleBack = () => {
     router.push('/booking');
-    router.refresh();
   };
 
   const formFields = (

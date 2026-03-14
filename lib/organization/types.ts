@@ -4,6 +4,7 @@ export type Organization = {
   id: string;
   name: string;
   description: string | null;
+  creator_id: string | null;
 };
 
 export type OrganizationDetail = Organization & {

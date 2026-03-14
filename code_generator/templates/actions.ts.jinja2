@@ -1,8 +1,8 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+{% if comment_actions_code %}import { revalidatePath } from 'next/cache';
+{% endif %}import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 {% if service_imports %}
 import { {{ service_imports }} } from './service';
@@ -11,7 +11,6 @@ import { {{ service_imports }} } from './service';
 export async function upsert{{ parent_pascal }}(data: FormData) {
 {{ upsert_body }}
 
-  revalidatePath('/');
   redirect('/{{ parent }}');
 }
 {% endif %}
@@ -23,7 +22,6 @@ export async function remove{{ parent_pascal }}(data: FormData | string[]) {
     await requirePermission('{{ parent }}', 'delete', item);
   }
   await delete{{ parent_pascal }}(ids);
-  revalidatePath('/');
   redirect('/{{ parent }}');
 }
 {% endif %}

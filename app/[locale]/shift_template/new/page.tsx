@@ -1,10 +1,22 @@
+import { Suspense } from 'react';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/shift_template/FormUpsert';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
 import { getShiftTemplateNewPageAccessCheck } from '@/lib/shift_template/getters';
 
-export default async function AddShiftTemplatePage() {
-  const userAccountsData = await getUserAccountListPageData(false);
-  const userPermissions = await getShiftTemplateNewPageAccessCheck();
+export default function AddShiftTemplatePage() {
+  return (
+    <Suspense fallback={<FormSkeleton />}>
+      <ShiftTemplateNewContent />
+    </Suspense>
+  );
+}
+
+async function ShiftTemplateNewContent() {
+  const [userPermissions, userAccountsData] = await Promise.all([
+    getShiftTemplateNewPageAccessCheck(),
+    getUserAccountListPageData(false),
+  ]);
   const src = {
     id: '',
     user_account_id: '',

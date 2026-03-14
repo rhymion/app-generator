@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addParentOnly, updateParentOnly, deleteParentOnly } from './service';
@@ -28,7 +27,6 @@ export async function upsertParentOnly(data: FormData) {
     await addParentOnly(userId, name, description, loginTime, logoutTime);
   }
 
-  revalidatePath('/');
   redirect('/parent_only');
 }
 export async function removeParentOnly(data: FormData | string[]) {
@@ -38,7 +36,6 @@ export async function removeParentOnly(data: FormData | string[]) {
     await requirePermission('parent_only', 'delete', item);
   }
   await deleteParentOnly(ids);
-  revalidatePath('/');
   redirect('/parent_only');
 }
 

@@ -15,7 +15,7 @@ import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';
 import { fields_columns } from '../db_table/column_def';
 import { useFormValidation } from './form_validation';
 
-export default function FormUpsert({ src, isEdit, permissions, currentUserId, allDbTables = [], dbTablePermissions }: FormUpsertProps) {
+export default function FormUpsert({ src, isEdit, permissions, currentUserId }: FormUpsertProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const tf = useTranslations('Fields');
@@ -27,10 +27,7 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
   const fieldsRef = useRef<{ getFields: () => GridRowsProp }>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
-  const referenceIdOptions = useMemo(() =>
-    (allDbTables ?? []).map(item => ({ value: item.id, label: item.name })),
-  [allDbTables]);
-  const fieldsColumns = fields_columns(true, referenceIdOptions);
+  const fieldsColumns = fields_columns(true);
 
   const [initialFields] = useState<GridRowsProp>(() => src.fields.map(f => ({ ...f, id: f.id || `temp-${Date.now()}-${Math.random()}` })));
 
@@ -97,7 +94,6 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId, al
 
   const handleBack = () => {
     router.push('/db_table');
-    router.refresh();
   };
 
   const handleCreateComment = async (message: string) => {

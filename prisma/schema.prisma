@@ -169,6 +169,7 @@ model user_account {
   shift_templates    shift_template[] @relation("ShiftTemplateUser")
   shifts    shift[] @relation("ShiftUser")
   organizations organization[] @relation("UserOrganizations")
+  purchase_orders purchase_order[] @relation("Buyer")
   created_db_tables db_table[] @relation("DbTableCreator")
   updated_db_tables db_table[] @relation("DbTableUpdater")
   created_xxxxx_xxxxxs xxxxx_xxxxx[] @relation("XxxxxXxxxxCreator")
@@ -196,6 +197,12 @@ model user_account {
   updated_shift_templates  shift_template[] @relation("ShiftTemplateUpdater")
   created_shifts  shift[] @relation("ShiftCreator")
   updated_shifts  shift[] @relation("ShiftUpdater")
+  created_products  product[] @relation("ProductCreator")
+  updated_products  product[] @relation("ProductUpdater")
+  created_inventories  inventory[] @relation("InventoryCreator")
+  updated_inventories  inventory[] @relation("InventoryUpdater")
+  created_purchase_orders  purchase_order[] @relation("PurchaseOrderCreator")
+  updated_purchase_orders  purchase_order[] @relation("PurchaseOrderUpdater")
   created_db_table_comments  db_table_comment[] @relation("DbTableCommentCreator")
   @@index([api_key])
 }
@@ -347,4 +354,74 @@ model shift {
   creator     user_account @relation("ShiftCreator", fields: [creator_id], references: [id])
   updater_id  String
   updater     user_account @relation("ShiftUpdater", fields: [updater_id], references: [id])
+}
+
+model product {
+  id          String @id @default(cuid())
+  code        String @unique
+  name        String
+  price       Int
+  barcode     String?
+  images      product_image[]
+  inventories  inventory[]
+  purchase_per_items purchase_per_item[]
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  creator_id  String
+  creator     user_account @relation("ProductCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user_account @relation("ProductUpdater", fields: [updater_id], references: [id])
+}
+
+model product_image {
+  id           String @id @default(cuid())
+  name         String
+  path         String
+  product_id   String
+  product      product @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model inventory {
+  id          String @id @default(cuid())
+  product_id  String
+  product     product @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  quantity    Int
+  reserved_quantity    Int
+  location    String?
+  lot_number  String?
+  expiration_date DateTime?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  creator_id  String
+  creator     user_account @relation("InventoryCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user_account @relation("InventoryUpdater", fields: [updater_id], references: [id])
+}
+
+model purchase_order {
+  id          String @id @default(cuid())
+  order_no    String
+  customer_id String
+  customer    user_account @relation("Buyer", fields: [customer_id], references: [id])
+  items       purchase_per_item[]
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  creator_id  String
+  creator     user_account @relation("PurchaseOrderCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user_account @relation("PurchaseOrderUpdater", fields: [updater_id], references: [id])
+}
+
+model purchase_per_item {
+  id          String @id @default(cuid())
+  purchase_order_id String
+  purchase_order    purchase_order @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  product_id  String
+  product     product @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  quantity    Int
+  price       Int?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
 }

@@ -1,9 +1,19 @@
+import { Suspense } from 'react';
+import TableSkeleton from '@/components/_standard/TableSkeleton';
 import { getTranslations } from 'next-intl/server';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
 import { removeUserAccount } from '@/lib/user_account/actions';
 
-export default async function UserAccountListPage() {
+export default function UserAccountListPage() {
+  return (
+    <Suspense fallback={<TableSkeleton />}>
+      <UserAccountListContent />
+    </Suspense>
+  );
+}
+
+async function UserAccountListContent() {
   const [t, tf] = await Promise.all([
     getTranslations('EntityLabel'),
     getTranslations('Fields'),

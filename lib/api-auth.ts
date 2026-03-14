@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { getModelPermissions, type ModelPermissions, type Operation, type ItemContext } from '@/lib/authz';
+import { requirePermission, type RichPermissions, type Operation, type ItemContext } from '@/lib/authz';
 
 export class ApiError extends Error {
   constructor(
@@ -38,12 +38,13 @@ export async function requireApiPermission(
   model: string,
   operation: Operation,
   item?: ItemContext,
-): Promise<ModelPermissions> {
-  const permissions = await getModelPermissions(model, userId, item);
-  if (!permissions[operation]) {
-    throw new ApiError(403, `Access denied: ${model}.${operation}`);
+): Promise<RichPermissions> {
+  try {
+    return await requirePermission(model, operation, item, userId);
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    throw new ApiError(403, (e as Error).message);
   }
-  return permissions;
 }
 
 export function handleApiError(error: unknown): NextResponse {

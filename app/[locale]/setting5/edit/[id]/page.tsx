@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/setting5/FormUpsert';
 import { getSetting5DetailPageData } from '@/lib/setting5/getters';
 import { Setting5DetailPageProps } from '@/lib/setting5/types';
@@ -5,6 +7,14 @@ import { notFound } from 'next/navigation';
 
 export default async function EditSetting5Page({ params }: Setting5DetailPageProps) {
   const { id } = await params;
+  return (
+    <Suspense fallback={<FormSkeleton />}>
+      <Setting5EditContent id={id} />
+    </Suspense>
+  );
+}
+
+async function Setting5EditContent({ id }: { id: string }) {
   const detail = await getSetting5DetailPageData(id, 'update');
   if (!detail.setting5) {
     notFound();

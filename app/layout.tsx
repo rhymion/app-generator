@@ -2,6 +2,7 @@ import { Inconsolata } from 'next/font/google';
 import type { Metadata } from 'next';
 import { getLocale } from 'next-intl/server';
 import { siteConfig } from '@/lib/site-config';
+import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter';
 import './globals.css';
 
 const fnt = Inconsolata({ subsets: ['latin'] });
@@ -16,7 +17,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang={locale}>
       <body className={fnt.className}>
-        {children}
+        <AppRouterCacheProvider>
+          {children}
+        </AppRouterCacheProvider>
       </body>
     </html>
   );

@@ -2,10 +2,8 @@
 
 import prisma from '@/lib/prisma';
 import type { XxxxxXxxxx, XxxxxXxxxxDetail } from '@/lib/xxxxx_xxxxx/types';
-import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';
 
 export async function getAllXxxxxXxxxxs(): Promise<XxxxxXxxxx[]> {
   const xxxxxXxxxxs = await prisma.xxxxx_xxxxx.findMany({
@@ -15,6 +13,7 @@ export async function getAllXxxxxXxxxxs(): Promise<XxxxxXxxxx[]> {
     name: xxxxxXxxxx.name,
     description: xxxxxXxxxx.description,
     team: xxxxxXxxxx.team,
+    creator_id: xxxxxXxxxx.creator_id,
   }));
 }
 
@@ -24,7 +23,7 @@ export async function getXxxxxXxxxxDetail(id: string): Promise<XxxxxXxxxxDetail 
       id,
     },
     include: {
-      yyyyy_yyyyys: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      yyyyy_yyyyys: true
     },
   });
 
@@ -34,28 +33,40 @@ export async function getXxxxxXxxxxDetail(id: string): Promise<XxxxxXxxxxDetail 
 
   return {
     ...xxxxxXxxxx,
-    yyyyy_yyyyys: xxxxxXxxxx.yyyyy_yyyyys,
   };
 }
 
 export async function getXxxxxXxxxxListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('xxxxx_xxxxx');
+  const [{ permissions: userPermissions, userId }, xxxxxXxxxxs] = await Promise.all([
+    getModelPermissions('xxxxx_xxxxx'),
+    getAllXxxxxXxxxxs(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'xxxxx_xxxxx');
   }
-  const xxxxxXxxxxs = await getAllXxxxxXxxxxs();
-  return { xxxxxXxxxxs, userPermissions };
+  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
+  const filteredXxxxxXxxxxs = userPermissions.general.read
+    ? xxxxxXxxxxs
+    : xxxxxXxxxxs.filter(item =>
+        (userPermissions.creator?.read && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
+      );
+  return { xxxxxXxxxxs: filteredXxxxxXxxxxs, userPermissions: await toPermissions(userPermissions) };
 }
 
 export async function getXxxxxXxxxxDetailPageData(id: string, operation: Operation = 'read') {
-  const xxxxxXxxxx = await getXxxxxXxxxxDetail(id);
-  const userPermissions = await getModelPermissions('xxxxx_xxxxx', undefined, xxxxxXxxxx);
-  await assertPermission(userPermissions, operation, 'xxxxx_xxxxx');
-  return { xxxxxXxxxx, userPermissions };
+  const [xxxxxXxxxx, { permissions: basePermissions, userId }] = await Promise.all([
+    getXxxxxXxxxxDetail(id),
+    getModelPermissions('xxxxx_xxxxx'),
+  ]);
+  const resolved = await resolvePermissions(basePermissions, xxxxxXxxxx, userId ?? '');
+  await assertPermission(resolved, operation, 'xxxxx_xxxxx');
+  return { xxxxxXxxxx, userPermissions: await toPermissions(resolved) };
 }
 
 export async function getXxxxxXxxxxNewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('xxxxx_xxxxx');
-  await assertPermission(userPermissions, 'create', 'xxxxx_xxxxx');
-  return userPermissions;
+  const { permissions: richPermissions } = await getModelPermissions('xxxxx_xxxxx');
+  await assertPermission(richPermissions.general, 'create', 'xxxxx_xxxxx');
+  return richPermissions.general;
 }

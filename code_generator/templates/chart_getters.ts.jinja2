@@ -15,7 +15,7 @@ export type {{ parent_pascal }}ForChart = {
 };
 
 export async function get{{ parent_pascal }}sForChart(startDate: Date, endDate: Date): Promise<{{ parent_pascal }}ForChart[]> {
-  const userPermissions = await getModelPermissions('{{ model }}');
+  const { permissions: userPermissions, userId } = await getModelPermissions('{{ model }}');
   await assertPermission(userPermissions, 'read', '{{ model }}');
 
   const items = await prisma.{{ model }}.findMany({

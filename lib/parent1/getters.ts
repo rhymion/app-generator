@@ -2,10 +2,8 @@
 
 import prisma from '@/lib/prisma';
 import type { Parent1, Parent1Detail } from '@/lib/parent1/types';
-import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions, getSessionUserIdOrThrow } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions, getSessionUserIdOrThrow } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 
 export async function getAllParent1s(userId: string): Promise<Parent1[]> {
@@ -25,6 +23,7 @@ export async function getAllParent1s(userId: string): Promise<Parent1[]> {
     price: parent1.price,
     due_date: parent1.due_date,
     image_url: parent1.image_url,
+    creator_id: parent1.creator_id,
     organization: parent1.organization,
   }));
 }
@@ -38,7 +37,7 @@ export async function getParent1Detail(id: string, userId: string): Promise<Pare
       organization_id: { in: associatedOrganizationIds },
     },
     include: {
-      parent1_child1s: true, parent1_child2s: true, parent1_lists: true, organization: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      parent1_child1s: true, parent1_child2s: true, parent1_lists: true, organization: true
     },
   });
 
@@ -48,33 +47,42 @@ export async function getParent1Detail(id: string, userId: string): Promise<Pare
 
   return {
     ...parent1,
-    parent1_child1s: parent1.parent1_child1s,
-    parent1_child2s: parent1.parent1_child2s,
-    parent1_lists: parent1.parent1_lists,
-    organization: parent1.organization,
   };
 }
 
 export async function getParent1ListPageData(isAssertPermission: boolean = true) {
   const userId = await getSessionUserIdOrThrow();
-  const userPermissions = await getModelPermissions('parent1', userId);
+  const [{ permissions: userPermissions }, parent1s] = await Promise.all([
+    getModelPermissions('parent1', userId),
+    getAllParent1s(userId),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'parent1');
   }
-  const parent1s = await getAllParent1s(userId);
-  return { parent1s, userPermissions };
+  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
+  const filteredParent1s = userPermissions.general.read
+    ? parent1s
+    : parent1s.filter(item =>
+        (userPermissions.creator?.read && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
+      );
+  return { parent1s: filteredParent1s, userPermissions: await toPermissions(userPermissions) };
 }
 
 export async function getParent1DetailPageData(id: string, operation: Operation = 'read') {
   const userId = await getSessionUserIdOrThrow();
-  const parent1 = await getParent1Detail(id, userId);
-  const userPermissions = await getModelPermissions('parent1', userId, parent1);
-  await assertPermission(userPermissions, operation, 'parent1');
-  return { parent1, userPermissions };
+  const [parent1, { permissions: basePermissions }] = await Promise.all([
+    getParent1Detail(id, userId),
+    getModelPermissions('parent1', userId),
+  ]);
+  const resolved = await resolvePermissions(basePermissions, parent1, userId ?? '');
+  await assertPermission(resolved, operation, 'parent1');
+  return { parent1, userPermissions: await toPermissions(resolved) };
 }
 
 export async function getParent1NewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('parent1');
-  await assertPermission(userPermissions, 'create', 'parent1');
-  return userPermissions;
+  const { permissions: richPermissions } = await getModelPermissions('parent1');
+  await assertPermission(richPermissions.general, 'create', 'parent1');
+  return richPermissions.general;
 }

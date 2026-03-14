@@ -1,10 +1,22 @@
+import { Suspense } from 'react';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/permission/FormUpsert';
 import { getRoleListPageData } from '@/lib/role/getters';
 import { getPermissionNewPageAccessCheck } from '@/lib/permission/getters';
 
-export default async function AddPermissionPage() {
-  const rolesData = await getRoleListPageData(false);
-  const userPermissions = await getPermissionNewPageAccessCheck();
+export default function AddPermissionPage() {
+  return (
+    <Suspense fallback={<FormSkeleton />}>
+      <PermissionNewContent />
+    </Suspense>
+  );
+}
+
+async function PermissionNewContent() {
+  const [userPermissions, rolesData] = await Promise.all([
+    getPermissionNewPageAccessCheck(),
+    getRoleListPageData(false),
+  ]);
   const src = {
     id: '',
     name: '',

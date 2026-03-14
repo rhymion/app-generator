@@ -7,6 +7,7 @@ export type ShiftTemplate = {
   day_of_week: number;
   start_time: Date;
   end_time: Date;
+  creator_id: string | null;
   user_account?: UserAccount | null;
 };
 

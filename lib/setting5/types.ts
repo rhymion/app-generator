@@ -3,6 +3,7 @@ import type { ModelPermissions } from '@/lib/authz';
 export type Setting5 = {
   id: string;
   name: string;
+  creator_id: string | null;
 };
 
 export type Setting5Detail = Setting5 & {

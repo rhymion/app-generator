@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addRole, updateRole, deleteRole } from './service';
@@ -29,7 +28,6 @@ export async function upsertRole(data: FormData) {
     await addRole(userId, name, description, userAccountsIds);
   }
 
-  revalidatePath('/');
   redirect('/role');
 }
 export async function removeRole(data: FormData | string[]) {
@@ -39,7 +37,6 @@ export async function removeRole(data: FormData | string[]) {
     await requirePermission('role', 'delete', item);
   }
   await deleteRole(ids);
-  revalidatePath('/');
   redirect('/role');
 }
 

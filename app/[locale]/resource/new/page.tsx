@@ -1,10 +1,22 @@
+import { Suspense } from 'react';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/resource/FormUpsert';
 import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';
 import { getResourceNewPageAccessCheck } from '@/lib/resource/getters';
 
-export default async function AddResourcePage() {
-  const organizationsData = await getAssociatedOrganizationListPageData();
-  const userPermissions = await getResourceNewPageAccessCheck();
+export default function AddResourcePage() {
+  return (
+    <Suspense fallback={<FormSkeleton />}>
+      <ResourceNewContent />
+    </Suspense>
+  );
+}
+
+async function ResourceNewContent() {
+  const [userPermissions, organizationsData] = await Promise.all([
+    getResourceNewPageAccessCheck(),
+    getAssociatedOrganizationListPageData(),
+  ]);
   const src = {
     id: '',
     name: '',

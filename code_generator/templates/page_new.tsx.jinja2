@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/{{ parent }}/FormUpsert';
 {% for target in selection_targets %}
 {% if target == 'organization' %}
@@ -8,15 +10,29 @@ import { get{{ target | pascal_case }}ListPageData } from '@/lib/{{ target }}/ge
 {% endfor %}
 import { get{{ parent_pascal }}NewPageAccessCheck } from '@/lib/{{ parent }}/getters';
 
-export default async function Add{{ parent_pascal }}Page() {
+export default function Add{{ parent_pascal }}Page() {
+  return (
+    <Suspense fallback={<FormSkeleton />}>
+      <{{ parent_pascal }}NewContent />
+    </Suspense>
+  );
+}
+
+async function {{ parent_pascal }}NewContent() {
+{% if selection_targets %}
+  const [userPermissions, {% for target in selection_targets %}{{ target | camel_case }}sData{% if not loop.last %}, {% endif %}{% endfor %}] = await Promise.all([
+    get{{ parent_pascal }}NewPageAccessCheck(),
 {% for target in selection_targets %}
 {% if target == 'organization' %}
-  const organizationsData = await getAssociatedOrganizationListPageData();
+    getAssociatedOrganizationListPageData(),
 {% else %}
-  const {{ target | camel_case }}sData = await get{{ target | pascal_case }}ListPageData(false);
+    get{{ target | pascal_case }}ListPageData(false),
 {% endif %}
 {% endfor %}
+  ]);
+{% else %}
   const userPermissions = await get{{ parent_pascal }}NewPageAccessCheck();
+{% endif %}
   const src = {
     id: '',
 {{ parent_default_props }}

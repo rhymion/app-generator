@@ -1,7 +1,17 @@
+import { Suspense } from 'react';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/setting2/FormUpsert';
 import { getSetting2NewPageAccessCheck } from '@/lib/setting2/getters';
 
-export default async function AddSetting2Page() {
+export default function AddSetting2Page() {
+  return (
+    <Suspense fallback={<FormSkeleton />}>
+      <Setting2NewContent />
+    </Suspense>
+  );
+}
+
+async function Setting2NewContent() {
   const userPermissions = await getSetting2NewPageAccessCheck();
   const src = {
     id: '',

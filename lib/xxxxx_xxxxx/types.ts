@@ -5,6 +5,7 @@ export type XxxxxXxxxx = {
   name: string;
   description: string | null;
   team: string | null;
+  creator_id: string | null;
 };
 
 export type XxxxxXxxxxDetail = XxxxxXxxxx & {

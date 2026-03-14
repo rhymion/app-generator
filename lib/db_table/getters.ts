@@ -2,10 +2,8 @@
 
 import prisma from '@/lib/prisma';
 import type { DbTable, DbTableDetail } from '@/lib/db_table/types';
-import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';
 
 export async function getAllDbTables(): Promise<DbTable[]> {
   const dbTables = await prisma.db_table.findMany({
@@ -14,6 +12,7 @@ export async function getAllDbTables(): Promise<DbTable[]> {
     id: dbTable.id,
     name: dbTable.name,
     description: dbTable.description,
+    creator_id: dbTable.creator_id,
   }));
 }
 
@@ -23,7 +22,7 @@ export async function getDbTableDetail(id: string): Promise<DbTableDetail | null
       id,
     },
     include: {
-      fields: { include: { reference: true } }, db_table_comments: { include: { creator: { select: { id: true, name: true, avatar: true } } }, orderBy: { created_at: 'asc' } }, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      fields: { include: { reference: true } }, db_table_comments: { include: { creator: { select: { id: true, name: true, avatar: true } } }, orderBy: { created_at: 'asc' } }
     },
   });
 
@@ -33,29 +32,40 @@ export async function getDbTableDetail(id: string): Promise<DbTableDetail | null
 
   return {
     ...dbTable,
-    fields: dbTable.fields,
-    db_table_comments: dbTable.db_table_comments,
   };
 }
 
 export async function getDbTableListPageData(isAssertPermission: boolean = true) {
-  const userPermissions = await getModelPermissions('db_table');
+  const [{ permissions: userPermissions, userId }, dbTables] = await Promise.all([
+    getModelPermissions('db_table'),
+    getAllDbTables(),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'db_table');
   }
-  const dbTables = await getAllDbTables();
-  return { dbTables, userPermissions };
+  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
+  const filteredDbTables = userPermissions.general.read
+    ? dbTables
+    : dbTables.filter(item =>
+        (userPermissions.creator?.read && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
+      );
+  return { dbTables: filteredDbTables, userPermissions: await toPermissions(userPermissions) };
 }
 
 export async function getDbTableDetailPageData(id: string, operation: Operation = 'read') {
-  const dbTable = await getDbTableDetail(id);
-  const userPermissions = await getModelPermissions('db_table', undefined, dbTable);
-  await assertPermission(userPermissions, operation, 'db_table');
-  return { dbTable, userPermissions };
+  const [dbTable, { permissions: basePermissions, userId }] = await Promise.all([
+    getDbTableDetail(id),
+    getModelPermissions('db_table'),
+  ]);
+  const resolved = await resolvePermissions(basePermissions, dbTable, userId ?? '');
+  await assertPermission(resolved, operation, 'db_table');
+  return { dbTable, userPermissions: await toPermissions(resolved) };
 }
 
 export async function getDbTableNewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('db_table');
-  await assertPermission(userPermissions, 'create', 'db_table');
-  return userPermissions;
+  const { permissions: richPermissions } = await getModelPermissions('db_table');
+  await assertPermission(richPermissions.general, 'create', 'db_table');
+  return richPermissions.general;
 }

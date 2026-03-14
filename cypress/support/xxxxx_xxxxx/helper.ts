@@ -70,4 +70,3 @@ export async function populateXxxxxXxxxxYyyyyYyyyyData(parentId: string, length:
   // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
   return JSON.parse(JSON.stringify(records));
 }
-

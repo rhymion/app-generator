@@ -76,7 +76,6 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
 
   const handleBack = () => {
     router.push('/shift_template');
-    router.refresh();
   };
 
   const formFields = (

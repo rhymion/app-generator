@@ -14,12 +14,13 @@ from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
 )
+import copy
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-_EXCLUDE_FIELDS = {'created_at', 'updated_at', 'creator_id'}
+_EXCLUDE_FIELDS = {'created_at', 'updated_at'}
 _EXCLUDE_ID_TS  = {'id', 'created_at', 'updated_at', 'creator_id'}
 
 
@@ -240,7 +241,7 @@ export async function add{parent_pascal}Comment({parent_id_prop}: string, messag
   await prisma.{child_model}.create({{
     data: {{ message, {parent_id_prop}, creator_id: userId }},
   }});
-  revalidatePath('/');
+  revalidatePath('/{parent}');
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
@@ -250,7 +251,7 @@ export async function update{parent_pascal}Comment(commentId: string, message: s
     throw new Error('Not authorized to edit this comment');
   }}
   await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message }} }});
-  revalidatePath('/');
+  revalidatePath('/{parent}');
 }}
 
 export async function delete{parent_pascal}Comment(commentId: string): Promise<void> {{
@@ -261,7 +262,7 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
     await requirePermission('{parent}', 'delete');
   }}
   await prisma.{child_model}.delete({{ where: {{ id: commentId }} }});
-  revalidatePath('/');
+  revalidatePath('/{parent}');
 }}""")
     return '\n'.join(lines)
 
@@ -271,7 +272,7 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
 # ---------------------------------------------------------------------------
 
 def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict],
-                           schema: dict) -> list[str]:
+                           schema: dict, model: str = '') -> list[str]:
     m2m_targets = [
         c['relationship']['target']
         for c in children_raw
@@ -289,6 +290,7 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
         if child_def.get('properties'):
             child_entity_rel_targets.extend(
                 r['target'] for r in get_parent_relationships(child_def)
+                if r['target'] != model  # exclude back-reference to the parent entity
             )
 
     return _dedupe_ordered([*m2m_targets, *many_to_one_targets, *child_entity_rel_targets])
@@ -478,7 +480,7 @@ def build_context(entity: dict, schema: dict) -> dict:
     )
 
     # Selection targets (page_new, page_edit)
-    selection_targets = _get_selection_targets(children_raw, parent_rels_raw, schema)
+    selection_targets = _get_selection_targets(children_raw, parent_rels_raw, schema, model)
 
     # Field categorisation (for FormUpsert / FormView)
     field_categories = _categorize_form_fields(filtered_props, parent_rels_raw, gen_cfg)
@@ -560,14 +562,14 @@ def build_context(entity: dict, schema: dict) -> dict:
     include_entries_detail = [
         *child_include_entries,
         *[f"{r['relation_name']}: true" for r in parent_rels],
-        "creator: { select: { id: true, name: true } }",
-        "updater: { select: { id: true, name: true } }",
     ]
     include_props_detail = ', '.join(include_entries_detail)
+    creator_filtered_props = copy.deepcopy(filtered_props)
+    creator_filtered_props['creator_id'] = {'type': 'string'}
 
     parent_mapping = '\n'.join(
         f"    {k}: {parent_camel}.{k},"
-        for k in filtered_props
+        for k in creator_filtered_props
         if k not in _EXCLUDE_FIELDS
     )
     relationship_mapping = '\n'.join(

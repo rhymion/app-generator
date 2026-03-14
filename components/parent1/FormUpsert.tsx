@@ -165,7 +165,6 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
 
   const handleBack = () => {
     router.push('/parent1');
-    router.refresh();
   };
 
   const formFields = (

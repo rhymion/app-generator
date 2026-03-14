@@ -1,9 +1,17 @@
+import { Suspense } from 'react';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/db_table/FormUpsert';
-import { getDbTableListPageData } from '@/lib/db_table/getters';
 import { getDbTableNewPageAccessCheck } from '@/lib/db_table/getters';
 
-export default async function AddDbTablePage() {
-  const dbTablesData = await getDbTableListPageData(false);
+export default function AddDbTablePage() {
+  return (
+    <Suspense fallback={<FormSkeleton />}>
+      <DbTableNewContent />
+    </Suspense>
+  );
+}
+
+async function DbTableNewContent() {
   const userPermissions = await getDbTableNewPageAccessCheck();
   const src = {
     id: '',
@@ -12,5 +20,5 @@ export default async function AddDbTablePage() {
     fields: [],
     db_table_comments: [],
   };
-  return <FormUpsert src={src} isEdit={false} permissions={userPermissions} allDbTables={dbTablesData.dbTables} dbTablePermissions={dbTablesData.userPermissions} />;
+  return <FormUpsert src={src} isEdit={false} permissions={userPermissions} />;
 }

@@ -45,6 +45,11 @@ export async function resetTestDatabase() {
   await prisma.resource.deleteMany();
   await prisma.role.deleteMany();
   await prisma.organization.deleteMany();
+  await prisma.purchase_order.deleteMany();
+  await prisma.inventory.deleteMany();
+  await prisma.product.deleteMany();
+  await prisma.shift_template.deleteMany();
+  await prisma.shift.deleteMany();
 
   // Level 5: Finally delete user_account (last because everything references it)
   await prisma.user_account.deleteMany();

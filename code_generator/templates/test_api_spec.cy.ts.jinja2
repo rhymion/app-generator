@@ -1,0 +1,228 @@
+// AUTO-GENERATED - DO NOT EDIT
+import { TEST_API_KEY } from '../../support/test-credentials';
+
+const API_BASE = '{{ api_path }}';
+
+describe('API: {{ title }}', () => {
+  beforeEach(() => {
+    cy.task('db:reset');
+    cy.task('db:seed');
+  });
+{% if can_list %}
+
+  describe('GET {{ api_path }}', () => {
+    it('1.1 returns empty list when no items', () => {
+      cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })
+        .then((res) => {
+          expect(res.status).to.eq(200);
+          expect(res.body).to.deep.eq([]);
+        });
+    });
+
+    it('1.2 returns list with items', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })
+        .then((res) => {
+          expect(res.status).to.eq(200);
+          expect(res.body).to.have.length(1);
+        });
+    });
+  });
+{% endif %}
+{% if can_view %}
+
+  describe('GET {{ api_path }}/:id', () => {
+    it('2.1 returns item detail by id', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+          .then((res) => {
+            expect(res.status).to.eq(200);
+            expect(res.body.id).to.eq(records[0].id);
+          });
+      });
+    });
+
+    it('2.2 returns 404 for non-existent id', () => {
+      cy.request({ url: `${API_BASE}/non-existent-id`, headers: { 'X-API-Key': TEST_API_KEY }, failOnStatusCode: false })
+        .then((res) => {
+          expect(res.status).to.eq(404);
+        });
+    });
+  });
+{% endif %}
+{% if can_new %}
+
+  describe('POST {{ api_path }}', () => {
+    it('3.1 creates with required fields, verified by GET', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I }}cy.request({
+{{ I }}  method: 'POST',
+{{ I }}  url: API_BASE,
+{{ I }}  headers: { 'X-API-Key': TEST_API_KEY },
+{{ I }}  body: {
+{% for ln in post_body_create %}
+{{ ln }}
+{% endfor %}
+{{ I }}  },
+{{ I }}}).then((res) => {
+{{ I }}  expect(res.status).to.eq(201);
+{{ I }}  cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+{{ I }}    .then((getRes) => {
+{{ I }}      expect(getRes.status).to.eq(200);
+{{ I }}      {{ assert_create }}
+{{ I }}    });
+{{ I }}});
+{% if has_deps %}
+      });
+{% endif %}
+    });
+
+    it('5.1 fails when a required field is missing', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I }}cy.request({
+{{ I }}  method: 'POST',
+{{ I }}  url: API_BASE,
+{{ I }}  headers: { 'X-API-Key': TEST_API_KEY },
+{{ I }}  body: {
+{% for ln in post_body_missing_field %}
+{{ ln }}
+{% endfor %}
+{{ I }}  },
+{{ I }}  failOnStatusCode: false,
+{{ I }}}).then((res) => {
+{{ I }}  expect(res.status).to.be.gte(400);
+{{ I }}});
+{% if has_deps %}
+      });
+{% endif %}
+    });
+  });
+{% endif %}
+{% if can_edit %}
+
+  describe('PUT {{ api_path }}/:id', () => {
+    it('4.1 updates, verified by GET', () => {
+{% if primary_is_fk %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {
+{% for ln in put_body_update_fk %}
+{{ ln }}
+{% endfor %}
+            },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                expect(getRes.status).to.eq(200);
+                {{ assert_update }}
+              });
+          });
+        });
+      });
+{% else %}
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.request({
+          method: 'PUT',
+          url: `${API_BASE}/${records[0].id}`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: {
+{% for ln in put_body_update %}
+{{ ln }}
+{% endfor %}
+          },
+        }).then((res) => {
+          expect(res.status).to.eq(200);
+          cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+            .then((getRes) => {
+              expect(getRes.status).to.eq(200);
+              {{ assert_update }}
+            });
+        });
+      });
+{% endif %}
+    });
+  });
+{% endif %}
+{% if can_delete %}
+
+  describe('DELETE {{ api_path }}/:id', () => {
+    it('4.2 deletes item, verified by GET returning 404', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.request({
+          method: 'DELETE',
+          url: `${API_BASE}/${records[0].id}`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+        }).then((res) => {
+          expect(res.status).to.eq(204);
+          cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY }, failOnStatusCode: false })
+            .then((getRes) => {
+              expect(getRes.status).to.eq(404);
+            });
+        });
+      });
+    });
+  });
+{% endif %}
+
+  describe('Authentication errors', () => {
+    it('6.1 returns 401 without API key', () => {
+      cy.request({ url: API_BASE, failOnStatusCode: false })
+        .then((res) => {
+          expect(res.status).to.eq(401);
+        });
+    });
+
+    it('6.2 returns 401 with invalid API key', () => {
+      cy.request({ url: API_BASE, headers: { 'X-API-Key': 'invalid_key' }, failOnStatusCode: false })
+        .then((res) => {
+          expect(res.status).to.eq(401);
+        });
+    });
+  });
+
+  describe('Permission errors', () => {
+    it('7.1 returns 403 for GET list when permission denied', () => {
+      cy.task<string>('db:createLimitedApiUser', '{{ model }}').then((limitedKey) => {
+        cy.request({ url: API_BASE, headers: { 'X-API-Key': limitedKey }, failOnStatusCode: false })
+          .then((res) => {
+            expect(res.status).to.eq(403);
+          });
+      });
+    });
+{% if can_new %}
+
+    it('7.2 returns 403 for POST when permission denied', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I7 }}cy.task<string>('db:createLimitedApiUser', '{{ model }}').then((limitedKey) => {
+{{ I7 }}  cy.request({
+{{ I7 }}    method: 'POST',
+{{ I7 }}    url: API_BASE,
+{{ I7 }}    headers: { 'X-API-Key': limitedKey },
+{{ I7 }}    body: {
+{% for ln in i7_post_body %}
+{{ ln }}
+{% endfor %}
+{{ I7 }}    },
+{{ I7 }}    failOnStatusCode: false,
+{{ I7 }}  }).then((res) => {
+{{ I7 }}    expect(res.status).to.eq(403);
+{{ I7 }}  });
+{{ I7 }}});
+{% if has_deps %}
+      });
+{% endif %}
+    });
+{% endif %}
+  });
+});

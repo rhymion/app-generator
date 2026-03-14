@@ -13,14 +13,22 @@ async function getTestUser() {
 export async function populateBookingDependencies() {
   const testUser = await getTestUser();
   const organization = await prisma.organization.create({
-    data: { name: 'Test Organization', creator_id: testUser.id, updater_id: testUser.id, 
+    data: {
+      name: 'Test Organization',
+      creator_id: testUser.id,
+      updater_id: testUser.id,
       user_accounts: {
-        connect: [testUser.id].map((id) => ({ id }))
-      }
+        connect: [testUser.id].map((id) => ({ id })),
+      },
     },
   });
   const resource = await prisma.resource.create({
-    data: { name: 'Test Resource', organization_id: organization.id, creator_id: testUser.id, updater_id: testUser.id },
+    data: {
+      name: 'Test Resource',
+      organization_id: organization.id,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
   });
   return { organization, resource };
 }
@@ -47,4 +55,3 @@ export async function populateBookingData(length: number) {
 }
 
 export const populateBookingFullData = populateBookingData;
-

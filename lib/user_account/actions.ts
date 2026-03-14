@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { updateUserAccount, deleteUserAccount } from './service';
@@ -22,7 +21,6 @@ export async function upsertUserAccount(data: FormData) {
   const userId = await getSessionUserIdOrThrow();
   await updateUserAccount(userId, id, name, avatar, rolesIds, srcSnapshotRaw);
 
-  revalidatePath('/');
   redirect('/user_account');
 }
 export async function removeUserAccount(data: FormData | string[]) {
@@ -32,7 +30,6 @@ export async function removeUserAccount(data: FormData | string[]) {
     await requirePermission('user_account', 'delete', item);
   }
   await deleteUserAccount(ids);
-  revalidatePath('/');
   redirect('/user_account');
 }
 

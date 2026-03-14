@@ -1,12 +1,24 @@
+import { Suspense } from 'react';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/procedure/FormUpsert';
 import { getProcedureListPageData } from '@/lib/procedure/getters';
 import { getUserAccountListPageData } from '@/lib/user_account/getters';
 import { getProcedureNewPageAccessCheck } from '@/lib/procedure/getters';
 
-export default async function AddProcedurePage() {
-  const proceduresData = await getProcedureListPageData(false);
-  const userAccountsData = await getUserAccountListPageData(false);
-  const userPermissions = await getProcedureNewPageAccessCheck();
+export default function AddProcedurePage() {
+  return (
+    <Suspense fallback={<FormSkeleton />}>
+      <ProcedureNewContent />
+    </Suspense>
+  );
+}
+
+async function ProcedureNewContent() {
+  const [userPermissions, proceduresData, userAccountsData] = await Promise.all([
+    getProcedureNewPageAccessCheck(),
+    getProcedureListPageData(false),
+    getUserAccountListPageData(false),
+  ]);
   const src = {
     id: '',
     name: '',

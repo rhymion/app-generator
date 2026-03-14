@@ -1,0 +1,23 @@
+import { Suspense } from 'react';
+import FormSkeleton from '@/components/_standard/FormSkeleton';
+import FormView from '@/components/product/FormView';
+import { getProductDetailPageData } from '@/lib/product/getters';
+import { ProductDetailPageProps } from '@/lib/product/types';
+import { notFound } from 'next/navigation';
+
+export default async function ViewProductPage({ params }: ProductDetailPageProps) {
+  const { id } = await params;
+  return (
+    <Suspense fallback={<FormSkeleton />}>
+      <ProductViewContent id={id} />
+    </Suspense>
+  );
+}
+
+async function ProductViewContent({ id }: { id: string }) {
+  const { product, userPermissions } = await getProductDetailPageData(id);
+  if (!product) {
+    notFound();
+  }
+  return <FormView src={product} permissions={userPermissions} />;
+}

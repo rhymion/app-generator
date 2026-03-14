@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { updateSetting } from './service';
@@ -25,7 +24,6 @@ export async function upsertSetting(data: FormData) {
   const userId = await getSessionUserIdOrThrow();
   await updateSetting(userId, id, name, email, password, apiKey, avatar, rolesIds, srcSnapshotRaw);
 
-  revalidatePath('/');
   redirect('/setting');
 }
 

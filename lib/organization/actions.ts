@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addOrganization, updateOrganization, deleteOrganization } from './service';
@@ -29,7 +28,6 @@ export async function upsertOrganization(data: FormData) {
     await addOrganization(userId, name, description, userAccountsIds);
   }
 
-  revalidatePath('/');
   redirect('/organization');
 }
 export async function removeOrganization(data: FormData | string[]) {
@@ -39,7 +37,6 @@ export async function removeOrganization(data: FormData | string[]) {
     await requirePermission('organization', 'delete', item);
   }
   await deleteOrganization(ids);
-  revalidatePath('/');
   redirect('/organization');
 }
 

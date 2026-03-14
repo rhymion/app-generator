@@ -6,6 +6,45 @@ This app uses MUI components inside a Next.js App Router project. Without explic
 MUI always renders in light mode regardless of the OS/browser preference. This document covers
 how dark mode is enabled and how to avoid React hydration errors that arise from it.
 
+## Required: AppRouterCacheProvider
+
+**This must be set up before adding a MUI ThemeProvider**, otherwise adding `ThemeProvider` +
+`CssBaseline` triggers a cascade of Emotion SSR style injection that causes:
+
+- `Hydration failed because the server rendered HTML didn't match the client`
+- `Cannot read properties of null (reading 'parentNode')`
+
+Without `ThemeProvider`, Emotion generates very little CSS during SSR and the bug stays latent.
+As soon as `ThemeProvider` is added, Emotion generates substantial CSS server-side and injects
+`<style>` tags in a way that conflicts with React's hydration.
+
+**Fix:** install `@mui/material-nextjs` and wrap the root layout body with `AppRouterCacheProvider`.
+
+```bash
+npm install @mui/material-nextjs
+```
+
+**File: `app/layout.tsx`**
+
+```tsx
+import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter';
+
+export default async function RootLayout({ children }) {
+  return (
+    <html lang={locale}>
+      <body className={fnt.className}>
+        <AppRouterCacheProvider>
+          {children}
+        </AppRouterCacheProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+`AppRouterCacheProvider` ensures Emotion's style cache is shared correctly across SSR and
+client hydration, so `<style>` tags are inserted in the same order and position on both sides.
+
 ## Enabling MUI Dark Mode
 
 **File: `app/[locale]/providers.tsx`**
@@ -130,9 +169,17 @@ any script injection and eliminates the hydration mismatch.
 
 ### General checklist for avoiding hydration errors
 
+- Always use `AppRouterCacheProvider` at the root when any MUI `ThemeProvider` is present
 - Avoid `Date.toLocaleString()` / `toLocaleDateString()` in SSR-rendered output; use
   `suppressHydrationWarning` or format with a fixed locale if unavoidable
 - Avoid reading `window`, `navigator`, `localStorage`, or other browser globals during render
 - Avoid `Math.random()` or `Date.now()` in rendered output
 - Avoid CSS-in-JS that depends on runtime state during SSR
 - Prefer CSS variables and media queries over JS-driven theming for color schemes
+
+## Setup Summary (correct order)
+
+1. Install `@mui/material-nextjs`
+2. Add `AppRouterCacheProvider` to `app/layout.tsx` (root layout, wraps `<body>` contents)
+3. Add `ThemeProvider` + `CssBaseline` in `app/[locale]/providers.tsx` (client component)
+4. Use `colorSchemeSelector: 'media'` in the theme — no init script needed, SSR-safe
