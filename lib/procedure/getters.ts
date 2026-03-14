@@ -2,10 +2,8 @@
 
 import prisma from '@/lib/prisma';
 import type { Procedure, ProcedureDetail } from '@/lib/procedure/types';
-import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';
 
 export async function getAllProcedures(): Promise<Procedure[]> {
   const procedures = await prisma.procedure.findMany({
@@ -17,6 +15,7 @@ export async function getAllProcedures(): Promise<Procedure[]> {
     description: procedure.description,
     parent_id: procedure.parent_id,
     assignee_id: procedure.assignee_id,
+    creator_id: procedure.creator_id,
     parent: procedure.parent,
     assignee: procedure.assignee,
   }));
@@ -47,25 +46,36 @@ export async function getProcedureDetail(id: string): Promise<ProcedureDetail | 
 }
 
 export async function getProcedureListPageData(isAssertPermission: boolean = true) {
-  const [userPermissions, procedures] = await Promise.all([
+  const [{ permissions: userPermissions, userId }, procedures] = await Promise.all([
     getModelPermissions('procedure'),
     getAllProcedures(),
   ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'procedure');
   }
-  return { procedures, userPermissions };
+  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
+  const filteredProcedures = userPermissions.general.read
+    ? procedures
+    : procedures.filter(item =>
+        (userPermissions.creator?.read && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
+      );
+  return { procedures: filteredProcedures, userPermissions: await toPermissions(userPermissions) };
 }
 
 export async function getProcedureDetailPageData(id: string, operation: Operation = 'read') {
-  const procedure = await getProcedureDetail(id);
-  const userPermissions = await getModelPermissions('procedure', undefined, procedure);
-  await assertPermission(userPermissions, operation, 'procedure');
-  return { procedure, userPermissions };
+  const [procedure, { permissions: basePermissions, userId }] = await Promise.all([
+    getProcedureDetail(id),
+    getModelPermissions('procedure'),
+  ]);
+  const resolved = await resolvePermissions(basePermissions, procedure, userId ?? '');
+  await assertPermission(resolved, operation, 'procedure');
+  return { procedure, userPermissions: await toPermissions(resolved) };
 }
 
 export async function getProcedureNewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('procedure');
-  await assertPermission(userPermissions, 'create', 'procedure');
-  return userPermissions;
+  const { permissions: richPermissions } = await getModelPermissions('procedure');
+  await assertPermission(richPermissions.general, 'create', 'procedure');
+  return richPermissions.general;
 }

@@ -2,10 +2,8 @@
 
 import prisma from '@/lib/prisma';
 import type { Inventory, InventoryDetail } from '@/lib/inventory/types';
-import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';
 
 export async function getAllInventorys(): Promise<Inventory[]> {
   const inventorys = await prisma.inventory.findMany({
@@ -19,6 +17,7 @@ export async function getAllInventorys(): Promise<Inventory[]> {
     location: inventory.location,
     lot_number: inventory.lot_number,
     expiration_date: inventory.expiration_date,
+    creator_id: inventory.creator_id,
     product: inventory.product,
   }));
 }
@@ -44,25 +43,36 @@ export async function getInventoryDetail(id: string): Promise<InventoryDetail | 
 }
 
 export async function getInventoryListPageData(isAssertPermission: boolean = true) {
-  const [userPermissions, inventorys] = await Promise.all([
+  const [{ permissions: userPermissions, userId }, inventorys] = await Promise.all([
     getModelPermissions('inventory'),
     getAllInventorys(),
   ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'inventory');
   }
-  return { inventorys, userPermissions };
+  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
+  const filteredInventorys = userPermissions.general.read
+    ? inventorys
+    : inventorys.filter(item =>
+        (userPermissions.creator?.read && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
+      );
+  return { inventorys: filteredInventorys, userPermissions: await toPermissions(userPermissions) };
 }
 
 export async function getInventoryDetailPageData(id: string, operation: Operation = 'read') {
-  const inventory = await getInventoryDetail(id);
-  const userPermissions = await getModelPermissions('inventory', undefined, inventory);
-  await assertPermission(userPermissions, operation, 'inventory');
-  return { inventory, userPermissions };
+  const [inventory, { permissions: basePermissions, userId }] = await Promise.all([
+    getInventoryDetail(id),
+    getModelPermissions('inventory'),
+  ]);
+  const resolved = await resolvePermissions(basePermissions, inventory, userId ?? '');
+  await assertPermission(resolved, operation, 'inventory');
+  return { inventory, userPermissions: await toPermissions(resolved) };
 }
 
 export async function getInventoryNewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('inventory');
-  await assertPermission(userPermissions, 'create', 'inventory');
-  return userPermissions;
+  const { permissions: richPermissions } = await getModelPermissions('inventory');
+  await assertPermission(richPermissions.general, 'create', 'inventory');
+  return richPermissions.general;
 }

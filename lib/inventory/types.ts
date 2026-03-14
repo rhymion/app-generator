@@ -9,6 +9,7 @@ export type Inventory = {
   location: string | null;
   lot_number: string | null;
   expiration_date: Date | null;
+  creator_id: string | null;
   product?: Product | null;
 };
 

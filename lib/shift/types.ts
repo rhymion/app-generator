@@ -7,6 +7,7 @@ export type Shift = {
   start_time: Date;
   end_time: Date;
   status: number;
+  creator_id: string | null;
   user_account?: UserAccount | null;
 };
 

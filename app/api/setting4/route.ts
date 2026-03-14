@@ -4,9 +4,17 @@ import { getAllSetting4s } from '@/lib/setting4/getters';
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, 'setting4', 'read');
+    const richPerms = await requireApiPermission(userId, 'setting4', 'read');
     const items = await getAllSetting4s();
-    return NextResponse.json(items);
+    // Filter to items the user can read (mirrors UI list page logic).
+    const filtered = richPerms.general.read
+      ? items
+      : items.filter(item =>
+          (richPerms.creator?.read && item.creator_id === userId) ||
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (richPerms.assignee?.read && (item as any).assignee_id === userId)
+        );
+    return NextResponse.json(filtered);
   } catch (error) {
     return handleApiError(error);
   }

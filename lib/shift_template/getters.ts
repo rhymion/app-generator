@@ -2,10 +2,8 @@
 
 import prisma from '@/lib/prisma';
 import type { ShiftTemplate, ShiftTemplateDetail } from '@/lib/shift_template/types';
-import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';
 
 export async function getAllShiftTemplates(): Promise<ShiftTemplate[]> {
   const shiftTemplates = await prisma.shift_template.findMany({
@@ -17,6 +15,7 @@ export async function getAllShiftTemplates(): Promise<ShiftTemplate[]> {
     day_of_week: shiftTemplate.day_of_week,
     start_time: shiftTemplate.start_time,
     end_time: shiftTemplate.end_time,
+    creator_id: shiftTemplate.creator_id,
     user_account: shiftTemplate.user_account,
   }));
 }
@@ -42,35 +41,36 @@ export async function getShiftTemplateDetail(id: string): Promise<ShiftTemplateD
 }
 
 export async function getShiftTemplateListPageData(isAssertPermission: boolean = true) {
-  const t0 = performance.now();
-  const [userPermissions, shiftTemplates] = await Promise.all([
+  const [{ permissions: userPermissions, userId }, shiftTemplates] = await Promise.all([
     getModelPermissions('shift_template'),
     getAllShiftTemplates(),
   ]);
-  console.log(`getModelPermissions: ${(performance.now() - t0).toFixed(1)}ms`);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'shift_template');
   }
-  console.log(`getShiftTemplateListPageData: ${(performance.now() - t0).toFixed(1)}ms`);
-  return { shiftTemplates, userPermissions };
+  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
+  const filteredShiftTemplates = userPermissions.general.read
+    ? shiftTemplates
+    : shiftTemplates.filter(item =>
+        (userPermissions.creator?.read && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
+      );
+  return { shiftTemplates: filteredShiftTemplates, userPermissions: await toPermissions(userPermissions) };
 }
 
 export async function getShiftTemplateDetailPageData(id: string, operation: Operation = 'read') {
-  const t0 = performance.now();
-  const shiftTemplate = await getShiftTemplateDetail(id);
-  console.log(`getShiftTemplateDetail: ${(performance.now() - t0).toFixed(1)}ms`);
-  const userPermissions = await getModelPermissions('shift_template', undefined, shiftTemplate);
-  console.log(`getModelPermissions: ${(performance.now() - t0).toFixed(1)}ms`);
-  await assertPermission(userPermissions, operation, 'shift_template');
-  console.log(`getShiftTemplateDetailPageData: ${(performance.now() - t0).toFixed(1)}ms`);
-  return { shiftTemplate, userPermissions };
+  const [shiftTemplate, { permissions: basePermissions, userId }] = await Promise.all([
+    getShiftTemplateDetail(id),
+    getModelPermissions('shift_template'),
+  ]);
+  const resolved = await resolvePermissions(basePermissions, shiftTemplate, userId ?? '');
+  await assertPermission(resolved, operation, 'shift_template');
+  return { shiftTemplate, userPermissions: await toPermissions(resolved) };
 }
 
 export async function getShiftTemplateNewPageAccessCheck() {
-  const t0 = performance.now();
-  const userPermissions = await getModelPermissions('shift_template');
-  console.log(`getModelPermissions: ${(performance.now() - t0).toFixed(1)}ms`);
-  await assertPermission(userPermissions, 'create', 'shift_template');
-  console.log(`getShiftTemplateNewPageAccessCheck: ${(performance.now() - t0).toFixed(1)}ms`);
-  return userPermissions;
+  const { permissions: richPermissions } = await getModelPermissions('shift_template');
+  await assertPermission(richPermissions.general, 'create', 'shift_template');
+  return richPermissions.general;
 }

@@ -6,6 +6,7 @@ export type PurchaseOrder = {
   id: string;
   order_no: string;
   customer_id: string;
+  creator_id: string | null;
   customer?: UserAccount | null;
 };
 

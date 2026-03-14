@@ -4,6 +4,7 @@ export type Role = {
   id: string;
   name: string;
   description: string | null;
+  creator_id: string | null;
 };
 
 export type RoleDetail = Role & {

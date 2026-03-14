@@ -4,6 +4,7 @@ export type UserAccount = {
   id: string;
   name: string;
   avatar: string | null;
+  creator_id: string | null;
 };
 
 export type UserAccountDetail = UserAccount & {

@@ -2,10 +2,8 @@
 
 import prisma from '@/lib/prisma';
 import type { Resource, ResourceDetail } from '@/lib/resource/types';
-import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions, getSessionUserIdOrThrow } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions, getSessionUserIdOrThrow } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 
 export async function getAllResources(userId: string): Promise<Resource[]> {
@@ -22,6 +20,7 @@ export async function getAllResources(userId: string): Promise<Resource[]> {
     name: resource.name,
     description: resource.description,
     organization_id: resource.organization_id,
+    creator_id: resource.creator_id,
     organization: resource.organization,
   }));
 }
@@ -53,26 +52,37 @@ export async function getResourceDetail(id: string, userId: string): Promise<Res
 
 export async function getResourceListPageData(isAssertPermission: boolean = true) {
   const userId = await getSessionUserIdOrThrow();
-  const [userPermissions, resources] = await Promise.all([
+  const [{ permissions: userPermissions }, resources] = await Promise.all([
     getModelPermissions('resource', userId),
     getAllResources(userId),
   ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'resource');
   }
-  return { resources, userPermissions };
+  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
+  const filteredResources = userPermissions.general.read
+    ? resources
+    : resources.filter(item =>
+        (userPermissions.creator?.read && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
+      );
+  return { resources: filteredResources, userPermissions: await toPermissions(userPermissions) };
 }
 
 export async function getResourceDetailPageData(id: string, operation: Operation = 'read') {
   const userId = await getSessionUserIdOrThrow();
-  const resource = await getResourceDetail(id, userId);
-  const userPermissions = await getModelPermissions('resource', userId, resource);
-  await assertPermission(userPermissions, operation, 'resource');
-  return { resource, userPermissions };
+  const [resource, { permissions: basePermissions }] = await Promise.all([
+    getResourceDetail(id, userId),
+    getModelPermissions('resource', userId),
+  ]);
+  const resolved = await resolvePermissions(basePermissions, resource, userId ?? '');
+  await assertPermission(resolved, operation, 'resource');
+  return { resource, userPermissions: await toPermissions(resolved) };
 }
 
 export async function getResourceNewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('resource');
-  await assertPermission(userPermissions, 'create', 'resource');
-  return userPermissions;
+  const { permissions: richPermissions } = await getModelPermissions('resource');
+  await assertPermission(richPermissions.general, 'create', 'resource');
+  return richPermissions.general;
 }

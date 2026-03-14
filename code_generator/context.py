@@ -107,6 +107,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     ]
 
     parent_fields = [FieldInfo(k, get_ts_type(v)) for k, v in filtered_props.items()]
+    parent_fields.append(FieldInfo('creator_id', 'string | null'))  # enforce id as string for permissions
 
     form_view_fields = [
         FieldInfo(k, get_ts_type(v, for_view_props=True))

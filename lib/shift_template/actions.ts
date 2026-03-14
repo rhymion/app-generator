@@ -6,7 +6,6 @@ import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addShiftTemplate, updateShiftTemplate, deleteShiftTemplate } from './service';
 export async function upsertShiftTemplate(data: FormData) {
-  const t0 = performance.now();
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
@@ -22,30 +21,24 @@ export async function upsertShiftTemplate(data: FormData) {
   const endTimeStr = data.get('end_time') as string;
   const endTime = new Date(endTimeStr);
   const userId = await getSessionUserIdOrThrow();
-  console.log(`Permission check: ${(performance.now() - t0).toFixed(1)}ms`);
+
   if (id) {
     await updateShiftTemplate(userId, id, userAccountId, dayOfWeek, startTime, endTime, srcSnapshotRaw);
   } else {
     await addShiftTemplate(userId, userAccountId, dayOfWeek, startTime, endTime);
   }
-  console.log(`Upsert shift template: ${(performance.now() - t0).toFixed(1)}ms`);
+
   revalidatePath('/');
   redirect('/shift_template');
-  console.log(`Redirect: ${(performance.now() - t0).toFixed(1)}ms`);
 }
 export async function removeShiftTemplate(data: FormData | string[]) {
-  const t0 = performance.now();
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   const items = await prisma.shift_template.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
-  console.log(`Find shifts: ${(performance.now() - t0).toFixed(1)}ms`);
   for (const item of items) {
     await requirePermission('shift_template', 'delete', item);
   }
-  console.log(`Permission check: ${(performance.now() - t0).toFixed(1)}ms`);
   await deleteShiftTemplate(ids);
-  console.log(`Delete shifts: ${(performance.now() - t0).toFixed(1)}ms`);
   revalidatePath('/');
   redirect('/shift_template');
-  console.log(`Redirect: ${(performance.now() - t0).toFixed(1)}ms`);
 }
 

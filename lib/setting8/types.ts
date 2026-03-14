@@ -4,6 +4,7 @@ export type Setting8 = {
   id: string;
   name: string;
   description: string | null;
+  creator_id: string | null;
 };
 
 export type Setting8Detail = Setting8;

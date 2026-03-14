@@ -2,10 +2,8 @@
 
 import prisma from '@/lib/prisma';
 import type { PurchaseOrder, PurchaseOrderDetail } from '@/lib/purchase_order/types';
-import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';
 
 export async function getAllPurchaseOrders(): Promise<PurchaseOrder[]> {
   const purchaseOrders = await prisma.purchase_order.findMany({
@@ -15,6 +13,7 @@ export async function getAllPurchaseOrders(): Promise<PurchaseOrder[]> {
     id: purchaseOrder.id,
     order_no: purchaseOrder.order_no,
     customer_id: purchaseOrder.customer_id,
+    creator_id: purchaseOrder.creator_id,
     customer: purchaseOrder.customer,
   }));
 }
@@ -41,25 +40,36 @@ export async function getPurchaseOrderDetail(id: string): Promise<PurchaseOrderD
 }
 
 export async function getPurchaseOrderListPageData(isAssertPermission: boolean = true) {
-  const [userPermissions, purchaseOrders] = await Promise.all([
+  const [{ permissions: userPermissions, userId }, purchaseOrders] = await Promise.all([
     getModelPermissions('purchase_order'),
     getAllPurchaseOrders(),
   ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'purchase_order');
   }
-  return { purchaseOrders, userPermissions };
+  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
+  const filteredPurchaseOrders = userPermissions.general.read
+    ? purchaseOrders
+    : purchaseOrders.filter(item =>
+        (userPermissions.creator?.read && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
+      );
+  return { purchaseOrders: filteredPurchaseOrders, userPermissions: await toPermissions(userPermissions) };
 }
 
 export async function getPurchaseOrderDetailPageData(id: string, operation: Operation = 'read') {
-  const purchaseOrder = await getPurchaseOrderDetail(id);
-  const userPermissions = await getModelPermissions('purchase_order', undefined, purchaseOrder);
-  await assertPermission(userPermissions, operation, 'purchase_order');
-  return { purchaseOrder, userPermissions };
+  const [purchaseOrder, { permissions: basePermissions, userId }] = await Promise.all([
+    getPurchaseOrderDetail(id),
+    getModelPermissions('purchase_order'),
+  ]);
+  const resolved = await resolvePermissions(basePermissions, purchaseOrder, userId ?? '');
+  await assertPermission(resolved, operation, 'purchase_order');
+  return { purchaseOrder, userPermissions: await toPermissions(resolved) };
 }
 
 export async function getPurchaseOrderNewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('purchase_order');
-  await assertPermission(userPermissions, 'create', 'purchase_order');
-  return userPermissions;
+  const { permissions: richPermissions } = await getModelPermissions('purchase_order');
+  await assertPermission(richPermissions.general, 'create', 'purchase_order');
+  return richPermissions.general;
 }

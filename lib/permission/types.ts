@@ -9,6 +9,7 @@ export type Permission = {
   update: boolean;
   delete: boolean;
   role_id: string | null;
+  creator_id: string | null;
   role?: Role | null;
 };
 

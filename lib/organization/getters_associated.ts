@@ -4,7 +4,7 @@ import prisma from '@/lib/prisma';
 import type { Organization, OrganizationDetail } from '@/lib/organization/types';
 import { authOptions } from '@/auth';
 import { getServerSession } from 'next-auth';
-import { assertPermission, getModelPermissions, getSessionUserIdOrThrow, Operation } from '../authz';
+import { assertPermission, getModelPermissions, getSessionUserIdOrThrow, Operation, resolvePermissions, toPermissions } from '../authz';
 
 export async function getAssociatedOrganizations(userId: string): Promise<Organization[]> {
   const organizations = await prisma.organization.findMany({
@@ -20,6 +20,7 @@ export async function getAssociatedOrganizations(userId: string): Promise<Organi
     id: organization.id,
     name: organization.name,
     description: organization.description,
+    creator_id: organization.creator_id,
   }));
 }
 
@@ -52,18 +53,31 @@ export async function getAssociatedOrganizationDetail(id: string, userId: string
 
 export async function getAssociatedOrganizationListPageData(isAssertPermission: boolean = true) {
   const userId = await getSessionUserIdOrThrow();
-  const userPermissions = await getModelPermissions('organization', userId);
+  const [{ permissions: userPermissions }, organizations] = await Promise.all([
+    getModelPermissions('organization', userId),
+    getAssociatedOrganizations(userId),
+  ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'organization');
   }
-  const organizations = await getAssociatedOrganizations(userId);
-  return { organizations, userPermissions };
+  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
+  const filteredOrganizations = userPermissions.general.read
+    ? organizations
+    : organizations.filter(item =>
+        (userPermissions.creator?.read && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
+      );
+  return { organizations: filteredOrganizations, userPermissions: await toPermissions(userPermissions) };
 }
 
 export async function getAssociatedOrganizationDetailPageData(id: string, operation: Operation = 'read') {
   const userId = await getSessionUserIdOrThrow();
-  const userPermissions = await getModelPermissions('organization', userId);
-  await assertPermission(userPermissions, operation, 'organization');
-  const organization = await getAssociatedOrganizationDetail(id, userId);
-  return { organization, userPermissions };
+  const [organization, { permissions: basePermissions }] = await Promise.all([
+    getAssociatedOrganizationDetail(id, userId),
+    getModelPermissions('organization', userId),
+  ]);
+  const resolved = await resolvePermissions(basePermissions, organization, userId ?? '');
+  await assertPermission(resolved, operation, 'organization');
+  return { organization, userPermissions: await toPermissions(resolved) };
 }

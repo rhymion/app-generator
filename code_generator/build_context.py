@@ -14,12 +14,13 @@ from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
 )
+import copy
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-_EXCLUDE_FIELDS = {'created_at', 'updated_at', 'creator_id'}
+_EXCLUDE_FIELDS = {'created_at', 'updated_at'}
 _EXCLUDE_ID_TS  = {'id', 'created_at', 'updated_at', 'creator_id'}
 
 
@@ -565,10 +566,12 @@ def build_context(entity: dict, schema: dict) -> dict:
         "updater: { select: { id: true, name: true } }",
     ]
     include_props_detail = ', '.join(include_entries_detail)
+    creator_filtered_props = copy.deepcopy(filtered_props)
+    creator_filtered_props['creator_id'] = {'type': 'string'}
 
     parent_mapping = '\n'.join(
         f"    {k}: {parent_camel}.{k},"
-        for k in filtered_props
+        for k in creator_filtered_props
         if k not in _EXCLUDE_FIELDS
     )
     relationship_mapping = '\n'.join(

@@ -2,10 +2,8 @@
 
 import prisma from '@/lib/prisma';
 import type { Setting6, Setting6Detail } from '@/lib/setting6/types';
-import type { ModelPermissions } from '@/lib/authz';
-import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
-import { getServerSession } from 'next-auth/next';
 
 export async function getAllSetting6s(): Promise<Setting6[]> {
   const setting6s = await prisma.xxxxx_xxxxx.findMany({
@@ -15,6 +13,7 @@ export async function getAllSetting6s(): Promise<Setting6[]> {
     name: setting6.name,
     description: setting6.description,
     team: setting6.team,
+    creator_id: setting6.creator_id,
   }));
 }
 
@@ -39,25 +38,36 @@ export async function getSetting6Detail(id: string): Promise<Setting6Detail | nu
 }
 
 export async function getSetting6ListPageData(isAssertPermission: boolean = true) {
-  const [userPermissions, setting6s] = await Promise.all([
+  const [{ permissions: userPermissions, userId }, setting6s] = await Promise.all([
     getModelPermissions('setting6'),
     getAllSetting6s(),
   ]);
   if (isAssertPermission) {
     await assertPermission(userPermissions, 'read', 'setting6');
   }
-  return { setting6s, userPermissions };
+  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
+  const filteredSetting6s = userPermissions.general.read
+    ? setting6s
+    : setting6s.filter(item =>
+        (userPermissions.creator?.read && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
+      );
+  return { setting6s: filteredSetting6s, userPermissions: await toPermissions(userPermissions) };
 }
 
 export async function getSetting6DetailPageData(id: string, operation: Operation = 'read') {
-  const setting6 = await getSetting6Detail(id);
-  const userPermissions = await getModelPermissions('setting6', undefined, setting6);
-  await assertPermission(userPermissions, operation, 'setting6');
-  return { setting6, userPermissions };
+  const [setting6, { permissions: basePermissions, userId }] = await Promise.all([
+    getSetting6Detail(id),
+    getModelPermissions('setting6'),
+  ]);
+  const resolved = await resolvePermissions(basePermissions, setting6, userId ?? '');
+  await assertPermission(resolved, operation, 'setting6');
+  return { setting6, userPermissions: await toPermissions(resolved) };
 }
 
 export async function getSetting6NewPageAccessCheck() {
-  const userPermissions = await getModelPermissions('setting6');
-  await assertPermission(userPermissions, 'create', 'setting6');
-  return userPermissions;
+  const { permissions: richPermissions } = await getModelPermissions('setting6');
+  await assertPermission(richPermissions.general, 'create', 'setting6');
+  return richPermissions.general;
 }

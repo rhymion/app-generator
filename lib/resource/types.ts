@@ -6,6 +6,7 @@ export type Resource = {
   name: string;
   description: string | null;
   organization_id: string;
+  creator_id: string | null;
   organization?: Organization | null;
 };
 

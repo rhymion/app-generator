@@ -5,6 +5,7 @@ export type Product = {
   code: string;
   name: string;
   price: number;
+  creator_id: string | null;
 };
 
 export type ProductDetail = Product & {

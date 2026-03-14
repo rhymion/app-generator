@@ -7,6 +7,7 @@ export type Booking = {
   resource_id: string;
   start_time: Date;
   end_time: Date;
+  creator_id: string | null;
   resource?: Resource | null;
 };
 

@@ -6,6 +6,7 @@ export type ParentOnly = {
   description: string | null;
   login_time: Date | null;
   logout_time: Date | null;
+  creator_id: string | null;
 };
 
 export type ParentOnlyDetail = ParentOnly;
