@@ -94,7 +94,6 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId }: 
 
   const handleBack = () => {
     router.push('/db_table');
-    router.refresh();
   };
 
   const handleCreateComment = async (message: string) => {

@@ -27,7 +27,7 @@ export async function upsertXxxxxXxxxx(data: FormData) {
     await addXxxxxXxxxx(userId, name, description, team, yyyyyYyyyysItems);
   }
 
-  revalidatePath('/');
+  revalidatePath('/xxxxx_xxxxx');
   redirect('/xxxxx_xxxxx');
 }
 export async function removeXxxxxXxxxx(data: FormData | string[]) {
@@ -37,7 +37,7 @@ export async function removeXxxxxXxxxx(data: FormData | string[]) {
     await requirePermission('xxxxx_xxxxx', 'delete', item);
   }
   await deleteXxxxxXxxxx(ids);
-  revalidatePath('/');
+  revalidatePath('/xxxxx_xxxxx');
   redirect('/xxxxx_xxxxx');
 }
 

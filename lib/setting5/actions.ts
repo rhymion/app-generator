@@ -18,7 +18,7 @@ export async function upsertSetting5(data: FormData) {
   const userId = await getSessionUserIdOrThrow();
   await updateSetting5(userId, id, name, yyyyyYyyyysItems, srcSnapshotRaw);
 
-  revalidatePath('/');
+  revalidatePath('/setting5');
   redirect('/setting5');
 }
 

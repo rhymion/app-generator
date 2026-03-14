@@ -28,7 +28,7 @@ export async function upsertShift(data: FormData) {
     await addShift(userId, userAccountId, startTime, endTime, status);
   }
 
-  revalidatePath('/');
+  revalidatePath('/shift');
   redirect('/shift');
 }
 export async function removeShift(data: FormData | string[]) {
@@ -38,7 +38,7 @@ export async function removeShift(data: FormData | string[]) {
     await requirePermission('shift', 'delete', item);
   }
   await deleteShift(ids);
-  revalidatePath('/');
+  revalidatePath('/shift');
   redirect('/shift');
 }
 

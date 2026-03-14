@@ -12,7 +12,7 @@ export async function removeSetting6(data: FormData | string[]) {
     await requirePermission('setting6', 'delete', item);
   }
   await deleteSetting6(ids);
-  revalidatePath('/');
+  revalidatePath('/setting6');
   redirect('/setting6');
 }
 

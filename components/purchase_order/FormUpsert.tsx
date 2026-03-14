@@ -97,7 +97,6 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
 
   const handleBack = () => {
     router.push('/purchase_order');
-    router.refresh();
   };
 
   const formFields = (

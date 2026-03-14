@@ -29,7 +29,7 @@ export async function upsertInventory(data: FormData) {
     await addInventory(userId, productId, quantity, reservedQuantity, location, lotNumber, expirationDate);
   }
 
-  revalidatePath('/');
+  revalidatePath('/inventory');
   redirect('/inventory');
 }
 export async function removeInventory(data: FormData | string[]) {
@@ -39,7 +39,7 @@ export async function removeInventory(data: FormData | string[]) {
     await requirePermission('inventory', 'delete', item);
   }
   await deleteInventory(ids);
-  revalidatePath('/');
+  revalidatePath('/inventory');
   redirect('/inventory');
 }
 

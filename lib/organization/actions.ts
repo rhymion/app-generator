@@ -29,7 +29,7 @@ export async function upsertOrganization(data: FormData) {
     await addOrganization(userId, name, description, userAccountsIds);
   }
 
-  revalidatePath('/');
+  revalidatePath('/organization');
   redirect('/organization');
 }
 export async function removeOrganization(data: FormData | string[]) {
@@ -39,7 +39,7 @@ export async function removeOrganization(data: FormData | string[]) {
     await requirePermission('organization', 'delete', item);
   }
   await deleteOrganization(ids);
-  revalidatePath('/');
+  revalidatePath('/organization');
   redirect('/organization');
 }
 

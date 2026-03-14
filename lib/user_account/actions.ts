@@ -22,7 +22,7 @@ export async function upsertUserAccount(data: FormData) {
   const userId = await getSessionUserIdOrThrow();
   await updateUserAccount(userId, id, name, avatar, rolesIds, srcSnapshotRaw);
 
-  revalidatePath('/');
+  revalidatePath('/user_account');
   redirect('/user_account');
 }
 export async function removeUserAccount(data: FormData | string[]) {
@@ -32,7 +32,7 @@ export async function removeUserAccount(data: FormData | string[]) {
     await requirePermission('user_account', 'delete', item);
   }
   await deleteUserAccount(ids);
-  revalidatePath('/');
+  revalidatePath('/user_account');
   redirect('/user_account');
 }
 

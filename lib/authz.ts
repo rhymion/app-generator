@@ -148,6 +148,7 @@ export const getModelPermissions = cache(async (
     },
   });
 
+  console.log(`getModelPermissions query completed for ${model}`);
   if (rows.length === 0) {
     // Default: grant all if no explicit permissions are defined for this model
     const full = { ...FULL_FLAGS, general: { ...FULL_FLAGS }, creator: null, assignee: null };

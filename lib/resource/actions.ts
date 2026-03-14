@@ -29,7 +29,7 @@ export async function upsertResource(data: FormData) {
     await addResource(userId, name, description, organizationId, resourceAttachmentsItems, resourceImagesItems);
   }
 
-  revalidatePath('/');
+  revalidatePath('/resource');
   redirect('/resource');
 }
 export async function removeResource(data: FormData | string[]) {
@@ -39,7 +39,7 @@ export async function removeResource(data: FormData | string[]) {
     await requirePermission('resource', 'delete', item);
   }
   await deleteResource(ids);
-  revalidatePath('/');
+  revalidatePath('/resource');
   redirect('/resource');
 }
 

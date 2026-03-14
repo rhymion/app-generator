@@ -142,7 +142,6 @@ export default function FormUpsert({ src, isEdit, permissions, allProcedures = [
 
   const handleBack = () => {
     router.push('/procedure');
-    router.refresh();
   };
 
   const formFields = (

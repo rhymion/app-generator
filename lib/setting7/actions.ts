@@ -25,7 +25,7 @@ export async function upsertSetting7(data: FormData) {
     await addSetting7(userId, name, description, team);
   }
 
-  revalidatePath('/');
+  revalidatePath('/setting7');
   redirect('/setting7');
 }
 

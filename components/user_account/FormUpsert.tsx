@@ -82,7 +82,6 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
 
   const handleBack = () => {
     router.push('/user_account');
-    router.refresh();
   };
 
   const formFields = (

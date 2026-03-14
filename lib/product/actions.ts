@@ -27,7 +27,7 @@ export async function upsertProduct(data: FormData) {
     await addProduct(userId, code, name, price, imagesItems);
   }
 
-  revalidatePath('/');
+  revalidatePath('/product');
   redirect('/product');
 }
 export async function removeProduct(data: FormData | string[]) {
@@ -37,7 +37,7 @@ export async function removeProduct(data: FormData | string[]) {
     await requirePermission('product', 'delete', item);
   }
   await deleteProduct(ids);
-  revalidatePath('/');
+  revalidatePath('/product');
   redirect('/product');
 }
 

@@ -29,7 +29,7 @@ export async function upsertRole(data: FormData) {
     await addRole(userId, name, description, userAccountsIds);
   }
 
-  revalidatePath('/');
+  revalidatePath('/role');
   redirect('/role');
 }
 export async function removeRole(data: FormData | string[]) {
@@ -39,7 +39,7 @@ export async function removeRole(data: FormData | string[]) {
     await requirePermission('role', 'delete', item);
   }
   await deleteRole(ids);
-  revalidatePath('/');
+  revalidatePath('/role');
   redirect('/role');
 }
 

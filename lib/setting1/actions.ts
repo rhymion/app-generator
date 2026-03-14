@@ -27,7 +27,7 @@ export async function upsertSetting1(data: FormData) {
     await addSetting1(userId, name, description, team, yyyyyYyyyysItems);
   }
 
-  revalidatePath('/');
+  revalidatePath('/setting1');
   redirect('/setting1');
 }
 export async function removeSetting1(data: FormData | string[]) {
@@ -37,7 +37,7 @@ export async function removeSetting1(data: FormData | string[]) {
     await requirePermission('setting1', 'delete', item);
   }
   await deleteSetting1(ids);
-  revalidatePath('/');
+  revalidatePath('/setting1');
   redirect('/setting1');
 }
 

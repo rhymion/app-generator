@@ -16,12 +16,17 @@ export default async function EditShiftTemplatePage({ params }: ShiftTemplateDet
 }
 
 async function ShiftTemplateEditContent({ id }: { id: string }) {
+  const t0 = performance.now();
   const [detail, userAccountsData] = await Promise.all([
     getShiftTemplateDetailPageData(id, 'update'),
     getUserAccountListPageData(false),
   ]);
+  console.log(`Data fetching for page took ${performance.now() - t0} ms`);
+
   if (!detail.shiftTemplate) {
     notFound();
   }
-  return <FormUpsert src={detail.shiftTemplate} isEdit={true} permissions={detail.userPermissions} allUserAccounts={userAccountsData.userAccounts} userAccountPermissions={userAccountsData.userPermissions} />;
+  const form = <FormUpsert src={detail.shiftTemplate} isEdit={true} permissions={detail.userPermissions} allUserAccounts={userAccountsData.userAccounts} userAccountPermissions={userAccountsData.userPermissions} />;
+  console.log(`Rendering page took ${performance.now() - t0} ms`);
+  return form;
 }

@@ -26,7 +26,7 @@ export async function upsertDbTable(data: FormData) {
     await addDbTable(userId, name, description, fieldsItems);
   }
 
-  revalidatePath('/');
+  revalidatePath('/db_table');
   redirect('/db_table');
 }
 export async function removeDbTable(data: FormData | string[]) {
@@ -36,7 +36,7 @@ export async function removeDbTable(data: FormData | string[]) {
     await requirePermission('db_table', 'delete', item);
   }
   await deleteDbTable(ids);
-  revalidatePath('/');
+  revalidatePath('/db_table');
   redirect('/db_table');
 }
 

@@ -28,7 +28,7 @@ export async function upsertBooking(data: FormData) {
     await addBooking(userId, name, resourceId, startTime, endTime);
   }
 
-  revalidatePath('/');
+  revalidatePath('/booking');
   redirect('/booking');
 }
 export async function removeBooking(data: FormData | string[]) {
@@ -38,7 +38,7 @@ export async function removeBooking(data: FormData | string[]) {
     await requirePermission('booking', 'delete', item);
   }
   await deleteBooking(ids);
-  revalidatePath('/');
+  revalidatePath('/booking');
   redirect('/booking');
 }
 

@@ -78,7 +78,6 @@ export default function FormUpsert({ src, isEdit, permissions, allProducts = [],
 
   const handleBack = () => {
     router.push('/inventory');
-    router.refresh();
   };
 
   const formFields = (

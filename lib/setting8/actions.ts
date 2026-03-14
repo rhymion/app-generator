@@ -13,7 +13,7 @@ export async function upsertSetting8(data: FormData) {
   const userId = await getSessionUserIdOrThrow();
   await addSetting8(userId, name, description);
 
-  revalidatePath('/');
+  revalidatePath('/setting8');
   redirect('/setting8');
 }
 export async function removeSetting8(data: FormData | string[]) {
@@ -23,7 +23,7 @@ export async function removeSetting8(data: FormData | string[]) {
     await requirePermission('setting8', 'delete', item);
   }
   await deleteSetting8(ids);
-  revalidatePath('/');
+  revalidatePath('/setting8');
   redirect('/setting8');
 }
 

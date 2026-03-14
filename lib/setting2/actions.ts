@@ -13,7 +13,7 @@ export async function upsertSetting2(data: FormData) {
   const userId = await getSessionUserIdOrThrow();
   await addSetting2(userId, name, description);
 
-  revalidatePath('/');
+  revalidatePath('/setting2');
   redirect('/setting2');
 }
 

@@ -6,6 +6,7 @@ import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addShiftTemplate, updateShiftTemplate, deleteShiftTemplate } from './service';
 export async function upsertShiftTemplate(data: FormData) {
+  const t0 = performance.now();
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
@@ -14,6 +15,7 @@ export async function upsertShiftTemplate(data: FormData) {
   } else {
     await requirePermission('shift_template', 'create');
   }
+  console.log(`Assertion took ${performance.now() - t0} ms`);
   const userAccountId = data.get('user_account_id') as string;
   const dayOfWeek = Number(data.get('day_of_week'));
   const startTimeStr = data.get('start_time') as string;
@@ -27,17 +29,21 @@ export async function upsertShiftTemplate(data: FormData) {
   } else {
     await addShiftTemplate(userId, userAccountId, dayOfWeek, startTime, endTime);
   }
+  console.log(`Upsert took ${performance.now() - t0} ms`);
 
-  revalidatePath('/');
+  revalidatePath('/shift_template');
   redirect('/shift_template');
 }
 export async function removeShiftTemplate(data: FormData | string[]) {
+  const t0 = performance.now();
   const ids = Array.isArray(data) ? data : [data.get('id') as string];
   const items = await prisma.shift_template.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
   for (const item of items) {
     await requirePermission('shift_template', 'delete', item);
   }
+  console.log(`Assertion took ${performance.now() - t0} ms`);
   await deleteShiftTemplate(ids);
+  console.log(`Delete took ${performance.now() - t0} ms`);
   revalidatePath('/');
   redirect('/shift_template');
 }

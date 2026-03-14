@@ -28,7 +28,7 @@ export async function upsertParentOnly(data: FormData) {
     await addParentOnly(userId, name, description, loginTime, logoutTime);
   }
 
-  revalidatePath('/');
+  revalidatePath('/parent_only');
   redirect('/parent_only');
 }
 export async function removeParentOnly(data: FormData | string[]) {
@@ -38,7 +38,7 @@ export async function removeParentOnly(data: FormData | string[]) {
     await requirePermission('parent_only', 'delete', item);
   }
   await deleteParentOnly(ids);
-  revalidatePath('/');
+  revalidatePath('/parent_only');
   redirect('/parent_only');
 }
 

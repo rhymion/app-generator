@@ -28,7 +28,7 @@ export async function upsertPermission(data: FormData) {
     await addPermission(userId, name, create, read, update, deleteValue, roleId);
   }
 
-  revalidatePath('/');
+  revalidatePath('/permission');
   redirect('/permission');
 }
 export async function removePermission(data: FormData | string[]) {
@@ -38,7 +38,7 @@ export async function removePermission(data: FormData | string[]) {
     await requirePermission('permission', 'delete', item);
   }
   await deletePermission(ids);
-  revalidatePath('/');
+  revalidatePath('/permission');
   redirect('/permission');
 }
 

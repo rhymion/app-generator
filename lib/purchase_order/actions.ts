@@ -26,7 +26,7 @@ export async function upsertPurchaseOrder(data: FormData) {
     await addPurchaseOrder(userId, orderNo, customerId, itemsItems);
   }
 
-  revalidatePath('/');
+  revalidatePath('/purchase_order');
   redirect('/purchase_order');
 }
 export async function removePurchaseOrder(data: FormData | string[]) {
@@ -36,7 +36,7 @@ export async function removePurchaseOrder(data: FormData | string[]) {
     await requirePermission('purchase_order', 'delete', item);
   }
   await deletePurchaseOrder(ids);
-  revalidatePath('/');
+  revalidatePath('/purchase_order');
   redirect('/purchase_order');
 }
 

@@ -41,7 +41,7 @@ export async function upsertProcedure(data: FormData) {
     await addProcedure(userId, name, description, parentId, assigneeId, childrenIds, precededByIds, followedByIds);
   }
 
-  revalidatePath('/');
+  revalidatePath('/procedure');
   redirect('/procedure');
 }
 export async function removeProcedure(data: FormData | string[]) {
@@ -51,7 +51,7 @@ export async function removeProcedure(data: FormData | string[]) {
     await requirePermission('procedure', 'delete', item);
   }
   await deleteProcedure(ids);
-  revalidatePath('/');
+  revalidatePath('/procedure');
   redirect('/procedure');
 }
 
