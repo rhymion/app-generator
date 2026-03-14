@@ -25,7 +25,7 @@ export async function getSettingDetail(id: string): Promise<SettingDetail | null
       id,
     },
     include: {
-      roles: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      roles: true
     },
   });
 
@@ -35,7 +35,6 @@ export async function getSettingDetail(id: string): Promise<SettingDetail | null
 
   return {
     ...setting,
-    roles: setting.roles,
   };
 }
 

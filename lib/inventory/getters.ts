@@ -28,7 +28,7 @@ export async function getInventoryDetail(id: string): Promise<InventoryDetail | 
       id,
     },
     include: {
-      product: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      product: true
     },
   });
 
@@ -38,7 +38,6 @@ export async function getInventoryDetail(id: string): Promise<InventoryDetail | 
 
   return {
     ...inventory,
-    product: inventory.product,
   };
 }
 

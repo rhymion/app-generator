@@ -22,7 +22,7 @@ export async function getUserAccountDetail(id: string): Promise<UserAccountDetai
       id,
     },
     include: {
-      roles: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      roles: true
     },
   });
 
@@ -32,7 +32,6 @@ export async function getUserAccountDetail(id: string): Promise<UserAccountDetai
 
   return {
     ...userAccount,
-    roles: userAccount.roles,
   };
 }
 

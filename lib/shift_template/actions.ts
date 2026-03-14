@@ -44,7 +44,7 @@ export async function removeShiftTemplate(data: FormData | string[]) {
   console.log(`Assertion took ${performance.now() - t0} ms`);
   await deleteShiftTemplate(ids);
   console.log(`Delete took ${performance.now() - t0} ms`);
-  revalidatePath('/');
+  revalidatePath('/shift_template');
   redirect('/shift_template');
 }
 

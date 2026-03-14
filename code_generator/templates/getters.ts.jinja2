@@ -56,12 +56,6 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 
   return {
     ...{{ parent_camel }},
-{% if child_mappings %}
-{{ child_mappings }}
-{% endif %}
-{% if relationship_mapping %}
-{{ relationship_mapping }}
-{% endif %}
   };
 }
 

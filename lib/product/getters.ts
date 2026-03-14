@@ -23,7 +23,7 @@ export async function getProductDetail(id: string): Promise<ProductDetail | null
       id,
     },
     include: {
-      images: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      images: true
     },
   });
 
@@ -33,7 +33,6 @@ export async function getProductDetail(id: string): Promise<ProductDetail | null
 
   return {
     ...product,
-    images: product.images,
   };
 }
 

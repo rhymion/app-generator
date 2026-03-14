@@ -21,7 +21,7 @@ export async function getSetting5Detail(id: string): Promise<Setting5Detail | nu
       id,
     },
     include: {
-      yyyyy_yyyyys: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      yyyyy_yyyyys: true
     },
   });
 
@@ -31,7 +31,6 @@ export async function getSetting5Detail(id: string): Promise<Setting5Detail | nu
 
   return {
     ...setting5,
-    yyyyy_yyyyys: setting5.yyyyy_yyyyys,
   };
 }
 

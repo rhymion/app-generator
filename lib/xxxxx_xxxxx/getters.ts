@@ -23,7 +23,7 @@ export async function getXxxxxXxxxxDetail(id: string): Promise<XxxxxXxxxxDetail 
       id,
     },
     include: {
-      yyyyy_yyyyys: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      yyyyy_yyyyys: true
     },
   });
 
@@ -33,7 +33,6 @@ export async function getXxxxxXxxxxDetail(id: string): Promise<XxxxxXxxxxDetail 
 
   return {
     ...xxxxxXxxxx,
-    yyyyy_yyyyys: xxxxxXxxxx.yyyyy_yyyyys,
   };
 }
 

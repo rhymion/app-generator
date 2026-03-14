@@ -21,9 +21,6 @@ export async function getSetting2Detail(id: string): Promise<Setting2Detail | nu
     where: {
       id,
     },
-    include: {
-      creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
-    },
   });
 
   if (!setting2) {

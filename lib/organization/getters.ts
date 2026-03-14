@@ -22,7 +22,7 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
       id,
     },
     include: {
-      user_accounts: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      user_accounts: true
     },
   });
 
@@ -32,7 +32,6 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
 
   return {
     ...organization,
-    user_accounts: organization.user_accounts,
   };
 }
 

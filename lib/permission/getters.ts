@@ -28,7 +28,7 @@ export async function getPermissionDetail(id: string): Promise<PermissionDetail 
       id,
     },
     include: {
-      role: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      role: true
     },
   });
 
@@ -38,7 +38,6 @@ export async function getPermissionDetail(id: string): Promise<PermissionDetail 
 
   return {
     ...permission,
-    role: permission.role,
   };
 }
 

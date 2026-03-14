@@ -22,7 +22,7 @@ export async function getDbTableDetail(id: string): Promise<DbTableDetail | null
       id,
     },
     include: {
-      fields: { include: { reference: true } }, db_table_comments: { include: { creator: { select: { id: true, name: true, avatar: true } } }, orderBy: { created_at: 'asc' } }, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      fields: { include: { reference: true } }, db_table_comments: { include: { creator: { select: { id: true, name: true, avatar: true } } }, orderBy: { created_at: 'asc' } }
     },
   });
 
@@ -32,8 +32,6 @@ export async function getDbTableDetail(id: string): Promise<DbTableDetail | null
 
   return {
     ...dbTable,
-    fields: dbTable.fields,
-    db_table_comments: dbTable.db_table_comments,
   };
 }
 

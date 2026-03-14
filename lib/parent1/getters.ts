@@ -37,7 +37,7 @@ export async function getParent1Detail(id: string, userId: string): Promise<Pare
       organization_id: { in: associatedOrganizationIds },
     },
     include: {
-      parent1_child1s: true, parent1_child2s: true, parent1_lists: true, organization: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      parent1_child1s: true, parent1_child2s: true, parent1_lists: true, organization: true
     },
   });
 
@@ -47,10 +47,6 @@ export async function getParent1Detail(id: string, userId: string): Promise<Pare
 
   return {
     ...parent1,
-    parent1_child1s: parent1.parent1_child1s,
-    parent1_child2s: parent1.parent1_child2s,
-    parent1_lists: parent1.parent1_lists,
-    organization: parent1.organization,
   };
 }
 

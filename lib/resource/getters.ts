@@ -34,7 +34,7 @@ export async function getResourceDetail(id: string, userId: string): Promise<Res
       organization_id: { in: associatedOrganizationIds },
     },
     include: {
-      resource_attachments: true, resource_images: true, organization: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      resource_attachments: true, resource_images: true, organization: true
     },
   });
 
@@ -44,9 +44,6 @@ export async function getResourceDetail(id: string, userId: string): Promise<Res
 
   return {
     ...resource,
-    resource_attachments: resource.resource_attachments,
-    resource_images: resource.resource_images,
-    organization: resource.organization,
   };
 }
 

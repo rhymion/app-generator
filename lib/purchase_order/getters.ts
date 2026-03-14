@@ -24,7 +24,7 @@ export async function getPurchaseOrderDetail(id: string): Promise<PurchaseOrderD
       id,
     },
     include: {
-      items: { include: { purchase_order: true, product: true } }, customer: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      items: { include: { purchase_order: true, product: true } }, customer: true
     },
   });
 
@@ -34,8 +34,6 @@ export async function getPurchaseOrderDetail(id: string): Promise<PurchaseOrderD
 
   return {
     ...purchaseOrder,
-    items: purchaseOrder.items,
-    customer: purchaseOrder.customer,
   };
 }
 

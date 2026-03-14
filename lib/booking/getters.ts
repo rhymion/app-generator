@@ -26,7 +26,7 @@ export async function getBookingDetail(id: string): Promise<BookingDetail | null
       id,
     },
     include: {
-      resource: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      resource: true
     },
   });
 
@@ -36,7 +36,6 @@ export async function getBookingDetail(id: string): Promise<BookingDetail | null
 
   return {
     ...booking,
-    resource: booking.resource,
   };
 }
 

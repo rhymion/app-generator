@@ -27,7 +27,7 @@ export async function getProcedureDetail(id: string): Promise<ProcedureDetail | 
       id,
     },
     include: {
-      children: { include: { parent: true, assignee: true } }, preceded_by: { include: { parent: true, assignee: true } }, followed_by: { include: { parent: true, assignee: true } }, parent: true, assignee: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      children: { include: { parent: true, assignee: true } }, preceded_by: { include: { parent: true, assignee: true } }, followed_by: { include: { parent: true, assignee: true } }, parent: true, assignee: true
     },
   });
 
@@ -37,11 +37,6 @@ export async function getProcedureDetail(id: string): Promise<ProcedureDetail | 
 
   return {
     ...procedure,
-    children: procedure.children,
-    preceded_by: procedure.preceded_by,
-    followed_by: procedure.followed_by,
-    parent: procedure.parent,
-    assignee: procedure.assignee,
   };
 }
 

@@ -26,7 +26,7 @@ export async function getShiftDetail(id: string): Promise<ShiftDetail | null> {
       id,
     },
     include: {
-      user_account: true, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }
+      user_account: true
     },
   });
 
@@ -36,7 +36,6 @@ export async function getShiftDetail(id: string): Promise<ShiftDetail | null> {
 
   return {
     ...shift,
-    user_account: shift.user_account,
   };
 }
 
