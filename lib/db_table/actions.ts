@@ -1,6 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addDbTable, updateDbTable, deleteDbTable } from './service';
@@ -42,7 +43,7 @@ export async function addDbTableComment(db_table_id: string, message: string): P
   await prisma.db_table_comment.create({
     data: { message, db_table_id, creator_id: userId },
   });
-  revalidatePath('/');
+  revalidatePath('/db_table');
 }
 
 export async function updateDbTableComment(commentId: string, message: string): Promise<void> {
@@ -52,7 +53,7 @@ export async function updateDbTableComment(commentId: string, message: string): 
     throw new Error('Not authorized to edit this comment');
   }
   await prisma.db_table_comment.update({ where: { id: commentId }, data: { message } });
-  revalidatePath('/');
+  revalidatePath('/db_table');
 }
 
 export async function deleteDbTableComment(commentId: string): Promise<void> {
@@ -63,5 +64,5 @@ export async function deleteDbTableComment(commentId: string): Promise<void> {
     await requirePermission('db_table', 'delete');
   }
   await prisma.db_table_comment.delete({ where: { id: commentId } });
-  revalidatePath('/');
+  revalidatePath('/db_table');
 }

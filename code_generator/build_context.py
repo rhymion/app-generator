@@ -241,7 +241,7 @@ export async function add{parent_pascal}Comment({parent_id_prop}: string, messag
   await prisma.{child_model}.create({{
     data: {{ message, {parent_id_prop}, creator_id: userId }},
   }});
-  revalidatePath('/');
+  revalidatePath('/{parent}');
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
@@ -251,7 +251,7 @@ export async function update{parent_pascal}Comment(commentId: string, message: s
     throw new Error('Not authorized to edit this comment');
   }}
   await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message }} }});
-  revalidatePath('/');
+  revalidatePath('/{parent}');
 }}
 
 export async function delete{parent_pascal}Comment(commentId: string): Promise<void> {{
@@ -262,7 +262,7 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
     await requirePermission('{parent}', 'delete');
   }}
   await prisma.{child_model}.delete({{ where: {{ id: commentId }} }});
-  revalidatePath('/');
+  revalidatePath('/{parent}');
 }}""")
     return '\n'.join(lines)
 

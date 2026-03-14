@@ -1,7 +1,8 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+{% if comment_actions_code %}import { revalidatePath } from 'next/cache';
+{% endif %}import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 {% if service_imports %}
 import { {{ service_imports }} } from './service';
