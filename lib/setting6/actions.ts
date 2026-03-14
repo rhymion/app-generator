@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { deleteSetting6 } from './service';
@@ -12,7 +11,6 @@ export async function removeSetting6(data: FormData | string[]) {
     await requirePermission('setting6', 'delete', item);
   }
   await deleteSetting6(ids);
-  revalidatePath('/setting6');
   redirect('/setting6');
 }
 

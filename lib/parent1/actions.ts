@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addParent1, updateParent1, deleteParent1 } from './service';
@@ -35,7 +34,6 @@ export async function upsertParent1(data: FormData) {
     await addParent1(userId, name, organizationId, description, price, dueDate, imageUrl, parent1Child1sItems, parent1Child2sItems, parent1ListsItems);
   }
 
-  revalidatePath('/parent1');
   redirect('/parent1');
 }
 export async function removeParent1(data: FormData | string[]) {
@@ -45,7 +43,6 @@ export async function removeParent1(data: FormData | string[]) {
     await requirePermission('parent1', 'delete', item);
   }
   await deleteParent1(ids);
-  revalidatePath('/parent1');
   redirect('/parent1');
 }
 

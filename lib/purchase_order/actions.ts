@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder } from './service';
@@ -26,7 +25,6 @@ export async function upsertPurchaseOrder(data: FormData) {
     await addPurchaseOrder(userId, orderNo, customerId, itemsItems);
   }
 
-  revalidatePath('/purchase_order');
   redirect('/purchase_order');
 }
 export async function removePurchaseOrder(data: FormData | string[]) {
@@ -36,7 +34,6 @@ export async function removePurchaseOrder(data: FormData | string[]) {
     await requirePermission('purchase_order', 'delete', item);
   }
   await deletePurchaseOrder(ids);
-  revalidatePath('/purchase_order');
   redirect('/purchase_order');
 }
 

@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addProduct, updateProduct, deleteProduct } from './service';
@@ -27,7 +26,6 @@ export async function upsertProduct(data: FormData) {
     await addProduct(userId, code, name, price, imagesItems);
   }
 
-  revalidatePath('/product');
   redirect('/product');
 }
 export async function removeProduct(data: FormData | string[]) {
@@ -37,7 +35,6 @@ export async function removeProduct(data: FormData | string[]) {
     await requirePermission('product', 'delete', item);
   }
   await deleteProduct(ids);
-  revalidatePath('/product');
   redirect('/product');
 }
 

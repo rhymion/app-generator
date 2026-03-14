@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addResource, updateResource, deleteResource } from './service';
@@ -29,7 +28,6 @@ export async function upsertResource(data: FormData) {
     await addResource(userId, name, description, organizationId, resourceAttachmentsItems, resourceImagesItems);
   }
 
-  revalidatePath('/resource');
   redirect('/resource');
 }
 export async function removeResource(data: FormData | string[]) {
@@ -39,7 +37,6 @@ export async function removeResource(data: FormData | string[]) {
     await requirePermission('resource', 'delete', item);
   }
   await deleteResource(ids);
-  revalidatePath('/resource');
   redirect('/resource');
 }
 

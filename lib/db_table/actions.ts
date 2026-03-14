@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addDbTable, updateDbTable, deleteDbTable } from './service';
@@ -26,7 +25,6 @@ export async function upsertDbTable(data: FormData) {
     await addDbTable(userId, name, description, fieldsItems);
   }
 
-  revalidatePath('/db_table');
   redirect('/db_table');
 }
 export async function removeDbTable(data: FormData | string[]) {
@@ -36,7 +34,6 @@ export async function removeDbTable(data: FormData | string[]) {
     await requirePermission('db_table', 'delete', item);
   }
   await deleteDbTable(ids);
-  revalidatePath('/db_table');
   redirect('/db_table');
 }
 

@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addBooking, updateBooking, deleteBooking } from './service';
@@ -28,7 +27,6 @@ export async function upsertBooking(data: FormData) {
     await addBooking(userId, name, resourceId, startTime, endTime);
   }
 
-  revalidatePath('/booking');
   redirect('/booking');
 }
 export async function removeBooking(data: FormData | string[]) {
@@ -38,7 +36,6 @@ export async function removeBooking(data: FormData | string[]) {
     await requirePermission('booking', 'delete', item);
   }
   await deleteBooking(ids);
-  revalidatePath('/booking');
   redirect('/booking');
 }
 

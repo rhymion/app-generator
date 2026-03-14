@@ -31,7 +31,6 @@ export async function upsertShiftTemplate(data: FormData) {
   }
   console.log(`Upsert took ${performance.now() - t0} ms`);
 
-  revalidatePath('/shift_template');
   redirect('/shift_template');
 }
 export async function removeShiftTemplate(data: FormData | string[]) {
@@ -44,7 +43,6 @@ export async function removeShiftTemplate(data: FormData | string[]) {
   console.log(`Assertion took ${performance.now() - t0} ms`);
   await deleteShiftTemplate(ids);
   console.log(`Delete took ${performance.now() - t0} ms`);
-  revalidatePath('/shift_template');
   redirect('/shift_template');
 }
 

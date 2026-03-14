@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addSetting1, updateSetting1, deleteSetting1 } from './service';
@@ -27,7 +26,6 @@ export async function upsertSetting1(data: FormData) {
     await addSetting1(userId, name, description, team, yyyyyYyyyysItems);
   }
 
-  revalidatePath('/setting1');
   redirect('/setting1');
 }
 export async function removeSetting1(data: FormData | string[]) {
@@ -37,7 +35,6 @@ export async function removeSetting1(data: FormData | string[]) {
     await requirePermission('setting1', 'delete', item);
   }
   await deleteSetting1(ids);
-  revalidatePath('/setting1');
   redirect('/setting1');
 }
 
