@@ -32,6 +32,7 @@ from generators import (
     form_upsert_context,
 )
 from generators_i18n import update_i18n_and_config
+from generators_doc import build_doc_entity_context, build_doc_index_context
 from generators_test import (
     test_helper_context,
     test_spec_context,
@@ -98,6 +99,9 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     print(f'Found {len(entities)} entities in {schema_path}')
 
+    doc_dir = out / 'docs' / 'generated'
+    entity_doc_summaries: list[dict] = []
+
     for entity in entities:
         parent     = entity['parent']
         model      = entity['model']
@@ -123,6 +127,17 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # Base context for all other generators
         ctx = build_context(entity, schema)
+
+        # --- docs/{parent}.md ---
+        doc_ctx = build_doc_entity_context(ctx)
+        _write(doc_dir / f'{parent}.md', _render(env, 'doc_entity.md.jinja2', doc_ctx))
+        entity_doc_summaries.append({
+            'parent':     doc_ctx['parent'],
+            'title':      doc_ctx['title'],
+            'operations': doc_ctx['operations'],
+            'can_api':    doc_ctx['can_api'],
+            'has_chart':  doc_ctx['has_chart'],
+        })
 
         # --- getters.ts ---
         _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', ctx))
@@ -202,6 +217,11 @@ def generate(schema_path: str, output_dir: str) -> None:
         # --- page view ---
         if can_view:
             _write(app_dir / 'view' / '[id]' / 'page.tsx', _render(env, 'page_view.tsx.jinja2', ctx))
+
+    # --- docs/generated/index.md ---
+    print('\nGenerating documentation index...')
+    index_ctx = build_doc_index_context(entity_doc_summaries)
+    _write(doc_dir / 'index.md', _render(env, 'doc_index.md.jinja2', index_ctx))
 
     # --- Cypress test generation ---
     test_entities = [e for e in entities if e['generate_config'].get('test')]

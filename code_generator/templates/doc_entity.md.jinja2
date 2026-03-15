@@ -1,0 +1,166 @@
+# {{ title }}
+
+> Auto-generated — run the code generator to update this file. Do not edit manually.
+
+## Overview
+
+| | |
+|---|---|
+| Entity | `{{ parent }}` |
+{% if parent != model %}
+| Model | `{{ model }}` |
+{% endif %}
+| Operations | {{ operations | join(' · ') if operations else '—' }} |
+| API | {{ 'Yes — see [API Reference](#api-reference) below' if can_api else 'No' }} |
+{% if has_chart %}
+| Chart | `{{ chart_span }}` view, grouped by `{{ chart_row_by }}` |
+{% endif %}
+
+## Fields
+
+| Field | Type | Required | Read-only | Notes |
+|-------|------|:--------:|:---------:|-------|
+{% for f in field_rows %}
+| `{{ f.name }}` | `{{ f.type }}` | {{ '✓' if f.required else '' }} | {{ '✓' if f.readonly else '' }} | {{ f.notes }} |
+{% endfor %}
+
+> **Read-only** fields (`id`, `creator_id`, `created_at`, `updated_at`) are set automatically and cannot be written through the API or UI forms.
+
+## Relationships
+
+{% if relations %}
+| Field / Property | Target Entity | Relationship Type |
+|-----------------|---------------|-------------------|
+{% for r in relations %}
+| `{{ r.field }}` | [`{{ r.target }}`]({{ r.target }}.md) | {{ r.type }}{% if r.out %} · `{{ r.out }}`{% endif %} |
+{% endfor %}
+{% else %}
+_(none)_
+{% endif %}
+
+## UI Pages
+
+| Page | URL | Enabled |
+|------|-----|:-------:|
+| List | `/en/{{ parent }}` | {{ '✓' if can_list else '✗' }} |
+| New | `/en/{{ parent }}/new` | {{ '✓' if can_create else '✗' }} |
+| Edit | `/en/{{ parent }}/edit/[id]` | {{ '✓' if can_update else '✗' }} |
+| View | `/en/{{ parent }}/view/[id]` | {{ '✓' if can_view else '✗' }} |
+{% if has_chart %}
+| Chart | `/en/{{ parent }}/chart` | ✓ |
+{% endif %}
+
+{% if can_api %}
+## API Reference
+
+### Authentication
+
+All endpoints require one of:
+
+| Header | Format | Example |
+|--------|--------|---------|
+| `X-API-Key` | `<key>` | `X-API-Key: mk_abc123...` |
+| `Authorization` | `Bearer <key>` | `Authorization: Bearer mk_abc123...` |
+
+API keys are stored in `user_account.api_key` and start with the `mk_` prefix.
+
+---
+
+{% if can_list %}
+### GET /api/{{ parent }}
+
+List all `{{ title }}` records the authenticated user has permission to read.
+
+**Response `200 OK`**
+
+```json
+[
+  {{ response_item_json | indent(2) }}
+]
+```
+
+{% endif %}
+{% if can_create %}
+### POST /api/{{ parent }}
+
+Create a new `{{ title }}` record.
+
+**Request Body**
+
+```json
+{{ request_body_json }}
+```
+
+{% if child_body_fields %}
+**Child / association fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+{% for f in child_body_fields %}
+| `{{ f.name }}` | `{{ f.type }}` | {{ f.description }} |
+{% endfor %}
+{% endif %}
+
+**Response `201 Created`** — the newly created record object.
+
+{% endif %}
+{% if can_view %}
+### GET /api/{{ parent }}/[id]
+
+Retrieve a single `{{ title }}` record by its ID.
+
+**Response `200 OK`** — the record object (same shape as a list item).
+
+**Response `404 Not Found`**
+
+```json
+{ "error": "Not found" }
+```
+
+{% endif %}
+{% if can_update %}
+### PUT /api/{{ parent }}/[id]
+
+Replace an existing `{{ title }}` record. Accepts the same body as `POST /api/{{ parent }}`.
+
+**Response `200 OK`**
+
+```json
+{ "success": true }
+```
+
+**Response `404 Not Found`**
+
+```json
+{ "error": "Not found" }
+```
+
+{% endif %}
+{% if can_delete %}
+### DELETE /api/{{ parent }}/[id]
+
+Delete a `{{ title }}` record by its ID.
+
+**Response `204 No Content`** — empty body on success.
+
+**Response `404 Not Found`**
+
+```json
+{ "error": "Not found" }
+```
+
+{% endif %}
+
+### Error Responses
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Bad request (validation error) |
+| `401` | Missing or invalid API key |
+| `403` | Insufficient permission for the operation |
+| `404` | Record not found |
+| `500` | Unexpected server error |
+
+All error responses return `{ "error": "<message>" }`.
+
+{% endif %}
