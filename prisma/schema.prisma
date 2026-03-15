@@ -14,8 +14,8 @@ model db_table {
   id           String   @id @default(cuid())
   name         String   @unique
   description  String? 
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
   creator    user_account @relation("DbTableCreator", fields: [creator_id], references: [id])
   updater_id String
@@ -37,8 +37,8 @@ model field {
   max         Int?
   regex       String?
   required    Boolean   @default(true)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
 }
 
 model db_table_comment {
@@ -46,8 +46,8 @@ model db_table_comment {
   message     String
   db_table_id    String     
   db_table       db_table @relation("CommentParentTable", fields: [db_table_id], references: [id], onDelete: Cascade)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
   creator    user_account @relation("DbTableCommentCreator", fields: [creator_id], references: [id])
 }
@@ -57,8 +57,8 @@ model xxxxx_xxxxx {
   name         String   @unique
   description  String? 
   team         String?
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
   creator    user_account @relation("XxxxxXxxxxCreator", fields: [creator_id], references: [id])
   updater_id String
@@ -77,8 +77,8 @@ model yyyyy_yyyyy {
   regex       String?
   required    Boolean   @default(true)
   written_by  String
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
 }
 
 model parent1 {
@@ -88,10 +88,10 @@ model parent1 {
   organization       organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   description  String? 
   price        Int
-  due_date     DateTime @db.Timestamptz(3)
+  due_date     DateTime @db.Timestamptz(0)
   image_url    String?
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
   creator    user_account @relation("Parent1Creator", fields: [creator_id], references: [id])
   updater_id String
@@ -113,8 +113,8 @@ model parent1_child1 {
   regex       String?
   required    Boolean   @default(true)
   written_by  String
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
 }
 
 model parent1_child2 {
@@ -123,17 +123,17 @@ model parent1_child2 {
   parent1_id    String     
   parent1       parent1 @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
   required    Boolean   @default(true)
-  start_date  DateTime? @db.Timestamptz(3)
-  end_date    DateTime  @db.Timestamptz(3)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  start_date  DateTime? @db.Timestamptz(0)
+  end_date    DateTime  @db.Timestamptz(0)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
 }
 
 model parent1_list {
   id          String   @id @default(cuid())
   name        String
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
   parent1_id    String     
   parent1       parent1 @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
 }
@@ -142,10 +142,10 @@ model parent_only {
   id           String   @id @default(cuid())
   name         String   @unique
   description  String? 
-  login_time   DateTime? @db.Timestamptz(3)
-  logout_time  DateTime? @db.Timestamptz(3)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  login_time   DateTime? @db.Timestamptz(0)
+  logout_time  DateTime? @db.Timestamptz(0)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
   creator    user_account @relation("ParentOnlyCreator", fields: [creator_id], references: [id])
   updater_id String
@@ -159,8 +159,8 @@ model user_account {
   password String
   api_key  String?
   avatar   String?
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
   creator    user_account @relation("UserAccountCreator", fields: [creator_id], references: [id])
   updater_id String
@@ -211,8 +211,8 @@ model role {
   id       String  @id @default(cuid())
   name     String
   description String?
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
   creator    user_account @relation("RoleCreator", fields: [creator_id], references: [id])
   updater_id String
@@ -225,8 +225,8 @@ model organization {
   id       String  @id @default(cuid())
   name     String
   description String?
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
   creator    user_account @relation("OrganizationCreator", fields: [creator_id], references: [id])
   updater_id String
@@ -245,8 +245,8 @@ model permission {
   read     Boolean
   update   Boolean
   delete   Boolean
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
   creator    user_account @relation("PermissionCreator", fields: [creator_id], references: [id])
   updater_id String
@@ -258,8 +258,8 @@ model procedure {
   id           String @id @default(cuid())
   name         String
   description  String?
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
   creator    user_account @relation("ProcedureCreator", fields: [creator_id], references: [id])
   updater_id String
@@ -282,8 +282,8 @@ model resource {
   resource_attachments  resource_attachment[]
   resource_images  resource_image[]
   bookings     booking[]
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
   creator    user_account @relation("ResourceCreator", fields: [creator_id], references: [id])
   updater_id String
@@ -297,8 +297,8 @@ model resource_attachment {
   path         String
   resource_id  String
   resource     resource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
 }
 
 model resource_image {
@@ -307,8 +307,8 @@ model resource_image {
   path         String
   resource_id  String
   resource     resource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
 }
 
 model booking {
@@ -316,10 +316,10 @@ model booking {
   name         String
   resource_id  String
   resource     resource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
-  start_time   DateTime @db.Timestamptz(3)
-  end_time     DateTime @db.Timestamptz(3)
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
+  start_time   DateTime @db.Timestamptz(0)
+  end_time     DateTime @db.Timestamptz(0)
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
   creator_id   String
   creator      user_account @relation("BookingCreator", fields: [creator_id], references: [id])
   updater_id String
@@ -333,8 +333,8 @@ model shift_template {
   day_of_week Int
   start_time  DateTime @db.Timetz(0)
   end_time    DateTime @db.Timetz(0)
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
   creator_id  String
   creator     user_account @relation("ShiftTemplateCreator", fields: [creator_id], references: [id])
   updater_id  String
@@ -348,8 +348,8 @@ model shift {
   start_time  DateTime @db.Timestamptz(0)
   end_time    DateTime @db.Timestamptz(0)
   status      Int
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
   creator_id  String
   creator     user_account @relation("ShiftCreator", fields: [creator_id], references: [id])
   updater_id  String
@@ -365,8 +365,8 @@ model product {
   images      product_image[]
   inventories  inventory[]
   purchase_per_items purchase_per_item[]
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
   creator_id  String
   creator     user_account @relation("ProductCreator", fields: [creator_id], references: [id])
   updater_id  String
@@ -379,8 +379,8 @@ model product_image {
   path         String
   product_id   String
   product      product @relation(fields: [product_id], references: [id], onDelete: Cascade)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
 }
 
 model inventory {
@@ -392,8 +392,8 @@ model inventory {
   location    String?
   lot_number  String?
   expiration_date DateTime?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
   creator_id  String
   creator     user_account @relation("InventoryCreator", fields: [creator_id], references: [id])
   updater_id  String
@@ -406,8 +406,8 @@ model purchase_order {
   customer_id String
   customer    user_account @relation("Buyer", fields: [customer_id], references: [id])
   items       purchase_per_item[]
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
   creator_id  String
   creator     user_account @relation("PurchaseOrderCreator", fields: [creator_id], references: [id])
   updater_id  String
@@ -422,6 +422,6 @@ model purchase_per_item {
   product     product @relation(fields: [product_id], references: [id], onDelete: Cascade)
   quantity    Int
   price       Int?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
 }
