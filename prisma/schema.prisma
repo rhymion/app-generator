@@ -10,6 +10,11 @@ datasource db {
   provider = "postgresql"
 }
 
+model tenant {
+  id          String @id @default(cuid())
+  name        String?
+}
+
 model db_table {
   id           String   @id @default(cuid())
   name         String   @unique

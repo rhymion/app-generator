@@ -407,6 +407,31 @@ definitions:
     allOf:
       - $ref: "#/definitions/parent_only"
 
+  tenant:
+    type: object
+    required:
+      - id
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type:
+          - string
+          - "null"
+
+  tenant_detail:
+    x-generate:
+      list: false
+      view: true
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+    allOf:
+      - $ref: "#/definitions/tenant"
+
   user_account:
     type: object
     required:
