@@ -58,6 +58,11 @@ function getDisplayValue(col: GridColDef, row: GridValidRowModel): string {
     return String(result);
   }
   if (col.type === 'boolean') return Boolean(rawValue) ? 'Yes' : 'No';
+  if (col.type === 'singleSelect') {
+    const opts = ((col as { valueOptions?: Array<{ value: string | null; label: string }> }).valueOptions as Array<{ value: string | null; label: string }>) ?? [];
+    const option = opts.find(opt => opt.value === rawValue);
+    return option ? option.label : '';
+  }
   if (rawValue === null || rawValue === undefined) return '';
   if (col.valueFormatter) {
     const formatted = (col.valueFormatter as (...args: unknown[]) => unknown)(rawValue, row, col, null);
@@ -280,10 +285,10 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
 
           {/* Delete Row Confirmation */}
           <Dialog open={deleteRowId !== null} onClose={() => setDeleteRowId(null)}>
-            <DialogTitle>Delete Item?</DialogTitle>
+            <DialogTitle>{deleteDialogTitle}</DialogTitle>
             <DialogContent>
               <DialogContentText>
-                Are you sure you want to delete this item? This action cannot be undone.
+                {deleteDialogMessage}
               </DialogContentText>
             </DialogContent>
             <DialogActions>
