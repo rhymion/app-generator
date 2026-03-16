@@ -83,7 +83,7 @@ describe('Testing Inventory pages and their behavior', () => {
 
   describe('Edit', () => {
     it('3.1 adds optional data and child items', () => {
-      cy.task('db:populateInventory', 1).then(() => {
+      cy.task<any[]>('db:populateInventory', 1).then((records) => {
         cy.visit('/en/inventory');
         cy.contains('Test Product 1').click();
         cy.get('[aria-label="Edit"]').click();
@@ -102,7 +102,7 @@ describe('Testing Inventory pages and their behavior', () => {
     });
 
     it('3.2 removes optional data and child items', () => {
-      cy.task('db:populateInventoryFull', 1).then(() => {
+      cy.task<any[]>('db:populateInventoryFull', 1).then((records) => {
         cy.visit('/en/inventory');
         cy.contains('Test Product 1').click();
         cy.get('[aria-label="Edit"]').click();
@@ -117,7 +117,7 @@ describe('Testing Inventory pages and their behavior', () => {
     });
 
     it('3.3 edits with mixed changes', () => {
-      cy.task('db:populateInventory', 1).then(() => {
+      cy.task<any[]>('db:populateInventory', 1).then((records) => {
         cy.visit('/en/inventory');
         cy.contains('Test Product 1').click();
         cy.get('[aria-label="Edit"]').click();

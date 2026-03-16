@@ -38,21 +38,39 @@ function makeBulkResponse<T>(results: BulkResult<T>[]): BulkResponse<T> {
 export async function PUT(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
+    const richPerms = await requireApiPermission(userId, 'setting', 'update');
     const body = await request.json();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bulkItems: any[] = Array.isArray(body) ? body : [body];
+
+    // Fetch all requested records in one query for existence checks
+    const requestedIds = bulkItems.map((item) => item.id).filter(Boolean) as string[];
+    const existingRecords = await prisma.user_account.findMany({
+      where: { id: { in: requestedIds } },
+      select: { id: true, creator_id: true },
+    });
+    const existingMap = new Map(existingRecords.map((r) => [r.id, r]));
+
     const results: BulkResult<{ success: boolean }>[] = [];
 
     for (let i = 0; i < bulkItems.length; i++) {
-      try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { id, name, email, password, api_key: apiKey, avatar, roles_ids } = bulkItems[i] as any;
+      const existing = existingMap.get(id);
+      if (!existing) {
+        results.push({ index: i, success: false, error: `Not found: ${id}` });
+        continue;
+      }
+      const canUpdate =
+        richPerms.general.update ||
+        (richPerms.creator?.update && existing.creator_id === userId) ||
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { id, name, email, password, api_key: apiKey, avatar, roles_ids } = bulkItems[i] as any;
-        const existing = await prisma.user_account.findUnique({ where: { id }, select: { creator_id: true } });
-        if (!existing) {
-          results.push({ index: i, success: false, error: `Not found: ${id}` });
-          continue;
-        }
-        await requireApiPermission(userId, 'setting', 'update', existing);
+        (richPerms.assignee?.update && (existing as any).assignee_id === userId);
+      if (!canUpdate) {
+        results.push({ index: i, success: false, error: `Access denied: ${id}` });
+        continue;
+      }
+      try {
         await updateSetting(userId, id, name, email, password, apiKey ?? null, avatar ?? null, roles_ids ?? [], null);
         results.push({ index: i, success: true, data: { success: true } });
       } catch (err) {

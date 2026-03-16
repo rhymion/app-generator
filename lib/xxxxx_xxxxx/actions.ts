@@ -4,12 +4,11 @@ import { redirect } from 'next/navigation';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addXxxxxXxxxx, updateXxxxxXxxxx, deleteXxxxxXxxxx } from './service';
-import { revalidatePath } from 'next/cache';
 export async function upsertXxxxxXxxxx(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    const existing = await prisma.xxxxx_xxxxx.findUnique({ where: { id }, select: { creator_id: true } });
+    const existing = await prisma.xxxxx_xxxxx.findUnique({ where: { id }, select: { id: true, creator_id: true } });
     await requirePermission('xxxxx_xxxxx', 'update', existing);
   } else {
     await requirePermission('xxxxx_xxxxx', 'create');

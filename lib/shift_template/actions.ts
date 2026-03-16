@@ -8,7 +8,7 @@ export async function upsertShiftTemplate(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    const existing = await prisma.shift_template.findUnique({ where: { id }, select: { creator_id: true } });
+    const existing = await prisma.shift_template.findUnique({ where: { id }, select: { id: true, creator_id: true } });
     await requirePermission('shift_template', 'update', existing);
   } else {
     await requirePermission('shift_template', 'create');

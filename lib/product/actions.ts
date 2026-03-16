@@ -8,7 +8,7 @@ export async function upsertProduct(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    const existing = await prisma.product.findUnique({ where: { id }, select: { creator_id: true } });
+    const existing = await prisma.product.findUnique({ where: { id }, select: { id: true, creator_id: true } });
     await requirePermission('product', 'update', existing);
   } else {
     await requirePermission('product', 'create');

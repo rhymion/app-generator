@@ -9,7 +9,7 @@ export async function upsertDbTable(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    const existing = await prisma.db_table.findUnique({ where: { id }, select: { creator_id: true } });
+    const existing = await prisma.db_table.findUnique({ where: { id }, select: { id: true, creator_id: true } });
     await requirePermission('db_table', 'update', existing);
   } else {
     await requirePermission('db_table', 'create');

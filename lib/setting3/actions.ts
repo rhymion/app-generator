@@ -8,7 +8,7 @@ export async function upsertSetting3(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (!id) throw new Error('Create not supported');
-  const existing = await prisma.xxxxx_xxxxx.findUnique({ where: { id }, select: { creator_id: true } });
+  const existing = await prisma.xxxxx_xxxxx.findUnique({ where: { id }, select: { id: true, creator_id: true } });
   await requirePermission('setting3', 'update', existing);
   const name = data.get('name') as string;
   const description = data.get('description') as string | null;

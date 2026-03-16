@@ -1,7 +1,6 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addInventory, updateInventory, deleteInventory } from './service';
@@ -9,7 +8,7 @@ export async function upsertInventory(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    const existing = await prisma.inventory.findUnique({ where: { id }, select: { creator_id: true } });
+    const existing = await prisma.inventory.findUnique({ where: { id }, select: { id: true, creator_id: true } });
     await requirePermission('inventory', 'update', existing);
   } else {
     await requirePermission('inventory', 'create');
@@ -38,7 +37,6 @@ export async function removeInventory(data: FormData | string[]) {
     await requirePermission('inventory', 'delete', item);
   }
   await deleteInventory(ids);
-  revalidatePath('/[locale]/inventory', 'page');
   redirect('/inventory');
 }
 

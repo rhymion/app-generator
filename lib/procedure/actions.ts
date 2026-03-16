@@ -8,7 +8,7 @@ export async function upsertProcedure(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;
   if (id) {
-    const existing = await prisma.procedure.findUnique({ where: { id }, select: { creator_id: true, assignee_id: true } });
+    const existing = await prisma.procedure.findUnique({ where: { id }, select: { id: true, creator_id: true, assignee_id: true } });
     await requirePermission('procedure', 'update', existing);
   } else {
     await requirePermission('procedure', 'create');

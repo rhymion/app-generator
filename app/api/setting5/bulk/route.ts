@@ -38,21 +38,39 @@ function makeBulkResponse<T>(results: BulkResult<T>[]): BulkResponse<T> {
 export async function PUT(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
+    const richPerms = await requireApiPermission(userId, 'setting5', 'update');
     const body = await request.json();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bulkItems: any[] = Array.isArray(body) ? body : [body];
+
+    // Fetch all requested records in one query for existence checks
+    const requestedIds = bulkItems.map((item) => item.id).filter(Boolean) as string[];
+    const existingRecords = await prisma.xxxxx_xxxxx.findMany({
+      where: { id: { in: requestedIds } },
+      select: { id: true, creator_id: true },
+    });
+    const existingMap = new Map(existingRecords.map((r) => [r.id, r]));
+
     const results: BulkResult<{ success: boolean }>[] = [];
 
     for (let i = 0; i < bulkItems.length; i++) {
-      try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { id, name, yyyyy_yyyyys } = bulkItems[i] as any;
+      const existing = existingMap.get(id);
+      if (!existing) {
+        results.push({ index: i, success: false, error: `Not found: ${id}` });
+        continue;
+      }
+      const canUpdate =
+        richPerms.general.update ||
+        (richPerms.creator?.update && existing.creator_id === userId) ||
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { id, name, yyyyy_yyyyys } = bulkItems[i] as any;
-        const existing = await prisma.xxxxx_xxxxx.findUnique({ where: { id }, select: { creator_id: true } });
-        if (!existing) {
-          results.push({ index: i, success: false, error: `Not found: ${id}` });
-          continue;
-        }
-        await requireApiPermission(userId, 'setting5', 'update', existing);
+        (richPerms.assignee?.update && (existing as any).assignee_id === userId);
+      if (!canUpdate) {
+        results.push({ index: i, success: false, error: `Access denied: ${id}` });
+        continue;
+      }
+      try {
         await updateSetting5(userId, id, name, yyyyy_yyyyys ?? [], null);
         results.push({ index: i, success: true, data: { success: true } });
       } catch (err) {

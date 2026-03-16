@@ -412,7 +412,7 @@ def build_context(entity: dict, schema: dict) -> dict:
 
     has_assignee_id   = 'assignee_id' in filtered_props
     item_context_select = (
-        f'{{ creator_id: true{", assignee_id: true" if has_assignee_id else ""} }}'
+        f'{{ id: true, creator_id: true{", assignee_id: true" if has_assignee_id else ""} }}'
     )
 
     # Parent prop infos (excluding id + timestamps)

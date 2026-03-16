@@ -68,26 +68,49 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const { userId } = await authenticateApiKey(request);
+    const richPerms = await requireApiPermission(userId, 'setting8', 'delete');
     const body = await request.json();
     const bulkItems: { id: string }[] = Array.isArray(body) ? body : [body];
-    const results: BulkResult<null>[] = [];
 
+    // Fetch all requested records in one query for existence checks
+    const requestedIds = bulkItems.map((item) => item.id);
+    const existingRecords = await prisma.xxxxx_xxxxx.findMany({
+      where: { id: { in: requestedIds } },
+      select: { id: true, creator_id: true },
+    });
+    const existingMap = new Map(existingRecords.map((r) => [r.id, r]));
+
+    // Permission-check pass — collect IDs allowed to delete
+    const results: BulkResult<null>[] = [];
+    const permitted: { index: number; id: string }[] = [];
     for (let i = 0; i < bulkItems.length; i++) {
-      try {
-        const { id } = bulkItems[i];
-        const existing = await prisma.xxxxx_xxxxx.findUnique({ where: { id }, select: { creator_id: true } });
-        if (!existing) {
-          results.push({ index: i, success: false, error: `Not found: ${id}` });
-          continue;
-        }
-        await requireApiPermission(userId, 'setting8', 'delete', existing);
-        await deleteSetting8([id]);
-        results.push({ index: i, success: true, data: null });
-      } catch (err) {
-        results.push({ index: i, success: false, error: err instanceof Error ? err.message : String(err) });
+      const { id } = bulkItems[i];
+      const existing = existingMap.get(id);
+      if (!existing) {
+        results.push({ index: i, success: false, error: `Not found: ${id}` });
+        continue;
+      }
+      const canDelete =
+        richPerms.general.delete ||
+        (richPerms.creator?.delete && existing.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (richPerms.assignee?.delete && (existing as any).assignee_id === userId);
+      if (!canDelete) {
+        results.push({ index: i, success: false, error: `Access denied: ${id}` });
+        continue;
+      }
+      permitted.push({ index: i, id });
+    }
+
+    // Batch delete all permitted records in a single query
+    if (permitted.length > 0) {
+      await deleteSetting8(permitted.map((p) => p.id));
+      for (const { index } of permitted) {
+        results.push({ index, success: true, data: null });
       }
     }
 
+    results.sort((a, b) => a.index - b.index);
     return NextResponse.json(makeBulkResponse(results), { status: 207 });
   } catch (error) {
     return handleApiError(error);

@@ -23,7 +23,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId } = await authenticateApiKey(request);
-    const existing = await prisma.xxxxx_xxxxx.findUnique({ where: { id }, select: { creator_id: true } });
+    const existing = await prisma.xxxxx_xxxxx.findUnique({ where: { id }, select: { id: true, creator_id: true } });
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
