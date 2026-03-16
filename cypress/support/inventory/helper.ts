@@ -35,12 +35,20 @@ export async function populateInventoryDependencies() {
 
 export async function populateInventoryData(length: number) {
   const testUser = await getTestUser();
-  const deps = await populateInventoryDependencies();
   const records = [];
   for (let i = 1; i <= length; i++) {
+    const productItem = await prisma.product.create({
+      data: {
+        code: `TEST-CODE-${Date.now()}-${i}`,
+        name: `Test Product ${i}`,
+        price: 100,
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
     const record = await prisma.inventory.create({
       data: {
-        product_id: deps.product.id,
+        product_id: productItem.id,
         quantity: Math.max(0, i * 100),
         reserved_quantity: Math.max(0, i * 100),
         creator_id: testUser.id,
@@ -55,12 +63,20 @@ export async function populateInventoryData(length: number) {
 
 export async function populateInventoryFullData(length: number) {
   const testUser = await getTestUser();
-  const deps = await populateInventoryDependencies();
   const records = [];
   for (let i = 1; i <= length; i++) {
+    const productItem = await prisma.product.create({
+      data: {
+        code: `TEST-CODE-${Date.now()}-${i}`,
+        name: `Test Product ${i}`,
+        price: 100,
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
     const record = await prisma.inventory.create({
       data: {
-        product_id: deps.product.id,
+        product_id: productItem.id,
         quantity: Math.max(0, i * 100),
         reserved_quantity: Math.max(0, i * 100),
         location: `Test Location ${i}`,

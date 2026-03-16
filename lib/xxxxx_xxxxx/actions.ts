@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addXxxxxXxxxx, updateXxxxxXxxxx, deleteXxxxxXxxxx } from './service';
+import { revalidatePath } from 'next/cache';
 export async function upsertXxxxxXxxxx(data: FormData) {
   const id = data.get('id') as string | null;
   const srcSnapshotRaw = data.get('__src_snapshot') as string | null;

@@ -56,6 +56,7 @@ export default function DataGridClient<T extends BaseEntity>({
   });
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [selectedRowIds, setSelectedRowIds] = useState<GridRowSelectionModel>({ type: 'include', ids: new Set() });
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
   const apiRef = useGridApiRef();
   const tc = useTranslations('Common');
   const tf = useTranslations('Fields');
@@ -77,16 +78,19 @@ export default function DataGridClient<T extends BaseEntity>({
   }
 
   const deleteSelected = () => {
+    // Capture IDs now — before the Dialog opens and its focus trap causes
+    // MUI DataGrid to fire onRowSelectionModelChange with an empty set.
+    setPendingDeleteIds(Array.from(selectedRowIds.ids) as string[]);
     setOpenDeleteDialog(true);
   };
 
   const deleteConfirmed = () => {
-    const selectedRows = apiRef.current?.getSelectedRows() || new Map();
-    const selectedIds = Array.from(selectedRows.keys());
-    if (selectedIds.length > 0 && removeAction) {
-      startTransition(() => removeAction(selectedIds));
+    if (pendingDeleteIds.length > 0 && removeAction) {
+      setItems(prev => prev.filter(item => !pendingDeleteIds.includes((item as { id: string }).id)));
+      startTransition(() => removeAction(pendingDeleteIds));
     }
     setOpenDeleteDialog(false);
+    setPendingDeleteIds([]);
   };
 
   // Build dynamic columns based on displayFields, with name as default first column

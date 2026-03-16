@@ -1,6 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
 import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addInventory, updateInventory, deleteInventory } from './service';
@@ -37,6 +38,7 @@ export async function removeInventory(data: FormData | string[]) {
     await requirePermission('inventory', 'delete', item);
   }
   await deleteInventory(ids);
+  revalidatePath('/[locale]/inventory', 'page');
   redirect('/inventory');
 }
 

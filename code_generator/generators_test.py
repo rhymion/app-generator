@@ -71,14 +71,18 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
         fmt = prop.get('format')
         if prop_name == 'name':
             val = f"'Test {to_title_case(dep_target)}'"
+            val_unique = f'`Test {to_title_case(dep_target)} ${{i}}`'
         elif actual == 'string' and fmt in ('date', 'date-time', 'time'):
             val = 'new Date(2025, 0, 1).toISOString()'
+            val_unique = val
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
             val = f'Math.max({mn}, 100)' if mn else '100'
+            val_unique = val
         else:
             val = f'`TEST-{prop_name.upper()}-${{Date.now()}}`'
-        result.append({'prop_name': prop_name, 'prisma_val': val})
+            val_unique = f'`TEST-{prop_name.upper()}-${{Date.now()}}-${{i}}`'
+        result.append({'prop_name': prop_name, 'prisma_val': val, 'prisma_val_unique': val_unique})
     return result
 
 
@@ -676,6 +680,16 @@ def test_helper_context(
             'has_fk_deps': has_fk_deps,
         })
 
+    primary_fk_dep = next((d for d in enriched_deps if d.get('needs_second')), None)
+
+    # populateData/populateFullData need deps only when there are FK fields NOT covered
+    # by the inline primary_fk_dep creation (or user_account deps).
+    primary_fk_dep_var = primary_fk_dep['var_name'] if primary_fk_dep else None
+    needs_deps_in_populate = bool(ua_dep_fields) or any(
+        f['category'] == 'autocomplete' and f['dep_var_name'] and f['dep_var_name'] != primary_fk_dep_var
+        for f in required_fields_prisma
+    )
+
     return {
         'pascal': pascal,
         'title': title,
@@ -683,11 +697,13 @@ def test_helper_context(
         'deps': enriched_deps,
         'deps_return': deps_return,
         'has_parent_deps': bool(entity_fk_deps) or bool(ua_dep_fields),
+        'needs_deps_in_populate': needs_deps_in_populate,
         'ua_dep_fields': ua_dep_fields,
         'required_fields_prisma': required_fields_prisma,
         'all_fields_prisma': all_fields_prisma,
         'has_optional': bool(optional_field_metas),
         'datagrid_children': enriched_datagrid_children,
+        'primary_fk_dep': primary_fk_dep,
     }
 
 
@@ -769,7 +785,7 @@ def test_spec_context(
 
     if prim_is_fk:
         dep_title = to_title_case(prim)
-        list_id_1 = f'Test {dep_title}'
+        list_id_1 = f'Test {dep_title} 1'
         after_create_id = None
         after_create_id_is_expr = True
         primary_dep_var_for_list = to_camel_case(prim)

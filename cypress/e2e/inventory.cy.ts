@@ -23,14 +23,14 @@ describe('Testing Inventory pages and their behavior', () => {
     it('1.2 shows list with one item', () => {
       cy.task('db:populateInventory', 1);
       cy.visit('/en/inventory');
-      cy.contains('Test Product').should('be.visible');
+      cy.contains('Test Product 1').should('be.visible');
       getDataGridRowCount().should('eq', 1);
     });
 
     it('1.3 shows list with multiple items', () => {
       cy.task('db:populateInventory', 3);
       cy.visit('/en/inventory');
-      cy.contains('Test Product').should('be.visible');
+      cy.contains('Test Product 1').should('be.visible');
       getDataGridRowCount().should('eq', 3);
     });
   });
@@ -83,9 +83,9 @@ describe('Testing Inventory pages and their behavior', () => {
 
   describe('Edit', () => {
     it('3.1 adds optional data and child items', () => {
-      cy.task<any[]>('db:populateInventory', 1).then((records) => {
+      cy.task('db:populateInventory', 1).then(() => {
         cy.visit('/en/inventory');
-        cy.contains('Test Product').click();
+        cy.contains('Test Product 1').click();
         cy.get('[aria-label="Edit"]').click();
         cy.url().should('include', '/inventory/edit');
         cy.fillField('Location', 'Test Location');
@@ -93,18 +93,18 @@ describe('Testing Inventory pages and their behavior', () => {
         cy.fillDate('Expiration Date', '01/15/2025');
         cy.clickButton('Save');
         cy.url().should('include', '/inventory');
-        cy.contains('Test Product').should('be.visible');
+        cy.contains('Test Product 1').should('be.visible');
         // Verify on view page
-        cy.contains('Test Product').click();
+        cy.contains('Test Product 1').click();
         cy.url().should('include', '/inventory/view');
-        cy.checkField('Product', 'Test Product');
+        cy.checkField('Product', 'Test Product 1');
       });
     });
 
     it('3.2 removes optional data and child items', () => {
-      cy.task<any[]>('db:populateInventoryFull', 1).then((records) => {
+      cy.task('db:populateInventoryFull', 1).then(() => {
         cy.visit('/en/inventory');
-        cy.contains('Test Product').click();
+        cy.contains('Test Product 1').click();
         cy.get('[aria-label="Edit"]').click();
         cy.url().should('include', '/inventory/edit');
         cy.clearField('Location');
@@ -112,23 +112,23 @@ describe('Testing Inventory pages and their behavior', () => {
         cy.clearDateTime('Expiration Date');
         cy.clickButton('Save');
         cy.url().should('include', '/inventory');
-        cy.contains('Test Product').should('be.visible');
+        cy.contains('Test Product 1').should('be.visible');
       });
     });
 
     it('3.3 edits with mixed changes', () => {
-      cy.task<any[]>('db:populateInventory', 1).then((records) => {
+      cy.task('db:populateInventory', 1).then(() => {
         cy.visit('/en/inventory');
-        cy.contains('Test Product').click();
+        cy.contains('Test Product 1').click();
         cy.get('[aria-label="Edit"]').click();
         cy.fillField('Location', 'Updated Location');
         cy.clickButton('Save');
         cy.url().should('include', '/inventory');
-        cy.contains('Test Product').should('be.visible');
+        cy.contains('Test Product 1').should('be.visible');
         // Verify on view page
-        cy.contains('Test Product').click();
+        cy.contains('Test Product 1').click();
         cy.url().should('include', '/inventory/view');
-        cy.checkField('Product', 'Test Product');
+        cy.checkField('Product', 'Test Product 1');
       });
     });
   });
@@ -140,6 +140,7 @@ describe('Testing Inventory pages and their behavior', () => {
       cy.selectDataGridRows([0]);
       cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+      cy.contains('Test Product 1').should('not.exist');
       getDataGridRowCount().should('eq', 1);
     });
 
@@ -149,19 +150,20 @@ describe('Testing Inventory pages and their behavior', () => {
       cy.selectDataGridRows([0, 1]);
       cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+      cy.contains('Test Product 1').should('not.exist');
       getDataGridRowCount().should('eq', 1);
     });
 
     it('4.3 deletes an item from edit page', () => {
       cy.task('db:populateInventory', 1);
       cy.visit('/en/inventory');
-      cy.contains('Test Product').click();
+      cy.contains('Test Product 1').click();
       cy.get('[aria-label="Edit"]').click();
       cy.url().should('include', '/inventory/edit');
       cy.clickButton('Delete Inventory');
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       cy.url().should('include', '/inventory');
-      cy.contains('Test Product').should('not.exist');
+      cy.contains('Test Product 1').should('not.exist');
     });
   });
 
@@ -182,7 +184,7 @@ describe('Testing Inventory pages and their behavior', () => {
     it('6.1 fails when required parent field is cleared', () => {
       cy.task('db:populateInventory', 1);
       cy.visit('/en/inventory');
-      cy.contains('Test Product').click();
+      cy.contains('Test Product 1').click();
       cy.get('[aria-label="Edit"]').click();
       cy.clearField('Quantity');
       cy.clickButton('Save');

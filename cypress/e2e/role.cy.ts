@@ -132,6 +132,7 @@ describe('Testing Role pages and their behavior', () => {
       cy.selectDataGridRows([0]);
       cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+      cy.contains('Role 1').should('not.exist');
       getDataGridRowCount().should('eq', 1);
     });
 
@@ -141,6 +142,7 @@ describe('Testing Role pages and their behavior', () => {
       cy.selectDataGridRows([0, 1]);
       cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+      cy.contains('Role 1').should('not.exist');
       getDataGridRowCount().should('eq', 1);
     });
 

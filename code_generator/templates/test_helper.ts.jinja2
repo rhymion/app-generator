@@ -66,16 +66,34 @@ export async function populate{{ pascal }}Dependencies() {
 
 export async function populate{{ pascal }}Data(length: number) {
   const testUser = await getTestUser();
-{% if has_parent_deps %}
+{% if needs_deps_in_populate %}
   const deps = await populate{{ pascal }}Dependencies();
 {% endif %}
   const records = [];
   for (let i = 1; i <= length; i++) {
+{% if primary_fk_dep %}
+    const {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.create({
+      data: {
+{% for ef in primary_fk_dep.extra_required_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
+{% endfor %}
+{% for fk in primary_fk_dep.fk_deps %}
+        {{ fk.prop_name }}: deps.{{ fk.dep_var_name }}.id,
+{% endfor %}
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
+{% endif %}
     const record = await prisma.{{ model_name }}.create({
       data: {
 {% for field in required_fields_prisma %}
 {% if field.category == 'autocomplete' and field.dep_var_name %}
+{% if primary_fk_dep and field.dep_var_name == primary_fk_dep.var_name %}
+        {{ field.prop_name }}: {{ field.dep_var_name }}Item.id,
+{% else %}
         {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
+{% endif %}
 {% elif field.category != 'autocomplete' %}
         {{ field.prop_name }}: {{ field.prisma_val }},
 {% endif %}
@@ -96,16 +114,34 @@ export async function populate{{ pascal }}Data(length: number) {
 {% if has_optional %}
 export async function populate{{ pascal }}FullData(length: number) {
   const testUser = await getTestUser();
-{% if has_parent_deps %}
+{% if needs_deps_in_populate %}
   const deps = await populate{{ pascal }}Dependencies();
 {% endif %}
   const records = [];
   for (let i = 1; i <= length; i++) {
+{% if primary_fk_dep %}
+    const {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.create({
+      data: {
+{% for ef in primary_fk_dep.extra_required_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
+{% endfor %}
+{% for fk in primary_fk_dep.fk_deps %}
+        {{ fk.prop_name }}: deps.{{ fk.dep_var_name }}.id,
+{% endfor %}
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
+{% endif %}
     const record = await prisma.{{ model_name }}.create({
       data: {
 {% for field in all_fields_prisma %}
 {% if field.category == 'autocomplete' and field.dep_var_name %}
+{% if primary_fk_dep and field.dep_var_name == primary_fk_dep.var_name %}
+        {{ field.prop_name }}: {{ field.dep_var_name }}Item.id,
+{% else %}
         {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
+{% endif %}
 {% elif field.category != 'autocomplete' %}
         {{ field.prop_name }}: {{ field.prisma_val }},
 {% endif %}
