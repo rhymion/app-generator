@@ -141,3 +141,83 @@ Delete a `Role` record by its ID.
 
 All error responses return `{ "error": "<message>" }`.
 
+---
+
+## Bulk Operations
+
+Bulk endpoints process each item independently, enabling **partial success**. The outer
+request always returns `207 Multi-Status` as long as authentication passes; individual
+item outcomes are reported in the `results` array.
+
+### Response shape (`207 Multi-Status`)
+
+```json
+{
+  "results": [
+    { "index": 0, "success": true,  "data": { ... } },
+    { "index": 1, "success": false, "error": "Not found: clxxx..." }
+  ],
+  "summary": { "total": 2, "succeeded": 1, "failed": 1 }
+}
+```
+
+> Auth/permission failures at the **request** level (bad key, no permission at all) still
+> return `401` / `403` — not `207`.
+
+### POST /api/role/bulk
+
+Bulk-create `Role` records. Each element in the request array is processed with
+the same rules as `POST /api/role`.
+
+**Request Body** — array of create objects:
+
+```json
+[
+  {
+    "name": "...",
+    "description": null,
+    "userAccounts_ids": ["clxxx..."]
+  },
+  { "..." : "..." }
+]
+```
+
+**Response `207`** — `data` of each successful item contains `{ "id": "..." }`.
+
+### PUT /api/role/bulk
+
+Bulk-update `Role` records. Each element must include `id` in addition to the
+fields accepted by `PUT /api/role/[id]`.
+
+**Request Body** — array of update objects:
+
+```json
+[
+  { "id": "clxxx...", 
+    "name": "...",
+    "description": null,
+    "userAccounts_ids": ["clxxx..."]
+  },
+  { "id": "clyyy...", "..." : "..." }
+]
+```
+
+**Response `207`** — `data` of each successful item is `{ "success": true }`.
+Items with an unknown `id` report `"error": "Not found: <id>"`.
+
+### DELETE /api/role/bulk
+
+Bulk-delete `Role` records by ID.
+
+**Request Body** — array of id objects:
+
+```json
+[
+  { "id": "clxxx..." },
+  { "id": "clyyy..." }
+]
+```
+
+**Response `207`** — `data` of each successful item is `null`.
+Items with an unknown `id` report `"error": "Not found: <id>"`.
+

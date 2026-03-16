@@ -42,6 +42,8 @@ Obtain or regenerate a key from the User Account edit page.
 
 ## API Conventions
 
+### Single-resource endpoints
+
 | Method | Path | Operation |
 |--------|------|-----------|
 | `GET` | `/api/{entity}` | List all records (permission-filtered) |
@@ -49,6 +51,31 @@ Obtain or regenerate a key from the User Account edit page.
 | `GET` | `/api/{entity}/[id]` | Get a single record |
 | `PUT` | `/api/{entity}/[id]` | Replace a record |
 | `DELETE` | `/api/{entity}/[id]` | Delete a record |
+
+### Bulk endpoints
+
+Bulk endpoints are generated alongside any entity that has at least one of create / update / delete enabled.
+
+| Method | Path | Operation |
+|--------|------|-----------|
+| `POST` | `/api/{entity}/bulk` | Bulk-create records |
+| `PUT` | `/api/{entity}/bulk` | Bulk-update records |
+| `DELETE` | `/api/{entity}/bulk` | Bulk-delete records |
+
+Bulk endpoints always return **`207 Multi-Status`** (when auth succeeds) with the shape:
+
+```json
+{
+  "results": [
+    { "index": 0, "success": true,  "data": { ... } },
+    { "index": 1, "success": false, "error": "Not found: clxxx..." }
+  ],
+  "summary": { "total": 2, "succeeded": 1, "failed": 1 }
+}
+```
+
+Each item in the request array is processed independently — one failure does not prevent
+the others from succeeding. See each entity's detail page for the exact request body shape.
 
 **Standard error shape**: `{ "error": "<message>" }`
 

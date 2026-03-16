@@ -173,6 +173,226 @@ describe('API: {{ title }}', () => {
   });
 {% endif %}
 
+  // -------------------------------------------------------------------------
+  // Bulk operations
+  // -------------------------------------------------------------------------
+{% if can_new %}
+
+  describe('POST {{ api_path }}/bulk', () => {
+    it('8.1 bulk creates — all succeed, summary reflects counts', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I }}cy.request({
+{{ I }}  method: 'POST',
+{{ I }}  url: `${API_BASE}/bulk`,
+{{ I }}  headers: { 'X-API-Key': TEST_API_KEY },
+{{ I }}  body: [
+{{ I }}    {
+{% for ln in bulk_post_body_valid %}
+{{ ln }}
+{% endfor %}
+{{ I }}    },
+{{ I }}  ],
+{{ I }}}).then((res) => {
+{{ I }}  expect(res.status).to.eq(207);
+{{ I }}  expect(res.body.summary.total).to.eq(1);
+{{ I }}  expect(res.body.summary.succeeded).to.eq(1);
+{{ I }}  expect(res.body.summary.failed).to.eq(0);
+{{ I }}  expect(res.body.results[0].success).to.be.true;
+{{ I }}  expect(res.body.results[0].data.id).to.exist;
+{{ I }}});
+{% if has_deps %}
+      });
+{% endif %}
+    });
+
+    it('8.2 bulk creates — partial failure when a required field is missing', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I }}cy.request({
+{{ I }}  method: 'POST',
+{{ I }}  url: `${API_BASE}/bulk`,
+{{ I }}  headers: { 'X-API-Key': TEST_API_KEY },
+{{ I }}  body: [
+{{ I }}    {
+{% for ln in bulk_post_body_valid %}
+{{ ln }}
+{% endfor %}
+{{ I }}    },
+{{ I }}    {
+{% for ln in bulk_post_body_invalid %}
+{{ ln }}
+{% endfor %}
+{{ I }}    },
+{{ I }}  ],
+{{ I }}}).then((res) => {
+{{ I }}  expect(res.status).to.eq(207);
+{{ I }}  expect(res.body.summary.total).to.eq(2);
+{{ I }}  expect(res.body.summary.succeeded).to.eq(1);
+{{ I }}  expect(res.body.summary.failed).to.eq(1);
+{{ I }}  expect(res.body.results[0].success).to.be.true;
+{{ I }}  expect(res.body.results[1].success).to.be.false;
+{{ I }}  expect(res.body.results[1].error).to.be.a('string');
+{{ I }}});
+{% if has_deps %}
+      });
+{% endif %}
+    });
+  });
+{% endif %}
+{% if can_edit %}
+
+  describe('PUT {{ api_path }}/bulk', () => {
+    it('9.1 bulk updates — all succeed, summary reflects counts', () => {
+{% if primary_is_fk %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/bulk`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: [
+              {
+                id: records[0].id,
+{% for ln in bulk_put_body_valid_fk %}
+{{ ln }}
+{% endfor %}
+              },
+            ],
+          }).then((res) => {
+            expect(res.status).to.eq(207);
+            expect(res.body.summary.total).to.eq(1);
+            expect(res.body.summary.succeeded).to.eq(1);
+            expect(res.body.summary.failed).to.eq(0);
+            expect(res.body.results[0].success).to.be.true;
+          });
+        });
+      });
+{% else %}
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.request({
+          method: 'PUT',
+          url: `${API_BASE}/bulk`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: [
+            {
+              id: records[0].id,
+{% for ln in bulk_put_body_valid %}
+{{ ln }}
+{% endfor %}
+            },
+          ],
+        }).then((res) => {
+          expect(res.status).to.eq(207);
+          expect(res.body.summary.total).to.eq(1);
+          expect(res.body.summary.succeeded).to.eq(1);
+          expect(res.body.summary.failed).to.eq(0);
+          expect(res.body.results[0].success).to.be.true;
+        });
+      });
+{% endif %}
+    });
+
+    it('9.2 bulk updates — partial failure for non-existent id', () => {
+{% if primary_is_fk %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/bulk`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: [
+              {
+                id: records[0].id,
+{% for ln in bulk_put_body_valid_fk %}
+{{ ln }}
+{% endfor %}
+              },
+              { id: 'non-existent-id' },
+            ],
+          }).then((res) => {
+            expect(res.status).to.eq(207);
+            expect(res.body.summary.total).to.eq(2);
+            expect(res.body.summary.succeeded).to.eq(1);
+            expect(res.body.summary.failed).to.eq(1);
+            expect(res.body.results[1].success).to.be.false;
+          });
+        });
+      });
+{% else %}
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.request({
+          method: 'PUT',
+          url: `${API_BASE}/bulk`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: [
+            {
+              id: records[0].id,
+{% for ln in bulk_put_body_valid %}
+{{ ln }}
+{% endfor %}
+            },
+            { id: 'non-existent-id' },
+          ],
+        }).then((res) => {
+          expect(res.status).to.eq(207);
+          expect(res.body.summary.total).to.eq(2);
+          expect(res.body.summary.succeeded).to.eq(1);
+          expect(res.body.summary.failed).to.eq(1);
+          expect(res.body.results[1].success).to.be.false;
+        });
+      });
+{% endif %}
+    });
+  });
+{% endif %}
+{% if can_delete %}
+
+  describe('DELETE {{ api_path }}/bulk', () => {
+    it('10.1 bulk deletes — all succeed, items are gone', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.request({
+          method: 'DELETE',
+          url: `${API_BASE}/bulk`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: [{ id: records[0].id }],
+        }).then((res) => {
+          expect(res.status).to.eq(207);
+          expect(res.body.summary.succeeded).to.eq(1);
+          expect(res.body.summary.failed).to.eq(0);
+          cy.request({
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            failOnStatusCode: false,
+          }).then((getRes) => {
+            expect(getRes.status).to.eq(404);
+          });
+        });
+      });
+    });
+
+    it('10.2 bulk deletes — partial failure for non-existent id', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.request({
+          method: 'DELETE',
+          url: `${API_BASE}/bulk`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: [{ id: records[0].id }, { id: 'non-existent-id' }],
+        }).then((res) => {
+          expect(res.status).to.eq(207);
+          expect(res.body.summary.total).to.eq(2);
+          expect(res.body.summary.succeeded).to.eq(1);
+          expect(res.body.summary.failed).to.eq(1);
+          expect(res.body.results[0].success).to.be.true;
+          expect(res.body.results[1].success).to.be.false;
+        });
+      });
+    });
+  });
+{% endif %}
+
   describe('Authentication errors', () => {
     it('6.1 returns 401 without API key', () => {
       cy.request({ url: API_BASE, failOnStatusCode: false })

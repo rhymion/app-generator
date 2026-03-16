@@ -148,3 +148,87 @@ Delete a `Resource` record by its ID.
 
 All error responses return `{ "error": "<message>" }`.
 
+---
+
+## Bulk Operations
+
+Bulk endpoints process each item independently, enabling **partial success**. The outer
+request always returns `207 Multi-Status` as long as authentication passes; individual
+item outcomes are reported in the `results` array.
+
+### Response shape (`207 Multi-Status`)
+
+```json
+{
+  "results": [
+    { "index": 0, "success": true,  "data": { ... } },
+    { "index": 1, "success": false, "error": "Not found: clxxx..." }
+  ],
+  "summary": { "total": 2, "succeeded": 1, "failed": 1 }
+}
+```
+
+> Auth/permission failures at the **request** level (bad key, no permission at all) still
+> return `401` / `403` — not `207`.
+
+### POST /api/resource/bulk
+
+Bulk-create `Resource` records. Each element in the request array is processed with
+the same rules as `POST /api/resource`.
+
+**Request Body** — array of create objects:
+
+```json
+[
+  {
+    "name": "...",
+    "description": null,
+    "organization_id": "...",
+    "resource_attachments": [{...}],
+    "resource_images": [{...}]
+  },
+  { "..." : "..." }
+]
+```
+
+**Response `207`** — `data` of each successful item contains `{ "id": "..." }`.
+
+### PUT /api/resource/bulk
+
+Bulk-update `Resource` records. Each element must include `id` in addition to the
+fields accepted by `PUT /api/resource/[id]`.
+
+**Request Body** — array of update objects:
+
+```json
+[
+  { "id": "clxxx...", 
+    "name": "...",
+    "description": null,
+    "organization_id": "...",
+    "resource_attachments": [{...}],
+    "resource_images": [{...}]
+  },
+  { "id": "clyyy...", "..." : "..." }
+]
+```
+
+**Response `207`** — `data` of each successful item is `{ "success": true }`.
+Items with an unknown `id` report `"error": "Not found: <id>"`.
+
+### DELETE /api/resource/bulk
+
+Bulk-delete `Resource` records by ID.
+
+**Request Body** — array of id objects:
+
+```json
+[
+  { "id": "clxxx..." },
+  { "id": "clyyy..." }
+]
+```
+
+**Response `207`** — `data` of each successful item is `null`.
+Items with an unknown `id` report `"error": "Not found: <id>"`.
+

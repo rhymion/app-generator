@@ -133,6 +133,163 @@ describe('API: Booking', () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // Bulk operations
+  // -------------------------------------------------------------------------
+
+  describe('POST /api/booking/bulk', () => {
+    it('8.1 bulk creates — all succeed, summary reflects counts', () => {
+      cy.task<any>('db:populateBookingDependencies').then((deps) => {
+        cy.request({
+          method: 'POST',
+          url: `${API_BASE}/bulk`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: [
+            {
+              name: 'Test Booking',
+              resource_id: deps.resource.id,
+              start_time: '2025-01-15T09:00:00.000Z',
+              end_time: '2025-01-15T17:00:00.000Z',
+            },
+          ],
+        }).then((res) => {
+          expect(res.status).to.eq(207);
+          expect(res.body.summary.total).to.eq(1);
+          expect(res.body.summary.succeeded).to.eq(1);
+          expect(res.body.summary.failed).to.eq(0);
+          expect(res.body.results[0].success).to.be.true;
+          expect(res.body.results[0].data.id).to.exist;
+        });
+      });
+    });
+
+    it('8.2 bulk creates — partial failure when a required field is missing', () => {
+      cy.task<any>('db:populateBookingDependencies').then((deps) => {
+        cy.request({
+          method: 'POST',
+          url: `${API_BASE}/bulk`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: [
+            {
+              name: 'Test Booking',
+              resource_id: deps.resource.id,
+              start_time: '2025-01-15T09:00:00.000Z',
+              end_time: '2025-01-15T17:00:00.000Z',
+            },
+            {
+              resource_id: deps.resource.id,
+              start_time: '2025-01-15T09:00:00.000Z',
+              end_time: '2025-01-15T17:00:00.000Z',
+            },
+          ],
+        }).then((res) => {
+          expect(res.status).to.eq(207);
+          expect(res.body.summary.total).to.eq(2);
+          expect(res.body.summary.succeeded).to.eq(1);
+          expect(res.body.summary.failed).to.eq(1);
+          expect(res.body.results[0].success).to.be.true;
+          expect(res.body.results[1].success).to.be.false;
+          expect(res.body.results[1].error).to.be.a('string');
+        });
+      });
+    });
+  });
+
+  describe('PUT /api/booking/bulk', () => {
+    it('9.1 bulk updates — all succeed, summary reflects counts', () => {
+      cy.task<any[]>('db:populateBooking', 1).then((records) => {
+        cy.request({
+          method: 'PUT',
+          url: `${API_BASE}/bulk`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: [
+            {
+              id: records[0].id,
+              name: 'Updated Name',
+              resource_id: records[0].resource_id,
+              start_time: records[0].start_time,
+              end_time: records[0].end_time,
+            },
+          ],
+        }).then((res) => {
+          expect(res.status).to.eq(207);
+          expect(res.body.summary.total).to.eq(1);
+          expect(res.body.summary.succeeded).to.eq(1);
+          expect(res.body.summary.failed).to.eq(0);
+          expect(res.body.results[0].success).to.be.true;
+        });
+      });
+    });
+
+    it('9.2 bulk updates — partial failure for non-existent id', () => {
+      cy.task<any[]>('db:populateBooking', 1).then((records) => {
+        cy.request({
+          method: 'PUT',
+          url: `${API_BASE}/bulk`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: [
+            {
+              id: records[0].id,
+              name: 'Updated Name',
+              resource_id: records[0].resource_id,
+              start_time: records[0].start_time,
+              end_time: records[0].end_time,
+            },
+            { id: 'non-existent-id' },
+          ],
+        }).then((res) => {
+          expect(res.status).to.eq(207);
+          expect(res.body.summary.total).to.eq(2);
+          expect(res.body.summary.succeeded).to.eq(1);
+          expect(res.body.summary.failed).to.eq(1);
+          expect(res.body.results[1].success).to.be.false;
+        });
+      });
+    });
+  });
+
+  describe('DELETE /api/booking/bulk', () => {
+    it('10.1 bulk deletes — all succeed, items are gone', () => {
+      cy.task<any[]>('db:populateBooking', 1).then((records) => {
+        cy.request({
+          method: 'DELETE',
+          url: `${API_BASE}/bulk`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: [{ id: records[0].id }],
+        }).then((res) => {
+          expect(res.status).to.eq(207);
+          expect(res.body.summary.succeeded).to.eq(1);
+          expect(res.body.summary.failed).to.eq(0);
+          cy.request({
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            failOnStatusCode: false,
+          }).then((getRes) => {
+            expect(getRes.status).to.eq(404);
+          });
+        });
+      });
+    });
+
+    it('10.2 bulk deletes — partial failure for non-existent id', () => {
+      cy.task<any[]>('db:populateBooking', 1).then((records) => {
+        cy.request({
+          method: 'DELETE',
+          url: `${API_BASE}/bulk`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: [{ id: records[0].id }, { id: 'non-existent-id' }],
+        }).then((res) => {
+          expect(res.status).to.eq(207);
+          expect(res.body.summary.total).to.eq(2);
+          expect(res.body.summary.succeeded).to.eq(1);
+          expect(res.body.summary.failed).to.eq(1);
+          expect(res.body.results[0].success).to.be.true;
+          expect(res.body.results[1].success).to.be.false;
+        });
+      });
+    });
+  });
+
   describe('Authentication errors', () => {
     it('6.1 returns 401 without API key', () => {
       cy.request({ url: API_BASE, failOnStatusCode: false })

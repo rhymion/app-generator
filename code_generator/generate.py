@@ -164,6 +164,8 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(api_dir / 'route.ts', _render(env, 'api_route.ts.jinja2', ctx))
             if can_view or can_edit or can_delete:
                 _write(api_dir / '[id]' / 'route.ts', _render(env, 'api_detail_route.ts.jinja2', ctx))
+            if can_new or can_edit or can_delete:
+                _write(api_dir / 'bulk' / 'route.ts', _render(env, 'api_bulk_route.ts.jinja2', ctx))
             print(f'  API routes → app/api/{parent}/')
 
         # --- column_def.tsx ---

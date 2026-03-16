@@ -1169,4 +1169,10 @@ def test_api_spec_context(
         'put_body_update': _put_body_impl('            '),
         'put_body_update_fk': _put_body_impl('              '),
         'i7_post_body': _post_body_impl(None, f'{I}      '),
+        # Bulk test bodies — two extra spaces of indent (inside array item `{`)
+        'bulk_post_body_valid':   _post_body_impl(None,               f'{I}      '),
+        'bulk_post_body_invalid': _post_body_impl(field_to_skip_5_1, f'{I}      '),
+        # Bulk PUT: non-FK inside one `.then((records)=>`, FK inside two `.then` blocks
+        'bulk_put_body_valid':    _put_body_impl('              '),   # 14 spaces
+        'bulk_put_body_valid_fk': _put_body_impl('                '), # 16 spaces
     }

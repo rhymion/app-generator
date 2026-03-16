@@ -80,3 +80,26 @@ List all `Setting4` records the authenticated user has permission to read.
 
 All error responses return `{ "error": "<message>" }`.
 
+---
+
+## Bulk Operations
+
+Bulk endpoints process each item independently, enabling **partial success**. The outer
+request always returns `207 Multi-Status` as long as authentication passes; individual
+item outcomes are reported in the `results` array.
+
+### Response shape (`207 Multi-Status`)
+
+```json
+{
+  "results": [
+    { "index": 0, "success": true,  "data": { ... } },
+    { "index": 1, "success": false, "error": "Not found: clxxx..." }
+  ],
+  "summary": { "total": 2, "succeeded": 1, "failed": 1 }
+}
+```
+
+> Auth/permission failures at the **request** level (bad key, no permission at all) still
+> return `401` / `403` — not `207`.
+

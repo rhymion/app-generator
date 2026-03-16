@@ -160,3 +160,95 @@ Delete a `Parent1` record by its ID.
 
 All error responses return `{ "error": "<message>" }`.
 
+---
+
+## Bulk Operations
+
+Bulk endpoints process each item independently, enabling **partial success**. The outer
+request always returns `207 Multi-Status` as long as authentication passes; individual
+item outcomes are reported in the `results` array.
+
+### Response shape (`207 Multi-Status`)
+
+```json
+{
+  "results": [
+    { "index": 0, "success": true,  "data": { ... } },
+    { "index": 1, "success": false, "error": "Not found: clxxx..." }
+  ],
+  "summary": { "total": 2, "succeeded": 1, "failed": 1 }
+}
+```
+
+> Auth/permission failures at the **request** level (bad key, no permission at all) still
+> return `401` / `403` — not `207`.
+
+### POST /api/parent1/bulk
+
+Bulk-create `Parent1` records. Each element in the request array is processed with
+the same rules as `POST /api/parent1`.
+
+**Request Body** — array of create objects:
+
+```json
+[
+  {
+    "name": "...",
+    "organization_id": "...",
+    "description": null,
+    "price": 0,
+    "due_date": "2024-01-01T00:00:00.000Z",
+    "image_url": null,
+    "parent1_child1s": [{...}],
+    "parent1_child2s": [{...}],
+    "parent1_lists": [{...}]
+  },
+  { "..." : "..." }
+]
+```
+
+**Response `207`** — `data` of each successful item contains `{ "id": "..." }`.
+
+### PUT /api/parent1/bulk
+
+Bulk-update `Parent1` records. Each element must include `id` in addition to the
+fields accepted by `PUT /api/parent1/[id]`.
+
+**Request Body** — array of update objects:
+
+```json
+[
+  { "id": "clxxx...", 
+    "name": "...",
+    "organization_id": "...",
+    "description": null,
+    "price": 0,
+    "due_date": "2024-01-01T00:00:00.000Z",
+    "image_url": null,
+    "parent1_child1s": [{...}],
+    "parent1_child2s": [{...}],
+    "parent1_lists": [{...}]
+  },
+  { "id": "clyyy...", "..." : "..." }
+]
+```
+
+**Response `207`** — `data` of each successful item is `{ "success": true }`.
+Items with an unknown `id` report `"error": "Not found: <id>"`.
+
+### DELETE /api/parent1/bulk
+
+Bulk-delete `Parent1` records by ID.
+
+**Request Body** — array of id objects:
+
+```json
+[
+  { "id": "clxxx..." },
+  { "id": "clyyy..." }
+]
+```
+
+**Response `207`** — `data` of each successful item is `null`.
+Items with an unknown `id` report `"error": "Not found: <id>"`.
+
