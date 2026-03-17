@@ -32,19 +32,6 @@ export function parent1_child2s_columns(editable: boolean = false): GridColDef[]
       width: 250,
       editable: editable,
       type: 'dateTime',
-      renderEditCell: (params: GridRenderEditCellParams) => (
-        <DateTimeWrapper
-          label={t('startDate')}
-          date_time={params.value ? new Date(params.value) : null}
-          onChange={(newValue: dayjs.Dayjs | null) => {
-            params.api.setEditCellValue({
-              id: params.id,
-              field: params.field,
-              value: newValue ? newValue.toISOString() : ''
-            });
-          }}
-        />
-      ),
       valueFormatter: (value) => {
         if (!value) return '';
         return dayjs(value).format('YYYY-MM-DD HH:mm');
@@ -56,19 +43,6 @@ export function parent1_child2s_columns(editable: boolean = false): GridColDef[]
       width: 250,
       editable: editable,
       type: 'dateTime',
-      renderEditCell: (params: GridRenderEditCellParams) => (
-        <DateTimeWrapper
-          label={t('endDate')}
-          date_time={params.value ? new Date(params.value) : null}
-          onChange={(newValue: dayjs.Dayjs | null) => {
-            params.api.setEditCellValue({
-              id: params.id,
-              field: params.field,
-              value: newValue ? newValue.toISOString() : ''
-            });
-          }}
-        />
-      ),
       valueFormatter: (value) => {
         if (!value) return '';
         return dayjs(value).format('YYYY-MM-DD HH:mm');
