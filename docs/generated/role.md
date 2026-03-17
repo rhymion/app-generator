@@ -102,7 +102,8 @@ Retrieve a single `Role` record by its ID.
 
 ### PUT /api/role/[id]
 
-Replace an existing `Role` record. Accepts the same body as `POST /api/role`.
+Replace an existing `Role` record. 
+Accepts the same body as `POST /api/role`.
 
 **Response `200 OK`**
 

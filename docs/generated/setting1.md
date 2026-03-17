@@ -106,7 +106,8 @@ Retrieve a single `Setting1` record by its ID.
 
 ### PUT /api/setting1/[id]
 
-Replace an existing `Setting1` record. Accepts the same body as `POST /api/setting1`.
+Replace an existing `Setting1` record. 
+Accepts the same body as `POST /api/setting1`.
 
 **Response `200 OK`**
 

@@ -66,7 +66,22 @@ Retrieve a single `Setting5` record by its ID.
 
 ### PUT /api/setting5/[id]
 
-Replace an existing `Setting5` record. Accepts the same body as `POST /api/setting5`.
+Replace an existing `Setting5` record. 
+
+**Request Body**
+
+```json
+{
+  "name": "...",
+  "yyyyy_yyyyys": [{...}]
+}
+```
+
+**Child / association fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `yyyyy_yyyyys` | `object[]` | `yyyyy_yyyyy` child records (all replaced on update) |
 
 **Response `200 OK`**
 

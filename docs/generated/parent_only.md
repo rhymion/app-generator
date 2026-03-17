@@ -100,7 +100,8 @@ Retrieve a single `Parent Only` record by its ID.
 
 ### PUT /api/parent_only/[id]
 
-Replace an existing `Parent Only` record. Accepts the same body as `POST /api/parent_only`.
+Replace an existing `Parent Only` record. 
+Accepts the same body as `POST /api/parent_only`.
 
 **Response `200 OK`**
 

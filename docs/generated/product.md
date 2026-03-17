@@ -105,7 +105,8 @@ Retrieve a single `Product` record by its ID.
 
 ### PUT /api/product/[id]
 
-Replace an existing `Product` record. Accepts the same body as `POST /api/product`.
+Replace an existing `Product` record. 
+Accepts the same body as `POST /api/product`.
 
 **Response `200 OK`**
 

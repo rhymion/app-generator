@@ -134,7 +134,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         _write(doc_dir / f'{parent}.md', md_content)
         _write(
             out / 'app' / '[locale]' / 'docs' / parent / 'page.mdx',
-            convert_md_to_mdx(md_content, link_prefix='../'),
+            convert_md_to_mdx(md_content, link_prefix=''),
         )
         entity_doc_summaries.append({
             'parent':     doc_ctx['parent'],
@@ -232,7 +232,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     _write(doc_dir / 'index.md', index_md)
     _write(
         out / 'app' / '[locale]' / 'docs' / 'page.mdx',
-        convert_md_to_mdx(index_md, link_prefix=''),
+        convert_md_to_mdx(index_md, link_prefix='docs/'),
     )
 
     # --- Cypress test generation ---

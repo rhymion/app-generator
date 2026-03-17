@@ -102,7 +102,8 @@ Retrieve a single `Organization` record by its ID.
 
 ### PUT /api/organization/[id]
 
-Replace an existing `Organization` record. Accepts the same body as `POST /api/organization`.
+Replace an existing `Organization` record. 
+Accepts the same body as `POST /api/organization`.
 
 **Response `200 OK`**
 

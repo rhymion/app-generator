@@ -87,7 +87,26 @@ Retrieve a single `Setting` record by its ID.
 
 ### PUT /api/setting/[id]
 
-Replace an existing `Setting` record. Accepts the same body as `POST /api/setting`.
+Replace an existing `Setting` record. 
+
+**Request Body**
+
+```json
+{
+  "name": "...",
+  "email": "...",
+  "password": "...",
+  "api_key": null,
+  "avatar": null,
+  "roles_ids": ["clxxx..."]
+}
+```
+
+**Child / association fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `roles_ids` | `string[]` | IDs of `role` records to associate (replaces existing) |
 
 **Response `200 OK`**
 

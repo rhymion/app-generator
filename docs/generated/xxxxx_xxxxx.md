@@ -105,7 +105,8 @@ Retrieve a single `Xxxxx Xxxxx` record by its ID.
 
 ### PUT /api/xxxxx_xxxxx/[id]
 
-Replace an existing `Xxxxx Xxxxx` record. Accepts the same body as `POST /api/xxxxx_xxxxx`.
+Replace an existing `Xxxxx Xxxxx` record. 
+Accepts the same body as `POST /api/xxxxx_xxxxx`.
 
 **Response `200 OK`**
 

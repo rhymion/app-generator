@@ -108,7 +108,8 @@ Retrieve a single `Inventory` record by its ID.
 
 ### PUT /api/inventory/[id]
 
-Replace an existing `Inventory` record. Accepts the same body as `POST /api/inventory`.
+Replace an existing `Inventory` record. 
+Accepts the same body as `POST /api/inventory`.
 
 **Response `200 OK`**
 

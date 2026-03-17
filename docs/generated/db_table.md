@@ -103,7 +103,8 @@ Retrieve a single `Db Table` record by its ID.
 
 ### PUT /api/db_table/[id]
 
-Replace an existing `Db Table` record. Accepts the same body as `POST /api/db_table`.
+Replace an existing `Db Table` record. 
+Accepts the same body as `POST /api/db_table`.
 
 **Response `200 OK`**
 

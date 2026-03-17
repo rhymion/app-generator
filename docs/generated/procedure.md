@@ -116,7 +116,8 @@ Retrieve a single `Procedure` record by its ID.
 
 ### PUT /api/procedure/[id]
 
-Replace an existing `Procedure` record. Accepts the same body as `POST /api/procedure`.
+Replace an existing `Procedure` record. 
+Accepts the same body as `POST /api/procedure`.
 
 **Response `200 OK`**
 

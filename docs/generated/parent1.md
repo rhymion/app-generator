@@ -121,7 +121,8 @@ Retrieve a single `Parent1` record by its ID.
 
 ### PUT /api/parent1/[id]
 
-Replace an existing `Parent1` record. Accepts the same body as `POST /api/parent1`.
+Replace an existing `Parent1` record. 
+Accepts the same body as `POST /api/parent1`.
 
 **Response `200 OK`**
 

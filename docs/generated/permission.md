@@ -108,7 +108,8 @@ Retrieve a single `Permission` record by its ID.
 
 ### PUT /api/permission/[id]
 
-Replace an existing `Permission` record. Accepts the same body as `POST /api/permission`.
+Replace an existing `Permission` record. 
+Accepts the same body as `POST /api/permission`.
 
 **Response `200 OK`**
 

@@ -4,7 +4,7 @@
 
 ## Overview
 
-<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>Entity</td><td><code>organization</code></td></tr><tr><td>Operations</td><td>List · View · Create · Update · Delete</td></tr><tr><td>API</td><td>Yes — see <a href="../#api-reference">API Reference</a> below</td></tr></tbody></table>
+<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>Entity</td><td><code>organization</code></td></tr><tr><td>Operations</td><td>List · View · Create · Update · Delete</td></tr><tr><td>API</td><td>Yes — see <a href="#api-reference">API Reference</a> below</td></tr></tbody></table>
 
 ## Fields
 
@@ -14,7 +14,7 @@
 
 ## Relationships
 
-<table><thead><tr><th>Field / Property</th><th>Target Entity</th><th>Relationship Type</th></tr></thead><tbody><tr><td><code>user_accounts</code></td><td><a href="../user_account"><code>user_account</code></a></td><td>many-to-many · <code>list</code></td></tr></tbody></table>
+<table><thead><tr><th>Field / Property</th><th>Target Entity</th><th>Relationship Type</th></tr></thead><tbody><tr><td><code>user_accounts</code></td><td><a href="user_account"><code>user_account</code></a></td><td>many-to-many · <code>list</code></td></tr></tbody></table>
 
 ## UI Pages
 
@@ -82,7 +82,8 @@ Retrieve a single `Organization` record by its ID.
 
 ### PUT /api/organization/[id]
 
-Replace an existing `Organization` record. Accepts the same body as `POST /api/organization`.
+Replace an existing `Organization` record. 
+Accepts the same body as `POST /api/organization`.
 
 **Response `200 OK`**
 

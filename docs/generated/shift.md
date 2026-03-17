@@ -104,7 +104,8 @@ Retrieve a single `Shift` record by its ID.
 
 ### PUT /api/shift/[id]
 
-Replace an existing `Shift` record. Accepts the same body as `POST /api/shift`.
+Replace an existing `Shift` record. 
+Accepts the same body as `POST /api/shift`.
 
 **Response `200 OK`**
 

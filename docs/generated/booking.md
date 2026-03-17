@@ -104,7 +104,8 @@ Retrieve a single `Booking` record by its ID.
 
 ### PUT /api/booking/[id]
 
-Replace an existing `Booking` record. Accepts the same body as `POST /api/booking`.
+Replace an existing `Booking` record. 
+Accepts the same body as `POST /api/booking`.
 
 **Response `200 OK`**
 

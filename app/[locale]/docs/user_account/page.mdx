@@ -4,7 +4,7 @@
 
 ## Overview
 
-<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>Entity</td><td><code>user_account</code></td></tr><tr><td>Operations</td><td>List · View · Update · Delete</td></tr><tr><td>API</td><td>Yes — see <a href="../#api-reference">API Reference</a> below</td></tr></tbody></table>
+<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>Entity</td><td><code>user_account</code></td></tr><tr><td>Operations</td><td>List · View · Update · Delete</td></tr><tr><td>API</td><td>Yes — see <a href="#api-reference">API Reference</a> below</td></tr></tbody></table>
 
 ## Fields
 
@@ -14,7 +14,7 @@
 
 ## Relationships
 
-<table><thead><tr><th>Field / Property</th><th>Target Entity</th><th>Relationship Type</th></tr></thead><tbody><tr><td><code>roles</code></td><td><a href="../role"><code>role</code></a></td><td>many-to-many · <code>list</code></td></tr></tbody></table>
+<table><thead><tr><th>Field / Property</th><th>Target Entity</th><th>Relationship Type</th></tr></thead><tbody><tr><td><code>roles</code></td><td><a href="role"><code>role</code></a></td><td>many-to-many · <code>list</code></td></tr></tbody></table>
 
 ## UI Pages
 
@@ -65,7 +65,21 @@ Retrieve a single `User Account` record by its ID.
 
 ### PUT /api/user_account/[id]
 
-Replace an existing `User Account` record. Accepts the same body as `POST /api/user_account`.
+Replace an existing `User Account` record. 
+
+**Request Body**
+
+```json
+{
+  "name": "...",
+  "avatar": null,
+  "roles_ids": ["clxxx..."]
+}
+```
+
+**Child / association fields**
+
+<table><thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code>roles_ids</code></td><td><code>string[]</code></td><td>IDs of <code>role</code> records to associate (replaces existing)</td></tr></tbody></table>
 
 **Response `200 OK`**
 

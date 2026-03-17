@@ -103,7 +103,8 @@ Retrieve a single `Purchase Order` record by its ID.
 
 ### PUT /api/purchase_order/[id]
 
-Replace an existing `Purchase Order` record. Accepts the same body as `POST /api/purchase_order`.
+Replace an existing `Purchase Order` record. 
+Accepts the same body as `POST /api/purchase_order`.
 
 **Response `200 OK`**
 

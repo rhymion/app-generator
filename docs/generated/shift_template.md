@@ -102,7 +102,8 @@ Retrieve a single `Shift Template` record by its ID.
 
 ### PUT /api/shift_template/[id]
 
-Replace an existing `Shift Template` record. Accepts the same body as `POST /api/shift_template`.
+Replace an existing `Shift Template` record. 
+Accepts the same body as `POST /api/shift_template`.
 
 **Response `200 OK`**
 

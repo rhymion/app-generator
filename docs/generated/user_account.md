@@ -86,7 +86,23 @@ Retrieve a single `User Account` record by its ID.
 
 ### PUT /api/user_account/[id]
 
-Replace an existing `User Account` record. Accepts the same body as `POST /api/user_account`.
+Replace an existing `User Account` record. 
+
+**Request Body**
+
+```json
+{
+  "name": "...",
+  "avatar": null,
+  "roles_ids": ["clxxx..."]
+}
+```
+
+**Child / association fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `roles_ids` | `string[]` | IDs of `role` records to associate (replaces existing) |
 
 **Response `200 OK`**
 

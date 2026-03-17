@@ -109,7 +109,8 @@ Retrieve a single `Resource` record by its ID.
 
 ### PUT /api/resource/[id]
 
-Replace an existing `Resource` record. Accepts the same body as `POST /api/resource`.
+Replace an existing `Resource` record. 
+Accepts the same body as `POST /api/resource`.
 
 **Response `200 OK`**
 
