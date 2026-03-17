@@ -21,7 +21,7 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:reset:test": "dotenv -e .env.test -- prisma migrate reset --force && dotenv -e .env.test -- prisma db push",
-    "db:seed:test": "dotenv -e .env.test -- tsx scripts/seed-test-db.ts",
+    "db:seed:test": "dotenv -e .env.test -- tsx scripts/seed-its.ts",
     "db:studio": "prisma studio",
     "db:studio:test": "dotenv -e .env.test -- prisma studio",
     "db:use:sqlite": "bash scripts/use-sqlite.sh",
