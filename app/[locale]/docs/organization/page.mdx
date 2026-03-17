@@ -4,36 +4,21 @@
 
 ## Overview
 
-| | |
-|---|---|
-| Entity | `organization` |
-| Operations | List · View · Create · Update · Delete |
-| API | Yes — see [API Reference](#api-reference) below |
+<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>Entity</td><td><code>organization</code></td></tr><tr><td>Operations</td><td>List · View · Create · Update · Delete</td></tr><tr><td>API</td><td>Yes — see <a href="../#api-reference">API Reference</a> below</td></tr></tbody></table>
 
 ## Fields
 
-| Field | Type | Required | Read-only | Notes |
-|-------|------|:--------:|:---------:|-------|
-| `id` | `string` | ✓ | ✓ | CUID |
-| `name` | `string` | ✓ |  | min 1 chars |
-| `description` | `string \| null` |  |  |  |
+<table><thead><tr><th>Field</th><th>Type</th><th style={{textAlign:'center'}}>Required</th><th style={{textAlign:'center'}}>Read-only</th><th>Notes</th></tr></thead><tbody><tr><td><code>id</code></td><td><code>string</code></td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}>✓</td><td>CUID</td></tr><tr><td><code>name</code></td><td><code>string</code></td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td>min 1 chars</td></tr><tr><td><code>description</code></td><td><code>string | null</code></td><td style={{textAlign:'center'}}></td><td style={{textAlign:'center'}}></td><td></td></tr></tbody></table>
 
 > **Read-only** fields (`id`, `creator_id`, `created_at`, `updated_at`) are set automatically and cannot be written through the API or UI forms.
 
 ## Relationships
 
-| Field / Property | Target Entity | Relationship Type |
-|-----------------|---------------|-------------------|
-| `user_accounts` | [`user_account`](../user_account) | many-to-many · `list` |
+<table><thead><tr><th>Field / Property</th><th>Target Entity</th><th>Relationship Type</th></tr></thead><tbody><tr><td><code>user_accounts</code></td><td><a href="../user_account"><code>user_account</code></a></td><td>many-to-many · <code>list</code></td></tr></tbody></table>
 
 ## UI Pages
 
-| Page | URL | Enabled |
-|------|-----|:-------:|
-| List | `/en/organization` | ✓ |
-| New | `/en/organization/new` | ✓ |
-| Edit | `/en/organization/edit/[id]` | ✓ |
-| View | `/en/organization/view/[id]` | ✓ |
+<table><thead><tr><th>Page</th><th>URL</th><th style={{textAlign:'center'}}>Enabled</th></tr></thead><tbody><tr><td>List</td><td><code>/en/organization</code></td><td style={{textAlign:'center'}}>✓</td></tr><tr><td>New</td><td><code>/en/organization/new</code></td><td style={{textAlign:'center'}}>✓</td></tr><tr><td>Edit</td><td><code>/en/organization/edit/[id]</code></td><td style={{textAlign:'center'}}>✓</td></tr><tr><td>View</td><td><code>/en/organization/view/[id]</code></td><td style={{textAlign:'center'}}>✓</td></tr></tbody></table>
 
 ## API Reference
 
@@ -41,10 +26,7 @@
 
 All endpoints require one of:
 
-| Header | Format | Example |
-|--------|--------|---------|
-| `X-API-Key` | `<key>` | `X-API-Key: mk_abc123...` |
-| `Authorization` | `Bearer <key>` | `Authorization: Bearer mk_abc123...` |
+<table><thead><tr><th>Header</th><th>Format</th><th>Example</th></tr></thead><tbody><tr><td><code>X-API-Key</code></td><td><code>&lt;key&gt;</code></td><td><code>X-API-Key: mk_abc123...</code></td></tr><tr><td><code>Authorization</code></td><td><code>Bearer &lt;key&gt;</code></td><td><code>Authorization: Bearer mk_abc123...</code></td></tr></tbody></table>
 
 API keys are stored in `user_account.api_key` and start with the `mk_` prefix.
 
@@ -82,9 +64,7 @@ Create a new `Organization` record.
 
 **Child / association fields**
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `userAccounts_ids` | `string[]` | IDs of `user_account` records to associate (replaces existing) |
+<table><thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code>userAccounts_ids</code></td><td><code>string[]</code></td><td>IDs of <code>user_account</code> records to associate (replaces existing)</td></tr></tbody></table>
 
 **Response `201 Created`** — the newly created record object.
 
@@ -131,13 +111,7 @@ Delete a `Organization` record by its ID.
 
 ### Error Responses
 
-| Status | Meaning |
-|--------|---------|
-| `400` | Bad request (validation error) |
-| `401` | Missing or invalid API key |
-| `403` | Insufficient permission for the operation |
-| `404` | Record not found |
-| `500` | Unexpected server error |
+<table><thead><tr><th>Status</th><th>Meaning</th></tr></thead><tbody><tr><td><code>400</code></td><td>Bad request (validation error)</td></tr><tr><td><code>401</code></td><td>Missing or invalid API key</td></tr><tr><td><code>403</code></td><td>Insufficient permission for the operation</td></tr><tr><td><code>404</code></td><td>Record not found</td></tr><tr><td><code>500</code></td><td>Unexpected server error</td></tr></tbody></table>
 
 All error responses return `{ "error": "<message>" }`.
 

@@ -1,7 +1,6 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from 'next-intl/plugin';
 import createMDX from '@next/mdx'
-import remarkGfm from 'remark-gfm'
 
 const withNextIntl = createNextIntlPlugin('./i18n/request.ts');
 
@@ -19,11 +18,7 @@ const nextConfig: NextConfig = {
   // cacheComponents: true,
 };
 
-const withMDX = createMDX({
-  options: {
-    remarkPlugins: [remarkGfm],
-  },
-})
+const withMDX = createMDX({})
 
 // Merge MDX config with Next.js config
 export default withNextIntl(withMDX(nextConfig));

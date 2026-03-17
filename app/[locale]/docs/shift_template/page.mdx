@@ -4,38 +4,21 @@
 
 ## Overview
 
-| | |
-|---|---|
-| Entity | `shift_template` |
-| Operations | List · View · Create · Update · Delete |
-| API | Yes — see [API Reference](#api-reference) below |
+<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>Entity</td><td><code>shift_template</code></td></tr><tr><td>Operations</td><td>List · View · Create · Update · Delete</td></tr><tr><td>API</td><td>Yes — see <a href="../#api-reference">API Reference</a> below</td></tr></tbody></table>
 
 ## Fields
 
-| Field | Type | Required | Read-only | Notes |
-|-------|------|:--------:|:---------:|-------|
-| `id` | `string` | ✓ | ✓ | CUID |
-| `user_account_id` | `string` | ✓ |  | FK → [user_account](../user_account) (label: `name`), CUID |
-| `day_of_week` | `integer` | ✓ |  | min: 0, max: 6, values: `Sunday`, `Monday`, `Tuesday`, `Wednesday`, `Thursday`, `Friday`, `Saturday` |
-| `start_time` | `time` | ✓ |  |  |
-| `end_time` | `time` | ✓ |  |  |
+<table><thead><tr><th>Field</th><th>Type</th><th style={{textAlign:'center'}}>Required</th><th style={{textAlign:'center'}}>Read-only</th><th>Notes</th></tr></thead><tbody><tr><td><code>id</code></td><td><code>string</code></td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}>✓</td><td>CUID</td></tr><tr><td><code>user_account_id</code></td><td><code>string</code></td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td>FK → <a href="../user_account">user_account</a> (label: <code>name</code>), CUID</td></tr><tr><td><code>day_of_week</code></td><td><code>integer</code></td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td>min: 0, max: 6, values: <code>Sunday</code>, <code>Monday</code>, <code>Tuesday</code>, <code>Wednesday</code>, <code>Thursday</code>, <code>Friday</code>, <code>Saturday</code></td></tr><tr><td><code>start_time</code></td><td><code>time</code></td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td></td></tr><tr><td><code>end_time</code></td><td><code>time</code></td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td></td></tr></tbody></table>
 
 > **Read-only** fields (`id`, `creator_id`, `created_at`, `updated_at`) are set automatically and cannot be written through the API or UI forms.
 
 ## Relationships
 
-| Field / Property | Target Entity | Relationship Type |
-|-----------------|---------------|-------------------|
-| `user_account_id` | [`user_account`](../user_account) | many-to-one |
+<table><thead><tr><th>Field / Property</th><th>Target Entity</th><th>Relationship Type</th></tr></thead><tbody><tr><td><code>user_account_id</code></td><td><a href="../user_account"><code>user_account</code></a></td><td>many-to-one</td></tr></tbody></table>
 
 ## UI Pages
 
-| Page | URL | Enabled |
-|------|-----|:-------:|
-| List | `/en/shift_template` | ✓ |
-| New | `/en/shift_template/new` | ✓ |
-| Edit | `/en/shift_template/edit/[id]` | ✓ |
-| View | `/en/shift_template/view/[id]` | ✓ |
+<table><thead><tr><th>Page</th><th>URL</th><th style={{textAlign:'center'}}>Enabled</th></tr></thead><tbody><tr><td>List</td><td><code>/en/shift_template</code></td><td style={{textAlign:'center'}}>✓</td></tr><tr><td>New</td><td><code>/en/shift_template/new</code></td><td style={{textAlign:'center'}}>✓</td></tr><tr><td>Edit</td><td><code>/en/shift_template/edit/[id]</code></td><td style={{textAlign:'center'}}>✓</td></tr><tr><td>View</td><td><code>/en/shift_template/view/[id]</code></td><td style={{textAlign:'center'}}>✓</td></tr></tbody></table>
 
 ## API Reference
 
@@ -43,10 +26,7 @@
 
 All endpoints require one of:
 
-| Header | Format | Example |
-|--------|--------|---------|
-| `X-API-Key` | `<key>` | `X-API-Key: mk_abc123...` |
-| `Authorization` | `Bearer <key>` | `Authorization: Bearer mk_abc123...` |
+<table><thead><tr><th>Header</th><th>Format</th><th>Example</th></tr></thead><tbody><tr><td><code>X-API-Key</code></td><td><code>&lt;key&gt;</code></td><td><code>X-API-Key: mk_abc123...</code></td></tr><tr><td><code>Authorization</code></td><td><code>Bearer &lt;key&gt;</code></td><td><code>Authorization: Bearer mk_abc123...</code></td></tr></tbody></table>
 
 API keys are stored in `user_account.api_key` and start with the `mk_` prefix.
 
@@ -131,13 +111,7 @@ Delete a `Shift Template` record by its ID.
 
 ### Error Responses
 
-| Status | Meaning |
-|--------|---------|
-| `400` | Bad request (validation error) |
-| `401` | Missing or invalid API key |
-| `403` | Insufficient permission for the operation |
-| `404` | Record not found |
-| `500` | Unexpected server error |
+<table><thead><tr><th>Status</th><th>Meaning</th></tr></thead><tbody><tr><td><code>400</code></td><td>Bad request (validation error)</td></tr><tr><td><code>401</code></td><td>Missing or invalid API key</td></tr><tr><td><code>403</code></td><td>Insufficient permission for the operation</td></tr><tr><td><code>404</code></td><td>Record not found</td></tr><tr><td><code>500</code></td><td>Unexpected server error</td></tr></tbody></table>
 
 All error responses return `{ "error": "<message>" }`.
 

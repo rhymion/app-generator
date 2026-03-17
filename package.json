@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --no-turbopack",
-    "dev:test": "dotenv -e .env.test -- next dev --no-turbopack",
+    "dev": "next dev",
+    "dev:test": "dotenv -e .env.test -- next dev",
     "build": "next build",
     "start": "next start",
     "start:test": "dotenv -e .env.test -- next start",
@@ -55,8 +55,7 @@
     "next-auth": "^4.24.13",
     "next-intl": "^4.8.3",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3",
-    "remark-gfm": "^4.0.1"
+    "react-dom": "^19.2.3"
   },
   "devDependencies": {
     "@marp-team/marp-cli": "^4.2.3",

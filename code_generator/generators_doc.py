@@ -285,3 +285,129 @@ def build_doc_entity_context(ctx: dict) -> dict:
 def build_doc_index_context(entity_summaries: list) -> dict:
     """Build the Jinja2 context for doc_index.md.jinja2."""
     return {'entities': entity_summaries}
+
+
+# ---------------------------------------------------------------------------
+# GFM → MDX conversion (HTML tables, no remark-gfm needed at runtime)
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+
+def _md_inline_to_html(text: str, link_prefix: str = '') -> str:
+    """Convert inline markdown in a table cell to HTML.
+
+    link_prefix: prepended to relative link hrefs (e.g. '../' for entity pages).
+    """
+    # Preserve inline code content from further substitutions
+    codes: list[str] = []
+
+    def save_code(m: '_re.Match[str]') -> str:
+        inner = (m.group(1)
+                 .replace('&', '&amp;')
+                 .replace('<', '&lt;')
+                 .replace('>', '&gt;')
+                 .replace('{', '&#123;')
+                 .replace('}', '&#125;'))
+        codes.append(inner)
+        return f'\x00CODE{len(codes) - 1}\x00'
+
+    text = _re.sub(r'`([^`]+)`', save_code, text)
+
+    # Escape remaining HTML special chars and JSX expression delimiters
+    text = (text
+            .replace('&', '&amp;')
+            .replace('<', '&lt;')
+            .replace('>', '&gt;')
+            .replace('{', '&#123;')
+            .replace('}', '&#125;'))
+
+    # Markdown links: [label](target.md) and [label](target)
+    def replace_link(m: '_re.Match[str]') -> str:
+        label = m.group(1)
+        href = _re.sub(r'\.md$', '', m.group(2))
+        return f'<a href="{link_prefix}{href}">{label}</a>'
+
+    text = _re.sub(r'\[([^\]]+)\]\(([^)]+)\)', replace_link, text)
+
+    # Bold
+    text = _re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
+
+    # Restore inline code
+    for i, code in enumerate(codes):
+        text = text.replace(f'\x00CODE{i}\x00', f'<code>{code}</code>')
+
+    return text
+
+
+def _table_lines_to_html(lines: list[str], link_prefix: str) -> str:
+    """Convert a block of GFM table lines to an HTML table string."""
+    if len(lines) < 2:
+        return '\n'.join(lines)
+
+    def split_row(line: str) -> list[str]:
+        # Split on unescaped pipes only, then restore \| within cells
+        raw = line.strip().strip('|')
+        cells = _re.split(r'(?<!\\)\|', raw)
+        return [c.strip().replace(r'\|', '|') for c in cells]
+
+    headers = split_row(lines[0])
+    separators = split_row(lines[1])
+
+    def alignment(sep: str) -> str:
+        if sep.startswith(':') and sep.endswith(':'):
+            return " style={{textAlign:'center'}}"
+        if sep.endswith(':'):
+            return " style={{textAlign:'right'}}"
+        return ''
+
+    aligns = [alignment(s) for s in separators]
+
+    parts = ['<table><thead><tr>']
+    for i, h in enumerate(headers):
+        a = aligns[i] if i < len(aligns) else ''
+        parts.append(f'<th{a}>{_md_inline_to_html(h, link_prefix)}</th>')
+    parts.append('</tr></thead><tbody>')
+
+    for row_line in lines[2:]:
+        cells = split_row(row_line)
+        parts.append('<tr>')
+        for i, cell in enumerate(cells):
+            a = aligns[i] if i < len(aligns) else ''
+            parts.append(f'<td{a}>{_md_inline_to_html(cell, link_prefix)}</td>')
+        parts.append('</tr>')
+
+    parts.append('</tbody></table>')
+    return ''.join(parts)
+
+
+def convert_md_to_mdx(content: str, link_prefix: str = '') -> str:
+    """Convert a GFM markdown string to MDX by replacing pipe tables with HTML tables.
+
+    link_prefix: prepended to relative link hrefs inside table cells
+    (use '' for the index page, '../' for entity pages).
+    """
+    lines = content.split('\n')
+    result: list[str] = []
+    i = 0
+    sep_re = _re.compile(r'^[\s|:\-]+$')
+
+    while i < len(lines):
+        line = lines[i]
+        # Detect start of a GFM table: a pipe row followed by a separator row
+        if (line.strip().startswith('|')
+                and i + 1 < len(lines)
+                and sep_re.match(lines[i + 1])
+                and '|' in lines[i + 1]):
+            table_lines = [line]
+            j = i + 1
+            while j < len(lines) and lines[j].strip().startswith('|'):
+                table_lines.append(lines[j])
+                j += 1
+            result.append(_table_lines_to_html(table_lines, link_prefix))
+            i = j
+        else:
+            result.append(line)
+            i += 1
+
+    return '\n'.join(result)
