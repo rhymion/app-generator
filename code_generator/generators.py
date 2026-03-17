@@ -168,6 +168,14 @@ def page_list_context(ctx: dict) -> dict:
     display_fields_code = ''
     primary_field = ''
 
+    # Build map from relation display name (e.g. 'epic') to label_field (e.g. 'title')
+    # parent_rels_raw entries: { prop_name: 'epic_id', label_field: 'title', ... }
+    rel_label_map: dict[str, str] = {}
+    for r in ctx.get('parent_rels_raw', []):
+        prop = r['prop_name']
+        if prop.endswith('_id'):
+            rel_label_map[prop[:-3]] = r['label_field']
+
     if xdisplay_table:
         fields_code_parts = []
         for item in xdisplay_table:
@@ -204,6 +212,11 @@ def page_list_context(ctx: dict) -> dict:
 
             if config.get('primary'):
                 primary_field = field_name
+
+            # If this field is a relationship object, format it server-side (no functions to client)
+            if field_name in rel_label_map:
+                label_f = rel_label_map[field_name]
+                formatting_entries.append(f"    {field_name}: item.{field_name}?.{label_f} ?? '',")
 
             fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width} }}")
 
