@@ -101,9 +101,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% if can_delete %}
 
   const handleDelete = async () => {
-    const formData = new FormData();
-    formData.set('id', src.id);
-    await remove{{ parent_pascal }}(formData);
+    await remove{{ parent_pascal }}([src.id]);
   };
 {% endif %}
 

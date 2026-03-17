@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addXxxxxXxxxx, updateXxxxxXxxxx, deleteXxxxxXxxxx } from './service';
 export async function upsertXxxxxXxxxx(data: FormData) {
@@ -28,13 +28,22 @@ export async function upsertXxxxxXxxxx(data: FormData) {
 
   redirect('/xxxxx_xxxxx');
 }
-export async function removeXxxxxXxxxx(data: FormData | string[]) {
-  const ids = Array.isArray(data) ? data : [data.get('id') as string];
-  const items = await prisma.xxxxx_xxxxx.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
-  for (const item of items) {
-    await requirePermission('xxxxx_xxxxx', 'delete', item);
+export async function removeXxxxxXxxxx(ids: string[]) {
+  const [{ permissions: userPermissions, userId }, xxxxxXxxxxs] = await Promise.all([
+    getModelPermissions('xxxxx_xxxxx'),
+    await prisma.xxxxx_xxxxx.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
+  ]);
+  const filteredXxxxxXxxxxs = userPermissions.general.delete
+    ? xxxxxXxxxxs
+    : xxxxxXxxxxs.filter(item =>
+        (userPermissions.creator?.delete && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
+      );
+  if (filteredXxxxxXxxxxs.length === 0) {
+    throw new Error('No permission to delete');
   }
-  await deleteXxxxxXxxxx(ids);
+  await deleteXxxxxXxxxx(filteredXxxxxXxxxxs.map(item => item.id));
   redirect('/xxxxx_xxxxx');
 }
 

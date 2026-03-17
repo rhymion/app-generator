@@ -59,9 +59,7 @@ export default function FormUpsert({ src, isEdit, permissions }: FormUpsertProps
   };
 
   const handleDelete = async () => {
-    const formData = new FormData();
-    formData.set('id', src.id);
-    await removeParentOnly(formData);
+    await removeParentOnly([src.id]);
   };
 
   const handleBack = () => {

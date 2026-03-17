@@ -105,9 +105,7 @@ export default function FormUpsert({ src, isEdit, permissions, allOrganizations 
   };
 
   const handleDelete = async () => {
-    const formData = new FormData();
-    formData.set('id', src.id);
-    await removeResource(formData);
+    await removeResource([src.id]);
   };
 
   const handleBack = () => {

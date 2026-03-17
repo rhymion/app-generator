@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addRole, updateRole, deleteRole } from './service';
 export async function upsertRole(data: FormData) {
@@ -30,13 +30,22 @@ export async function upsertRole(data: FormData) {
 
   redirect('/role');
 }
-export async function removeRole(data: FormData | string[]) {
-  const ids = Array.isArray(data) ? data : [data.get('id') as string];
-  const items = await prisma.role.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
-  for (const item of items) {
-    await requirePermission('role', 'delete', item);
+export async function removeRole(ids: string[]) {
+  const [{ permissions: userPermissions, userId }, roles] = await Promise.all([
+    getModelPermissions('role'),
+    await prisma.role.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
+  ]);
+  const filteredRoles = userPermissions.general.delete
+    ? roles
+    : roles.filter(item =>
+        (userPermissions.creator?.delete && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
+      );
+  if (filteredRoles.length === 0) {
+    throw new Error('No permission to delete');
   }
-  await deleteRole(ids);
+  await deleteRole(filteredRoles.map(item => item.id));
   redirect('/role');
 }
 

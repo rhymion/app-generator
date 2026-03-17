@@ -90,9 +90,7 @@ export default function FormUpsert({ src, isEdit, permissions, allUserAccounts =
   };
 
   const handleDelete = async () => {
-    const formData = new FormData();
-    formData.set('id', src.id);
-    await removePurchaseOrder(formData);
+    await removePurchaseOrder([src.id]);
   };
 
   const handleBack = () => {

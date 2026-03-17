@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addDbTable, updateDbTable, deleteDbTable } from './service';
 export async function upsertDbTable(data: FormData) {
@@ -28,13 +28,22 @@ export async function upsertDbTable(data: FormData) {
 
   redirect('/db_table');
 }
-export async function removeDbTable(data: FormData | string[]) {
-  const ids = Array.isArray(data) ? data : [data.get('id') as string];
-  const items = await prisma.db_table.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
-  for (const item of items) {
-    await requirePermission('db_table', 'delete', item);
+export async function removeDbTable(ids: string[]) {
+  const [{ permissions: userPermissions, userId }, dbTables] = await Promise.all([
+    getModelPermissions('db_table'),
+    await prisma.db_table.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
+  ]);
+  const filteredDbTables = userPermissions.general.delete
+    ? dbTables
+    : dbTables.filter(item =>
+        (userPermissions.creator?.delete && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
+      );
+  if (filteredDbTables.length === 0) {
+    throw new Error('No permission to delete');
   }
-  await deleteDbTable(ids);
+  await deleteDbTable(filteredDbTables.map(item => item.id));
   redirect('/db_table');
 }
 

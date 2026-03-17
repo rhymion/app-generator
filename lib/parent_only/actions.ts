@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addParentOnly, updateParentOnly, deleteParentOnly } from './service';
 export async function upsertParentOnly(data: FormData) {
@@ -29,13 +29,22 @@ export async function upsertParentOnly(data: FormData) {
 
   redirect('/parent_only');
 }
-export async function removeParentOnly(data: FormData | string[]) {
-  const ids = Array.isArray(data) ? data : [data.get('id') as string];
-  const items = await prisma.parent_only.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
-  for (const item of items) {
-    await requirePermission('parent_only', 'delete', item);
+export async function removeParentOnly(ids: string[]) {
+  const [{ permissions: userPermissions, userId }, parentOnlys] = await Promise.all([
+    getModelPermissions('parent_only'),
+    await prisma.parent_only.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
+  ]);
+  const filteredParentOnlys = userPermissions.general.delete
+    ? parentOnlys
+    : parentOnlys.filter(item =>
+        (userPermissions.creator?.delete && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
+      );
+  if (filteredParentOnlys.length === 0) {
+    throw new Error('No permission to delete');
   }
-  await deleteParentOnly(ids);
+  await deleteParentOnly(filteredParentOnlys.map(item => item.id));
   redirect('/parent_only');
 }
 

@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addProcedure, updateProcedure, deleteProcedure } from './service';
 export async function upsertProcedure(data: FormData) {
@@ -42,13 +42,22 @@ export async function upsertProcedure(data: FormData) {
 
   redirect('/procedure');
 }
-export async function removeProcedure(data: FormData | string[]) {
-  const ids = Array.isArray(data) ? data : [data.get('id') as string];
-  const items = await prisma.procedure.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true, assignee_id: true } });
-  for (const item of items) {
-    await requirePermission('procedure', 'delete', item);
+export async function removeProcedure(ids: string[]) {
+  const [{ permissions: userPermissions, userId }, procedures] = await Promise.all([
+    getModelPermissions('procedure'),
+    await prisma.procedure.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
+  ]);
+  const filteredProcedures = userPermissions.general.delete
+    ? procedures
+    : procedures.filter(item =>
+        (userPermissions.creator?.delete && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
+      );
+  if (filteredProcedures.length === 0) {
+    throw new Error('No permission to delete');
   }
-  await deleteProcedure(ids);
+  await deleteProcedure(filteredProcedures.map(item => item.id));
   redirect('/procedure');
 }
 

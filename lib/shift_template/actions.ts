@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addShiftTemplate, updateShiftTemplate, deleteShiftTemplate } from './service';
 export async function upsertShiftTemplate(data: FormData) {
@@ -29,13 +29,22 @@ export async function upsertShiftTemplate(data: FormData) {
 
   redirect('/shift_template');
 }
-export async function removeShiftTemplate(data: FormData | string[]) {
-  const ids = Array.isArray(data) ? data : [data.get('id') as string];
-  const items = await prisma.shift_template.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
-  for (const item of items) {
-    await requirePermission('shift_template', 'delete', item);
+export async function removeShiftTemplate(ids: string[]) {
+  const [{ permissions: userPermissions, userId }, shiftTemplates] = await Promise.all([
+    getModelPermissions('shift_template'),
+    await prisma.shift_template.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
+  ]);
+  const filteredShiftTemplates = userPermissions.general.delete
+    ? shiftTemplates
+    : shiftTemplates.filter(item =>
+        (userPermissions.creator?.delete && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
+      );
+  if (filteredShiftTemplates.length === 0) {
+    throw new Error('No permission to delete');
   }
-  await deleteShiftTemplate(ids);
+  await deleteShiftTemplate(filteredShiftTemplates.map(item => item.id));
   redirect('/shift_template');
 }
 

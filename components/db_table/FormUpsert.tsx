@@ -87,9 +87,7 @@ export default function FormUpsert({ src, isEdit, permissions, currentUserId }: 
   };
 
   const handleDelete = async () => {
-    const formData = new FormData();
-    formData.set('id', src.id);
-    await removeDbTable(formData);
+    await removeDbTable([src.id]);
   };
 
   const handleBack = () => {

@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { updateUserAccount, deleteUserAccount } from './service';
 export async function upsertUserAccount(data: FormData) {
@@ -23,13 +23,22 @@ export async function upsertUserAccount(data: FormData) {
 
   redirect('/user_account');
 }
-export async function removeUserAccount(data: FormData | string[]) {
-  const ids = Array.isArray(data) ? data : [data.get('id') as string];
-  const items = await prisma.user_account.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
-  for (const item of items) {
-    await requirePermission('user_account', 'delete', item);
+export async function removeUserAccount(ids: string[]) {
+  const [{ permissions: userPermissions, userId }, userAccounts] = await Promise.all([
+    getModelPermissions('user_account'),
+    await prisma.user_account.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
+  ]);
+  const filteredUserAccounts = userPermissions.general.delete
+    ? userAccounts
+    : userAccounts.filter(item =>
+        (userPermissions.creator?.delete && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
+      );
+  if (filteredUserAccounts.length === 0) {
+    throw new Error('No permission to delete');
   }
-  await deleteUserAccount(ids);
+  await deleteUserAccount(filteredUserAccounts.map(item => item.id));
   redirect('/user_account');
 }
 

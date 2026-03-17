@@ -67,9 +67,7 @@ export default function FormUpsert({ src, isEdit, permissions, allResources = []
   };
 
   const handleDelete = async () => {
-    const formData = new FormData();
-    formData.set('id', src.id);
-    await removeBooking(formData);
+    await removeBooking([src.id]);
   };
 
   const handleBack = () => {

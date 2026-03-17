@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addProduct, updateProduct, deleteProduct } from './service';
 export async function upsertProduct(data: FormData) {
@@ -28,13 +28,22 @@ export async function upsertProduct(data: FormData) {
 
   redirect('/product');
 }
-export async function removeProduct(data: FormData | string[]) {
-  const ids = Array.isArray(data) ? data : [data.get('id') as string];
-  const items = await prisma.product.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
-  for (const item of items) {
-    await requirePermission('product', 'delete', item);
+export async function removeProduct(ids: string[]) {
+  const [{ permissions: userPermissions, userId }, products] = await Promise.all([
+    getModelPermissions('product'),
+    await prisma.product.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
+  ]);
+  const filteredProducts = userPermissions.general.delete
+    ? products
+    : products.filter(item =>
+        (userPermissions.creator?.delete && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
+      );
+  if (filteredProducts.length === 0) {
+    throw new Error('No permission to delete');
   }
-  await deleteProduct(ids);
+  await deleteProduct(filteredProducts.map(item => item.id));
   redirect('/product');
 }
 

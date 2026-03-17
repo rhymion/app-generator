@@ -32,7 +32,7 @@ interface DisplayFieldConfig<T> {
 interface DataGridClientProps<T extends BaseEntity> {
   src: T[];
   basePath: string;
-  removeAction?: (formDataOrIds: FormData | string[]) => Promise<void>;
+  removeAction?: (ids: string[]) => Promise<void>;
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];
   permissions?: ModelPermissions;

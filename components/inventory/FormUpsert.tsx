@@ -71,9 +71,7 @@ export default function FormUpsert({ src, isEdit, permissions, allProducts = [],
   };
 
   const handleDelete = async () => {
-    const formData = new FormData();
-    formData.set('id', src.id);
-    await removeInventory(formData);
+    await removeInventory([src.id]);
   };
 
   const handleBack = () => {

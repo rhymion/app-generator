@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder } from './service';
 export async function upsertPurchaseOrder(data: FormData) {
@@ -27,13 +27,22 @@ export async function upsertPurchaseOrder(data: FormData) {
 
   redirect('/purchase_order');
 }
-export async function removePurchaseOrder(data: FormData | string[]) {
-  const ids = Array.isArray(data) ? data : [data.get('id') as string];
-  const items = await prisma.purchase_order.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
-  for (const item of items) {
-    await requirePermission('purchase_order', 'delete', item);
+export async function removePurchaseOrder(ids: string[]) {
+  const [{ permissions: userPermissions, userId }, purchaseOrders] = await Promise.all([
+    getModelPermissions('purchase_order'),
+    await prisma.purchase_order.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
+  ]);
+  const filteredPurchaseOrders = userPermissions.general.delete
+    ? purchaseOrders
+    : purchaseOrders.filter(item =>
+        (userPermissions.creator?.delete && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
+      );
+  if (filteredPurchaseOrders.length === 0) {
+    throw new Error('No permission to delete');
   }
-  await deletePurchaseOrder(ids);
+  await deletePurchaseOrder(filteredPurchaseOrders.map(item => item.id));
   redirect('/purchase_order');
 }
 

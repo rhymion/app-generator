@@ -73,9 +73,7 @@ export default function FormUpsert({ src, isEdit, permissions, allRoles = [], ro
   };
 
   const handleDelete = async () => {
-    const formData = new FormData();
-    formData.set('id', src.id);
-    await removePermission(formData);
+    await removePermission([src.id]);
   };
 
   const handleBack = () => {

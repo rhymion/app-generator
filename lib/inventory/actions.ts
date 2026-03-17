@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { addInventory, updateInventory, deleteInventory } from './service';
 export async function upsertInventory(data: FormData) {
@@ -30,13 +30,22 @@ export async function upsertInventory(data: FormData) {
 
   redirect('/inventory');
 }
-export async function removeInventory(data: FormData | string[]) {
-  const ids = Array.isArray(data) ? data : [data.get('id') as string];
-  const items = await prisma.inventory.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
-  for (const item of items) {
-    await requirePermission('inventory', 'delete', item);
+export async function removeInventory(ids: string[]) {
+  const [{ permissions: userPermissions, userId }, inventorys] = await Promise.all([
+    getModelPermissions('inventory'),
+    await prisma.inventory.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
+  ]);
+  const filteredInventorys = userPermissions.general.delete
+    ? inventorys
+    : inventorys.filter(item =>
+        (userPermissions.creator?.delete && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
+      );
+  if (filteredInventorys.length === 0) {
+    throw new Error('No permission to delete');
   }
-  await deleteInventory(ids);
+  await deleteInventory(filteredInventorys.map(item => item.id));
   redirect('/inventory');
 }
 
