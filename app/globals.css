@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 /*
  * Base colour tokens – used by Tailwind utilities and the body defaults.
