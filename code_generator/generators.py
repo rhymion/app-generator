@@ -818,8 +818,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         rel_jsxs.append(
             f"      <Autocomplete\n"
             f"        options={{{opts_var}}}\n"
-            f"        value={{{opts_var}.find((option) => option.id === {state_name}) || null}}\n"
-            f"        onChange={{(_, newValue) => set{setter}(newValue?.id ?? null)}}\n"
+            f"        value={{{opts_var}.find((option) => option.value === {state_name}) || null}}\n"
+            f"        onChange={{(_, newValue) => set{setter}(newValue?.value ?? null)}}\n"
             f"        renderInput={{(params) => (\n"
             f"          <TextField\n"
             f"            {{...params}}\n"
@@ -936,13 +936,13 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     for r in parent_rels_raw:
         prop_name    = r['prop_name']
         target_pascal = to_pascal_case(r['target'])
-        label_field  = r.get('labelField', 'name')
+        label_field  = r.get('label_field', 'name')
         sn           = safe_var_name(prop_name)
         opts_var     = f'{sn}Options'
         rel_opt_setups.append(
             f"  const {opts_var} = useMemo(() => {{\n"
             f"    return all{target_pascal}s.map((item) => ({{\n"
-            f"      id: item.id,\n"
+            f"      value: item.id,\n"
             f"      label: item.{label_field},\n"
             f"    }}));\n"
             f"  }}, [all{target_pascal}s]);"
@@ -1144,15 +1144,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             continue
         cdef = schema['definitions'].get(c['name'], {})
         all_child_rels.extend(r for r in _gpr(cdef) if r['target'] != model)
+    parent_rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
     seen_rel = set()
     child_entity_rel_opt = []
     for r in all_child_rels:
-        if r['prop_name'] in seen_rel:
+        if r['prop_name'] in seen_rel or r['prop_name'] in parent_rel_prop_names:
             continue
         seen_rel.add(r['prop_name'])
         prop_camel   = to_camel_case(r['prop_name'])
         target_pascal = to_pascal_case(r['target'])
-        label_field  = r.get('labelField', 'name')
+        label_field  = r.get('label_field', 'name')
         opts_var     = f'{prop_camel}Options'
         child_entity_rel_opt.append(
             f"  const {opts_var} = useMemo(() =>\n"
