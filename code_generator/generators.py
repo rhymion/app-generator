@@ -543,7 +543,7 @@ def form_view_context(ctx: dict) -> dict:
         fk = _tf(p)
         rel = rel_by_prop.get(p)
         if rel:
-            label_f  = rel.get('labelField', 'name')
+            label_f  = rel.get('label_field', 'name')
             label_fk = fk.removesuffix('Id')
             rel_name = rel.get('relation_name', p.removesuffix('_id'))
             text_jsxs.append(
