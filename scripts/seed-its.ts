@@ -25,6 +25,7 @@ async function main() {
       id: adminId,
       creator_id: adminId,
       updater_id: adminId,
+      api_key: 'mk_78d1e51a47f40912f5a1787367e3f7f6ed17c314590eac84edc5b3f785a527b1',
       email: 'admin@example.com',
       name: 'Test Admin',
       password: hashedPassword,
