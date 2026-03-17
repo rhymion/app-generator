@@ -121,7 +121,27 @@ Retrieve a single `{{ title }}` record by its ID.
 {% if can_update %}
 ### PUT /api/{{ parent }}/[id]
 
-Replace an existing `{{ title }}` record. Accepts the same body as `POST /api/{{ parent }}`.
+Replace an existing `{{ title }}` record. 
+{% if can_create %}
+Accepts the same body as `POST /api/{{ parent }}`.
+{% else %}
+
+**Request Body**
+
+```json
+{{ request_body_json }}
+```
+
+{% if child_body_fields %}
+**Child / association fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+{% for f in child_body_fields %}
+| `{{ f.name }}` | `{{ f.type }}` | {{ f.description }} |
+{% endfor %}
+{% endif %}
+{% endif %}
 
 **Response `200 OK`**
 
