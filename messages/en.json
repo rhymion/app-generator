@@ -25,15 +25,12 @@
   },
   "Fields": {
     "actions": "Actions",
-    "endDate": "End Date",
     "max": "Max",
     "maxLength": "Max Length",
     "order": "No.",
     "reference": "Reference",
     "regex": "Regex",
     "required": "Required",
-    "startDate": "Start Date",
-    "title": "Title",
     "type": "Type",
     "writtenBy": "Written By"
   },

@@ -25,15 +25,12 @@
   },
   "Fields": {
     "actions": "アクション",
-    "endDate": "終了日",
     "max": "最大",
     "maxLength": "最大長",
     "order": "No.",
     "reference": "参照",
     "regex": "正規表現",
     "required": "必須",
-    "startDate": "開始日",
-    "title": "タイトル",
     "type": "タイプ",
     "writtenBy": "作成者"
   },
