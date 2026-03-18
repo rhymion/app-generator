@@ -1,3 +1,23 @@
+# Notes on demo
+
+```
+cd code_generator
+python3 cleanup.py json_schema_its.yaml ..
+cd ..
+npm run generate-code
+npx prisma generate
+npm run build
+npm run start:test
+npm run db:reset:test
+npm run db:seed:test
+npm run db:studio:test
+```
+
+Could you populate a few sample data in http://localhost:3000/ 
+? 
+The API documents are available under http://localhost:3000/en/docs You can use mk_78d1e51a47f40912f5a1787367e3f7f6ed17c314590eac84edc5b3f785a527b1 as API key.
+
+
 # About my-next
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
