@@ -149,10 +149,24 @@ def extract_entities(schema: dict) -> list[dict]:
             if child in child_to_parents.get(parent_model, []):
                 m2m_pairs.add('<->'.join(sorted([parent_model, child])))
 
-    # Filter out entities that are pure children (not in any m2m pair)
+    # Validate: if a generated entity appears as a child, it must use x-outputType: list
+    generated_models = {e['model'] for e in results}
+    for entity in results:
+        for child in entity['children']:
+            if child['name'] in generated_models and child['output_type'] != 'list':
+                raise ValueError(
+                    f"Entity '{child['name']}' has x-generate but appears as a child of "
+                    f"'{entity['parent']}' with x-outputType: '{child['output_type']}' "
+                    f"(must be 'list')"
+                )
+
+    # Filter out entities that are pure children (not in any m2m pair),
+    # unless they have an explicit _detail definition (which opts them in to standalone generation)
     def _should_include(entity: dict) -> bool:
         m = entity['model']
         if m not in all_children:
+            return True
+        if entity['definition_key'].endswith('_detail'):
             return True
         return any(m in pair.split('<->') for pair in m2m_pairs)
 

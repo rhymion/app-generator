@@ -12,6 +12,7 @@ from helpers.schema_helpers import (
     filter_fields,
     get_parent_relationships,
     get_detail_relation_name,
+    is_optional_fk_to_parent,
 )
 
 
@@ -115,9 +116,13 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         if k not in _TIMESTAMP_FIELDS
     ]
 
-    # Child many-to-one rels — needed early for import target calculation
+    # Child many-to-one rels — needed early for import target and option calculation.
+    # Exclude list children: they are independent entities managed on their own pages,
+    # so their FK dropdown options are not needed in this form.
     child_rels_early = []
     for child_raw in children_raw:
+        if child_raw.get('output_type') == 'list':
+            continue
         child_def = schema['definitions'].get(child_raw['name'], {})
         if child_def.get('properties'):
             child_rels_early.extend(get_parent_relationships(child_def))
@@ -142,6 +147,17 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         if not child_def.get('properties'):
             continue
 
+        # Independent entity: a list child (not m2m) that has its own _detail with x-generate.
+        # Its type is declared in its own module — import it rather than redeclaring inline.
+        is_independent = (
+            child_raw.get('output_type') == 'list'
+            and (child_raw.get('relationship') or {}).get('type') != 'many-to-many'
+            and bool(schema['definitions'].get(f'{child_name}_detail', {}).get('x-generate'))
+        )
+        if is_independent:
+            if child_name not in import_targets and child_name != model:
+                import_targets.append(child_name)
+
         # Respect field filtering from child's own detail definition
         child_detail_def = schema['definitions'].get(f'{child_name}_detail', {})
         child_fields_whitelist = (child_detail_def.get('x-generate') or {}).get('fields')
@@ -158,7 +174,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             for r in get_parent_relationships(child_def)
         ]
 
-        already_declared = child_name in declared_child_types or child_name == model
+        already_declared = is_independent or child_name in declared_child_types or child_name == model
         if not already_declared:
             declared_child_types.add(child_name)
 
@@ -171,15 +187,22 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             declare_type=not already_declared,
         ))
 
-    # all_option_targets for FormUpsertProps: m2m targets + parent rels + child rel targets
+    # all_option_targets for FormUpsertProps: m2m + optional-FK-list + parent rels + embedded child rels
     m2m_targets = [
         c['relationship']['target']
         for c in children_raw
         if (c.get('relationship') or {}).get('type') == 'many-to-many'
     ]
+    optional_fk_list_targets = [
+        c['name'] for c in children_raw
+        if (c.get('output_type') == 'list'
+            and (c.get('relationship') or {}).get('type') != 'many-to-many'
+            and is_optional_fk_to_parent(schema['definitions'].get(c['name'], {}), model))
+    ]
     child_rel_targets = _dedupe_ordered(r['target'] for r in child_rels_early)
     all_option_targets = _dedupe_ordered([
         *m2m_targets,
+        *optional_fk_list_targets,
         *[r.target for r in parent_rels],
         *child_rel_targets,
     ])

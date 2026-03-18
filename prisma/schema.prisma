@@ -1,0 +1,284 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// Common models
+// ============================================================
+
+model user_account {
+  id         String  @id @default(cuid())
+  name       String
+  email      String  @unique
+  password   String
+  api_key    String?
+  avatar     String?
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user_account  @relation("UserAccountCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account  @relation("UserAccountUpdater", fields: [updater_id], references: [id])
+
+  roles         role[]         @relation("UserRoles")
+  organizations organization[] @relation("UserOrganizations")
+
+  created_user_accounts  user_account[]  @relation("UserAccountCreator")
+  updated_user_accounts  user_account[]  @relation("UserAccountUpdater")
+  created_roles          role[]          @relation("RoleCreator")
+  updated_roles          role[]          @relation("RoleUpdater")
+  created_organizations  organization[]  @relation("OrganizationCreator")
+  updated_organizations  organization[]  @relation("OrganizationUpdater")
+  created_permissions    permission[]    @relation("PermissionCreator")
+  updated_permissions    permission[]    @relation("PermissionUpdater")
+
+  // ITS relations
+  created_epics           epic[]           @relation("EpicCreator")
+  updated_epics           epic[]           @relation("EpicUpdater")
+  created_features        feature[]        @relation("FeatureCreator")
+  updated_features        feature[]        @relation("FeatureUpdater")
+  assigned_features       feature[]        @relation("FeatureAssignee")
+  created_user_stories    user_story[]     @relation("UserStoryCreator")
+  updated_user_stories    user_story[]     @relation("UserStoryUpdater")
+  assigned_user_stories   user_story[]     @relation("UserStoryAssignee")
+  created_tasks           task[]           @relation("TaskCreator")
+  updated_tasks           task[]           @relation("TaskUpdater")
+  assigned_tasks          task[]           @relation("TaskAssignee")
+  created_bugs            bug[]            @relation("BugCreator")
+  updated_bugs            bug[]            @relation("BugUpdater")
+  assigned_bugs           bug[]            @relation("BugAssignee")
+  created_epic_comments   epic_comment[]   @relation("EpicCommentCreator")
+  created_feature_comments   feature_comment[]   @relation("FeatureCommentCreator")
+  created_user_story_comments user_story_comment[] @relation("UserStoryCommentCreator")
+  created_task_comments   task_comment[]   @relation("TaskCommentCreator")
+  created_bug_comments    bug_comment[]    @relation("BugCommentCreator")
+
+  @@index([api_key])
+}
+
+model role {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user_account @relation("RoleCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user_account @relation("RoleUpdater", fields: [updater_id], references: [id])
+
+  user_accounts user_account[] @relation("UserRoles")
+  permissions   permission[]
+}
+
+model organization {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user_account @relation("OrganizationCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user_account @relation("OrganizationUpdater", fields: [updater_id], references: [id])
+
+  user_accounts user_account[] @relation("UserOrganizations")
+  epics         epic[]
+}
+
+model permission {
+  id         String  @id @default(cuid())
+  name       String
+  role_id    String?
+  role       role?   @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  create     Boolean
+  read       Boolean
+  update     Boolean
+  delete     Boolean
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user_account @relation("PermissionCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account @relation("PermissionUpdater", fields: [updater_id], references: [id])
+
+  @@unique([name, role_id])
+}
+
+// ============================================================
+// ITS models
+// ============================================================
+
+model epic {
+  id              String   @id @default(cuid())
+  name            String
+  organization_id String
+  organization    organization @relation(fields: [organization_id], references: [id])
+  description     String?
+  status          Int      @default(0)
+  priority        Int      @default(1)
+  due_date        DateTime? @db.Date
+  created_at      DateTime @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user_account @relation("EpicCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user_account @relation("EpicUpdater", fields: [updater_id], references: [id])
+
+  features      feature[]
+  epic_comments epic_comment[]
+}
+
+model feature {
+  id          String   @id @default(cuid())
+  name        String
+  epic_id     String
+  epic        epic     @relation(fields: [epic_id], references: [id], onDelete: Cascade)
+  description String?
+  status      Int      @default(0)
+  priority    Int      @default(1)
+  assignee_id String?
+  assignee    user_account? @relation("FeatureAssignee", fields: [assignee_id], references: [id])
+  due_date    DateTime? @db.Date
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user_account @relation("FeatureCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user_account @relation("FeatureUpdater", fields: [updater_id], references: [id])
+
+  user_stories     user_story[]
+  bugs             bug[]
+  feature_comments feature_comment[]
+}
+
+model user_story {
+  id           String   @id @default(cuid())
+  name         String
+  feature_id   String
+  feature      feature  @relation(fields: [feature_id], references: [id], onDelete: Cascade)
+  description  String?
+  status       Int      @default(0)
+  priority     Int      @default(1)
+  story_points Int?
+  assignee_id  String?
+  assignee     user_account? @relation("UserStoryAssignee", fields: [assignee_id], references: [id])
+  created_at   DateTime @default(now()) @db.Timestamptz(0)
+  updated_at   DateTime @updatedAt @db.Timestamptz(0)
+  creator_id   String
+  creator      user_account @relation("UserStoryCreator", fields: [creator_id], references: [id])
+  updater_id   String
+  updater      user_account @relation("UserStoryUpdater", fields: [updater_id], references: [id])
+
+  tasks               task[]
+  bugs                bug[]
+  user_story_comments user_story_comment[]
+}
+
+model task {
+  id            String   @id @default(cuid())
+  name          String
+  user_story_id String
+  user_story    user_story @relation(fields: [user_story_id], references: [id], onDelete: Cascade)
+  description   String?
+  status        Int      @default(0)
+  priority      Int      @default(1)
+  assignee_id   String?
+  assignee      user_account? @relation("TaskAssignee", fields: [assignee_id], references: [id])
+  due_date      DateTime? @db.Date
+  created_at    DateTime @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime @updatedAt @db.Timestamptz(0)
+  creator_id    String
+  creator       user_account @relation("TaskCreator", fields: [creator_id], references: [id])
+  updater_id    String
+  updater       user_account @relation("TaskUpdater", fields: [updater_id], references: [id])
+
+  task_comments task_comment[]
+}
+
+model bug {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  status        Int      @default(0)
+  priority      Int      @default(1)
+  severity      Int      @default(1)
+  feature_id    String?
+  feature       feature?    @relation(fields: [feature_id], references: [id])
+  user_story_id String?
+  user_story    user_story? @relation(fields: [user_story_id], references: [id])
+  assignee_id   String?
+  assignee      user_account? @relation("BugAssignee", fields: [assignee_id], references: [id])
+  due_date      DateTime? @db.Date
+  created_at    DateTime @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime @updatedAt @db.Timestamptz(0)
+  creator_id    String
+  creator       user_account @relation("BugCreator", fields: [creator_id], references: [id])
+  updater_id    String
+  updater       user_account @relation("BugUpdater", fields: [updater_id], references: [id])
+
+  bug_comments bug_comment[]
+}
+
+model epic_comment {
+  id         String   @id @default(cuid())
+  message    String
+  epic_id    String
+  epic       epic     @relation(fields: [epic_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user_account @relation("EpicCommentCreator", fields: [creator_id], references: [id])
+}
+
+model feature_comment {
+  id         String   @id @default(cuid())
+  message    String
+  feature_id String
+  feature    feature  @relation(fields: [feature_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user_account @relation("FeatureCommentCreator", fields: [creator_id], references: [id])
+}
+
+model user_story_comment {
+  id             String     @id @default(cuid())
+  message        String
+  user_story_id  String
+  user_story     user_story @relation(fields: [user_story_id], references: [id], onDelete: Cascade)
+  created_at     DateTime   @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime   @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user_account @relation("UserStoryCommentCreator", fields: [creator_id], references: [id])
+}
+
+model task_comment {
+  id         String   @id @default(cuid())
+  message    String
+  task_id    String
+  task       task     @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user_account @relation("TaskCommentCreator", fields: [creator_id], references: [id])
+}
+
+model bug_comment {
+  id         String   @id @default(cuid())
+  message    String
+  bug_id     String
+  bug        bug      @relation(fields: [bug_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user_account @relation("BugCommentCreator", fields: [creator_id], references: [id])
+}

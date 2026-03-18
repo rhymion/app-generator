@@ -992,7 +992,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     parent_form_data_sets = '\n'.join(filter(None, [text_ds, rel_ds, num_ds, enum_ds, bool_ds, dt_ds, img_ds, cust_ds]))
 
     # ---- Children analysis ----
-    non_comment_ch = [c for c in children_raw if c.get('output_type') != 'comments']
+    # Use the pre-filtered embedded_ch from build_context (passed as non_comment_ch in ctx).
+    # This excludes mandatory-FK list children (independent entities, read-only in this form)
+    # while keeping m2m and optional-FK list children (which have use_connect=True).
+    non_comment_ch = ctx['non_comment_ch']
     comment_children = [c for c in children_raw if c.get('output_type') == 'comments']
     has_comment_children = bool(comment_children)
     has_children = bool(non_comment_ch)
@@ -1075,7 +1078,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         is_list    = c.get('output_type') == 'list'
         is_self    = child_name == model
 
-        if is_m2m or (is_list and is_self):
+        if c.get('use_connect') and is_list:
             child_grid_setup_parts.append(
                 f"  const [initial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                 f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
@@ -1188,7 +1191,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         is_list = c.get('output_type') == 'list'
         is_self = child_name == model
 
-        if is_m2m or (is_list and is_self):
+        if c.get('use_connect') and is_list:
             item_var = singularize(child_var)
             child_fdh_parts.append(
                 f"    const {child_var} = {child_var}Ref.current?.getItems?.() || [];\n\n"
@@ -1276,32 +1279,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         is_self = child_name == model
         rel = c.get('relationship') or {}
 
-        if is_m2m:
-            target = rel['target']
-            target_pascal = to_pascal_case(target)
-            child_grid_components_parts.append(
-                f"      <EditableListWrapper\n"
-                f"        ref={{{child_var}Ref}}\n"
-                f"        initialItems={{initial{child_pascal}}}\n"
-                f"        itemType=\"autocomplete\"\n"
-                f"        addButtonLabel=\"Add {child_title_label}\"\n"
-                f"        showTitle={{true}}\n"
-                f"        title={{tf('{child_camel}')}}\n"
-                f"        textFieldLabel=\"Name\"\n"
-                f"        textFieldPlaceholder=\"Enter name\"\n"
-                f"        allAutocompleteOptions={{all{target_pascal}s.map(item => ({{\n"
-                f"          id: item.id,\n"
-                f"          label: item.name,\n"
-                f"          value: item.id,\n"
-                f"        }}))}}\n"
-                f"        excludeOptionIds={{[src.id]}}\n"
-                f"      />"
-            )
-            continue
-
-        if is_list and is_self:
-            target_pascal = to_pascal_case(parent)
-            self_rel = next((r for r in parent_rels_raw if r['target'] == model), None)
+        if c.get('use_connect') and is_list:
+            if is_m2m:
+                autocomplete_target = rel['target']
+            elif is_self:
+                autocomplete_target = model
+            else:  # optional FK list
+                autocomplete_target = child_name
+            target_pascal = to_pascal_case(autocomplete_target)
+            self_rel = next((r for r in parent_rels_raw if r['target'] == model), None) if is_self else None
             filter_logic = f'.filter(item => !item.{self_rel["prop_name"]} || item.{self_rel["prop_name"]} === src.id)' if self_rel else ''
             child_grid_components_parts.append(
                 f"      <EditableListWrapper\n"

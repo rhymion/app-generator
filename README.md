@@ -7,7 +7,7 @@ npm run db:seed:test
 npm run db:studio:test
 ```
 
-シンプルな課題追跡システム用のJSONスキーマとPrismaスキーマを作成していただけますか？ITSには、Epic、Feature、User Story、Task、Bugというチケットタイプがあり、それぞれに対応するモデル/エンティティが必要です。`user_account`、`role`、`permission`、`organization`は、コードジェネレーターで作成されるすべてのアプリケーションで共通となるモデル/エンティティなので、 @code_generator/json_schema_db_table.yaml と同じものにしてください。また、ユーザーが自身のアカウントを管理するために使用する`setting`エンティティも維持してください。
+シンプルな課題追跡システム用のJSONスキーマとPrismaスキーマを作成していただけますか？ITSには、Epic、Feature、User Story、Task、Bugというチケットタイプがあり、それぞれに対応するモデル/エンティティが必要で、またコメント欄も必要です。`user_account`、`role`、`permission`、`organization`は、コードジェネレーターで作成されるすべてのアプリケーションで共通となるモデル/エンティティなので、 @code_generator/json_schema_db_table.yaml と同じものにしてください。また、ユーザーが自身のアカウントを管理するために使用する`setting`エンティティも維持してください。
 
 これはデモ目的なので、厳密な要件はありません。既存のツールを参考にしても構いません。
 

@@ -36,6 +36,16 @@ def filter_fields(properties: dict, fields: list[str] | None = None) -> dict:
     return {k: v for k, v in properties.items() if k in allowed}
 
 
+def is_optional_fk_to_parent(child_def: dict, parent_model: str) -> bool:
+    """Return True if the child's FK to parent_model is nullable (optional relationship)."""
+    for prop_def in child_def.get('properties', {}).values():
+        rel = prop_def.get('x-relationship', {})
+        if rel.get('target') == parent_model:
+            t = prop_def.get('type')
+            return isinstance(t, list) and 'null' in t
+    return False  # FK not found or not nullable → treat as mandatory
+
+
 def get_parent_relationships(parent_def: dict) -> list[dict]:
     """Returns many-to-one relationship metadata from a schema definition.
     Each entry: {prop_name, target, label_field, required}"""
