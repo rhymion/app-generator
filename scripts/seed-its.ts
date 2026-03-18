@@ -37,8 +37,8 @@ async function main() {
     update: {},
     create: {
       id: workerId,
-      creator_id: adminId,
-      updater_id: adminId,
+      creator_id: workerId,
+      updater_id: workerId,
       email: 'worker@example.com',
       name: 'Test Worker',
       password: hashedPassword,
@@ -77,7 +77,7 @@ async function main() {
   });
 
   // ── Permissions ────────────────────────────────────────────────────────────
-  const entities = ['epic', 'feature', 'user_story', 'bug', 'user_account', 'role', 'organization', 'permission', 'setting'];
+  const entities = ['user_account', 'role', 'organization', 'permission', 'setting'];
 
   // Administrator: full CRUD
   await Promise.all(entities.map(entity =>
@@ -111,15 +111,47 @@ async function main() {
   ));
 
   // Creator role: create + read + update on ITS entities
-  const creatorEntities = ['epic', 'feature', 'user_story', 'bug'];
-  await Promise.all(creatorEntities.map(entity =>
+  const itsEntities = ['epic', 'feature', 'user_story', 'bug'];
+  // Administrator: full CRUD
+  await Promise.all(itsEntities.map(entity =>
     prisma.permission.create({
       data: {
         name: entity,
-        role_id: creatorRole.id,
+        role_id: adminRole.id,
         creator_id: admin.id,
         updater_id: admin.id,
         create: true,
+        read: true,
+        update: true,
+        delete: true,
+      },
+    })
+  ));
+
+  // Global (no role): read-only
+  await Promise.all(itsEntities.map(entity =>
+    prisma.permission.create({
+      data: {
+        name: entity,
+        creator_id: admin.id,
+        updater_id: admin.id,
+        create: true,
+        read: true,
+        update: true,
+        delete: true,
+      },
+    })
+  ));
+
+  // Assignee role: read + update on ITS entities
+  await Promise.all(itsEntities.map(entity =>
+    prisma.permission.create({
+      data: {
+        name: entity,
+        role_id: assigneeRole.id,
+        creator_id: admin.id,
+        updater_id: admin.id,
+        create: false,
         read: true,
         update: true,
         delete: false,
@@ -127,8 +159,8 @@ async function main() {
     })
   ));
 
-  // Creator + Assignee: read/update setting (own account)
-  for (const role of [creatorRole, assigneeRole]) {
+  // Creator: read/update setting (own account)
+  for (const role of [creatorRole]) {
     await prisma.permission.create({
       data: {
         name: 'setting',
@@ -164,74 +196,9 @@ async function main() {
     },
   });
 
-  // ── Epic ───────────────────────────────────────────────────────────────────
-  const epic = await prisma.epic.create({
-    data: {
-      title: 'Test epic',
-      description: 'テスト用',
-      organization_id: devOrg.id,
-      status: 0, // Open
-      start_date: new Date('2026-03-17T00:00:00.000Z'),
-      end_date: new Date('2026-06-30T00:00:00.000Z'),
-      creator_id: admin.id,
-      updater_id: admin.id,
-    },
-  });
-
-  // ── Feature ────────────────────────────────────────────────────────────────
-  const feature = await prisma.feature.create({
-    data: {
-      title: 'Test feature',
-      description: 'テスト用',
-      epic_id: epic.id,
-      status: 0, // Open
-      creator_id: admin.id,
-      updater_id: admin.id,
-    },
-  });
-
-  // ── User Story ─────────────────────────────────────────────────────────────
-  const userStory = await prisma.user_story.create({
-    data: {
-      title: 'Test story',
-      description: 'テスト用',
-      feature_id: feature.id,
-      status: 0,    // Backlog
-      priority: 0,  // Low
-      story_points: 0,
-      assignee_id: worker.id,
-      creator_id: admin.id,
-      updater_id: admin.id,
-      tasks: {
-        create: [
-          {
-            title: 'Sample task',
-            description: '',
-            status: 0, // Todo
-            assignee_id: worker.id,
-          },
-        ],
-      },
-    },
-  });
-
-  // ── Bug ────────────────────────────────────────────────────────────────────
-  const bug = await prisma.bug.create({
-    data: {
-      title: '変数が重複してエラー',
-      description: '',
-      steps_to_reproduce: '',
-      status: 0,   // Open
-      severity: 0, // Low
-      user_story_id: userStory.id,
-      assignee_id: worker.id,
-      creator_id: admin.id,
-      updater_id: admin.id,
-    },
-  });
 
   console.log('ITS database seeded successfully!');
-  console.log({ admin, worker, adminRole, creatorRole, assigneeRole, devOrg, epic, feature, userStory, bug });
+  console.log({ admin, worker, adminRole, creatorRole, assigneeRole, devOrg });
 }
 
 main()
