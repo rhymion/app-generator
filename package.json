@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "cleanup": "python3 code_generator/cleanup.py code_generator/json_schema_its.yaml ./",
+    "demo:cleanup": "python3 code_generator/cleanup.py code_generator/json_schema.yaml ./ && dotenv -e .env.test -- prisma migrate reset --force && dotenv -e .env.test -- prisma db push",
+    "demo:generate": "python3 code_generator/generate.py code_generator/json_schema.yaml ./ && prisma generate",
     "dev": "next dev",
     "dev:test": "dotenv -e .env.test -- next dev",
     "build": "next build",
