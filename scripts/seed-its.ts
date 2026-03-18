@@ -110,54 +110,54 @@ async function main() {
     })
   ));
 
-  // Creator role: create + read + update on ITS entities
-  const itsEntities = ['epic', 'feature', 'user_story', 'bug'];
-  // Administrator: full CRUD
-  await Promise.all(itsEntities.map(entity =>
-    prisma.permission.create({
-      data: {
-        name: entity,
-        role_id: adminRole.id,
-        creator_id: admin.id,
-        updater_id: admin.id,
-        create: true,
-        read: true,
-        update: true,
-        delete: true,
-      },
-    })
-  ));
+  // // Creator role: create + read + update on ITS entities
+  // const itsEntities = ['epic', 'feature', 'user_story', 'bug'];
+  // // Administrator: full CRUD
+  // await Promise.all(itsEntities.map(entity =>
+  //   prisma.permission.create({
+  //     data: {
+  //       name: entity,
+  //       role_id: adminRole.id,
+  //       creator_id: admin.id,
+  //       updater_id: admin.id,
+  //       create: true,
+  //       read: true,
+  //       update: true,
+  //       delete: true,
+  //     },
+  //   })
+  // ));
 
-  // Global (no role): read-only
-  await Promise.all(itsEntities.map(entity =>
-    prisma.permission.create({
-      data: {
-        name: entity,
-        creator_id: admin.id,
-        updater_id: admin.id,
-        create: true,
-        read: true,
-        update: true,
-        delete: true,
-      },
-    })
-  ));
+  // // Global (no role): read-only
+  // await Promise.all(itsEntities.map(entity =>
+  //   prisma.permission.create({
+  //     data: {
+  //       name: entity,
+  //       creator_id: admin.id,
+  //       updater_id: admin.id,
+  //       create: true,
+  //       read: true,
+  //       update: true,
+  //       delete: true,
+  //     },
+  //   })
+  // ));
 
-  // Assignee role: read + update on ITS entities
-  await Promise.all(itsEntities.map(entity =>
-    prisma.permission.create({
-      data: {
-        name: entity,
-        role_id: assigneeRole.id,
-        creator_id: admin.id,
-        updater_id: admin.id,
-        create: false,
-        read: true,
-        update: true,
-        delete: false,
-      },
-    })
-  ));
+  // // Assignee role: read + update on ITS entities
+  // await Promise.all(itsEntities.map(entity =>
+  //   prisma.permission.create({
+  //     data: {
+  //       name: entity,
+  //       role_id: assigneeRole.id,
+  //       creator_id: admin.id,
+  //       updater_id: admin.id,
+  //       create: false,
+  //       read: true,
+  //       update: true,
+  //       delete: false,
+  //     },
+  //   })
+  // ));
 
   // Creator: read/update setting (own account)
   for (const role of [creatorRole]) {
