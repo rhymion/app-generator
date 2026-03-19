@@ -226,8 +226,11 @@ resource_id:
   x-relationship:
     type: many-to-one
     target: resource      # name of the target base entity definition
-    labelField: name      # property on the target used as display label
+    labelField: name      # property on the target used as display label — can be any field
 ```
+
+`labelField` can be any scalar property on the target model, not just `name`. For example,
+`labelField: order_no` shows an order number in the Autocomplete dropdown instead of a name.
 
 Add the resolved object to the **detail entity**:
 
@@ -336,7 +339,13 @@ disambiguates when there are multiple relations between the same two models.
 
 ## 7. One-to-Many Children (Child Collections)
 
-Add child models as array properties in the detail definition **without** `x-relationships`:
+There are two distinct patterns for one-to-many children, depending on whether the child
+entity is inline-only or has its own standalone pages.
+
+### 7.1 Inline children (no `x-generate` on child)
+
+Add child models as array properties in the detail definition **without** `x-relationships`
+and **without** `x-outputType`:
 
 ```yaml
 db_table_detail:
@@ -352,8 +361,6 @@ db_table_detail:
             $ref: "#/definitions/field"   # child model definition
 ```
 
-### What this generates
-
 The generator detects that `field` belongs to `db_table_detail` and generates an editable
 child DataGrid in `FormUpsert.tsx`. On save, children are created/updated/deleted together
 with the parent in a transaction.
@@ -364,9 +371,7 @@ await prisma.field.deleteMany({ where: { db_table_id: id, id: { notIn: keptIds }
 await prisma.field.createMany({ data: newChildren });
 ```
 
-### Prisma alignment
-
-The child model must have a FK column pointing to the parent with `onDelete: Cascade`:
+**Prisma alignment** — the child must have a FK column pointing to the parent:
 
 ```prisma
 model field {
@@ -376,6 +381,106 @@ model field {
 ```
 
 The child model itself does **not** need `x-generate`. It is never generated as a standalone page.
+
+### 7.2 Independent children (`x-generate` on child, `x-outputType: list` on parent)
+
+When a child entity has its own `x-generate` (its own list/view/edit pages), it must appear
+in the parent's detail definition with `x-outputType: list`. The generator **validates** this:
+a child with `x-generate` that appears as `x-outputType: table` or `x-outputType: comments`
+is a configuration error.
+
+```yaml
+epic_detail:
+  x-generate: { list: true, view: true, ... }
+  allOf:
+    - $ref: "#/definitions/epic"
+    - type: object
+      properties:
+        features:
+          type: array
+          x-outputType: list     # required when child has x-generate
+          items:
+            $ref: "#/definitions/feature"
+```
+
+The parent form's behaviour then depends on whether the child's FK to the parent is
+**mandatory** or **optional**:
+
+#### Rule 1 — Mandatory FK (non-nullable `{parent}_id`)
+
+The child cannot be orphaned from its parent. The parent form treats the relationship as
+**read-only**: no add, edit, or delete buttons. The child list is displayed for reference
+only (both in `FormView` and `FormUpsert`).
+
+```yaml
+# Child base entity — FK is required (non-nullable)
+feature:
+  required: [id, name, epic_id]
+  properties:
+    epic_id:
+      type: string          # not nullable → mandatory
+      x-relationship:
+        type: many-to-one
+        target: epic
+        labelField: name
+```
+
+#### Rule 2 — Optional FK (nullable `{parent}_id`)
+
+The child may or may not be associated with this parent. The parent form allows **add and
+delete only** (no inline editing). The association is managed via Prisma `connect`/`set`,
+identical to how many-to-many relationships work. An autocomplete field lets the user pick
+existing child records to associate.
+
+```yaml
+# Child base entity — FK is optional (nullable)
+bug:
+  properties:
+    feature_id:
+      type:
+        - string
+        - "null"              # nullable → optional FK
+      x-relationship:
+        type: many-to-one
+        target: feature
+        labelField: name
+```
+
+**`service.ts`** for the parent — uses `.set()` (connect existing records):
+```typescript
+data: {
+  bugs: { set: bugIds.map(id => ({ id })) }
+}
+```
+
+**`FormUpsert.tsx`** — renders a multi-select autocomplete (same pattern as many-to-many):
+```tsx
+<EditableListWrapper
+  items={bugsItems}
+  itemType="autocomplete"
+  allAutocompleteOptions={allBugs.map(item => ({ value: item.id, label: item.name }))}
+  onAdd={...}
+  onDelete={...}
+/>
+```
+
+**`FormUpsertProps`** in `types.ts` — includes `allBugs` for the autocomplete:
+```typescript
+export type FormUpsertProps = Readonly<FormViewProps & {
+  allBugs?: Bug[];
+  bugPermissions?: ModelPermissions;
+}>;
+```
+
+**Prisma alignment** — use `onDelete: SetNull` so deleting the parent does not cascade-delete
+orphaned children:
+
+```prisma
+model bug {
+  feature_id  String?
+  feature     feature? @relation(fields: [feature_id], references: [id], onDelete: SetNull)
+}
+```
 
 ---
 
@@ -391,11 +496,17 @@ some_child_array:
     $ref: "#/definitions/some_child"
 ```
 
-| Value | Description |
-|---|---|
-| _(omitted)_ | Editable DataGrid inline in `FormUpsert.tsx` (create/edit/delete rows) |
-| `list` | Read-only list in `FormView.tsx` (e.g., related records fetched separately) |
-| `comments` | Comment thread UI: text input + list with edit/delete per comment; dedicated server actions |
+| Value | Context | `FormView` | `FormUpsert` |
+|---|---|---|---|
+| _(omitted)_ | Inline child (no `x-generate`) | Editable DataGrid | Editable DataGrid (create/edit/delete) |
+| `list` | Many-to-many | Read-only list | Autocomplete — add/delete only (no edit) |
+| `list` | Independent child, **mandatory** FK | Read-only list | Read-only list — no buttons |
+| `list` | Independent child, **optional** FK | Read-only list | Autocomplete — add/delete only (no edit) |
+| `comments` | Comment thread | Comment list | Comment input + list with edit/delete per item |
+
+**Validation rule:** if a child entity has `x-generate`, it _must_ use `x-outputType: list`
+in the parent's detail definition. Using `table` or `comments` for a generated child is a
+configuration error caught at generator run time.
 
 ### `comments` detail
 
@@ -852,11 +963,12 @@ cypress/support/generated-tasks.ts       (updated)
 
 ### Array rendering (`x-outputType`)
 
-| Value | Renders as |
-|---|---|
-| _(omitted)_ | Editable inline DataGrid |
-| `list` | Read-only list in FormView |
-| `comments` | Comment thread with add/edit/delete |
+| Value | Context | Renders as |
+|---|---|---|
+| _(omitted)_ | Inline child | Editable DataGrid (create/edit/delete) |
+| `list` | M2M or optional-FK independent child | Autocomplete — add/delete only in FormUpsert; read-only in FormView |
+| `list` | Mandatory-FK independent child | Read-only in both FormUpsert and FormView |
+| `comments` | Comment thread | Comment input + list |
 
 ### Chart spans
 
