@@ -59,6 +59,28 @@ describe("RegisterPage", () => {
     expect(screen.getByRole("button", { name: /register/i })).toBeInTheDocument();
   });
 
+  it("should fail to register with no name", async () => {
+    const user = userEvent.setup();
+    render(<RegisterPage />);
+
+    const emailInput = screen.getByRole('textbox', { name: /email/i });
+    const passwordInput = screen.getByTestId("password");
+    const confirmPasswordInput = screen.getByTestId("confirm-password");
+    const registerButton = screen.getByRole("button", { name: /register/i });
+
+    await user.type(emailInput, "john@example.com");
+    await user.type(passwordInput, "password123");
+    await user.type(confirmPasswordInput, "password123");
+
+    // The email field is required in HTML, so try to submit
+    // HTML5 validation should prevent submission
+    await user.click(registerButton);
+
+    // Browser validation prevents form submission with required fields empty
+    // The form should not have called signIn
+    expect(signIn).not.toHaveBeenCalled();
+  });
+
   it("should fail to register with no email address", async () => {
     const user = userEvent.setup();
     render(<RegisterPage />);
@@ -91,6 +113,32 @@ describe("RegisterPage", () => {
 
     await user.type(nameInput, "John Doe");
     await user.type(emailInput, "john@example.com");
+
+    // The password field is required in HTML, so try to submit
+    await user.click(registerButton);
+
+    // HTML5 validation should prevent submission
+    expect(signIn).not.toHaveBeenCalled();
+  });
+
+  it("should fail to register when confirm password does not match", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true }),
+    }));
+    render(<RegisterPage />);
+
+    const nameInput = screen.getByRole('textbox', { name: /full name/i });
+    const emailInput = screen.getByRole('textbox', { name: /email/i });
+    const passwordInput = screen.getByTestId("password");
+    const confirmPasswordInput = screen.getByTestId("confirm-password");
+    const registerButton = screen.getByRole("button", { name: /register/i });
+
+    await user.type(nameInput, "John Doe");
+    await user.type(emailInput, "john@example.com");
+    await user.type(passwordInput, "password123");
+    await user.type(confirmPasswordInput, "password120");
 
     // The password field is required in HTML, so try to submit
     await user.click(registerButton);
