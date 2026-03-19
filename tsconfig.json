@@ -26,7 +26,8 @@
       "@/*": [
         "./*"
       ]
-    }
+    },
+    "types": ["@testing-library/jest-dom", "vitest/globals"]
   },
   "include": [
     "next-env.d.ts",
@@ -39,8 +40,7 @@
   ],
   "exclude": [
     "node_modules",
-    "**/*.test.tsx",
     "**/*.cy.tsx",
     "cypress" // Exclude the entire Cypress directory
-  ]
+  ],
 }

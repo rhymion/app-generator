@@ -45,6 +45,7 @@ describe("RegisterPage", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("should render the registration form", () => {
@@ -100,6 +101,10 @@ describe("RegisterPage", () => {
 
   it("should succeed to register with user name, email address and password", async () => {
     const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true }),
+    }));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (signIn as any).mockResolvedValueOnce({ error: null });
 
@@ -119,10 +124,8 @@ describe("RegisterPage", () => {
 
     await waitFor(() => {
       expect(signIn).toHaveBeenCalledWith("credentials", {
-        name: "John Doe",
         email: "john@example.com",
         password: "password123",
-        confirm_password: "password123",
         redirect: false,
       });
     });
@@ -135,10 +138,10 @@ describe("RegisterPage", () => {
 
   it("should fail to register with email address same as existing account", async () => {
     const user = userEvent.setup();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (signIn as any).mockResolvedValueOnce({
-      error: "Failed to sign in after registration",
-    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({ error: "Email address is already in use" }),
+    }));
 
     render(<RegisterPage />);
 
@@ -154,15 +157,8 @@ describe("RegisterPage", () => {
     await user.type(confirmPasswordInput, "password456");
     await user.click(registerButton);
 
-    await waitFor(() => {
-      expect(signIn).toHaveBeenCalledWith("credentials", {
-        name: "Jane Doe",
-        email: "existing@example.com",
-        password: "password456",
-        confirm_password: "password456",
-        redirect: false,
-      });
-    });
+    // Registration fails at the API level — signIn should not be called
+    expect(signIn).not.toHaveBeenCalled();
 
     // Should show error message
     await waitFor(() => {
