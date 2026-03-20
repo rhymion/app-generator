@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "code_generator/generate.py",
             "console": "integratedTerminal",
-            "args": ["code_generator/json_schema_db_table.yaml", "./"]
+            "args": ["code_generator/json_schema.yaml", "./"]
         },
         {
             "name": "Python Debugger: Current File",
