@@ -339,10 +339,10 @@ disambiguates when there are multiple relations between the same two models.
 
 ## 7. One-to-Many Children (Child Collections)
 
-There are two distinct patterns for one-to-many children, depending on whether the child
-entity is inline-only or has its own standalone pages.
+There are three distinct patterns for one-to-many children depending on whether the child
+entity has its own standalone pages and how many properties it has.
 
-### 7.1 Inline children (no `x-generate` on child)
+### 7.1 Inline DataGrid children (no `x-generate`, no `x-outputType`)
 
 Add child models as array properties in the detail definition **without** `x-relationships`
 and **without** `x-outputType`:
@@ -382,7 +382,72 @@ model field {
 
 The child model itself does **not** need `x-generate`. It is never generated as a standalone page.
 
-### 7.2 Independent children (`x-generate` on child, `x-outputType: list` on parent)
+### 7.2 Embedded list children (no `x-generate`, with `x-outputType: list`)
+
+For simple child models with only a `name` field (e.g. tags, labels, categories), use
+`x-outputType: list` without giving the child its own pages. The child must have a mandatory
+FK back to the parent:
+
+```yaml
+parent1_list:
+  type: object
+  required: [id, name, parent1_id]
+  properties:
+    id:
+      type: string
+      pattern: "^c[a-z0-9]{24,}$"
+    name:
+      type: string
+    parent1_id:
+      type: string
+      pattern: "^c[a-z0-9]{24,}$"
+
+parent1_detail:
+  allOf:
+    - $ref: "#/definitions/parent1"
+    - type: object
+      properties:
+        parent1_lists:
+          type: array
+          x-outputType: list      # embedded list — no own page
+          items:
+            $ref: "#/definitions/parent1_list"
+```
+
+The parent form shows an `EditableListWrapper` with `itemType="text"` — full add/edit/delete
+inline. The child has no own pages. Prisma uses nested `create`/`deleteMany` (delete-all +
+re-create on save).
+
+**`service.ts`** — uses nested `create`/`deleteMany` on update:
+```typescript
+data: {
+  parent1Lists: {
+    deleteMany: {},
+    create: parent1ListsItems.map(f => ({ name: f.name })),
+  },
+}
+```
+
+**`FormUpsert.tsx`** — renders an editable text list:
+```tsx
+<EditableListWrapper
+  ref={parent1ListsRef}
+  initialItems={initialParent1Lists}
+  itemType="text"
+  addButtonLabel="Add Parent1 Lists"
+  ...
+/>
+```
+
+**Prisma alignment** — same as §7.1 (FK column + cascade):
+```prisma
+model parent1_list {
+  parent1_id  String
+  parent1     parent1 @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
+}
+```
+
+### 7.3 Independent children (`x-generate` on child, `x-outputType: list` on parent)
 
 When a child entity has its own `x-generate` (its own list/view/edit pages), it must appear
 in the parent's detail definition with `x-outputType: list`. The generator **validates** this:
@@ -406,7 +471,7 @@ epic_detail:
 The parent form's behaviour then depends on whether the child's FK to the parent is
 **mandatory** or **optional**:
 
-#### Rule 1 — Mandatory FK (non-nullable `{parent}_id`)
+#### Rule 1 — Mandatory FK, independent child (non-nullable `{parent}_id`)
 
 The child cannot be orphaned from its parent. The parent form treats the relationship as
 **read-only**: no add, edit, or delete buttons. The child list is displayed for reference
@@ -499,9 +564,10 @@ some_child_array:
 | Value | Context | `FormView` | `FormUpsert` |
 |---|---|---|---|
 | _(omitted)_ | Inline child (no `x-generate`) | Editable DataGrid | Editable DataGrid (create/edit/delete) |
+| `list` | Embedded child (no `x-generate`), **mandatory** FK | Read-only list | Text list — add/edit/delete inline |
 | `list` | Many-to-many | Read-only list | Autocomplete — add/delete only (no edit) |
-| `list` | Independent child, **mandatory** FK | Read-only list | Read-only list — no buttons |
-| `list` | Independent child, **optional** FK | Read-only list | Autocomplete — add/delete only (no edit) |
+| `list` | Independent child (has `x-generate`), **mandatory** FK | Read-only list | Read-only list — no buttons |
+| `list` | Independent child (has `x-generate`), **optional** FK | Read-only list | Autocomplete — add/delete only (no edit) |
 | `comments` | Comment thread | Comment list | Comment input + list with edit/delete per item |
 
 **Validation rule:** if a child entity has `x-generate`, it _must_ use `x-outputType: list`
@@ -965,9 +1031,10 @@ cypress/support/generated-tasks.ts       (updated)
 
 | Value | Context | Renders as |
 |---|---|---|
-| _(omitted)_ | Inline child | Editable DataGrid (create/edit/delete) |
+| _(omitted)_ | Inline child (no own page) | Editable DataGrid (create/edit/delete) |
+| `list` | Embedded child, **no own page**, mandatory FK | Text list — add/edit/delete inline |
 | `list` | M2M or optional-FK independent child | Autocomplete — add/delete only in FormUpsert; read-only in FormView |
-| `list` | Mandatory-FK independent child | Read-only in both FormUpsert and FormView |
+| `list` | Mandatory-FK **independent** child (has own page) | Read-only in both FormUpsert and FormView |
 | `comments` | Comment thread | Comment input + list |
 
 ### Chart spans

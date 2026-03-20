@@ -81,7 +81,7 @@ class TestGetSelectionTargets:
         assert "bug" in targets
 
     def test_mandatory_fk_list_child_excluded(self):
-        """Feature linked to epic via mandatory FK — should NOT appear in selection targets."""
+        """Mandatory FK list child — never in selection_targets, regardless of own-page status."""
         feature_def = {
             "properties": {
                 "epic_id": _fk_field("epic", nullable=False),
@@ -90,6 +90,17 @@ class TestGetSelectionTargets:
         children = [_child_entry("feature", "features", output_type="list")]
         targets = self._run(children, [], {"feature": feature_def}, model="epic")
         assert "feature" not in targets
+
+    def test_non_independent_mandatory_fk_list_child_excluded(self):
+        """Non-independent mandatory FK list child (no own page) also not in selection_targets."""
+        tag_def = {
+            "properties": {
+                "parent1_id": _fk_field("parent1", nullable=False),
+            }
+        }
+        children = [_child_entry("tag", "tags", output_type="list")]
+        targets = self._run(children, [], {"tag": tag_def}, model="parent1")
+        assert "tag" not in targets
 
     def test_many_to_one_parent_rel_included(self):
         from helpers.schema_helpers import get_parent_relationships
@@ -171,28 +182,49 @@ class TestEmbeddedChFiltering:
         )
         return entity, schema
 
-    def test_mandatory_fk_list_child_excluded_from_embedded_ch(self):
-        """Feature's list of user_stories (mandatory FK) must not appear in embedded_ch."""
-        user_story_fk = _fk_field("feature", nullable=False)
-        schema = {
-            "definitions": {
-                "feature": {"type": "object", "required": ["id", "name"], "properties": _base_props()},
-                "user_story": {
-                    "type": "object",
-                    "required": ["id", "name", "feature_id"],
-                    "properties": {**_base_props(), "feature_id": user_story_fk},
-                },
-            }
+    def _mandatory_fk_schema(self, child_name: str, parent_name: str,
+                              with_own_page: bool) -> tuple[dict, dict]:
+        """Return (entity, schema) for a parent with a mandatory-FK list child."""
+        fk_prop = f"{parent_name}_id"
+        child_def = {
+            "type": "object",
+            "required": ["id", "name", fk_prop],
+            "properties": {**_base_props(), fk_prop: _fk_field(parent_name, nullable=False)},
         }
+        defs = {
+            parent_name: {"type": "object", "required": ["id", "name"], "properties": _base_props()},
+            child_name: child_def,
+        }
+        if with_own_page:
+            defs[f"{child_name}_detail"] = {
+                "x-generate": {"list": True, "view": True, "new": True, "edit": True, "delete": True, "api": False, "test": False},
+                "allOf": [{"$ref": f"#/definitions/{child_name}"}],
+            }
         entity = _entity(
-            model="feature",
-            children=[_child_entry("user_story", "user_stories", output_type="list")],
+            model=parent_name,
+            children=[_child_entry(child_name, f"{child_name}s", output_type="list")],
         )
+        return entity, {"definitions": defs}
+
+    def test_independent_mandatory_fk_list_child_excluded_from_embedded_ch(self):
+        """Independent child (has own page) with mandatory FK → excluded from embedded_ch (read-only)."""
+        entity, schema = self._mandatory_fk_schema("user_story", "feature", with_own_page=True)
         ctx = build_context(entity, schema)
-        # embedded_ch is reflected as non_comment_ch in ctx
         embedded = ctx["non_comment_ch"]
         assert all(c["name"] != "user_story" for c in embedded), \
-            "Mandatory FK list child should be excluded from embedded_ch"
+            "Independent mandatory-FK list child should be excluded from embedded_ch (shown read-only)"
+
+    def test_non_independent_mandatory_fk_list_child_included_in_embedded_ch(self):
+        """Non-independent child (no own page) with mandatory FK → included in embedded_ch with use_connect=False."""
+        entity, schema = self._mandatory_fk_schema("tag", "parent1", with_own_page=False)
+        ctx = build_context(entity, schema)
+        embedded = ctx["non_comment_ch"]
+        tag_ch = next((c for c in embedded if c["name"] == "tag"), None)
+        assert tag_ch is not None, \
+            "Non-independent mandatory-FK list child should be in embedded_ch (full CRUD inline)"
+        assert tag_ch["use_connect"] is False, \
+            "Non-independent mandatory-FK list child should use inline create (use_connect=False)"
+        assert tag_ch["is_independent"] is False
 
     def test_optional_fk_list_child_included_in_embedded_ch(self):
         """Feature's list of bugs (optional FK) must appear in embedded_ch with use_connect=True."""
@@ -366,7 +398,9 @@ class TestBuildContextSelectionTargets:
         assert "bug" in ctx["selection_targets"]
 
     def test_mandatory_fk_list_child_not_in_selection_targets(self):
-        """Mandatory FK list child (feature→epic) must NOT be in selection_targets."""
+        """Mandatory FK list child must NOT be in selection_targets — regardless of whether
+        it has its own page. Mandatory FK children use inline CRUD or are read-only,
+        never autocomplete-based."""
         schema = {
             "definitions": {
                 "epic": {"type": "object", "required": ["id", "name"], "properties": _base_props()},
@@ -378,6 +412,12 @@ class TestBuildContextSelectionTargets:
                         "epic_id": _fk_field("epic", nullable=False),
                     },
                 },
+                # feature has its own page (independent) — still not in selection targets
+                "feature_detail": {
+                    "x-generate": {"list": True, "view": True, "new": True, "edit": True,
+                                   "delete": True, "api": False, "test": False},
+                    "allOf": [{"$ref": "#/definitions/feature"}],
+                },
             }
         }
         entity = _entity(
@@ -386,6 +426,29 @@ class TestBuildContextSelectionTargets:
         )
         ctx = build_context(entity, schema)
         assert "feature" not in ctx["selection_targets"]
+
+    def test_non_independent_mandatory_fk_list_child_not_in_selection_targets(self):
+        """Non-independent mandatory-FK list child (no own page) also not in selection_targets.
+        It uses inline CRUD, not autocomplete."""
+        schema = {
+            "definitions": {
+                "parent1": {"type": "object", "required": ["id", "name"], "properties": _base_props()},
+                "tag": {
+                    "type": "object",
+                    "required": ["id", "name", "parent1_id"],
+                    "properties": {
+                        **_base_props(),
+                        "parent1_id": _fk_field("parent1", nullable=False),
+                    },
+                },
+            }
+        }
+        entity = _entity(
+            model="parent1",
+            children=[_child_entry("tag", "tags", output_type="list")],
+        )
+        ctx = build_context(entity, schema)
+        assert "tag" not in ctx["selection_targets"]
 
     def test_many_to_one_parent_rel_in_selection_targets(self):
         """A many-to-one FK on the entity itself (e.g. epic_id on feature) is in selection_targets."""

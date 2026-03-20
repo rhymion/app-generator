@@ -993,8 +993,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # ---- Children analysis ----
     # Use the pre-filtered embedded_ch from build_context (passed as non_comment_ch in ctx).
-    # This excludes mandatory-FK list children (independent entities, read-only in this form)
-    # while keeping m2m and optional-FK list children (which have use_connect=True).
+    # Excludes independent mandatory-FK list children (have own pages; shown read-only).
+    # Includes non-independent mandatory-FK list children (no own page; full CRUD via text list).
+    # Includes m2m and optional-FK list children (use_connect=True; autocomplete add/delete).
     non_comment_ch = ctx['non_comment_ch']
     comment_children = [c for c in children_raw if c.get('output_type') == 'comments']
     has_comment_children = bool(comment_children)

@@ -2,8 +2,9 @@
 Tests for generators.form_upsert_context() — FormUpsert component generation.
 
 Focuses on:
-- Rule 1: mandatory FK list child → read-only (excluded from component params and grid)
-- Rule 2: optional FK list child → autocomplete add/delete only (no edit)
+- Independent mandatory FK list child → read-only (excluded from component params and grid)
+- Non-independent mandatory FK list child → text list with full CRUD (add/edit/delete)
+- Optional FK list child → autocomplete add/delete only (no edit)
 - M2M child → autocomplete add/delete only
 - Field types generate correct component imports and state setup
 """
@@ -67,14 +68,13 @@ def _build_upsert_ctx(entity: dict, schema: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Rule 1: Mandatory FK list child → read-only
+# Independent mandatory FK list child → read-only
 # ---------------------------------------------------------------------------
 
 class TestMandatoryFKListChild:
     """
-    When a list child's FK to the parent is non-nullable (mandatory),
-    it must not appear in the FormUpsert component at all — neither in
-    the props signature nor as an EditableListWrapper.
+    When a list child has its own pages (x-generate on _detail) and a mandatory FK
+    to the parent, the parent FormUpsert must show it read-only — no wrapper, no params.
     """
 
     def _schema(self) -> dict:
@@ -93,6 +93,12 @@ class TestMandatoryFKListChild:
                         "feature_id": _fk_field("feature", nullable=False),
                     },
                 },
+                # user_story HAS its own page → independent → read-only in parent form
+                "user_story_detail": {
+                    "x-generate": {"list": True, "view": True, "new": True, "edit": True,
+                                   "delete": True, "api": False, "test": False},
+                    "allOf": [{"$ref": "#/definitions/user_story"}],
+                },
             }
         }
 
@@ -102,20 +108,79 @@ class TestMandatoryFKListChild:
         ])
         return _build_upsert_ctx(entity, self._schema())
 
-    def test_mandatory_child_not_in_props_signature(self):
+    def test_independent_mandatory_child_not_in_props_signature(self):
         ctx = self._ctx()
-        # allUserStorys or allUserStories must NOT appear in the destructured params
         assert "allUserStory" not in ctx["form_upsert_params"]
         assert "allUserStories" not in ctx["form_upsert_params"]
 
-    def test_mandatory_child_has_no_editable_list_wrapper(self):
+    def test_independent_mandatory_child_has_no_editable_list_wrapper(self):
         ctx = self._ctx()
         assert "EditableListWrapper" not in ctx["child_grid_components"] or \
                "userStories" not in ctx["child_grid_components"]
 
-    def test_mandatory_child_excluded_from_form_data_handling(self):
+    def test_independent_mandatory_child_excluded_from_form_data_handling(self):
         ctx = self._ctx()
         assert "userStory" not in ctx["child_form_data_handling"]
+
+
+# ---------------------------------------------------------------------------
+# Non-independent mandatory FK list child → text list with full CRUD
+# ---------------------------------------------------------------------------
+
+class TestNonIndependentEmbeddedListChild:
+    """
+    When a list child has NO own pages (no x-generate on _detail) and a mandatory FK
+    to the parent, the parent FormUpsert embeds it with full add/edit/delete via a
+    text EditableListWrapper. No allTags prop is needed (inline create, not autocomplete).
+    """
+
+    def _schema(self) -> dict:
+        return {
+            "definitions": {
+                "parent1": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": _base_props(),
+                },
+                "tag": {
+                    "type": "object",
+                    "required": ["id", "name", "parent1_id"],
+                    "properties": {
+                        **_base_props(),
+                        "parent1_id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    },
+                },
+                # No tag_detail definition → tag has no own page → non-independent
+            }
+        }
+
+    def _ctx(self) -> dict:
+        entity = _entity("parent1", children=[
+            _child_entry("tag", "tags", output_type="list"),
+        ])
+        return _build_upsert_ctx(entity, self._schema())
+
+    def test_embedded_list_child_uses_text_item_type(self):
+        ctx = self._ctx()
+        assert 'itemType="text"' in ctx["child_grid_components"]
+
+    def test_embedded_list_child_has_editable_list_wrapper(self):
+        ctx = self._ctx()
+        assert "EditableListWrapper" in ctx["child_grid_components"]
+        assert "tagsRef" in ctx["child_grid_components"]
+
+    def test_embedded_list_child_not_in_props_signature(self):
+        """No allTags prop — inline CRUD, not autocomplete."""
+        ctx = self._ctx()
+        assert "allTags" not in ctx["form_upsert_params"]
+
+    def test_embedded_list_child_in_form_data_handling(self):
+        ctx = self._ctx()
+        assert "tagsRef" in ctx["child_form_data_handling"]
+
+    def test_embedded_list_child_not_autocomplete(self):
+        ctx = self._ctx()
+        assert 'itemType="autocomplete"' not in ctx["child_grid_components"]
 
 
 # ---------------------------------------------------------------------------

@@ -135,6 +135,12 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             and is_optional_fk_to_parent(child_def, model)
         )
         use_connect = is_many_to_many or child_name == model or is_optional_fk_list
+        # Independent list child: has its own _detail definition with x-generate.
+        # These are managed on their own pages; the parent form shows them read-only.
+        is_independent = (
+            output_type == 'list' and not is_many_to_many
+            and bool(schema['definitions'].get(f'{child_name}_detail', {}).get('x-generate'))
+        )
         child_props_dict = child_def.get('properties', {})
 
         parent_id_props = _get_child_parent_id_props(child_name, model, parent_rels_raw)
@@ -178,6 +184,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             'form_key':         form_key,
             'is_many_to_many':  is_many_to_many,
             'use_connect':      use_connect,
+            'is_independent':   is_independent,
             'output_type':      output_type,
             'props_no_id':      props_no_id,
             'props_with_id':    props_with_id,
@@ -455,9 +462,10 @@ def build_context(entity: dict, schema: dict) -> dict:
     children_data    = _build_child_data(children_raw, model, schema, parent_rels_raw)
     non_comment_ch   = [c for c in children_data if c.get('output_type') != 'comments']
     comment_children = [c for c in children_data if c.get('output_type') == 'comments']
-    # Embedded children: exclude one-to-many list children (independent entities managed on their
-    # own pages). Many-to-many list children (use_connect=True) remain embedded via connect/set.
-    embedded_ch      = [c for c in non_comment_ch if c['use_connect'] or c.get('output_type') != 'list']
+    # Embedded children: exclude independent list children (have own pages; shown read-only here).
+    # Non-independent mandatory-FK list children (no own page) are embedded with full CRUD.
+    # Many-to-many and optional-FK list children (use_connect=True) use connect/set.
+    embedded_ch      = [c for c in non_comment_ch if c['use_connect'] or c.get('output_type') != 'list' or not c['is_independent']]
 
     child_form_data_extractions = _build_child_form_data_extractions(embedded_ch)
 
