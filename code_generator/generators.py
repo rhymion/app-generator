@@ -1289,7 +1289,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 autocomplete_target = child_name
             target_pascal = to_pascal_case(autocomplete_target)
             self_rel = next((r for r in parent_rels_raw if r['target'] == model), None) if is_self else None
-            filter_logic = f'.filter(item => !item.{self_rel["prop_name"]} || item.{self_rel["prop_name"]} === src.id)' if self_rel else ''
+            # filter_logic = f'.filter(item => !item.{self_rel["prop_name"]} || item.{self_rel["prop_name"]} === src.id)' if self_rel else ''
             child_grid_components_parts.append(
                 f"      <EditableListWrapper\n"
                 f"        ref={{{child_var}Ref}}\n"
@@ -1300,7 +1300,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"        title={{tf('{child_camel}')}}\n"
                 f"        textFieldLabel=\"Name\"\n"
                 f"        textFieldPlaceholder=\"Enter name\"\n"
-                f"        allAutocompleteOptions={{all{target_pascal}s{filter_logic}.map(item => ({{\n"
+                f"        allAutocompleteOptions={{all{target_pascal}s.map(item => ({{\n"
                 f"          id: item.id,\n"
                 f"          label: item.name,\n"
                 f"          value: item.id,\n"
