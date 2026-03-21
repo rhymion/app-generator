@@ -944,7 +944,10 @@ def test_spec_context(
             (f for f in non_autocomplete_required if f['prop_name'] == 'name'),
             non_autocomplete_required[0],
         )
-        fail_edit_6_1 = {'clear_cmd': gen_clear_command(field_to_clear, '      ')}
+        fail_edit_6_1 = {
+        'clear_cmd': gen_clear_command(field_to_clear, '      '),
+        'clear_cmd_nested': gen_clear_command(field_to_clear, '        '),
+    }
 
     # Section 6.2: clear a non-FK required child field (singleSelect cannot be cleared via input)
     fail_edit_6_2 = None
