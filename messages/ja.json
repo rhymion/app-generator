@@ -25,6 +25,8 @@
   },
   "Fields": {
     "actions": "アクション",
+    "name": "名前",
+    "description": "説明",
     "max": "最大",
     "maxLength": "最大長",
     "order": "No.",

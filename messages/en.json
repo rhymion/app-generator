@@ -25,6 +25,8 @@
   },
   "Fields": {
     "actions": "Actions",
+    "name": "Name",
+    "description": "Description",
     "max": "Max",
     "maxLength": "Max Length",
     "order": "No.",
