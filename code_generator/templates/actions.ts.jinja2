@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-{% if comment_actions_code %}import { revalidatePath } from 'next/cache';
+{% if comment_actions_code or (can_list and can_delete) %}import { revalidatePath } from 'next/cache';
 {% endif %}import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 {% if service_imports %}
@@ -31,6 +31,9 @@ export async function remove{{ parent_pascal }}(ids: string[]) {
     throw new Error('No permission to delete');
   }
   await delete{{ parent_pascal }}(filtered{{ parent_pascal }}s.map(item => item.id));
+{% if can_list %}
+  revalidatePath('/[locale]/{{ parent }}', 'page');
+{% endif %}
   redirect('/{{ parent }}');
 }
 {% endif %}
