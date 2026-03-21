@@ -4,9 +4,10 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
+import { read } from 'node:fs';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export default function DateTimeWrapper({label, date_time, show_date = true, show_time = true, ...other}: {label: string, date_time: Date | null, show_date?: boolean, show_time?: boolean, [key: string]: any}) {
+export default function DateTimeWrapper({label, date_time, show_date = true, show_time = true, readOnly = false, ...other}: {label: string, date_time: Date | null, show_date?: boolean, show_time?: boolean, readOnly?: boolean, [key: string]: any}) {
     return (
     <div>
       <LocalizationProvider dateAdapter={AdapterDayjs}>
@@ -16,6 +17,7 @@ export default function DateTimeWrapper({label, date_time, show_date = true, sho
           views={show_time ? (show_date ? ['year', 'month', 'day', 'hours', 'minutes'] : ['hours', 'minutes']) : ['year', 'month', 'day']}
           label={label}
           value={date_time ? dayjs(date_time) : null}
+          {...(readOnly ? { readOnly: true } : {})}
           slotProps={{ field: { clearable: true }, textField: { margin: 'normal' } }}
           {...other}
         /> )
@@ -26,6 +28,7 @@ export default function DateTimeWrapper({label, date_time, show_date = true, sho
           views={['hours', 'minutes']}
           label={label}
           value={date_time ? dayjs(date_time) : null}
+          {...(readOnly ? { readOnly: true } : {})}
           slotProps={{ field: { clearable: true }, textField: { margin: 'normal' } }}
           {...other}
         />
