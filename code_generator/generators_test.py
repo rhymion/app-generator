@@ -249,6 +249,8 @@ def get_child_render_type(child: dict) -> str:
         return 'editable-list-autocomplete'
     if child.get('output_type') == 'list':
         return 'editable-list-text'
+    if child.get('output_type') == 'comments':
+        return 'comments'
     return 'datagrid'
 
 
@@ -583,6 +585,7 @@ def test_helper_context(
 
     child_metas = analyze_children(children, schema, model_name)
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
+    comment_children_meta = [c for c in child_metas if c['render_type'] == 'comments']
 
     # Detect primary display field (for needs_second on FK primary deps)
     primary_field_name_h = _get_primary_display_field_name(parent_def)
@@ -690,6 +693,15 @@ def test_helper_context(
             'has_fk_deps': has_fk_deps,
         })
 
+    enriched_comment_children = []
+    for child_meta in comment_children_meta:
+        child_name = child_meta['child']['name']
+        enriched_comment_children.append({
+            'model_name': child_name,
+            'pascal': to_pascal_case(child_name),
+            'parent_fk_prop': child_meta['parent_fk_prop'],
+        })
+
     primary_fk_dep = next((d for d in enriched_deps if d.get('needs_second')), None)
 
     # populateData/populateFullData need deps only when there are FK fields NOT covered
@@ -713,6 +725,7 @@ def test_helper_context(
         'all_fields_prisma': all_fields_prisma,
         'has_optional': bool(optional_field_metas),
         'datagrid_children': enriched_datagrid_children,
+        'comment_children': enriched_comment_children,
         'primary_fk_dep': primary_fk_dep,
     }
 
@@ -761,6 +774,7 @@ def test_spec_context(
     child_metas = analyze_children(children, schema, model_name)
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
     list_children = [c for c in child_metas if c['render_type'] in ('editable-list-text', 'editable-list-autocomplete')]
+    comment_children = [c for c in child_metas if c['render_type'] == 'comments']
 
     can_list   = generate_config.get('list', True)
     can_new    = generate_config.get('new', True)
@@ -884,6 +898,15 @@ def test_spec_context(
             'is_external_target': bool(rel_target and rel_target != model_name),
         })
 
+    # Comment children data
+    comment_children_data = []
+    for child_meta in comment_children:
+        child_name = child_meta['child']['name']
+        comment_children_data.append({
+            'title': child_meta['names']['title'],
+            'pascal': to_pascal_case(child_name),
+        })
+
     # Section 3.1: optional fill commands (8-space indent, non-autocomplete only)
     opt_fill_cmds_3_1 = [
         gen_fill_command(f, cypress_create_value(f, title), '        ')
@@ -996,6 +1019,7 @@ def test_spec_context(
         'all_assert_cmds_no_bool': all_assert_cmds_no_bool,
         'datagrid_children_data': datagrid_children_data,
         'list_children_data': list_children_data,
+        'comment_children_data': comment_children_data,
         'opt_fill_cmds_3_1': opt_fill_cmds_3_1,
         'opt_clear_cmds_3_2': opt_clear_cmds_3_2,
         'edit_fill_cmd_3_3': edit_fill_cmd_3_3,
@@ -1032,6 +1056,7 @@ def test_tasks_registry_context(entities: list, schema: dict) -> dict:
         child_metas = analyze_children(entity['children'], schema, entity['model_name'])
         datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
         list_children = [c for c in child_metas if c['render_type'] in ('editable-list-autocomplete', 'editable-list-text')]
+        comment_children_registry = [c for c in child_metas if c['render_type'] == 'comments']
         for lc in list_children:
             rel = lc['child'].get('relationship') or {}
             if rel.get('target') == 'user_account':
@@ -1043,6 +1068,10 @@ def test_tasks_registry_context(entities: list, schema: dict) -> dict:
             'datagrid_children': [
                 {'pascal': to_pascal_case(c['child']['name'])}
                 for c in datagrid_children
+            ],
+            'comment_children': [
+                {'pascal': to_pascal_case(c['child']['name'])}
+                for c in comment_children_registry
             ],
         })
     return {'entities': enriched_entities, 'has_user_account_populate': has_user_account_populate}

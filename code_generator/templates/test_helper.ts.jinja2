@@ -186,3 +186,22 @@ export async function populate{{ pascal }}{{ child.pascal }}Data(parentId: strin
   return JSON.parse(JSON.stringify(records));
 }
 {% endfor %}
+{% for child in comment_children %}
+
+export async function populate{{ pascal }}{{ child.pascal }}Data(parentId: string, length: number) {
+  const testUser = await getTestUser();
+  const records = [];
+  for (let i = 1; i <= length; i++) {
+    const record = await prisma.{{ child.model_name }}.create({
+      data: {
+        {{ child.parent_fk_prop }}: parentId,
+        message: `Test Message ${i}`,
+        creator_id: testUser.id,
+      },
+    });
+    records.push(record);
+  }
+  // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
+  return JSON.parse(JSON.stringify(records));
+}
+{% endfor %}

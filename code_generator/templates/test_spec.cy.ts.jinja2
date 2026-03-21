@@ -215,6 +215,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.get('div[role="dialog"]').find('button').contains('Add').click();
 {% endif %}
 {% endfor %}
+{% for child in comment_children_data %}
+        // Add comment: {{ child.title }}
+        cy.get('textarea[placeholder="Write a comment..."]').type('Test {{ child.title }} Comment');
+        cy.get('button[aria-label="Submit"]').click();
+{% endfor %}
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}');
 {% if can_list %}
@@ -242,6 +247,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for child in datagrid_children_data %}
         cy.task('db:populate{{ pascal }}{{ child.pascal }}', { parentId: records[0].id, length: 1 });
 {% endfor %}
+{% for child in comment_children_data %}
+        cy.task('db:populate{{ pascal }}{{ child.pascal }}', { parentId: records[0].id, length: 1 });
+{% endfor %}
 {% if can_list and can_view %}
         cy.visit('/en/{{ parent }}');
         cy.contains('{{ list_id_1 }}').click();
@@ -264,6 +272,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.selectDataGridRows([0]);
         cy.contains('h2', '{{ child.title }}').parent().find('button[aria-label="Delete Selected"]').click();
         cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+{% endfor %}
+{% for child in comment_children_data %}
+        // Delete comment: {{ child.title }}
+        cy.contains('h2', '{{ child.title }}').parent().find('[aria-label="Delete"]').click();
 {% endfor %}
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}');

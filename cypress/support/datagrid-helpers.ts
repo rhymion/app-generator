@@ -81,7 +81,7 @@ export function fillDataGridRow(
     if (typeof value === 'boolean') {
       toggleDataGridCheckbox(rowIndex, field, value);
       if (isLast && submitLast) {
-        getDataGridCell(rowIndex, field).find('input').type('{enter}');
+        // getDataGridCell(rowIndex, field).find('input').type('{enter}');
       }
     } else {
       editDataGridCell(rowIndex, field, value, isLast && submitLast);
@@ -119,6 +119,7 @@ export function waitForDataGrid() {
  * Check if DataGrid has no rows
  */
 export function assertDataGridEmpty() {
+  cy.get('div[role="grid"]').should('be.visible');
   cy.contains('No rows').should('be.visible');
 }
 
