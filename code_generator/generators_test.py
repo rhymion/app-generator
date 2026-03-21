@@ -537,12 +537,18 @@ def gen_child_full_datagrid_object(child_meta: dict) -> str:
     return '{ ' + ', '.join(entries) + ' }'
 
 
-def gen_child_datagrid_fk_fields(fields: list) -> list[dict]:
-    """Return [{field, label}] for FK (singleSelect) fields in a datagrid child."""
+def gen_child_datagrid_fk_fields(fields: list, exclude_parent_model: str = '') -> list[dict]:
+    """Return [{field, label}] for FK (singleSelect) fields in a datagrid child.
+
+    Excludes self-referential FKs (dep_target == exclude_parent_model) because
+    the parent entity doesn't exist yet when creating its children inline.
+    """
     return [
         {'field': f['prop_name'], 'label': f"Test {to_title_case(f['dep_target'])}"}
         for f in fields
-        if f['category'] == 'autocomplete' and f.get('dep_target')
+        if f['category'] == 'autocomplete'
+        and f.get('dep_target')
+        and f.get('dep_target') != exclude_parent_model
     ]
 
 
@@ -667,8 +673,12 @@ def test_helper_context(
         for f in child_meta['fields']:
             target = f.get('dep_target')
             if f['category'] == 'autocomplete' and target and target != 'user_account':
-                has_fk_deps = True
-                child_fields_prisma.append({**f, 'prisma_val': f'deps.{to_camel_case(target)}.id'})
+                if target == model_name:
+                    # Self-referential FK: parent doesn't exist yet — use null
+                    child_fields_prisma.append({**f, 'prisma_val': 'null'})
+                else:
+                    has_fk_deps = True
+                    child_fields_prisma.append({**f, 'prisma_val': f'deps.{to_camel_case(target)}.id'})
             else:
                 child_fields_prisma.append({**f, 'prisma_val': prisma_value(f, 'i', child_title)})
         enriched_datagrid_children.append({
@@ -847,8 +857,8 @@ def test_spec_context(
     datagrid_children_data = []
     for child_meta in datagrid_children:
         child_name = child_meta['child']['name']
-        fk_create_fields = gen_child_datagrid_fk_fields(child_meta['required_fields'])
-        fk_full_fields = gen_child_datagrid_fk_fields(child_meta['fields'])
+        fk_create_fields = gen_child_datagrid_fk_fields(child_meta['required_fields'], model_name)
+        fk_full_fields = gen_child_datagrid_fk_fields(child_meta['fields'], model_name)
         datagrid_children_data.append({
             'title': child_meta['names']['title'],
             'pascal': to_pascal_case(child_name),
@@ -924,7 +934,7 @@ def test_spec_context(
             fail_create_5_2_scalar = {
                 'title': child_title,
                 'partial_obj': ('{ ' + ', '.join(entries) + ' }') if entries else None,
-                'fk_fields': gen_child_datagrid_fk_fields(fk_required),
+                'fk_fields': gen_child_datagrid_fk_fields(fk_required, model_name),
                 'fill_cmds': gen_fill_commands(required_field_metas, title, I),
             }
 

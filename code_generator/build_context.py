@@ -171,7 +171,17 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             ' }'
         ) if props_with_id else '{}'
 
-        field_map_create = '\n'.join(f'          {p}: f.{p},' for p in props_no_id)
+        def _is_nullable_cuid(defn: dict) -> bool:
+            t = defn.get('type')
+            return (isinstance(t, list) and 'null' in t
+                    and defn.get('pattern') == '^c[a-z0-9]{24,}$')
+
+        field_map_create = '\n'.join(
+            f'          {p}: f.{p} || null,'
+            if _is_nullable_cuid(child_props_dict.get(p, {}))
+            else f'          {p}: f.{p},'
+            for p in props_no_id
+        )
 
         child_var    = safe_var_name(prop_name)
         child_pascal = to_pascal_case(prop_name)
