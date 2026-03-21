@@ -213,14 +213,24 @@ def get_field_metas(
                 'format': fmt,
             })
         elif prop_type in ('integer', 'number'):
-            metas.append({
-                **base,
-                'label': to_title_case(prop_name),
-                'category': 'number',
-                'required': prop_name in required_fields,
-                'min': prop.get('minimum'),
-                'max': prop.get('maximum'),
-            })
+            if prop.get('enum'):
+                # Integer field with string enum labels → rendered as Autocomplete select
+                metas.append({
+                    **base,
+                    'label': to_title_case(prop_name),
+                    'category': 'enum',
+                    'required': prop_name in required_fields,
+                    'enum_values': prop.get('enum'),
+                })
+            else:
+                metas.append({
+                    **base,
+                    'label': to_title_case(prop_name),
+                    'category': 'number',
+                    'required': prop_name in required_fields,
+                    'min': prop.get('minimum'),
+                    'max': prop.get('maximum'),
+                })
         elif prop_type == 'boolean':
             metas.append({
                 **base,
@@ -304,6 +314,10 @@ def prisma_value(field: dict, index: str, entity_title: str) -> str:
             return f"'{field['enum_values'][0]}'"
         return f'`Test {field["label"]} ${{{index}}}`'
 
+    elif cat == 'enum':
+        # Integer enum: store integer index 0 (first option)
+        return '0'
+
     elif cat == 'number':
         val = f'{index} * 100'
         mn = field.get('min')
@@ -339,6 +353,9 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
         if field.get('enum_values'):
             return field['enum_values'][0]
         return f'Test {field["label"]}'
+
+    elif cat == 'enum':
+        return field['enum_values'][0]
 
     elif cat == 'number':
         val = 100
@@ -377,6 +394,9 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
             return enum_values[1] if len(enum_values) > 1 else enum_values[0]
         return f'Updated {field["label"]}'
 
+    elif cat == 'enum':
+        return field['enum_values'][1] if len(field['enum_values']) > 1 else field['enum_values'][0]
+
     elif cat == 'number':
         val = 200
         mn = field.get('min')
@@ -412,6 +432,9 @@ def api_value(field: dict, entity_title: str) -> str:
         if field.get('enum_values'):
             return f"'{field['enum_values'][0]}'"
         return f"'Test {field['label']}'"
+
+    elif cat == 'enum':
+        return '0'
 
     elif cat == 'number':
         val = 100
@@ -452,6 +475,8 @@ def gen_fill_command(field: dict, value: str, indent: str) -> str:
         return f"{indent}cy.fillDateTime('{label}', '{value}');"
     elif cat == 'boolean':
         return f"{indent}cy.setCheckbox('{label}', {value});"
+    elif cat == 'enum':
+        return f"{indent}cy.selectAutocomplete('{label}', '{value}');"
     else:
         return f"{indent}cy.selectAutocomplete('{label}', '{value}');"
 
@@ -465,6 +490,8 @@ def gen_clear_command(field: dict, indent: str) -> str:
         return f"{indent}cy.clearDateTime('{label}');"
     elif cat == 'boolean':
         return f"{indent}cy.setCheckbox('{label}', false);"
+    elif cat == 'enum':
+        return f"{indent}cy.clearAutocomplete('{label}');"
     else:
         return f"{indent}cy.clearAutocomplete('{label}');"
 
@@ -472,7 +499,7 @@ def gen_clear_command(field: dict, indent: str) -> str:
 def gen_assert_command(field: dict, value: str, indent: str) -> str:
     cat = field['category']
     label = field['label']
-    if cat in ('text', 'number', 'datetime', 'autocomplete'):
+    if cat in ('text', 'number', 'datetime', 'autocomplete', 'enum'):
         return f"{indent}cy.checkField('{label}', '{value}');"
     else:
         return f"{indent}cy.setCheckbox('{label}', {value}); // verify checkbox state"
@@ -514,7 +541,7 @@ def _child_scalar_entries(fields: list, title: str, value_fn) -> list[str]:
     """Return JS object entries for scalar (non-autocomplete) datagrid child fields."""
     entries = []
     for field in fields:
-        if field['category'] == 'autocomplete':
+        if field['category'] in ('autocomplete', 'enum'):
             continue
         value = value_fn(field, title)
         if field['category'] in ('boolean', 'number'):
@@ -627,7 +654,7 @@ def test_helper_context(
         if is_ua:
             enriched_deps.append({
                 **dep,
-                'title': to_title_case(dep['var_name']),
+                'title': to_title_case(dep['target']),
                 'has_user_accounts': False,
                 'extra_required_fields': [],
                 'needs_second': False,
@@ -703,11 +730,20 @@ def test_helper_context(
         })
 
     primary_fk_dep = next((d for d in enriched_deps if d.get('needs_second')), None)
+    # Also detect when the primary display FK is a user_account field
+    if primary_fk_dep is None and primary_fk_dep_target == 'user_account':
+        primary_fk_dep = next(
+            (d for d in enriched_deps
+             if d.get('is_user_account') and d['var_name'] == to_camel_case(primary_fk_dep_target)),
+            None,
+        )
 
     # populateData/populateFullData need deps only when there are FK fields NOT covered
     # by the inline primary_fk_dep creation (or user_account deps).
     primary_fk_dep_var = primary_fk_dep['var_name'] if primary_fk_dep else None
-    needs_deps_in_populate = bool(ua_dep_fields) or any(
+    primary_fk_ua_dep_var = primary_fk_dep_var if (primary_fk_dep and primary_fk_dep.get('is_user_account')) else None
+    non_primary_ua_dep_fields = [f for f in ua_dep_fields if f['dep_var_name'] != primary_fk_ua_dep_var]
+    needs_deps_in_populate = bool(non_primary_ua_dep_fields) or any(
         f['category'] == 'autocomplete' and f['dep_var_name'] and f['dep_var_name'] != primary_fk_dep_var
         for f in required_fields_prisma
     )
@@ -762,7 +798,7 @@ def test_spec_context(
                 'prop_name': r['prop_name'],
                 'dep_var_name': var_name,
                 'label': field_label,
-                'dep_name': f'Test {to_title_case(var_name)}',
+                'dep_name': f'Test {field_label}',
             })
 
     has_deps = bool(deps) or bool(ua_dep_fields_spec)

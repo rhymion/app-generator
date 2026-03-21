@@ -72,6 +72,17 @@ export async function populate{{ pascal }}Data(length: number) {
   const records = [];
   for (let i = 1; i <= length; i++) {
 {% if primary_fk_dep %}
+{% if primary_fk_dep.is_user_account %}
+    const {{ primary_fk_dep.var_name }}Item = await prisma.user_account.create({
+      data: {
+        name: `Test User Account ${i}`,
+        email: `test-user-account-${Date.now()}-${i}@example.com`,
+        password: 'test-password',
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
+{% else %}
     const {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.create({
       data: {
 {% for ef in primary_fk_dep.extra_required_fields %}
@@ -84,6 +95,7 @@ export async function populate{{ pascal }}Data(length: number) {
         updater_id: testUser.id,
       },
     });
+{% endif %}
 {% endif %}
     const record = await prisma.{{ model_name }}.create({
       data: {
@@ -99,7 +111,11 @@ export async function populate{{ pascal }}Data(length: number) {
 {% endif %}
 {% endfor %}
 {% for ua_dep in ua_dep_fields %}
+{% if primary_fk_dep and primary_fk_dep.is_user_account and ua_dep.dep_var_name == primary_fk_dep.var_name %}
+        {{ ua_dep.prop_name }}: {{ ua_dep.dep_var_name }}Item.id,
+{% else %}
         {{ ua_dep.prop_name }}: deps.{{ ua_dep.dep_var_name }}.id,
+{% endif %}
 {% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,
@@ -120,6 +136,17 @@ export async function populate{{ pascal }}FullData(length: number) {
   const records = [];
   for (let i = 1; i <= length; i++) {
 {% if primary_fk_dep %}
+{% if primary_fk_dep.is_user_account %}
+    const {{ primary_fk_dep.var_name }}Item = await prisma.user_account.create({
+      data: {
+        name: `Test User Account ${i}`,
+        email: `test-user-account-${Date.now()}-${i}@example.com`,
+        password: 'test-password',
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
+{% else %}
     const {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.create({
       data: {
 {% for ef in primary_fk_dep.extra_required_fields %}
@@ -132,6 +159,7 @@ export async function populate{{ pascal }}FullData(length: number) {
         updater_id: testUser.id,
       },
     });
+{% endif %}
 {% endif %}
     const record = await prisma.{{ model_name }}.create({
       data: {
@@ -147,7 +175,11 @@ export async function populate{{ pascal }}FullData(length: number) {
 {% endif %}
 {% endfor %}
 {% for ua_dep in ua_dep_fields %}
+{% if primary_fk_dep and primary_fk_dep.is_user_account and ua_dep.dep_var_name == primary_fk_dep.var_name %}
+        {{ ua_dep.prop_name }}: {{ ua_dep.dep_var_name }}Item.id,
+{% else %}
         {{ ua_dep.prop_name }}: deps.{{ ua_dep.dep_var_name }}.id,
+{% endif %}
 {% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,
