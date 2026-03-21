@@ -95,6 +95,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/db_table"
       - type: object
@@ -472,6 +473,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: false
       fields:
         - name
         - avatar
@@ -526,6 +528,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/xxxxx_xxxxx"
       - type: object
@@ -546,6 +549,7 @@ definitions:
       delete: false
       invalidate: false
       api: false
+      test: true
       fields:
         - name
         - description
@@ -561,6 +565,7 @@ definitions:
       delete: true
       invalidate: false
       api: false
+      test: true
       fields:
         - name
         - description
@@ -576,6 +581,7 @@ definitions:
       delete: false
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/xxxxx_xxxxx"
 
@@ -588,6 +594,7 @@ definitions:
       delete: false
       invalidate: false
       api: true
+      test: true
       fields:
         - name
         - yyyyy_yyyyys
@@ -611,6 +618,7 @@ definitions:
       delete: true
       invalidate: false
       api: false
+      test: true
     allOf:
       - $ref: "#/definitions/xxxxx_xxxxx"
       - type: object
@@ -631,6 +639,7 @@ definitions:
       delete: false
       invalidate: false
       api: false
+      test: true
     allOf:
       - $ref: "#/definitions/xxxxx_xxxxx"
 
@@ -643,6 +652,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
       fields:
         - name
         - description
@@ -701,6 +711,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     x-relationships:
       user_accounts:
         type: many-to-many
@@ -766,6 +777,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/permission"
       - type: object
@@ -817,6 +829,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     x-relationships:
       preceded_by:
         type: many-to-many
@@ -923,6 +936,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/resource"
       - type: object
@@ -1062,7 +1076,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
-      test: false
+      test: true
     x-custom-component:
       name: CopyShiftsButton
     allOf:
@@ -1129,7 +1143,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
-      test: false
+      test: true
     allOf:
       - $ref: "#/definitions/shift"
       - type: object
