@@ -184,10 +184,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.visit('/en/{{ parent }}');
         cy.get('[aria-label="Edit"]').first().click();
 {% elif can_view %}
-        cy.visit(`/en/{{ parent }}/${records[0].id}`);
+        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
         cy.get('[aria-label="Edit"]').click();
 {% else %}
-        cy.visit(`/en/{{ parent }}/${records[0].id}/edit`);
+        cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
         cy.url().should('include', '/{{ parent }}/edit');
 {% for cmd in opt_fill_cmds_3_1 %}
@@ -230,7 +230,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list %}
         cy.contains('{{ list_id_1 }}').click();
 {% else %}
-        cy.visit(`/en/{{ parent }}/${records[0].id}`);
+        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
 {% endif %}
         cy.url().should('include', '/{{ parent }}/view');
         cy.checkField('{{ check_field_label }}', '{{ check_field_value_1 }}');
@@ -258,10 +258,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.visit('/en/{{ parent }}');
         cy.get('[aria-label="Edit"]').first().click();
 {% elif can_view %}
-        cy.visit(`/en/{{ parent }}/${records[0].id}`);
+        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
         cy.get('[aria-label="Edit"]').click();
 {% else %}
-        cy.visit(`/en/{{ parent }}/${records[0].id}/edit`);
+        cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
         cy.url().should('include', '/{{ parent }}/edit');
 {% for cmd in opt_clear_cmds_3_2 %}
@@ -296,10 +296,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.visit('/en/{{ parent }}');
         cy.get('[aria-label="Edit"]').first().click();
 {% elif can_view %}
-        cy.visit(`/en/{{ parent }}/${records[0].id}`);
+        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
         cy.get('[aria-label="Edit"]').click();
 {% else %}
-        cy.visit(`/en/{{ parent }}/${records[0].id}/edit`);
+        cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
 {% if has_edit_primary %}
         cy.clearAndFillField('{{ edit_field_label }}', '{{ edit_update_value }}');
@@ -319,7 +319,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.checkField('{{ check_field_label }}', '{{ check_field_updated }}');
 {% elif can_view %}
         // Verify on view page
-        cy.visit(`/en/{{ parent }}/${records[0].id}`);
+        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
         cy.url().should('include', '/{{ parent }}/view');
         cy.checkField('{{ check_field_label }}', '{{ check_field_updated }}');
 {% endif %}
@@ -372,10 +372,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% else %}
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
 {% if can_view %}
-        cy.visit(`/en/{{ parent }}/${records[0].id}`);
+        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
         cy.get('[aria-label="Edit"]').click();
 {% else %}
-        cy.visit(`/en/{{ parent }}/${records[0].id}/edit`);
+        cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
         cy.url().should('include', '/{{ parent }}/edit');
         cy.clickButton('Delete {{ title }}');
@@ -474,10 +474,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% else %}
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
 {% if can_view %}
-        cy.visit(`/en/{{ parent }}/${records[0].id}`);
+        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
         cy.get('[aria-label="Edit"]').click();
 {% else %}
-        cy.visit(`/en/{{ parent }}/${records[0].id}/edit`);
+        cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
 {{ fail_edit_6_1.clear_cmd_nested }}
         cy.clickButton('Save');
@@ -499,10 +499,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.visit('/en/{{ parent }}');
         cy.get('[aria-label="Edit"]').first().click();
 {% elif can_view %}
-        cy.visit(`/en/{{ parent }}/${records[0].id}`);
+        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
         cy.get('[aria-label="Edit"]').click();
 {% else %}
-        cy.visit(`/en/{{ parent }}/${records[0].id}/edit`);
+        cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
         // Clear required child field
         cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="{{ fail_edit_6_2.field_prop_name }}"]').dblclick();
