@@ -373,7 +373,13 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
     elif cat == 'datetime':
         fmt = field.get('format')
         if fmt == 'date':
+            if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+                return '01/16/2025'
             return '01/15/2025'
+        if fmt == 'time':
+            if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+                return '05:00 PM'
+            return '09:00 AM'
         if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
             return '01/15/2025 05:00 PM'
         return '01/15/2025 09:00 AM'
