@@ -86,18 +86,18 @@ export async function seedTestDatabase() {
  * - Main test user has no roles → no permission records match → default-grant (all true)
  * - Limited user has a DenyRole with explicit false permissions → all operations denied → 403
  */
-export async function createLimitedApiUser(modelName: string): Promise<string> {
+export async function createLimitedApiUser(entityName: string): Promise<string> {
   const testUser = await prisma.user_account.findUnique({
     where: { email: TEST_CREDENTIALS.email },
   });
   if (!testUser) throw new Error('Test user not found. Run db:seed first.');
 
-  const limitedApiKey = `test_mk_limited_${modelName}`;
+  const limitedApiKey = `test_mk_limited_${entityName}`;
   const limitedUserId = createId();
 
   const denyRole = await prisma.role.create({
     data: {
-      name: `DenyRole_${modelName}`,
+      name: `DenyRole_${entityName}`,
       creator_id: testUser.id,
       updater_id: testUser.id,
     },
@@ -105,7 +105,7 @@ export async function createLimitedApiUser(modelName: string): Promise<string> {
 
   await prisma.permission.create({
     data: {
-      name: modelName,
+      name: entityName,
       role_id: denyRole.id,
       create: false,
       read: false,
@@ -121,8 +121,8 @@ export async function createLimitedApiUser(modelName: string): Promise<string> {
       id: limitedUserId,
       creator_id: limitedUserId,
       updater_id: limitedUserId,
-      email: `limited_${modelName}@example.com`,
-      name: `Limited User (${modelName})`,
+      email: `limited_${entityName}@example.com`,
+      name: `Limited User (${entityName})`,
       password: 'not_needed',
       api_key: limitedApiKey,
       roles: { connect: [{ id: denyRole.id }] },
