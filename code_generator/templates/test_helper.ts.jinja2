@@ -26,6 +26,16 @@ export async function populate{{ pascal }}Dependencies() {
       updater_id: testUser.id,
     },
   });
+{% elif dep.is_self_reference %}
+  const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
+    data: {
+{% for ef in dep.extra_required_fields %}
+      {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
 {% else %}
   const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
     data: {
@@ -130,7 +140,7 @@ export async function populate{{ pascal }}Data(length: number) {
 {% if has_optional %}
 export async function populate{{ pascal }}FullData(length: number) {
   const testUser = await getTestUser();
-{% if needs_deps_in_populate %}
+{% if needs_deps_in_populate_full %}
   const deps = await populate{{ pascal }}Dependencies();
 {% endif %}
   const records = [];

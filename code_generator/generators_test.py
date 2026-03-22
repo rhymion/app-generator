@@ -649,20 +649,40 @@ def test_helper_context(
         if (r['target'] == 'user_account'
                 and r['prop_name'] in required_fields
                 and r['prop_name'] not in ('creator_id', 'updater_id')):
-            var_name = to_camel_case(re.sub(r'_id$', '', r['prop_name']))
-            deps.append({'target': 'user_account', 'var_name': var_name, 'fk_deps': [], 'is_user_account': True})
+            prop_stem = re.sub(r'_id$', '', r['prop_name'])
+            var_name = to_camel_case(prop_stem)
+            deps.append({'target': 'user_account', 'var_name': var_name, 'prop_stem': prop_stem, 'fk_deps': [], 'is_user_account': True})
             ua_dep_fields.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
+
+    # Add self-referential optional FK deps (e.g. procedure.parent_id → creates a base record)
+    if not any(d['target'] == model_name for d in deps):
+        for r in relationships:
+            if r['target'] == model_name and r['prop_name'] not in ('updater_id', 'assignee_id'):
+                var_name = to_camel_case(model_name)
+                deps.append({'target': model_name, 'var_name': var_name, 'fk_deps': [], 'is_self_reference': True})
+                entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
+                break  # one self-ref dep covers the common case
 
     # Enrich deps with title, has_user_accounts, extra required fields, and needs_second
     enriched_deps = []
     for dep in deps:
         is_ua = dep.get('is_user_account', False)
+        is_self_ref = dep.get('is_self_reference', False)
         if is_ua:
+            enriched_deps.append({
+                **dep,
+                # Use prop_stem-based title (e.g. 'Customer' for customer_id, not 'User Account')
+                'title': to_title_case(dep.get('prop_stem', dep['var_name'])),
+                'has_user_accounts': False,
+                'extra_required_fields': [],
+                'needs_second': False,
+            })
+        elif is_self_ref:
             enriched_deps.append({
                 **dep,
                 'title': to_title_case(dep['target']),
                 'has_user_accounts': False,
-                'extra_required_fields': [],
+                'extra_required_fields': _get_dep_extra_required_fields(dep['target'], schema),
                 'needs_second': False,
             })
         else:
@@ -753,6 +773,11 @@ def test_helper_context(
         f['category'] == 'autocomplete' and f['dep_var_name'] and f['dep_var_name'] != primary_fk_dep_var
         for f in required_fields_prisma
     )
+    # populateFullData also needs deps when there are optional FK fields
+    needs_deps_in_populate_full = bool(ua_dep_fields) or any(
+        f['category'] == 'autocomplete' and f.get('dep_var_name')
+        for f in all_fields_prisma
+    )
 
     return {
         'pascal': pascal,
@@ -762,6 +787,7 @@ def test_helper_context(
         'deps_return': deps_return,
         'has_parent_deps': bool(entity_fk_deps) or bool(ua_dep_fields),
         'needs_deps_in_populate': needs_deps_in_populate,
+        'needs_deps_in_populate_full': needs_deps_in_populate_full,
         'ua_dep_fields': ua_dep_fields,
         'required_fields_prisma': required_fields_prisma,
         'all_fields_prisma': all_fields_prisma,
@@ -806,6 +832,13 @@ def test_spec_context(
                 'label': field_label,
                 'dep_name': f'Test {field_label}',
             })
+
+    # Include self-referential optional FK deps in has_deps
+    if not any(d['target'] == model_name for d in deps):
+        for r in relationships:
+            if r['target'] == model_name and r['prop_name'] not in ('updater_id', 'assignee_id'):
+                deps.append({'target': model_name, 'var_name': to_camel_case(model_name)})
+                break
 
     has_deps = bool(deps) or bool(ua_dep_fields_spec)
 
