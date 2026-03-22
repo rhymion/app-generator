@@ -105,6 +105,7 @@ Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) =
  * Clear MUI Autocomplete selection
  */
 Cypress.Commands.add('clearAutocomplete', (label: string) => {
+  cy.contains('label', label).parent().find('input').first().click();
   cy.contains('label', label).parent().find('button[aria-label="Clear"]').click();
 });
 
