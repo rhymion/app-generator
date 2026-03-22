@@ -1162,6 +1162,13 @@ def test_api_spec_context(
     )
     primary_dep_var = to_camel_case(primary_field_name) if primary_is_fk else None
 
+    # Detect if primary FK target is user_account (per-iteration creation in populateData)
+    primary_fk_rel = next(
+        (r for r in relationships if r['prop_name'] == f'{primary_field_name}_id'),
+        None,
+    ) if primary_is_fk else None
+    primary_fk_is_ua = primary_is_fk and bool(primary_fk_rel) and primary_fk_rel['target'] == 'user_account'
+
     # User_account FK fields required by the entity (e.g. customer_id)
     ua_fk_fields_for_api = [
         {'prop_name': r['prop_name'], 'var_name': to_camel_case(re.sub(r'_id$', '', r['prop_name']))}
@@ -1175,10 +1182,43 @@ def test_api_spec_context(
 
     I = '        ' if has_deps else '      '
 
+    # When primary FK is user_account, find a non-FK field to use for PUT update validation
+    ua_update_field = None
+    ua_update_expr = None
+    if primary_fk_is_ua:
+        candidates = [
+            f for f in all_field_metas
+            if f['prop_name'] in put_body_props
+            and f['category'] in ('enum', 'number')
+            and f['prop_name'] not in ('creator_id', 'updater_id')
+        ]
+        for f in candidates:
+            if f['category'] == 'enum':
+                ua_update_field = f
+                n = len(f['enum_values'])
+                ua_update_expr = f'(records[0].{f["prop_name"]} + 1) % {n}'
+                break
+        if not ua_update_field:
+            for f in candidates:
+                if f['category'] == 'number' and f.get('max') is not None:
+                    ua_update_field = f
+                    mn = f.get('min', 0)
+                    if mn == 0:
+                        ua_update_expr = f'(records[0].{f["prop_name"]} + 1) % {f["max"] + 1}'
+                    else:
+                        ua_update_expr = f'Math.min({f["max"]}, records[0].{f["prop_name"]} + 1)'
+                    break
+        if not ua_update_field and candidates:
+            ua_update_field = candidates[0]
+            ua_update_expr = f'records[0].{candidates[0]["prop_name"]} + 100'
+
     # Compute assertions for 3.1 and 4.1 based on primary display field
     # Fallback: use 'name' field if no x-display primary is set
     has_name_field = any(f['prop_name'] == 'name' for f in all_field_metas)
-    if primary_is_fk:
+    if primary_fk_is_ua and ua_update_field:
+        assert_create = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}.name);'
+        assert_update = f'expect(getRes.body.{ua_update_field["prop_name"]}).to.eq({ua_update_expr});'
+    elif primary_is_fk:
         assert_create = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}.name);'
         assert_update = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}2.name);'
     elif primary_field_name:
@@ -1233,8 +1273,10 @@ def test_api_spec_context(
     def _put_body_impl(indent: str) -> list[str]:
         out = []
         for prop in put_body_props:
-            if primary_is_fk and prop == f'{primary_field_name}_id':
+            if primary_is_fk and not primary_fk_is_ua and prop == f'{primary_field_name}_id':
                 out.append(f"{indent}{prop}: deps.{primary_dep_var}2.id,")
+            elif primary_fk_is_ua and ua_update_field and prop == ua_update_field['prop_name']:
+                out.append(f"{indent}{prop}: {ua_update_expr},")
             elif not primary_is_fk and primary_field_name and prop == primary_field_name:
                 primary_meta = next((f for f in all_field_metas if f['prop_name'] == prop), None)
                 update_label = primary_meta.get('label', to_title_case(prop)) if primary_meta else to_title_case(prop)
@@ -1255,6 +1297,7 @@ def test_api_spec_context(
         'api_path': api_path,
         'has_deps': has_deps,
         'primary_is_fk': primary_is_fk,
+        'primary_fk_is_ua': primary_fk_is_ua,
         'can_list': gen_cfg.get('list', True) is not False,
         'can_view': gen_cfg.get('view', True) is not False,
         'can_new': gen_cfg.get('new', True) is not False,
