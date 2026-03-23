@@ -1114,8 +1114,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 )
             continue
 
-        # Grid child — exclude the back-reference to the parent entity
-        child_rels = [r for r in get_parent_relationships(child_def) if r['target'] != model]
+        # Grid child — exclude only the actual parent FK column (e.g. db_table_id),
+        # not all FKs targeting the parent model (e.g. reference_id → db_table should remain).
+        child_rels = [r for r in get_parent_relationships(child_def) if r['prop_name'] != f'{model}_id']
         rel_opt_args = ', '.join(f'{to_camel_case(r["prop_name"])}Options' for r in child_rels)
         rel_args_str = f', {rel_opt_args}' if rel_opt_args else ''
 
@@ -1160,7 +1161,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         if c.get('output_type') == 'list' or (c.get('relationship') or {}).get('type') == 'many-to-many':
             continue
         cdef = schema['definitions'].get(c['name'], {})
-        all_child_rels.extend(r for r in _gpr(cdef) if r['target'] != model)
+        all_child_rels.extend(r for r in _gpr(cdef) if r['prop_name'] != f'{model}_id')
     parent_rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
     seen_rel = set()
     child_entity_rel_opt = []
@@ -1289,7 +1290,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 autocomplete_target = child_name
             target_pascal = to_pascal_case(autocomplete_target)
             self_rel = next((r for r in parent_rels_raw if r['target'] == model), None) if is_self else None
-            # filter_logic = f'.filter(item => !item.{self_rel["prop_name"]} || item.{self_rel["prop_name"]} === src.id)' if self_rel else ''
+            filter_logic = f'.filter(item => !item.{self_rel["prop_name"]} || item.{self_rel["prop_name"]} === src.id)' if self_rel else ''
             child_grid_components_parts.append(
                 f"      <EditableListWrapper\n"
                 f"        ref={{{child_var}Ref}}\n"
@@ -1300,7 +1301,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"        title={{tf('{child_camel}')}}\n"
                 f"        textFieldLabel=\"Name\"\n"
                 f"        textFieldPlaceholder=\"Enter name\"\n"
-                f"        allAutocompleteOptions={{all{target_pascal}s.map(item => ({{\n"
+                f"        allAutocompleteOptions={{all{target_pascal}s{filter_logic}.map(item => ({{\n"
                 f"          id: item.id,\n"
                 f"          label: item.name,\n"
                 f"          value: item.id,\n"

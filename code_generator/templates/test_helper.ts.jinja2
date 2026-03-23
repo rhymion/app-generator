@@ -16,27 +16,6 @@ export async function populate{{ pascal }}Dependencies() {
 {% else %}
   const testUser = await getTestUser();
 {% for dep in deps %}
-{% if dep.is_user_account %}
-  const {{ dep.var_name }} = await prisma.user_account.create({
-    data: {
-      name: 'Test {{ dep.title }}',
-      email: `test-{{ dep.var_name }}-${Date.now()}@example.com`,
-      password: 'test-password',
-      creator_id: testUser.id,
-      updater_id: testUser.id,
-    },
-  });
-{% elif dep.is_self_reference %}
-  const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
-    data: {
-{% for ef in dep.extra_required_fields %}
-      {{ ef.prop_name }}: {{ ef.prisma_val }},
-{% endfor %}
-      creator_id: testUser.id,
-      updater_id: testUser.id,
-    },
-  });
-{% else %}
   const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
     data: {
 {% for ef in dep.extra_required_fields %}
@@ -67,7 +46,6 @@ export async function populate{{ pascal }}Dependencies() {
       updater_id: testUser.id,
     },
   });
-{% endif %}
 {% endif %}
 {% endfor %}
   return { {{ deps_return }} };
@@ -184,7 +162,7 @@ export async function populate{{ pascal }}FullData(length: number) {
         {{ field.prop_name }}: {{ field.prisma_val }},
 {% endif %}
 {% endfor %}
-{% for ua_dep in ua_dep_fields %}
+{% for ua_dep in ua_dep_fields_full %}
 {% if primary_fk_dep and primary_fk_dep.is_user_account and ua_dep.dep_var_name == primary_fk_dep.var_name %}
         {{ ua_dep.prop_name }}: {{ ua_dep.dep_var_name }}Item.id,
 {% else %}

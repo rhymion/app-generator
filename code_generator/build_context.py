@@ -321,7 +321,7 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
         if child_def.get('properties'):
             child_entity_rel_targets.extend(
                 r['target'] for r in get_parent_relationships(child_def)
-                if r['target'] != model  # exclude back-reference to the parent entity
+                if r['prop_name'] != f'{model}_id'  # exclude only the actual parent FK column
             )
 
     return _dedupe_ordered([*m2m_targets, *optional_fk_list_targets, *many_to_one_targets, *child_entity_rel_targets])

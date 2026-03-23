@@ -133,8 +133,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% elif child.render_type == 'editable-list-autocomplete' and child.rel_target %}
 {{ I }}// Add list item: {{ child.title }}
 {{ I }}cy.clickButton('Add {{ child.title }}');
+{% if child.dep_var_name %}
+{{ I }}cy.get('div[role="dialog"]').find('input').type(deps.{{ child.dep_var_name }}.name);
+{{ I }}cy.get('.MuiAutocomplete-popper li').first().click();
+{% else %}
 {{ I }}cy.get('div[role="dialog"]').find('input').type('{{ child.rel_target_title }} 1');
 {{ I }}cy.get('.MuiAutocomplete-popper li').contains('{{ child.rel_target_title }} 1').click();
+{% endif %}
 {{ I }}cy.get('div[role="dialog"]').find('button').contains('Add').click();
 {% endif %}
 {% endfor %}
@@ -170,12 +175,17 @@ describe('Testing {{ title }} pages and their behavior', () => {
   describe('Edit', () => {
 {% if has_optional or has_children %}
     it('3.1 adds optional data and child items', () => {
+{% if use_deps_in_3_1 %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+        cy.task('db:populate{{ pascal }}', 1);
+{% else %}
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
 {% for child in list_children_data %}
 {% if child.render_type == 'editable-list-autocomplete' and child.is_external_target %}
         cy.task('db:populate{{ child.target_pascal }}', 2);
 {% endif %}
 {% endfor %}
+{% endif %}
 {% if can_list and can_view %}
         cy.visit('/en/{{ parent }}');
         cy.contains('{{ list_id_1 }}').click();
@@ -210,8 +220,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.get('div[role="dialog"]').find('button').contains('Add').click();
 {% elif child.render_type == 'editable-list-autocomplete' and child.rel_target %}
         cy.clickButton('Add {{ child.title }}');
+{% if use_deps_in_3_1 and child.dep_var_name %}
+        cy.get('div[role="dialog"]').find('input').type(deps.{{ child.dep_var_name }}.name);
+        cy.get('.MuiAutocomplete-popper li').first().click();
+{% else %}
         cy.get('div[role="dialog"]').find('input').type('{{ child.rel_target_title }} 1');
         cy.get('.MuiAutocomplete-popper li').contains('{{ child.rel_target_title }} 1').click();
+{% endif %}
         cy.get('div[role="dialog"]').find('button').contains('Add').click();
 {% endif %}
 {% endfor %}

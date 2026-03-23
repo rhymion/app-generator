@@ -12,7 +12,7 @@ import re
 from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
 )
-from helpers.schema_helpers import filter_fields, get_parent_relationships
+from helpers.schema_helpers import filter_fields, get_parent_relationships, is_optional_fk_to_parent
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +46,47 @@ def _get_primary_display_field_name(model_def: dict) -> str | None:
             if cfg.get('primary'):
                 return field_name
     return None
+
+
+def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dict) -> list[dict]:
+    """Compute extra_required_fields for a dep record in populateDependencies.
+
+    Uses title-based name (e.g. 'Test Parent', 'Test Assignee') and encodes
+    user_account email/password so the template needs no user_account special-casing.
+    """
+    if target == 'user_account':
+        return [
+            {'prop_name': 'name', 'prisma_val': f"'Test {title}'", 'prisma_val_unique': f'`Test {title} ${{i}}`'},
+            {'prop_name': 'email', 'prisma_val': f'`test-{var_name}-${{Date.now()}}@example.com`', 'prisma_val_unique': f'`test-{var_name}-${{Date.now()}}-${{i}}@example.com`'},
+            {'prop_name': 'password', 'prisma_val': "'test-password'", 'prisma_val_unique': "'test-password'"},
+        ]
+    dep_def = schema['definitions'].get(target)
+    if not dep_def:
+        return []
+    props = dep_def.get('properties', {})
+    required = set(dep_def.get('required') or [])
+    rel_props = {r['prop_name'] for r in get_parent_relationships(dep_def)}
+    exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props
+    result = []
+    for prop_name, prop in props.items():
+        if prop_name not in required or prop_name in exclude:
+            continue
+        prop_type_raw = prop.get('type')
+        actual = next((t for t in prop_type_raw if t != 'null'), None) if isinstance(prop_type_raw, list) else prop_type_raw
+        fmt = prop.get('format')
+        if prop_name == 'name':
+            val = f"'Test {title}'"
+            val_unique = f'`Test {title} ${{i}}`'
+        elif actual == 'string' and fmt in ('date', 'date-time', 'time'):
+            val = val_unique = 'new Date(2025, 0, 1).toISOString()'
+        elif actual in ('integer', 'number'):
+            mn = prop.get('minimum', 0)
+            val = val_unique = f'Math.max({mn}, 100)' if mn else '100'
+        else:
+            val = f'`TEST-{prop_name.upper()}-${{Date.now()}}`'
+            val_unique = f'`TEST-{prop_name.upper()}-${{Date.now()}}-${{i}}`'
+        result.append({'prop_name': prop_name, 'prisma_val': val, 'prisma_val_unique': val_unique})
+    return result
 
 
 def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
@@ -250,7 +291,7 @@ def get_field_metas(
     return metas
 
 
-def get_child_render_type(child: dict) -> str:
+def get_child_render_type(child: dict, schema: dict = None, parent_model_name: str = '') -> str:
     """Port of getChildRenderType()."""
     if child.get('file_type'):
         return 'file'
@@ -258,6 +299,11 @@ def get_child_render_type(child: dict) -> str:
     if rel.get('type') == 'many-to-many':
         return 'editable-list-autocomplete'
     if child.get('output_type') == 'list':
+        # Optional-FK reverse lists (e.g. children → parent_id) use connect semantics: autocomplete
+        if schema is not None:
+            child_def = schema['definitions'].get(child['name'], {})
+            if is_optional_fk_to_parent(child_def, parent_model_name):
+                return 'editable-list-autocomplete'
         return 'editable-list-text'
     if child.get('output_type') == 'comments':
         return 'comments'
@@ -268,7 +314,7 @@ def analyze_children(children: list, schema: dict, parent_model_name: str) -> li
     """Port of analyzeChildren()."""
     result = []
     for child in children:
-        render_type = get_child_render_type(child)
+        render_type = get_child_render_type(child, schema, parent_model_name)
         if render_type == 'file':
             continue
 
@@ -511,13 +557,14 @@ def gen_assert_command(field: dict, value: str, indent: str) -> str:
         return f"{indent}cy.setCheckbox('{label}', {value}); // verify checkbox state"
 
 
-def gen_fill_commands(fields: list, entity_title: str, indent: str) -> list[str]:
+def gen_fill_commands(fields: list, entity_title: str, indent: str, fk_dep_vars: dict | None = None) -> list[str]:
+    """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup."""
     lines = []
     for field in fields:
         if field['category'] == 'autocomplete':
             dep_target = field.get('dep_target')
             if dep_target:
-                dep_var = to_camel_case(dep_target)
+                dep_var = (fk_dep_vars or {}).get(field['prop_name']) or to_camel_case(dep_target)
                 lines.append(f"{indent}cy.selectAutocomplete('{field['label']}', deps.{dep_var}.name);")
         else:
             value = cypress_create_value(field, entity_title)
@@ -525,13 +572,15 @@ def gen_fill_commands(fields: list, entity_title: str, indent: str) -> list[str]
     return lines
 
 
-def gen_assert_commands(fields: list, entity_title: str, indent: str) -> list[str]:
+def gen_assert_commands(fields: list, entity_title: str, indent: str, fk_dep_vars: dict | None = None) -> list[str]:
+    """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup."""
     lines = []
     for field in fields:
         if field['category'] == 'autocomplete':
             dep_target = field.get('dep_target')
             if dep_target:
-                dep_title = to_title_case(dep_target)
+                dep_var = (fk_dep_vars or {}).get(field['prop_name']) or to_camel_case(dep_target)
+                dep_title = to_title_case(dep_var)
                 lines.append(f"{indent}cy.checkField('{field['label']}', 'Test {dep_title}');")
         else:
             value = cypress_create_value(field, entity_title)
@@ -572,18 +621,17 @@ def gen_child_full_datagrid_object(child_meta: dict) -> str:
     return '{ ' + ', '.join(entries) + ' }'
 
 
-def gen_child_datagrid_fk_fields(fields: list, exclude_parent_model: str = '') -> list[dict]:
+def gen_child_datagrid_fk_fields(fields: list) -> list[dict]:
     """Return [{field, label}] for FK (singleSelect) fields in a datagrid child.
 
-    Excludes self-referential FKs (dep_target == exclude_parent_model) because
-    the parent entity doesn't exist yet when creating its children inline.
+    Uses prop-stem-based label so reference_id → 'Test Reference' (not 'Test Db Table').
+    The parent FK (e.g. db_table_id) is already excluded from fields by analyze_children.
     """
     return [
-        {'field': f['prop_name'], 'label': f"Test {to_title_case(f['dep_target'])}"}
+        {'field': f['prop_name'], 'label': f"Test {to_title_case(re.sub(r'_id$', '', f['prop_name']))}"}
         for f in fields
         if f['category'] == 'autocomplete'
         and f.get('dep_target')
-        and f.get('dep_target') != exclude_parent_model
     ]
 
 
@@ -630,71 +678,72 @@ def test_helper_context(
 
     # Extend deps to include FK deps needed by datagrid children
     # (e.g. purchase_per_item needs product, but parent purchase_order doesn't)
-    existing_dep_targets = {d['target'] for d in deps}
+    # Also handles self-ref child FKs (e.g. field.reference_id → db_table) using prop-stem var names.
+    # Note: parent FK (e.g. db_table_id) is already excluded from child_meta['fields'] by analyze_children.
     for child_meta in datagrid_children:
         for field in child_meta['fields']:
             target = field.get('dep_target')
-            if (field['category'] == 'autocomplete'
-                    and target
-                    and target != 'user_account'
-                    and target != model_name
-                    and target not in existing_dep_targets):
-                deps.append({'target': target, 'var_name': to_camel_case(target), 'fk_deps': []})
-                existing_dep_targets.add(target)
+            if field['category'] == 'autocomplete' and target and target != 'user_account':
+                prop_stem = re.sub(r'_id$', '', field['prop_name'])
+                var_name = to_camel_case(prop_stem)
+                if not any(d['var_name'] == var_name for d in deps):
+                    deps.append({'target': target, 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': []})
 
-    # Collect user_account FK fields required by the parent (e.g. customer_id)
-    # and add each as a separate user_account dep (creates a distinct user)
-    ua_dep_fields = []  # [{prop_name, dep_var_name}] for use in populateData
+    # Collect ALL user_account FK fields (required and optional) as separate deps.
+    # ua_dep_fields: required only (for populateData); ua_dep_fields_full: all (for populateFullData).
+    ua_dep_fields = []
+    ua_dep_fields_full = []
     for r in relationships:
         if (r['target'] == 'user_account'
-                and r['prop_name'] in required_fields
                 and r['prop_name'] not in ('creator_id', 'updater_id')):
             prop_stem = re.sub(r'_id$', '', r['prop_name'])
             var_name = to_camel_case(prop_stem)
-            deps.append({'target': 'user_account', 'var_name': var_name, 'prop_stem': prop_stem, 'fk_deps': [], 'is_user_account': True})
-            ua_dep_fields.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
+            deps.append({'target': 'user_account', 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': []})
+            entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
+            ua_dep_fields_full.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
+            if r['prop_name'] in required_fields:
+                ua_dep_fields.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
 
-    # Add self-referential optional FK deps (e.g. procedure.parent_id → creates a base record)
-    if not any(d['target'] == model_name for d in deps):
-        for r in relationships:
-            if r['target'] == model_name and r['prop_name'] not in ('updater_id', 'assignee_id'):
-                var_name = to_camel_case(model_name)
-                deps.append({'target': model_name, 'var_name': var_name, 'fk_deps': [], 'is_self_reference': True})
-                entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
-                break  # one self-ref dep covers the common case
+    # Add self-referential FK deps using prop-stem var_names (e.g. parent_id → var 'parent')
+    for r in relationships:
+        if r['target'] == model_name and r['prop_name'] not in ('updater_id',):
+            prop_stem = re.sub(r'_id$', '', r['prop_name'])
+            var_name = to_camel_case(prop_stem)
+            if not any(d['var_name'] == var_name for d in deps):
+                deps.append({'target': model_name, 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': []})
+            entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
 
-    # Enrich deps with title, has_user_accounts, extra required fields, and needs_second
+    # Add editable-list-autocomplete children as deps (m2m and optional-FK reverse lists)
+    list_child_metas = [c for c in child_metas if c['render_type'] == 'editable-list-autocomplete']
+    for child_meta in list_child_metas:
+        rel = child_meta['child'].get('relationship') or {}
+        rel_target = rel.get('target', '') or child_meta['child']['name']
+        if not rel_target:
+            continue
+        prop_name = child_meta['child']['property_name']
+        var_name = to_camel_case(prop_name)
+        title_str = to_title_case(prop_name)
+        if not any(d['var_name'] == var_name for d in deps):
+            deps.append({'target': rel_target, 'var_name': var_name, 'title': title_str, 'fk_deps': []})
+
+    # Enrich deps with extra_required_fields, has_user_accounts, needs_second.
+    # All dep types (regular, user_account, self-ref, m2m) are handled uniformly.
+    # Deps from resolve_dependencies have no 'title' key; direct deps (UA, self-ref, m2m)
+    # have 'title' pre-set. Only transitive deps can have needs_second=True.
     enriched_deps = []
     for dep in deps:
-        is_ua = dep.get('is_user_account', False)
-        is_self_ref = dep.get('is_self_reference', False)
-        if is_ua:
-            enriched_deps.append({
-                **dep,
-                # Use prop_stem-based title (e.g. 'Customer' for customer_id, not 'User Account')
-                'title': to_title_case(dep.get('prop_stem', dep['var_name'])),
-                'has_user_accounts': False,
-                'extra_required_fields': [],
-                'needs_second': False,
-            })
-        elif is_self_ref:
-            enriched_deps.append({
-                **dep,
-                'title': to_title_case(dep['target']),
-                'has_user_accounts': False,
-                'extra_required_fields': _get_dep_extra_required_fields(dep['target'], schema),
-                'needs_second': False,
-            })
-        else:
-            dep_def = schema['definitions'].get(dep['target'] + '_detail', {})
-            x_rels = dep_def.get('x-relationships', {})
-            enriched_deps.append({
-                **dep,
-                'title': to_title_case(dep['target']),
-                'has_user_accounts': x_rels.get('user_accounts', {}).get('target') == 'user_account',
-                'extra_required_fields': _get_dep_extra_required_fields(dep['target'], schema),
-                'needs_second': dep['target'] == primary_fk_dep_target,
-            })
+        is_direct = 'title' in dep  # UA / self-ref / m2m deps added directly
+        title_str = dep.get('title') or to_title_case(dep['target'])
+        dep_def = schema['definitions'].get(dep['target'] + '_detail', {})
+        x_rels = dep_def.get('x-relationships', {})
+        enriched_deps.append({
+            **dep,
+            'title': title_str,
+            'has_user_accounts': x_rels.get('user_accounts', {}).get('target') == 'user_account',
+            'extra_required_fields': _get_dep_populate_fields(dep['target'], dep['var_name'], title_str, schema),
+            # needs_second only for transitive (non-direct) deps matching primary FK target
+            'needs_second': not is_direct and dep['target'] == primary_fk_dep_target,
+        })
 
     # Compute deps_return including second instances for FK primary deps
     deps_return_parts = []
@@ -729,12 +778,12 @@ def test_helper_context(
         for f in child_meta['fields']:
             target = f.get('dep_target')
             if f['category'] == 'autocomplete' and target and target != 'user_account':
-                if target == model_name:
-                    # Self-referential FK: parent doesn't exist yet — use null
-                    child_fields_prisma.append({**f, 'prisma_val': 'null'})
-                else:
-                    has_fk_deps = True
-                    child_fields_prisma.append({**f, 'prisma_val': f'deps.{to_camel_case(target)}.id'})
+                # Use prop-stem var name so self-ref FKs (e.g. reference_id → db_table)
+                # get their own dep (e.g. deps.reference) distinct from the parent itself.
+                prop_stem = re.sub(r'_id$', '', f['prop_name'])
+                dep_var = to_camel_case(prop_stem)
+                has_fk_deps = True
+                child_fields_prisma.append({**f, 'prisma_val': f'deps.{dep_var}.id'})
             else:
                 child_fields_prisma.append({**f, 'prisma_val': prisma_value(f, 'i', child_title)})
         enriched_datagrid_children.append({
@@ -756,25 +805,29 @@ def test_helper_context(
         })
 
     primary_fk_dep = next((d for d in enriched_deps if d.get('needs_second')), None)
-    # Also detect when the primary display FK is a user_account field
-    if primary_fk_dep is None and primary_fk_dep_target == 'user_account':
+    # Also detect when the primary display FK is a user_account field.
+    # In that case the dep var_name equals to_camel_case(primary_field_name_h).
+    if primary_fk_dep is None and primary_is_fk_h and primary_fk_dep_target == 'user_account':
+        primary_ua_var = to_camel_case(primary_field_name_h)
         primary_fk_dep = next(
             (d for d in enriched_deps
-             if d.get('is_user_account') and d['var_name'] == to_camel_case(primary_fk_dep_target)),
+             if d['target'] == 'user_account' and d['var_name'] == primary_ua_var),
             None,
         )
+    if primary_fk_dep is not None:
+        primary_fk_dep = {**primary_fk_dep, 'is_user_account': primary_fk_dep['target'] == 'user_account'}
 
-    # populateData/populateFullData need deps only when there are FK fields NOT covered
-    # by the inline primary_fk_dep creation (or user_account deps).
+    # populateData needs deps when there are required FK fields not covered by per-iteration creation.
     primary_fk_dep_var = primary_fk_dep['var_name'] if primary_fk_dep else None
-    primary_fk_ua_dep_var = primary_fk_dep_var if (primary_fk_dep and primary_fk_dep.get('is_user_account')) else None
+    primary_fk_is_ua = primary_fk_dep is not None and primary_fk_dep.get('is_user_account', False)
+    primary_fk_ua_dep_var = primary_fk_dep_var if primary_fk_is_ua else None
     non_primary_ua_dep_fields = [f for f in ua_dep_fields if f['dep_var_name'] != primary_fk_ua_dep_var]
     needs_deps_in_populate = bool(non_primary_ua_dep_fields) or any(
         f['category'] == 'autocomplete' and f['dep_var_name'] and f['dep_var_name'] != primary_fk_dep_var
         for f in required_fields_prisma
     )
-    # populateFullData also needs deps when there are optional FK fields
-    needs_deps_in_populate_full = bool(ua_dep_fields) or any(
+    # populateFullData also needs deps when there are any UA FK fields or optional FK fields
+    needs_deps_in_populate_full = bool(ua_dep_fields_full) or any(
         f['category'] == 'autocomplete' and f.get('dep_var_name')
         for f in all_fields_prisma
     )
@@ -789,6 +842,7 @@ def test_helper_context(
         'needs_deps_in_populate': needs_deps_in_populate,
         'needs_deps_in_populate_full': needs_deps_in_populate_full,
         'ua_dep_fields': ua_dep_fields,
+        'ua_dep_fields_full': ua_dep_fields_full,
         'required_fields_prisma': required_fields_prisma,
         'all_fields_prisma': all_fields_prisma,
         'has_optional': bool(optional_field_metas),
@@ -818,36 +872,63 @@ def test_spec_context(
     fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'))
     deps = resolve_dependencies(model_name, schema)
 
-    # User_account FK fields required by the entity (e.g. customer_id → Customer autocomplete)
-    ua_dep_fields_spec = []
+    # Collect ALL user_account FK fields (required and optional) for fill/assert commands.
+    # req_ua_spec: required only (for section 2.1, 5.x); all_ua_spec: all (for section 2.2)
+    req_ua_spec = []
+    all_ua_spec = []
     for r in relationships:
-        if (r['target'] == 'user_account'
-                and r['prop_name'] in required_fields
-                and r['prop_name'] not in ('creator_id', 'updater_id')):
+        if r['target'] == 'user_account' and r['prop_name'] not in ('creator_id', 'updater_id'):
             var_name = to_camel_case(re.sub(r'_id$', '', r['prop_name']))
             field_label = to_title_case(re.sub(r'_id$', '', r['prop_name']))
-            ua_dep_fields_spec.append({
+            entry = {
                 'prop_name': r['prop_name'],
                 'dep_var_name': var_name,
                 'label': field_label,
                 'dep_name': f'Test {field_label}',
-            })
+            }
+            all_ua_spec.append(entry)
+            if r['prop_name'] in required_fields:
+                req_ua_spec.append(entry)
+    ua_dep_fields_spec = req_ua_spec  # kept for template backward-compat
 
-    # Include self-referential optional FK deps in has_deps
+    # Build fk_dep_vars: {prop_name: dep_var_name} for all non-UA FK relationships.
+    # Uses prop-stem-based var_names so self-ref FKs get e.g. 'parent' not 'procedure'.
+    fk_dep_vars = {}
+    for r in relationships:
+        if r['target'] != 'user_account' and r['prop_name'] not in ('creator_id', 'updater_id'):
+            prop_stem = re.sub(r'_id$', '', r['prop_name'])
+            fk_dep_vars[r['prop_name']] = to_camel_case(prop_stem)
+
+    child_metas = analyze_children(children, schema, model_name)
+    list_autocomplete_children = [c for c in child_metas if c['render_type'] == 'editable-list-autocomplete']
+
+    # Include self-referential FK deps and m2m self-ref children in has_deps
     if not any(d['target'] == model_name for d in deps):
+        # Self-ref FK fields
         for r in relationships:
-            if r['target'] == model_name and r['prop_name'] not in ('updater_id', 'assignee_id'):
+            if r['target'] == model_name and r['prop_name'] not in ('updater_id',):
                 deps.append({'target': model_name, 'var_name': to_camel_case(model_name)})
                 break
+    # m2m self-ref autocomplete children also need deps
+    has_m2m_self_ref = any(
+        (c['child'].get('relationship') or {}).get('target') == model_name
+        for c in list_autocomplete_children
+    )
+    if has_m2m_self_ref and not any(d['target'] == model_name for d in deps):
+        deps.append({'target': model_name, 'var_name': to_camel_case(model_name)})
 
-    has_deps = bool(deps) or bool(ua_dep_fields_spec)
+    datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
+    # Datagrid children may have FK deps not on the parent (e.g. field.reference_id → db_table)
+    has_child_fk_deps = any(
+        f['category'] == 'autocomplete' and f.get('dep_target') and f.get('dep_target') != 'user_account'
+        for c in datagrid_children
+        for f in c['fields']
+    )
+    has_deps = bool(deps) or bool(all_ua_spec) or has_child_fk_deps
 
     required_field_metas = [f for f in fields if f['required']]
     optional_field_metas = [f for f in fields if not f['required']]
     non_autocomplete_required = [f for f in required_field_metas if f['category'] != 'autocomplete']
-
-    child_metas = analyze_children(children, schema, model_name)
-    datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
     list_children = [c for c in child_metas if c['render_type'] in ('editable-list-text', 'editable-list-autocomplete')]
     comment_children = [c for c in child_metas if c['render_type'] == 'comments']
 
@@ -860,19 +941,20 @@ def test_spec_context(
     # Indentation for .then((deps) => {}) wrapper in sections 2 and 5
     I = '        ' if has_deps else '      '
 
-    # Pre-compute fill/assert command lists (indent already baked in)
-    required_fill_cmds = gen_fill_commands(required_field_metas, title, I)
-    all_fill_cmds = gen_fill_commands(fields, title, I)
+    # Pre-compute fill/assert command lists (indent already baked in), with fk_dep_vars
+    required_fill_cmds = gen_fill_commands(required_field_metas, title, I, fk_dep_vars)
+    all_fill_cmds = gen_fill_commands(fields, title, I, fk_dep_vars)
     required_assert_cmds_no_bool = gen_assert_commands(
-        [f for f in required_field_metas if f['category'] != 'boolean'], title, I)
+        [f for f in required_field_metas if f['category'] != 'boolean'], title, I, fk_dep_vars)
     all_assert_cmds_no_bool = gen_assert_commands(
-        [f for f in fields if f['category'] != 'boolean'], title, I)
+        [f for f in fields if f['category'] != 'boolean'], title, I, fk_dep_vars)
 
-    # Append user_account FK fill/assert commands
-    for ua in ua_dep_fields_spec:
+    # Append user_account FK fill/assert commands (required UA for req_cmds; all UA for all_cmds)
+    for ua in req_ua_spec:
         required_fill_cmds.append(f"{I}cy.selectAutocomplete('{ua['label']}', deps.{ua['dep_var_name']}.name);")
-        all_fill_cmds.append(f"{I}cy.selectAutocomplete('{ua['label']}', deps.{ua['dep_var_name']}.name);")
         required_assert_cmds_no_bool.append(f"{I}cy.checkField('{ua['label']}', '{ua['dep_name']}');")
+    for ua in all_ua_spec:
+        all_fill_cmds.append(f"{I}cy.selectAutocomplete('{ua['label']}', deps.{ua['dep_var_name']}.name);")
         all_assert_cmds_no_bool.append(f"{I}cy.checkField('{ua['label']}', '{ua['dep_name']}');")
 
     # Compute list identifiers based on primary display field.
@@ -946,8 +1028,8 @@ def test_spec_context(
     datagrid_children_data = []
     for child_meta in datagrid_children:
         child_name = child_meta['child']['name']
-        fk_create_fields = gen_child_datagrid_fk_fields(child_meta['required_fields'], model_name)
-        fk_full_fields = gen_child_datagrid_fk_fields(child_meta['fields'], model_name)
+        fk_create_fields = gen_child_datagrid_fk_fields(child_meta['required_fields'])
+        fk_full_fields = gen_child_datagrid_fk_fields(child_meta['fields'])
         datagrid_children_data.append({
             'title': child_meta['names']['title'],
             'pascal': to_pascal_case(child_name),
@@ -962,7 +1044,12 @@ def test_spec_context(
     list_children_data = []
     for child_meta in list_children:
         rel = child_meta['child'].get('relationship') or {}
-        rel_target = rel.get('target', '')
+        rel_target = rel.get('target', '') or child_meta['child']['name']
+        prop_name = child_meta['child']['property_name']
+        # Self-ref autocomplete children (m2m or optional-FK reverse) use deps.{var}.name
+        is_self_ref_autocomplete = (child_meta['render_type'] == 'editable-list-autocomplete'
+                                    and rel_target == model_name)
+        dep_var_name = to_camel_case(prop_name) if is_self_ref_autocomplete else None
         list_children_data.append({
             'singular_pascal': child_meta['names']['singular_pascal_name'],
             'title': child_meta['names']['title'],
@@ -971,6 +1058,7 @@ def test_spec_context(
             'rel_target_title': to_title_case(rel_target) if rel_target else '',
             'target_pascal': to_pascal_case(rel_target) if rel_target else '',
             'is_external_target': bool(rel_target and rel_target != model_name),
+            'dep_var_name': dep_var_name,
         })
 
     # Comment children data
@@ -982,12 +1070,25 @@ def test_spec_context(
             'pascal': to_pascal_case(child_name),
         })
 
-    # Section 3.1: optional fill commands (8-space indent, non-autocomplete only)
-    opt_fill_cmds_3_1 = [
+    # Section 3.1: optional fill commands (8-space indent)
+    # When deps are available, include optional autocomplete fields too; otherwise omit them.
+    use_deps_in_3_1 = has_deps and (can_list is not False)
+    opt_fill_cmds_3_1_non_ac = [
         gen_fill_command(f, cypress_create_value(f, title), '        ')
         for f in optional_field_metas
         if f['category'] != 'autocomplete'
     ]
+    opt_fill_cmds_3_1_ac = gen_fill_commands(
+        [f for f in optional_field_metas if f['category'] == 'autocomplete'],
+        title, '        ', fk_dep_vars,
+    ) if use_deps_in_3_1 else []
+    # Optional UA FK fields (excluded from field_metas; appended separately via all_ua_spec)
+    opt_ua_spec = [ua for ua in all_ua_spec if ua['prop_name'] not in required_fields]
+    opt_fill_cmds_3_1_ua = [
+        f"        cy.selectAutocomplete('{ua['label']}', deps.{ua['dep_var_name']}.name);"
+        for ua in opt_ua_spec
+    ] if use_deps_in_3_1 else []
+    opt_fill_cmds_3_1 = opt_fill_cmds_3_1_non_ac + opt_fill_cmds_3_1_ac + opt_fill_cmds_3_1_ua
 
     # Section 3.2: optional clear commands (8-space indent, non-autocomplete only)
     opt_clear_cmds_3_2 = [
@@ -1032,7 +1133,7 @@ def test_spec_context(
             fail_create_5_2_scalar = {
                 'title': child_title,
                 'partial_obj': ('{ ' + ', '.join(entries) + ' }') if entries else None,
-                'fk_fields': gen_child_datagrid_fk_fields(fk_required, model_name),
+                'fk_fields': gen_child_datagrid_fk_fields(fk_required),
                 'fill_cmds': gen_fill_commands(required_field_metas, title, I),
             }
 
@@ -1095,6 +1196,7 @@ def test_spec_context(
         'datagrid_children_data': datagrid_children_data,
         'list_children_data': list_children_data,
         'comment_children_data': comment_children_data,
+        'use_deps_in_3_1': use_deps_in_3_1,
         'opt_fill_cmds_3_1': opt_fill_cmds_3_1,
         'opt_clear_cmds_3_2': opt_clear_cmds_3_2,
         'edit_fill_cmd_3_3': edit_fill_cmd_3_3,
