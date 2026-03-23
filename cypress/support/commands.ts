@@ -137,11 +137,10 @@ Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
   const [, month, day, year, hour, minute, ampm] = parts;
   const ampmChar = ampm.toUpperCase() === 'AM' ? 'a' : 'p';
 
-  cy.contains('label', label)
-    .parent()
-    .find('input')
-    .click()
-    .type(month + day + year + hour + minute + ampmChar);
+  // Break the chain: MUI X re-renders the input on focus, detaching the original DOM node.
+  // Re-querying after click ensures .type() gets the live element.
+  cy.contains('label', label).parent().find('input').click();
+  cy.contains('label', label).parent().find('input').type(month + day + year + hour + minute + ampmChar);
 });
 
 Cypress.Commands.add('fillDate', (label: string, dateString: string) => {
@@ -149,11 +148,8 @@ Cypress.Commands.add('fillDate', (label: string, dateString: string) => {
   if (!parts) throw new Error(`fillDate: Expected "MM/DD/YYYY", got "${dateString}"`);
   const [, month, day, year] = parts;
 
-  cy.contains('label', label)
-    .parent()
-    .find('input')
-    .click()
-    .type(month + day + year);
+  cy.contains('label', label).parent().find('input').click();
+  cy.contains('label', label).parent().find('input').type(month + day + year);
 });
 
 Cypress.Commands.add('fillTime', (label: string, dateString: string) => {
@@ -162,11 +158,8 @@ Cypress.Commands.add('fillTime', (label: string, dateString: string) => {
   const [, hour, minute, ampm] = parts;
   const ampmChar = ampm.toUpperCase() === 'AM' ? 'a' : 'p';
 
-  cy.contains('label', label)
-    .parent()
-    .find('input')
-    .click()
-    .type(hour + minute + ampmChar);
+  cy.contains('label', label).parent().find('input').click();
+  cy.contains('label', label).parent().find('input').type(hour + minute + ampmChar);
 });
 
 /**
