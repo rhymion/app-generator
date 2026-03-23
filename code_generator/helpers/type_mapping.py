@@ -16,7 +16,7 @@ def get_ts_type(prop: dict, for_view_props: bool = False) -> str:
             return 'Date | null' if ('null' in prop_type or for_view_props) else 'Date'
         return ' | '.join('null' if t == 'null' else _map_primitive(t) for t in prop_type)
 
-    if 'number' in prop_type or 'integer' in prop_type:
+    if prop_type and ('number' in prop_type or 'integer' in prop_type):
         return 'number | null' if ('null' in prop_type or for_view_props) else 'number'
 
     if prop_type == 'array':

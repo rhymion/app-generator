@@ -23,6 +23,21 @@ class TestPrimitiveTypes:
         assert get_ts_type({}) == "any"
 
 
+class TestNumberForViewProps:
+    def test_required_integer_for_view_props_is_nullable(self):
+        # number fields default to null in FormUpsert, so view props expose number | null
+        assert get_ts_type({"type": "integer"}, for_view_props=True) == "number | null"
+
+    def test_required_number_for_view_props_is_nullable(self):
+        assert get_ts_type({"type": "number"}, for_view_props=True) == "number | null"
+
+    def test_required_integer_without_for_view_props_is_plain_number(self):
+        assert get_ts_type({"type": "integer"}) == "number"
+
+    def test_required_number_without_for_view_props_is_plain_number(self):
+        assert get_ts_type({"type": "number"}) == "number"
+
+
 class TestNullableTypes:
     def test_nullable_string(self):
         assert get_ts_type({"type": ["string", "null"]}) == "string | null"
