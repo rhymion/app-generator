@@ -1265,6 +1265,48 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         )
     child_form_data_handling = '\n'.join(child_fdh_parts)
 
+    # Child datagrid required-field validation (injected at start of handleSubmit)
+    child_validation_parts = []
+    exclude_validation = {'id', 'created_at', 'updated_at', 'creator_id', 'order'}
+    for c in non_comment_ch:
+        child_name = c['name']
+        prop_name  = c['property_name']
+        child_var  = safe_var_name(prop_name)
+        child_pascal = to_pascal_case(prop_name)
+        child_title_label = ' '.join(w.capitalize() for w in prop_name.split('_'))
+        child_def  = schema['definitions'].get(child_name, {})
+        child_props_dict_v = child_def.get('properties', {})
+        is_list = c.get('output_type') == 'list'
+        is_m2m  = (c.get('relationship') or {}).get('type') == 'many-to-many'
+
+        if is_list or is_m2m or c.get('file_type') or c.get('use_connect'):
+            continue
+
+        # Required fields excluding the parent FK and audit columns; booleans always have a value
+        child_required_all = child_def.get('required', [])
+        # Additionally treat string/number/datetime fields as required if they appear mandatory in schema
+        required_validatable = [
+            k for k in child_required_all
+            if k not in exclude_validation
+            and k != f'{model}_id'
+            and _get_actual_type(child_props_dict_v.get(k, {})) != 'boolean'
+        ]
+
+        if not required_validatable:
+            continue
+
+        req_props_js = ', '.join(f"'{p}'" for p in required_validatable)
+        child_validation_parts.append(
+            f"    const invalid{child_pascal} = ({child_var}Ref.current?.getFields?.() || []).filter((row: any) =>\n"
+            f"      [{req_props_js}].some((prop: string) => row[prop] == null || row[prop] === '')\n"
+            f"    );\n"
+            f"    if (invalid{child_pascal}.length > 0) {{\n"
+            f"      setError('{child_title_label}: required fields ({', '.join(required_validatable)}) must be filled for all rows.');\n"
+            f"      return;\n"
+            f"    }}"
+        )
+    child_validation_code = '\n\n'.join(child_validation_parts)
+
     # Child grid components (JSX)
     child_grid_components_parts = []
     for c in non_comment_ch:
@@ -1423,6 +1465,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'child_imports':            child_imports,
         'child_grid_setup':         child_grid_setup,
         'child_form_data_handling': child_form_data_handling,
+        'child_validation_code':    child_validation_code,
         'child_grid_components':    child_grid_components,
         'form_upsert_params':       form_upsert_params,
         'enum_ns_hooks':            '\n'.join(enum_ns_hooks),
