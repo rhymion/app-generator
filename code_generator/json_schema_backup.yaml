@@ -25,6 +25,7 @@ definitions:
       - name
       - type
       - db_table_id
+      - max_length
       - required
     properties:
       id:
@@ -53,9 +54,7 @@ definitions:
           target: db_table
           labelField: name
       max_length:
-        type:
-          - integer
-          - "null"
+        type: integer
         minimum: 1
       max:
         type:

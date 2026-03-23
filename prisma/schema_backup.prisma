@@ -38,7 +38,7 @@ model field {
   db_table       db_table @relation("ParentTable", fields: [db_table_id], references: [id], onDelete: Cascade)
   reference_id   String?
   reference      db_table? @relation("ReferenceTable", fields: [reference_id], references: [id])
-  max_length  Int?
+  max_length  Int
   max         Int?
   regex       String?
   required    Boolean   @default(true)
