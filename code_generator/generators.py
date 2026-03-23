@@ -849,6 +849,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     for p in number_props:
         prop = filtered_props[p]
         fk   = _tf(p)
+        req  = p in (model_def.get('required') or [])
         mn   = prop.get('minimum', 0)
         mx   = prop.get('maximum', 1000000)
         num_jsxs.append(
@@ -856,6 +857,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        label={{tf('{fk}')}}\n"
             f"        inputRef={{{p}Ref}}\n"
             f"        defaultValue={{src.{p} || 0}}\n"
+            f"        {'required' if req else ''}\n"
             f"        min={{{mn}}}\n"
             f"        max={{{mx}}}\n"
             f"      />"
@@ -866,6 +868,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     for p in date_time_props:
         prop    = filtered_props[p]
         fk      = _tf(p)
+        req     = p in (model_def.get('required') or [])
         sn      = safe_var_name(p)
         setter  = _setter(sn)
         fmt     = prop.get('format')
@@ -875,6 +878,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      <DateTimeWrapper\n"
             f"        label={{tf('{fk}')}} {show_date_str}{show_time_str}\n"
             f"        date_time={{{sn} ? {sn}.toDate() : null}}\n"
+            f"        {'required' if req else ''}\n"
             f"        onChange={{(newValue: dayjs.Dayjs | null) => set{setter}(newValue)}}\n"
             f"      />"
         )

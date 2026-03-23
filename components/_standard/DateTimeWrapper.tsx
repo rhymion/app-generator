@@ -7,7 +7,7 @@ import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 import { read } from 'node:fs';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export default function DateTimeWrapper({label, date_time, show_date = true, show_time = true, readOnly = false, ...other}: {label: string, date_time: Date | null, show_date?: boolean, show_time?: boolean, readOnly?: boolean, [key: string]: any}) {
+export default function DateTimeWrapper({label, date_time, show_date = true, show_time = true, readOnly = false, required = false, ...other}: {label: string, date_time: Date | null, show_date?: boolean, show_time?: boolean, readOnly?: boolean, required?: boolean, [key: string]: any}) {
     return (
     <div>
       <LocalizationProvider dateAdapter={AdapterDayjs}>
