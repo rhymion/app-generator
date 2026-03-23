@@ -36,7 +36,8 @@ export function editDataGridCell(
   const input = getDataGridCell(rowIndex, field).find('input');
   input.clear().type(String(value));
   if (submit) {
-    input.type('{enter}');
+    cy.get('p').first().click(); // Click outside to commit the edit, as some cells may have async validation that prevents Enter key from working.
+    // input.type('{enter}');
   }
 }
 
@@ -81,6 +82,7 @@ export function fillDataGridRow(
     if (typeof value === 'boolean') {
       toggleDataGridCheckbox(rowIndex, field, value);
       if (isLast && submitLast) {
+        cy.get('p').first().click(); // Click outside to commit the edit, as some cells may have async validation that prevents Enter key from working.
         // getDataGridCell(rowIndex, field).find('input').type('{enter}');
       }
     } else {
