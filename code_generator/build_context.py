@@ -529,7 +529,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         if actual == 'string' and fmt in ('date', 'date-time', 'time'):
             return 'null'
         if actual in ('integer', 'number'):
-            return '0' if is_req else 'null'
+            return 'null'
         if actual == 'string':
             return "''"
         if actual == 'boolean':

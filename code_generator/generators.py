@@ -856,7 +856,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      <NumberField\n"
             f"        label={{tf('{fk}')}}\n"
             f"        inputRef={{{p}Ref}}\n"
-            f"        defaultValue={{src.{p} || 0}}\n"
+            f"        defaultValue={{src.{p} || undefined}}\n"
             f"        {'required' if req else ''}\n"
             f"        min={{{mn}}}\n"
             f"        max={{{mx}}}\n"
