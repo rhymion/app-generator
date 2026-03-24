@@ -1,0 +1,4 @@
+[project]
+name = "my-next"
+version = "0.1.0"
+requires-python = ">=3.12" # Example: use 3.12, 3.13, or 3.14
