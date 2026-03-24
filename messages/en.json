@@ -25,14 +25,17 @@
   },
   "Fields": {
     "actions": "Actions",
-    "name": "Name",
     "description": "Description",
+    "endDate": "End Date",
     "max": "Max",
     "maxLength": "Max Length",
+    "name": "Name",
     "order": "No.",
+    "path": "Path",
     "reference": "Reference",
     "regex": "Regex",
     "required": "Required",
+    "startDate": "Start Date",
     "type": "Type",
     "writtenBy": "Written By"
   },
