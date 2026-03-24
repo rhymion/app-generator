@@ -56,8 +56,6 @@ jobs:
         run: cp -a custom/sample/* .
       - name: Generate all (code generation and prisma client)
         run: npm run demo:generate
-      - name: Build and start Next.js app for testing
-        run: npm run demo:start
       - name: Reset test database
         run: npm run db:reset:test
       - name: Run Cypress E2E tests
