@@ -124,6 +124,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     x-relationships:
       user_accounts:
         type: many-to-many
@@ -166,6 +167,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     x-relationships:
       user_accounts:
         type: many-to-many
@@ -231,6 +233,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/permission"
       - type: object
@@ -749,6 +752,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/feature"
       - type: object
@@ -785,6 +789,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/user_story"
       - type: object
@@ -847,6 +852,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      test: true
     allOf:
       - $ref: "#/definitions/bug"
       - type: object
