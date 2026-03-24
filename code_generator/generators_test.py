@@ -1454,3 +1454,78 @@ def test_api_spec_context(
         'bulk_put_body_valid':    _put_body_impl('              '),   # 14 spaces
         'bulk_put_body_valid_fk': _put_body_impl('                '), # 16 spaces
     }
+
+
+# ---------------------------------------------------------------------------
+# db-helpers.ts context
+# ---------------------------------------------------------------------------
+
+def db_helpers_context(schema: dict) -> dict:
+    """Build context for cypress/support/db-helpers.ts.
+
+    Determines the correct deletion order for all Prisma models by:
+    1. Extracting base entities (type: object with id, not *_detail/*_input).
+    2. Building an FK dependency graph from x-relationship fields.
+    3. Adding an implicit dependency on user_account for every other entity
+       (all models reference it via creator_id/updater_id even when not in schema).
+    4. Grouping into deletion waves so that all dependents of an entity are
+       deleted before the entity itself.
+    """
+    defs = schema['definitions']
+
+    # --- Collect base entities ---
+    base_entities: dict[str, dict] = {}
+    for key, defn in defs.items():
+        if key.endswith('_detail') or key.endswith('_input'):
+            continue
+        if defn.get('type') == 'object' and 'id' in defn.get('properties', {}):
+            base_entities[key] = defn
+
+    # --- Build FK dependency graph (entity -> set of entities it references) ---
+    deps: dict[str, set[str]] = {}
+    for name, defn in base_entities.items():
+        fk_targets: set[str] = set()
+        for prop_name, prop in defn.get('properties', {}).items():
+            rel = prop.get('x-relationship', {})
+            if rel.get('type') == 'many-to-one':
+                # Explicit x-relationship annotation
+                target = rel.get('target')
+                if target and target in base_entities and target != name:
+                    fk_targets.add(target)
+            elif prop_name.endswith('_id') and prop_name not in ('id', 'creator_id', 'updater_id') and not rel:
+                # Infer FK from _id suffix when no x-relationship is present
+                # e.g. bug_id in bug_comment → bug
+                inferred = prop_name[:-3]
+                if inferred in base_entities and inferred != name:
+                    fk_targets.add(inferred)
+        # All entities implicitly reference user_account via creator_id/updater_id
+        if name != 'user_account' and 'user_account' in base_entities:
+            fk_targets.add('user_account')
+        deps[name] = fk_targets
+
+    # --- Compute reverse deps: entity -> set of entities that depend on it ---
+    reverse_deps: dict[str, set[str]] = {name: set() for name in base_entities}
+    for name, dep_set in deps.items():
+        for dep in dep_set:
+            if dep in reverse_deps:
+                reverse_deps[dep].add(name)
+
+    # --- Group into deletion waves (BFS from leaves) ---
+    assigned: set[str] = set()
+    remaining: set[str] = set(base_entities.keys())
+    levels: list[list[str]] = []
+
+    while remaining:
+        wave = sorted(
+            name for name in remaining
+            if all(d in assigned for d in reverse_deps[name])
+        )
+        if not wave:
+            # Cycle detected — add remaining in sorted order to avoid infinite loop
+            wave = sorted(remaining)
+        levels.append(wave)
+        for name in wave:
+            assigned.add(name)
+            remaining.remove(name)
+
+    return {'deletion_levels': levels}

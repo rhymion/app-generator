@@ -38,6 +38,7 @@ from generators_test import (
     test_spec_context,
     test_tasks_registry_context,
     test_api_spec_context,
+    db_helpers_context,
 )
 
 
@@ -278,6 +279,12 @@ def generate(schema_path: str, output_dir: str) -> None:
         registry_ctx = test_tasks_registry_context(registry_infos, schema)
         _write(cypress_support / 'generated-tasks.ts',
                _render(env, 'test_tasks_registry.ts.jinja2', registry_ctx))
+
+    # --- db-helpers.ts (always generated, not gated on test_entities) ---
+    print('\nGenerating db-helpers.ts...')
+    db_ctx = db_helpers_context(schema)
+    _write(out / 'cypress' / 'support' / 'db-helpers.ts',
+           _render(env, 'test_db_helpers.ts.jinja2', db_ctx))
 
     # --- i18n / config updates ---
     print('\nUpdating i18n and navigation config...')
