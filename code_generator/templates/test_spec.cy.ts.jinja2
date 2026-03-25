@@ -179,6 +179,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if use_deps_in_3_1 %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task('db:populate{{ pascal }}', 1);
+{% for child in list_children_data %}
+{% if child.render_type == 'editable-list-autocomplete' and child.is_external_target and not child.dep_var_name %}
+        cy.task('db:populate{{ child.target_pascal }}', 1);
+{% endif %}
+{% endfor %}
 {% else %}
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
 {% for child in list_children_data %}

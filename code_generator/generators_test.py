@@ -77,7 +77,9 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
         if prop_name == 'name':
             val = f"'Test {title}'"
             val_unique = f'`Test {title} ${{i}}`'
-        elif actual == 'string' and fmt in ('date', 'date-time', 'time'):
+        elif actual == 'string' and fmt == 'date':
+            val = val_unique = 'new Date(Date.UTC(2025, 0, 1)).toISOString()'
+        elif actual == 'string' and fmt in ('date-time', 'time'):
             val = val_unique = 'new Date(2025, 0, 1).toISOString()'
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
@@ -113,7 +115,10 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
         if prop_name == 'name':
             val = f"'Test {to_title_case(dep_target)}'"
             val_unique = f'`Test {to_title_case(dep_target)} ${{i}}`'
-        elif actual == 'string' and fmt in ('date', 'date-time', 'time'):
+        elif actual == 'string' and fmt == 'date':
+            val = 'new Date(Date.UTC(2025, 0, 1)).toISOString()'
+            val_unique = val
+        elif actual == 'string' and fmt in ('date-time', 'time'):
             val = 'new Date(2025, 0, 1).toISOString()'
             val_unique = val
         elif actual in ('integer', 'number'):
@@ -380,7 +385,8 @@ def prisma_value(field: dict, index: str, entity_title: str) -> str:
     elif cat == 'datetime':
         fmt = field.get('format')
         if fmt == 'date':
-            return f'new Date(2025, 0, {index}).toISOString()'
+            # Use UTC to avoid timezone shift: local midnight in e.g. JST would be stored as prev day
+            return f'new Date(Date.UTC(2025, 0, {index})).toISOString()'
         if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
             return f'new Date(2025, 0, {index}, 17, 0).toISOString()'
         return f'new Date(2025, 0, {index}, 9, 0).toISOString()'
@@ -579,8 +585,7 @@ def gen_assert_commands(fields: list, entity_title: str, indent: str, fk_dep_var
         if field['category'] == 'autocomplete':
             dep_target = field.get('dep_target')
             if dep_target:
-                dep_var = (fk_dep_vars or {}).get(field['prop_name']) or to_camel_case(dep_target)
-                dep_title = to_title_case(dep_var)
+                dep_title = to_title_case(dep_target)  # dep_target is snake_case → 'User Story'
                 lines.append(f"{indent}cy.checkField('{field['label']}', 'Test {dep_title}');")
         else:
             value = cypress_create_value(field, entity_title)
@@ -713,12 +718,18 @@ def test_helper_context(
                 deps.append({'target': model_name, 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': []})
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
 
-    # Add editable-list-autocomplete children as deps (m2m and optional-FK reverse lists)
+    # Add editable-list-autocomplete children as deps (only m2m and self-ref optional-FK reverse)
+    # External optional-FK reverse lists (e.g. feature.bugs where bug has optional feature_id)
+    # are populated separately via db:populate{Target} — do NOT add them as dependencies here.
     list_child_metas = [c for c in child_metas if c['render_type'] == 'editable-list-autocomplete']
     for child_meta in list_child_metas:
         rel = child_meta['child'].get('relationship') or {}
         rel_target = rel.get('target', '') or child_meta['child']['name']
         if not rel_target:
+            continue
+        is_m2m = rel.get('type') == 'many-to-many'
+        # Skip external optional-FK reverse lists — they are not true dependencies
+        if not is_m2m and rel_target != model_name:
             continue
         prop_name = child_meta['child']['property_name']
         var_name = to_camel_case(prop_name)
@@ -929,7 +940,10 @@ def test_spec_context(
     required_field_metas = [f for f in fields if f['required']]
     optional_field_metas = [f for f in fields if not f['required']]
     non_autocomplete_required = [f for f in required_field_metas if f['category'] != 'autocomplete']
-    list_children = [c for c in child_metas if c['render_type'] in ('editable-list-text', 'editable-list-autocomplete')]
+    # Only include editable-list-autocomplete (optional-FK reverse lists).
+    # editable-list-text children have a required FK to the parent, so the product
+    # UI does not show Add/remove management on the parent form — skip them in tests.
+    list_children = [c for c in child_metas if c['render_type'] == 'editable-list-autocomplete']
     comment_children = [c for c in child_metas if c['render_type'] == 'comments']
 
     can_list   = generate_config.get('list', True)

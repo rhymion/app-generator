@@ -987,7 +987,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # ---- FormData sets ----
     text_ds  = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in text_props)
     num_ds   = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in number_props)
-    dt_ds    = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}?.toISOString() || '');" for p in date_time_props)
+    dt_ds_parts = []
+    for p in date_time_props:
+        sn = safe_var_name(p)
+        if filtered_props[p].get('format') == 'date':
+            # Date-only: send as YYYY-MM-DD so new Date() parses it as UTC midnight,
+            # matching the @db.Date column and avoiding timezone shift (e.g. JST → prev day).
+            dt_ds_parts.append(f"    formData.set('{p}', {sn}?.format('YYYY-MM-DD') || '');")
+        else:
+            dt_ds_parts.append(f"    formData.set('{p}', {sn}?.toISOString() || '');")
+    dt_ds = '\n'.join(dt_ds_parts)
     img_ds   = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in image_props)
     rel_ds   = '\n'.join(f"    formData.set('{r['prop_name']}', {safe_var_name(r['prop_name'])} || '');" for r in parent_rels_raw)
     bool_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}.toString());" for p in boolean_props)
