@@ -83,7 +83,7 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val = val_unique = 'new Date(2025, 0, 1).toISOString()'
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
-            val = val_unique = f'Math.max({mn}, 100)' if mn else '100'
+            val = val_unique = str(mn)
         else:
             val = f'`TEST-{prop_name.upper()}-${{Date.now()}}`'
             val_unique = f'`TEST-{prop_name.upper()}-${{Date.now()}}-${{i}}`'
@@ -123,7 +123,7 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
             val_unique = val
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
-            val = f'Math.max({mn}, 100)' if mn else '100'
+            val = str(mn)
             val_unique = val
         else:
             val = f'`TEST-{prop_name.upper()}-${{Date.now()}}`'
@@ -718,18 +718,17 @@ def test_helper_context(
                 deps.append({'target': model_name, 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': []})
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
 
-    # Add editable-list-autocomplete children as deps (only m2m and self-ref optional-FK reverse)
-    # External optional-FK reverse lists (e.g. feature.bugs where bug has optional feature_id)
-    # are populated separately via db:populate{Target} — do NOT add them as dependencies here.
+    # Add editable-list-autocomplete children as deps only for self-ref children.
+    # External children (both optional-FK reverse and M2M) are populated separately
+    # via db:populate{Target} — do NOT add them as dependencies here.
     list_child_metas = [c for c in child_metas if c['render_type'] == 'editable-list-autocomplete']
     for child_meta in list_child_metas:
         rel = child_meta['child'].get('relationship') or {}
         rel_target = rel.get('target', '') or child_meta['child']['name']
         if not rel_target:
             continue
-        is_m2m = rel.get('type') == 'many-to-many'
-        # Skip external optional-FK reverse lists — they are not true dependencies
-        if not is_m2m and rel_target != model_name:
+        # Skip all external children — only self-ref belong in populateDependencies
+        if rel_target != model_name:
             continue
         prop_name = child_meta['child']['property_name']
         var_name = to_camel_case(prop_name)

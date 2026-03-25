@@ -322,16 +322,18 @@ class TestHelperContextDepsExclusion:
             "relationship": {"type": "many-to-many", "target": "role"},
         }
 
-    def test_m2m_external_child_included_in_deps(self):
-        """M2M child pointing to external entity (user.roles → role) IS a dep
-        because the join requires the related entity to exist."""
+    def test_m2m_external_child_excluded_from_deps(self):
+        """M2M child pointing to external entity (user.roles → role) must NOT be
+        in deps — it is populated separately via db:populateRole so specs can use
+        standard naming ('Role 1') and avoid duplicate setup data."""
         schema = self._user_schema_with_m2m_roles()
         children = [self._roles_m2m_child()]
         entity = _entity("user_account", children)
         ctx = _call_test_helper_context(entity, schema)
         dep_targets = [d["target"] for d in ctx["deps"]]
-        assert "role" in dep_targets, (
-            "M2M external child 'role' must remain in deps"
+        assert "role" not in dep_targets, (
+            "M2M external child 'role' must not be in deps; "
+            "populate it via db:populateRole in the spec"
         )
 
 
