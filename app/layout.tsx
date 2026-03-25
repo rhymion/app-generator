@@ -1,11 +1,8 @@
-import { Inconsolata } from 'next/font/google';
 import type { Metadata } from 'next';
 import { getLocale } from 'next-intl/server';
 import { siteConfig } from '@/lib/site-config';
 import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter';
 import './globals.css';
-
-const fnt = Inconsolata({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: siteConfig.title,
@@ -16,7 +13,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const locale = await getLocale();
   return (
     <html lang={locale}>
-      <body className={fnt.className}>
+      <body style={{ fontFamily: "'Inconsolata', 'Courier New', monospace" }}>
         <AppRouterCacheProvider>
           {children}
         </AppRouterCacheProvider>
