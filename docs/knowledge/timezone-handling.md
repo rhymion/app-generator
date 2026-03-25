@@ -168,6 +168,66 @@ const fmtInTz = (date: Date, tz: string) =>
 
 ---
 
+## Date-Only Fields (`@db.Date` / `format: date`)
+
+### The problem
+
+`@db.Date` columns store only a calendar date (`YYYY-MM-DD`). Prisma returns them as JavaScript `Date` objects anchored to **UTC midnight** — e.g. `2026-03-25T00:00:00.000Z`.
+
+When this value is passed to `dayjs()` without any conversion, dayjs applies the local timezone offset:
+
+| Timezone | `dayjs("2026-03-25T00:00:00.000Z")` displays |
+|---|---|
+| JST (UTC+9) | `2026-03-25 09:00` — correct date, wrong time shown |
+| California (UTC−8) | `2026-03-24 16:00` — **wrong date** |
+
+The reverse problem occurs on write: `dayjs("2026-03-25").toISOString()` in California gives `2026-03-25T08:00:00.000Z`, but in JST it gives `2026-03-24T15:00:00.000Z` — the stored date becomes `2026-03-24` instead of `2026-03-25`.
+
+### Solution: convert to local midnight at the call site
+
+The key insight: `new Date("2026-03-25T00:00:00")` — an ISO datetime string **without** a timezone suffix — is parsed by JavaScript as **local midnight**. This is distinct from `new Date("2026-03-25")` (date-only ISO, parsed as UTC midnight per spec).
+
+**Reading (FormView read-only display):**
+```tsx
+date_time={src.due_date
+  ? new Date(new Date(src.due_date).toISOString().slice(0, 10) + 'T00:00:00')
+  : null}
+```
+
+**Reading (FormUpsert state init):**
+```tsx
+useState<Dayjs | null>(
+  src.due_date
+    ? dayjs(new Date(src.due_date).toISOString().slice(0, 10) + 'T00:00:00')
+    : null
+)
+```
+
+**Writing (FormData submission):**
+```tsx
+formData.set('due_date', dueDate?.format('YYYY-MM-DD') || '');
+```
+
+On the server, `new Date("2026-03-25")` (date-only string, no timezone) is parsed as UTC midnight and stored as `2026-03-25` in the `DATE` column. ✓
+
+### Why `String(src.field).slice()` does not work
+
+`String(new Date(...))` produces the browser's locale string (e.g. `"Wed Mar 25 2026 09:00:00 GMT+0900"`), not an ISO string. `.slice(0, 10)` on that gives `"Wed Mar 25"`. Always use `.toISOString()` to get a reliable `"YYYY-MM-DDT..."` format.
+
+### Display component: `DatePicker` vs `DateTimePicker`
+
+For date-only fields (`show_time={false}`), `DateTimeWrapper` uses `DatePicker` instead of `DateTimePicker`. `DateTimePicker` with `views={['year','month','day']}` still renders the full datetime format string in the input; `DatePicker` renders only the date. The value passed in is always a local-midnight `Date`, so `dayjs(date_time)` inside the component is correct without any UTC extraction.
+
+### Summary table
+
+| Concern | Pattern |
+|---|---|
+| Display (FormView / FormUpsert init) | `new Date(src.field).toISOString().slice(0, 10) + 'T00:00:00'` → local midnight |
+| Submit (FormData) | `dayjs.format('YYYY-MM-DD')` → date-only string → `new Date("YYYY-MM-DD")` → UTC midnight |
+| Component | `DatePicker` (not `DateTimePicker`) for date-only fields |
+
+---
+
 ## Future Considerations
 
 ### Explicit timezone selection
