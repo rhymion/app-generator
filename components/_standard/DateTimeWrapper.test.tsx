@@ -10,6 +10,17 @@ vi.mock('@mui/x-date-pickers/LocalizationProvider', () => ({
 vi.mock('@mui/x-date-pickers/AdapterDayjs', () => ({
   AdapterDayjs: class {},
 }));
+vi.mock('@mui/x-date-pickers/DatePicker', () => ({
+  DatePicker: ({ label, readOnly }: { label: string; readOnly?: boolean }) => (
+    <div
+      data-testid="date-picker"
+      data-readonly={readOnly ? 'true' : 'false'}
+      data-views="year,month,day"
+    >
+      {label}
+    </div>
+  ),
+}));
 vi.mock('@mui/x-date-pickers/DateTimePicker', () => ({
   DateTimePicker: ({ label, readOnly, views }: { label: string; readOnly?: boolean; views?: string[] }) => (
     <div
@@ -52,9 +63,9 @@ describe('DateTimeWrapper', () => {
       expect(screen.queryByTestId('time-picker')).not.toBeInTheDocument();
     });
 
-    it('renders DateTimePicker (not TimePicker) when show_date=true and show_time=false', () => {
+    it('renders DatePicker when show_date=true and show_time=false', () => {
       render(<DateTimeWrapper label="Date Only" date_time={null} show_date={true} show_time={false} />);
-      expect(screen.getByTestId('date-time-picker')).toBeInTheDocument();
+      expect(screen.getByTestId('date-picker')).toBeInTheDocument();
       expect(screen.queryByTestId('time-picker')).not.toBeInTheDocument();
     });
   });
@@ -110,7 +121,7 @@ describe('DateTimeWrapper', () => {
 
     it('excludes time views when show_time=false', () => {
       render(<DateTimeWrapper label="Date only" date_time={null} show_date={true} show_time={false} />);
-      const picker = screen.getByTestId('date-time-picker');
+      const picker = screen.getByTestId('date-picker');
       expect(picker.getAttribute('data-views')).not.toContain('hours');
       expect(picker.getAttribute('data-views')).not.toContain('minutes');
     });
