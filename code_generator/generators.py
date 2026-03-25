@@ -205,9 +205,17 @@ def page_list_context(ctx: dict) -> dict:
                     else:
                         labels = ', '.join(f"'{v}'" for v in enum_vals)
                         formatting_entries.append(f"    {field_name}: ([{labels}] as const)[item.{field_name} as number] ?? '',")
-                elif actual == 'string' and fmt in ('date', 'date-time', 'time'):
+                elif actual == 'string' and fmt == 'date-time':
                     formatting_entries.append(
                         f"    {field_name}: item.{field_name} ? new Date(item.{field_name}).toLocaleString('sv-SE') : '',"
+                    )
+                elif actual == 'string' and fmt == 'date':
+                    formatting_entries.append(
+                        f"    {field_name}: item.{field_name} ? new Date(item.{field_name}).toLocaleDateString('sv-SE') : '',"
+                    )
+                elif actual == 'string' and fmt == 'time':
+                    formatting_entries.append(
+                        f"    {field_name}: item.{field_name} ? new Date(item.{field_name}).toLocaleTimeString('sv-SE') : '',"
                     )
 
             if config.get('primary'):
@@ -510,6 +518,7 @@ def form_view_context(ctx: dict) -> dict:
     model_def     = ctx['model_def']
     parent_rels   = ctx['parent_rels']
     children_raw  = ctx['children_raw']
+    use_dayjs     = False
 
     rel_by_prop = {r['prop_name']: r for r in ctx['parent_rels_raw']}
     EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'}
@@ -578,8 +587,15 @@ def form_view_context(ctx: dict) -> dict:
         fmt = filtered_props[p].get('format')
         show_time_attr = '' if fmt in ('date-time', 'time') else ' show_time={false}'
         show_date_attr = ' show_date={false}' if fmt == 'time' else ''
+        if fmt == 'date':
+            use_dayjs = True
+            # Convert UTC midnight ISO string to local midnight Date so dayjs() shows the
+            # correct calendar date in all timezones. 'T00:00:00' without tz suffix = local.
+            date_time_expr = f"{{src.{p} ? dayjs(new Date(src.{p}).toISOString().slice(0, 10) + 'T00:00:00').toDate() : null}}"
+        else:
+            date_time_expr = f"{{src.{p}}}"
         dt_jsxs.append(
-            f"      <DateTimeWrapper label={{tf('{fk}')}} date_time={{src.{p}}}{show_time_attr}{show_date_attr} readOnly />"
+            f"      <DateTimeWrapper label={{tf('{fk}')}} date_time={date_time_expr}{show_time_attr}{show_date_attr} readOnly />"
         )
 
     # Image fields
@@ -718,6 +734,7 @@ def form_view_context(ctx: dict) -> dict:
         'child_view_grids':       '\n'.join(child_view_grids),
         'column_variables':       column_variables,
         'custom_view_imports':    custom_view_imports,
+        'use_dayjs':              use_dayjs,
     }
 
 
@@ -759,10 +776,20 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     def _setter(var_name: str) -> str:
         return to_pascal_case_from_var(var_name)
 
-    dt_states = '\n'.join(
-        f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<Dayjs | null>(src.{p} ? dayjs(src.{p}) : null);"
-        for p in date_time_props
-    )
+    dt_state_lines = []
+    for p in date_time_props:
+        sn = safe_var_name(p)
+        fmt = filtered_props[p].get('format')
+        if fmt == 'date':
+            # Date-only: slice the UTC ISO string to "YYYY-MM-DD" then append 'T00:00:00'
+            # (no timezone suffix) so dayjs parses it as local midnight, preserving the
+            # calendar date regardless of timezone. Using plain "YYYY-MM-DD" would be
+            # parsed as UTC midnight by JS, causing a date shift in western timezones.
+            init = f"src.{p} ? dayjs(new Date(src.{p}).toISOString().slice(0, 10) + 'T00:00:00') : null"
+        else:
+            init = f"src.{p} ? dayjs(src.{p}) : null"
+        dt_state_lines.append(f"  const [{sn}, set{_setter(sn)}] = useState<Dayjs | null>({init});")
+    dt_states = '\n'.join(dt_state_lines)
     img_states = '\n'.join(
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} || '');"
         for p in image_props

@@ -2,6 +2,7 @@
 import dayjs from 'dayjs';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 
@@ -20,10 +21,20 @@ export default function DateTimeWrapper({label, date_time, show_date = true, sho
         />
       )}
       <LocalizationProvider dateAdapter={AdapterDayjs}>
-        { show_date && (
+        { show_date && !show_time && (
+        <DatePicker
+          enableAccessibleFieldDOMStructure={false}
+          label={label}
+          value={date_time ? dayjs(date_time) : null}
+          {...(readOnly ? { readOnly: true } : {})}
+          slotProps={{ field: { clearable: true }, textField: { margin: 'normal', required } }}
+          {...other}
+        /> )
+        }
+        { show_date && show_time && (
         <DateTimePicker
           enableAccessibleFieldDOMStructure={false}
-          views={show_time ? (show_date ? ['year', 'month', 'day', 'hours', 'minutes'] : ['hours', 'minutes']) : ['year', 'month', 'day']}
+          views={['year', 'month', 'day', 'hours', 'minutes']}
           label={label}
           value={date_time ? dayjs(date_time) : null}
           {...(readOnly ? { readOnly: true } : {})}
