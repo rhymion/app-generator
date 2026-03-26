@@ -1005,7 +1005,163 @@ cypress/support/generated-tasks.ts       (updated)
 
 ---
 
-## 15. Quick Reference
+## 15. Hidden Assumptions and Hard Constraints
+
+The generator has a number of implicit constraints that are not enforced with clear error messages.
+Violating them produces silently broken output — wrong field names in queries, missing includes,
+or TypeScript that compiles but renders incorrectly at runtime.
+
+### 15.1 Entity and field naming
+
+**Entity names must be lowercase `snake_case`.**
+The naming helpers split on `_` to produce camelCase and PascalCase identifiers. An entity named
+`MyEntity` or `myEntity` will produce broken TypeScript variable and type names.
+
+**FK field names must end with `_id`.**
+The generator strips the `_id` suffix to derive the relation object name used in Prisma `include`
+clauses, TypeScript types, and React component props. For example, `resource_id` becomes `resource`.
+If a FK field does not end with `_id` it will not be recognised as a relationship FK.
+
+```yaml
+# Correct
+resource_id:
+  x-relationship:
+    type: many-to-one
+    target: resource
+
+# Wrong — the generator will NOT strip the suffix correctly
+resourceId:       # camelCase — breaks naming
+resource_key:     # no _id suffix — not treated as FK
+```
+
+**The relation object property in the detail definition must match `{fk_field_without_id}`.**
+The generator resolves the relation name from `x-relationship` by looking for a matching `$ref` in
+the detail `allOf`. But it also derives the name from the FK field with `_id` removed in several
+other places. If the two disagree the generated code will not compile.
+
+```yaml
+booking_detail:
+  allOf:
+    - $ref: '#/definitions/booking'
+    - type: object
+      properties:
+        resource:          # MUST match resource_id → resource
+          $ref: '#/definitions/resource'
+```
+
+**Child-to-parent FK must be named exactly `{parent_model}_id`.**
+The generator hardcodes `{parent_model}_id` as the child FK prop name (see `_get_child_parent_id_props`).
+It cannot be configured. For example a child of `db_table` must have `db_table_id`.
+
+---
+
+### 15.2 The `name` field assumption
+
+`labelField` in `x-relationship` controls the label in **Autocomplete** dropdowns and is respected in:
+- `FormUpsert` Autocomplete inputs
+- Test generation fixtures
+
+However, **`name` is hardcoded** in several other places and `labelField` is ignored there:
+
+| Location | Hardcoded behaviour |
+|---|---|
+| DataGrid FK column fallback (no `valueOptions`) | `row.{relation}?.name` — always uses `name` |
+| Embedded child `x-outputType: list` items (non-autocomplete) | `f.name` for the display label |
+| Self-referential / optional-FK list items in FormUpsert | `item.name` for Autocomplete label |
+| Cypress test navigation (list → view click) | navigates by `name` field when no explicit primary |
+| Comment thread creator display | `user_account.name` and `.avatar` hardcoded |
+
+**Practical rule:** every entity that appears as a relationship target, a child list item, or in a
+DataGrid FK column should have a `name` field of type `string`. Entities without `name` will render
+empty or broken labels in those contexts even if `labelField` is set to something else.
+
+---
+
+### 15.3 Definition naming conventions
+
+**`_detail` suffix is required** for definitions that extend a base entity with children or
+configuration. The generator identifies detail definitions by `endswith('_detail')`.
+
+**`_input` suffix** causes a definition to be excluded from base model detection — it is never
+treated as an entity.
+
+**Base model detection:** a definition is a base model if it does NOT end in `_detail` or `_input`
+AND has an `id` property. This means every entity must have an `id` field; a definition without
+`id` is invisible to the generator.
+
+---
+
+### 15.4 System fields (always special-cased)
+
+These fields are treated specially regardless of what the schema says:
+
+| Field | Behaviour |
+|---|---|
+| `id` | Excluded from form inputs; always included in queries |
+| `created_at` | Excluded from form inputs; always included in queries |
+| `updated_at` | Excluded from form inputs; always included in queries |
+| `creator_id` | Excluded from form inputs; written automatically on create |
+| `updater_id` | Excluded from form inputs; written automatically on update; excluded from many-to-one relationship detection |
+| `assignee_id` | If present, added to the permission-check `select` clause |
+| `organization_id` | If present with `x-relationship` to `organization`, enables automatic org-scoped filtering in list queries |
+| `order` | In inline child DataGrids, rendered as a fixed narrow (`width: 50`) number column |
+| `message` | Required field name for `x-outputType: comments` children |
+
+---
+
+### 15.5 Comment children
+
+A child used with `x-outputType: comments` must:
+1. Have a `message` field (type `string`, `minLength: 1`)
+2. Have a `{parent_model}_id` FK column pointing to the parent
+3. Have `creator_id` (used for edit/delete ownership checks)
+4. Have `created_at` (used for `orderBy: { created_at: 'asc' }` in the include)
+
+The generated comment actions are named `add{Parent}Comment`, `update{Parent}Comment`,
+`delete{Parent}Comment`. The parent path used in `revalidatePath` is derived from the entity name.
+
+---
+
+### 15.6 Chart field names
+
+When `x-display.chart` is configured the generator assumes the entity has exactly these field names:
+- `start_time` — chart item start (type `string`, `format: date-time`)
+- `end_time` — chart item end (type `string`, `format: date-time`)
+
+There is no way to configure different field names. An entity without `start_time` / `end_time`
+will produce a chart page that fails at runtime.
+
+---
+
+### 15.7 CUID pattern and nullable FK handling
+
+The pattern `^c[a-z0-9]{24,}$` is the signal the generator uses to identify ID / FK fields.
+It affects form-data extraction in `actions.ts` and API routes: a nullable field with this pattern
+gets `|| null` coercion rather than the default string cast. If you use a different ID format (UUID,
+numeric, etc.) the generated form-data extraction may silently produce `undefined` instead of `null`
+for optional FK fields.
+
+---
+
+### 15.8 Summary of hard constraints
+
+| Constraint | Detail |
+|---|---|
+| Entity names | Lowercase `snake_case` only |
+| FK field suffix | Must end with `_id` |
+| Relation object name | Must equal FK field with `_id` removed |
+| Child-to-parent FK | Must be `{parent_model}_id` exactly |
+| `name` field | Every entity used as a relationship target should have a `name: string` field |
+| `id` field | Required on every base model definition |
+| `_detail` suffix | Required for detail definitions |
+| `start_time` / `end_time` | Required field names when `x-display.chart` is configured |
+| `message` field | Required on comment child models |
+| Timestamp fields | `created_at` and `updated_at` must exist in Prisma for every generated entity |
+| Creator/updater fields | `creator_id` and `updater_id` must exist in Prisma for any entity with `x-generate` or used with `x-outputType: comments` |
+
+---
+
+## 16. Quick Reference
 
 ### `x-generate` flags
 
