@@ -585,10 +585,15 @@ def gen_assert_commands(fields: list, entity_title: str, indent: str, fk_dep_var
         if field['category'] == 'autocomplete':
             dep_target = field.get('dep_target')
             if dep_target:
-                # Use prop-stem dep var name when available (e.g. parent_id → 'parent' → 'Test Parent')
+                # Use prop stem when available (e.g. parent_id → 'parent' → 'Test Parent')
                 # so self-ref FKs get the right dep title rather than the entity title.
+                # Must use snake_case prop stem (not camelCase dep_var) so to_title_case splits correctly.
                 dep_var = (fk_dep_vars or {}).get(field['prop_name'])
-                dep_title = to_title_case(dep_var) if dep_var else to_title_case(dep_target)
+                if dep_var:
+                    prop_stem = re.sub(r'_id$', '', field['prop_name'])
+                    dep_title = to_title_case(prop_stem)
+                else:
+                    dep_title = to_title_case(dep_target)
                 lines.append(f"{indent}cy.checkField('{field['label']}', 'Test {dep_title}');")
         else:
             value = cypress_create_value(field, entity_title)
