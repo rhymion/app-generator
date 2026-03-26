@@ -1036,6 +1036,10 @@ definitions:
             width: 200
         - day_of_week: 
             width: 100
+        - start_time:
+            width: 150
+        - end_time:
+            width: 150
     properties:
       id:
         type: string
