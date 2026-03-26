@@ -228,6 +228,37 @@ For date-only fields (`show_time={false}`), `DateTimeWrapper` uses `DatePicker` 
 
 ---
 
+## List Page Display (`DisplayFieldConfig.format`)
+
+List pages pass a `format` field in `displayFields` config instead of pre-formatting datetimes server-side. The `DataGridClient` and `CardListClient` components then apply client-side formatting in the browser's local timezone.
+
+| `format` value | Source value from Prisma | Client-side pattern | Result |
+|---|---|---|---|
+| `'date-time'` | ISO string (Timestamptz via JSON) | `dayjs(value).format('YYYY-MM-DD HH:mm')` | Local datetime |
+| `'date'` | ISO string (Date via JSON, UTC midnight) | `dayjs(new Date(value).toISOString().slice(0, 10)).format('YYYY-MM-DD')` | Local date |
+| `'time'` | ISO string (Timetz via JSON, epoch-anchored UTC) | `dayjs(value).format('HH:mm')` | Local time |
+
+### Why this pattern works for each type
+
+**`date-time`**: `dayjs(isoString)` parses the UTC instant and applies the browser's local offset — same as any standard datetime display.
+
+**`date`**: `new Date(value).toISOString().slice(0, 10)` extracts the UTC date portion as a plain `'YYYY-MM-DD'` string. `dayjs('YYYY-MM-DD')` (date-only, no timezone suffix) is parsed as local midnight, so `format('YYYY-MM-DD')` always returns the correct calendar date regardless of timezone. This is the same conversion used in `FormUpsert` state initialization.
+
+**`time`**: Timetz values are stored as UTC-normalized instants anchored to the Unix epoch (see "How Prisma Stores Timetz" above). `dayjs(epochUtcString)` applies the browser's local offset, recovering the original local time the user entered. Example: `08:00 JST` stored as `1970-01-01T23:00:00Z` → `dayjs(...).format('HH:mm')` in JST = `08:00` ✓.
+
+### Previous (broken) approach
+
+Before this change, datetimes were formatted server-side in the page component:
+
+```ts
+// Server-side — always UTC on Vercel, ignores user timezone
+start_time: item.start_time ? new Date(item.start_time).toLocaleString('sv-SE') : '',
+```
+
+This was replaced by passing the raw value to the client with `format: 'date-time'` in `displayFields`.
+
+---
+
 ## Future Considerations
 
 ### Explicit timezone selection

@@ -15,6 +15,7 @@ interface DisplayFieldConfig<T> {
   field: keyof T;
   headerName: string;
   width?: number;
+  format?: 'date-time' | 'date' | 'time';
 }
 
 interface ResponsiveListClientProps<T extends BaseEntity> {

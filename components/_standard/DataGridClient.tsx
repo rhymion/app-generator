@@ -1,5 +1,6 @@
 'use client';
 import { useState, useTransition } from 'react';
+import dayjs from 'dayjs';
 import { useTranslations } from 'next-intl';
 import { DataGrid, GridColDef, gridRowSelectionManagerSelector, useGridApiRef, GridRowSelectionModel } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
@@ -27,6 +28,7 @@ interface DisplayFieldConfig<T> {
   field: keyof T;
   headerName: string;
   width?: number;
+  format?: 'date-time' | 'date' | 'time';
 }
 
 interface DataGridClientProps<T extends BaseEntity> {
@@ -121,8 +123,12 @@ export default function DataGridClient<T extends BaseEntity>({
       width: fieldConfig.width || 200,
       valueGetter: (value, row) => {
         const fieldValue = row[fieldConfig.field];
-        return fieldValue !== null && fieldValue !== undefined ?
-        (typeof fieldValue === 'object' && 'name' in fieldValue ? fieldValue.name : String(fieldValue)) : '';
+        if (fieldValue === null || fieldValue === undefined) return '';
+        if (fieldConfig.format === 'date-time') return dayjs(fieldValue as string).format('YYYY-MM-DD HH:mm');
+        if (fieldConfig.format === 'date') return dayjs(new Date(fieldValue as string).toISOString().slice(0, 10) as string).format('YYYY-MM-DD');
+        if (fieldConfig.format === 'time') return dayjs(fieldValue as string).format('HH:mm');
+        if (typeof fieldValue === 'object' && 'name' in (fieldValue as object)) return (fieldValue as unknown as { name: string }).name;
+        return String(fieldValue);
       },
     };
   });

@@ -187,7 +187,6 @@ def page_list_context(ctx: dict) -> dict:
             prop = model_props.get(field_name)
             if prop:
                 actual   = _get_actual_type(prop)
-                fmt      = prop.get('format')
                 enum_vals = prop.get('enum')
                 enum_ns  = prop.get('x-enum-namespace')
 
@@ -205,18 +204,6 @@ def page_list_context(ctx: dict) -> dict:
                     else:
                         labels = ', '.join(f"'{v}'" for v in enum_vals)
                         formatting_entries.append(f"    {field_name}: ([{labels}] as const)[item.{field_name} as number] ?? '',")
-                elif actual == 'string' and fmt == 'date-time':
-                    formatting_entries.append(
-                        f"    {field_name}: item.{field_name} ? new Date(item.{field_name}).toLocaleString('sv-SE') : '',"
-                    )
-                elif actual == 'string' and fmt == 'date':
-                    formatting_entries.append(
-                        f"    {field_name}: item.{field_name} ? new Date(item.{field_name}).toLocaleDateString('sv-SE') : '',"
-                    )
-                elif actual == 'string' and fmt == 'time':
-                    formatting_entries.append(
-                        f"    {field_name}: item.{field_name} ? new Date(item.{field_name}).toLocaleTimeString('sv-SE') : '',"
-                    )
 
             if config.get('primary'):
                 primary_field = field_name
@@ -226,7 +213,9 @@ def page_list_context(ctx: dict) -> dict:
                 label_f = rel_label_map[field_name]
                 formatting_entries.append(f"    {field_name}: item.{field_name}?.{label_f} ?? '',")
 
-            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width} }}")
+            fmt = model_props[field_name].get('format') if field_name in model_props else None
+            format_attr = f", format: '{fmt}'" if fmt in ('date-time', 'date', 'time') else ''
+            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr} }}")
 
         display_fields_code = ',\n'.join(fields_code_parts)
 
