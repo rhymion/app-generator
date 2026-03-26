@@ -11,7 +11,7 @@ from helpers.naming import (
     safe_var_name, singularize,
 )
 from helpers.type_mapping import get_ts_type
-from helpers.schema_helpers import get_parent_relationships
+from helpers.schema_helpers import get_parent_relationships, get_parent_fk_props
 
 
 # ---------------------------------------------------------------------------
@@ -425,15 +425,16 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
 
             rel = prop.get('x-relationship', {})
             if rel.get('type') == 'many-to-one':
-                label_base  = key.removesuffix('_id')
+                label_base   = key.removesuffix('_id')
                 header_camel = to_camel_case(label_base)
-                prop_camel  = to_camel_case(key)
-                param_name  = f'{prop_camel}Options'
+                prop_camel   = to_camel_case(key)
+                param_name   = f'{prop_camel}Options'
+                label_field  = rel.get('labelField', 'name')
                 columns.append(
                     f"    ...({param_name} && {param_name}.length > 0\n"
                     f"      ? [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: editable, type: 'singleSelect' as const, valueOptions: {param_name} }}]\n"
                     f"      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
-                    f"      : [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: false, valueGetter: (_value: any, row: any) => row.{label_base}?.name ?? '' }}]),"
+                    f"      : [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: false, valueGetter: (_value: any, row: any) => row.{label_base}?.{label_field} ?? '' }}]),"
                 )
                 continue
 
@@ -1120,11 +1121,20 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         is_self    = child_name == model
 
         if c.get('use_connect') and is_list:
+            # Derive label_field: m2m uses x-relationships labelField, self-ref uses own rel, else 'name'
+            _rel = c.get('relationship') or {}
+            if _rel.get('type') == 'many-to-many':
+                _uc_label = _rel.get('label_field', 'name')
+            elif child_name == model:
+                _sr = next((r for r in ctx.get('parent_rels_raw', []) if r['target'] == model), None)
+                _uc_label = _sr.get('label_field', 'name') if _sr else 'name'
+            else:
+                _uc_label = 'name'
             child_grid_setup_parts.append(
                 f"  const [initial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                 f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
                 f"    value: f.id,\n"
-                f"    label: f.name,\n"
+                f"    label: f.{_uc_label},\n"
                 f"    originalId: f.id,\n"
                 f"  }})));"
             )
@@ -1154,13 +1164,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 )
             continue
 
-        # Grid child — exclude only the actual parent FK column (e.g. db_table_id),
-        # not all FKs targeting the parent model (e.g. reference_id → db_table should remain).
-        child_rels = [r for r in get_parent_relationships(child_def) if r['prop_name'] != f'{model}_id']
+        # Grid child — exclude only the actual parent FK column(s), found via x-relationship
+        # annotations (not all FKs targeting the parent, e.g. reference_id → db_table stays).
+        parent_fk_props_child = get_parent_fk_props(child_def, model)
+        child_rels = [r for r in get_parent_relationships(child_def) if r['prop_name'] not in parent_fk_props_child]
         rel_opt_args = ', '.join(f'{to_camel_case(r["prop_name"])}Options' for r in child_rels)
         rel_args_str = f', {rel_opt_args}' if rel_opt_args else ''
 
-        exclude_in_create = {f'{model}_id', 'id', 'created_at', 'updated_at', 'creator_id'}
+        exclude_in_create = parent_fk_props_child | {'id', 'created_at', 'updated_at', 'creator_id'}
         create_props = [k for k in child_props_dict if k not in exclude_in_create]
 
         def _new_prop_val(p, defn):
@@ -1182,26 +1193,29 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             for p in create_props
         )
 
+        parent_fk_assignments = '\n'.join(
+            f"    {fk_prop}: src.id," for fk_prop in sorted(parent_fk_props_child)
+        )
         child_grid_setup_parts.append(
             f"  const {child_var}Columns = {prop_name}_columns(true{rel_args_str});\n\n"
             f"  const [initial{child_pascal}] = useState<GridRowsProp>(() => src.{prop_name}.map(f => ({{ ...f, id: f.id || `temp-${{Date.now()}}-${{Math.random()}}` }})));\n\n"
             f"  const createNew{child_pascal} = () => ({{\n"
             f"    id: `temp-${{Date.now()}}-${{Math.random()}}`,\n"
             f"{create_body}\n"
-            f"    {model}_id: src.id,\n"
+            f"{parent_fk_assignments}\n"
             f"  }});"
         )
 
     child_grid_setup = '\n'.join(child_grid_setup_parts)
 
     # Child entity rel option setups (for child grid many-to-one dropdowns)
-    from helpers.schema_helpers import get_parent_relationships as _gpr
     all_child_rels = []
     for c in non_comment_ch:
         if c.get('output_type') == 'list' or (c.get('relationship') or {}).get('type') == 'many-to-many':
             continue
         cdef = schema['definitions'].get(c['name'], {})
-        all_child_rels.extend(r for r in _gpr(cdef) if r['prop_name'] != f'{model}_id')
+        parent_fk_props_cdef = get_parent_fk_props(cdef, model)
+        all_child_rels.extend(r for r in get_parent_relationships(cdef) if r['prop_name'] not in parent_fk_props_cdef)
     parent_rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
     seen_rel = set()
     child_entity_rel_opt = []
@@ -1288,7 +1302,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             continue
 
         # Grid child
-        exclude_ser = {f'{model}_id', 'id', 'created_at', 'updated_at', 'creator_id'}
+        parent_fk_props_ser = get_parent_fk_props(child_def, model)
+        exclude_ser = parent_fk_props_ser | {'id', 'created_at', 'updated_at', 'creator_id'}
         ser_props = [k for k in child_props_dict if k not in exclude_ser]
         serialize = '\n'.join(f"          {p}: field.{p}," for p in ser_props)
         child_fdh_parts.append(
@@ -1324,11 +1339,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
         # Required fields excluding the parent FK and audit columns; booleans always have a value
         child_required_all = child_def.get('required', [])
-        # Additionally treat string/number/datetime fields as required if they appear mandatory in schema
+        parent_fk_props_val = get_parent_fk_props(child_def, model)
         required_validatable = [
             k for k in child_required_all
             if k not in exclude_validation
-            and k != f'{model}_id'
+            and k not in parent_fk_props_val
             and _get_actual_type(child_props_dict_v.get(k, {})) != 'boolean'
         ]
 
@@ -1366,10 +1381,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         if c.get('use_connect') and is_list:
             if is_m2m:
                 autocomplete_target = rel['target']
+                # label_field for m2m comes from x-relationships labelField config
+                ac_label_field = rel.get('label_field', 'name')
             elif is_self:
                 autocomplete_target = model
+                # self-referential: use the self-relationship's label_field
+                self_rel_info = next((r for r in parent_rels_raw if r['target'] == model), None)
+                ac_label_field = self_rel_info.get('label_field', 'name') if self_rel_info else 'name'
             else:  # optional FK list
                 autocomplete_target = child_name
+                # for optional-FK lists, look for a labelField in the child's x-relationship back to this entity,
+                # otherwise fall back to 'name'
+                ac_label_field = 'name'
             target_pascal = to_pascal_case(autocomplete_target)
             self_rel = next((r for r in parent_rels_raw if r['target'] == model), None) if is_self else None
             filter_logic = f'.filter(item => !item.{self_rel["prop_name"]} || item.{self_rel["prop_name"]} === src.id)' if self_rel else ''
@@ -1385,7 +1408,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"        textFieldPlaceholder=\"Enter name\"\n"
                 f"        allAutocompleteOptions={{all{target_pascal}s{filter_logic}.map(item => ({{\n"
                 f"          id: item.id,\n"
-                f"          label: item.name,\n"
+                f"          label: item.{ac_label_field},\n"
                 f"          value: item.id,\n"
                 f"        }}))}}\n"
                 f"        excludeOptionIds={{[src.id]}}\n"

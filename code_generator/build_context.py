@@ -13,7 +13,7 @@ from helpers.naming import (
 from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
-    is_optional_fk_to_parent,
+    is_optional_fk_to_parent, get_parent_fk_props,
 )
 import copy
 
@@ -107,12 +107,18 @@ def _build_form_data_gets(prop_infos: list[dict]) -> str:
 # Child data analysis
 # ---------------------------------------------------------------------------
 
-def _get_child_parent_id_props(child_name: str, model: str, parent_rels_raw: list[dict]) -> set[str]:
-    """What FK props in the child definition point back to the parent?"""
+def _get_child_parent_id_props(child_name: str, model: str, parent_rels_raw: list[dict],
+                               schema: dict) -> set[str]:
+    """What FK props in the child definition point back to the parent?
+
+    For self-referential children, uses the parent's own many-to-one rels to itself.
+    Otherwise scans the child's x-relationship annotations via get_parent_fk_props,
+    falling back to the '{model}_id' convention if no annotated FK is found.
+    """
     if child_name == model:
-        # Self-referential: use the parent's own many-to-one rels to itself
         return {r['prop_name'] for r in parent_rels_raw if r['target'] == model}
-    return {f'{model}_id'}
+    child_def = schema.get('definitions', {}).get(child_name, {})
+    return get_parent_fk_props(child_def, model)
 
 
 def _build_child_data(children_raw: list[dict], model: str, schema: dict,
@@ -143,7 +149,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         )
         child_props_dict = child_def.get('properties', {})
 
-        parent_id_props = _get_child_parent_id_props(child_name, model, parent_rels_raw)
+        parent_id_props = _get_child_parent_id_props(child_name, model, parent_rels_raw, schema)
 
         # Fields WITHOUT id (for create body)
         props_no_id = [
@@ -319,9 +325,10 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
             continue
         child_def = schema['definitions'].get(child_raw['name'], {})
         if child_def.get('properties'):
+            parent_fk_props = get_parent_fk_props(child_def, model)
             child_entity_rel_targets.extend(
                 r['target'] for r in get_parent_relationships(child_def)
-                if r['prop_name'] != f'{model}_id'  # exclude only the actual parent FK column
+                if r['prop_name'] not in parent_fk_props  # exclude only the actual parent FK column(s)
             )
 
     return _dedupe_ordered([*m2m_targets, *optional_fk_list_targets, *many_to_one_targets, *child_entity_rel_targets])

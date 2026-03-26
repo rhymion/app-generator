@@ -32,6 +32,7 @@ from generators import (
     form_upsert_context,
 )
 from generators_i18n import update_i18n_and_config
+from validate import validate_schema, SchemaValidationError
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
 from generators_test import (
     test_helper_context,
@@ -89,6 +90,12 @@ def _write_stub(path: Path, content: str) -> None:
 def generate(schema_path: str, output_dir: str) -> None:
     with open(schema_path) as f:
         schema = yaml.safe_load(f)
+
+    try:
+        validate_schema(schema)
+    except SchemaValidationError as exc:
+        print(f'\n{exc}', file=sys.stderr)
+        sys.exit(1)
 
     entities = extract_entities(schema)
     if not entities:

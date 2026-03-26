@@ -1005,22 +1005,23 @@ cypress/support/generated-tasks.ts       (updated)
 
 ---
 
-## 15. Hidden Assumptions and Hard Constraints
+## 15. Constraints, Guidelines, and Validation
 
-The generator has a number of implicit constraints that are not enforced with clear error messages.
-Violating them produces silently broken output — wrong field names in queries, missing includes,
-or TypeScript that compiles but renders incorrectly at runtime.
+Some rules are **hard constraints** enforced by `validate.py` — violating them aborts generation
+with a clear error. Others are **strong guidelines** — the generator works best when they are
+followed but can handle deviations. The table in §15.8 summarises which is which.
 
 ### 15.1 Entity and field naming
 
-**Entity names must be lowercase `snake_case`.**
+**[Hard constraint] Entity names must be lowercase `snake_case`.**
 The naming helpers split on `_` to produce camelCase and PascalCase identifiers. An entity named
-`MyEntity` or `myEntity` will produce broken TypeScript variable and type names.
+`MyEntity` or `myEntity` will produce broken TypeScript variable and type names. Validated at
+generation time.
 
-**FK field names must end with `_id`.**
+**[Hard constraint] FK fields with `x-relationship` must end with `_id`.**
 The generator strips the `_id` suffix to derive the relation object name used in Prisma `include`
 clauses, TypeScript types, and React component props. For example, `resource_id` becomes `resource`.
-If a FK field does not end with `_id` it will not be recognised as a relationship FK.
+Validated at generation time.
 
 ```yaml
 # Correct
@@ -1029,15 +1030,14 @@ resource_id:
     type: many-to-one
     target: resource
 
-# Wrong — the generator will NOT strip the suffix correctly
+# Wrong — validated and rejected
 resourceId:       # camelCase — breaks naming
 resource_key:     # no _id suffix — not treated as FK
 ```
 
-**The relation object property in the detail definition must match `{fk_field_without_id}`.**
-The generator resolves the relation name from `x-relationship` by looking for a matching `$ref` in
-the detail `allOf`. But it also derives the name from the FK field with `_id` removed in several
-other places. If the two disagree the generated code will not compile.
+**[Hard constraint] The relation object property in the detail definition must match `{fk_field_without_id}`.**
+The generator derives the relation name from the FK field with `_id` removed. If the `allOf`
+property in the detail definition uses a different name the generated code will not compile.
 
 ```yaml
 booking_detail:
@@ -1049,45 +1049,47 @@ booking_detail:
           $ref: '#/definitions/resource'
 ```
 
-**Child-to-parent FK must be named exactly `{parent_model}_id`.**
-The generator hardcodes `{parent_model}_id` as the child FK prop name (see `_get_child_parent_id_props`).
-It cannot be configured. For example a child of `db_table` must have `db_table_id`.
+**[Strong guideline] Child-to-parent FK should be named `{parent_model}_id`.**
+The generator looks for this conventional field name first when determining which FK column
+links a child to its parent. If the field is absent it falls back to scanning `x-relationship`
+annotations for `target == parent_model`. The convention is strongly recommended because it
+avoids ambiguity: a secondary FK that points to the same entity for a different purpose
+(e.g. `reference_id` pointing to `db_table` while `db_table_id` is the structural parent FK)
+will not be confused with the structural link as long as the conventional name exists.
 
 ---
 
-### 15.2 The `name` field assumption
+### 15.2 The `name` field and `labelField`
 
-`labelField` in `x-relationship` controls the label in **Autocomplete** dropdowns and is respected in:
-- `FormUpsert` Autocomplete inputs
-- Test generation fixtures
+`labelField` in `x-relationship` / `x-relationships` controls the display label and is now
+respected in most contexts:
 
-However, **`name` is hardcoded** in several other places and `labelField` is ignored there:
-
-| Location | Hardcoded behaviour |
+| Location | Behaviour |
 |---|---|
-| DataGrid FK column fallback (no `valueOptions`) | `row.{relation}?.name` — always uses `name` |
-| Embedded child `x-outputType: list` items (non-autocomplete) | `f.name` for the display label |
-| Self-referential / optional-FK list items in FormUpsert | `item.name` for Autocomplete label |
-| Cypress test navigation (list → view click) | navigates by `name` field when no explicit primary |
-| Comment thread creator display | `user_account.name` and `.avatar` hardcoded |
+| `FormUpsert` Autocomplete (many-to-one) | Uses `labelField` (default `name`) |
+| `FormUpsert` many-to-many autocomplete | Uses `labelField` from `x-relationships` (default `name`) |
+| `FormUpsert` self-referential autocomplete | Uses `labelField` from the self-ref relation (default `name`) |
+| DataGrid FK column fallback (no `valueOptions`) | Uses `labelField` from `x-relationship` (default `name`) |
+| Test generation fixtures | Uses `name` field when no explicit primary field is set |
+| Comment thread creator display | `user_account.name` and `.avatar` — hardcoded |
+| Plain text list children (`x-outputType: list`, no file_type) | `f.name` — these children are text containers whose field IS `name` |
 
-**Practical rule:** every entity that appears as a relationship target, a child list item, or in a
-DataGrid FK column should have a `name` field of type `string`. Entities without `name` will render
-empty or broken labels in those contexts even if `labelField` is set to something else.
+**[Strong guideline] Every entity used as a relationship target should have a `name: string` field**
+or set `labelField` explicitly in every `x-relationship` / `x-relationships` referencing it.
+The generator validates this and reports an error if neither is present.
 
 ---
 
 ### 15.3 Definition naming conventions
 
-**`_detail` suffix is required** for definitions that extend a base entity with children or
-configuration. The generator identifies detail definitions by `endswith('_detail')`.
+**[Hard constraint] `_detail` suffix is required** for definitions that extend a base entity with
+children or configuration. The generator identifies detail definitions by `endswith('_detail')`.
 
 **`_input` suffix** causes a definition to be excluded from base model detection — it is never
 treated as an entity.
 
-**Base model detection:** a definition is a base model if it does NOT end in `_detail` or `_input`
-AND has an `id` property. This means every entity must have an `id` field; a definition without
-`id` is invisible to the generator.
+**[Hard constraint] Base model must have an `id` property.** A definition without `id` is
+invisible to the generator (not treated as a base model).
 
 ---
 
@@ -1112,7 +1114,7 @@ These fields are treated specially regardless of what the schema says:
 ### 15.5 Comment children
 
 A child used with `x-outputType: comments` must:
-1. Have a `message` field (type `string`, `minLength: 1`)
+1. Have a `message` field (type `string`, `minLength: 1`) — **validated**
 2. Have a `{parent_model}_id` FK column pointing to the parent
 3. Have `creator_id` (used for edit/delete ownership checks)
 4. Have `created_at` (used for `orderBy: { created_at: 'asc' }` in the include)
@@ -1124,12 +1126,20 @@ The generated comment actions are named `add{Parent}Comment`, `update{Parent}Com
 
 ### 15.6 Chart field names
 
-When `x-display.chart` is configured the generator assumes the entity has exactly these field names:
-- `start_time` — chart item start (type `string`, `format: date-time`)
-- `end_time` — chart item end (type `string`, `format: date-time`)
+When `x-display.chart` is configured the generator defaults to `start_time` / `end_time` but
+both can be overridden:
 
-There is no way to configure different field names. An entity without `start_time` / `end_time`
-will produce a chart page that fails at runtime.
+```yaml
+x-display:
+  chart:
+    span: week
+    row_by: resource
+    start_field: begins_at   # optional — overrides default 'start_time'
+    end_field: ends_at       # optional — overrides default 'end_time'
+```
+
+The referenced fields must exist on the model. The generator validates this and reports an error
+if the field is missing.
 
 ---
 
@@ -1143,21 +1153,21 @@ for optional FK fields.
 
 ---
 
-### 15.8 Summary of hard constraints
+### 15.8 Summary
 
-| Constraint | Detail |
-|---|---|
-| Entity names | Lowercase `snake_case` only |
-| FK field suffix | Must end with `_id` |
-| Relation object name | Must equal FK field with `_id` removed |
-| Child-to-parent FK | Must be `{parent_model}_id` exactly |
-| `name` field | Every entity used as a relationship target should have a `name: string` field |
-| `id` field | Required on every base model definition |
-| `_detail` suffix | Required for detail definitions |
-| `start_time` / `end_time` | Required field names when `x-display.chart` is configured |
-| `message` field | Required on comment child models |
-| Timestamp fields | `created_at` and `updated_at` must exist in Prisma for every generated entity |
-| Creator/updater fields | `creator_id` and `updater_id` must exist in Prisma for any entity with `x-generate` or used with `x-outputType: comments` |
+| Rule | Status | Detail |
+|---|---|---|
+| Entity names | **Hard constraint** (validated) | Lowercase `snake_case` only |
+| FK field suffix | **Hard constraint** (validated) | Fields with `x-relationship` must end with `_id` |
+| Relation object name | **Hard constraint** | Must equal FK field with `_id` removed |
+| `id` field on base model | **Hard constraint** | Required for generator to recognise the definition |
+| `_detail` suffix | **Hard constraint** | Required for detail definitions |
+| `message` on comment child | **Hard constraint** (validated) | Required for `x-outputType: comments` |
+| Chart start/end fields | **Hard constraint** (validated) | Must exist; configurable via `start_field`/`end_field` |
+| Child-to-parent FK naming | **Strong guideline** | `{parent_model}_id` strongly recommended; generator falls back to x-relationship scanning if absent |
+| `name` field on targets | **Strong guideline** (validated) | Needed wherever `labelField` is not explicitly set |
+| Timestamp fields | **Strong guideline** | `created_at` / `updated_at` must exist in Prisma for every generated entity |
+| Creator/updater fields | **Strong guideline** | `creator_id` / `updater_id` must exist in Prisma for entities using `x-generate` or `x-outputType: comments` |
 
 ---
 
