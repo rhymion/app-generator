@@ -33,8 +33,7 @@ export function editDataGridCell(
   submit: boolean = false
 ) {
   getDataGridCell(rowIndex, field).dblclick();
-  const input = getDataGridCell(rowIndex, field).find('input');
-  input.clear().type(String(value));
+  getDataGridCell(rowIndex, field).find('input').should('be.visible').type('{selectall}' + String(value));
   if (submit) {
     cy.get('p').first().click(); // Click outside to commit the edit, as some cells may have async validation that prevents Enter key from working.
     // input.type('{enter}');

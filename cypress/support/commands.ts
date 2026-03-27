@@ -70,9 +70,9 @@ Cypress.Commands.add('clearAndFillField', (label: string, value: string) => {
     const forAttr = $label.attr('for');
 
     if (forAttr) {
-      cy.get(`#${forAttr}`).clear().type(value);
+      cy.get(`#${forAttr}`).type('{selectall}' + value);
     } else {
-      cy.contains('label', label).parent().find('input, textarea').first().clear().type(value);
+      cy.contains('label', label).parent().find('input, textarea').first().type('{selectall}' + value);
     }
   });
 });
@@ -86,9 +86,9 @@ Cypress.Commands.add('clearField', (label: string) => {
     const forAttr = $label.attr('for');
 
     if (forAttr) {
-      cy.get(`#${forAttr}`).clear();
+      cy.get(`#${forAttr}`).type('{selectall}{backspace}');
     } else {
-      cy.contains('label', label).parent().find('input, textarea').first().clear();
+      cy.contains('label', label).parent().find('input, textarea').first().type('{selectall}{backspace}');
     }
   });
 });
@@ -97,7 +97,7 @@ Cypress.Commands.add('clearField', (label: string) => {
  * Select an option from MUI Autocomplete by label
  */
 Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) => {
-  cy.contains('label', label).parent().find('input').first().clear().type(optionText);
+  cy.contains('label', label).parent().find('input').first().type('{selectall}' + optionText);
   cy.get('.MuiAutocomplete-popper li').contains(optionText).click();
 });
 

@@ -527,7 +527,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endif %}
         // Clear required child field
         cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="{{ fail_edit_6_2.field_prop_name }}"]').dblclick();
-        cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="{{ fail_edit_6_2.field_prop_name }}"] input').clear();
+        cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="{{ fail_edit_6_2.field_prop_name }}"] input').should('be.visible').type('{selectall}{backspace}');
         cy.get('p').first().click(); // Click outside to commit the edit, as some cells may have async validation that prevents Enter key from working.
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}/edit');
