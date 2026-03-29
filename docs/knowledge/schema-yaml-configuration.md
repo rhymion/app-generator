@@ -315,36 +315,38 @@ constraints beyond what the Prisma schema already defines.
 
 ### 4.3 Enum fields
 
-```yaml
-type:
-  type: string
-  enum:
-    - string
-    - number
-    - boolean
-    - date
-```
-
-Generates a `<Select>` component. Labels are derived from the enum values by title-casing.
-
-Integer enum (enum values are shown as labels, array index is the stored value):
+Use `type: integer` with `minimum`, `maximum`, and a label array. The enum values are
+human-readable labels shown in the UI. The stored database value is the **array index** (0, 1,
+2, …). Prisma stores a plain `Int`.
 
 ```yaml
-day_of_week:
+status:
   type: integer
   minimum: 0
-  maximum: 6
+  maximum: 5
   enum:
-    - Sunday
-    - Monday
-    - Tuesday
-    - Wednesday
-    - Thursday
-    - Friday
-    - Saturday
+    - Backlog
+    - Todo
+    - In Progress
+    - In Review
+    - Done
+    - Cancelled
+
+priority:
+  type: integer
+  minimum: 0
+  maximum: 3
+  enum:
+    - Low
+    - Medium
+    - High
+    - Critical
 ```
 
-Prisma stores a plain `Int`. The generator maps index → label in both the form and the list page.
+`minimum` must be `0`. `maximum` must equal the number of enum labels minus one. The generator
+maps index → label in the `<Select>` form component and in DataGrid columns.
+
+Generates a `<Select>` component in forms and displays the label string in list and view pages.
 
 ### 4.4 The `id` field
 
