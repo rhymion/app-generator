@@ -22,19 +22,11 @@ Cypress.Commands.add('login', (email, password) => {
  * Handles both associated labels (using 'for' attribute) and wrapped labels
  */
 Cypress.Commands.add('fillField', (label: string, value: string) => {
-  // Scope to <form> so we don't accidentally match labels on the previous page during
-  // client-side navigation (e.g. view page TextFields that are still in the DOM while
-  // the edit page skeleton/form is loading).
-  cy.get('form').then(($form) => {
-    const $label = $form.find(`label:contains("${label}")`).first();
-    const forAttr = $label.attr('for');
-
-    if (forAttr) {
-      cy.get(`#${forAttr}`).type(value);
-    } else {
-      cy.get('form').contains('label', label).parent().find('input, textarea').first().type(value);
-    }
-  });
+  // Scope to <form> to avoid matching labels on the previous page during client-side
+  // navigation (FormView renders real <input> elements with identical labels).
+  // Use DOM traversal — not forAttr ID lookup — because MUI auto-generates input IDs
+  // that can differ between SSR and hydration, making a cached ID stale.
+  cy.get('form').contains('label', label).parent().find('input, textarea').first().type(value);
 });
 
 /**
@@ -49,48 +41,21 @@ Cypress.Commands.add('clickButton', (text: string) => {
  * Handles both associated labels (using 'for' attribute) and wrapped labels
  */
 Cypress.Commands.add('checkField', (label: string, expectedValue: string) => {
-  cy.get('body').then(($body) => {
-    const $label = $body.find(`label:contains("${label}")`).first();
-    const forAttr = $label.attr('for');
-
-    if (forAttr) {
-      cy.get(`#${forAttr}`).should('have.value', expectedValue);
-    } else {
-      cy.contains('label', label).parent().find('input, textarea').first().should('have.value', expectedValue);
-    }
-  });
+  cy.contains('label', label).parent().find('input, textarea').first().should('have.value', expectedValue);
 });
 
 /**
  * Clear and re-fill a labeled form field (for editing existing values)
  */
 Cypress.Commands.add('clearAndFillField', (label: string, value: string) => {
-  cy.get('form').then(($form) => {
-    const $label = $form.find(`label:contains("${label}")`).first();
-    const forAttr = $label.attr('for');
-
-    if (forAttr) {
-      cy.get(`#${forAttr}`).type('{selectall}' + value);
-    } else {
-      cy.get('form').contains('label', label).parent().find('input, textarea').first().type('{selectall}' + value);
-    }
-  });
+  cy.get('form').contains('label', label).parent().find('input, textarea').first().type('{selectall}' + value);
 });
 
 /**
  * Clear a labeled form field value entirely
  */
 Cypress.Commands.add('clearField', (label: string) => {
-  cy.get('form').then(($form) => {
-    const $label = $form.find(`label:contains("${label}")`).first();
-    const forAttr = $label.attr('for');
-
-    if (forAttr) {
-      cy.get(`#${forAttr}`).type('{selectall}{backspace}');
-    } else {
-      cy.get('form').contains('label', label).parent().find('input, textarea').first().type('{selectall}{backspace}');
-    }
-  });
+  cy.get('form').contains('label', label).parent().find('input, textarea').first().type('{selectall}{backspace}');
 });
 
 /**
