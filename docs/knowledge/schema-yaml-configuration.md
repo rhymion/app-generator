@@ -12,7 +12,7 @@ Currently one schema file drives generation:
 
 | File | Purpose |
 |---|---|
-| `code_generator/json_schema_db_table.yaml` | All application entities |
+| `code_generator/json_schema.yaml` | All application entities |
 
 The file follows JSON Schema Draft-07 with custom `x-*` extension keywords.
 
