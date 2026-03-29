@@ -1265,6 +1265,27 @@ A child used with `x-outputType: comments` must:
 3. Have `creator_id` (used for edit/delete ownership checks)
 4. Have `created_at` (used for `orderBy: { created_at: 'asc' }` in the include)
 
+**Comment models do not have `updater_id` / `updater`.** Only the creator of a comment is
+allowed to edit it; the framework enforces this via `creator_id` ownership checks. Adding
+`updater_id` to a comment model causes a build failure because the generated comment actions
+never write that column.
+
+The Prisma model for a comment child therefore looks like:
+
+```prisma
+model epic_comment {
+  id         String   @id @default(cuid())
+  message    String
+  epic_id    String
+  epic       epic     @relation(fields: [epic_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user_account @relation("EpicCommentCreator", fields: [creator_id], references: [id])
+  // No updater_id / updater — comments are immutable after creation except by their creator
+}
+```
+
 The generated comment actions are named `add{Parent}Comment`, `update{Parent}Comment`,
 `delete{Parent}Comment`. The parent path used in `revalidatePath` is derived from the entity name.
 
@@ -1313,7 +1334,7 @@ for optional FK fields.
 | Child-to-parent FK naming | **Strong guideline** | `{parent_model}_id` strongly recommended; generator falls back to x-relationship scanning if absent |
 | `name` field on targets | **Strong guideline** (validated) | Needed wherever `labelField` is not explicitly set |
 | Timestamp fields | **Strong guideline** | `created_at` / `updated_at` must exist in Prisma for every generated entity |
-| Creator/updater fields | **Strong guideline** | `creator_id` / `updater_id` must exist in Prisma for entities using `x-generate` or `x-outputType: comments` |
+| Creator/updater fields | **Strong guideline** | `creator_id` / `updater_id` must exist in Prisma for entities using `x-generate`; comment children (`x-outputType: comments`) need only `creator_id` — **no `updater_id`** |
 
 ---
 
