@@ -78,6 +78,10 @@ export default function FormUpsert({{ form_upsert_params }}) {
 
     if (isPending) return;
 
+{% if child_validation_code %}
+{{ child_validation_code }}
+
+{% endif %}
     const formData = new FormData();
     formData.set('id', src.id);
     if (isEdit) {
@@ -101,9 +105,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% if can_delete %}
 
   const handleDelete = async () => {
-    const formData = new FormData();
-    formData.set('id', src.id);
-    await remove{{ parent_pascal }}(formData);
+    await remove{{ parent_pascal }}([src.id]);
   };
 {% endif %}
 

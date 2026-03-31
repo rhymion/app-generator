@@ -33,10 +33,10 @@ export function editDataGridCell(
   submit: boolean = false
 ) {
   getDataGridCell(rowIndex, field).dblclick();
-  const input = getDataGridCell(rowIndex, field).find('input');
-  input.clear().type(String(value));
+  getDataGridCell(rowIndex, field).find('input').should('be.visible').type('{selectall}' + String(value));
   if (submit) {
-    input.type('{enter}');
+    cy.get('p').first().click(); // Click outside to commit the edit, as some cells may have async validation that prevents Enter key from working.
+    // input.type('{enter}');
   }
 }
 
@@ -81,7 +81,8 @@ export function fillDataGridRow(
     if (typeof value === 'boolean') {
       toggleDataGridCheckbox(rowIndex, field, value);
       if (isLast && submitLast) {
-        getDataGridCell(rowIndex, field).find('input').type('{enter}');
+        cy.get('p').first().click(); // Click outside to commit the edit, as some cells may have async validation that prevents Enter key from working.
+        // getDataGridCell(rowIndex, field).find('input').type('{enter}');
       }
     } else {
       editDataGridCell(rowIndex, field, value, isLast && submitLast);
@@ -119,6 +120,7 @@ export function waitForDataGrid() {
  * Check if DataGrid has no rows
  */
 export function assertDataGridEmpty() {
+  cy.get('div[role="grid"]').should('be.visible');
   cy.contains('No rows').should('be.visible');
 }
 

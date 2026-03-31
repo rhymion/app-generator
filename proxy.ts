@@ -7,7 +7,7 @@ import { routing } from './i18n/routing';
 const intlMiddleware = createIntlMiddleware(routing);
 
 // Paths that do not require authentication (matched after stripping locale prefix)
-const PUBLIC_PATHS = ['/login', '/register'];
+const PUBLIC_PATHS = ['/login', '/register', '/docs'];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;

@@ -59,6 +59,7 @@ async function {{ parent_pascal }}ListContent() {
 {% endif %}
   return (
     <>
+      <h1>{t('{{ parent_camel }}')}</h1>
 {% if has_chart or entity_custom_component %}
       <Box sx={{ '{{' }} display: 'flex', gap: 1, mb: 1 {{ '}}' }}>
 {% if has_chart %}

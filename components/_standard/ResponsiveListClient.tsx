@@ -15,12 +15,13 @@ interface DisplayFieldConfig<T> {
   field: keyof T;
   headerName: string;
   width?: number;
+  format?: 'date-time' | 'date' | 'time';
 }
 
 interface ResponsiveListClientProps<T extends BaseEntity> {
   src: T[];
   basePath: string;
-  removeAction?: (formDataOrIds: FormData | string[]) => Promise<void>;
+  removeAction?: (ids: string[]) => Promise<void>;
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];
   permissions?: ModelPermissions;

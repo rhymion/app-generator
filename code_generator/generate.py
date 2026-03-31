@@ -32,11 +32,14 @@ from generators import (
     form_upsert_context,
 )
 from generators_i18n import update_i18n_and_config
+from validate import validate_schema, SchemaValidationError
+from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
 from generators_test import (
     test_helper_context,
     test_spec_context,
     test_tasks_registry_context,
     test_api_spec_context,
+    db_helpers_context,
 )
 
 
@@ -88,6 +91,12 @@ def generate(schema_path: str, output_dir: str) -> None:
     with open(schema_path) as f:
         schema = yaml.safe_load(f)
 
+    try:
+        validate_schema(schema)
+    except SchemaValidationError as exc:
+        print(f'\n{exc}', file=sys.stderr)
+        sys.exit(1)
+
     entities = extract_entities(schema)
     if not entities:
         print('No entities found in schema', file=sys.stderr)
@@ -97,6 +106,9 @@ def generate(schema_path: str, output_dir: str) -> None:
     out = Path(output_dir)
 
     print(f'Found {len(entities)} entities in {schema_path}')
+
+    doc_dir = out / 'docs' / 'generated'
+    entity_doc_summaries: list[dict] = []
 
     for entity in entities:
         parent     = entity['parent']
@@ -124,6 +136,22 @@ def generate(schema_path: str, output_dir: str) -> None:
         # Base context for all other generators
         ctx = build_context(entity, schema)
 
+        # --- docs/{parent}.md + app/[locale]/docs/{parent}/page.mdx ---
+        doc_ctx = build_doc_entity_context(ctx)
+        md_content = _render(env, 'doc_entity.md.jinja2', doc_ctx)
+        _write(doc_dir / f'{parent}.md', md_content)
+        _write(
+            out / 'app' / '[locale]' / 'docs' / parent / 'page.mdx',
+            convert_md_to_mdx(md_content, link_prefix=''),
+        )
+        entity_doc_summaries.append({
+            'parent':     doc_ctx['parent'],
+            'title':      doc_ctx['title'],
+            'operations': doc_ctx['operations'],
+            'can_api':    doc_ctx['can_api'],
+            'has_chart':  doc_ctx['has_chart'],
+        })
+
         # --- getters.ts ---
         _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', ctx))
 
@@ -149,6 +177,8 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(api_dir / 'route.ts', _render(env, 'api_route.ts.jinja2', ctx))
             if can_view or can_edit or can_delete:
                 _write(api_dir / '[id]' / 'route.ts', _render(env, 'api_detail_route.ts.jinja2', ctx))
+            if can_new or can_edit or can_delete:
+                _write(api_dir / 'bulk' / 'route.ts', _render(env, 'api_bulk_route.ts.jinja2', ctx))
             print(f'  API routes → app/api/{parent}/')
 
         # --- column_def.tsx ---
@@ -203,6 +233,16 @@ def generate(schema_path: str, output_dir: str) -> None:
         if can_view:
             _write(app_dir / 'view' / '[id]' / 'page.tsx', _render(env, 'page_view.tsx.jinja2', ctx))
 
+    # --- docs/generated/index.md + app/[locale]/docs/page.mdx ---
+    print('\nGenerating documentation index...')
+    index_ctx = build_doc_index_context(entity_doc_summaries)
+    index_md = _render(env, 'doc_index.md.jinja2', index_ctx)
+    _write(doc_dir / 'index.md', index_md)
+    _write(
+        out / 'app' / '[locale]' / 'docs' / 'page.mdx',
+        convert_md_to_mdx(index_md, link_prefix='docs/'),
+    )
+
     # --- Cypress test generation ---
     test_entities = [e for e in entities if e['generate_config'].get('test')]
     if test_entities:
@@ -246,6 +286,12 @@ def generate(schema_path: str, output_dir: str) -> None:
         registry_ctx = test_tasks_registry_context(registry_infos, schema)
         _write(cypress_support / 'generated-tasks.ts',
                _render(env, 'test_tasks_registry.ts.jinja2', registry_ctx))
+
+    # --- db-helpers.ts (always generated, not gated on test_entities) ---
+    print('\nGenerating db-helpers.ts...')
+    db_ctx = db_helpers_context(schema)
+    _write(out / 'cypress' / 'support' / 'db-helpers.ts',
+           _render(env, 'test_db_helpers.ts.jinja2', db_ctx))
 
     # --- i18n / config updates ---
     print('\nUpdating i18n and navigation config...')

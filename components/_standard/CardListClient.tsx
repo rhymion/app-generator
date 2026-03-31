@@ -33,12 +33,13 @@ interface DisplayFieldConfig<T> {
   field: keyof T;
   headerName: string;
   width?: number;
+  format?: 'date-time' | 'date' | 'time';
 }
 
 interface CardListClientProps<T extends BaseEntity> {
   src: T[];
   basePath: string;
-  removeAction?: (formDataOrIds: FormData | string[]) => Promise<void>;
+  removeAction?: (ids: string[]) => Promise<void>;
   entityLabel?: string;
   /** Fields to display. Defaults to name + description. */
   displayFields?: DisplayFieldConfig<T>[];
@@ -47,9 +48,12 @@ interface CardListClientProps<T extends BaseEntity> {
   primaryField?: keyof T;
 }
 
-function formatValue<T>(item: T, field: keyof T): string {
+function formatValue<T>(item: T, field: keyof T, format?: 'date-time' | 'date' | 'time'): string {
   const value = item[field];
   if (value === null || value === undefined) return '';
+  if (format === 'date-time') return dayjs(value as string).format('YYYY-MM-DD HH:mm');
+  if (format === 'date') return dayjs(new Date(value as string).toISOString().slice(0, 10) as string).format('YYYY-MM-DD');
+  if (format === 'time') return dayjs(value as string).format('HH:mm');;
   if (typeof value === 'object' && value !== null && 'name' in value) return (value as { name: string }).name;
   if (value instanceof Date) return dayjs(value).format('YYYY-MM-DD HH:mm');
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
@@ -132,7 +136,8 @@ export default function CardListClient<T extends BaseEntity>({
         ) : (
           items.map((item) => {
             const isSelected = selectedIds.has(item.id);
-            const primaryValue = formatValue(item, primaryField);
+            const primaryFieldConfig = defaultDisplayFields.find(f => f.field === primaryField);
+            const primaryValue = formatValue(item, primaryField, primaryFieldConfig?.format);
 
             return (
               <Card
@@ -158,7 +163,7 @@ export default function CardListClient<T extends BaseEntity>({
                     )}
                   </Box>
                   {secondaryFields.map((fieldConfig) => {
-                    const value = formatValue(item, fieldConfig.field);
+                    const value = formatValue(item, fieldConfig.field, fieldConfig.format);
                     if (!value) return null;
                     return (
                       <Box key={String(fieldConfig.field)} sx={{ mt: 0.5 }}>

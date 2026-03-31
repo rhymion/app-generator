@@ -45,128 +45,70 @@ or `disabled` — not `slotProps` — so this is safe.
 
 ---
 
-## Cypress Command: `fillDateTime`
+## Cypress Commands: `fillDateTime`, `fillDate`, `fillTime`
 
-### Why keyboard input alone fails
+### Approach: digit-only keyboard input (no calendar picker UI)
 
-With `enableAccessibleFieldDOMStructure={false}`, the picker input uses a
-**sectioned masked format** (`MM/DD/YYYY hh:mm aa`). Typing the full formatted
-string (`01/15/2025 09:00 AM`) causes problems because:
-- `.clear()` → `{ctrl+a}{del}` can leave the cursor at the last section
-- Separator characters (`/`, `:`, space) are interpreted inconsistently across
-  MUI versions when typed into the masked input
+With `enableAccessibleFieldDOMStructure={false}`, MUI X exposes a single `<input>`
+with a **sectioned masked format** (`MM/DD/YYYY hh:mm aa`). Typing digits directly
+into this input causes MUI X to auto-advance through sections automatically:
+`MM → DD → YYYY → HH → MM → AM/PM`.
 
-### Calendar-based approach (current implementation)
+The calendar picker UI is **not used** — it is unreliable in headless Chromium.
 
-`fillDateTime` opens the picker calendar UI and interacts step-by-step:
+### Input sequence
 
-```
-1. Click calendar-open button (last button in field = open, after optional clear)
-2. Click month/year header → year-picker view
-3. Click target year → month-picker view
-   (MUI shows month picker because 'month' is in the views array)
-4. Click target month → day-calendar view
-5. Click the target day — simple text match on day number
-6. Select hours via scroll list (ul[aria-label="Select hours"])
-7. Select minutes via scroll list (ul[aria-label="Select minutes"])
-8. Select AM/PM via scroll list (ul[aria-label="Select meridiem"])
-9. Click OK to confirm
-```
-
-### Why not use Prev/Next month arrows for navigation
-
-The Prev/Next month arrows (`[aria-label="Previous month"]`) are only visible in
-**day-calendar view**. In year-picker and month-picker views they are absent.
-After clicking the year header to enter year-picker view, the arrows disappear.
-Using year → month → day picker steps avoids any need to navigate with arrows.
-
-### Time picker: scroll lists, not keyboard input
-
-MUI X v8 DateTimePicker time selection uses **scroll-list UI** — three vertical
-lists for hours, minutes, and meridiem. Each is a `<ul>` element. There is no
-keyboard text input for time in the default picker UI.
-
-> Attempting to click `button[aria-label="edit time"]` to switch to a digital
-> keyboard input is unreliable. Use the scroll lists instead.
-
-### MUI X v8 selector reference
-
-| Element | Selector |
+| Command | Type into input |
 |---|---|
-| Picker popup | `.MuiPickerPopper-root` |
-| Calendar header label | `.MuiPickersCalendarHeader-label` |
-| Year calendar | `.MuiYearCalendar-root button` |
-| Month calendar | `.MuiMonthCalendar-root [aria-label="{MonthName}"]` |
-| Day button | `.MuiPickersDay-root` + `.contains(String(day))` |
-| Hours scroll list | `ul[aria-label="Select hours"]` |
-| Minutes scroll list | `ul[aria-label="Select minutes"]` |
-| AM/PM scroll list | `ul[aria-label="Select meridiem"]` |
-| Confirm button | `button` containing text `OK` |
-| Clear button | `button[title="Clear"]` |
+| `fillDateTime` | `month + day + year + hour + minute + ampmChar` (e.g. `011520250900a`) |
+| `fillDate` | `month + day + year` (e.g. `01152025`) |
+| `fillTime` | `hour + minute + ampmChar` (e.g. `0900a`) |
 
-> **Note:** The popup class is `.MuiPickerPopper-root` (no `s` after `Picker`).
-> Do not confuse with `.MuiPickersPopper-root` — that selector does not match.
+`ampmChar`: `'a'` for AM, `'p'` for PM.
 
-> **Note:** These selectors target MUI X v8 with default English locale and
-> `enableAccessibleFieldDOMStructure={false}`. If MUI changes its rendering or
-> you change locale, some selectors may need adjustment.
+### DOM detachment on focus — broken chain pattern
+
+**Problem**: MUI X re-renders the input's internal structure when it receives
+focus (section highlight state, aria attributes). The DOM node Cypress obtained
+via `.find('input')` is replaced, so a chained `.type()` gets a stale (detached)
+element and throws:
+
+> CypressError: `cy.type()` failed because the page updated as a result of this
+> command, but you tried to continue the command chain. The subject is no longer
+> attached to the DOM.
+
+**Fix**: break the chain between `.click()` and `.type()` so Cypress re-queries
+the input after the re-render:
+
+```ts
+// BAD — stale reference after MUI re-render on focus:
+cy.contains('label', label).parent().find('input').click().type('...');
+
+// GOOD — re-queries the live element after click:
+cy.contains('label', label).parent().find('input').click();
+cy.contains('label', label).parent().find('input').type('...');
+```
 
 ### `fillDateTime` implementation
 
 ```ts
-const PICKER_MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-
 Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
   const parts = dateString.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})\s+(AM|PM)$/i);
   if (!parts) throw new Error(`fillDateTime: Expected "MM/DD/YYYY HH:MM AM/PM", got "${dateString}"`);
   const [, month, day, year, hour, minute, ampm] = parts;
+  const ampmChar = ampm.toUpperCase() === 'AM' ? 'a' : 'p';
 
-  const targetYear = parseInt(year);
-  const targetMonth = parseInt(month);
-  const targetDay = parseInt(day);
-  const targetMonthName = PICKER_MONTH_NAMES[targetMonth - 1];
-
-  // 1. Open picker (last button in field, after optional Clear button)
-  cy.contains('label', label).parent().find('button').last().click();
-  cy.get('.MuiPickerPopper-root').should('be.visible');
-
-  // 2. Click month/year header → year-picker view
-  cy.get('.MuiPickersCalendarHeader-label').click();
-
-  // 3. Click year → month-picker view
-  cy.get('.MuiYearCalendar-root button').contains(String(targetYear)).scrollIntoView().click();
-
-  // 4. Click month → day-calendar view
-  cy.get(`.MuiMonthCalendar-root [aria-label="${targetMonthName}"]`).click();
-
-  // 5. Click day (text match — aria-label format varies by locale)
-  cy.get('.MuiPickersDay-root').contains(String(targetDay)).click();
-
-  // 6-8. Select time via scroll lists
-  cy.get('.MuiPickerPopper-root').find('ul[aria-label="Select hours"]').children().contains(hour).scrollIntoView().click();
-  cy.get('.MuiPickerPopper-root').find('ul[aria-label="Select minutes"]').children().contains(minute).scrollIntoView().click();
-  cy.get('.MuiPickerPopper-root').find('ul[aria-label="Select meridiem"]').children().contains(ampm).click();
-
-  // 9. Confirm
-  cy.get('.MuiPickerPopper-root').contains('button', 'OK').click();
+  cy.contains('label', label).parent().find('input').click();
+  cy.contains('label', label).parent().find('input').type(month + day + year + hour + minute + ampmChar);
 });
 ```
 
-### Why year → month → day (not Prev/Next arrows)
+### Debugging tip: `assert(false)` masks the real error
 
-An earlier approach tried to navigate using `[aria-label="Previous month"]` /
-`[aria-label="Next month"]` arrows after clicking the year in the year picker.
-This fails because:
-- Clicking the calendar header switches to **year-picker view**
-- Clicking a year switches to **month-picker view** (when `'month'` is in `views`)
-- Prev/Next month arrows are only rendered in **day-calendar view**
-- They are absent in year-picker and month-picker views
-
-The fix: click year → click month → both are one-click selections, landing
-directly on the correct day-calendar view with no arrow navigation needed.
+`assert(false)` throws synchronously and aborts the Cypress command queue,
+so any queued `cy.type()` / `cy.click()` failure never runs. You only see
+the AssertionError, not the underlying CypressError. To bisect a failing step,
+remove cy commands from the **end** of the test one at a time.
 
 ### `clearDateTime` command
 

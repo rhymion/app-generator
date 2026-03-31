@@ -22,26 +22,18 @@ Cypress.Commands.add('login', (email, password) => {
  * Handles both associated labels (using 'for' attribute) and wrapped labels
  */
 Cypress.Commands.add('fillField', (label: string, value: string) => {
-  // First try to find label with 'for' attribute pointing to an input/textarea
-  cy.get('body').then(($body) => {
-    const $label = $body.find(`label:contains("${label}")`).first();
-    const forAttr = $label.attr('for');
-    
-    if (forAttr) {
-      // Use the 'for' attribute to find the specific input/textarea
-      cy.get(`#${forAttr}`).type(value);
-    } else {
-      // Fall back to finding within parent (for wrapped labels)
-      cy.contains('label', label).parent().find('input, textarea').first().type(value);
-    }
-  });
+  // Scope to <form> to avoid matching labels on the previous page during client-side
+  // navigation (FormView renders real <input> elements with identical labels).
+  // Use DOM traversal — not forAttr ID lookup — because MUI auto-generates input IDs
+  // that can differ between SSR and hydration, making a cached ID stale.
+  cy.get('form').contains('label', label).parent().find('input, textarea').first().type(value);
 });
 
 /**
  * Click a button or link by aria-label
  */
 Cypress.Commands.add('clickButton', (text: string) => {
-  cy.get(`[aria-label="${text}"]`).click();
+  cy.get(`button[aria-label="${text}"]`).click();
 });
 
 /**
@@ -49,55 +41,28 @@ Cypress.Commands.add('clickButton', (text: string) => {
  * Handles both associated labels (using 'for' attribute) and wrapped labels
  */
 Cypress.Commands.add('checkField', (label: string, expectedValue: string) => {
-  cy.get('body').then(($body) => {
-    const $label = $body.find(`label:contains("${label}")`).first();
-    const forAttr = $label.attr('for');
-
-    if (forAttr) {
-      cy.get(`#${forAttr}`).should('have.value', expectedValue);
-    } else {
-      cy.contains('label', label).parent().find('input, textarea').first().should('have.value', expectedValue);
-    }
-  });
+  cy.contains('label', label).parent().find('input, textarea').first().should('have.value', expectedValue);
 });
 
 /**
  * Clear and re-fill a labeled form field (for editing existing values)
  */
 Cypress.Commands.add('clearAndFillField', (label: string, value: string) => {
-  cy.get('body').then(($body) => {
-    const $label = $body.find(`label:contains("${label}")`).first();
-    const forAttr = $label.attr('for');
-
-    if (forAttr) {
-      cy.get(`#${forAttr}`).clear().type(value);
-    } else {
-      cy.contains('label', label).parent().find('input, textarea').first().clear().type(value);
-    }
-  });
+  cy.get('form').contains('label', label).parent().find('input, textarea').first().type('{selectall}' + value);
 });
 
 /**
  * Clear a labeled form field value entirely
  */
 Cypress.Commands.add('clearField', (label: string) => {
-  cy.get('body').then(($body) => {
-    const $label = $body.find(`label:contains("${label}")`).first();
-    const forAttr = $label.attr('for');
-
-    if (forAttr) {
-      cy.get(`#${forAttr}`).clear();
-    } else {
-      cy.contains('label', label).parent().find('input, textarea').first().clear();
-    }
-  });
+  cy.get('form').contains('label', label).parent().find('input, textarea').first().type('{selectall}{backspace}');
 });
 
 /**
  * Select an option from MUI Autocomplete by label
  */
 Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) => {
-  cy.contains('label', label).parent().find('input').first().clear().type(optionText);
+  cy.get('form').contains('label', label).parent().find('input').first().type('{selectall}' + optionText);
   cy.get('.MuiAutocomplete-popper li').contains(optionText).click();
 });
 
@@ -105,14 +70,15 @@ Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) =
  * Clear MUI Autocomplete selection
  */
 Cypress.Commands.add('clearAutocomplete', (label: string) => {
-  cy.contains('label', label).parent().find('button[aria-label="Clear"]').click();
+  cy.get('form').contains('label', label).parent().find('input').first().click();
+  cy.get('form').contains('label', label).parent().find('button[aria-label="Clear"]').click();
 });
 
 /**
  * Set checkbox state by label
  */
 Cypress.Commands.add('setCheckbox', (label: string, checked: boolean) => {
-  cy.contains('label', label).parent().find('input[type="checkbox"]').then(($cb) => {
+  cy.get('form').contains('label', label).parent().find('input[type="checkbox"]').then(($cb) => {
     if (checked && !$cb.is(':checked')) {
       cy.wrap($cb).check();
     } else if (!checked && $cb.is(':checked')) {
@@ -136,11 +102,10 @@ Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
   const [, month, day, year, hour, minute, ampm] = parts;
   const ampmChar = ampm.toUpperCase() === 'AM' ? 'a' : 'p';
 
-  cy.contains('label', label)
-    .parent()
-    .find('input')
-    .click()
-    .type(month + day + year + hour + minute + ampmChar);
+  // Break the chain: MUI X re-renders the input on focus, detaching the original DOM node.
+  // Re-querying after click ensures .type() gets the live element.
+  cy.get('form').contains('label', label).parent().find('input').click();
+  cy.get('form').contains('label', label).parent().find('input').type(month + day + year + hour + minute + ampmChar);
 });
 
 Cypress.Commands.add('fillDate', (label: string, dateString: string) => {
@@ -148,11 +113,8 @@ Cypress.Commands.add('fillDate', (label: string, dateString: string) => {
   if (!parts) throw new Error(`fillDate: Expected "MM/DD/YYYY", got "${dateString}"`);
   const [, month, day, year] = parts;
 
-  cy.contains('label', label)
-    .parent()
-    .find('input')
-    .click()
-    .type(month + day + year);
+  cy.get('form').contains('label', label).parent().find('input').click();
+  cy.get('form').contains('label', label).parent().find('input').type(month + day + year);
 });
 
 Cypress.Commands.add('fillTime', (label: string, dateString: string) => {
@@ -161,11 +123,8 @@ Cypress.Commands.add('fillTime', (label: string, dateString: string) => {
   const [, hour, minute, ampm] = parts;
   const ampmChar = ampm.toUpperCase() === 'AM' ? 'a' : 'p';
 
-  cy.contains('label', label)
-    .parent()
-    .find('input')
-    .click()
-    .type(hour + minute + ampmChar);
+  cy.get('form').contains('label', label).parent().find('input').click();
+  cy.get('form').contains('label', label).parent().find('input').type(hour + minute + ampmChar);
 });
 
 /**
@@ -173,7 +132,7 @@ Cypress.Commands.add('fillTime', (label: string, dateString: string) => {
  * Requires DateTimeWrapper to have clearable={true} on the field slot.
  */
 Cypress.Commands.add('clearDateTime', (label: string) => {
-  cy.contains('label', label).parent().find('button[title="Clear"]').click();
+  cy.get('form').contains('label', label).parent().find('button[title="Clear"]').click();
 });
 
 /**

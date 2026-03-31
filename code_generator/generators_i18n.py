@@ -52,11 +52,29 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
 
             keys.setdefault(key, label)
 
-        # Child array property names
+        # Child properties: section heading key + column header keys for child tables
+        # column_def_context uses the child's unfiltered base definition (excluding id,
+        # parent FK, and system timestamps), so we replicate the same exclusion here.
+        child_parent_fk = f'{model}_id'
+        _child_sys = {'id', 'created_at', 'updated_at', 'creator_id', child_parent_fk}
         for child in entity.get('children', []):
+            # Section heading (e.g. "features", "userAccounts")
             prop_name = child['property_name']
-            key = to_camel_case(prop_name)
-            keys.setdefault(key, to_title_case(prop_name))
+            keys.setdefault(to_camel_case(prop_name), to_title_case(prop_name))
+
+            # Column headers for non-comment child tables
+            if child.get('output_type') == 'comments':
+                continue
+            child_def = schema['definitions'].get(child['name'], {})
+            for cp_name, cp_prop in child_def.get('properties', {}).items():
+                if cp_name in _child_sys:
+                    continue
+                cp_rel = cp_prop.get('x-relationship', {})
+                if cp_rel.get('type') == 'many-to-one':
+                    base = cp_name[:-3] if cp_name.endswith('_id') else cp_name
+                    keys.setdefault(to_camel_case(base), to_title_case(base))
+                else:
+                    keys.setdefault(to_camel_case(cp_name), to_title_case(cp_name))
 
     return keys
 

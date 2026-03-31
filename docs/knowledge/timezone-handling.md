@@ -168,6 +168,97 @@ const fmtInTz = (date: Date, tz: string) =>
 
 ---
 
+## Date-Only Fields (`@db.Date` / `format: date`)
+
+### The problem
+
+`@db.Date` columns store only a calendar date (`YYYY-MM-DD`). Prisma returns them as JavaScript `Date` objects anchored to **UTC midnight** — e.g. `2026-03-25T00:00:00.000Z`.
+
+When this value is passed to `dayjs()` without any conversion, dayjs applies the local timezone offset:
+
+| Timezone | `dayjs("2026-03-25T00:00:00.000Z")` displays |
+|---|---|
+| JST (UTC+9) | `2026-03-25 09:00` — correct date, wrong time shown |
+| California (UTC−8) | `2026-03-24 16:00` — **wrong date** |
+
+The reverse problem occurs on write: `dayjs("2026-03-25").toISOString()` in California gives `2026-03-25T08:00:00.000Z`, but in JST it gives `2026-03-24T15:00:00.000Z` — the stored date becomes `2026-03-24` instead of `2026-03-25`.
+
+### Solution: convert to local midnight at the call site
+
+The key insight: `new Date("2026-03-25T00:00:00")` — an ISO datetime string **without** a timezone suffix — is parsed by JavaScript as **local midnight**. This is distinct from `new Date("2026-03-25")` (date-only ISO, parsed as UTC midnight per spec).
+
+**Reading (FormView read-only display):**
+```tsx
+date_time={src.due_date
+  ? new Date(new Date(src.due_date).toISOString().slice(0, 10) + 'T00:00:00')
+  : null}
+```
+
+**Reading (FormUpsert state init):**
+```tsx
+useState<Dayjs | null>(
+  src.due_date
+    ? dayjs(new Date(src.due_date).toISOString().slice(0, 10) + 'T00:00:00')
+    : null
+)
+```
+
+**Writing (FormData submission):**
+```tsx
+formData.set('due_date', dueDate?.format('YYYY-MM-DD') || '');
+```
+
+On the server, `new Date("2026-03-25")` (date-only string, no timezone) is parsed as UTC midnight and stored as `2026-03-25` in the `DATE` column. ✓
+
+### Why `String(src.field).slice()` does not work
+
+`String(new Date(...))` produces the browser's locale string (e.g. `"Wed Mar 25 2026 09:00:00 GMT+0900"`), not an ISO string. `.slice(0, 10)` on that gives `"Wed Mar 25"`. Always use `.toISOString()` to get a reliable `"YYYY-MM-DDT..."` format.
+
+### Display component: `DatePicker` vs `DateTimePicker`
+
+For date-only fields (`show_time={false}`), `DateTimeWrapper` uses `DatePicker` instead of `DateTimePicker`. `DateTimePicker` with `views={['year','month','day']}` still renders the full datetime format string in the input; `DatePicker` renders only the date. The value passed in is always a local-midnight `Date`, so `dayjs(date_time)` inside the component is correct without any UTC extraction.
+
+### Summary table
+
+| Concern | Pattern |
+|---|---|
+| Display (FormView / FormUpsert init) | `new Date(src.field).toISOString().slice(0, 10) + 'T00:00:00'` → local midnight |
+| Submit (FormData) | `dayjs.format('YYYY-MM-DD')` → date-only string → `new Date("YYYY-MM-DD")` → UTC midnight |
+| Component | `DatePicker` (not `DateTimePicker`) for date-only fields |
+
+---
+
+## List Page Display (`DisplayFieldConfig.format`)
+
+List pages pass a `format` field in `displayFields` config instead of pre-formatting datetimes server-side. The `DataGridClient` and `CardListClient` components then apply client-side formatting in the browser's local timezone.
+
+| `format` value | Source value from Prisma | Client-side pattern | Result |
+|---|---|---|---|
+| `'date-time'` | ISO string (Timestamptz via JSON) | `dayjs(value).format('YYYY-MM-DD HH:mm')` | Local datetime |
+| `'date'` | ISO string (Date via JSON, UTC midnight) | `dayjs(new Date(value).toISOString().slice(0, 10)).format('YYYY-MM-DD')` | Local date |
+| `'time'` | ISO string (Timetz via JSON, epoch-anchored UTC) | `dayjs(value).format('HH:mm')` | Local time |
+
+### Why this pattern works for each type
+
+**`date-time`**: `dayjs(isoString)` parses the UTC instant and applies the browser's local offset — same as any standard datetime display.
+
+**`date`**: `new Date(value).toISOString().slice(0, 10)` extracts the UTC date portion as a plain `'YYYY-MM-DD'` string. `dayjs('YYYY-MM-DD')` (date-only, no timezone suffix) is parsed as local midnight, so `format('YYYY-MM-DD')` always returns the correct calendar date regardless of timezone. This is the same conversion used in `FormUpsert` state initialization.
+
+**`time`**: Timetz values are stored as UTC-normalized instants anchored to the Unix epoch (see "How Prisma Stores Timetz" above). `dayjs(epochUtcString)` applies the browser's local offset, recovering the original local time the user entered. Example: `08:00 JST` stored as `1970-01-01T23:00:00Z` → `dayjs(...).format('HH:mm')` in JST = `08:00` ✓.
+
+### Previous (broken) approach
+
+Before this change, datetimes were formatted server-side in the page component:
+
+```ts
+// Server-side — always UTC on Vercel, ignores user timezone
+start_time: item.start_time ? new Date(item.start_time).toLocaleString('sv-SE') : '',
+```
+
+This was replaced by passing the raw value to the client with `format: 'date-time'` in `displayFields`.
+
+---
+
 ## Future Considerations
 
 ### Explicit timezone selection

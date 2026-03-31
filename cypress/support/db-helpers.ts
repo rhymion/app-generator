@@ -1,10 +1,9 @@
+// AUTO-GENERATED - DO NOT EDIT
 import 'dotenv/config'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/app/generated/prisma/client';
 import { TEST_CREDENTIALS, TEST_API_KEY, getTestPasswordHash } from './test-credentials';
 import { createId } from "@paralleldrive/cuid2";
-
-// import prisma from '@/lib/prisma';
 
 // Use direct database connection for tests
 // Accelerate extension is required but will use direct connection for non-Accelerate URLs
@@ -23,36 +22,6 @@ export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
 
-  // Level 1: Delete tables that reference parent1
-  await prisma.parent1_child1.deleteMany();
-  await prisma.parent1_child2.deleteMany();
-  await prisma.parent1_list.deleteMany();
-
-  // Level 2: Delete tables that reference xxxxx_xxxxx and db_table
-  await prisma.yyyyy_yyyyy.deleteMany();
-  await prisma.field.deleteMany();
-
-  // Level 3: Delete tables that reference role and procedure (self-reference)
-  await prisma.permission.deleteMany();
-  await prisma.procedure.deleteMany();
-
-  // Level 4: Delete tables that reference user_account (via creator_id)
-  await prisma.parent1.deleteMany();
-  await prisma.xxxxx_xxxxx.deleteMany();
-  await prisma.booking.deleteMany();
-  await prisma.db_table.deleteMany();
-  await prisma.parent_only.deleteMany();
-  await prisma.resource.deleteMany();
-  await prisma.role.deleteMany();
-  await prisma.organization.deleteMany();
-  await prisma.purchase_order.deleteMany();
-  await prisma.inventory.deleteMany();
-  await prisma.product.deleteMany();
-  await prisma.shift_template.deleteMany();
-  await prisma.shift.deleteMany();
-
-  // Level 5: Finally delete user_account (last because everything references it)
-  await prisma.user_account.deleteMany();
 }
 
 /**
@@ -86,18 +55,18 @@ export async function seedTestDatabase() {
  * - Main test user has no roles → no permission records match → default-grant (all true)
  * - Limited user has a DenyRole with explicit false permissions → all operations denied → 403
  */
-export async function createLimitedApiUser(modelName: string): Promise<string> {
+export async function createLimitedApiUser(entityName: string): Promise<string> {
   const testUser = await prisma.user_account.findUnique({
     where: { email: TEST_CREDENTIALS.email },
   });
   if (!testUser) throw new Error('Test user not found. Run db:seed first.');
 
-  const limitedApiKey = `test_mk_limited_${modelName}`;
+  const limitedApiKey = `test_mk_limited_${entityName}`;
   const limitedUserId = createId();
 
   const denyRole = await prisma.role.create({
     data: {
-      name: `DenyRole_${modelName}`,
+      name: `DenyRole_${entityName}`,
       creator_id: testUser.id,
       updater_id: testUser.id,
     },
@@ -105,7 +74,7 @@ export async function createLimitedApiUser(modelName: string): Promise<string> {
 
   await prisma.permission.create({
     data: {
-      name: modelName,
+      name: entityName,
       role_id: denyRole.id,
       create: false,
       read: false,
@@ -121,8 +90,8 @@ export async function createLimitedApiUser(modelName: string): Promise<string> {
       id: limitedUserId,
       creator_id: limitedUserId,
       updater_id: limitedUserId,
-      email: `limited_${modelName}@example.com`,
-      name: `Limited User (${modelName})`,
+      email: `limited_${entityName}@example.com`,
+      name: `Limited User (${entityName})`,
       password: 'not_needed',
       api_key: limitedApiKey,
       roles: { connect: [{ id: denyRole.id }] },

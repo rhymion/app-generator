@@ -37,13 +37,64 @@ describe('Authentication E2E Tests', () => {
 
   it('should fail login with wrong password', () => {
     cy.contains('Sign In').click();
-    
+
     cy.get('input[name="email"]').type(TEST_CREDENTIALS.email);
     cy.get('input[name="password"]').type('wrongpassword');
-    
+
     cy.get('button[type="submit"]').click();
-    
+
     // Should show error
-    cy.contains(/invalid|incorrect|wrong/i).should('be.visible');
+    cy.contains('Invalid credentials').should('be.visible');
+  });
+
+  it('should fail login with unknown email address', () => {
+    cy.contains('Sign In').click();
+
+    cy.get('input[name="email"]').type('unknown@example.com');
+    cy.get('input[name="password"]').type('somepassword');
+
+    cy.get('button[type="submit"]').click();
+
+    cy.contains('Invalid credentials').should('be.visible');
+  });
+
+  it('should fail registration with existing email and correct password', () => {
+    cy.visit('/en/register');
+
+    cy.get('input[name="name"]').type('Test User');
+    cy.get('input[name="email"]').type(TEST_CREDENTIALS.email);
+    cy.get('input[name="password"]').type(TEST_CREDENTIALS.password);
+    cy.get('input[name="confirm_password"]').type(TEST_CREDENTIALS.password);
+
+    cy.get('button[type="submit"]').click();
+
+    cy.contains('Email already in use').should('be.visible');
+  });
+
+  it('should fail registration with existing email and different password', () => {
+    cy.visit('/en/register');
+
+    cy.get('input[name="name"]').type('Test User');
+    cy.get('input[name="email"]').type(TEST_CREDENTIALS.email);
+    cy.get('input[name="password"]').type('differentpassword');
+    cy.get('input[name="confirm_password"]').type('differentpassword');
+
+    cy.get('button[type="submit"]').click();
+
+    cy.contains('Email already in use').should('be.visible');
+  });
+
+  it('should succeed registration with new email and valid password', () => {
+    cy.visit('/en/register');
+
+    cy.get('input[name="name"]').type('New User');
+    cy.get('input[name="email"]').type('newuser@example.com');
+    cy.get('input[name="password"]').type('newpassword123');
+    cy.get('input[name="confirm_password"]').type('newpassword123');
+
+    cy.get('button[type="submit"]').click();
+
+    // Should be redirected and logged in as the new user
+    cy.contains('New User').should('be.visible');
   });
 });

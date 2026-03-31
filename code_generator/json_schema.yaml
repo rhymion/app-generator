@@ -1,0 +1,243 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+
+definitions:
+  # ============================================================
+  # Common models (same across all apps)
+  # ============================================================
+
+  user_account:
+    type: object
+    required:
+      - id
+      - name
+      - email
+      - password
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 150
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+      email:
+        type: string
+      password:
+        type: string
+        x-custom-component:
+          target:
+            - upsert
+      api_key:
+        type:
+          - string
+          - "null"
+        x-custom-component:
+          target:
+            - upsert
+      avatar:
+        type:
+          - string
+          - "null"
+        format: uri
+
+  role:
+    type: object
+    required:
+      - id
+      - name
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+      description:
+        type:
+          - string
+          - "null"
+
+  user_account_detail:
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+      fields:
+        - name
+        - avatar
+        - roles
+    x-relationships:
+      roles:
+        type: many-to-many
+        target: role
+    allOf:
+      - $ref: "#/definitions/user_account"
+      - type: object
+        required:
+          - roles
+        properties:
+          roles:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/role"
+
+  setting:
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+    x-relationships:
+      roles:
+        type: many-to-many
+        target: role
+    allOf:
+      - $ref: "#/definitions/user_account"
+      - type: object
+        required:
+          - roles
+        properties:
+          roles:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/role"
+
+  role_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-relationships:
+      user_accounts:
+        type: many-to-many
+        target: user_account
+    allOf:
+      - $ref: "#/definitions/role"
+      - type: object
+        required:
+          - user_accounts
+        properties:
+          user_accounts:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/user_account"
+
+  organization:
+    type: object
+    required:
+      - id
+      - name
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+      description:
+        type:
+          - string
+          - "null"
+
+  organization_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-relationships:
+      user_accounts:
+        type: many-to-many
+        target: user_account
+    allOf:
+      - $ref: "#/definitions/organization"
+      - type: object
+        required:
+          - user_accounts
+        properties:
+          user_accounts:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/user_account"
+
+  permission:
+    type: object
+    required:
+      - id
+      - name
+      - create
+      - read
+      - update
+      - delete
+    x-display:
+      table:
+        - name:
+            width: 200
+        - role:
+            width: 200
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+      create:
+        type: boolean
+      read:
+        type: boolean
+      update:
+        type: boolean
+      delete:
+        type: boolean
+      role_id:
+        type:
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: role
+          labelField: name
+
+  permission_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    allOf:
+      - $ref: "#/definitions/permission"
+      - type: object
+        properties:
+          role:
+            $ref: "#/definitions/role"

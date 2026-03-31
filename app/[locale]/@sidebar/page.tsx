@@ -6,22 +6,6 @@ import { siteConfig, themeConfig } from "@/lib/site-config";
 // Maps nav link href to Nav translation key
 const navTranslationKeys: Record<string, string> = {
   "/": "home",
-  "/db_table": "dbTable",
-  "/xxxxx_xxxxx": "xxxxxXxxxx",
-  "/parent_only": "parentOnly",
-  "/parent1": "parent1",
-  "/user_account": "userAccount",
-  "/role": "role",
-  "/organization": "organization",
-  "/permission": "permission",
-  "/resource": "resource",
-  "/booking": "booking",
-  "/shift_template": "shiftTemplate",
-  "/shift": "shift",
-  "/procedure": "procedure",
-  "/product": "product",
-  "/inventory": "inventory",
-  "/purchase_order": "purchaseOrder",
 };
 
 export default function Sidebar() {

@@ -11,7 +11,7 @@ from helpers.naming import (
     safe_var_name, singularize,
 )
 from helpers.type_mapping import get_ts_type
-from helpers.schema_helpers import get_parent_relationships
+from helpers.schema_helpers import get_parent_relationships, get_parent_fk_props
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +168,14 @@ def page_list_context(ctx: dict) -> dict:
     display_fields_code = ''
     primary_field = ''
 
+    # Build map from relation display name (e.g. 'epic') to label_field (e.g. 'title')
+    # parent_rels_raw entries: { prop_name: 'epic_id', label_field: 'title', ... }
+    rel_label_map: dict[str, str] = {}
+    for r in ctx.get('parent_rels_raw', []):
+        prop = r['prop_name']
+        if prop.endswith('_id'):
+            rel_label_map[prop[:-3]] = r['label_field']
+
     if xdisplay_table:
         fields_code_parts = []
         for item in xdisplay_table:
@@ -179,7 +187,6 @@ def page_list_context(ctx: dict) -> dict:
             prop = model_props.get(field_name)
             if prop:
                 actual   = _get_actual_type(prop)
-                fmt      = prop.get('format')
                 enum_vals = prop.get('enum')
                 enum_ns  = prop.get('x-enum-namespace')
 
@@ -197,15 +204,18 @@ def page_list_context(ctx: dict) -> dict:
                     else:
                         labels = ', '.join(f"'{v}'" for v in enum_vals)
                         formatting_entries.append(f"    {field_name}: ([{labels}] as const)[item.{field_name} as number] ?? '',")
-                elif actual == 'string' and fmt in ('date', 'date-time', 'time'):
-                    formatting_entries.append(
-                        f"    {field_name}: item.{field_name} ? new Date(item.{field_name}).toLocaleString('sv-SE') : '',"
-                    )
 
             if config.get('primary'):
                 primary_field = field_name
 
-            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width} }}")
+            # If this field is a relationship object, format it server-side (no functions to client)
+            if field_name in rel_label_map:
+                label_f = rel_label_map[field_name]
+                formatting_entries.append(f"    {field_name}: item.{field_name}?.{label_f} ?? '',")
+
+            fmt = model_props[field_name].get('format') if field_name in model_props else None
+            format_attr = f", format: '{fmt}'" if fmt in ('date-time', 'date', 'time') else ''
+            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr} }}")
 
         display_fields_code = ',\n'.join(fields_code_parts)
 
@@ -404,15 +414,16 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
 
             rel = prop.get('x-relationship', {})
             if rel.get('type') == 'many-to-one':
-                label_base  = key.removesuffix('_id')
+                label_base   = key.removesuffix('_id')
                 header_camel = to_camel_case(label_base)
-                prop_camel  = to_camel_case(key)
-                param_name  = f'{prop_camel}Options'
+                prop_camel   = to_camel_case(key)
+                param_name   = f'{prop_camel}Options'
+                label_field  = rel.get('labelField', 'name')
                 columns.append(
                     f"    ...({param_name} && {param_name}.length > 0\n"
                     f"      ? [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: editable, type: 'singleSelect' as const, valueOptions: {param_name} }}]\n"
                     f"      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
-                    f"      : [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: false, valueGetter: (_value: any, row: any) => row.{label_base}?.name ?? '' }}]),"
+                    f"      : [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: false, valueGetter: (_value: any, row: any) => row.{label_base}?.{label_field} ?? '' }}]),"
                 )
                 continue
 
@@ -458,19 +469,6 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                     f"      width: 250,\n"
                     f"      editable: editable,\n"
                     f"      type: 'dateTime',\n"
-                    f"      renderEditCell: (params: GridRenderEditCellParams) => (\n"
-                    f"        <DateTimeWrapper\n"
-                    f"          label={{t('{header_camel}')}}{show_date_str}\n"
-                    f"          date_time={{params.value ? new Date(params.value) : null}}\n"
-                    f"          onChange={{(newValue: dayjs.Dayjs | null) => {{\n"
-                    f"            params.api.setEditCellValue({{\n"
-                    f"              id: params.id,\n"
-                    f"              field: params.field,\n"
-                    f"              value: newValue ? newValue.toISOString() : ''\n"
-                    f"            }});\n"
-                    f"          }}}}\n"
-                    f"        />\n"
-                    f"      ),\n"
                     f"      valueFormatter: (value) => {{\n"
                     f"        if (!value) return '';\n"
                     f"        return dayjs(value).format('YYYY-MM-DD HH:mm');\n"
@@ -510,6 +508,7 @@ def form_view_context(ctx: dict) -> dict:
     model_def     = ctx['model_def']
     parent_rels   = ctx['parent_rels']
     children_raw  = ctx['children_raw']
+    use_dayjs     = False
 
     rel_by_prop = {r['prop_name']: r for r in ctx['parent_rels_raw']}
     EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'}
@@ -556,7 +555,7 @@ def form_view_context(ctx: dict) -> dict:
         fk = _tf(p)
         rel = rel_by_prop.get(p)
         if rel:
-            label_f  = rel.get('labelField', 'name')
+            label_f  = rel.get('label_field', 'name')
             label_fk = fk.removesuffix('Id')
             rel_name = rel.get('relation_name', p.removesuffix('_id'))
             text_jsxs.append(
@@ -578,8 +577,15 @@ def form_view_context(ctx: dict) -> dict:
         fmt = filtered_props[p].get('format')
         show_time_attr = '' if fmt in ('date-time', 'time') else ' show_time={false}'
         show_date_attr = ' show_date={false}' if fmt == 'time' else ''
+        if fmt == 'date':
+            use_dayjs = True
+            # Convert UTC midnight ISO string to local midnight Date so dayjs() shows the
+            # correct calendar date in all timezones. 'T00:00:00' without tz suffix = local.
+            date_time_expr = f"{{src.{p} ? dayjs(new Date(src.{p}).toISOString().slice(0, 10) + 'T00:00:00').toDate() : null}}"
+        else:
+            date_time_expr = f"{{src.{p}}}"
         dt_jsxs.append(
-            f"      <DateTimeWrapper label={{tf('{fk}')}} date_time={{src.{p}}}{show_time_attr}{show_date_attr} readOnly />"
+            f"      <DateTimeWrapper label={{tf('{fk}')}} date_time={date_time_expr}{show_time_attr}{show_date_attr} readOnly />"
         )
 
     # Image fields
@@ -718,6 +724,7 @@ def form_view_context(ctx: dict) -> dict:
         'child_view_grids':       '\n'.join(child_view_grids),
         'column_variables':       column_variables,
         'custom_view_imports':    custom_view_imports,
+        'use_dayjs':              use_dayjs,
     }
 
 
@@ -759,10 +766,20 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     def _setter(var_name: str) -> str:
         return to_pascal_case_from_var(var_name)
 
-    dt_states = '\n'.join(
-        f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<Dayjs | null>(src.{p} ? dayjs(src.{p}) : null);"
-        for p in date_time_props
-    )
+    dt_state_lines = []
+    for p in date_time_props:
+        sn = safe_var_name(p)
+        fmt = filtered_props[p].get('format')
+        if fmt == 'date':
+            # Date-only: slice the UTC ISO string to "YYYY-MM-DD" then append 'T00:00:00'
+            # (no timezone suffix) so dayjs parses it as local midnight, preserving the
+            # calendar date regardless of timezone. Using plain "YYYY-MM-DD" would be
+            # parsed as UTC midnight by JS, causing a date shift in western timezones.
+            init = f"src.{p} ? dayjs(new Date(src.{p}).toISOString().slice(0, 10) + 'T00:00:00') : null"
+        else:
+            init = f"src.{p} ? dayjs(src.{p}) : null"
+        dt_state_lines.append(f"  const [{sn}, set{_setter(sn)}] = useState<Dayjs | null>({init});")
+    dt_states = '\n'.join(dt_state_lines)
     img_states = '\n'.join(
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} || '');"
         for p in image_props
@@ -831,8 +848,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         rel_jsxs.append(
             f"      <Autocomplete\n"
             f"        options={{{opts_var}}}\n"
-            f"        value={{{opts_var}.find((option) => option.id === {state_name}) || null}}\n"
-            f"        onChange={{(_, newValue) => set{setter}(newValue?.id ?? null)}}\n"
+            f"        value={{{opts_var}.find((option) => option.value === {state_name}) || null}}\n"
+            f"        onChange={{(_, newValue) => set{setter}(newValue?.value ?? null)}}\n"
             f"        renderInput={{(params) => (\n"
             f"          <TextField\n"
             f"            {{...params}}\n"
@@ -849,13 +866,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     for p in number_props:
         prop = filtered_props[p]
         fk   = _tf(p)
+        req  = p in (model_def.get('required') or [])
         mn   = prop.get('minimum', 0)
         mx   = prop.get('maximum', 1000000)
         num_jsxs.append(
             f"      <NumberField\n"
             f"        label={{tf('{fk}')}}\n"
             f"        inputRef={{{p}Ref}}\n"
-            f"        defaultValue={{src.{p} || 0}}\n"
+            f"        defaultValue={{src.{p} || undefined}}\n"
+            f"        {'required' if req else ''}\n"
             f"        min={{{mn}}}\n"
             f"        max={{{mx}}}\n"
             f"      />"
@@ -866,6 +885,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     for p in date_time_props:
         prop    = filtered_props[p]
         fk      = _tf(p)
+        req     = p in (model_def.get('required') or [])
         sn      = safe_var_name(p)
         setter  = _setter(sn)
         fmt     = prop.get('format')
@@ -875,6 +895,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      <DateTimeWrapper\n"
             f"        label={{tf('{fk}')}} {show_date_str}{show_time_str}\n"
             f"        date_time={{{sn} ? {sn}.toDate() : null}}\n"
+            f"        {'required' if req else ''}\n"
             f"        onChange={{(newValue: dayjs.Dayjs | null) => set{setter}(newValue)}}\n"
             f"      />"
         )
@@ -949,13 +970,13 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     for r in parent_rels_raw:
         prop_name    = r['prop_name']
         target_pascal = to_pascal_case(r['target'])
-        label_field  = r.get('labelField', 'name')
+        label_field  = r.get('label_field', 'name')
         sn           = safe_var_name(prop_name)
         opts_var     = f'{sn}Options'
         rel_opt_setups.append(
             f"  const {opts_var} = useMemo(() => {{\n"
             f"    return all{target_pascal}s.map((item) => ({{\n"
-            f"      id: item.id,\n"
+            f"      value: item.id,\n"
             f"      label: item.{label_field},\n"
             f"    }}));\n"
             f"  }}, [all{target_pascal}s]);"
@@ -983,7 +1004,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # ---- FormData sets ----
     text_ds  = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in text_props)
     num_ds   = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in number_props)
-    dt_ds    = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}?.toISOString() || '');" for p in date_time_props)
+    dt_ds_parts = []
+    for p in date_time_props:
+        sn = safe_var_name(p)
+        if filtered_props[p].get('format') == 'date':
+            # Date-only: send as YYYY-MM-DD so new Date() parses it as UTC midnight,
+            # matching the @db.Date column and avoiding timezone shift (e.g. JST → prev day).
+            dt_ds_parts.append(f"    formData.set('{p}', {sn}?.format('YYYY-MM-DD') || '');")
+        else:
+            dt_ds_parts.append(f"    formData.set('{p}', {sn}?.toISOString() || '');")
+    dt_ds = '\n'.join(dt_ds_parts)
     img_ds   = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in image_props)
     rel_ds   = '\n'.join(f"    formData.set('{r['prop_name']}', {safe_var_name(r['prop_name'])} || '');" for r in parent_rels_raw)
     bool_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}.toString());" for p in boolean_props)
@@ -992,7 +1022,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     parent_form_data_sets = '\n'.join(filter(None, [text_ds, rel_ds, num_ds, enum_ds, bool_ds, dt_ds, img_ds, cust_ds]))
 
     # ---- Children analysis ----
-    non_comment_ch = [c for c in children_raw if c.get('output_type') != 'comments']
+    # Use the pre-filtered embedded_ch from build_context (passed as non_comment_ch in ctx).
+    # Excludes independent mandatory-FK list children (have own pages; shown read-only).
+    # Includes non-independent mandatory-FK list children (no own page; full CRUD via text list).
+    # Includes m2m and optional-FK list children (use_connect=True; autocomplete add/delete).
+    non_comment_ch = ctx['non_comment_ch']
     comment_children = [c for c in children_raw if c.get('output_type') == 'comments']
     has_comment_children = bool(comment_children)
     has_children = bool(non_comment_ch)
@@ -1075,12 +1109,21 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         is_list    = c.get('output_type') == 'list'
         is_self    = child_name == model
 
-        if is_m2m or (is_list and is_self):
+        if c.get('use_connect') and is_list:
+            # Derive label_field: m2m uses x-relationships labelField, self-ref uses own rel, else 'name'
+            _rel = c.get('relationship') or {}
+            if _rel.get('type') == 'many-to-many':
+                _uc_label = _rel.get('label_field', 'name')
+            elif child_name == model:
+                _sr = next((r for r in ctx.get('parent_rels_raw', []) if r['target'] == model), None)
+                _uc_label = _sr.get('label_field', 'name') if _sr else 'name'
+            else:
+                _uc_label = 'name'
             child_grid_setup_parts.append(
                 f"  const [initial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                 f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
                 f"    value: f.id,\n"
-                f"    label: f.name,\n"
+                f"    label: f.{_uc_label},\n"
                 f"    originalId: f.id,\n"
                 f"  }})));"
             )
@@ -1110,12 +1153,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 )
             continue
 
-        # Grid child — exclude the back-reference to the parent entity
-        child_rels = [r for r in get_parent_relationships(child_def) if r['target'] != model]
+        # Grid child — exclude only the actual parent FK column(s), found via x-relationship
+        # annotations (not all FKs targeting the parent, e.g. reference_id → db_table stays).
+        parent_fk_props_child = get_parent_fk_props(child_def, model)
+        child_rels = [r for r in get_parent_relationships(child_def) if r['prop_name'] not in parent_fk_props_child]
         rel_opt_args = ', '.join(f'{to_camel_case(r["prop_name"])}Options' for r in child_rels)
         rel_args_str = f', {rel_opt_args}' if rel_opt_args else ''
 
-        exclude_in_create = {f'{model}_id', 'id', 'created_at', 'updated_at', 'creator_id'}
+        exclude_in_create = parent_fk_props_child | {'id', 'created_at', 'updated_at', 'creator_id'}
         create_props = [k for k in child_props_dict if k not in exclude_in_create]
 
         def _new_prop_val(p, defn):
@@ -1137,35 +1182,39 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             for p in create_props
         )
 
+        parent_fk_assignments = '\n'.join(
+            f"    {fk_prop}: src.id," for fk_prop in sorted(parent_fk_props_child)
+        )
         child_grid_setup_parts.append(
             f"  const {child_var}Columns = {prop_name}_columns(true{rel_args_str});\n\n"
             f"  const [initial{child_pascal}] = useState<GridRowsProp>(() => src.{prop_name}.map(f => ({{ ...f, id: f.id || `temp-${{Date.now()}}-${{Math.random()}}` }})));\n\n"
             f"  const createNew{child_pascal} = () => ({{\n"
             f"    id: `temp-${{Date.now()}}-${{Math.random()}}`,\n"
             f"{create_body}\n"
-            f"    {model}_id: src.id,\n"
+            f"{parent_fk_assignments}\n"
             f"  }});"
         )
 
     child_grid_setup = '\n'.join(child_grid_setup_parts)
 
     # Child entity rel option setups (for child grid many-to-one dropdowns)
-    from helpers.schema_helpers import get_parent_relationships as _gpr
     all_child_rels = []
     for c in non_comment_ch:
         if c.get('output_type') == 'list' or (c.get('relationship') or {}).get('type') == 'many-to-many':
             continue
         cdef = schema['definitions'].get(c['name'], {})
-        all_child_rels.extend(r for r in _gpr(cdef) if r['target'] != model)
+        parent_fk_props_cdef = get_parent_fk_props(cdef, model)
+        all_child_rels.extend(r for r in get_parent_relationships(cdef) if r['prop_name'] not in parent_fk_props_cdef)
+    parent_rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
     seen_rel = set()
     child_entity_rel_opt = []
     for r in all_child_rels:
-        if r['prop_name'] in seen_rel:
+        if r['prop_name'] in seen_rel or r['prop_name'] in parent_rel_prop_names:
             continue
         seen_rel.add(r['prop_name'])
         prop_camel   = to_camel_case(r['prop_name'])
         target_pascal = to_pascal_case(r['target'])
-        label_field  = r.get('labelField', 'name')
+        label_field  = r.get('label_field', 'name')
         opts_var     = f'{prop_camel}Options'
         child_entity_rel_opt.append(
             f"  const {opts_var} = useMemo(() =>\n"
@@ -1187,7 +1236,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         is_list = c.get('output_type') == 'list'
         is_self = child_name == model
 
-        if is_m2m or (is_list and is_self):
+        if c.get('use_connect') and is_list:
             item_var = singularize(child_var)
             child_fdh_parts.append(
                 f"    const {child_var} = {child_var}Ref.current?.getItems?.() || [];\n\n"
@@ -1242,7 +1291,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             continue
 
         # Grid child
-        exclude_ser = {f'{model}_id', 'id', 'created_at', 'updated_at', 'creator_id'}
+        parent_fk_props_ser = get_parent_fk_props(child_def, model)
+        exclude_ser = parent_fk_props_ser | {'id', 'created_at', 'updated_at', 'creator_id'}
         ser_props = [k for k in child_props_dict if k not in exclude_ser]
         serialize = '\n'.join(f"          {p}: field.{p}," for p in ser_props)
         child_fdh_parts.append(
@@ -1258,6 +1308,48 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"    }});"
         )
     child_form_data_handling = '\n'.join(child_fdh_parts)
+
+    # Child datagrid required-field validation (injected at start of handleSubmit)
+    child_validation_parts = []
+    exclude_validation = {'id', 'created_at', 'updated_at', 'creator_id', 'order'}
+    for c in non_comment_ch:
+        child_name = c['name']
+        prop_name  = c['property_name']
+        child_var  = safe_var_name(prop_name)
+        child_pascal = to_pascal_case(prop_name)
+        child_title_label = ' '.join(w.capitalize() for w in prop_name.split('_'))
+        child_def  = schema['definitions'].get(child_name, {})
+        child_props_dict_v = child_def.get('properties', {})
+        is_list = c.get('output_type') == 'list'
+        is_m2m  = (c.get('relationship') or {}).get('type') == 'many-to-many'
+
+        if is_list or is_m2m or c.get('file_type') or c.get('use_connect'):
+            continue
+
+        # Required fields excluding the parent FK and audit columns; booleans always have a value
+        child_required_all = child_def.get('required', [])
+        parent_fk_props_val = get_parent_fk_props(child_def, model)
+        required_validatable = [
+            k for k in child_required_all
+            if k not in exclude_validation
+            and k not in parent_fk_props_val
+            and _get_actual_type(child_props_dict_v.get(k, {})) != 'boolean'
+        ]
+
+        if not required_validatable:
+            continue
+
+        req_props_js = ', '.join(f"'{p}'" for p in required_validatable)
+        child_validation_parts.append(
+            f"    const invalid{child_pascal} = ({child_var}Ref.current?.getFields?.() || []).filter((row: any) =>\n"
+            f"      [{req_props_js}].some((prop: string) => row[prop] == null || row[prop] === '')\n"
+            f"    );\n"
+            f"    if (invalid{child_pascal}.length > 0) {{\n"
+            f"      setError('{child_title_label}: required fields ({', '.join(required_validatable)}) must be filled for all rows.');\n"
+            f"      return;\n"
+            f"    }}"
+        )
+    child_validation_code = '\n\n'.join(child_validation_parts)
 
     # Child grid components (JSX)
     child_grid_components_parts = []
@@ -1275,32 +1367,23 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         is_self = child_name == model
         rel = c.get('relationship') or {}
 
-        if is_m2m:
-            target = rel['target']
-            target_pascal = to_pascal_case(target)
-            child_grid_components_parts.append(
-                f"      <EditableListWrapper\n"
-                f"        ref={{{child_var}Ref}}\n"
-                f"        initialItems={{initial{child_pascal}}}\n"
-                f"        itemType=\"autocomplete\"\n"
-                f"        addButtonLabel=\"Add {child_title_label}\"\n"
-                f"        showTitle={{true}}\n"
-                f"        title={{tf('{child_camel}')}}\n"
-                f"        textFieldLabel=\"Name\"\n"
-                f"        textFieldPlaceholder=\"Enter name\"\n"
-                f"        allAutocompleteOptions={{all{target_pascal}s.map(item => ({{\n"
-                f"          id: item.id,\n"
-                f"          label: item.name,\n"
-                f"          value: item.id,\n"
-                f"        }}))}}\n"
-                f"        excludeOptionIds={{[src.id]}}\n"
-                f"      />"
-            )
-            continue
-
-        if is_list and is_self:
-            target_pascal = to_pascal_case(parent)
-            self_rel = next((r for r in parent_rels_raw if r['target'] == model), None)
+        if c.get('use_connect') and is_list:
+            if is_m2m:
+                autocomplete_target = rel['target']
+                # label_field for m2m comes from x-relationships labelField config
+                ac_label_field = rel.get('label_field', 'name')
+            elif is_self:
+                autocomplete_target = model
+                # self-referential: use the self-relationship's label_field
+                self_rel_info = next((r for r in parent_rels_raw if r['target'] == model), None)
+                ac_label_field = self_rel_info.get('label_field', 'name') if self_rel_info else 'name'
+            else:  # optional FK list
+                autocomplete_target = child_name
+                # for optional-FK lists, look for a labelField in the child's x-relationship back to this entity,
+                # otherwise fall back to 'name'
+                ac_label_field = 'name'
+            target_pascal = to_pascal_case(autocomplete_target)
+            self_rel = next((r for r in parent_rels_raw if r['target'] == model), None) if is_self else None
             filter_logic = f'.filter(item => !item.{self_rel["prop_name"]} || item.{self_rel["prop_name"]} === src.id)' if self_rel else ''
             child_grid_components_parts.append(
                 f"      <EditableListWrapper\n"
@@ -1314,7 +1397,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"        textFieldPlaceholder=\"Enter name\"\n"
                 f"        allAutocompleteOptions={{all{target_pascal}s{filter_logic}.map(item => ({{\n"
                 f"          id: item.id,\n"
-                f"          label: item.name,\n"
+                f"          label: item.{ac_label_field},\n"
                 f"          value: item.id,\n"
                 f"        }}))}}\n"
                 f"        excludeOptionIds={{[src.id]}}\n"
@@ -1434,6 +1517,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'child_imports':            child_imports,
         'child_grid_setup':         child_grid_setup,
         'child_form_data_handling': child_form_data_handling,
+        'child_validation_code':    child_validation_code,
         'child_grid_components':    child_grid_components,
         'form_upsert_params':       form_upsert_params,
         'enum_ns_hooks':            '\n'.join(enum_ns_hooks),

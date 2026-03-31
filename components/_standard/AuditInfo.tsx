@@ -15,7 +15,7 @@ export default function AuditInfo({ src }: AuditInfoProps) {
   if (!src.created_at && !src.updated_at) return null;
 
   const formatDate = (date: string | Date) => {
-    return new Date(date).toLocaleString();
+    return new Date(date).toLocaleString('sv-SE');
   };
 
   return (

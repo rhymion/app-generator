@@ -1,5 +1,6 @@
 'use client';
 import { useState, useTransition } from 'react';
+import dayjs from 'dayjs';
 import { useTranslations } from 'next-intl';
 import { DataGrid, GridColDef, gridRowSelectionManagerSelector, useGridApiRef, GridRowSelectionModel } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
@@ -27,12 +28,13 @@ interface DisplayFieldConfig<T> {
   field: keyof T;
   headerName: string;
   width?: number;
+  format?: 'date-time' | 'date' | 'time';
 }
 
 interface DataGridClientProps<T extends BaseEntity> {
   src: T[];
   basePath: string;
-  removeAction?: (formDataOrIds: FormData | string[]) => Promise<void>;
+  removeAction?: (ids: string[]) => Promise<void>;
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];
   permissions?: ModelPermissions;
@@ -56,6 +58,7 @@ export default function DataGridClient<T extends BaseEntity>({
   });
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [selectedRowIds, setSelectedRowIds] = useState<GridRowSelectionModel>({ type: 'include', ids: new Set() });
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
   const apiRef = useGridApiRef();
   const tc = useTranslations('Common');
   const tf = useTranslations('Fields');
@@ -77,16 +80,19 @@ export default function DataGridClient<T extends BaseEntity>({
   }
 
   const deleteSelected = () => {
+    // Capture IDs now — before the Dialog opens and its focus trap causes
+    // MUI DataGrid to fire onRowSelectionModelChange with an empty set.
+    setPendingDeleteIds(Array.from(selectedRowIds.ids) as string[]);
     setOpenDeleteDialog(true);
   };
 
   const deleteConfirmed = () => {
-    const selectedRows = apiRef.current?.getSelectedRows() || new Map();
-    const selectedIds = Array.from(selectedRows.keys());
-    if (selectedIds.length > 0 && removeAction) {
-      startTransition(() => removeAction(selectedIds));
+    if (pendingDeleteIds.length > 0 && removeAction) {
+      setItems(prev => prev.filter(item => !pendingDeleteIds.includes((item as { id: string }).id)));
+      startTransition(() => removeAction(pendingDeleteIds));
     }
     setOpenDeleteDialog(false);
+    setPendingDeleteIds([]);
   };
 
   // Build dynamic columns based on displayFields, with name as default first column
@@ -117,8 +123,12 @@ export default function DataGridClient<T extends BaseEntity>({
       width: fieldConfig.width || 200,
       valueGetter: (value, row) => {
         const fieldValue = row[fieldConfig.field];
-        return fieldValue !== null && fieldValue !== undefined ?
-        (typeof fieldValue === 'object' && 'name' in fieldValue ? fieldValue.name : String(fieldValue)) : '';
+        if (fieldValue === null || fieldValue === undefined) return '';
+        if (fieldConfig.format === 'date-time') return dayjs(fieldValue as string).format('YYYY-MM-DD HH:mm');
+        if (fieldConfig.format === 'date') return dayjs(new Date(fieldValue as string).toISOString().slice(0, 10) as string).format('YYYY-MM-DD');
+        if (fieldConfig.format === 'time') return dayjs(fieldValue as string).format('HH:mm');
+        if (typeof fieldValue === 'object' && 'name' in (fieldValue as object)) return (fieldValue as unknown as { name: string }).name;
+        return String(fieldValue);
       },
     };
   });

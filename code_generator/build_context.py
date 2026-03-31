@@ -13,6 +13,7 @@ from helpers.naming import (
 from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
+    is_optional_fk_to_parent, get_parent_fk_props,
 )
 import copy
 
@@ -106,12 +107,18 @@ def _build_form_data_gets(prop_infos: list[dict]) -> str:
 # Child data analysis
 # ---------------------------------------------------------------------------
 
-def _get_child_parent_id_props(child_name: str, model: str, parent_rels_raw: list[dict]) -> set[str]:
-    """What FK props in the child definition point back to the parent?"""
+def _get_child_parent_id_props(child_name: str, model: str, parent_rels_raw: list[dict],
+                               schema: dict) -> set[str]:
+    """What FK props in the child definition point back to the parent?
+
+    For self-referential children, uses the parent's own many-to-one rels to itself.
+    Otherwise scans the child's x-relationship annotations via get_parent_fk_props,
+    falling back to the '{model}_id' convention if no annotated FK is found.
+    """
     if child_name == model:
-        # Self-referential: use the parent's own many-to-one rels to itself
         return {r['prop_name'] for r in parent_rels_raw if r['target'] == model}
-    return {f'{model}_id'}
+    child_def = schema.get('definitions', {}).get(child_name, {})
+    return get_parent_fk_props(child_def, model)
 
 
 def _build_child_data(children_raw: list[dict], model: str, schema: dict,
@@ -124,12 +131,25 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         relationship = child_raw.get('relationship') or {}
 
         is_many_to_many = relationship.get('type') == 'many-to-many'
-        use_connect     = is_many_to_many or child_name == model
 
         child_def  = schema['definitions'].get(child_name, {})
+
+        # Optional FK list: non-m2m list child whose FK to parent is nullable.
+        # Treat like m2m (connect/set) — add/remove existing entities, no inline create.
+        is_optional_fk_list = (
+            output_type == 'list' and not is_many_to_many
+            and is_optional_fk_to_parent(child_def, model)
+        )
+        use_connect = is_many_to_many or child_name == model or is_optional_fk_list
+        # Independent list child: has its own _detail definition with x-generate.
+        # These are managed on their own pages; the parent form shows them read-only.
+        is_independent = (
+            output_type == 'list' and not is_many_to_many
+            and bool(schema['definitions'].get(f'{child_name}_detail', {}).get('x-generate'))
+        )
         child_props_dict = child_def.get('properties', {})
 
-        parent_id_props = _get_child_parent_id_props(child_name, model, parent_rels_raw)
+        parent_id_props = _get_child_parent_id_props(child_name, model, parent_rels_raw, schema)
 
         # Fields WITHOUT id (for create body)
         props_no_id = [
@@ -157,7 +177,17 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             ' }'
         ) if props_with_id else '{}'
 
-        field_map_create = '\n'.join(f'          {p}: f.{p},' for p in props_no_id)
+        def _is_nullable_cuid(defn: dict) -> bool:
+            t = defn.get('type')
+            return (isinstance(t, list) and 'null' in t
+                    and defn.get('pattern') == '^c[a-z0-9]{24,}$')
+
+        field_map_create = '\n'.join(
+            f'          {p}: f.{p} || null,'
+            if _is_nullable_cuid(child_props_dict.get(p, {}))
+            else f'          {p}: f.{p},'
+            for p in props_no_id
+        )
 
         child_var    = safe_var_name(prop_name)
         child_pascal = to_pascal_case(prop_name)
@@ -170,6 +200,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             'form_key':         form_key,
             'is_many_to_many':  is_many_to_many,
             'use_connect':      use_connect,
+            'is_independent':   is_independent,
             'output_type':      output_type,
             'props_no_id':      props_no_id,
             'props_with_id':    props_with_id,
@@ -278,6 +309,12 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
         for c in children_raw
         if (c.get('relationship') or {}).get('type') == 'many-to-many'
     ]
+    optional_fk_list_targets = [
+        c['name'] for c in children_raw
+        if (c.get('output_type') == 'list'
+            and (c.get('relationship') or {}).get('type') != 'many-to-many'
+            and is_optional_fk_to_parent(schema['definitions'].get(c['name'], {}), model))
+    ]
     many_to_one_targets = [r['target'] for r in parent_rels_raw]
 
     child_entity_rel_targets = []
@@ -288,12 +325,13 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
             continue
         child_def = schema['definitions'].get(child_raw['name'], {})
         if child_def.get('properties'):
+            parent_fk_props = get_parent_fk_props(child_def, model)
             child_entity_rel_targets.extend(
                 r['target'] for r in get_parent_relationships(child_def)
-                if r['target'] != model  # exclude back-reference to the parent entity
+                if r['prop_name'] not in parent_fk_props  # exclude only the actual parent FK column(s)
             )
 
-    return _dedupe_ordered([*m2m_targets, *many_to_one_targets, *child_entity_rel_targets])
+    return _dedupe_ordered([*m2m_targets, *optional_fk_list_targets, *many_to_one_targets, *child_entity_rel_targets])
 
 
 # ---------------------------------------------------------------------------
@@ -412,7 +450,7 @@ def build_context(entity: dict, schema: dict) -> dict:
 
     has_assignee_id   = 'assignee_id' in filtered_props
     item_context_select = (
-        f'{{ creator_id: true{", assignee_id: true" if has_assignee_id else ""} }}'
+        f'{{ id: true, creator_id: true{", assignee_id: true" if has_assignee_id else ""} }}'
     )
 
     # Parent prop infos (excluding id + timestamps)
@@ -441,24 +479,28 @@ def build_context(entity: dict, schema: dict) -> dict:
     children_data    = _build_child_data(children_raw, model, schema, parent_rels_raw)
     non_comment_ch   = [c for c in children_data if c.get('output_type') != 'comments']
     comment_children = [c for c in children_data if c.get('output_type') == 'comments']
+    # Embedded children: exclude independent list children (have own pages; shown read-only here).
+    # Non-independent mandatory-FK list children (no own page) are embedded with full CRUD.
+    # Many-to-many and optional-FK list children (use_connect=True) use connect/set.
+    embedded_ch      = [c for c in non_comment_ch if c['use_connect'] or c.get('output_type') != 'list' or not c['is_independent']]
 
-    child_form_data_extractions = _build_child_form_data_extractions(non_comment_ch)
+    child_form_data_extractions = _build_child_form_data_extractions(embedded_ch)
 
     child_params_for_add    = ', '.join(
         f"{c['child_var']}Ids: string[]" if c['use_connect'] else f"{c['child_var']}Items: {c['field_type']}[]"
-        for c in non_comment_ch
+        for c in embedded_ch
     )
     child_params_for_update = ', '.join(
         f"{c['child_var']}Ids: string[]" if c['use_connect'] else f"{c['child_var']}Items: {c['field_type_with_id']}[]"
-        for c in non_comment_ch
+        for c in embedded_ch
     )
     child_args_for_call = ', '.join(
         f"{c['child_var']}Ids" if c['use_connect'] else f"{c['child_var']}Items"
-        for c in non_comment_ch
+        for c in embedded_ch
     )
 
-    child_nested_create = _build_child_nested_create(non_comment_ch)
-    child_nested_update = _build_child_nested_update(non_comment_ch)
+    child_nested_create = _build_child_nested_create(embedded_ch)
+    child_nested_update = _build_child_nested_update(embedded_ch)
 
     # Self-parent relationship (for tree structures)
     self_parent_rel  = next((r for r in parent_rels_raw if r['target'] == model), None)
@@ -470,13 +512,13 @@ def build_context(entity: dict, schema: dict) -> dict:
     # Snapshot child mappings (for service)
     snapshot_child_mappings = '\n'.join(
         f"    {c['property_name']}: normalizeChildRefs(safeSnapshot.{c['property_name']}),"
-        for c in non_comment_ch
+        for c in embedded_ch
     )
     snapshot_include_props = (
         ',\n    include: {\n      ' +
-        ',\n      '.join(f"{c['property_name']}: {{ select: {{ id: true }} }}" for c in non_comment_ch) +
+        ',\n      '.join(f"{c['property_name']}: {{ select: {{ id: true }} }}" for c in embedded_ch) +
         '\n    }'
-        if non_comment_ch else ''
+        if embedded_ch else ''
     )
 
     # Selection targets (page_new, page_edit)
@@ -494,7 +536,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         if actual == 'string' and fmt in ('date', 'date-time', 'time'):
             return 'null'
         if actual in ('integer', 'number'):
-            return '0' if is_req else 'null'
+            return 'null'
         if actual == 'string':
             return "''"
         if actual == 'boolean':
@@ -530,7 +572,7 @@ def build_context(entity: dict, schema: dict) -> dict:
     )
     child_service_args = ', '.join(
         f"{c['child_var']}_ids ?? []" if c['use_connect'] else f"{c['property_name']} ?? []"
-        for c in non_comment_ch
+        for c in embedded_ch
     )
 
     # Getters: include entries
@@ -586,7 +628,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         *(p['prop'] if p['prop'] == p['var_name'] else f"{p['prop']}: {p['var_name']}"
           for p in parent_prop_infos),
         *(f"{c['child_var']}_ids" if c['use_connect'] else c['property_name']
-          for c in non_comment_ch),
+          for c in embedded_ch),
     ])
     service_args_for_create = f"userId, {parent_service_args}" + (
         f", {child_service_args}" if child_service_args else ""
@@ -631,7 +673,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         # Children
         children_raw=children_raw,
         children_data=children_data,
-        non_comment_ch=non_comment_ch,
+        non_comment_ch=embedded_ch,
         comment_children=comment_children,
         child_mappings=child_mappings,
         child_form_data_extractions=child_form_data_extractions,

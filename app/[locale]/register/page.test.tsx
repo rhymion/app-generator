@@ -45,6 +45,7 @@ describe("RegisterPage", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("should render the registration form", () => {
@@ -56,6 +57,28 @@ describe("RegisterPage", () => {
     expect(screen.getByTestId("password")).toBeInTheDocument();
     expect(screen.getByTestId("confirm-password")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /register/i })).toBeInTheDocument();
+  });
+
+  it("should fail to register with no name", async () => {
+    const user = userEvent.setup();
+    render(<RegisterPage />);
+
+    const emailInput = screen.getByRole('textbox', { name: /email/i });
+    const passwordInput = screen.getByTestId("password");
+    const confirmPasswordInput = screen.getByTestId("confirm-password");
+    const registerButton = screen.getByRole("button", { name: /register/i });
+
+    await user.type(emailInput, "john@example.com");
+    await user.type(passwordInput, "password123");
+    await user.type(confirmPasswordInput, "password123");
+
+    // The email field is required in HTML, so try to submit
+    // HTML5 validation should prevent submission
+    await user.click(registerButton);
+
+    // Browser validation prevents form submission with required fields empty
+    // The form should not have called signIn
+    expect(signIn).not.toHaveBeenCalled();
   });
 
   it("should fail to register with no email address", async () => {
@@ -98,8 +121,38 @@ describe("RegisterPage", () => {
     expect(signIn).not.toHaveBeenCalled();
   });
 
+  it("should fail to register when confirm password does not match", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true }),
+    }));
+    render(<RegisterPage />);
+
+    const nameInput = screen.getByRole('textbox', { name: /full name/i });
+    const emailInput = screen.getByRole('textbox', { name: /email/i });
+    const passwordInput = screen.getByTestId("password");
+    const confirmPasswordInput = screen.getByTestId("confirm-password");
+    const registerButton = screen.getByRole("button", { name: /register/i });
+
+    await user.type(nameInput, "John Doe");
+    await user.type(emailInput, "john@example.com");
+    await user.type(passwordInput, "password123");
+    await user.type(confirmPasswordInput, "password120");
+
+    // The password field is required in HTML, so try to submit
+    await user.click(registerButton);
+
+    // HTML5 validation should prevent submission
+    expect(signIn).not.toHaveBeenCalled();
+  });
+
   it("should succeed to register with user name, email address and password", async () => {
     const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true }),
+    }));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (signIn as any).mockResolvedValueOnce({ error: null });
 
@@ -119,10 +172,8 @@ describe("RegisterPage", () => {
 
     await waitFor(() => {
       expect(signIn).toHaveBeenCalledWith("credentials", {
-        name: "John Doe",
         email: "john@example.com",
         password: "password123",
-        confirm_password: "password123",
         redirect: false,
       });
     });
@@ -135,10 +186,10 @@ describe("RegisterPage", () => {
 
   it("should fail to register with email address same as existing account", async () => {
     const user = userEvent.setup();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (signIn as any).mockResolvedValueOnce({
-      error: "Failed to sign in after registration",
-    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({ error: "Email address is already in use" }),
+    }));
 
     render(<RegisterPage />);
 
@@ -154,15 +205,8 @@ describe("RegisterPage", () => {
     await user.type(confirmPasswordInput, "password456");
     await user.click(registerButton);
 
-    await waitFor(() => {
-      expect(signIn).toHaveBeenCalledWith("credentials", {
-        name: "Jane Doe",
-        email: "existing@example.com",
-        password: "password456",
-        confirm_password: "password456",
-        redirect: false,
-      });
-    });
+    // Registration fails at the API level — signIn should not be called
+    expect(signIn).not.toHaveBeenCalled();
 
     // Should show error message
     await waitFor(() => {

@@ -22,6 +22,12 @@ export function getGeneratedTasks() {
       return await populate{{ entity.pascal }}{{ child.pascal }}Data(params.parentId, params.length || 1);
     },
 {% endfor %}
+{% for child in entity.comment_children %}
+    async 'db:populate{{ entity.pascal }}{{ child.pascal }}'(params: { parentId: string; length?: number }) {
+      const { populate{{ entity.pascal }}{{ child.pascal }}Data } = require('{{ entity.helper_path }}');
+      return await populate{{ entity.pascal }}{{ child.pascal }}Data(params.parentId, params.length || 1);
+    },
+{% endfor %}
 {% endfor %}
 {% if has_user_account_populate %}
     async 'db:populateUserAccount'(length: number) {

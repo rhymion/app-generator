@@ -39,6 +39,9 @@ import AuditInfo from '@/components/_standard/AuditInfo';
 {% if custom_view_imports %}
 {{ custom_view_imports }}
 {% endif %}
+{% if use_dayjs %}
+import dayjs from 'dayjs';
+{% endif %}
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const tf = useTranslations('Fields');

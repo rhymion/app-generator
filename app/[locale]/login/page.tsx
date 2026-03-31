@@ -58,6 +58,11 @@ export default function LoginPage() {
             name="password"
             type="password"
             label={t("passwordPlaceholder")}
+            slotProps={{
+              htmlInput: {
+                "data-testid": "password",
+              },
+            }}
             required
             fullWidth
           />

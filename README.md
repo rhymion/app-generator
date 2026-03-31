@@ -1,3 +1,31 @@
+# Notes on demo
+
+```
+npm run demo:generate
+npm run demo:start
+npm run db:seed:test
+npm run db:studio:test
+```
+
+シンプルな課題追跡システム用のJSONスキーマとPrismaスキーマを作成していただけますか？ITSには、Epic、Feature、User Story、Task、Bugというチケットタイプがあり、それぞれに対応するモデル/エンティティが必要で、またコメント欄も必要です。`user_account`、`role`、`permission`、`organization`は、コードジェネレーターで作成されるすべてのアプリケーションで共通となるモデル/エンティティなので、 @code_generator/json_schema_db_table.yaml と同じものにしてください。また、ユーザーが自身のアカウントを管理するために使用する`setting`エンティティも維持してください。
+
+これはデモ目的なので、厳密な要件はありません。既存のツールを参考にしても構いません。
+
+JSONスキーマの仕様については、@docs/knowledge/schema-yaml-configuration.md を参照してください。JSONスキーマは @code_generator/json_schema.yaml 、Prismaスキーマは @schema.prismaを書き換えてください。これら2つのスキーマは同期している必要があります。
+
+http://localhost:3000/ にサンプルデータをいくつか入力していただけますか？ APIドキュメントは http://localhost:3000/en/docs で入手できます。API キーとして mk_78d1e51a47f40912f5a1787367e3f7f6ed17c314590eac84edc5b3f785a527b1 を使用できます。
+
+
+Could you create JSON schema and Prisma schema for a simple issue tracking system? The ITS should have ticket types Epic, Feature, User Story, Task and Bug, each corresponding to model / entity. `user_account`, `role`, `permission` and `organization` are the models / entities that must be common for all the apps created by the code generator so please keep them the same as @json... Please also keep `setting` entity, which is used by the user to manage his/her own account.
+The purpose is for demo so we don't have strict requirements. We can follow existing tools.
+Please refer @schema-yaml-configuration for the spec of the JSON schema. You can rewrite @schema.prisma as I have taken backup. Those two schemas must be in sync with each other.
+
+
+Could you populate a few sample data in http://localhost:3000/ 
+? 
+The API documents are available under http://localhost:3000/en/docs You can use mk_78d1e51a47f40912f5a1787367e3f7f6ed17c314590eac84edc5b3f785a527b1 as API key.
+
+
 # About my-next
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 

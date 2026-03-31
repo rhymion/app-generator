@@ -1,8 +1,8 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-{% if comment_actions_code %}import { revalidatePath } from 'next/cache';
-{% endif %}import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';
+{% if comment_actions_code or (can_list and can_delete) %}import { revalidatePath } from 'next/cache';
+{% endif %}import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 {% if service_imports %}
 import { {{ service_imports }} } from './service';
@@ -15,13 +15,25 @@ export async function upsert{{ parent_pascal }}(data: FormData) {
 }
 {% endif %}
 {% if can_delete %}
-export async function remove{{ parent_pascal }}(data: FormData | string[]) {
-  const ids = Array.isArray(data) ? data : [data.get('id') as string];
-  const items = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true{% if has_assignee_id %}, assignee_id: true{% endif %} } });
-  for (const item of items) {
-    await requirePermission('{{ parent }}', 'delete', item);
+export async function remove{{ parent_pascal }}(ids: string[]) {
+  const [{ permissions: userPermissions, userId }, {{ parent_camel }}s] = await Promise.all([
+    getModelPermissions('{{ parent }}'),
+    await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
+  ]);
+  const filtered{{ parent_pascal }}s = userPermissions.general.delete
+    ? {{ parent_camel }}s
+    : {{ parent_camel }}s.filter(item =>
+        (userPermissions.creator?.delete && item.creator_id === userId) ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
+      );
+  if (filtered{{ parent_pascal }}s.length === 0) {
+    throw new Error('No permission to delete');
   }
-  await delete{{ parent_pascal }}(ids);
+  await delete{{ parent_pascal }}(filtered{{ parent_pascal }}s.map(item => item.id));
+{% if can_list %}
+  revalidatePath('/[locale]/{{ parent }}', 'page');
+{% endif %}
   redirect('/{{ parent }}');
 }
 {% endif %}

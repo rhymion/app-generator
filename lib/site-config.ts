@@ -20,22 +20,6 @@ export const siteConfig = {
   /** Links listed in the sidebar navigation */
   navLinks: [
     { label: "Home", href: "/", external: false },
-    { label: "DB Tables", href: "/db_table" },
-    { label: "Xxxxx Xxxxx", href: "/xxxxx_xxxxx" },
-    { label: "Parent Only", href: "/parent_only" },
-    { label: "Parent1", href: "/parent1" },
-    { label: "User Account", href: "/user_account" },
-    { label: "Role", href: "/role" },
-    { label: "Organization", href: "/organization" },
-    { label: "Permission", href: "/permission" },
-    { label: "Resource", href: "/resource" },
-    { label: "Booking", href: "/booking" },
-    { label: "Shift Template", href: "/shift_template" },
-    { label: "Shift", href: "/shift" },
-    { label: "Procedure", href: "/procedure" },
-    { label: "Product", href: "/product" },
-    { label: "Inventory", href: "/inventory" },
-    { label: "Purchase Order", href: "/purchase_order" },
   ] satisfies NavLink[],
 };
 

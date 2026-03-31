@@ -25,13 +25,30 @@ export default function RegisterPage() {
         setError(t("passwordMismatch"));
         return;
       }
+      const registerRes = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.get("name"),
+          email: formData.get("email"),
+          password: formData.get("password"),
+        }),
+      });
+
+      if (!registerRes.ok) {
+        const data = await registerRes.json();
+        setError(data.error ?? t("registrationFailed"));
+        return;
+      }
+
       const signInResult = await signIn("credentials", {
-        ...Object.fromEntries(formData),
+        email: formData.get("email"),
+        password: formData.get("password"),
         redirect: false,
       });
 
       if (signInResult?.error) {
-        setError(t("emailInUse"));
+        setError(t("registrationFailed"));
         return;
       }
 
