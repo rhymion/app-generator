@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "Verify that all unit tests pass for the code generator python code. Run the code generator, and component test suite. Then run build and start the app and run e2e tests for API. Check the results. Only return ok:true if all of them pass.",
+            "timeout": 120
+          },
+          {
+            "type": "prompt",
+            "prompt": "Check if all requested tasks are complete and the code change matches the original requirement. If not, respond with {\"ok\": false, \"reason\": \"what remains to be done\"}."
+          }
+        ]
+      }
+    ]
+  }
+}
