@@ -1377,3 +1377,229 @@ definitions:
             type: array
             items:
               $ref: "#/definitions/purchase_per_item"
+
+  leave_request:
+    type: object
+    required:
+      - id
+      - user_account_id
+      - start_date
+      - end_date
+      - reason
+      - approvable_id
+    x-display:
+      table:
+        - user_account:
+            primary: true
+            width: 200
+        - start_date:
+            width: 150
+        - end_date:
+            width: 150
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      user_account_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: user_account
+          labelField: name
+      start_date:
+        type: string
+        format: date
+      end_date:
+        type: string
+        format: date
+      reason:
+        type: string
+        minLength: 1
+      approvable_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: one-to-one
+          target: approvable
+          labelField: id
+
+  leave_request_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-custom-component:
+      name: ApprovalSection
+      target:
+        - view
+        - edit
+    allOf:
+      - $ref: "#/definitions/leave_request"
+      - type: object
+        required:
+          - user_account
+        properties:
+          user_account:
+            $ref: "#/definitions/user_account"
+          approvable:
+            $ref: "#/definitions/approvable"
+
+  approval_flow:
+    type: object
+    required:
+      - id
+      - entity_name
+      - approver_role_id
+    x-display:
+      table:
+        - entity_name:
+            primary: true
+            width: 200
+        - requestor_role:
+            width: 150
+        - approver_role:
+            width: 150
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      entity_name:
+        type: string
+        minLength: 1
+      requestor_role_id:
+        type: 
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: role
+          labelField: name
+      approver_role_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: role
+          labelField: name
+
+  approval_flow_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-relationships:
+      preceded_by:
+        type: many-to-many
+        target: approval_flow
+        labelField: entity_name
+        secondaryLabelField: approver_role.name
+      followed_by:
+        type: many-to-many
+        target: approval_flow
+        labelField: entity_name
+        secondaryLabelField: approver_role.name
+    allOf:
+      - $ref: "#/definitions/approval_flow"
+      - type: object
+        required:
+          - approver_role
+          - preceding_transitions
+        properties:
+          requestor_role:
+            $ref: "#/definitions/role"
+          approver_role:
+            $ref: "#/definitions/role"
+          preceded_by:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/approval_flow"
+          followed_by:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/approval_flow"
+
+  approval_request:
+    type: object
+    required:
+      - id
+      - approvable_id
+      - approval_flow_id
+    x-display:
+      table:
+        - approval_flow:
+            width: 200
+        - status:
+            width: 100
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      approvable_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: approvable
+          labelField: id
+      approval_flow_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: approval_flow
+          labelField: entity_name
+      status:
+        type: integer
+        minimum: 0
+        maximum: 2
+        enum:
+          - Pending
+          - Approved
+          - Rejected
+
+  approvable:
+    type: object
+    required:
+      - id
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+
+  approvable_detail:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    allOf:
+      - $ref: "#/definitions/approvable"
+      - type: object
+        required:
+          - approval_requests
+        properties:
+          approval_requests:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/approval_request"
+          leave_request:
+            $ref: "#/definitions/leave_request"

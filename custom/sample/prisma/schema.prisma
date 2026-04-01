@@ -209,6 +209,11 @@ model user_account {
   created_purchase_orders  purchase_order[] @relation("PurchaseOrderCreator")
   updated_purchase_orders  purchase_order[] @relation("PurchaseOrderUpdater")
   created_db_table_comments  db_table_comment[] @relation("DbTableCommentCreator")
+  leave_requests  leave_request[] @relation("LeaveRequestUser")
+  created_leave_requests  leave_request[] @relation("LeaveRequestCreator")
+  updated_leave_requests  leave_request[] @relation("LeaveRequestUpdater")
+  created_approval_flows  approval_flow[] @relation("ApprovalFlowCreator")
+  updated_approval_flows  approval_flow[] @relation("ApprovalFlowUpdater")
   @@index([api_key])
 }
 
@@ -224,6 +229,8 @@ model role {
   updater    user_account @relation("RoleUpdater", fields: [updater_id], references: [id])
   user_accounts user_account[] @relation("UserRoles")
   permissions permission[]
+  requestor_approval_flows approval_flow[] @relation("ApprovalFlowRequestorRole")
+  approver_approval_flows  approval_flow[] @relation("ApprovalFlowApproverRole")
 }
 
 model organization {
@@ -429,4 +436,56 @@ model purchase_per_item {
   price       Int?
   created_at  DateTime @default(now()) @db.Timestamptz(0)
   updated_at  DateTime @updatedAt @db.Timestamptz(0)
+}
+
+model leave_request {
+  id              String   @id @default(cuid())
+  user_account_id String
+  user_account    user_account @relation("LeaveRequestUser", fields: [user_account_id], references: [id])
+  start_date      DateTime @db.Timestamptz(0)
+  end_date        DateTime @db.Timestamptz(0)
+  reason          String
+  approvable_id   String   @unique
+  approvable      approvable @relation(fields: [approvable_id], references: [id])
+  created_at      DateTime @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user_account @relation("LeaveRequestCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user_account @relation("LeaveRequestUpdater", fields: [updater_id], references: [id])
+}
+
+model approvable {
+  id               String   @id @default(cuid())
+  approval_requests approval_request[]
+  leave_request    leave_request?
+}
+
+model approval_flow {
+  id               String   @id @default(cuid())
+  entity_name      String
+  requestor_role_id String?
+  requestor_role   role?    @relation("ApprovalFlowRequestorRole", fields: [requestor_role_id], references: [id])
+  approver_role_id String
+  approver_role    role     @relation("ApprovalFlowApproverRole", fields: [approver_role_id], references: [id])
+  approval_requests approval_request[]
+  preceded_by      approval_flow[] @relation("ApprovalFlowOrder")
+  followed_by      approval_flow[] @relation("ApprovalFlowOrder")
+  created_at       DateTime @default(now()) @db.Timestamptz(0)
+  updated_at       DateTime @updatedAt @db.Timestamptz(0)
+  creator_id       String
+  creator          user_account @relation("ApprovalFlowCreator", fields: [creator_id], references: [id])
+  updater_id       String
+  updater          user_account @relation("ApprovalFlowUpdater", fields: [updater_id], references: [id])
+}
+
+model approval_request {
+  id               String   @id @default(cuid())
+  approvable_id    String
+  approvable       approvable @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
+  approval_flow_id String
+  approval_flow    approval_flow @relation(fields: [approval_flow_id], references: [id])
+  status           Int      @default(0)
+  created_at       DateTime @default(now()) @db.Timestamptz(0)
+  updated_at       DateTime @updatedAt @db.Timestamptz(0)
 }

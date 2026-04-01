@@ -83,6 +83,52 @@ def get_parent_fk_props(child_def: dict, parent_model: str) -> set[str]:
     return found or {convention}
 
 
+def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
+    """Returns one-to-one outbound FK relationship metadata (FK is on this model).
+    Each entry: {prop_name, relation_name, target, children}
+    'children' = array children of the target's _detail (for nested includes and display)."""
+    props = parent_def.get('properties', {})
+    result = []
+    for prop_name, prop in props.items():
+        rel = prop.get('x-relationship')
+        if not rel or rel.get('type') != 'one-to-one' or not rel.get('target'):
+            continue
+        target = rel['target']
+        relation_name = prop_name[:-3] if prop_name.endswith('_id') else prop_name
+
+        # Collect array children from the target's _detail definition
+        target_detail = schema['definitions'].get(f'{target}_detail', {})
+        target_detail_props = {}
+        if 'properties' in target_detail:
+            target_detail_props = target_detail['properties']
+        else:
+            for item in target_detail.get('allOf', []):
+                if 'properties' in item:
+                    target_detail_props = item['properties']
+                    break
+
+        children = []
+        for cp_name, cp in target_detail_props.items():
+            if cp.get('type') == 'array' and (cp.get('items') or {}).get('$ref'):
+                child_name = cp['items']['$ref'].split('/')[-1]
+                child_def = schema['definitions'].get(child_name, {})
+                child_rels = get_parent_relationships(child_def)
+                children.append({
+                    'property_name': cp_name,
+                    'child_name': child_name,
+                    'child_rels': child_rels,
+                    'child_def': child_def,
+                })
+
+        result.append({
+            'prop_name': prop_name,
+            'relation_name': relation_name,
+            'target': target,
+            'children': children,
+        })
+    return result
+
+
 def get_parent_relationships(parent_def: dict) -> list[dict]:
     """Returns many-to-one relationship metadata from a schema definition.
     Each entry: {prop_name, target, label_field, required}"""

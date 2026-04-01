@@ -10,6 +10,21 @@ export type {{ parent | pascal_case }} = {
 {% for rel in parent_rels %}
   {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
 {% endfor %}
+{% for oto in one_to_one_rels %}
+  {{ oto.relation_name }}?: {
+    id: string;
+{% for child in oto.children %}
+    {{ child.property_name }}: {
+{% for field in child.fields %}
+      {{ field.name }}: {{ field.ts_type }};
+{% endfor %}
+{% for rel in child.relationships %}
+      {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+{% endfor %}
+    }[];
+{% endfor %}
+  } | null;
+{% endfor %}
 };
 
 {% for rel in option_types %}
@@ -64,6 +79,21 @@ export type FormViewProps = Readonly<{
 {% endfor %}
 {% for child in children %}
     {{ child.property_name }}: {{ child.name | pascal_case }}[];
+{% endfor %}
+{% for oto in one_to_one_rels %}
+    {{ oto.relation_name }}?: {
+      id: string;
+{% for child in oto.children %}
+      {{ child.property_name }}: {
+{% for field in child.fields %}
+        {{ field.name }}: {{ field.ts_type }};
+{% endfor %}
+{% for rel in child.relationships %}
+        {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+{% endfor %}
+      }[];
+{% endfor %}
+    } | null;
 {% endfor %}
     created_at?: string | Date;
     updated_at?: string | Date;

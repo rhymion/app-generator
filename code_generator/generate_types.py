@@ -66,6 +66,7 @@ def _extract_children(defn: dict, schema: dict) -> list[dict]:
                     'type': rel_info['type'],
                     'target': rel_info.get('target', child_name),
                     'label_field': rel_info.get('labelField', 'name'),
+                    'secondary_label_field': rel_info.get('secondaryLabelField'),
                 }
             children.append({
                 'name': child_name,
@@ -134,6 +135,11 @@ def extract_entities(schema: dict) -> list[dict]:
             'test':   x_generate.get('test') is True,
             'fields': x_generate.get('fields'),
         }
+
+        # Skip entities where all user-facing flags are explicitly False (internal models)
+        core_flags = ['list', 'view', 'new', 'edit', 'delete', 'api']
+        if all(x_generate.get(f) is False for f in core_flags):
+            continue
 
         results.append({
             'parent': entity_name,

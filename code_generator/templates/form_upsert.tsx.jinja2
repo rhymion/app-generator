@@ -21,6 +21,9 @@ import CommentListWrapper from '@/components/_standard/CommentListWrapper';
 {% if child_imports %}
 {{ child_imports }}
 {% endif %}
+{% if entity_edit_component %}
+import {{ entity_edit_component }} from './{{ entity_edit_component }}';
+{% endif %}
 {% if has_datetime_props %}
 import dayjs, { Dayjs } from 'dayjs';
 import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
@@ -158,6 +161,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
       />
 {% if comment_children_jsx %}
 {{ comment_children_jsx }}
+{% endif %}
+{% if entity_edit_component %}
+      <{{ entity_edit_component }} src={src} permissions={permissions} />
 {% endif %}
     </>
   );

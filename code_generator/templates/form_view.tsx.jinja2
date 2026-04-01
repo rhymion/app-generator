@@ -39,6 +39,9 @@ import AuditInfo from '@/components/_standard/AuditInfo';
 {% if custom_view_imports %}
 {{ custom_view_imports }}
 {% endif %}
+{% if entity_view_component %}
+import {{ entity_view_component }} from './{{ entity_view_component }}';
+{% endif %}
 {% if use_dayjs %}
 import dayjs from 'dayjs';
 {% endif %}
@@ -84,6 +87,9 @@ export default function FormView({ src, permissions }: FormViewProps) {
 {{ child_view_grids }}
 {% endif %}
       <AuditInfo src={src} />
+{% if entity_view_component %}
+      <{{ entity_view_component }} src={src} permissions={permissions} />
+{% endif %}
     </div>
   );
 }

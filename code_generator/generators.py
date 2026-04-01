@@ -342,7 +342,8 @@ def service_context(ctx: dict) -> dict:
         f"import prisma from '@/lib/prisma';\n"
         f"import {{ normalizeValue,{' normalizeChildRefs,' if has_non_comment_ch else ''}"
         f"{' assertNotStale,' if can_update else ''} type NormalizedSnapshot }} from '@/lib/normalize';"
-        + (f"\nimport {{ validateOnAdd, validateOnUpdate }} from './service_validation';" if (can_create or can_update) else '') +
+        + (f"\nimport {{ validateOnAdd, validateOnUpdate }} from './service_validation';" if (can_create or can_update) else '')
+        + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '') +
         f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'>;\n\n"
         f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
         f"  const safeSnapshot = (snapshot ?? {{}}) as Record<string, unknown>;\n"
@@ -511,7 +512,8 @@ def form_view_context(ctx: dict) -> dict:
     use_dayjs     = False
 
     rel_by_prop = {r['prop_name']: r for r in ctx['parent_rels_raw']}
-    EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'}
+    one_to_one_fk_props = {r['prop_name'] for r in ctx.get('one_to_one_rels', [])}
+    EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'} | one_to_one_fk_props
     parent_props = [k for k in filtered_props if k not in EXCLUDE]
 
     custom_view_props = [
@@ -683,13 +685,23 @@ def form_view_context(ctx: dict) -> dict:
                     f"      </div>"
                 )
             else:
+                _rel = child.get('relationship') or {}
+                _lf = _rel.get('label_field', 'name') if _rel else 'name'
+                _slf = _rel.get('secondary_label_field') if _rel else None
+                if _slf:
+                    _sec_parts = _slf.split('.')
+                    _sec_rel = _sec_parts[0]
+                    _sec_field = _sec_parts[1] if len(_sec_parts) > 1 else 'name'
+                    _view_val = f"f.{_sec_rel}?.{_sec_field} || f.{_lf}"
+                else:
+                    _view_val = f"f.{_lf}"
                 child_view_grids.append(
                     f"      <div>\n"
                     f"        <ListWrapper\n"
                     f"          items={{src.{prop}.map(f => ({{\n"
                     f"            id: f.id,\n"
-                    f"            value: f.name,\n"
-                    f"            label: f.name,\n"
+                    f"            value: {_view_val},\n"
+                    f"            label: {_view_val},\n"
                     f"          }}))}}\n"
                     f"          itemType=\"text\"\n"
                     f"          showTitle={{true}}\n"
@@ -1114,16 +1126,25 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             _rel = c.get('relationship') or {}
             if _rel.get('type') == 'many-to-many':
                 _uc_label = _rel.get('label_field', 'name')
+                _uc_secondary = _rel.get('secondary_label_field')
             elif child_name == model:
                 _sr = next((r for r in ctx.get('parent_rels_raw', []) if r['target'] == model), None)
                 _uc_label = _sr.get('label_field', 'name') if _sr else 'name'
+                _uc_secondary = None
             else:
                 _uc_label = 'name'
+                _uc_secondary = None
+            if _uc_secondary:
+                _sec_parts = _uc_secondary.split('.')
+                _sec_rel, _sec_field = _sec_parts[0], _sec_parts[1] if len(_sec_parts) > 1 else 'name'
+                _label_expr = f"f.{_uc_label} + (f.{_sec_rel} ? ` - ${{f.{_sec_rel}.{_sec_field}}}` : '')"
+            else:
+                _label_expr = f"f.{_uc_label}"
             child_grid_setup_parts.append(
                 f"  const [initial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                 f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
                 f"    value: f.id,\n"
-                f"    label: f.{_uc_label},\n"
+                f"    label: {_label_expr},\n"
                 f"    originalId: f.id,\n"
                 f"  }})));"
             )
@@ -1382,9 +1403,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 # for optional-FK lists, look for a labelField in the child's x-relationship back to this entity,
                 # otherwise fall back to 'name'
                 ac_label_field = 'name'
+            ac_secondary = rel.get('secondary_label_field') if is_m2m else None
             target_pascal = to_pascal_case(autocomplete_target)
             self_rel = next((r for r in parent_rels_raw if r['target'] == model), None) if is_self else None
             filter_logic = f'.filter(item => !item.{self_rel["prop_name"]} || item.{self_rel["prop_name"]} === src.id)' if self_rel else ''
+            if ac_secondary:
+                _sec_parts = ac_secondary.split('.')
+                _sec_rel, _sec_field = _sec_parts[0], _sec_parts[1] if len(_sec_parts) > 1 else 'name'
+                ac_label_expr = f"item.{ac_label_field} + (item.{_sec_rel} ? ` - ${{item.{_sec_rel}.{_sec_field}}}` : '')"
+            else:
+                ac_label_expr = f"item.{ac_label_field}"
             child_grid_components_parts.append(
                 f"      <EditableListWrapper\n"
                 f"        ref={{{child_var}Ref}}\n"
@@ -1397,7 +1425,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"        textFieldPlaceholder=\"Enter name\"\n"
                 f"        allAutocompleteOptions={{all{target_pascal}s{filter_logic}.map(item => ({{\n"
                 f"          id: item.id,\n"
-                f"          label: item.{ac_label_field},\n"
+                f"          label: {ac_label_expr},\n"
                 f"          value: item.id,\n"
                 f"        }}))}}\n"
                 f"        excludeOptionIds={{[src.id]}}\n"
