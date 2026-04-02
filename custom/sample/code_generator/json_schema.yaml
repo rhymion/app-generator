@@ -1436,6 +1436,7 @@ definitions:
       test: true
     x-custom-component:
       name: ApprovalSection
+      path: "@/components/_standard/ApprovalSection"
       target:
         - view
         - edit
