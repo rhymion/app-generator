@@ -195,6 +195,32 @@ def get_entity_fk_deps(model_name: str, schema: dict, deps: list[dict]) -> list[
     ]
 
 
+def get_internal_one_to_one_fks(model_name: str, schema: dict) -> list[dict]:
+    """Returns outbound one-to-one FK fields on model_name.
+
+    These are properties with x-relationship.type == 'one-to-one' where the FK
+    is owned by this model (prop_name ends in _id). The target is an internal
+    bridge model (e.g. approvable) that the service creates automatically.
+    Test helpers must create these records directly rather than treating them
+    as user-facing fields.
+    """
+    model_def = schema['definitions'].get(model_name, {})
+    props = model_def.get('properties', {})
+    result = []
+    for prop_name, prop in props.items():
+        rel = prop.get('x-relationship')
+        if not rel or rel.get('type') != 'one-to-one':
+            continue
+        target = rel.get('target')
+        if not target or target == model_name:
+            continue
+        if not prop_name.endswith('_id'):
+            continue
+        var_name = to_camel_case(re.sub(r'_id$', '', prop_name))
+        result.append({'prop_name': prop_name, 'target': target, 'var_name': var_name})
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Field analysis
 # ---------------------------------------------------------------------------
@@ -671,8 +697,37 @@ def test_helper_context(
     required_fields = parent_def.get('required') or []
     relationships = get_parent_relationships(parent_def)
     fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'))
+    # Detect outbound one-to-one FK fields (e.g. approvable_id on leave_request).
+    # These are internal bridge records the service creates automatically — not user-facing.
+    # Exclude from fill/assert commands and from prisma data field lists; handle separately.
+    internal_fk_deps = get_internal_one_to_one_fks(model_name, schema)
+    internal_fk_prop_names = {d['prop_name'] for d in internal_fk_deps}
+    fields = [f for f in fields if f['prop_name'] not in internal_fk_prop_names]
     deps = resolve_dependencies(model_name, schema)
     entity_fk_deps = get_entity_fk_deps(model_name, schema, deps)
+
+    # Split same-target deps into prop-stem deps when multiple FK fields point to the same target.
+    # Mirrors user_account handling: each FK field gets its own dep with a prop-stem var name.
+    # e.g. approver_role_id + requestor_role_id → both point to 'role'
+    # → creates 'approverRole' dep and 'requestorRole' dep instead of a single 'role' dep.
+    target_to_fk_rels: dict[str, list] = {}
+    for r in relationships:
+        if (r['target'] not in ('user_account', model_name)
+                and r['prop_name'] not in ('updater_id', 'assignee_id')):
+            target_to_fk_rels.setdefault(r['target'], []).append(r)
+    multi_fk_targets = {t: rels for t, rels in target_to_fk_rels.items() if len(rels) > 1}
+    for target, fk_rels in multi_fk_targets.items():
+        # Remove the single target-based dep and its entity_fk_deps entries
+        deps = [d for d in deps if d['target'] != target]
+        entity_fk_deps = [d for d in entity_fk_deps if d['dep_var_name'] != to_camel_case(target)]
+        # Add per-prop-stem deps and entity_fk_deps entries
+        for r in fk_rels:
+            prop_stem = re.sub(r'_id$', '', r['prop_name'])
+            var_name = to_camel_case(prop_stem)
+            title = to_title_case(prop_stem)
+            if not any(d['var_name'] == var_name for d in deps):
+                deps.append({'target': target, 'var_name': var_name, 'title': title, 'fk_deps': []})
+            entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
 
     required_field_metas = [f for f in fields if f['required']]
     optional_field_metas = [f for f in fields if not f['required']]
@@ -742,7 +797,25 @@ def test_helper_context(
         var_name = to_camel_case(prop_name)
         title_str = to_title_case(prop_name)
         if not any(d['var_name'] == var_name for d in deps):
-            deps.append({'target': rel_target, 'var_name': var_name, 'title': title_str, 'fk_deps': []})
+            # Compute fk_deps: required FK fields on this model that reference already-known non-self deps.
+            # These are needed to create a valid self-ref record (e.g. approval_flow needs approver_role_id).
+            # Use entity_fk_deps for the correct prop→var mapping (handles multi-FK-same-target splits).
+            fk_prop_to_dep_var = {fk['prop_name']: fk['dep_var_name'] for fk in entity_fk_deps}
+            self_ref_fk_deps = [
+                {'prop_name': r['prop_name'], 'dep_var_name': fk_prop_to_dep_var[r['prop_name']]}
+                for r in relationships
+                if r.get('required') and r['target'] != model_name and r['target'] != 'user_account'
+                and r['prop_name'] in fk_prop_to_dep_var
+            ]
+            # label_field key is snake_case in the extracted entity relationship dict
+            label_field = rel.get('label_field', 'name')
+            deps.append({
+                'target': rel_target,
+                'var_name': var_name,
+                'title': title_str,
+                'fk_deps': self_ref_fk_deps,
+                'label_field': label_field,
+            })
 
     # Enrich deps with extra_required_fields, has_user_accounts, needs_second.
     # All dep types (regular, user_account, self-ref, m2m) are handled uniformly.
@@ -763,13 +836,34 @@ def test_helper_context(
             'needs_second': not is_direct and dep['target'] == primary_fk_dep_target,
         })
 
-    # Compute deps_return including second instances for FK primary deps
+    # Separate self-ref deps (target == model) from non-self deps for _createBaseDeps() split.
+    non_self_deps = [d for d in enriched_deps if d['target'] != model_name]
+    self_ref_deps = [d for d in enriched_deps if d['target'] == model_name]
+    has_self_ref_deps = bool(self_ref_deps)
+
+    # Compute deps_return including second instances for FK primary deps.
+    # For non_self_deps_return (used in _createBaseDeps return), also include target-name aliases
+    # for any multi-FK-target split (e.g. role: approverRole) so API tests using deps.role.id still work.
     deps_return_parts = []
+    non_self_deps_return_parts = []
     for dep in enriched_deps:
         deps_return_parts.append(dep['var_name'])
         if dep.get('needs_second'):
             deps_return_parts.append(f"{dep['var_name']}2")
+    for dep in non_self_deps:
+        non_self_deps_return_parts.append(dep['var_name'])
+        if dep.get('needs_second'):
+            non_self_deps_return_parts.append(f"{dep['var_name']}2")
+    # Add target-name aliases for multi-FK-target splits
+    for target, fk_rels in multi_fk_targets.items():
+        alias_key = to_camel_case(target)
+        # Use the first required rel's prop-stem as the alias value, or first rel if none required
+        req_rel = next((r for r in fk_rels if r.get('required')), fk_rels[0])
+        alias_var = to_camel_case(re.sub(r'_id$', '', req_rel['prop_name']))
+        if alias_key != alias_var and alias_key not in non_self_deps_return_parts:
+            non_self_deps_return_parts.append(f'{alias_key}: {alias_var}')
     deps_return = ', '.join(deps_return_parts)
+    non_self_deps_return = ', '.join(non_self_deps_return_parts)
 
     def _enrich_field_prisma(field: dict, entity_title: str) -> dict:
         f = dict(field)
@@ -856,6 +950,10 @@ def test_helper_context(
         'model_name': model_name,
         'deps': enriched_deps,
         'deps_return': deps_return,
+        'non_self_deps': non_self_deps,
+        'self_ref_deps': self_ref_deps,
+        'has_self_ref_deps': has_self_ref_deps,
+        'non_self_deps_return': non_self_deps_return,
         'has_parent_deps': bool(entity_fk_deps) or bool(ua_dep_fields),
         'needs_deps_in_populate': needs_deps_in_populate,
         'needs_deps_in_populate_full': needs_deps_in_populate_full,
@@ -867,6 +965,7 @@ def test_helper_context(
         'datagrid_children': enriched_datagrid_children,
         'comment_children': enriched_comment_children,
         'primary_fk_dep': primary_fk_dep,
+        'internal_fk_deps': internal_fk_deps,
     }
 
 
@@ -888,6 +987,9 @@ def test_spec_context(
     required_fields = parent_def.get('required') or []
     relationships = get_parent_relationships(parent_def)
     fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'))
+    # Exclude outbound one-to-one FK fields (internal bridge records, not user-facing).
+    _internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model_name, schema)}
+    fields = [f for f in fields if f['prop_name'] not in _internal_fk_prop_names]
     deps = resolve_dependencies(model_name, schema)
 
     # Collect ALL user_account FK fields (required and optional) for fill/assert commands.
@@ -1298,6 +1400,9 @@ def test_api_spec_context(
 
     required_fields_list = model_def.get('required') or []
     all_field_metas = get_field_metas(filtered_props, required_fields_list, relationships, gen_cfg.get('fields'))
+    # Exclude outbound one-to-one FK fields (internal bridge records — service creates them automatically).
+    _api_internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model, schema)}
+    all_field_metas = [f for f in all_field_metas if f['prop_name'] not in _api_internal_fk_prop_names]
 
     deps = resolve_dependencies(model, schema)
     entity_fk_deps = get_entity_fk_deps(model, schema, deps)
@@ -1308,6 +1413,7 @@ def test_api_spec_context(
     put_body_props = [
         k for k in filtered_props
         if k not in ('id', 'created_at', 'updated_at', 'creator_id')
+        and k not in _api_internal_fk_prop_names
     ]
 
     # Primary display field detection
@@ -1374,6 +1480,10 @@ def test_api_spec_context(
     if primary_fk_is_ua and ua_update_field:
         assert_create = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}.name);'
         assert_update = f'expect(getRes.body.{ua_update_field["prop_name"]}).to.eq({ua_update_expr});'
+    elif primary_fk_is_ua:
+        # user_account primary FK but no updatable scalar — can verify create but not update via UA name
+        assert_create = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}.name);'
+        assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
     elif primary_is_fk:
         assert_create = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}.name);'
         assert_update = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}2.name);'

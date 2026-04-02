@@ -22,7 +22,7 @@ import CommentListWrapper from '@/components/_standard/CommentListWrapper';
 {{ child_imports }}
 {% endif %}
 {% if entity_edit_component %}
-import {{ entity_edit_component }} from './{{ entity_edit_component }}';
+import {{ entity_edit_component }} from '{{ entity_edit_component_path if entity_edit_component_path else "./" + entity_edit_component }}';
 {% endif %}
 {% if has_datetime_props %}
 import dayjs, { Dayjs } from 'dayjs';

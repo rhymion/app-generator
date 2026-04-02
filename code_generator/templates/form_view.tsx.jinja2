@@ -40,7 +40,7 @@ import AuditInfo from '@/components/_standard/AuditInfo';
 {{ custom_view_imports }}
 {% endif %}
 {% if entity_view_component %}
-import {{ entity_view_component }} from './{{ entity_view_component }}';
+import {{ entity_view_component }} from '{{ entity_view_component_path if entity_view_component_path else "./" + entity_view_component }}';
 {% endif %}
 {% if use_dayjs %}
 import dayjs from 'dayjs';

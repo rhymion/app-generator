@@ -593,12 +593,16 @@ def build_context(entity: dict, schema: dict) -> dict:
     detail_def = schema['definitions'].get(def_key, {})
     _xcc = detail_def.get('x-custom-component') or {}
     _xcc_name = _xcc.get('name')
+    _xcc_path = _xcc.get('path')  # optional explicit import path; defaults to './ComponentName'
     _xcc_target = _xcc.get('target') or ['list']  # default: list only (backward compat)
     # entity_custom_component: shown on list page (no target specified, or 'list' in target)
     entity_custom_component = _xcc_name if ('list' in _xcc_target) else None
     # entity_view_component / entity_edit_component: shown in FormView / FormUpsert
     entity_view_component = _xcc_name if (_xcc_name and 'view' in _xcc_target) else None
     entity_edit_component = _xcc_name if (_xcc_name and 'edit' in _xcc_target) else None
+    # import path for view/edit components (explicit path overrides default ./ relative import)
+    entity_view_component_path = _xcc_path if (entity_view_component and _xcc_path) else None
+    entity_edit_component_path = _xcc_path if (entity_edit_component and _xcc_path) else None
 
     # Service args helpers
     parent_service_args = ', '.join(
@@ -784,6 +788,8 @@ def build_context(entity: dict, schema: dict) -> dict:
         entity_custom_component=entity_custom_component,
         entity_view_component=entity_view_component,
         entity_edit_component=entity_edit_component,
+        entity_view_component_path=entity_view_component_path,
+        entity_edit_component_path=entity_edit_component_path,
         # Helpers exposed for templates
         to_camel_case=to_camel_case,
         to_pascal_case=to_pascal_case,
