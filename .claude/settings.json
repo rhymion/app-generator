@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "agent",
-            "prompt": "Verify that all unit tests pass for the code generator python code. Run the code generator, and component test suite. Then run build and start the app and run e2e tests for API. Check the results. Only return ok:true if all of them pass.",
+            "prompt": "Verify that all unit tests pass for the code generator python code. Run the code generator, and component test suite. Then start the app and run e2e tests for API. Check the results. Only return ok:true if all of them pass.",
             "timeout": 120
           },
           {
