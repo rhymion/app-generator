@@ -195,9 +195,7 @@ export async function populate{{ pascal }}Data(length: number) {
 {% if has_optional %}
 export async function populate{{ pascal }}FullData(length: number) {
   const testUser = await getTestUser();
-{% if has_self_ref_deps and needs_deps_in_populate_full %}
-  const deps = await _create{{ pascal }}BaseDeps();
-{% elif needs_deps_in_populate_full %}
+{% if needs_deps_in_populate_full %}
   const deps = await populate{{ pascal }}Dependencies();
 {% endif %}
   const records = [];
