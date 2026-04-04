@@ -21,6 +21,16 @@ export type {{ parent | pascal_case }} = {
 {% for rel in child.relationships %}
       {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
 {% endfor %}
+{% if child.child_name == 'approval_request' %}
+      approval_histories?: {
+        id: string;
+        pre_status: number;
+        post_status: number;
+        message?: string | null;
+        created_at: Date | string;
+        creator?: { id: string; name: string } | null;
+      }[];
+{% endif %}
     }[];
 {% endfor %}
   } | null;
@@ -91,6 +101,16 @@ export type FormViewProps = Readonly<{
 {% for rel in child.relationships %}
         {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
 {% endfor %}
+{% if child.child_name == 'approval_request' %}
+        approval_histories?: {
+          id: string;
+          pre_status: number;
+          post_status: number;
+          message?: string | null;
+          created_at: Date | string;
+          creator?: { id: string; name: string } | null;
+        }[];
+{% endif %}
       }[];
 {% endfor %}
     } | null;
@@ -103,6 +123,7 @@ export type FormViewProps = Readonly<{
   permissions?: ModelPermissions;
 {% if entity_view_component or entity_edit_component %}
   currentUserRoleIds?: string[];
+  currentUserId?: string | null;
 {% endif %}
 }>;
 

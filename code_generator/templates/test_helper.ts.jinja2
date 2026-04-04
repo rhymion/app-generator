@@ -388,6 +388,39 @@ export async function setup{{ pascal }}ApprovalFlow() {
   }));
 }
 
+export async function populate{{ pascal }}WithRejectedApproval(creatorId: string, approvalFlowIds: string[]) {
+  const testUser = await getTestUser();
+{% for fk in internal_fk_deps %}
+  const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {} });
+{% endfor %}
+{% set approvable_dep = internal_fk_deps | selectattr('target', 'equalto', 'approvable') | first %}
+  const record = await prisma.{{ model_name }}.create({
+    data: {
+{% for fk in internal_fk_deps %}
+      {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
+{% endfor %}
+{% for field in required_fields_prisma %}
+{% if field.category != 'autocomplete' %}
+      {{ field.prop_name }}: {{ field.prisma_val_fixed }},
+{% endif %}
+{% endfor %}
+{% for ua in ua_dep_fields %}
+      {{ ua.prop_name }}: testUser.id,
+{% endfor %}
+      creator_id: creatorId,
+      updater_id: creatorId,
+    },
+  });
+  const approvalRequests = [];
+  for (const flowId of approvalFlowIds) {
+    const ar = await prisma.approval_request.create({
+      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 2 },
+    });
+    approvalRequests.push(ar);
+  }
+  return JSON.parse(JSON.stringify({ record, approvalRequests }));
+}
+
 export async function populate{{ pascal }}WithApproval(creatorId: string, approvalFlowIds: string[]) {
   const testUser = await getTestUser();
 {% for fk in internal_fk_deps %}

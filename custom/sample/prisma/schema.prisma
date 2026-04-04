@@ -214,6 +214,7 @@ model user_account {
   updated_leave_requests  leave_request[] @relation("LeaveRequestUpdater")
   created_approval_flows  approval_flow[] @relation("ApprovalFlowCreator")
   updated_approval_flows  approval_flow[] @relation("ApprovalFlowUpdater")
+  created_approval_historys  approval_history[] @relation("ApprovalHistoryCreator")
   @@index([api_key])
 }
 
@@ -486,6 +487,20 @@ model approval_request {
   approval_flow_id String
   approval_flow    approval_flow @relation(fields: [approval_flow_id], references: [id])
   status           Int      @default(0)
+  approval_histories approval_history[]
   created_at       DateTime @default(now()) @db.Timestamptz(0)
   updated_at       DateTime @updatedAt @db.Timestamptz(0)
+}
+
+model approval_history {
+  id               String   @id @default(cuid())
+  approval_request_id String
+  approval_request approval_request @relation(fields: [approval_request_id], references: [id], onDelete: Cascade)
+  pre_status       Int
+  post_status      Int
+  message          String?
+  created_at       DateTime @default(now()) @db.Timestamptz(0)
+  updated_at       DateTime @updatedAt @db.Timestamptz(0)
+  creator_id       String
+  creator          user_account @relation("ApprovalHistoryCreator", fields: [creator_id], references: [id])
 }

@@ -632,8 +632,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.login(setup.approverUser.email, 'test-password');
           cy.visit(`/en/{{ parent }}/view/${data.record.id}`);
           cy.get('[aria-label="Approve"]').click();
+          cy.get('[role="dialog"]').find('button').contains('Approve').click();
           cy.contains('Approved').should('be.visible');
           cy.get('[aria-label="Approve"]').should('not.exist');
+          // History expand button should appear after approval
+          cy.get('[aria-label="Expand history"]').should('be.visible');
         });
       });
     });
@@ -649,8 +652,30 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.login(setup.approverUser.email, 'test-password');
           cy.visit(`/en/{{ parent }}/view/${data.record.id}`);
           cy.get('[aria-label="Reject"]').click();
+          cy.get('[role="dialog"]').find('button').contains('Reject').click();
           cy.contains('Rejected').should('be.visible');
           cy.get('[aria-label="Reject"]').should('not.exist');
+        });
+      });
+    });
+
+    it('7.8 requestor can re-submit a rejected request', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithRejectedApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.requestorUser.email, 'test-password');
+          cy.visit(`/en/{{ parent }}/view/${data.record.id}`);
+          cy.get('[aria-label="Re-submit"]').should('be.visible');
+          cy.get('[aria-label="Re-submit"]').click();
+          cy.get('[role="dialog"]').find('button').contains('Re-submit').click();
+          cy.contains('Pending').should('be.visible');
+          cy.get('[aria-label="Re-submit"]').should('not.exist');
+          // History expand button should appear after re-submission
+          cy.get('[aria-label="Expand history"]').should('be.visible');
         });
       });
     });

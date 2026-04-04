@@ -46,7 +46,7 @@ import {{ entity_view_component }} from '{{ entity_view_component_path if entity
 import dayjs from 'dayjs';
 {% endif %}
 
-export default function FormView({ src, permissions{% if entity_view_component %}, currentUserRoleIds{% endif %} }: FormViewProps) {
+export default function FormView({ src, permissions{% if entity_view_component %}, currentUserRoleIds, currentUserId{% endif %} }: FormViewProps) {
   const tf = useTranslations('Fields');
   const te = useTranslations('EntityLabel');
 {% if view_enum_ns_hooks %}
@@ -88,7 +88,7 @@ export default function FormView({ src, permissions{% if entity_view_component %
 {% endif %}
       <AuditInfo src={src} />
 {% if entity_view_component %}
-      <{{ entity_view_component }} src={src} permissions={permissions} currentUserRoleIds={currentUserRoleIds} />
+      <{{ entity_view_component }} src={src} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />
 {% endif %}
     </div>
   );

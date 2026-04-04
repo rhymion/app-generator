@@ -664,6 +664,12 @@ def build_context(entity: dict, schema: dict) -> dict:
                             sub_parts.append(f"{rel_name}: {{ include: {{ {sub_sub} }} }}")
                         else:
                             sub_parts.append(f"{rel_name}: true")
+                    # approval_request always carries approval_histories — inject it
+                    if c.get('child_name') == 'approval_request':
+                        sub_parts.append(
+                            "approval_histories: { include: { creator: { select: { id: true, name: true } } },"
+                            " orderBy: { created_at: 'asc' } }"
+                        )
                     nested_parts.append(f"{c['property_name']}: {{ include: {{ {', '.join(sub_parts)} }} }}")
                 else:
                     nested_parts.append(f"{c['property_name']}: true")

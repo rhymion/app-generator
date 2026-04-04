@@ -37,6 +37,10 @@ export function getGeneratedTasks() {
       const { populate{{ entity.pascal }}WithApproval } = require('{{ entity.helper_path }}');
       return await populate{{ entity.pascal }}WithApproval(params.creatorId, params.approvalFlowIds);
     },
+    async 'db:populate{{ entity.pascal }}WithRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populate{{ entity.pascal }}WithRejectedApproval } = require('{{ entity.helper_path }}');
+      return await populate{{ entity.pascal }}WithRejectedApproval(params.creatorId, params.approvalFlowIds);
+    },
 {% endif %}
 {% endfor %}
 {% if has_user_account_populate %}
