@@ -690,6 +690,8 @@ def build_context(entity: dict, schema: dict) -> dict:
         *child_include_entries,
         *[f"{r['relation_name']}: true" for r in parent_rels],
         *one_to_one_include_entries,
+        "creator: { select: { id: true, name: true } }",
+        "updater: { select: { id: true, name: true } }",
     ]
     include_props_detail = ', '.join(include_entries_detail)
     creator_filtered_props = copy.deepcopy(filtered_props)

@@ -43,6 +43,8 @@ export type {{ parent | pascal_case }} = {
 {% endfor %}
   } | null;
 {% endfor %}
+  creator?: { id: string; name: string } | null;
+  updater?: { id: string; name: string } | null;
 };
 
 {% for rel in option_types %}
