@@ -1489,10 +1489,13 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # FormUpsert params signature
     extra_default_props = ', '.join(f"all{to_pascal_case(t)}s = []" for t in selection_targets)
     sel_perm_props = ', '.join(f"{to_camel_case(t)}Permissions" for t in selection_targets)
-    if extra_default_props or sel_perm_props or has_comment_children:
+    entity_edit_component = ctx.get('entity_edit_component')
+    has_current_user_role_ids = bool(entity_edit_component)
+    if extra_default_props or sel_perm_props or has_comment_children or has_current_user_role_ids:
         form_upsert_params = (
             f"{{ src, isEdit, permissions"
             + (', currentUserId' if has_comment_children else '')
+            + (', currentUserRoleIds' if has_current_user_role_ids else '')
             + (f', {extra_default_props}' if extra_default_props else '')
             + (f', {sel_perm_props}' if sel_perm_props else '')
             + " }: FormUpsertProps"

@@ -308,3 +308,116 @@ export async function populate{{ pascal }}{{ child.pascal }}Data(parentId: strin
   return JSON.parse(JSON.stringify(records));
 }
 {% endfor %}
+{% if has_approvable %}
+
+export async function setup{{ pascal }}ApprovalFlow() {
+  const { hashPassword } = require('../test-credentials');
+  const testUser = await getTestUser();
+  const hashedPw = await hashPassword('test-password');
+
+  const requestorRole = await prisma.role.create({
+    data: { name: 'Test {{ title }} Requestor Role', creator_id: testUser.id, updater_id: testUser.id },
+  });
+  const approverRole = await prisma.role.create({
+    data: { name: 'Test {{ title }} Approver Role', creator_id: testUser.id, updater_id: testUser.id },
+  });
+
+  const requestorUser = await prisma.user_account.create({
+    data: {
+      name: 'Test {{ title }} Requestor User',
+      email: 'test-{{ model_name }}-requestor@example.com',
+      password: hashedPw,
+      api_key: `test_mk_{{ model_name }}_requestor`,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+      roles: { connect: [{ id: requestorRole.id }] },
+    },
+  });
+
+  const approverUser = await prisma.user_account.create({
+    data: {
+      name: 'Test {{ title }} Approver User',
+      email: 'test-{{ model_name }}-approver@example.com',
+      password: hashedPw,
+      api_key: `test_mk_{{ model_name }}_approver`,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+      roles: { connect: [{ id: approverRole.id }] },
+    },
+  });
+
+  const noRoleUser = await prisma.user_account.create({
+    data: {
+      name: 'Test {{ title }} No Role User',
+      email: 'test-{{ model_name }}-norole@example.com',
+      password: hashedPw,
+      api_key: `test_mk_{{ model_name }}_norole`,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+
+  const flowWithRole = await prisma.approval_flow.create({
+    data: {
+      entity_name: '{{ model_name }}',
+      requestor_role_id: requestorRole.id,
+      approver_role_id: approverRole.id,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+
+  const flowWithoutRole = await prisma.approval_flow.create({
+    data: {
+      entity_name: '{{ model_name }}',
+      requestor_role_id: null,
+      approver_role_id: approverRole.id,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+
+  return JSON.parse(JSON.stringify({
+    requestorRole,
+    approverRole,
+    requestorUser,
+    approverUser,
+    noRoleUser,
+    flowWithRole,
+    flowWithoutRole,
+  }));
+}
+
+export async function populate{{ pascal }}WithApproval(creatorId: string, approvalFlowIds: string[]) {
+  const testUser = await getTestUser();
+{% for fk in internal_fk_deps %}
+  const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {} });
+{% endfor %}
+{% set approvable_dep = internal_fk_deps | selectattr('target', 'equalto', 'approvable') | first %}
+  const record = await prisma.{{ model_name }}.create({
+    data: {
+{% for fk in internal_fk_deps %}
+      {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
+{% endfor %}
+{% for field in required_fields_prisma %}
+{% if field.category != 'autocomplete' %}
+      {{ field.prop_name }}: {{ field.prisma_val_fixed }},
+{% endif %}
+{% endfor %}
+{% for ua in ua_dep_fields %}
+      {{ ua.prop_name }}: testUser.id,
+{% endfor %}
+      creator_id: creatorId,
+      updater_id: creatorId,
+    },
+  });
+  const approvalRequests = [];
+  for (const flowId of approvalFlowIds) {
+    const ar = await prisma.approval_request.create({
+      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 0 },
+    });
+    approvalRequests.push(ar);
+  }
+  return JSON.parse(JSON.stringify({ record, approvalRequests }));
+}
+{% endif %}

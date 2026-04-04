@@ -30,9 +30,10 @@ type ApprovalRequest = {
 type Props = {
   src: { approvable?: { id: string; approval_requests: ApprovalRequest[] } | null };
   permissions?: ModelPermissions;
+  currentUserRoleIds?: string[];
 };
 
-export default function ApprovalSection({ src }: Props) {
+export default function ApprovalSection({ src, currentUserRoleIds }: Props) {
   const t = useTranslations('Fields');
   const [, startTransition] = useTransition();
 
@@ -58,38 +59,44 @@ export default function ApprovalSection({ src }: Props) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {requests.map((ar) => (
-            <TableRow key={ar.id}>
-              <TableCell>{ar.approval_flow?.approver_role?.name ?? '-'}</TableCell>
-              <TableCell>{STATUS_LABELS[ar.status] ?? ar.status}</TableCell>
-              <TableCell>
-                {ar.status === 0 && (
-                  <>
-                    <Tooltip title="Approve">
-                      <IconButton
-                        aria-label="Approve"
-                        color="success"
-                        size="small"
-                        onClick={() => handleApprove(ar.id)}
-                      >
-                        <CheckIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Reject">
-                      <IconButton
-                        aria-label="Reject"
-                        color="error"
-                        size="small"
-                        onClick={() => handleReject(ar.id)}
-                      >
-                        <CloseIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  </>
-                )}
-              </TableCell>
-            </TableRow>
-          ))}
+          {requests.map((ar) => {
+            const approverRoleId = ar.approval_flow?.approver_role_id;
+            const canAct = ar.status === 0
+              && approverRoleId
+              && currentUserRoleIds?.includes(approverRoleId);
+            return (
+              <TableRow key={ar.id}>
+                <TableCell>{ar.approval_flow?.approver_role?.name ?? '-'}</TableCell>
+                <TableCell>{STATUS_LABELS[ar.status] ?? ar.status}</TableCell>
+                <TableCell>
+                  {canAct && (
+                    <>
+                      <Tooltip title="Approve">
+                        <IconButton
+                          aria-label="Approve"
+                          color="success"
+                          size="small"
+                          onClick={() => handleApprove(ar.id)}
+                        >
+                          <CheckIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Reject">
+                        <IconButton
+                          aria-label="Reject"
+                          color="error"
+                          size="small"
+                          onClick={() => handleReject(ar.id)}
+                        >
+                          <CloseIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>

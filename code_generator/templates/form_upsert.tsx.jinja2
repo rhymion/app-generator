@@ -163,7 +163,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {{ comment_children_jsx }}
 {% endif %}
 {% if entity_edit_component %}
-      <{{ entity_edit_component }} src={src} permissions={permissions} />
+      <{{ entity_edit_component }} src={src} permissions={permissions} currentUserRoleIds={currentUserRoleIds} />
 {% endif %}
     </>
   );

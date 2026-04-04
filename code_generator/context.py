@@ -71,6 +71,8 @@ class EntityContext:
     form_view_fields: list[FieldInfo]   # parent fields minus timestamps
     all_option_targets: list[str]       # for FormUpsertProps allXxx / xxxPermissions
     one_to_one_rels: list[OneToOneRelInfo]  # one-to-one outbound FK rels with nested children
+    entity_view_component: str | None = None   # custom component rendered in FormView
+    entity_edit_component: str | None = None   # custom component rendered in FormUpsert
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +284,13 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             children=oto_children,
         ))
 
+    # Custom view/edit components from x-custom-component config
+    _xcc = schema['definitions'].get(def_key, {}).get('x-custom-component') or {}
+    _xcc_name = _xcc.get('name')
+    _xcc_target = _xcc.get('target') or ['list']
+    entity_view_component = _xcc_name if (_xcc_name and 'view' in _xcc_target) else None
+    entity_edit_component = _xcc_name if (_xcc_name and 'edit' in _xcc_target) else None
+
     return EntityContext(
         parent=parent,
         model=model,
@@ -293,4 +302,6 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         form_view_fields=form_view_fields,
         all_option_targets=all_option_targets,
         one_to_one_rels=one_to_one_rels,
+        entity_view_component=entity_view_component,
+        entity_edit_component=entity_edit_component,
     )

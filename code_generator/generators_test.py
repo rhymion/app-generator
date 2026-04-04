@@ -871,8 +871,10 @@ def test_helper_context(
             dep = next((d for d in entity_fk_deps if d['prop_name'] == f['prop_name']), None)
             f['dep_var_name'] = dep['dep_var_name'] if dep else None
             f['prisma_val'] = None
+            f['prisma_val_fixed'] = None
         else:
             f['prisma_val'] = prisma_value(f, 'i', entity_title)
+            f['prisma_val_fixed'] = prisma_value(f, '1', entity_title)
             f['dep_var_name'] = None
         return f
 
@@ -944,6 +946,8 @@ def test_helper_context(
         for f in all_fields_prisma
     )
 
+    has_approvable = any(d['target'] == 'approvable' for d in internal_fk_deps)
+
     return {
         'pascal': pascal,
         'title': title,
@@ -966,6 +970,7 @@ def test_helper_context(
         'comment_children': enriched_comment_children,
         'primary_fk_dep': primary_fk_dep,
         'internal_fk_deps': internal_fk_deps,
+        'has_approvable': has_approvable,
     }
 
 
@@ -1340,6 +1345,7 @@ def test_spec_context(
         'check_field_label': check_field_label,
         'check_field_value_1': check_field_value_1,
         'check_field_updated': check_field_updated,
+        'has_approvable': any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model_name, schema)),
     }
 
 
@@ -1361,6 +1367,10 @@ def test_tasks_registry_context(entities: list, schema: dict) -> dict:
             rel = lc['child'].get('relationship') or {}
             if rel.get('target') == 'user_account':
                 has_user_account_populate = True
+        has_approvable = any(
+            d['target'] == 'approvable'
+            for d in get_internal_one_to_one_fks(entity['model_name'], schema)
+        )
         enriched_entities.append({
             'parent': parent,
             'pascal': pascal,
@@ -1373,6 +1383,7 @@ def test_tasks_registry_context(entities: list, schema: dict) -> dict:
                 {'pascal': to_pascal_case(c['child']['name'])}
                 for c in comment_children_registry
             ],
+            'has_approvable': has_approvable,
         })
     return {'entities': enriched_entities, 'has_user_account_populate': has_user_account_populate}
 
@@ -1555,6 +1566,8 @@ def test_api_spec_context(
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
+    has_approvable = any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model, schema))
+
     return {
         'parent': parent,
         'pascal': parent_pascal,
@@ -1584,6 +1597,7 @@ def test_api_spec_context(
         # Bulk PUT: non-FK inside one `.then((records)=>`, FK inside two `.then` blocks
         'bulk_put_body_valid':    _put_body_impl('              '),   # 14 spaces
         'bulk_put_body_valid_fk': _put_body_impl('                '), # 16 spaces
+        'has_approvable': has_approvable,
     }
 
 

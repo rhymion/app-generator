@@ -101,6 +101,9 @@ export type FormViewProps = Readonly<{
     updater?: { id: string; name: string } | null;
   };
   permissions?: ModelPermissions;
+{% if entity_view_component or entity_edit_component %}
+  currentUserRoleIds?: string[];
+{% endif %}
 }>;
 
 export type FormUpsertProps = Readonly<FormViewProps & {

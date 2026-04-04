@@ -449,4 +449,146 @@ describe('API: {{ title }}', () => {
     });
 {% endif %}
   });
+{% if has_approvable %}
+
+  // -------------------------------------------------------------------------
+  // Approval operations
+  // -------------------------------------------------------------------------
+
+  describe('Approval request creation (POST {{ api_path }})', () => {
+    it('11.1 creates approval requests for user in requestor role', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+{% if has_deps %}
+        cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I }}cy.request({
+{{ I }}  method: 'POST',
+{{ I }}  url: API_BASE,
+{{ I }}  headers: { 'X-API-Key': setup.requestorUser.api_key },
+{{ I }}  body: {
+{% for ln in post_body_create %}
+{{ ln }}
+{% endfor %}
+{{ I }}  },
+{{ I }}}).then((res) => {
+{{ I }}  expect(res.status).to.eq(201);
+{{ I }}  cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': setup.requestorUser.api_key } })
+{{ I }}    .then((getRes) => {
+{{ I }}      expect(getRes.body.approvable.approval_requests).to.have.length(2);
+{{ I }}    });
+{{ I }}});
+{% if has_deps %}
+        });
+{% endif %}
+      });
+    });
+
+    it('11.2 skips approval request for role-gated flow when user lacks requestor role', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+{% if has_deps %}
+        cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I }}cy.request({
+{{ I }}  method: 'POST',
+{{ I }}  url: API_BASE,
+{{ I }}  headers: { 'X-API-Key': setup.noRoleUser.api_key },
+{{ I }}  body: {
+{% for ln in post_body_create %}
+{{ ln }}
+{% endfor %}
+{{ I }}  },
+{{ I }}}).then((res) => {
+{{ I }}  expect(res.status).to.eq(201);
+{{ I }}  cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': setup.noRoleUser.api_key } })
+{{ I }}    .then((getRes) => {
+{{ I }}      expect(getRes.body.approvable.approval_requests).to.have.length(1);
+{{ I }}    });
+{{ I }}});
+{% if has_deps %}
+        });
+{% endif %}
+      });
+    });
+  });
+
+  describe('Approve (POST /api/approval_request/:id/approve)', () => {
+    it('12.1 approver can approve a pending request', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/approve`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            expect(res.body.status).to.eq(1);
+          });
+        });
+      });
+    });
+
+    it('12.2 non-approver cannot approve (403)', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/approve`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(403);
+          });
+        });
+      });
+    });
+  });
+
+  describe('Reject (POST /api/approval_request/:id/reject)', () => {
+    it('13.1 approver can reject a pending request', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            expect(res.body.status).to.eq(2);
+          });
+        });
+      });
+    });
+
+    it('13.2 non-approver cannot reject (403)', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(403);
+          });
+        });
+      });
+    });
+  });
+{% endif %}
 });
