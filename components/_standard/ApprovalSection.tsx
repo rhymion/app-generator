@@ -40,6 +40,7 @@ type ApprovalHistory = {
 
 type ApprovalRequest = {
   id: string;
+  approval_flow_id: string;
   status: number;
   approval_flow?: {
     id: string;
@@ -47,6 +48,7 @@ type ApprovalRequest = {
     approver_role_id?: string | null;
     requestor_role_id?: string | null;
     approver_role?: { id: string; name: string } | null;
+    preceded_by?: { id: string }[];
   } | null;
   approval_histories?: ApprovalHistory[];
 };
@@ -70,6 +72,9 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
 
   const requests = src.approvable?.approval_requests ?? [];
   if (requests.length === 0) return null;
+
+  // Build a map of flow_id → status for ordering checks
+  const flowIdToStatus = new Map(requests.map((r) => [r.approval_flow_id, r.status]));
 
   const toggleExpanded = (id: string) => {
     setExpandedIds((prev) => {
@@ -119,9 +124,14 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
           {requests.map((ar) => {
             const approverRoleId = ar.approval_flow?.approver_role_id;
             const requestorRoleId = ar.approval_flow?.requestor_role_id;
+            const precedingFlowIds = ar.approval_flow?.preceded_by?.map((f) => f.id) ?? [];
+            const precedingApproved = precedingFlowIds.every(
+              (fid) => flowIdToStatus.get(fid) === 1,
+            );
             const canAct = ar.status === 0
               && approverRoleId
-              && currentUserRoleIds?.includes(approverRoleId);
+              && currentUserRoleIds?.includes(approverRoleId)
+              && precedingApproved;
             const canResubmit = ar.status === 2 && (
               currentUserId === src.creator_id ||
               (requestorRoleId ? currentUserRoleIds?.includes(requestorRoleId) : false)

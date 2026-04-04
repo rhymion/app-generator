@@ -616,6 +616,54 @@ describe('API: {{ title }}', () => {
     });
   });
 
+  describe('Approval order enforcement', () => {
+    it('15.1 cannot approve when preceding request is not approved (400)', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar2 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar2.id}/approve`,
+            headers: { 'X-API-Key': setup.approverUser2.api_key },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(400);
+          });
+        });
+      });
+    });
+
+    it('15.2 can approve flow2 after flow1 is approved', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          const ar2 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/approve`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            cy.request({
+              method: 'POST',
+              url: `/api/approval_request/${ar2.id}/approve`,
+              headers: { 'X-API-Key': setup.approverUser2.api_key },
+            }).then((res2) => {
+              expect(res2.status).to.eq(200);
+              expect(res2.body.status).to.eq(1);
+            });
+          });
+        });
+      });
+    });
+  });
+
   describe('Resubmit (POST /api/approval_request/:id/resubmit)', () => {
     it('14.1 requestor can resubmit a rejected request', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {

@@ -388,6 +388,62 @@ export async function setup{{ pascal }}ApprovalFlow() {
   }));
 }
 
+export async function setup{{ pascal }}OrderedApprovalFlow() {
+  const { hashPassword } = require('../test-credentials');
+  const testUser = await getTestUser();
+  const hashedPw = await hashPassword('test-password');
+
+  const approverRole1 = await prisma.role.create({
+    data: { name: 'Test {{ title }} Ordered Approver Role 1', creator_id: testUser.id, updater_id: testUser.id },
+  });
+  const approverRole2 = await prisma.role.create({
+    data: { name: 'Test {{ title }} Ordered Approver Role 2', creator_id: testUser.id, updater_id: testUser.id },
+  });
+
+  const approverUser1 = await prisma.user_account.create({
+    data: {
+      name: 'Test {{ title }} Ordered Approver 1',
+      email: 'test-{{ model_name }}-ordered-approver1@example.com',
+      password: hashedPw,
+      api_key: `test_mk_{{ model_name }}_ordered_approver1`,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+      roles: { connect: [{ id: approverRole1.id }] },
+    },
+  });
+  const approverUser2 = await prisma.user_account.create({
+    data: {
+      name: 'Test {{ title }} Ordered Approver 2',
+      email: 'test-{{ model_name }}-ordered-approver2@example.com',
+      password: hashedPw,
+      api_key: `test_mk_{{ model_name }}_ordered_approver2`,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+      roles: { connect: [{ id: approverRole2.id }] },
+    },
+  });
+
+  const flow1 = await prisma.approval_flow.create({
+    data: {
+      entity_name: '{{ model_name }}',
+      approver_role_id: approverRole1.id,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+  const flow2 = await prisma.approval_flow.create({
+    data: {
+      entity_name: '{{ model_name }}',
+      approver_role_id: approverRole2.id,
+      preceded_by: { connect: [{ id: flow1.id }] },
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+
+  return JSON.parse(JSON.stringify({ flow1, flow2, approverUser1, approverUser2 }));
+}
+
 export async function populate{{ pascal }}WithRejectedApproval(creatorId: string, approvalFlowIds: string[]) {
   const testUser = await getTestUser();
 {% for fk in internal_fk_deps %}

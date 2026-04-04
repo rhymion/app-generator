@@ -664,8 +664,16 @@ def build_context(entity: dict, schema: dict) -> dict:
                             sub_parts.append(f"{rel_name}: {{ include: {{ {sub_sub} }} }}")
                         else:
                             sub_parts.append(f"{rel_name}: true")
-                    # approval_request always carries approval_histories — inject it
+                    # approval_request always carries approval_histories and approval_flow.preceded_by
                     if c.get('child_name') == 'approval_request':
+                        # Inject preceded_by into the approval_flow include
+                        for i, part in enumerate(sub_parts):
+                            if part.startswith('approval_flow:'):
+                                sub_parts[i] = (
+                                    "approval_flow: { include: { requestor_role: true, approver_role: true,"
+                                    " preceded_by: { select: { id: true } } } }"
+                                )
+                                break
                         sub_parts.append(
                             "approval_histories: { include: { creator: { select: { id: true, name: true } } },"
                             " orderBy: { created_at: 'asc' } }"

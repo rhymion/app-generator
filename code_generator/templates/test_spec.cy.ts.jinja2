@@ -659,6 +659,23 @@ describe('Testing {{ title }} pages and their behavior', () => {
       });
     });
 
+    it('7.9 Approve/Reject buttons disabled when preceding approval not done', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser2.email, 'test-password');
+          cy.visit(`/en/{{ parent }}/view/${data.record.id}`);
+          // flow2 requires flow1 approved first — buttons should not exist
+          cy.get('[aria-label="Approve"]').should('not.exist');
+          cy.get('[aria-label="Reject"]').should('not.exist');
+        });
+      });
+    });
+
     it('7.8 requestor can re-submit a rejected request', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithRejectedApproval', {

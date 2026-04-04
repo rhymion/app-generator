@@ -33,6 +33,10 @@ export function getGeneratedTasks() {
       const { setup{{ entity.pascal }}ApprovalFlow } = require('{{ entity.helper_path }}');
       return await setup{{ entity.pascal }}ApprovalFlow();
     },
+    async 'db:setup{{ entity.pascal }}OrderedApprovalFlow'() {
+      const { setup{{ entity.pascal }}OrderedApprovalFlow } = require('{{ entity.helper_path }}');
+      return await setup{{ entity.pascal }}OrderedApprovalFlow();
+    },
     async 'db:populate{{ entity.pascal }}WithApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
       const { populate{{ entity.pascal }}WithApproval } = require('{{ entity.helper_path }}');
       return await populate{{ entity.pascal }}WithApproval(params.creatorId, params.approvalFlowIds);

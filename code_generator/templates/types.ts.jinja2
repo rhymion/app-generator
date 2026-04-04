@@ -18,10 +18,14 @@ export type {{ parent | pascal_case }} = {
 {% for field in child.fields %}
       {{ field.name }}: {{ field.ts_type }};
 {% endfor %}
-{% for rel in child.relationships %}
-      {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
-{% endfor %}
 {% if child.child_name == 'approval_request' %}
+{% for rel in child.relationships %}
+{% if rel.relation_name == 'approval_flow' %}
+      {{ rel.relation_name }}?: ({{ rel.target | pascal_case }} & { preceded_by?: { id: string }[] }) | null;
+{% else %}
+      {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+{% endif %}
+{% endfor %}
       approval_histories?: {
         id: string;
         pre_status: number;
@@ -30,6 +34,10 @@ export type {{ parent | pascal_case }} = {
         created_at: Date | string;
         creator?: { id: string; name: string } | null;
       }[];
+{% else %}
+{% for rel in child.relationships %}
+      {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+{% endfor %}
 {% endif %}
     }[];
 {% endfor %}
@@ -98,10 +106,14 @@ export type FormViewProps = Readonly<{
 {% for field in child.fields %}
         {{ field.name }}: {{ field.ts_type }};
 {% endfor %}
-{% for rel in child.relationships %}
-        {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
-{% endfor %}
 {% if child.child_name == 'approval_request' %}
+{% for rel in child.relationships %}
+{% if rel.relation_name == 'approval_flow' %}
+        {{ rel.relation_name }}?: ({{ rel.target | pascal_case }} & { preceded_by?: { id: string }[] }) | null;
+{% else %}
+        {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+{% endif %}
+{% endfor %}
         approval_histories?: {
           id: string;
           pre_status: number;
@@ -110,6 +122,10 @@ export type FormViewProps = Readonly<{
           created_at: Date | string;
           creator?: { id: string; name: string } | null;
         }[];
+{% else %}
+{% for rel in child.relationships %}
+        {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+{% endfor %}
 {% endif %}
       }[];
 {% endfor %}
