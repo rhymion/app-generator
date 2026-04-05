@@ -373,6 +373,7 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
     enum_integer  = []
     image         = []
     boolean       = []
+    entity_select = []
     text          = []
 
     for p in parent_props:
@@ -393,6 +394,8 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
             boolean.append(p)
         elif actual == 'string' and fmt == 'uri':
             image.append(p)
+        elif actual == 'string' and defn.get('x-entity-select'):
+            entity_select.append(p)
         else:
             text.append(p)
 
@@ -403,8 +406,26 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         'enum_integer': enum_integer,
         'image': image,
         'boolean': boolean,
+        'entity_select': entity_select,
         'text': text,
     }
+
+
+# ---------------------------------------------------------------------------
+# Entity select options helper
+# ---------------------------------------------------------------------------
+
+def _get_entity_options(schema: dict) -> list[dict]:
+    """Returns list of {value, label} for all schema entities that have pages."""
+    from generate_types import extract_entities
+    options = []
+    seen = set()
+    for e in extract_entities(schema):
+        parent = e['parent']
+        if parent not in seen:
+            seen.add(parent)
+            options.append({'value': parent, 'label': to_title_case(parent)})
+    return options
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +811,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         service_args_for_update=service_args_for_update,
         # Field categories (FormUpsert / FormView)
         field_categories=field_categories,
+        entity_select_options=_get_entity_options(schema),
         # Chart
         chart_cfg=chart_cfg,
         has_chart=has_chart,

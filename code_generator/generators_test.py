@@ -13,6 +13,7 @@ from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
 )
 from helpers.schema_helpers import filter_fields, get_parent_relationships, is_optional_fk_to_parent
+from build_context import _get_entity_options
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +68,8 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     required = set(dep_def.get('required') or [])
     rel_props = {r['prop_name'] for r in get_parent_relationships(dep_def)}
     exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props
+    _entity_opts = _get_entity_options(schema)
+    _first_entity_val = f"'{_entity_opts[0]['value']}'" if _entity_opts else "''"
     result = []
     for prop_name, prop in props.items():
         if prop_name not in required or prop_name in exclude:
@@ -77,6 +80,8 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
         if prop_name == 'name':
             val = f"'Test {title}'"
             val_unique = f'`Test {title} ${{i}}`'
+        elif actual == 'string' and prop.get('x-entity-select'):
+            val = val_unique = _first_entity_val
         elif actual == 'string' and fmt == 'date':
             val = val_unique = 'new Date(Date.UTC(2025, 0, 1)).toISOString()'
         elif actual == 'string' and fmt in ('date-time', 'time'):
@@ -105,6 +110,8 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
     rel_props = {r['prop_name'] for r in get_parent_relationships(dep_def)}
     exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props
 
+    _entity_opts = _get_entity_options(schema)
+    _first_entity_val = f"'{_entity_opts[0]['value']}'" if _entity_opts else "''"
     result = []
     for prop_name, prop in props.items():
         if prop_name not in required or prop_name in exclude:
@@ -115,6 +122,8 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
         if prop_name == 'name':
             val = f"'Test {to_title_case(dep_target)}'"
             val_unique = f'`Test {to_title_case(dep_target)} ${{i}}`'
+        elif actual == 'string' and prop.get('x-entity-select'):
+            val = val_unique = _first_entity_val
         elif actual == 'string' and fmt == 'date':
             val = 'new Date(Date.UTC(2025, 0, 1)).toISOString()'
             val_unique = val
@@ -230,12 +239,13 @@ def get_field_metas(
     required_fields: list,
     relationships: list,
     fields_filter: list | None = None,
+    entity_options: list | None = None,
 ) -> list[dict]:
     """Port of getFieldMetas().
 
     Returns list of FieldMeta dicts with keys:
       prop_name, label, category, required,
-      enum_values, format, dep_target, min, max
+      enum_values, format, dep_target, min, max, entity_options
     """
     filtered = filter_fields(properties, fields_filter)
     exclude_keys = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
@@ -252,6 +262,7 @@ def get_field_metas(
             'dep_target': None,
             'min': None,
             'max': None,
+            'entity_options': None,
         }
 
         rel = next((r for r in relationships if r['prop_name'] == prop_name), None)
@@ -309,6 +320,14 @@ def get_field_metas(
                 'label': to_title_case(prop_name),
                 'category': 'boolean',
                 'required': prop_name in required_fields,
+            })
+        elif prop_type == 'string' and prop.get('x-entity-select') and entity_options:
+            metas.append({
+                **base,
+                'label': to_title_case(prop_name),
+                'category': 'entity_select',
+                'required': prop_name in required_fields,
+                'entity_options': entity_options,
             })
         else:
             metas.append({
@@ -391,6 +410,10 @@ def prisma_value(field: dict, index: str, entity_title: str) -> str:
             return f"'{field['enum_values'][0]}'"
         return f'`Test {field["label"]} ${{{index}}}`'
 
+    elif cat == 'entity_select':
+        options = field.get('entity_options') or []
+        return f"'{options[0]['value']}'" if options else "''"
+
     elif cat == 'enum':
         # Integer enum: store integer index 0 (first option)
         return '0'
@@ -431,6 +454,10 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
         if field.get('enum_values'):
             return field['enum_values'][0]
         return f'Test {field["label"]}'
+
+    elif cat == 'entity_select':
+        options = field.get('entity_options') or []
+        return options[0]['label'] if options else ''
 
     elif cat == 'enum':
         return field['enum_values'][0]
@@ -478,6 +505,12 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
             return enum_values[1] if len(enum_values) > 1 else enum_values[0]
         return f'Updated {field["label"]}'
 
+    elif cat == 'entity_select':
+        options = field.get('entity_options') or []
+        if len(options) > 1:
+            return options[1]['label']
+        return options[0]['label'] if options else ''
+
     elif cat == 'enum':
         return field['enum_values'][1] if len(field['enum_values']) > 1 else field['enum_values'][0]
 
@@ -516,6 +549,10 @@ def api_value(field: dict, entity_title: str) -> str:
         if field.get('enum_values'):
             return f"'{field['enum_values'][0]}'"
         return f"'Test {field['label']}'"
+
+    elif cat == 'entity_select':
+        options = field.get('entity_options') or []
+        return f"'{options[0]['value']}'" if options else "''"
 
     elif cat == 'enum':
         return '0'
@@ -559,7 +596,7 @@ def gen_fill_command(field: dict, value: str, indent: str) -> str:
         return f"{indent}cy.fillDateTime('{label}', '{value}');"
     elif cat == 'boolean':
         return f"{indent}cy.setCheckbox('{label}', {value});"
-    elif cat == 'enum':
+    elif cat in ('enum', 'entity_select'):
         return f"{indent}cy.selectAutocomplete('{label}', '{value}');"
     else:
         return f"{indent}cy.selectAutocomplete('{label}', '{value}');"
@@ -583,7 +620,7 @@ def gen_clear_command(field: dict, indent: str) -> str:
 def gen_assert_command(field: dict, value: str, indent: str) -> str:
     cat = field['category']
     label = field['label']
-    if cat in ('text', 'number', 'datetime', 'autocomplete', 'enum'):
+    if cat in ('text', 'number', 'datetime', 'autocomplete', 'enum', 'entity_select'):
         return f"{indent}cy.checkField('{label}', '{value}');"
     else:
         return f"{indent}cy.setCheckbox('{label}', {value}); // verify checkbox state"
@@ -696,7 +733,8 @@ def test_helper_context(
     properties = filter_fields(parent_def['properties'], generate_config.get('fields'))
     required_fields = parent_def.get('required') or []
     relationships = get_parent_relationships(parent_def)
-    fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'))
+    entity_options = _get_entity_options(schema)
+    fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'), entity_options)
     # Detect outbound one-to-one FK fields (e.g. approvable_id on leave_request).
     # These are internal bridge records the service creates automatically — not user-facing.
     # Exclude from fill/assert commands and from prisma data field lists; handle separately.
@@ -991,7 +1029,8 @@ def test_spec_context(
     properties = filter_fields(parent_def['properties'], generate_config.get('fields'))
     required_fields = parent_def.get('required') or []
     relationships = get_parent_relationships(parent_def)
-    fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'))
+    entity_options = _get_entity_options(schema)
+    fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'), entity_options)
     # Exclude outbound one-to-one FK fields (internal bridge records, not user-facing).
     _internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model_name, schema)}
     fields = [f for f in fields if f['prop_name'] not in _internal_fk_prop_names]
@@ -1095,6 +1134,7 @@ def test_spec_context(
     if prim_is_fk:
         dep_title = to_title_case(prim)
         list_id_1 = f'Test {dep_title} 1'
+        list_id_is_unique = True
         after_create_id = None
         after_create_id_is_expr = True
         primary_dep_var_for_list = to_camel_case(prim)
@@ -1106,34 +1146,76 @@ def test_spec_context(
         check_field_value_1 = list_id_1
         check_field_updated = list_id_1
     elif prim and prim != 'name' and prim_meta:
-        # Explicit non-name primary field (e.g., product.code).
+        # Explicit non-name primary field (e.g., product.code or entity_name).
         # Link in the list is on this column, so use it for all click navigation.
         lbl = prim_meta.get('label', to_title_case(prim))
-        list_id_1 = f'Test {lbl} 1'
-        after_create_id = cypress_create_value(prim_meta, title)
-        after_create_id_is_expr = False
-        primary_dep_var_for_list = None
-        list_id_updated = f'Updated {lbl}'
-        has_edit_primary = True
-        edit_field_label = lbl
-        edit_update_value = f'Updated {lbl}'
-        check_field_label = lbl
-        check_field_value_1 = list_id_1
-        check_field_updated = list_id_updated
+        if prim_meta.get('category') == 'entity_select':
+            opts = prim_meta.get('entity_options') or []
+            first_val   = opts[0]['value'] if opts else ''
+            second_val  = opts[1]['value'] if len(opts) > 1 else first_val
+            first_label = opts[0]['label'] if opts else ''
+            second_label = opts[1]['label'] if len(opts) > 1 else first_label
+            list_id_1 = first_val
+            list_id_is_unique = False
+            after_create_id = first_val
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = second_val
+            has_edit_primary = True
+            edit_field_label = lbl
+            edit_update_value = second_label
+            check_field_label = lbl
+            check_field_value_1 = first_label
+            check_field_updated = second_label
+        else:
+            list_id_1 = f'Test {lbl} 1'
+            list_id_is_unique = True
+            after_create_id = cypress_create_value(prim_meta, title)
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = f'Updated {lbl}'
+            has_edit_primary = True
+            edit_field_label = lbl
+            edit_update_value = f'Updated {lbl}'
+            check_field_label = lbl
+            check_field_value_1 = list_id_1
+            check_field_updated = list_id_updated
     elif has_name:
-        list_id_1 = f'{title} 1'
-        after_create_id = f'Test {title}'
-        after_create_id_is_expr = False
-        primary_dep_var_for_list = None
-        list_id_updated = f'Updated {title}'
-        has_edit_primary = True
-        edit_field_label = 'Name'
-        edit_update_value = f'Updated {title}'
-        check_field_label = 'Name'
-        check_field_value_1 = f'{title} 1'
-        check_field_updated = f'Updated {title}'
+        name_meta = next((f for f in fields if f['prop_name'] == 'name'), None)
+        if name_meta and name_meta.get('category') == 'entity_select':
+            opts = name_meta.get('entity_options') or []
+            first_val   = opts[0]['value'] if opts else ''
+            second_val  = opts[1]['value'] if len(opts) > 1 else first_val
+            first_label = opts[0]['label'] if opts else ''
+            second_label = opts[1]['label'] if len(opts) > 1 else first_label
+            list_id_1 = first_val
+            list_id_is_unique = False
+            after_create_id = first_val
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = second_val
+            has_edit_primary = True
+            edit_field_label = 'Name'
+            edit_update_value = second_label
+            check_field_label = 'Name'
+            check_field_value_1 = first_label
+            check_field_updated = second_label
+        else:
+            list_id_1 = f'{title} 1'
+            list_id_is_unique = True
+            after_create_id = f'Test {title}'
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = f'Updated {title}'
+            has_edit_primary = True
+            edit_field_label = 'Name'
+            edit_update_value = f'Updated {title}'
+            check_field_label = 'Name'
+            check_field_value_1 = f'{title} 1'
+            check_field_updated = f'Updated {title}'
     else:
         list_id_1 = f'{title} 1'
+        list_id_is_unique = True
         after_create_id = f'Test {title}'
         after_create_id_is_expr = False
         primary_dep_var_for_list = None
@@ -1224,6 +1306,18 @@ def test_spec_context(
         for f in optional_field_metas
         if f['category'] != 'autocomplete'
     ]
+
+    # Section 3.3: primary field edit command
+    if has_edit_primary and edit_field_label and edit_update_value:
+        prim_edit_meta = next(
+            (f for f in fields if f.get('label') == edit_field_label), None
+        )
+        if prim_edit_meta and prim_edit_meta.get('category') == 'entity_select':
+            edit_primary_cmd = f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
+        else:
+            edit_primary_cmd = f"        cy.clearAndFillField('{edit_field_label}', '{edit_update_value}');"
+    else:
+        edit_primary_cmd = None
 
     # Section 3.3: edit value for first non-autocomplete optional field
     edit_fill_cmd_3_3 = None
@@ -1327,6 +1421,7 @@ def test_spec_context(
         'use_deps_in_3_1': use_deps_in_3_1,
         'opt_fill_cmds_3_1': opt_fill_cmds_3_1,
         'opt_clear_cmds_3_2': opt_clear_cmds_3_2,
+        'edit_primary_cmd': edit_primary_cmd,
         'edit_fill_cmd_3_3': edit_fill_cmd_3_3,
         'fail_create_5_1': fail_create_5_1,
         'fail_create_5_2_scalar': fail_create_5_2_scalar,
@@ -1335,6 +1430,7 @@ def test_spec_context(
         'fail_edit_6_2': fail_edit_6_2,
         # List identifiers
         'list_id_1': list_id_1,
+        'list_id_is_unique': list_id_is_unique,
         'after_create_id': after_create_id,
         'after_create_id_is_expr': after_create_id_is_expr,
         'primary_dep_var_for_list': primary_dep_var_for_list,
@@ -1410,7 +1506,8 @@ def test_api_spec_context(
     relationships = get_parent_relationships({**model_def, 'properties': filtered_props})
 
     required_fields_list = model_def.get('required') or []
-    all_field_metas = get_field_metas(filtered_props, required_fields_list, relationships, gen_cfg.get('fields'))
+    _api_entity_options = _get_entity_options(schema)
+    all_field_metas = get_field_metas(filtered_props, required_fields_list, relationships, gen_cfg.get('fields'), _api_entity_options)
     # Exclude outbound one-to-one FK fields (internal bridge records — service creates them automatically).
     _api_internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model, schema)}
     all_field_metas = [f for f in all_field_metas if f['prop_name'] not in _api_internal_fk_prop_names]
@@ -1509,8 +1606,16 @@ def test_api_spec_context(
             assert_create = 'expect(getRes.body.id).to.exist;'
             assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
     elif has_name_field:
-        assert_create = f"expect(getRes.body.name).to.eq('Test {title}');"
-        assert_update = f"expect(getRes.body.name).to.eq('Updated {title}');"
+        name_meta_api = next((f for f in all_field_metas if f['prop_name'] == 'name'), None)
+        if name_meta_api and name_meta_api.get('category') == 'entity_select':
+            _opts = name_meta_api.get('entity_options') or []
+            _create_val = api_value(name_meta_api, title)
+            _update_val = f"'{_opts[1]['value']}'" if len(_opts) > 1 else _create_val
+            assert_create = f"expect(getRes.body.name).to.eq({_create_val});"
+            assert_update = f"expect(getRes.body.name).to.eq({_update_val});"
+        else:
+            assert_create = f"expect(getRes.body.name).to.eq('Test {title}');"
+            assert_update = f"expect(getRes.body.name).to.eq('Updated {title}');"
     else:
         assert_create = 'expect(getRes.body.id).to.exist;'
         assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'

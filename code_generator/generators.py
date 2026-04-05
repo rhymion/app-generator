@@ -552,11 +552,27 @@ def form_view_context(ctx: dict) -> dict:
         return to_camel_case(p)
 
     # Text fields (incl. relationship display)
+    entity_select_props_view = {
+        p for p in other_flds
+        if filtered_props.get(p, {}).get('x-entity-select')
+    }
+    entity_select_options = ctx.get('entity_select_options', [])
     text_jsxs = []
     for p in other_flds:
         fk = _tf(p)
         rel = rel_by_prop.get(p)
-        if rel:
+        if p in entity_select_props_view:
+            opts_var = f'{safe_var_name(p)}Options'
+            opts_items = ', '.join(
+                f"{{ value: '{o['value']}', label: '{o['label']}' }}"
+                for o in entity_select_options
+            )
+            text_jsxs.append(
+                f"      <TextField\n        label={{tf('{fk}')}}\n"
+                f"        value={{[{opts_items}].find((o) => o.value === src.{p})?.label ?? src.{p} ?? ''}}\n"
+                f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n      />"
+            )
+        elif rel:
             label_f  = rel.get('label_field', 'name')
             label_fk = fk.removesuffix('Id')
             rel_name = rel.get('relation_name', p.removesuffix('_id'))
@@ -760,13 +776,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     cats = ctx['field_categories']
     EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'}
 
-    text_props        = cats['text']
-    number_props      = cats['number']
-    date_time_props   = cats['date_time']
-    image_props       = cats['image']
-    boolean_props     = cats['boolean']
-    enum_int_props    = cats['enum_integer']
-    custom_upsert_props = cats['custom_upsert']
+    text_props           = cats['text']
+    number_props         = cats['number']
+    date_time_props      = cats['date_time']
+    image_props          = cats['image']
+    boolean_props        = cats['boolean']
+    enum_int_props       = cats['enum_integer']
+    custom_upsert_props  = cats['custom_upsert']
+    entity_select_props  = cats.get('entity_select', [])
 
     rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
 
@@ -812,7 +829,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
         for p in custom_upsert_props
     )
-    all_states = '\n'.join(filter(None, [dt_states, img_states, bool_states, enum_states, rel_states, custom_states]))
+    entity_select_states = '\n'.join(
+        f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string | null>(src.{p} || null);"
+        for p in entity_select_props
+    )
+    all_states = '\n'.join(filter(None, [dt_states, img_states, bool_states, enum_states, rel_states, custom_states, entity_select_states]))
 
     # ---- Form fields (JSX) ----
     def _tf(p):
@@ -994,6 +1015,37 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"  }}, [all{target_pascal}s]);"
         )
 
+    # Entity select fields (static options embedded in the file)
+    entity_select_opt_setups = []
+    entity_select_jsxs = []
+    entity_select_options = ctx.get('entity_select_options', [])
+    for p in entity_select_props:
+        fk      = _tf(p)
+        sn      = safe_var_name(p)
+        setter  = _setter(sn)
+        req     = p in (model_def.get('required') or [])
+        opts_var = f'{sn}Options'
+        opts_items = ', '.join(
+            f"{{ value: '{o['value']}', label: '{o['label']}' }}"
+            for o in entity_select_options
+        )
+        entity_select_opt_setups.append(f"  const {opts_var} = [{opts_items}];")
+        entity_select_jsxs.append(
+            f"      <Autocomplete\n"
+            f"        options={{{opts_var}}}\n"
+            f"        value={{{opts_var}.find((o) => o.value === {sn}) ?? null}}\n"
+            f"        onChange={{(_, newValue) => set{setter}(newValue?.value ?? null)}}\n"
+            f"        renderInput={{(params) => (\n"
+            f"          <TextField\n"
+            f"            {{...params}}\n"
+            f"            label={{tf('{fk}')}}\n"
+            f"            margin=\"normal\"\n"
+            f"            {'required' if req else ''}\n"
+            f"          />\n"
+            f"        )}}\n"
+            f"      />"
+        )
+
     # Custom upsert fields
     custom_jsxs = []
     for p in custom_upsert_props:
@@ -1004,6 +1056,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     all_parent_fields_jsx = '\n'.join(filter(None, [
         '\n'.join(text_jsxs),
+        '\n'.join(entity_select_jsxs),
         '\n'.join(rel_jsxs),
         '\n'.join(num_jsxs),
         '\n'.join(enum_int_jsxs),
@@ -1015,6 +1068,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # ---- FormData sets ----
     text_ds  = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in text_props)
+    entity_select_ds = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} || '');" for p in entity_select_props)
     num_ds   = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in number_props)
     dt_ds_parts = []
     for p in date_time_props:
@@ -1031,7 +1085,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     bool_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}.toString());" for p in boolean_props)
     enum_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} !== null ? String({safe_var_name(p)}) : '');" for p in enum_int_props)
     cust_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in custom_upsert_props)
-    parent_form_data_sets = '\n'.join(filter(None, [text_ds, rel_ds, num_ds, enum_ds, bool_ds, dt_ds, img_ds, cust_ds]))
+    parent_form_data_sets = '\n'.join(filter(None, [text_ds, entity_select_ds, rel_ds, num_ds, enum_ds, bool_ds, dt_ds, img_ds, cust_ds]))
 
     # ---- Children analysis ----
     # Use the pre-filtered embedded_ch from build_context (passed as non_comment_ch in ctx).
@@ -1552,7 +1606,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'child_grid_components':    child_grid_components,
         'form_upsert_params':       form_upsert_params,
         'enum_ns_hooks':            '\n'.join(enum_ns_hooks),
-        'enum_opt_setups':          '\n'.join(enum_opt_setups),
+        'enum_opt_setups':          '\n'.join(enum_opt_setups + entity_select_opt_setups),
         'rel_opt_setups':           '\n'.join(rel_opt_setups),
         'child_entity_rel_opt':     child_entity_rel_option_setups,
         'validation_call':          validation_call,
@@ -1560,7 +1614,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'custom_upsert_imports':    custom_upsert_imports,
         'has_children':             has_children,
         'has_comment_children':     has_comment_children,
-        'has_many_to_one':          has_many_to_one or bool(enum_int_props),
+        'has_many_to_one':          has_many_to_one or bool(enum_int_props) or bool(entity_select_props),
         'has_datetime_props':       bool(date_time_props),
         'has_image_props':          bool(image_props),
         'has_number_props':         bool(number_props),
