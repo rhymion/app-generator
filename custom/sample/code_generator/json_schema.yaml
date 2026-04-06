@@ -749,6 +749,7 @@ definitions:
       name:
         type: string
         minLength: 1
+        x-entity-select: true
       create:
         type: boolean
       read:
@@ -1473,6 +1474,7 @@ definitions:
       entity_name:
         type: string
         minLength: 1
+        x-entity-select: true
       requestor_role_id:
         type: 
           - string
