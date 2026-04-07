@@ -10,12 +10,28 @@ export async function afterCreate(
   const approvable = created.approvable as { id: string } | null | undefined;
   if (!approvable?.id) return;
 
+  const creatorId = created.creator_id as string | null | undefined;
   const db = tx as Tx;
+
+  // Fetch the creator's role IDs to check requestor_role_id gating
+  let creatorRoleIds: string[] = [];
+  if (creatorId) {
+    const creator = await db.user_account.findUnique({
+      where: { id: creatorId },
+      select: { roles: { select: { id: true } } },
+    });
+    creatorRoleIds = creator?.roles.map((r) => r.id) ?? [];
+  }
+
   const flows = await db.approval_flow.findMany({
     where: { entity_name: 'leave_request' },
   });
 
   for (const flow of flows) {
+    // Skip role-gated flows when the creator doesn't have the requestor role
+    if (flow.requestor_role_id && !creatorRoleIds.includes(flow.requestor_role_id)) {
+      continue;
+    }
     await db.approval_request.create({
       data: {
         approvable_id: approvable.id,
