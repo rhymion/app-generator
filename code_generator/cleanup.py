@@ -66,6 +66,7 @@ def _rmdir_tree(path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def _collect_field_keys(entities: list, schema: dict) -> set:
+    from generators_i18n import _CUSTOM_COMPONENT_FIELD_KEYS
     keys = set()
     for entity in entities:
         model = entity['model']
@@ -79,10 +80,17 @@ def _collect_field_keys(entities: list, schema: dict) -> set:
             if rel.get('type') == 'many-to-one':
                 base = prop_name[:-3] if prop_name.endswith('_id') else prop_name
                 keys.add(to_camel_case(base))
+            elif rel.get('type') == 'one-to-one':
+                continue  # internal bridge model, not user-facing
             else:
                 keys.add(to_camel_case(prop_name))
         for child in entity.get('children', []):
             keys.add(to_camel_case(child['property_name']))
+        # Custom component keys
+        def_key = entity.get('definition_key', '')
+        custom_comp = schema['definitions'].get(def_key, {}).get('x-custom-component') or {}
+        comp_name = custom_comp.get('name', '')
+        keys.update(_CUSTOM_COMPONENT_FIELD_KEYS.get(comp_name, {}).keys())
     return keys
 
 
