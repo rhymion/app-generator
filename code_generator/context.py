@@ -13,6 +13,7 @@ from helpers.schema_helpers import (
     get_parent_relationships,
     get_detail_relation_name,
     is_optional_fk_to_parent,
+    get_one_to_one_rels,
 )
 
 
@@ -44,6 +45,21 @@ class ChildContext:
 
 
 @dataclass
+class OneToOneChildInfo:
+    property_name: str   # e.g. "approval_requests"
+    child_name: str      # e.g. "approval_request"
+    fields: list[FieldInfo]
+    relationships: list[RelInfo]
+
+
+@dataclass
+class OneToOneRelInfo:
+    relation_name: str       # e.g. "approvable"
+    target: str              # e.g. "approvable"
+    children: list[OneToOneChildInfo]
+
+
+@dataclass
 class EntityContext:
     parent: str
     model: str
@@ -54,6 +70,9 @@ class EntityContext:
     children: list[ChildContext]
     form_view_fields: list[FieldInfo]   # parent fields minus timestamps
     all_option_targets: list[str]       # for FormUpsertProps allXxx / xxxPermissions
+    one_to_one_rels: list[OneToOneRelInfo]  # one-to-one outbound FK rels with nested children
+    entity_view_component: str | None = None   # custom component rendered in FormView
+    entity_edit_component: str | None = None   # custom component rendered in FormUpsert
 
 
 # ---------------------------------------------------------------------------
@@ -91,29 +110,35 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     merged_def = {**model_def, 'properties': filtered_props}
     rels_raw = get_parent_relationships(merged_def)
 
-    # Dedupe by target (first occurrence wins, same as TS Map behaviour)
+    # Dedupe by target for import purposes only (each target type imported once)
     seen_targets: dict[str, dict] = {}
     for r in rels_raw:
         seen_targets.setdefault(r['target'], r)
     relationship_targets = list(seen_targets.values())
 
-    # Resolve property name from detail definition (e.g. find "organization" prop that $refs Organization)
+    # All many-to-one rels (not deduplicated) — derive relation name from prop_name directly
     parent_rels = [
         RelInfo(
-            relation_name=get_detail_relation_name(parent, r['target'], schema, def_key),
+            relation_name=r['prop_name'].removesuffix('_id'),
             target=r['target'],
-            label_field=r.get('label_field', r.get('label_field', 'name')),
+            label_field=r.get('label_field', 'name'),
         )
-        for r in relationship_targets
+        for r in rels_raw
     ]
 
     parent_fields = [FieldInfo(k, get_ts_type(v)) for k, v in filtered_props.items()]
     parent_fields.append(FieldInfo('creator_id', 'string | null'))  # enforce id as string for permissions
 
+    # One-to-one FK props (computed early for form_view_fields exclusion)
+    _oto_fk_names_early = {
+        p for p, v in filtered_props.items()
+        if (v.get('x-relationship') or {}).get('type') == 'one-to-one'
+    }
+
     form_view_fields = [
         FieldInfo(k, get_ts_type(v, for_view_props=True))
         for k, v in filtered_props.items()
-        if k not in _TIMESTAMP_FIELDS
+        if k not in _TIMESTAMP_FIELDS and k not in _oto_fk_names_early
     ]
 
     # Child many-to-one rels — needed early for import target and option calculation.
@@ -127,15 +152,37 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         if child_def.get('properties'):
             child_rels_early.extend(get_parent_relationships(child_def))
 
-    # Import targets = union of parent + child relationship targets, filtered to exclude model itself
+    # One-to-one outbound FK rels (computed early for import targets)
+    oto_rels_early = get_one_to_one_rels({**model_def, 'properties': filtered_props}, schema)
+    # Only import oto child rel targets that have their own generated types
+    def _has_generated_types(target: str) -> bool:
+        detail = schema['definitions'].get(f'{target}_detail', {})
+        gen = detail.get('x-generate') or {}
+        return any(gen.get(k) for k in ('list', 'view', 'new', 'edit', 'delete', 'api'))
+
+    oto_child_rel_targets = [
+        cr['target']
+        for oto in oto_rels_early
+        for c in oto['children']
+        for cr in c['child_rels']
+        if cr['target'] != oto['target'] and _has_generated_types(cr['target'])
+    ]
+
+    # Import targets = union of parent + child + one-to-one nested rel targets
     all_import_targets = _dedupe_ordered([
         *[r['target'] for r in relationship_targets],
         *[r['target'] for r in child_rels_early],
+        *oto_child_rel_targets,
     ])
     import_targets = [t for t in all_import_targets if t != model]
 
-    # XxxOption types — parent rels whose target is not the model itself
-    option_types = [r for r in parent_rels if r.target != model]
+    # XxxOption types — parent rels whose target is not the model itself (deduplicated by target)
+    _seen_option_targets: set[str] = set()
+    option_types = []
+    for r in parent_rels:
+        if r.target != model and r.target not in _seen_option_targets:
+            _seen_option_targets.add(r.target)
+            option_types.append(r)
 
     # Build child contexts, deduplicating type declarations
     children: list[ChildContext] = []
@@ -207,6 +254,43 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         *child_rel_targets,
     ])
 
+    # One-to-one outbound FK rels with nested children (for types + display)
+    oto_rels_raw = get_one_to_one_rels({**model_def, 'properties': filtered_props}, schema)
+    one_to_one_rels: list[OneToOneRelInfo] = []
+    for oto in oto_rels_raw:
+        oto_children: list[OneToOneChildInfo] = []
+        for c in oto['children']:
+            child_def = c['child_def']
+            child_filtered = filter_fields(child_def.get('properties', {}), None)
+            c_fields = [FieldInfo(k, get_ts_type(v)) for k, v in child_filtered.items()]
+            c_rels = [
+                RelInfo(
+                    relation_name=r['prop_name'].removesuffix('_id'),
+                    target=r['target'],
+                    label_field=r.get('label_field', 'name'),
+                )
+                for r in c['child_rels']
+                if r['target'] != oto['target']  # exclude back-ref to one-to-one parent
+            ]
+            oto_children.append(OneToOneChildInfo(
+                property_name=c['property_name'],
+                child_name=c['child_name'],
+                fields=c_fields,
+                relationships=c_rels,
+            ))
+        one_to_one_rels.append(OneToOneRelInfo(
+            relation_name=oto['relation_name'],
+            target=oto['target'],
+            children=oto_children,
+        ))
+
+    # Custom view/edit components from x-custom-component config
+    _xcc = schema['definitions'].get(def_key, {}).get('x-custom-component') or {}
+    _xcc_name = _xcc.get('name')
+    _xcc_target = _xcc.get('target') or ['list']
+    entity_view_component = _xcc_name if (_xcc_name and 'view' in _xcc_target) else None
+    entity_edit_component = _xcc_name if (_xcc_name and 'edit' in _xcc_target) else None
+
     return EntityContext(
         parent=parent,
         model=model,
@@ -217,4 +301,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         children=children,
         form_view_fields=form_view_fields,
         all_option_targets=all_option_targets,
+        one_to_one_rels=one_to_one_rels,
+        entity_view_component=entity_view_component,
+        entity_edit_component=entity_edit_component,
     )

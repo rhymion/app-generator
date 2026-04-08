@@ -10,6 +10,41 @@ export type {{ parent | pascal_case }} = {
 {% for rel in parent_rels %}
   {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
 {% endfor %}
+{% for oto in one_to_one_rels %}
+  {{ oto.relation_name }}?: {
+    id: string;
+{% for child in oto.children %}
+    {{ child.property_name }}: {
+{% for field in child.fields %}
+      {{ field.name }}: {{ field.ts_type }};
+{% endfor %}
+{% if child.child_name == 'approval_request' %}
+{% for rel in child.relationships %}
+{% if rel.relation_name == 'approval_flow' %}
+      {{ rel.relation_name }}?: ({{ rel.target | pascal_case }} & { preceded_by?: { id: string }[] }) | null;
+{% else %}
+      {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+{% endif %}
+{% endfor %}
+      approval_histories?: {
+        id: string;
+        pre_status: number;
+        post_status: number;
+        message?: string | null;
+        created_at: Date | string;
+        creator?: { id: string; name: string } | null;
+      }[];
+{% else %}
+{% for rel in child.relationships %}
+      {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+{% endfor %}
+{% endif %}
+    }[];
+{% endfor %}
+  } | null;
+{% endfor %}
+  creator?: { id: string; name: string } | null;
+  updater?: { id: string; name: string } | null;
 };
 
 {% for rel in option_types %}
@@ -65,12 +100,49 @@ export type FormViewProps = Readonly<{
 {% for child in children %}
     {{ child.property_name }}: {{ child.name | pascal_case }}[];
 {% endfor %}
+{% for oto in one_to_one_rels %}
+    {{ oto.relation_name }}?: {
+      id: string;
+{% for child in oto.children %}
+      {{ child.property_name }}: {
+{% for field in child.fields %}
+        {{ field.name }}: {{ field.ts_type }};
+{% endfor %}
+{% if child.child_name == 'approval_request' %}
+{% for rel in child.relationships %}
+{% if rel.relation_name == 'approval_flow' %}
+        {{ rel.relation_name }}?: ({{ rel.target | pascal_case }} & { preceded_by?: { id: string }[] }) | null;
+{% else %}
+        {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+{% endif %}
+{% endfor %}
+        approval_histories?: {
+          id: string;
+          pre_status: number;
+          post_status: number;
+          message?: string | null;
+          created_at: Date | string;
+          creator?: { id: string; name: string } | null;
+        }[];
+{% else %}
+{% for rel in child.relationships %}
+        {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+{% endfor %}
+{% endif %}
+      }[];
+{% endfor %}
+    } | null;
+{% endfor %}
     created_at?: string | Date;
     updated_at?: string | Date;
     creator?: { id: string; name: string } | null;
     updater?: { id: string; name: string } | null;
   };
   permissions?: ModelPermissions;
+{% if entity_view_component or entity_edit_component %}
+  currentUserRoleIds?: string[];
+  currentUserId?: string | null;
+{% endif %}
 }>;
 
 export type FormUpsertProps = Readonly<FormViewProps & {

@@ -342,7 +342,8 @@ def service_context(ctx: dict) -> dict:
         f"import prisma from '@/lib/prisma';\n"
         f"import {{ normalizeValue,{' normalizeChildRefs,' if has_non_comment_ch else ''}"
         f"{' assertNotStale,' if can_update else ''} type NormalizedSnapshot }} from '@/lib/normalize';"
-        + (f"\nimport {{ validateOnAdd, validateOnUpdate }} from './service_validation';" if (can_create or can_update) else '') +
+        + (f"\nimport {{ validateOnAdd, validateOnUpdate }} from './service_validation';" if (can_create or can_update) else '')
+        + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '') +
         f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'>;\n\n"
         f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
         f"  const safeSnapshot = (snapshot ?? {{}}) as Record<string, unknown>;\n"
@@ -511,7 +512,8 @@ def form_view_context(ctx: dict) -> dict:
     use_dayjs     = False
 
     rel_by_prop = {r['prop_name']: r for r in ctx['parent_rels_raw']}
-    EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'}
+    one_to_one_fk_props = {r['prop_name'] for r in ctx.get('one_to_one_rels', [])}
+    EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'} | one_to_one_fk_props
     parent_props = [k for k in filtered_props if k not in EXCLUDE]
 
     custom_view_props = [
@@ -550,11 +552,27 @@ def form_view_context(ctx: dict) -> dict:
         return to_camel_case(p)
 
     # Text fields (incl. relationship display)
+    entity_select_props_view = {
+        p for p in other_flds
+        if filtered_props.get(p, {}).get('x-entity-select')
+    }
+    entity_select_options = ctx.get('entity_select_options', [])
     text_jsxs = []
     for p in other_flds:
         fk = _tf(p)
         rel = rel_by_prop.get(p)
-        if rel:
+        if p in entity_select_props_view:
+            opts_var = f'{safe_var_name(p)}Options'
+            opts_items = ', '.join(
+                f"{{ value: '{o['value']}', label: '{o['label']}' }}"
+                for o in entity_select_options
+            )
+            text_jsxs.append(
+                f"      <TextField\n        label={{tf('{fk}')}}\n"
+                f"        value={{[{opts_items}].find((o) => o.value === src.{p})?.label ?? src.{p} ?? ''}}\n"
+                f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n      />"
+            )
+        elif rel:
             label_f  = rel.get('label_field', 'name')
             label_fk = fk.removesuffix('Id')
             rel_name = rel.get('relation_name', p.removesuffix('_id'))
@@ -683,13 +701,23 @@ def form_view_context(ctx: dict) -> dict:
                     f"      </div>"
                 )
             else:
+                _rel = child.get('relationship') or {}
+                _lf = _rel.get('label_field', 'name') if _rel else 'name'
+                _slf = _rel.get('secondary_label_field') if _rel else None
+                if _slf:
+                    _sec_parts = _slf.split('.')
+                    _sec_rel = _sec_parts[0]
+                    _sec_field = _sec_parts[1] if len(_sec_parts) > 1 else 'name'
+                    _view_val = f"f.{_sec_rel}?.{_sec_field} || f.{_lf}"
+                else:
+                    _view_val = f"f.{_lf}"
                 child_view_grids.append(
                     f"      <div>\n"
                     f"        <ListWrapper\n"
                     f"          items={{src.{prop}.map(f => ({{\n"
                     f"            id: f.id,\n"
-                    f"            value: f.name,\n"
-                    f"            label: f.name,\n"
+                    f"            value: {_view_val},\n"
+                    f"            label: {_view_val},\n"
                     f"          }}))}}\n"
                     f"          itemType=\"text\"\n"
                     f"          showTitle={{true}}\n"
@@ -748,13 +776,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     cats = ctx['field_categories']
     EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'}
 
-    text_props        = cats['text']
-    number_props      = cats['number']
-    date_time_props   = cats['date_time']
-    image_props       = cats['image']
-    boolean_props     = cats['boolean']
-    enum_int_props    = cats['enum_integer']
-    custom_upsert_props = cats['custom_upsert']
+    text_props           = cats['text']
+    number_props         = cats['number']
+    date_time_props      = cats['date_time']
+    image_props          = cats['image']
+    boolean_props        = cats['boolean']
+    enum_int_props       = cats['enum_integer']
+    custom_upsert_props  = cats['custom_upsert']
+    entity_select_props  = cats.get('entity_select', [])
 
     rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
 
@@ -800,7 +829,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
         for p in custom_upsert_props
     )
-    all_states = '\n'.join(filter(None, [dt_states, img_states, bool_states, enum_states, rel_states, custom_states]))
+    entity_select_states = '\n'.join(
+        f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string | null>(src.{p} || null);"
+        for p in entity_select_props
+    )
+    all_states = '\n'.join(filter(None, [dt_states, img_states, bool_states, enum_states, rel_states, custom_states, entity_select_states]))
 
     # ---- Form fields (JSX) ----
     def _tf(p):
@@ -982,6 +1015,37 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"  }}, [all{target_pascal}s]);"
         )
 
+    # Entity select fields (static options embedded in the file)
+    entity_select_opt_setups = []
+    entity_select_jsxs = []
+    entity_select_options = ctx.get('entity_select_options', [])
+    for p in entity_select_props:
+        fk      = _tf(p)
+        sn      = safe_var_name(p)
+        setter  = _setter(sn)
+        req     = p in (model_def.get('required') or [])
+        opts_var = f'{sn}Options'
+        opts_items = ', '.join(
+            f"{{ value: '{o['value']}', label: '{o['label']}' }}"
+            for o in entity_select_options
+        )
+        entity_select_opt_setups.append(f"  const {opts_var} = [{opts_items}];")
+        entity_select_jsxs.append(
+            f"      <Autocomplete\n"
+            f"        options={{{opts_var}}}\n"
+            f"        value={{{opts_var}.find((o) => o.value === {sn}) ?? null}}\n"
+            f"        onChange={{(_, newValue) => set{setter}(newValue?.value ?? null)}}\n"
+            f"        renderInput={{(params) => (\n"
+            f"          <TextField\n"
+            f"            {{...params}}\n"
+            f"            label={{tf('{fk}')}}\n"
+            f"            margin=\"normal\"\n"
+            f"            {'required' if req else ''}\n"
+            f"          />\n"
+            f"        )}}\n"
+            f"      />"
+        )
+
     # Custom upsert fields
     custom_jsxs = []
     for p in custom_upsert_props:
@@ -992,6 +1056,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     all_parent_fields_jsx = '\n'.join(filter(None, [
         '\n'.join(text_jsxs),
+        '\n'.join(entity_select_jsxs),
         '\n'.join(rel_jsxs),
         '\n'.join(num_jsxs),
         '\n'.join(enum_int_jsxs),
@@ -1003,6 +1068,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # ---- FormData sets ----
     text_ds  = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in text_props)
+    entity_select_ds = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} || '');" for p in entity_select_props)
     num_ds   = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in number_props)
     dt_ds_parts = []
     for p in date_time_props:
@@ -1019,7 +1085,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     bool_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}.toString());" for p in boolean_props)
     enum_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} !== null ? String({safe_var_name(p)}) : '');" for p in enum_int_props)
     cust_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in custom_upsert_props)
-    parent_form_data_sets = '\n'.join(filter(None, [text_ds, rel_ds, num_ds, enum_ds, bool_ds, dt_ds, img_ds, cust_ds]))
+    parent_form_data_sets = '\n'.join(filter(None, [text_ds, entity_select_ds, rel_ds, num_ds, enum_ds, bool_ds, dt_ds, img_ds, cust_ds]))
 
     # ---- Children analysis ----
     # Use the pre-filtered embedded_ch from build_context (passed as non_comment_ch in ctx).
@@ -1114,16 +1180,25 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             _rel = c.get('relationship') or {}
             if _rel.get('type') == 'many-to-many':
                 _uc_label = _rel.get('label_field', 'name')
+                _uc_secondary = _rel.get('secondary_label_field')
             elif child_name == model:
                 _sr = next((r for r in ctx.get('parent_rels_raw', []) if r['target'] == model), None)
                 _uc_label = _sr.get('label_field', 'name') if _sr else 'name'
+                _uc_secondary = None
             else:
                 _uc_label = 'name'
+                _uc_secondary = None
+            if _uc_secondary:
+                _sec_parts = _uc_secondary.split('.')
+                _sec_rel, _sec_field = _sec_parts[0], _sec_parts[1] if len(_sec_parts) > 1 else 'name'
+                _label_expr = f"f.{_uc_label} + (f.{_sec_rel} ? ` - ${{f.{_sec_rel}.{_sec_field}}}` : '')"
+            else:
+                _label_expr = f"f.{_uc_label}"
             child_grid_setup_parts.append(
                 f"  const [initial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                 f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
                 f"    value: f.id,\n"
-                f"    label: f.{_uc_label},\n"
+                f"    label: {_label_expr},\n"
                 f"    originalId: f.id,\n"
                 f"  }})));"
             )
@@ -1382,9 +1457,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 # for optional-FK lists, look for a labelField in the child's x-relationship back to this entity,
                 # otherwise fall back to 'name'
                 ac_label_field = 'name'
+            ac_secondary = rel.get('secondary_label_field') if is_m2m else None
             target_pascal = to_pascal_case(autocomplete_target)
             self_rel = next((r for r in parent_rels_raw if r['target'] == model), None) if is_self else None
             filter_logic = f'.filter(item => !item.{self_rel["prop_name"]} || item.{self_rel["prop_name"]} === src.id)' if self_rel else ''
+            if ac_secondary:
+                _sec_parts = ac_secondary.split('.')
+                _sec_rel, _sec_field = _sec_parts[0], _sec_parts[1] if len(_sec_parts) > 1 else 'name'
+                ac_label_expr = f"item.{ac_label_field} + (item.{_sec_rel} ? ` - ${{item.{_sec_rel}.{_sec_field}}}` : '')"
+            else:
+                ac_label_expr = f"item.{ac_label_field}"
             child_grid_components_parts.append(
                 f"      <EditableListWrapper\n"
                 f"        ref={{{child_var}Ref}}\n"
@@ -1397,7 +1479,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"        textFieldPlaceholder=\"Enter name\"\n"
                 f"        allAutocompleteOptions={{all{target_pascal}s{filter_logic}.map(item => ({{\n"
                 f"          id: item.id,\n"
-                f"          label: item.{ac_label_field},\n"
+                f"          label: {ac_label_expr},\n"
                 f"          value: item.id,\n"
                 f"        }}))}}\n"
                 f"        excludeOptionIds={{[src.id]}}\n"
@@ -1461,10 +1543,13 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # FormUpsert params signature
     extra_default_props = ', '.join(f"all{to_pascal_case(t)}s = []" for t in selection_targets)
     sel_perm_props = ', '.join(f"{to_camel_case(t)}Permissions" for t in selection_targets)
-    if extra_default_props or sel_perm_props or has_comment_children:
+    entity_edit_component = ctx.get('entity_edit_component')
+    has_current_user_role_ids = bool(entity_edit_component)
+    if extra_default_props or sel_perm_props or has_comment_children or has_current_user_role_ids:
         form_upsert_params = (
             f"{{ src, isEdit, permissions"
             + (', currentUserId' if has_comment_children else '')
+            + (', currentUserRoleIds' if has_current_user_role_ids else '')
             + (f', {extra_default_props}' if extra_default_props else '')
             + (f', {sel_perm_props}' if sel_perm_props else '')
             + " }: FormUpsertProps"
@@ -1521,7 +1606,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'child_grid_components':    child_grid_components,
         'form_upsert_params':       form_upsert_params,
         'enum_ns_hooks':            '\n'.join(enum_ns_hooks),
-        'enum_opt_setups':          '\n'.join(enum_opt_setups),
+        'enum_opt_setups':          '\n'.join(enum_opt_setups + entity_select_opt_setups),
         'rel_opt_setups':           '\n'.join(rel_opt_setups),
         'child_entity_rel_opt':     child_entity_rel_option_setups,
         'validation_call':          validation_call,
@@ -1529,7 +1614,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'custom_upsert_imports':    custom_upsert_imports,
         'has_children':             has_children,
         'has_comment_children':     has_comment_children,
-        'has_many_to_one':          has_many_to_one or bool(enum_int_props),
+        'has_many_to_one':          has_many_to_one or bool(enum_int_props) or bool(entity_select_props),
         'has_datetime_props':       bool(date_time_props),
         'has_image_props':          bool(image_props),
         'has_number_props':         bool(number_props),

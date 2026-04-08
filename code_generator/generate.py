@@ -164,6 +164,11 @@ def generate(schema_path: str, output_dir: str) -> None:
                     lib_dir / 'service_validation.ts',
                     _render(env, 'service_validation_stub.ts.jinja2', ctx),
                 )
+            if can_new:
+                _write_stub(
+                    lib_dir / 'service_after_create.ts',
+                    _render(env, 'service_after_create_stub.ts.jinja2', ctx),
+                )
 
         # --- actions.ts ---
         if can_new or can_edit or can_delete:

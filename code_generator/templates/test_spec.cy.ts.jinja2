@@ -73,6 +73,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {{ I }}cy.clickButton('Save');
 {{ I }}cy.url().should('include', '/{{ parent }}');
+{{ I }}cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
 {% if after_create_id_is_expr %}
 {{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).should('be.visible');
@@ -146,6 +147,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {{ I }}cy.clickButton('Save');
 {{ I }}cy.url().should('include', '/{{ parent }}');
+{{ I }}cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
 {% if after_create_id_is_expr %}
 {{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).should('be.visible');
@@ -243,6 +245,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}');
+        cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
         cy.contains('{{ list_id_1 }}').should('be.visible');
 {% endif %}
@@ -300,6 +303,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}');
+        cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
         cy.contains('{{ list_id_1 }}').should('be.visible');
 {% endif %}
@@ -322,14 +326,15 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% else %}
         cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
-{% if has_edit_primary %}
-        cy.clearAndFillField('{{ edit_field_label }}', '{{ edit_update_value }}');
+{% if edit_primary_cmd %}
+{{ edit_primary_cmd }}
 {% endif %}
 {% if edit_fill_cmd_3_3 %}
 {{ edit_fill_cmd_3_3 }}
 {% endif %}
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}');
+        cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
         cy.contains('{{ list_id_updated }}').should('be.visible');
 {% endif %}
@@ -358,7 +363,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.selectDataGridRows([0]);
       cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+{% if list_id_is_unique %}
       cy.contains('{{ list_id_1 }}').should('not.exist');
+{% endif %}
       getDataGridRowCount().should('eq', 1);
     });
 
@@ -368,7 +375,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.selectDataGridRows([0, 1]);
       cy.get('div').find('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+{% if list_id_is_unique %}
       cy.contains('{{ list_id_1 }}').should('not.exist');
+{% endif %}
       getDataGridRowCount().should('eq', 1);
     });
 
@@ -389,7 +398,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.clickButton('Delete {{ title }}');
       cy.get('div[role="dialog"]').find('button').contains('Delete').click();
       cy.url().should('include', '/{{ parent }}');
+      cy.url().should('not.include', '/{{ parent }}/');
+{% if list_id_is_unique %}
       cy.contains('{{ list_id_1 }}').should('not.exist');
+{% endif %}
 {% else %}
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
 {% if can_view %}
@@ -536,6 +548,166 @@ describe('Testing {{ title }} pages and their behavior', () => {
       });
     });
 {% endif %}
+  });
+{% endif %}
+{% if has_approvable %}
+
+  describe('Approval', () => {
+    it('7.1 creates approval requests for user in requestor role', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.requestorUser.email, 'test-password');
+          cy.visit('/en/{{ parent }}/new');
+{% for cmd in required_fill_cmds %}
+          {{ cmd | trim }}
+{% endfor %}
+          cy.clickButton('Save');
+          cy.url().should('include', '/{{ parent }}');
+{% if after_create_id_is_expr %}
+          cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
+{% else %}
+          cy.contains('{{ after_create_id }}').click();
+{% endif %}
+          cy.url().should('include', '/{{ parent }}/view');
+          // Requestor is in requestorRole → both flows apply → 2 approval_requests
+          cy.get('table').find('tr').should('have.length', 3);
+        });
+      });
+    });
+
+    it('7.2 does not create approval request for role-gated flow when user lacks requestor role', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.noRoleUser.email, 'test-password');
+          cy.visit('/en/{{ parent }}/new');
+{% for cmd in required_fill_cmds %}
+          {{ cmd | trim }}
+{% endfor %}
+          cy.clickButton('Save');
+          cy.url().should('include', '/{{ parent }}');
+{% if after_create_id_is_expr %}
+          cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
+{% else %}
+          cy.contains('{{ after_create_id }}').click();
+{% endif %}
+          cy.url().should('include', '/{{ parent }}/view');
+          // noRoleUser not in requestorRole → only flowWithoutRole applies → 1 approval_request
+          cy.get('table').find('tr').should('have.length', 2);
+        });
+      });
+    });
+
+    it('7.4 shows Approve/Reject buttons for user in approver role', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
+          cy.visit(`/en/{{ parent }}/view/${data.record.id}`);
+          cy.get('[aria-label="Approve"]').should('be.visible');
+          cy.get('[aria-label="Reject"]').should('be.visible');
+        });
+      });
+    });
+
+    it('7.5 does not show Approve/Reject buttons for non-approver', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.requestorUser.email, 'test-password');
+          cy.visit(`/en/{{ parent }}/view/${data.record.id}`);
+          cy.get('[aria-label="Approve"]').should('not.exist');
+          cy.get('[aria-label="Reject"]').should('not.exist');
+        });
+      });
+    });
+
+    it('7.6 approver can approve a pending request', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
+          cy.visit(`/en/{{ parent }}/view/${data.record.id}`);
+          cy.get('[aria-label="Approve"]').click();
+          cy.get('[role="dialog"]').find('button').contains('Approve').click();
+          cy.contains('Approved').should('be.visible');
+          cy.get('[aria-label="Approve"]').should('not.exist');
+          // History expand button should appear after approval
+          cy.get('[aria-label="Expand history"]').should('be.visible');
+        });
+      });
+    });
+
+    it('7.7 approver can reject a pending request', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
+          cy.visit(`/en/{{ parent }}/view/${data.record.id}`);
+          cy.get('[aria-label="Reject"]').click();
+          cy.get('[role="dialog"]').find('button').contains('Reject').click();
+          cy.contains('Rejected').should('be.visible');
+          cy.get('[aria-label="Reject"]').should('not.exist');
+        });
+      });
+    });
+
+    it('7.9 Approve/Reject buttons disabled when preceding approval not done', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser2.email, 'test-password');
+          cy.visit(`/en/{{ parent }}/view/${data.record.id}`);
+          // flow2 requires flow1 approved first — buttons should not exist
+          cy.get('[aria-label="Approve"]').should('not.exist');
+          cy.get('[aria-label="Reject"]').should('not.exist');
+        });
+      });
+    });
+
+    it('7.8 requestor can re-submit a rejected request', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithRejectedApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.requestorUser.email, 'test-password');
+          cy.visit(`/en/{{ parent }}/view/${data.record.id}`);
+          cy.get('[aria-label="Re-submit"]').should('be.visible');
+          cy.get('[aria-label="Re-submit"]').click();
+          cy.get('[role="dialog"]').find('button').contains('Re-submit').click();
+          cy.contains('Pending').should('be.visible');
+          cy.get('[aria-label="Re-submit"]').should('not.exist');
+          // History expand button should appear after re-submission
+          cy.get('[aria-label="Expand history"]').should('be.visible');
+        });
+      });
+    });
   });
 {% endif %}
 });

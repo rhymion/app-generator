@@ -24,6 +24,20 @@ from helpers.schema_helpers import filter_fields
 
 _SYSTEM_PROPS = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
 
+# i18n keys (Fields namespace) required by each named custom component.
+# When a schema entity uses x-custom-component with one of these names, its
+# keys are injected into every language file automatically.
+_CUSTOM_COMPONENT_FIELD_KEYS: dict[str, dict[str, str]] = {
+    'ApprovalSection': {
+        'approve': 'Approve',
+        'approvalHistory': 'Approval History',
+        'approvalRequests': 'Approval Requests',
+        'message': 'Message',
+        'reject': 'Reject',
+        'resubmit': 'Re-submit',
+    },
+}
+
 
 def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
     """Return {camelCaseKey: 'Title Case Label'} for every field across all entities."""
@@ -46,11 +60,21 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
                 base = prop_name[:-3] if prop_name.endswith('_id') else prop_name
                 key = to_camel_case(base)
                 label = to_title_case(base)
+            elif rel.get('type') == 'one-to-one':
+                # Outbound one-to-one FK = internal bridge model, not user-facing — skip
+                continue
             else:
                 key = to_camel_case(prop_name)
                 label = to_title_case(prop_name)
 
             keys.setdefault(key, label)
+
+        # Custom component keys (e.g. ApprovalSection uses approve/reject/resubmit/…)
+        def_key = entity.get('definition_key', '')
+        custom_comp = schema['definitions'].get(def_key, {}).get('x-custom-component') or {}
+        comp_name = custom_comp.get('name', '')
+        for comp_key, comp_label in _CUSTOM_COMPONENT_FIELD_KEYS.get(comp_name, {}).items():
+            keys.setdefault(comp_key, comp_label)
 
         # Child properties: section heading key + column header keys for child tables
         # column_def_context uses the child's unfiltered base definition (excluding id,

@@ -5,6 +5,9 @@ export async function add{{ parent_pascal }}(userId: string{% if parent_params_w
     await validateOnAdd(tx, {
 {{ validation_data_obj }}
     });
+{% if one_to_one_pre_creates %}
+{{ one_to_one_pre_creates }}
+{% endif %}
     const created = await tx.{{ model }}.create({
       data: {
         creator_id: userId,
@@ -14,6 +17,13 @@ export async function add{{ parent_pascal }}(userId: string{% if parent_params_w
 {{ child_nested_create }}
 {% endif %}
       },
+    });
+{% if one_to_one_spread %}
+    await afterCreate(tx, { ...created, {{ one_to_one_spread }} } as Record<string, unknown>, {
+{% else %}
+    await afterCreate(tx, created as Record<string, unknown>, {
+{% endif %}
+{{ validation_data_obj }}
     });
     return { id: created.id };
   });
@@ -32,7 +42,7 @@ export async function update{{ parent_pascal }}(userId: string, id: string{% if 
       where: { id },
       data: {
         updater_id: userId,
-{{ parent_data_obj }}
+{{ parent_data_obj_update }}
 {% if child_nested_update %}
 {{ child_nested_update }}
 {% endif %}

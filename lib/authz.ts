@@ -229,3 +229,14 @@ export async function assertPermission(permissions: OperationFlags, operation: O
     throw new Error(`Access denied: ${model ?? 'model'}.${operation}`);
   }
 }
+
+/** Returns the IDs of all roles the current user (or given userId) belongs to. */
+export const getUserRoleIds = cache(async (userId?: string | null): Promise<string[]> => {
+  const resolvedUserId = userId ?? await getSessionUserId();
+  if (!resolvedUserId) return [];
+  const user = await prisma.user_account.findUnique({
+    where: { id: resolvedUserId },
+    select: { roles: { select: { id: true } } },
+  });
+  return user?.roles.map(r => r.id) ?? [];
+});

@@ -28,6 +28,24 @@ export function getGeneratedTasks() {
       return await populate{{ entity.pascal }}{{ child.pascal }}Data(params.parentId, params.length || 1);
     },
 {% endfor %}
+{% if entity.has_approvable %}
+    async 'db:setup{{ entity.pascal }}ApprovalFlow'() {
+      const { setup{{ entity.pascal }}ApprovalFlow } = require('{{ entity.helper_path }}');
+      return await setup{{ entity.pascal }}ApprovalFlow();
+    },
+    async 'db:setup{{ entity.pascal }}OrderedApprovalFlow'() {
+      const { setup{{ entity.pascal }}OrderedApprovalFlow } = require('{{ entity.helper_path }}');
+      return await setup{{ entity.pascal }}OrderedApprovalFlow();
+    },
+    async 'db:populate{{ entity.pascal }}WithApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populate{{ entity.pascal }}WithApproval } = require('{{ entity.helper_path }}');
+      return await populate{{ entity.pascal }}WithApproval(params.creatorId, params.approvalFlowIds);
+    },
+    async 'db:populate{{ entity.pascal }}WithRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populate{{ entity.pascal }}WithRejectedApproval } = require('{{ entity.helper_path }}');
+      return await populate{{ entity.pascal }}WithRejectedApproval(params.creatorId, params.approvalFlowIds);
+    },
+{% endif %}
 {% endfor %}
 {% if has_user_account_populate %}
     async 'db:populateUserAccount'(length: number) {

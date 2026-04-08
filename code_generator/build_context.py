@@ -13,7 +13,7 @@ from helpers.naming import (
 from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
-    is_optional_fk_to_parent, get_parent_fk_props,
+    is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
 )
 import copy
 
@@ -358,11 +358,13 @@ def _int_enum_option(v, i: int) -> str:
 # ---------------------------------------------------------------------------
 
 def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
-                            generate_config: dict) -> dict:
+                            generate_config: dict,
+                            one_to_one_fk_props: set | None = None) -> dict:
     rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
+    _oto_fk = one_to_one_fk_props or set()
     parent_props = [
         k for k in filtered_props
-        if k not in _EXCLUDE_ID_TS and k != 'id' and k not in rel_prop_names
+        if k not in _EXCLUDE_ID_TS and k != 'id' and k not in rel_prop_names and k not in _oto_fk
     ]
 
     custom_upsert = []
@@ -371,6 +373,7 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
     enum_integer  = []
     image         = []
     boolean       = []
+    entity_select = []
     text          = []
 
     for p in parent_props:
@@ -391,6 +394,8 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
             boolean.append(p)
         elif actual == 'string' and fmt == 'uri':
             image.append(p)
+        elif actual == 'string' and defn.get('x-entity-select'):
+            entity_select.append(p)
         else:
             text.append(p)
 
@@ -401,8 +406,26 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         'enum_integer': enum_integer,
         'image': image,
         'boolean': boolean,
+        'entity_select': entity_select,
         'text': text,
     }
+
+
+# ---------------------------------------------------------------------------
+# Entity select options helper
+# ---------------------------------------------------------------------------
+
+def _get_entity_options(schema: dict) -> list[dict]:
+    """Returns list of {value, label} for all schema entities that have pages."""
+    from generate_types import extract_entities
+    options = []
+    seen = set()
+    for e in extract_entities(schema):
+        parent = e['parent']
+        if parent not in seen:
+            seen.add(parent)
+            options.append({'value': parent, 'label': to_title_case(parent)})
+    return options
 
 
 # ---------------------------------------------------------------------------
@@ -429,20 +452,22 @@ def build_context(entity: dict, schema: dict) -> dict:
     can_list   = gen_cfg.get('list',   True) is not False
     can_view   = gen_cfg.get('view',   True) is not False
 
-    # Parent relationships (many-to-one), deduped by target
+    # Parent relationships (many-to-one) — all of them, not deduplicated by target
     merged_def    = {**model_def, 'properties': filtered_props}
     parent_rels_raw = get_parent_relationships(merged_def)
+    # relationship_targets: deduplicated by target for import / type purposes
     seen: dict[str, dict] = {}
     for r in parent_rels_raw:
         seen.setdefault(r['target'], r)
     relationship_targets = list(seen.values())
 
+    # parent_rels: all rels with relation_name derived from prop_name directly
     parent_rels = [
         {
             **r,
-            'relation_name': get_detail_relation_name(parent, r['target'], schema, def_key),
+            'relation_name': r['prop_name'].removesuffix('_id'),
         }
-        for r in relationship_targets
+        for r in parent_rels_raw
     ]
 
     has_org_rel          = any(r['target'] == 'organization' for r in parent_rels)
@@ -453,8 +478,12 @@ def build_context(entity: dict, schema: dict) -> dict:
         f'{{ id: true, creator_id: true{", assignee_id: true" if has_assignee_id else ""} }}'
     )
 
-    # Parent prop infos (excluding id + timestamps)
-    parent_props = [k for k in filtered_props if k not in _EXCLUDE_ID_TS]
+    # One-to-one outbound FK rels (FK is on this model, target auto-created)
+    one_to_one_rels = get_one_to_one_rels(merged_def, schema)
+    one_to_one_fk_props = {r['prop_name'] for r in one_to_one_rels}
+
+    # Parent prop infos (excluding id + timestamps + one-to-one FK props)
+    parent_props = [k for k in filtered_props if k not in _EXCLUDE_ID_TS and k not in one_to_one_fk_props]
     parent_prop_infos = [
         {'prop': p, 'var_name': safe_var_name(p), 'def': filtered_props[p]}
         for p in parent_props
@@ -463,8 +492,28 @@ def build_context(entity: dict, schema: dict) -> dict:
     parent_params_with_types = ', '.join(
         f"{p['var_name']}: {get_ts_type(p['def'])}" for p in parent_prop_infos
     )
-    parent_data_obj      = '\n'.join(f"        {p['prop']}: {p['var_name']}," for p in parent_prop_infos)
+    _base_data_lines = [f"        {p['prop']}: {p['var_name']}," for p in parent_prop_infos]
+    # Explicit pre-create statements for one-to-one targets (e.g. const approvable = await tx.approvable.create({ data: {} });)
+    one_to_one_pre_creates = '\n'.join(
+        f"    const {r['relation_name']} = await tx.{r['target']}.create({{ data: {{}} }});"
+        for r in one_to_one_rels
+    )
+    # FK data lines for one-to-one targets (e.g. approvable_id: approvable.id,)
+    one_to_one_fk_data_lines = '\n'.join(
+        f"        {r['prop_name']}: {r['relation_name']}.id,"
+        for r in one_to_one_rels
+    )
+    parent_data_obj = '\n'.join(
+        _base_data_lines + ([one_to_one_fk_data_lines] if one_to_one_fk_data_lines else [])
+    )
+    parent_data_obj_update = '\n'.join(_base_data_lines)
     validation_data_obj  = '\n'.join(f"      {p['prop']}: {p['var_name']}," for p in parent_prop_infos)
+    # Synthetic object spreading created record with nested one-to-one stubs for afterCreate
+    one_to_one_spread = ', '.join(
+        f"{r['relation_name']}: {{ id: created.{r['prop_name']} }}"
+        for r in one_to_one_rels
+    )
+    one_to_one_include = ''  # not used with explicit creation approach
 
     # Snapshot
     snapshot_field_mappings = '\n'.join(
@@ -525,7 +574,7 @@ def build_context(entity: dict, schema: dict) -> dict:
     selection_targets = _get_selection_targets(children_raw, parent_rels_raw, schema, model)
 
     # Field categorisation (for FormUpsert / FormView)
-    field_categories = _categorize_form_fields(filtered_props, parent_rels_raw, gen_cfg)
+    field_categories = _categorize_form_fields(filtered_props, parent_rels_raw, gen_cfg, one_to_one_fk_props)
 
     # Default props (page_new)
     def _default_value(k: str, defn: dict) -> str:
@@ -563,7 +612,18 @@ def build_context(entity: dict, schema: dict) -> dict:
 
     # Detail def for custom component
     detail_def = schema['definitions'].get(def_key, {})
-    entity_custom_component = (detail_def.get('x-custom-component') or {}).get('name')
+    _xcc = detail_def.get('x-custom-component') or {}
+    _xcc_name = _xcc.get('name')
+    _xcc_path = _xcc.get('path')  # optional explicit import path; defaults to './ComponentName'
+    _xcc_target = _xcc.get('target') or ['list']  # default: list only (backward compat)
+    # entity_custom_component: shown on list page (no target specified, or 'list' in target)
+    entity_custom_component = _xcc_name if ('list' in _xcc_target) else None
+    # entity_view_component / entity_edit_component: shown in FormView / FormUpsert
+    entity_view_component = _xcc_name if (_xcc_name and 'view' in _xcc_target) else None
+    entity_edit_component = _xcc_name if (_xcc_name and 'edit' in _xcc_target) else None
+    # import path for view/edit components (explicit path overrides default ./ relative import)
+    entity_view_component_path = _xcc_path if (entity_view_component and _xcc_path) else None
+    entity_edit_component_path = _xcc_path if (entity_edit_component and _xcc_path) else None
 
     # Service args helpers
     parent_service_args = ', '.join(
@@ -601,9 +661,58 @@ def build_context(entity: dict, schema: dict) -> dict:
                 )
                 child_include_entries.append(f"{prop}: {{ include: {{ {child_includes} }} }}")
 
+    # Include entries for one-to-one rels with their nested children
+    one_to_one_include_entries = []
+    for r in one_to_one_rels:
+        if not r['children']:
+            one_to_one_include_entries.append(f"{r['relation_name']}: true")
+        else:
+            nested_parts = []
+            for c in r['children']:
+                # Exclude back-ref to the one-to-one parent (avoid circular include)
+                forward_rels = [cr for cr in c['child_rels'] if cr['target'] != r['target']]
+                if forward_rels:
+                    sub_parts = []
+                    for cr in forward_rels:
+                        rel_name = cr['prop_name'].removesuffix('_id')
+                        sub_target_def = schema['definitions'].get(cr['target'], {})
+                        sub_target_rels = get_parent_relationships(sub_target_def)
+                        if sub_target_rels:
+                            sub_sub = ', '.join(
+                                f"{sr['prop_name'].removesuffix('_id')}: true"
+                                for sr in sub_target_rels
+                            )
+                            sub_parts.append(f"{rel_name}: {{ include: {{ {sub_sub} }} }}")
+                        else:
+                            sub_parts.append(f"{rel_name}: true")
+                    # approval_request always carries approval_histories and approval_flow.preceded_by
+                    if c.get('child_name') == 'approval_request':
+                        # Inject preceded_by into the approval_flow include
+                        for i, part in enumerate(sub_parts):
+                            if part.startswith('approval_flow:'):
+                                sub_parts[i] = (
+                                    "approval_flow: { include: { requestor_role: true, approver_role: true,"
+                                    " preceded_by: { select: { id: true } } } }"
+                                )
+                                break
+                        sub_parts.append(
+                            "approval_histories: { include: { creator: { select: { id: true, name: true } } },"
+                            " orderBy: { created_at: 'asc' } }"
+                        )
+                    nested_parts.append(f"{c['property_name']}: {{ include: {{ {', '.join(sub_parts)} }} }}")
+                else:
+                    nested_parts.append(f"{c['property_name']}: true")
+            nested = ', '.join(nested_parts)
+            one_to_one_include_entries.append(
+                f"{r['relation_name']}: {{ include: {{ {nested} }} }}"
+            )
+
     include_entries_detail = [
         *child_include_entries,
         *[f"{r['relation_name']}: true" for r in parent_rels],
+        *one_to_one_include_entries,
+        "creator: { select: { id: true, name: true } }",
+        "updater: { select: { id: true, name: true } }",
     ]
     include_props_detail = ', '.join(include_entries_detail)
     creator_filtered_props = copy.deepcopy(filtered_props)
@@ -666,6 +775,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         parent_params=parent_params,
         parent_params_with_types=parent_params_with_types,
         parent_data_obj=parent_data_obj,
+        parent_data_obj_update=parent_data_obj_update,
         validation_data_obj=validation_data_obj,
         parent_default_props=parent_default_props,
         parent_mapping=parent_mapping,
@@ -701,13 +811,23 @@ def build_context(entity: dict, schema: dict) -> dict:
         service_args_for_update=service_args_for_update,
         # Field categories (FormUpsert / FormView)
         field_categories=field_categories,
+        entity_select_options=_get_entity_options(schema),
         # Chart
         chart_cfg=chart_cfg,
         has_chart=has_chart,
         xdisplay=xdisplay,
         xdisplay_table=xdisplay_table_raw,
-        # Page list
+        # One-to-one outbound FK rels
+        one_to_one_rels=one_to_one_rels,
+        one_to_one_pre_creates=one_to_one_pre_creates,
+        one_to_one_spread=one_to_one_spread,
+        one_to_one_include=one_to_one_include,
+        # Page list / view / edit custom components
         entity_custom_component=entity_custom_component,
+        entity_view_component=entity_view_component,
+        entity_edit_component=entity_edit_component,
+        entity_view_component_path=entity_view_component_path,
+        entity_edit_component_path=entity_edit_component_path,
         # Helpers exposed for templates
         to_camel_case=to_camel_case,
         to_pascal_case=to_pascal_case,

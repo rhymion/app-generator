@@ -9,9 +9,10 @@ The code generator (`utils/scripts/generate.ts` + `templates.ts`) overwrites mos
 | Extension point | File (not overwritten) | Purpose |
 |---|---|---|
 | Property-level custom field | `components/{entity}/{prop}.tsx` | Replace a form field with a custom UI component |
-| Entity-level custom component | `components/{entity}/{ComponentName}.tsx` | Add a custom button/widget to the list page |
+| Entity-level custom component | `components/{entity}/{ComponentName}.tsx` | Add a custom widget to the list, view, or edit page |
 | Client-side form validation | `components/{entity}/form_validation.ts` | Real-time validation in FormUpsert |
 | Server-side service validation | `lib/{entity}/service_validation.ts` | Pre-write validation inside DB transactions |
+| Post-create hook | `lib/{entity}/service_after_create.ts` | Run logic inside the create transaction after the record is saved |
 
 ---
 
@@ -56,32 +57,50 @@ interface Props { value: string; }
 
 ### Schema config
 
-Add `x-custom-component` to the `_detail` definition:
+Add `x-custom-component` to the `_detail` definition. The `target` field controls which pages render it. Default (no `target`) is `[list]` for backward compatibility.
 
 ```yaml
+# List page only (default / backward compat)
 shift_template_detail:
   x-custom-component:
     name: CopyShiftsButton
-  allOf:
-    - ...
+  allOf: ...
+
+# View and edit pages
+leave_request_detail:
+  x-custom-component:
+    name: ApprovalSection
+    target:
+      - view
+      - edit
+  allOf: ...
 ```
 
 ### What the generator does
 
-- **List page** (`app/[locale]/{entity}/page.tsx`): imports `CopyShiftsButton` from `@/components/{entity}/CopyShiftsButton` and renders it in the button bar alongside the chart button (if any).
+- **`target: [list]`** — imports `{ComponentName}` in the list page and renders it in the button bar.
+- **`target: [view]`** — imports `{ComponentName}` in `FormView.tsx` and renders `<{ComponentName} src={src} permissions={permissions} />` at the bottom.
+- **`target: [edit]`** — same in `FormUpsert.tsx`.
+- Multiple targets can be combined.
 - The component file is **never created or overwritten**.
 
 ### Component interface
 
 ```tsx
+// list target
 interface Props { permissions: ModelPermissions; }
-```
 
-The component receives the current user's permissions so it can conditionally enable/disable actions.
+// view / edit target
+interface Props {
+  src: LeaveRequestDetail;   // the full entity record including nested data
+  permissions?: ModelPermissions;
+}
+```
 
 ### Example
 
-`components/shift_template/CopyShiftsButton.tsx` — opens a dialog to copy shift templates to actual shifts for a selected date range.
+`components/shift_template/CopyShiftsButton.tsx` — list-page button to copy shift templates.
+`components/leave_request/ApprovalSection.tsx` — shows approval requests with Approve/Reject buttons in view and edit pages.
 
 ---
 
@@ -228,6 +247,82 @@ The client-side check is UX; the server-side check is the enforcement layer.
 
 ---
 
+## 5. Post-Create Hook (`service_after_create.ts`)
+
+Every entity with `new: true` gets an `afterCreate` call inside the Prisma `$transaction` in `service.ts`, executed after the record is created.
+
+### Generated boilerplate (service.ts)
+
+```ts
+import { afterCreate } from './service_after_create';
+
+export async function addLeaveRequest(...): Promise<{ id: string }> {
+  return await prisma.$transaction(async (tx) => {
+    await validateOnAdd(tx, { ... });
+    const created = await tx.leave_request.create({
+      data: { ..., approvable: { create: {} } },
+      include: { approvable: true },   // present when one-to-one rels exist
+    });
+    await afterCreate(tx, created as Record<string, unknown>, { ...formData });
+    return { id: created.id };
+  });
+}
+```
+
+### Generator behavior
+
+- On first generation: writes a **no-op stub** at `lib/{entity}/service_after_create.ts`.
+- On subsequent runs: stub is **never overwritten** if the file already exists.
+
+### Stub (default)
+
+```ts
+export async function afterCreate(
+  _tx: unknown,
+  _created: Record<string, unknown>,
+  _data: Record<string, unknown>,
+): Promise<void> {}
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `tx` | `unknown` | Prisma transaction client (cast internally as needed) |
+| `created` | `Record<string, unknown>` | The created record, including nested one-to-one relations when present (e.g. `created.approvable`) |
+| `data` | `Record<string, unknown>` | The form data passed to the service function (keyed by schema property names) |
+
+### Custom implementation
+
+```ts
+// lib/leave_request/service_after_create.ts
+import type { PrismaClient } from '@/app/generated/prisma';
+
+type Tx = Omit<PrismaClient, '$connect' | ...>;
+
+export async function afterCreate(
+  tx: unknown,
+  created: Record<string, unknown>,
+  _data: Record<string, unknown>,
+): Promise<void> {
+  const approvable = created.approvable as { id: string } | null | undefined;
+  if (!approvable?.id) return;
+
+  const flows = await (tx as Tx).approval_flow.findMany({
+    where: { entity_name: 'leave_request' },
+  });
+  for (const flow of flows) {
+    await (tx as Tx).approval_request.create({
+      data: { approvable_id: approvable.id, approval_flow_id: flow.id, status: 0 },
+    });
+  }
+}
+```
+
+**Note**: `afterCreate` runs inside the same `$transaction` as the parent `create`. Any error thrown will roll back the entire transaction including the parent record.
+
+---
+
 ## File Naming Summary
 
 ```
@@ -239,6 +334,7 @@ components/{entity}/
   {ComponentName}.tsx     ← never touched by generator (type-b entity component)
 
 lib/{entity}/
-  service.ts              ← overwritten by generator
-  service_validation.ts   ← stub created once, never overwritten
+  service.ts                  ← overwritten by generator
+  service_validation.ts       ← stub created once, never overwritten
+  service_after_create.ts     ← stub created once, never overwritten (when new: true)
 ```
