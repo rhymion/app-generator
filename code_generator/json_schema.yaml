@@ -395,5 +395,3 @@ definitions:
             x-outputType: list
             items:
               $ref: "#/definitions/approval_request"
-          leave_request:
-            $ref: "#/definitions/leave_request"
