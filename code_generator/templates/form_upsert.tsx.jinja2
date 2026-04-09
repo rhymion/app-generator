@@ -118,7 +118,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% if has_comment_children %}
 
   const handleCreateComment = async (message: string) => {
-    await add{{ parent_pascal }}Comment(src.id, message);
+    await add{{ parent_pascal }}Comment({{ comment_add_id_expr }}, message);
     router.refresh();
   };
 

@@ -1737,7 +1737,7 @@ def db_helpers_context(schema: dict) -> dict:
         fk_targets: set[str] = set()
         for prop_name, prop in defn.get('properties', {}).items():
             rel = prop.get('x-relationship', {})
-            if rel.get('type') == 'many-to-one':
+            if rel.get('type') in ('many-to-one', 'one-to-one'):
                 # Explicit x-relationship annotation
                 target = rel.get('target')
                 if target and target in base_entities and target != name:

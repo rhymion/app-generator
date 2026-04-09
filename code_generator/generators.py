@@ -663,12 +663,24 @@ def form_view_context(ctx: dict) -> dict:
     ]))
 
     # Children view grids
-    has_comment_children = any(c.get('output_type') == 'comments' for c in children_raw)
+    has_commentable      = ctx.get('has_commentable', False)
+    commentable_rel_name = ctx.get('commentable_rel_name', 'commentable')
+    has_comment_children = has_commentable or any(c.get('output_type') == 'comments' for c in children_raw)
     has_list_children    = any(c.get('output_type') == 'list' for c in children_raw)
     grid_children        = [c for c in children_raw if c.get('output_type') not in ('list', 'comments')]
     col_fn_names         = [f"{c['property_name']}_columns" for c in grid_children]
 
     child_view_grids = []
+    # Bridge-based comment section (commentable one-to-one)
+    if has_commentable:
+        child_view_grids.append(
+            f"      <CommentListWrapper\n"
+            f"        comments={{src.{commentable_rel_name}?.comments ?? []}}\n"
+            f"        showTitle={{true}}\n"
+            f"        title={{tf('comments')}}\n"
+            f"        permissions={{{{ create: false, delete: false }}}}\n"
+            f"      />"
+        )
     for child in children_raw:
         prop = child['property_name']
         child_camel = to_camel_case(prop)
@@ -1093,7 +1105,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # Includes non-independent mandatory-FK list children (no own page; full CRUD via text list).
     # Includes m2m and optional-FK list children (use_connect=True; autocomplete add/delete).
     non_comment_ch = ctx['non_comment_ch']
-    comment_children = [c for c in children_raw if c.get('output_type') == 'comments']
+    has_commentable_fu   = ctx.get('has_commentable', False)
+    commentable_rel_name_fu = ctx.get('commentable_rel_name', 'commentable')
+    if has_commentable_fu:
+        comment_children = [{'bridge': True, 'property_name': commentable_rel_name_fu}]
+    else:
+        comment_children = [c for c in children_raw if c.get('output_type') == 'comments']
     has_comment_children = bool(comment_children)
     has_children = bool(non_comment_ch)
     has_many_to_many = any((c.get('relationship') or {}).get('type') == 'many-to-many' for c in children_raw)
@@ -1571,23 +1588,42 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # Comment children JSX
     comment_jsx_parts = []
+    comment_add_id_expr = 'src.id'  # default: old pattern uses parent entity id
     for c in comment_children:
-        prop = c['property_name']
-        child_camel = to_camel_case(prop)
-        comment_jsx_parts.append(
-            f"      {{isEdit && (\n"
-            f"        <CommentListWrapper\n"
-            f"          comments={{src.{prop}}}\n"
-            f"          showTitle={{true}}\n"
-            f"          title={{tf('{child_camel}')}}\n"
-            f"          currentUserId={{currentUserId}}\n"
-            f"          permissions={{{{ create: permissions?.update ?? false, delete: permissions?.update ?? false }}}}\n"
-            f"          onCreateComment={{handleCreateComment}}\n"
-            f"          onUpdateComment={{handleUpdateComment}}\n"
-            f"          onDeleteComment={{handleDeleteComment}}\n"
-            f"        />\n"
-            f"      )}}"
-        )
+        if c.get('bridge'):
+            prop = c['property_name']
+            comment_add_id_expr = f'src.{prop}!.id'
+            comment_jsx_parts.append(
+                f"      {{isEdit && (\n"
+                f"        <CommentListWrapper\n"
+                f"          comments={{src.{prop}?.comments ?? []}}\n"
+                f"          showTitle={{true}}\n"
+                f"          title={{tf('comments')}}\n"
+                f"          currentUserId={{currentUserId}}\n"
+                f"          permissions={{{{ create: permissions?.update ?? false, delete: permissions?.update ?? false }}}}\n"
+                f"          onCreateComment={{handleCreateComment}}\n"
+                f"          onUpdateComment={{handleUpdateComment}}\n"
+                f"          onDeleteComment={{handleDeleteComment}}\n"
+                f"        />\n"
+                f"      )}}"
+            )
+        else:
+            prop = c['property_name']
+            child_camel = to_camel_case(prop)
+            comment_jsx_parts.append(
+                f"      {{isEdit && (\n"
+                f"        <CommentListWrapper\n"
+                f"          comments={{src.{prop}}}\n"
+                f"          showTitle={{true}}\n"
+                f"          title={{tf('{child_camel}')}}\n"
+                f"          currentUserId={{currentUserId}}\n"
+                f"          permissions={{{{ create: permissions?.update ?? false, delete: permissions?.update ?? false }}}}\n"
+                f"          onCreateComment={{handleCreateComment}}\n"
+                f"          onUpdateComment={{handleUpdateComment}}\n"
+                f"          onDeleteComment={{handleDeleteComment}}\n"
+                f"        />\n"
+                f"      )}}"
+            )
 
     custom_upsert_imports = '\n'.join(
         f"import {to_pascal_case(p)} from './{p}';" for p in custom_upsert_props
@@ -1611,6 +1647,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'child_entity_rel_opt':     child_entity_rel_option_setups,
         'validation_call':          validation_call,
         'comment_children_jsx':     '\n'.join(comment_jsx_parts),
+        'comment_add_id_expr':      comment_add_id_expr,
         'custom_upsert_imports':    custom_upsert_imports,
         'has_children':             has_children,
         'has_comment_children':     has_comment_children,

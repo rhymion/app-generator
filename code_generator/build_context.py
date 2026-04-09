@@ -298,6 +298,40 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
     return '\n'.join(lines)
 
 
+def _build_comment_actions_bridge(parent: str, model: str) -> str:
+    """Generate comment actions using the shared commentable bridge (single comment table)."""
+    parent_pascal = to_pascal_case(parent)
+    return f"""
+export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<void> {{
+  const userId = await getSessionUserIdOrThrow();
+  await prisma.comment.create({{
+    data: {{ message, commentable_id, creator_id: userId }},
+  }});
+  revalidatePath('/{parent}');
+}}
+
+export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
+  const userId = await getSessionUserIdOrThrow();
+  const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
+  if (!comment || comment.creator_id !== userId) {{
+    throw new Error('Not authorized to edit this comment');
+  }}
+  await prisma.comment.update({{ where: {{ id: commentId }}, data: {{ message }} }});
+  revalidatePath('/{parent}');
+}}
+
+export async function delete{parent_pascal}Comment(commentId: string): Promise<void> {{
+  const userId = await getSessionUserIdOrThrow();
+  const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
+  if (!comment) return;
+  if (comment.creator_id !== userId) {{
+    await requirePermission('{parent}', 'delete');
+  }}
+  await prisma.comment.delete({{ where: {{ id: commentId }} }});
+  revalidatePath('/{parent}');
+}}"""
+
+
 # ---------------------------------------------------------------------------
 # Selection targets (page_new, page_edit)
 # ---------------------------------------------------------------------------
@@ -527,7 +561,12 @@ def build_context(entity: dict, schema: dict) -> dict:
     # Children (full analysis)
     children_data    = _build_child_data(children_raw, model, schema, parent_rels_raw)
     non_comment_ch   = [c for c in children_data if c.get('output_type') != 'comments']
-    comment_children = [c for c in children_data if c.get('output_type') == 'comments']
+    # Detect bridge-based comments via one-to-one rel to 'commentable'
+    commentable_rel = next((r for r in one_to_one_rels if r['target'] == 'commentable'), None)
+    if commentable_rel:
+        comment_children = [{'bridge': True, 'property_name': commentable_rel['relation_name'], 'name': 'comment'}]
+    else:
+        comment_children = [c for c in children_data if c.get('output_type') == 'comments']
     # Embedded children: exclude independent list children (have own pages; shown read-only here).
     # Non-independent mandatory-FK list children (no own page) are embedded with full CRUD.
     # Many-to-many and optional-FK list children (use_connect=True) use connect/set.
@@ -556,7 +595,10 @@ def build_context(entity: dict, schema: dict) -> dict:
     self_parent_prop = self_parent_rel['prop_name'] if self_parent_rel else None
 
     # Comment actions code
-    comment_actions_code = _build_comment_actions(comment_children, parent, model)
+    if commentable_rel:
+        comment_actions_code = _build_comment_actions_bridge(parent, model)
+    else:
+        comment_actions_code = _build_comment_actions(comment_children, parent, model)
 
     # Snapshot child mappings (for service)
     snapshot_child_mappings = '\n'.join(
@@ -699,9 +741,23 @@ def build_context(entity: dict, schema: dict) -> dict:
                             "approval_histories: { include: { creator: { select: { id: true, name: true } } },"
                             " orderBy: { created_at: 'asc' } }"
                         )
-                    nested_parts.append(f"{c['property_name']}: {{ include: {{ {', '.join(sub_parts)} }} }}")
+                    # comment children always carry creator + orderBy (no FK rels defined in schema)
+                    if c.get('child_name') == 'comment':
+                        nested_parts.append(
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, avatar: true }} }} }},"
+                            f" orderBy: {{ created_at: 'asc' }} }}"
+                        )
+                    else:
+                        nested_parts.append(f"{c['property_name']}: {{ include: {{ {', '.join(sub_parts)} }} }}")
                 else:
-                    nested_parts.append(f"{c['property_name']}: true")
+                    # comment child has no FK rels in schema — emit include + orderBy directly
+                    if c.get('child_name') == 'comment':
+                        nested_parts.append(
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, avatar: true }} }} }},"
+                            f" orderBy: {{ created_at: 'asc' }} }}"
+                        )
+                    else:
+                        nested_parts.append(f"{c['property_name']}: true")
             nested = ', '.join(nested_parts)
             one_to_one_include_entries.append(
                 f"{r['relation_name']}: {{ include: {{ {nested} }} }}"
@@ -785,6 +841,8 @@ def build_context(entity: dict, schema: dict) -> dict:
         children_data=children_data,
         non_comment_ch=embedded_ch,
         comment_children=comment_children,
+        has_commentable=bool(commentable_rel),
+        commentable_rel_name=commentable_rel['relation_name'] if commentable_rel else None,
         child_mappings=child_mappings,
         child_form_data_extractions=child_form_data_extractions,
         child_params_for_add=child_params_for_add,
