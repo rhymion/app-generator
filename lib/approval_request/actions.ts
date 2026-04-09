@@ -4,10 +4,10 @@ import { revalidatePath } from 'next/cache';
 import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow, getUserRoleIds } from '@/lib/authz';
 
-async function assertApproverRole(id: string): Promise<void> {
+async function assertApproverRole(id: string): Promise<string | undefined> {
   const req = await prisma.approval_request.findUnique({
     where: { id },
-    select: { approval_flow: { select: { approver_role_id: true } } },
+    select: { approval_flow: { select: { approver_role_id: true, entity_name: true } } },
   });
   if (!req?.approval_flow) throw new Error('Approval request not found');
   const userId = await getSessionUserIdOrThrow();
@@ -15,6 +15,7 @@ async function assertApproverRole(id: string): Promise<void> {
   if (!roleIds.includes(req.approval_flow.approver_role_id)) {
     throw new Error('Access denied: not a member of the approver role');
   }
+  return req.approval_flow.entity_name;
 }
 
 async function assertApprovalOrder(id: string): Promise<void> {
@@ -40,33 +41,33 @@ async function assertApprovalOrder(id: string): Promise<void> {
   }
 }
 
-async function assertResubmitPermission(id: string): Promise<void> {
+async function assertResubmitPermission(id: string): Promise<string | undefined> {
   const req = await prisma.approval_request.findUnique({
     where: { id },
     select: {
       status: true,
-      approval_flow: { select: { requestor_role_id: true } },
-      approvable: { select: { leave_request: { select: { creator_id: true } } } },
+      approval_flow: { select: { requestor_role_id: true, entity_name: true } },
+      approvable: { select: { creator_id: true } },
     },
   });
   if (!req) throw new Error('Approval request not found');
   if (req.status !== 2) throw new Error('Only rejected requests can be re-submitted');
 
   const userId = await getSessionUserIdOrThrow();
-  const entityCreatorId = req.approvable?.leave_request?.creator_id;
-  if (entityCreatorId === userId) return;
+  const entityCreatorId = req.approvable?.creator_id;
+  if (entityCreatorId === userId) return req.approval_flow?.entity_name;
 
   const requestorRoleId = req.approval_flow?.requestor_role_id;
   if (requestorRoleId) {
     const roleIds = await getUserRoleIds(userId);
-    if (roleIds.includes(requestorRoleId)) return;
+    if (roleIds.includes(requestorRoleId)) return req.approval_flow?.entity_name;
   }
 
   throw new Error('Access denied: not authorized to re-submit this request');
 }
 
 export async function approveApprovalRequest(id: string, message?: string): Promise<void> {
-  await assertApproverRole(id);
+  const entityName = await assertApproverRole(id);
   await assertApprovalOrder(id);
   const userId = await getSessionUserIdOrThrow();
   await prisma.$transaction(async (tx) => {
@@ -85,11 +86,11 @@ export async function approveApprovalRequest(id: string, message?: string): Prom
       },
     });
   });
-  revalidatePath('/leave_request');
+  if (entityName) revalidatePath('/' + entityName);
 }
 
 export async function rejectApprovalRequest(id: string, message?: string): Promise<void> {
-  await assertApproverRole(id);
+  const entityName = await assertApproverRole(id);
   await assertApprovalOrder(id);
   const userId = await getSessionUserIdOrThrow();
   await prisma.$transaction(async (tx) => {
@@ -108,11 +109,11 @@ export async function rejectApprovalRequest(id: string, message?: string): Promi
       },
     });
   });
-  revalidatePath('/leave_request');
+  if (entityName) revalidatePath('/' + entityName);
 }
 
 export async function resubmitApprovalRequest(id: string, message?: string): Promise<void> {
-  await assertResubmitPermission(id);
+  const entityName = await assertResubmitPermission(id);
   const userId = await getSessionUserIdOrThrow();
   await prisma.$transaction(async (tx) => {
     const prev = await tx.approval_request.findUnique({
@@ -133,5 +134,5 @@ export async function resubmitApprovalRequest(id: string, message?: string): Pro
       },
     });
   });
-  revalidatePath('/leave_request');
+  if (entityName) revalidatePath('/' + entityName);
 }

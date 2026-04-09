@@ -42,6 +42,7 @@ model user_account {
   created_approval_flows  approval_flow[] @relation("ApprovalFlowCreator")
   updated_approval_flows  approval_flow[] @relation("ApprovalFlowUpdater")
   created_approval_historys  approval_history[] @relation("ApprovalHistoryCreator")
+  created_approvables     approvable[]    @relation("ApprovableCreator")
 
   @@index([api_key])
 }
@@ -98,6 +99,8 @@ model permission {
 
 model approvable {
   id               String   @id @default(cuid())
+  creator_id       String?
+  creator          user_account? @relation("ApprovableCreator", fields: [creator_id], references: [id])
   approval_requests approval_request[]
 }
 

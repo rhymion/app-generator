@@ -27,6 +27,7 @@ export async function afterCreate(
     where: { entity_name: 'leave_request' },
   });
 
+  let hasFlow = false;
   for (const flow of flows) {
     // Skip role-gated flows when the creator doesn't have the requestor role
     if (flow.requestor_role_id && !creatorRoleIds.includes(flow.requestor_role_id)) {
@@ -38,6 +39,14 @@ export async function afterCreate(
         approval_flow_id: flow.id,
         status: 0, // Pending
       },
+    });
+    hasFlow = true;
+  }
+
+  if (hasFlow && creatorId) {
+    await db.approvable.update({
+      where: { id: approvable.id },
+      data: { creator_id: creatorId },
     });
   }
 }
