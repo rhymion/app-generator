@@ -155,7 +155,7 @@ View page:
 
 ## Code Generator Implementation Notes
 
-Changes made to `utils/scripts/templates.ts`:
+Changes made to the code generator templates in `code_generator/` (previously `utils/scripts/templates.ts`):
 
 | Function | Change |
 |---|---|
