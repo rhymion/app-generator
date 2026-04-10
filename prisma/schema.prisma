@@ -146,3 +146,20 @@ model approval_history {
   creator_id       String
   creator          user_account @relation("ApprovalHistoryCreator", fields: [creator_id], references: [id])
 }
+
+model commentable {
+  id        String    @id @default(cuid())
+  comments  comment[]
+  db_table  db_table?
+}
+
+model comment {
+  id             String      @id @default(cuid())
+  message        String
+  commentable_id String
+  commentable    commentable @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user_account @relation("CommentCreator", fields: [creator_id], references: [id])
+}

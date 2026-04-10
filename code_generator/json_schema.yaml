@@ -395,3 +395,51 @@ definitions:
             x-outputType: list
             items:
               $ref: "#/definitions/approval_request"
+
+  commentable:
+    type: object
+    required:
+      - id
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+
+  commentable_detail:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    allOf:
+      - $ref: "#/definitions/commentable"
+      - type: object
+        required:
+          - comments
+        properties:
+          comments:
+            type: array
+            x-outputType: comments
+            items:
+              $ref: "#/definitions/comment"
+
+  comment:
+    type: object
+    required:
+      - id
+      - message
+      - commentable_id
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      message:
+        type: string
+        minLength: 1
+      commentable_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
