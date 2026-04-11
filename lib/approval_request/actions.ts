@@ -23,14 +23,14 @@ async function assertResubmitPermission(id: string): Promise<void> {
     select: {
       status: true,
       approval_flow: { select: { requestor_role_id: true } },
-      approvable: { select: { leave_request: { select: { creator_id: true } } } },
+      approvable: { select: { creator_id: true } },
     },
   });
   if (!req) throw new Error('Approval request not found');
   if (req.status !== 2) throw new Error('Only rejected requests can be re-submitted');
 
   const userId = await getSessionUserIdOrThrow();
-  const entityCreatorId = req.approvable?.leave_request?.creator_id;
+  const entityCreatorId = req.approvable?.creator_id;
   if (entityCreatorId === userId) return;
 
   const requestorRoleId = req.approval_flow?.requestor_role_id;
@@ -61,7 +61,7 @@ export async function approveApprovalRequest(id: string, message?: string): Prom
       },
     });
   });
-  revalidatePath('/leave_request');
+  revalidatePath('/approval_request');
 }
 
 export async function rejectApprovalRequest(id: string, message?: string): Promise<void> {
@@ -83,7 +83,7 @@ export async function rejectApprovalRequest(id: string, message?: string): Promi
       },
     });
   });
-  revalidatePath('/leave_request');
+  revalidatePath('/approval_request');
 }
 
 export async function resubmitApprovalRequest(id: string, message?: string): Promise<void> {
@@ -108,5 +108,5 @@ export async function resubmitApprovalRequest(id: string, message?: string): Pro
       },
     });
   });
-  revalidatePath('/leave_request');
+  revalidatePath('/approval_request');
 }
