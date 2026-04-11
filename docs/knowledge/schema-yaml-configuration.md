@@ -456,6 +456,48 @@ user_account_detail:
             $ref: "#/definitions/role"
 ```
 
+### `labelField` for targets without a `name` property
+
+By default the generator uses `name` as the display label for autocomplete options and
+column values. When the target entity uses a **different field** as its primary label (e.g.
+`title`, `code`, `order_no`), declare the relationship in `x-relationships` with
+`labelField`:
+
+```yaml
+work_detail:
+  x-relationships:
+    fundings:
+      type: one-to-many       # use for independent children (have x-generate) with non-name labels
+      target: funding
+      labelField: title       # funding uses "title" not "name"
+    followers:
+      type: many-to-many
+      target: user_account
+  allOf:
+    - $ref: "#/definitions/work"
+    - type: object
+      properties:
+        fundings:
+          type: array
+          x-outputType: list
+          items:
+            $ref: "#/definitions/funding"
+        followers:
+          type: array
+          x-outputType: list
+          items:
+            $ref: "#/definitions/user_account"
+```
+
+**Rule:** add an `x-relationships` entry with `type: one-to-many` and `labelField: <field>`
+for any independent child collection (has its own `x-generate`) whose primary display field
+is **not** `name`. Without this, the generated components assume `.name` on the child objects
+and produce a TypeScript build error.
+
+The `type: one-to-many` entry does not change how the UI or service works — it only supplies
+the `labelField` metadata to the generator. The relationship itself is still driven by the FK
+on the child model.
+
 ### What this generates
 
 **`service.ts`** — uses Prisma `.set()` (connect existing records):
