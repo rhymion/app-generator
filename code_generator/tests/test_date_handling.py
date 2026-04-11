@@ -25,7 +25,7 @@ from generators_test import (
     prisma_value,
     _get_dep_populate_fields,
     _get_dep_extra_required_fields,
-    test_helper_context as _test_helper_context,
+    helper_context as _test_helper_context,
     get_child_render_type,
     analyze_children,
 )
