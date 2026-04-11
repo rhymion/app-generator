@@ -25,6 +25,7 @@
   },
   "Fields": {
     "actions": "アクション",
+    "comments": "コメント",
     "description": "説明",
     "endDate": "終了日",
     "max": "最大",

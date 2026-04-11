@@ -25,6 +25,7 @@
   },
   "Fields": {
     "actions": "Actions",
+    "comments": "Comments",
     "description": "Description",
     "endDate": "End Date",
     "max": "Max",
