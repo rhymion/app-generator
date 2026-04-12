@@ -43,6 +43,7 @@ model user_account {
   updated_approval_flows  approval_flow[] @relation("ApprovalFlowUpdater")
   created_approval_historys  approval_history[] @relation("ApprovalHistoryCreator")
   created_approvables     approvable[]    @relation("ApprovableCreator")
+  created_comments          comment[]        @relation("CommentCreator")
 
   @@index([api_key])
 }
@@ -150,7 +151,6 @@ model approval_history {
 model commentable {
   id        String    @id @default(cuid())
   comments  comment[]
-  db_table  db_table?
 }
 
 model comment {
