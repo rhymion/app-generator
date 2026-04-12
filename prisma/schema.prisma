@@ -39,6 +39,10 @@ model user_account {
   updated_organizations  organization[]  @relation("OrganizationUpdater")
   created_permissions    permission[]    @relation("PermissionCreator")
   updated_permissions    permission[]    @relation("PermissionUpdater")
+  created_approval_flows  approval_flow[] @relation("ApprovalFlowCreator")
+  updated_approval_flows  approval_flow[] @relation("ApprovalFlowUpdater")
+  created_approval_historys  approval_history[] @relation("ApprovalHistoryCreator")
+  created_approvables     approvable[]    @relation("ApprovableCreator")
 
   @@index([api_key])
 }
@@ -56,6 +60,8 @@ model role {
 
   user_accounts user_account[] @relation("UserRoles")
   permissions   permission[]
+  requestor_approval_flows approval_flow[] @relation("ApprovalFlowRequestorRole")
+  approver_approval_flows  approval_flow[] @relation("ApprovalFlowApproverRole")
 }
 
 model organization {
@@ -89,4 +95,71 @@ model permission {
   updater    user_account @relation("PermissionUpdater", fields: [updater_id], references: [id])
 
   @@unique([name, role_id])
+}
+
+model approvable {
+  id               String   @id @default(cuid())
+  creator_id       String?
+  creator          user_account? @relation("ApprovableCreator", fields: [creator_id], references: [id])
+  approval_requests approval_request[]
+}
+
+model approval_flow {
+  id               String   @id @default(cuid())
+  entity_name      String
+  requestor_role_id String?
+  requestor_role   role?    @relation("ApprovalFlowRequestorRole", fields: [requestor_role_id], references: [id])
+  approver_role_id String
+  approver_role    role     @relation("ApprovalFlowApproverRole", fields: [approver_role_id], references: [id])
+  approval_requests approval_request[]
+  preceded_by      approval_flow[] @relation("ApprovalFlowOrder")
+  followed_by      approval_flow[] @relation("ApprovalFlowOrder")
+  created_at       DateTime @default(now()) @db.Timestamptz(0)
+  updated_at       DateTime @updatedAt @db.Timestamptz(0)
+  creator_id       String
+  creator          user_account @relation("ApprovalFlowCreator", fields: [creator_id], references: [id])
+  updater_id       String
+  updater          user_account @relation("ApprovalFlowUpdater", fields: [updater_id], references: [id])
+}
+
+model approval_request {
+  id               String   @id @default(cuid())
+  approvable_id    String
+  approvable       approvable @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
+  approval_flow_id String
+  approval_flow    approval_flow @relation(fields: [approval_flow_id], references: [id])
+  status           Int      @default(0)
+  approval_histories approval_history[]
+  created_at       DateTime @default(now()) @db.Timestamptz(0)
+  updated_at       DateTime @updatedAt @db.Timestamptz(0)
+}
+
+model approval_history {
+  id               String   @id @default(cuid())
+  approval_request_id String
+  approval_request approval_request @relation(fields: [approval_request_id], references: [id], onDelete: Cascade)
+  pre_status       Int
+  post_status      Int
+  message          String?
+  created_at       DateTime @default(now()) @db.Timestamptz(0)
+  updated_at       DateTime @updatedAt @db.Timestamptz(0)
+  creator_id       String
+  creator          user_account @relation("ApprovalHistoryCreator", fields: [creator_id], references: [id])
+}
+
+model commentable {
+  id        String    @id @default(cuid())
+  comments  comment[]
+  db_table  db_table?
+}
+
+model comment {
+  id             String      @id @default(cuid())
+  message        String
+  commentable_id String
+  commentable    commentable @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user_account @relation("CommentCreator", fields: [creator_id], references: [id])
 }

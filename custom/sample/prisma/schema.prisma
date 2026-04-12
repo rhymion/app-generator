@@ -16,18 +16,19 @@ model tenant {
 }
 
 model db_table {
-  id           String   @id @default(cuid())
-  name         String   @unique
-  description  String? 
-  created_at DateTime @default(now()) @db.Timestamptz(0)
-  updated_at DateTime @updatedAt @db.Timestamptz(0)
-  creator_id String
-  creator    user_account @relation("DbTableCreator", fields: [creator_id], references: [id])
-  updater_id String
-  updater    user_account @relation("DbTableUpdater", fields: [updater_id], references: [id])
-  fields       field[] @relation("ParentTable")
-  referenced_by field[] @relation("ReferenceTable")
-  db_table_comments       db_table_comment[] @relation("CommentParentTable")
+  id             String      @id @default(cuid())
+  name           String      @unique
+  description    String?
+  commentable_id String      @unique
+  commentable    commentable @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user_account @relation("DbTableCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user_account @relation("DbTableUpdater", fields: [updater_id], references: [id])
+  fields         field[]     @relation("ParentTable")
+  referenced_by  field[]     @relation("ReferenceTable")
 }
 
 model field {
@@ -46,15 +47,21 @@ model field {
   updated_at DateTime @updatedAt @db.Timestamptz(0)
 }
 
-model db_table_comment {
-  id          String   @id @default(cuid())
-  message     String
-  db_table_id    String     
-  db_table       db_table @relation("CommentParentTable", fields: [db_table_id], references: [id], onDelete: Cascade)
-  created_at DateTime @default(now()) @db.Timestamptz(0)
-  updated_at DateTime @updatedAt @db.Timestamptz(0)
-  creator_id String
-  creator    user_account @relation("DbTableCommentCreator", fields: [creator_id], references: [id])
+model commentable {
+  id        String    @id @default(cuid())
+  comments  comment[]
+  db_table  db_table?
+}
+
+model comment {
+  id             String      @id @default(cuid())
+  message        String
+  commentable_id String
+  commentable    commentable @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user_account @relation("CommentCreator", fields: [creator_id], references: [id])
 }
 
 model xxxxx_xxxxx {
@@ -208,13 +215,14 @@ model user_account {
   updated_inventories  inventory[] @relation("InventoryUpdater")
   created_purchase_orders  purchase_order[] @relation("PurchaseOrderCreator")
   updated_purchase_orders  purchase_order[] @relation("PurchaseOrderUpdater")
-  created_db_table_comments  db_table_comment[] @relation("DbTableCommentCreator")
+  created_comments  comment[] @relation("CommentCreator")
   leave_requests  leave_request[] @relation("LeaveRequestUser")
   created_leave_requests  leave_request[] @relation("LeaveRequestCreator")
   updated_leave_requests  leave_request[] @relation("LeaveRequestUpdater")
   created_approval_flows  approval_flow[] @relation("ApprovalFlowCreator")
   updated_approval_flows  approval_flow[] @relation("ApprovalFlowUpdater")
   created_approval_historys  approval_history[] @relation("ApprovalHistoryCreator")
+  created_approvables     approvable[]    @relation("ApprovableCreator")
   @@index([api_key])
 }
 
@@ -458,6 +466,8 @@ model leave_request {
 
 model approvable {
   id               String   @id @default(cuid())
+  creator_id       String?
+  creator          user_account? @relation("ApprovableCreator", fields: [creator_id], references: [id])
   approval_requests approval_request[]
   leave_request    leave_request?
 }

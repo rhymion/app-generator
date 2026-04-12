@@ -67,7 +67,8 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     props = dep_def.get('properties', {})
     required = set(dep_def.get('required') or [])
     rel_props = {r['prop_name'] for r in get_parent_relationships(dep_def)}
-    exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props
+    oto_props = {k for k, v in props.items() if (v.get('x-relationship') or {}).get('type') == 'one-to-one'}
+    exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props | oto_props
     _entity_opts = _get_entity_options(schema)
     _first_entity_val = f"'{_entity_opts[0]['value']}'" if _entity_opts else "''"
     result = []
@@ -108,7 +109,8 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
     props = dep_def.get('properties', {})
     required = set(dep_def.get('required') or [])
     rel_props = {r['prop_name'] for r in get_parent_relationships(dep_def)}
-    exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props
+    oto_props = {k for k, v in props.items() if (v.get('x-relationship') or {}).get('type') == 'one-to-one'}
+    exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props | oto_props
 
     _entity_opts = _get_entity_options(schema)
     _first_entity_val = f"'{_entity_opts[0]['value']}'" if _entity_opts else "''"
@@ -716,7 +718,7 @@ def gen_child_datagrid_fk_fields(fields: list) -> list[dict]:
 # Context builders (Jinja2 template contexts)
 # ---------------------------------------------------------------------------
 
-def test_helper_context(
+def helper_context(
     parent: str,
     children: list,
     schema: dict,
@@ -766,6 +768,31 @@ def test_helper_context(
             if not any(d['var_name'] == var_name for d in deps):
                 deps.append({'target': target, 'var_name': var_name, 'title': title, 'fk_deps': []})
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
+
+    # Handle single-FK non-standard prop names (e.g. work_creator_id → creator).
+    # When prop_stem != target name, rename the dep's var_name/title to prop_stem-based
+    # so helper and spec use consistent variable names (spec already uses prop_stem via fk_dep_vars).
+    # Keep an alias {old_target_var: new_prop_var} for the return object so callers using
+    # the target-name key (e.g. deps.creator) still work via destructuring alias.
+    single_fk_target_aliases: dict[str, str] = {}
+    for target, fk_rels in target_to_fk_rels.items():
+        if target in multi_fk_targets or len(fk_rels) != 1:
+            continue
+        r = fk_rels[0]
+        prop_stem = re.sub(r'_id$', '', r['prop_name'])
+        new_var = to_camel_case(prop_stem)
+        old_var = to_camel_case(target)
+        if new_var == old_var:
+            continue
+        single_fk_target_aliases[old_var] = new_var
+        new_title = to_title_case(prop_stem)
+        for dep in deps:
+            if dep['target'] == target and dep.get('var_name') == old_var and 'title' not in dep:
+                dep['var_name'] = new_var
+                dep['_title_override'] = new_title
+        for fk in entity_fk_deps:
+            if fk.get('dep_var_name') == old_var and fk['prop_name'] == r['prop_name']:
+                fk['dep_var_name'] = new_var
 
     required_field_metas = [f for f in fields if f['required']]
     optional_field_metas = [f for f in fields if not f['required']]
@@ -862,7 +889,7 @@ def test_helper_context(
     enriched_deps = []
     for dep in deps:
         is_direct = 'title' in dep  # UA / self-ref / m2m deps added directly
-        title_str = dep.get('title') or to_title_case(dep['target'])
+        title_str = dep.get('_title_override') or dep.get('title') or to_title_case(dep['target'])
         dep_def = schema['definitions'].get(dep['target'] + '_detail', {})
         x_rels = dep_def.get('x-relationships', {})
         enriched_deps.append({
@@ -872,6 +899,8 @@ def test_helper_context(
             'extra_required_fields': _get_dep_populate_fields(dep['target'], dep['var_name'], title_str, schema),
             # needs_second only for transitive (non-direct) deps matching primary FK target
             'needs_second': not is_direct and dep['target'] == primary_fk_dep_target,
+            # one-to-one FK pre-creates needed when creating this dep record (e.g. commentable_id)
+            'internal_fk_deps': get_internal_one_to_one_fks(dep['target'], schema),
         })
 
     # Separate self-ref deps (target == model) from non-self deps for _createBaseDeps() split.
@@ -900,6 +929,17 @@ def test_helper_context(
         alias_var = to_camel_case(re.sub(r'_id$', '', req_rel['prop_name']))
         if alias_key != alias_var and alias_key not in non_self_deps_return_parts:
             non_self_deps_return_parts.append(f'{alias_key}: {alias_var}')
+    # Add target-name aliases for single-FK non-standard renames (e.g. creator: workCreator).
+    # This allows callers to use either deps.workCreator or deps.creator interchangeably.
+    existing_return_keys = {p.split(':')[0].strip() for p in deps_return_parts}
+    existing_non_self_keys = {p.split(':')[0].strip() for p in non_self_deps_return_parts}
+    for old_var, new_var in single_fk_target_aliases.items():
+        if old_var not in existing_return_keys:
+            deps_return_parts.append(f'{old_var}: {new_var}')
+            existing_return_keys.add(old_var)
+        if old_var not in existing_non_self_keys:
+            non_self_deps_return_parts.append(f'{old_var}: {new_var}')
+            existing_non_self_keys.add(old_var)
     deps_return = ', '.join(deps_return_parts)
     non_self_deps_return = ', '.join(non_self_deps_return_parts)
 
@@ -1012,7 +1052,7 @@ def test_helper_context(
     }
 
 
-def test_spec_context(
+def spec_context(
     parent: str,
     children: list,
     schema: dict,
@@ -1445,7 +1485,7 @@ def test_spec_context(
     }
 
 
-def test_tasks_registry_context(entities: list, schema: dict) -> dict:
+def tasks_registry_context(entities: list, schema: dict) -> dict:
     """Build context for the generated-tasks.ts registry template.
 
     `entities` is a list of dicts: {parent, model_name, children}.
@@ -1484,7 +1524,7 @@ def test_tasks_registry_context(entities: list, schema: dict) -> dict:
     return {'entities': enriched_entities, 'has_user_account_populate': has_user_account_populate}
 
 
-def test_api_spec_context(
+def api_spec_context(
     parent: str,
     children: list,
     schema: dict,
@@ -1737,7 +1777,7 @@ def db_helpers_context(schema: dict) -> dict:
         fk_targets: set[str] = set()
         for prop_name, prop in defn.get('properties', {}).items():
             rel = prop.get('x-relationship', {})
-            if rel.get('type') == 'many-to-one':
+            if rel.get('type') in ('many-to-one', 'one-to-one'):
                 # Explicit x-relationship annotation
                 target = rel.get('target')
                 if target and target in base_entities and target != name:

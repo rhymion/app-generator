@@ -14,14 +14,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       select: {
         status: true,
         approval_flow: { select: { requestor_role_id: true } },
-        approvable: { select: { leave_request: { select: { creator_id: true } } } },
+        approvable: { select: { creator_id: true } },
       },
     });
     if (!req) throw new ApiError(404, 'Approval request not found');
     if (req.status !== 2) throw new ApiError(400, 'Only rejected requests can be re-submitted');
 
     // Authorize: entity creator or user in requestor_role
-    const entityCreatorId = req.approvable?.leave_request?.creator_id;
+    const entityCreatorId = req.approvable?.creator_id;
     const requestorRoleId = req.approval_flow?.requestor_role_id;
     let authorized = entityCreatorId === userId;
     if (!authorized && requestorRoleId) {

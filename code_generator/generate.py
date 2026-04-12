@@ -35,10 +35,10 @@ from generators_i18n import update_i18n_and_config
 from validate import validate_schema, SchemaValidationError
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
 from generators_test import (
-    test_helper_context,
-    test_spec_context,
-    test_tasks_registry_context,
-    test_api_spec_context,
+    helper_context,
+    spec_context,
+    tasks_registry_context,
+    api_spec_context,
     db_helpers_context,
 )
 
@@ -266,18 +266,18 @@ def generate(schema_path: str, output_dir: str) -> None:
             print(f'  Test: {parent}')
 
             # helper.ts
-            helper_ctx = test_helper_context(parent, children, schema, model, def_key, gen_cfg)
+            helper_ctx = helper_context(parent, children, schema, model, def_key, gen_cfg)
             _write(cypress_support / parent / 'helper.ts',
                    _render(env, 'test_helper.ts.jinja2', helper_ctx))
 
             # e2e spec
-            spec_ctx = test_spec_context(parent, children, schema, model, def_key, gen_cfg)
+            spec_ctx = spec_context(parent, children, schema, model, def_key, gen_cfg)
             _write(cypress_e2e / f'{parent}.cy.ts',
                    _render(env, 'test_spec.cy.ts.jinja2', spec_ctx))
 
             # api spec (only if api: true)
             if gen_cfg.get('api'):
-                api_ctx = test_api_spec_context(parent, children, schema, model, def_key, gen_cfg)
+                api_ctx = api_spec_context(parent, children, schema, model, def_key, gen_cfg)
                 _write(cypress_e2e / 'api' / f'{parent}.cy.ts',
                        _render(env, 'test_api_spec.cy.ts.jinja2', api_ctx))
 
@@ -288,7 +288,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             })
 
         # Task registry (covers all test-enabled entities)
-        registry_ctx = test_tasks_registry_context(registry_infos, schema)
+        registry_ctx = tasks_registry_context(registry_infos, schema)
         _write(cypress_support / 'generated-tasks.ts',
                _render(env, 'test_tasks_registry.ts.jinja2', registry_ctx))
 

@@ -66,15 +66,19 @@ shift_template_detail:
     name: CopyShiftsButton
   allOf: ...
 
-# View and edit pages
+# View and edit pages, using a shared component from components/_standard/
 leave_request_detail:
   x-custom-component:
     name: ApprovalSection
+    path: "@/components/_standard/ApprovalSection"   # optional; overrides default import path
     target:
       - view
       - edit
   allOf: ...
 ```
+
+The `path` option overrides the default import location (`components/{entity}/{ComponentName}`).
+Use it for reusable components shared across entities that live in `components/_standard/`.
 
 ### What the generator does
 
@@ -92,10 +96,15 @@ interface Props { permissions: ModelPermissions; }
 
 // view / edit target
 interface Props {
-  src: LeaveRequestDetail;   // the full entity record including nested data
+  src: LeaveRequestDetail;        // the full entity record including nested data
   permissions?: ModelPermissions;
+  currentUserRoleIds?: string[];  // role IDs of the logged-in user (fetched server-side)
+  currentUserId?: string | null;  // ID of the logged-in user
 }
 ```
+
+`currentUserRoleIds` and `currentUserId` are fetched server-side by the generated page and forwarded
+automatically to the component whenever `target` includes `view` or `edit`.
 
 ### Example
 

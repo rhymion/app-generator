@@ -6,6 +6,7 @@ definitions:
     required:
       - id
       - name
+      - commentable_id
     properties:
       id:
         type: string
@@ -17,6 +18,13 @@ definitions:
         type:
           - string
           - "null"
+      commentable_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: one-to-one
+          target: commentable
+          labelField: id
 
   field:
     type: object
@@ -68,23 +76,6 @@ definitions:
         type: boolean
         default: true
 
-  db_table_comment:
-    type: object
-    required:
-      - id
-      - message
-      - db_table_id
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-      message:
-        type: string
-        minLength: 1
-      db_table_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-
   db_table_detail:
     x-generate:
       list: true
@@ -105,11 +96,8 @@ definitions:
             type: array
             items:
               $ref: "#/definitions/field"
-          db_table_comments:
-            type: array
-            x-outputType: comments
-            items:
-              $ref: "#/definitions/db_table_comment"
+          commentable:
+            $ref: "#/definitions/commentable"
 
   xxxxx_xxxxx:
     type: object
@@ -1606,3 +1594,51 @@ definitions:
               $ref: "#/definitions/approval_request"
           leave_request:
             $ref: "#/definitions/leave_request"
+
+  commentable:
+    type: object
+    required:
+      - id
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+
+  commentable_detail:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    allOf:
+      - $ref: "#/definitions/commentable"
+      - type: object
+        required:
+          - comments
+        properties:
+          comments:
+            type: array
+            x-outputType: comments
+            items:
+              $ref: "#/definitions/comment"
+
+  comment:
+    type: object
+    required:
+      - id
+      - message
+      - commentable_id
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      message:
+        type: string
+        minLength: 1
+      commentable_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"

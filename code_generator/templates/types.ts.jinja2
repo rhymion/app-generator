@@ -124,6 +124,10 @@ export type FormViewProps = Readonly<{
           created_at: Date | string;
           creator?: { id: string; name: string } | null;
         }[];
+{% elif child.child_name == 'comment' %}
+        created_at?: string | Date | null;
+        updated_at?: string | Date | null;
+        creator?: { id: string; name: string; avatar?: string | null } | null;
 {% else %}
 {% for rel in child.relationships %}
         {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
