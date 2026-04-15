@@ -21,23 +21,54 @@
     "save": "Save"
   },
   "EntityLabel": {
-    "tenant": "Tenant"
+    "approvalFlow": "Approval Flow",
+    "organization": "Organization",
+    "permission": "Permission",
+    "role": "Role",
+    "setting": "Setting",
+    "tenant": "Tenant",
+    "userAccount": "User Account"
   },
   "Fields": {
     "actions": "Actions",
+    "apiKey": "API Key",
+    "approverRole": "Approver Role",
+    "avatar": "Avatar",
     "comments": "Comments",
+    "create": "Create",
+    "dateOfBirth": "Date of Birth",
+    "delete": "Delete",
     "description": "Description",
+    "email": "Email",
     "endDate": "End Date",
+    "entityName": "Entity Name",
+    "followedBy": "Followed By",
+    "gender": "Gender",
+    "itemName": "Item Name",
+    "judgement": "Judgement",
+    "location": "Location",
     "max": "Max",
     "maxLength": "Max Length",
     "name": "Name",
     "order": "No.",
+    "password": "Password",
     "path": "Path",
+    "phone": "Phone",
+    "precededBy": "Preceded By",
+    "read": "Read",
     "reference": "Reference",
     "regex": "Regex",
+    "requestorRole": "Requestor Role",
     "required": "Required",
+    "role": "Role",
+    "roles": "Roles",
     "startDate": "Start Date",
+    "status": "Status",
     "type": "Type",
+    "update": "Update",
+    "url": "URL",
+    "userAccount": "User Account",
+    "userAccounts": "User Accounts",
     "writtenBy": "Written By"
   },
   "Chart": {
@@ -76,7 +107,12 @@
     "closeMenu": "Close menu"
   },
   "Nav": {
-    "home": "Home"
+    "approvalFlow": "Approval Flow",
+    "home": "Home",
+    "organization": "Organization",
+    "permission": "Permission",
+    "role": "Role",
+    "userAccount": "User Account"
   },
   "Auth": {
     "signInTitle": "Sign in to your account",

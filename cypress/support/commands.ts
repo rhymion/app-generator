@@ -72,6 +72,8 @@ Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) =
 Cypress.Commands.add('clearAutocomplete', (label: string) => {
   cy.get('form').contains('label', label).parent().find('input').first().click();
   cy.get('form').contains('label', label).parent().find('button[aria-label="Clear"]').click();
+  // Press Escape to close the dropdown so it doesn't block other elements
+  cy.get('form').contains('label', label).parent().find('input').first().type('{esc}');
 });
 
 /**

@@ -21,23 +21,54 @@
     "save": "保存"
   },
   "EntityLabel": {
-    "tenant": "テナント"
+    "approvalFlow": "承認フロー",
+    "organization": "組織",
+    "permission": "権限",
+    "role": "ロール",
+    "setting": "設定",
+    "tenant": "テナント",
+    "userAccount": "ユーザアカウント"
   },
   "Fields": {
     "actions": "アクション",
+    "apiKey": "APIキー",
+    "approverRole": "承認者ロール",
+    "avatar": "アバター",
     "comments": "コメント",
+    "create": "作成",
+    "dateOfBirth": "生年月日",
+    "delete": "削除",
     "description": "説明",
+    "email": "メールアドレス",
     "endDate": "終了日",
+    "entityName": "エンティティ名",
+    "followedBy": "後続",
+    "gender": "性別",
+    "itemName": "項目名",
+    "judgement": "判定",
+    "location": "所在地",
     "max": "最大",
     "maxLength": "最大長",
     "name": "名前",
     "order": "No.",
+    "password": "パスワード",
     "path": "パス",
+    "phone": "電話番号",
+    "precededBy": "先行",
+    "read": "読取",
     "reference": "参照",
     "regex": "正規表現",
+    "requestorRole": "申請者ロール",
     "required": "必須",
+    "role": "ロール",
+    "roles": "ロール",
     "startDate": "開始日",
+    "status": "状態",
     "type": "タイプ",
+    "update": "更新",
+    "url": "URL",
+    "userAccount": "ユーザアカウント",
+    "userAccounts": "ユーザアカウント",
     "writtenBy": "作成者"
   },
   "Chart": {
@@ -76,7 +107,12 @@
     "closeMenu": "メニューを閉じる"
   },
   "Nav": {
-    "home": "ホーム"
+    "approvalFlow": "承認フロー",
+    "home": "ホーム",
+    "organization": "組織",
+    "permission": "権限",
+    "role": "ロール",
+    "userAccount": "ユーザアカウント"
   },
   "Auth": {
     "signInTitle": "アカウントにログイン",
