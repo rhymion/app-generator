@@ -573,13 +573,27 @@ def form_view_context(ctx: dict) -> dict:
                 f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n      />"
             )
         elif rel:
-            label_f  = rel.get('label_field', 'name')
-            label_fk = fk.removesuffix('Id')
-            rel_name = rel.get('relation_name', p.removesuffix('_id'))
+            label_f       = rel.get('label_field', 'name')
+            label_fk      = fk.removesuffix('Id')
+            rel_name      = rel.get('relation_name', p.removesuffix('_id'))
+            target        = rel.get('target', p.removesuffix('_id'))
+            target_pascal = to_pascal_case(target)
             text_jsxs.append(
                 f"      <TextField\n        label={{tf('{label_fk}')}}\n"
                 f"        value={{src.{rel_name}?.{label_f} || src.{p} || ''}}\n"
-                f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n      />"
+                f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n"
+                f"        slotProps={{{{ input: {{ endAdornment: src.{p} ? (\n"
+                f"          <InputAdornment position=\"end\">\n"
+                f"            <Tooltip title=\"View\">\n"
+                f"              <Link href={{`/{target}/view/${{src.{p}}}`}} aria-label=\"View {target_pascal}\">\n"
+                f"                <IconButton component=\"span\" size=\"small\" tabIndex={{-1}}>\n"
+                f"                  <OpenInNewIcon fontSize=\"small\" />\n"
+                f"                </IconButton>\n"
+                f"              </Link>\n"
+                f"            </Tooltip>\n"
+                f"          </InputAdornment>\n"
+                f"        ) : null }} }}}}\n"
+                f"      />"
             )
         else:
             text_jsxs.append(
@@ -751,9 +765,12 @@ def form_view_context(ctx: dict) -> dict:
         for c in grid_children
     )
 
+    has_rel_links = any(rel_by_prop.get(p) for p in other_flds)
+
     return {
         'needs_datetime_wrapper': needs_datetime_wrapper,
         'needs_image_display':    needs_image_display,
+        'has_rel_links':          has_rel_links,
         'has_comment_children':   has_comment_children,
         'has_list_children':      has_list_children,
         'has_grid_children':      bool(grid_children),
@@ -883,27 +900,40 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # Relationship fields (Autocomplete)
     rel_jsxs = []
     for r in parent_rels_raw:
-        prop_name   = r['prop_name']
-        label_base  = prop_name.removesuffix('_id')
-        label_fk    = _tf(label_base)
-        state_name  = safe_var_name(prop_name)
-        setter      = _setter(state_name)
-        target_pascal = to_pascal_case(r['target'])
-        opts_var    = f'{state_name}Options'
+        prop_name     = r['prop_name']
+        label_base    = prop_name.removesuffix('_id')
+        label_fk      = _tf(label_base)
+        state_name    = safe_var_name(prop_name)
+        setter        = _setter(state_name)
+        target        = r['target']
+        target_pascal = to_pascal_case(target)
+        opts_var      = f'{state_name}Options'
         rel_jsxs.append(
-            f"      <Autocomplete\n"
-            f"        options={{{opts_var}}}\n"
-            f"        value={{{opts_var}.find((option) => option.value === {state_name}) || null}}\n"
-            f"        onChange={{(_, newValue) => set{setter}(newValue?.value ?? null)}}\n"
-            f"        renderInput={{(params) => (\n"
-            f"          <TextField\n"
-            f"            {{...params}}\n"
-            f"            label={{tf('{label_fk}')}}\n"
-            f"            margin=\"normal\"\n"
-            f"            {'required' if r.get('required') else ''}\n"
-            f"          />\n"
+            f"      <Box sx={{{{ display: 'flex', alignItems: 'flex-start', gap: 1 }}}}>\n"
+            f"        <Autocomplete\n"
+            f"          sx={{{{ flex: 1 }}}}\n"
+            f"          options={{{opts_var}}}\n"
+            f"          value={{{opts_var}.find((option) => option.value === {state_name}) || null}}\n"
+            f"          onChange={{(_, newValue) => set{setter}(newValue?.value ?? null)}}\n"
+            f"          renderInput={{(params) => (\n"
+            f"            <TextField\n"
+            f"              {{...params}}\n"
+            f"              label={{tf('{label_fk}')}}\n"
+            f"              margin=\"normal\"\n"
+            f"              {'required' if r.get('required') else ''}\n"
+            f"            />\n"
+            f"          )}}\n"
+            f"        />\n"
+            f"        {{{state_name} && (\n"
+            f"          <Tooltip title=\"View\">\n"
+            f"            <Link href={{`/{target}/view/${{{state_name}}}`}} aria-label=\"View {target_pascal}\">\n"
+            f"              <IconButton component=\"span\" size=\"small\" tabIndex={{-1}} sx={{{{ mt: 2 }}}}>\n"
+            f"                <OpenInNewIcon fontSize=\"small\" />\n"
+            f"              </IconButton>\n"
+            f"            </Link>\n"
+            f"          </Tooltip>\n"
             f"        )}}\n"
-            f"      />"
+            f"      </Box>"
         )
 
     # Number fields

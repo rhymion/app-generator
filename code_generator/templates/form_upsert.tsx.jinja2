@@ -7,6 +7,11 @@ import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 {% if has_many_to_one %}
 import Autocomplete from '@mui/material/Autocomplete';
+import Box from '@mui/material/Box';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
+import Link from '@mui/material/Link';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 {% endif %}
 {% if has_number_props %}
 import NumberField from '@/components/_standard/NumberField';
