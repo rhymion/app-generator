@@ -208,6 +208,7 @@ definitions:
       name:
         type: string
         minLength: 1
+        x-entity-select: true
       create:
         type: boolean
       read:
