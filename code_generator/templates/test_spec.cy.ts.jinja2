@@ -86,7 +86,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if after_create_id_is_expr %}
 {{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
 {% elif not list_id_is_unique %}
-{{ I }}cy.contains('{{ after_create_id }}').last().click();
+{{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
 {% else %}
 {{ I }}cy.contains('{{ after_create_id }}').click();
 {% endif %}
@@ -162,7 +162,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if after_create_id_is_expr %}
 {{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
 {% elif not list_id_is_unique %}
-{{ I }}cy.contains('{{ after_create_id }}').last().click();
+{{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
 {% else %}
 {{ I }}cy.contains('{{ after_create_id }}').click();
 {% endif %}
