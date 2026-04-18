@@ -44,20 +44,20 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bulkItems: any[] = Array.isArray(body) ? body : [body];
-    const results: BulkResult<{ id: string }>[] = [];
+    const bulkResults: BulkResult<{ id: string }>[] = [];
 
     for (let i = 0; i < bulkItems.length; i++) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { {{ all_body_fields_create }} } = bulkItems[i] as any;
         const result = await add{{ parent_pascal }}({{ service_args_for_create }});
-        results.push({ index: i, success: true, data: result });
+        bulkResults.push({ index: i, success: true, data: result });
       } catch (err) {
-        results.push({ index: i, success: false, error: err instanceof Error ? err.message : String(err) });
+        bulkResults.push({ index: i, success: false, error: err instanceof Error ? err.message : String(err) });
       }
     }
 
-    return NextResponse.json(makeBulkResponse(results), { status: 207 });
+    return NextResponse.json(makeBulkResponse(bulkResults), { status: 207 });
   } catch (error) {
     return handleApiError(error);
   }
@@ -84,14 +84,14 @@ export async function PUT(request: NextRequest) {
     });
     const existingMap = new Map(existingRecords.map((r) => [r.id, r]));
 
-    const results: BulkResult<{ success: boolean }>[] = [];
+    const bulkResults: BulkResult<{ success: boolean }>[] = [];
 
     for (let i = 0; i < bulkItems.length; i++) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { id, {{ all_body_fields_create }} } = bulkItems[i] as any;
       const existing = existingMap.get(id);
       if (!existing) {
-        results.push({ index: i, success: false, error: `Not found: ${id}` });
+        bulkResults.push({ index: i, success: false, error: `Not found: ${id}` });
         continue;
       }
       const canUpdate =
@@ -100,18 +100,18 @@ export async function PUT(request: NextRequest) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (richPerms.assignee?.update && (existing as any).assignee_id === userId);
       if (!canUpdate) {
-        results.push({ index: i, success: false, error: `Access denied: ${id}` });
+        bulkResults.push({ index: i, success: false, error: `Access denied: ${id}` });
         continue;
       }
       try {
         await update{{ parent_pascal }}({{ service_args_for_update }}, null);
-        results.push({ index: i, success: true, data: { success: true } });
+        bulkResults.push({ index: i, success: true, data: { success: true } });
       } catch (err) {
-        results.push({ index: i, success: false, error: err instanceof Error ? err.message : String(err) });
+        bulkResults.push({ index: i, success: false, error: err instanceof Error ? err.message : String(err) });
       }
     }
 
-    return NextResponse.json(makeBulkResponse(results), { status: 207 });
+    return NextResponse.json(makeBulkResponse(bulkResults), { status: 207 });
   } catch (error) {
     return handleApiError(error);
   }
