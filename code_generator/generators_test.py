@@ -1639,9 +1639,14 @@ def api_spec_context(
         primary_meta = next((f for f in all_field_metas if f['prop_name'] == primary_field_name), None)
         if primary_meta:
             create_val = api_value(primary_meta, title)
-            update_label = primary_meta.get('label', to_title_case(primary_field_name))
             assert_create = f"expect(getRes.body.{primary_field_name}).to.eq({create_val});"
-            assert_update = f"expect(getRes.body.{primary_field_name}).to.eq('Updated {update_label}');"
+            if primary_meta.get('category') == 'entity_select':
+                _opts = primary_meta.get('entity_options') or []
+                _upd = f"'{_opts[1]['value']}'" if len(_opts) > 1 else create_val
+                assert_update = f"expect(getRes.body.{primary_field_name}).to.eq({_upd});"
+            else:
+                update_label = primary_meta.get('label', to_title_case(primary_field_name))
+                assert_update = f"expect(getRes.body.{primary_field_name}).to.eq('Updated {update_label}');"
         else:
             assert_create = 'expect(getRes.body.id).to.exist;'
             assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
@@ -1701,10 +1706,21 @@ def api_spec_context(
                 out.append(f"{indent}{prop}: {ua_update_expr},")
             elif not primary_is_fk and primary_field_name and prop == primary_field_name:
                 primary_meta = next((f for f in all_field_metas if f['prop_name'] == prop), None)
-                update_label = primary_meta.get('label', to_title_case(prop)) if primary_meta else to_title_case(prop)
-                out.append(f"{indent}{prop}: 'Updated {update_label}',")
+                if primary_meta and primary_meta.get('category') == 'entity_select':
+                    _opts = primary_meta.get('entity_options') or []
+                    _v = f"'{_opts[1]['value']}'" if len(_opts) > 1 else api_value(primary_meta, title)
+                    out.append(f"{indent}{prop}: {_v},")
+                else:
+                    update_label = primary_meta.get('label', to_title_case(prop)) if primary_meta else to_title_case(prop)
+                    out.append(f"{indent}{prop}: 'Updated {update_label}',")
             elif has_name_fallback and prop == 'name':
-                out.append(f"{indent}name: 'Updated {title}',")
+                nm = next((f for f in all_field_metas if f['prop_name'] == 'name'), None)
+                if nm and nm.get('category') == 'entity_select':
+                    _opts = nm.get('entity_options') or []
+                    _v = f"'{_opts[1]['value']}'" if len(_opts) > 1 else api_value(nm, title)
+                    out.append(f"{indent}name: {_v},")
+                else:
+                    out.append(f"{indent}name: 'Updated {title}',")
             else:
                 out.append(f"{indent}{prop}: records[0].{prop},")
         for c in api_child_metas:
