@@ -69,8 +69,14 @@ export async function populate{{ pascal }}Dependencies() {
   const baseDeps = await _create{{ pascal }}BaseDeps();
   const testUser = await getTestUser();
 {% for dep in self_ref_deps %}
+{% for fk in dep.internal_fk_deps %}
+  const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {} });
+{% endfor %}
   const {{ dep.var_name }}Record = await prisma.{{ dep.target }}.create({
     data: {
+{% for fk in dep.internal_fk_deps %}
+      {{ fk.prop_name }}: {{ dep.var_name }}{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
 {% for ef in dep.extra_required_fields %}
       {{ ef.prop_name }}: {{ ef.prisma_val }},
 {% endfor %}

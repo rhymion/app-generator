@@ -1481,6 +1481,31 @@ for optional FK fields.
 | `name` field on targets | **Strong guideline** (validated) | Needed wherever `labelField` is not explicitly set |
 | Timestamp fields | **Strong guideline** | `created_at` / `updated_at` must exist in Prisma for every generated entity |
 | Creator/updater fields | **Strong guideline** | `creator_id` / `updater_id` must exist in Prisma for entities using `x-generate`; comment children (`x-outputType: comments`) need only `creator_id` — **no `updater_id`** |
+| FK to embedded entity | **Hard constraint** | A FK (`x-relationship`) must not target an embedded child entity (one without `x-generate`) — see §15.9 |
+
+---
+
+### 15.9 FK fields must not reference embedded child entities
+
+**[Hard constraint]** An `x-relationship` FK field must always target an **independent** entity — one that has its own `x-generate` block and therefore its own Prisma model. FK references to an embedded child entity (no `x-generate`, lives only inside a parent) are not supported by the code generator and will cause a TypeScript build error.
+
+**Prohibited:**
+```yaml
+# embedded_line_item has no x-generate — it is a child of invoice
+invoice_item_id:
+  type: string
+  x-relationship:
+    type: many-to-one
+    target: embedded_line_item   # ✗ embedded entity — not allowed
+```
+
+**Alternatives when the target must be referenced by FK:**
+
+1. **Make the child independent** — add `x-generate` (with at least `list: true`) and a corresponding `_detail` entity. The child gets its own page and can be referenced by FK from anywhere.
+
+2. **Reference the parent instead** — point the FK at the parent entity rather than its embedded child. Use filtering or display logic to narrow to the relevant records.
+
+If a user requests a FK that would target an embedded entity, reject the request and explain these two alternatives clearly.
 
 ---
 
