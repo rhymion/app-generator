@@ -1,17 +1,44 @@
-# my-next — Schema-Driven Web Application Generator
+# Rhymion Web Application Generator — Schema-Driven Web Application Generator
 
-my-next is a framework that generates full-stack web applications from YAML schema files. Define your data model once, and the generator produces web screens, a database schema, a REST API, end-to-end test cases, and documentation — with login and role-based access control included by default.
+Generate production-ready web applications from schema definitions. Define your data structures and screens in YAML — the generator produces a complete Next.js application with CRUD operations, role-based access control, REST API, and multilingual support.
+
+Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and [MUI](https://mui.com/).
+
+---
+
+## What This Is
+
+This application is a schema-driven code generator. You describe your application's data model and screen layout in a YAML configuration file, and the generator produces a working web application that you own and can extend freely.
+
+The generated application is yours — you can deploy it, sell it, modify it, and build your own business logic on top of it.
+
+---
 
 ## Features
 
-- **Web screens** — List, create, edit, and view pages for every entity, including Gantt chart views
+- **Web screens** — List, create, edit, delete, and view pages for every entity, including Gantt chart views
 - **Database** — Prisma schema and migrations generated from your YAML definitions
+- **Table relationships** — Including one-to-many, many-to-many and self-relations
 - **REST API** — JSON API endpoints with API key authentication for every entity
 - **E2E tests** — Cypress test suite generated alongside the application code
 - **Documentation** — Knowledge articles and API specs generated from the schema
 - **Authentication & access control** — Login, roles, and per-model CRUD permissions included out of the box
 - **Internationalization** — English and Japanese UI with locale-aware routing
 - **Dark mode** — System-aware theme switching
+
+---
+
+## Current Status
+
+This generator is suitable for internal business applications and moderate-scale deployments. **Support for large datasets and high-traffic production environments is planned but not yet available.** Performance improvements are under active development.
+
+Planned features include:
+- Search beyond column filtering
+- Two-factor authentication and SSO
+- Data aggregation and visualization
+- Performance improvements for large datasets
+
+---
 
 ## Prerequisites
 
@@ -137,3 +164,60 @@ prisma/            Database schema and migrations
 cypress/           E2E test suite (generated + custom specs)
 messages/          i18n translation files (en, ja)
 ```
+
+---
+
+## License
+
+This project is licensed under the **Business Source License 1.1 (BUSL-1.1)**.
+
+### What you can do
+
+✅ Use the generator freely for any purpose  
+✅ Generate applications and sell them to your clients or as your own product  
+✅ Modify the generator source code  
+✅ Distribute modified versions of the generator, **as long as the modified source is publicly available** (see below)
+
+### What you cannot do
+
+❌ Operate a commercial service that lets third parties define schemas and generate applications using this software — for example, a hosted no-code or low-code platform built on this generator
+
+### Sharing modifications
+
+If you distribute a modified version of this generator, the modifications must be made publicly accessible in one of the following ways:
+
+- Submit a pull request or patch to the [official repository](https://github.com/rhymion/app-generator)
+- Maintain a publicly accessible fork on GitHub or an equivalent public code hosting service
+
+You may not distribute a modified version with the source kept private.
+
+### Becoming MIT
+
+On the fourth anniversary of the first public release of this version, the license automatically converts to the **MIT License**. At that point, all restrictions are lifted.
+
+### Commercial license
+
+If you need to use this software in a way not permitted by the BUSL-1.1 — for example, incorporating it into a proprietary closed-source product — please contact us at [contact@rhymion.com](mailto:contact@rhymion.com).
+
+See [LICENSE](./LICENSE) for the full license text.
+
+---
+
+## Contributing
+
+Contributions are welcome. By submitting a pull request, you agree that your contribution will be licensed under the same terms as this project.
+
+Please open an issue before beginning significant work to discuss the approach.
+
+---
+
+## About
+
+This application is developed by [Rhymion Labs](https://rhymion.com), founded in 2026.
+
+Our focus is helping organizations build the internal tooling they need without diverting engineering resources from their core business.
+
+- Website: [rhymion.com](https://rhymion.com)
+- GitHub: [github.com/rhymion](https://github.com/rhymion)
+- LinkedIn: [linkedin.com/company/rhymion](https://linkedin.com/company/rhymion)
+- Contact: [contact@rhymion.com](mailto:contact@rhymion.com)
