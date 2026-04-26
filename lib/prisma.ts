@@ -15,11 +15,26 @@ const createPrismaClient = async () => {
     return client;
   } else {
     console.log('Using direct database connection for Prisma Client');
-    const connectionString = `${process.env.DATABASE_URL}`;
-    
+    const rawUrl = `${process.env.DATABASE_URL}`;
+
+    // PrismaPg passes the connection string to pg.Pool, which ignores Prisma's
+    // ?schema= extension. Strip it from the URL and pass it via the adapter's
+    // native schema option so PrismaPg sets the correct PostgreSQL search_path.
+    let connectionString = rawUrl;
+    let schemaName: string | undefined;
+    try {
+      const u = new URL(rawUrl);
+      const s = u.searchParams.get('schema');
+      if (s) {
+        schemaName = s;
+        u.searchParams.delete('schema');
+        connectionString = u.toString();
+      }
+    } catch { /* malformed URL — fall through with original values */ }
+
     // Dynamic import to avoid bundling @prisma/adapter-pg in production
     const { PrismaPg } = await import('@prisma/adapter-pg');
-    const adapter = new PrismaPg({ connectionString });
+    const adapter = new PrismaPg({ connectionString }, schemaName ? { schema: schemaName } : undefined);
     const client = new PrismaClient({ adapter, log: ['query', 'info'] })
     return client;
   }
