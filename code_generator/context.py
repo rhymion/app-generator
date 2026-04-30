@@ -129,11 +129,14 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     parent_fields = [FieldInfo(k, get_ts_type(v)) for k, v in filtered_props.items()]
     parent_fields.append(FieldInfo('creator_id', 'string | null'))  # enforce id as string for permissions
 
-    # One-to-one FK props (computed early for form_view_fields exclusion)
-    _oto_fk_names_early = {
-        p for p, v in filtered_props.items()
-        if (v.get('x-relationship') or {}).get('type') == 'one-to-one'
-    }
+    # Compute all OTO rels early so we can split and use for FK-name exclusions
+    oto_rels_early = get_one_to_one_rels({**model_def, 'properties': filtered_props}, schema)
+    _auto_create_oto_early = [r for r in oto_rels_early if not r['is_selector']]
+    _selector_oto_early    = [r for r in oto_rels_early if r['is_selector']]
+
+    # All OTO FK props are excluded from form_view_fields — the selector OTO rels will be
+    # displayed through parent_rels (like many-to-one), and auto-create OTO via nested includes
+    _oto_fk_names_early = {r['prop_name'] for r in oto_rels_early}
 
     form_view_fields = [
         FieldInfo(k, get_ts_type(v, for_view_props=True))
@@ -152,9 +155,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         if child_def.get('properties'):
             child_rels_early.extend(get_parent_relationships(child_def))
 
-    # One-to-one outbound FK rels (computed early for import targets)
-    oto_rels_early = get_one_to_one_rels({**model_def, 'properties': filtered_props}, schema)
-    # Only import oto child rel targets that have their own generated types
+    # Only import auto-create OTO child rel targets that have their own generated types
     def _has_generated_types(target: str) -> bool:
         detail = schema['definitions'].get(f'{target}_detail', {})
         gen = detail.get('x-generate') or {}
@@ -162,21 +163,31 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
 
     oto_child_rel_targets = [
         cr['target']
-        for oto in oto_rels_early
+        for oto in _auto_create_oto_early
         for c in oto['children']
         for cr in c['child_rels']
         if cr['target'] != oto['target'] and _has_generated_types(cr['target'])
     ]
 
-    # Import targets = union of parent + child + one-to-one nested rel targets
+    # Selector OTO rels are treated like many-to-one for display and type generation
+    # Add them to parent_rels so they get RelInfo, XxxOption types, and autocomplete UI
+    for r in _selector_oto_early:
+        parent_rels.append(RelInfo(
+            relation_name=r['relation_name'],
+            target=r['target'],
+            label_field=r['label_field'],
+        ))
+
+    # Import targets = union of parent + child + auto-create OTO nested rel targets + selector OTO targets
     all_import_targets = _dedupe_ordered([
         *[r['target'] for r in relationship_targets],
         *[r['target'] for r in child_rels_early],
         *oto_child_rel_targets,
+        *[r['target'] for r in _selector_oto_early],
     ])
     import_targets = [t for t in all_import_targets if t != model]
 
-    # XxxOption types — parent rels whose target is not the model itself (deduplicated by target)
+    # XxxOption types — parent rels (including selector OTO) whose target is not the model (deduplicated)
     _seen_option_targets: set[str] = set()
     option_types = []
     for r in parent_rels:
@@ -254,10 +265,10 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         *child_rel_targets,
     ])
 
-    # One-to-one outbound FK rels with nested children (for types + display)
-    oto_rels_raw = get_one_to_one_rels({**model_def, 'properties': filtered_props}, schema)
+    # Auto-create OTO rels with nested children (for types + display)
+    # Selector OTO rels are already handled via parent_rels above
     one_to_one_rels: list[OneToOneRelInfo] = []
-    for oto in oto_rels_raw:
+    for oto in _auto_create_oto_early:
         oto_children: list[OneToOneChildInfo] = []
         for c in oto['children']:
             child_def = c['child_def']

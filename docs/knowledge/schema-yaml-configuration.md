@@ -946,9 +946,18 @@ This is the same format as described in §10. It overrides column layout in the 
 
 ## 12.5 One-to-One Relationships (`x-relationship: type: one-to-one`)
 
-A one-to-one relationship is declared on a FK field exactly like a many-to-one, but with
-`type: one-to-one`. The generator automatically pre-creates the target record inside the
-`$transaction` before creating the main entity.
+A one-to-one relationship is declared on a FK field with `type: one-to-one`. The generator
+distinguishes two modes based on whether the **target entity has its own generated pages**:
+
+| Mode | Criterion | UI behaviour |
+|------|-----------|--------------|
+| **Auto-create** | Target `_detail` has all `x-generate` flags `false` (e.g. `approvable`, `commentable`) | FK excluded from form; target pre-created inside `$transaction` |
+| **Selector** | Target `_detail` has at least one `x-generate` flag `true` (e.g. `checkup`, `user_account`) | FK rendered as **autocomplete** filtered to exclude already-linked records |
+
+### Auto-create mode (approvable / commentable pattern)
+
+The target is a bridge record with no own pages. The generator pre-creates it inside the
+`$transaction` before creating the main entity. The FK is not shown in the form.
 
 ```yaml
 # On the base entity:
@@ -973,8 +982,6 @@ leave_request_detail:
           $ref: "#/definitions/approvable"   # resolved object included in detail queries
 ```
 
-### What this generates
-
 **`service.ts`** — pre-creates the target in the transaction, then sets the FK:
 
 ```typescript
@@ -982,11 +989,7 @@ export async function addLeaveRequest(...) {
   return await prisma.$transaction(async (tx) => {
     const approvable = await tx.approvable.create({ data: {} });   // pre-created
     const created = await tx.leave_request.create({
-      data: {
-        ...,
-        approvable_id: approvable.id,   // FK set to pre-created record
-      },
-      include: { approvable: true },    // returned for use in afterCreate hook
+      data: { ..., approvable_id: approvable.id },
     });
     await afterCreate(tx, created as Record<string, unknown>, { ... });
     return { id: created.id };
@@ -994,24 +997,62 @@ export async function addLeaveRequest(...) {
 }
 ```
 
-The `afterCreate` hook (see `lib/{entity}/service_after_create.ts` in the extension points)
-receives the full created record including `created.approvable`, allowing post-create logic
-that references the pre-created target.
+### Selector mode (independent entities)
+
+When the target entity has its own pages (any `x-generate` flag is `true`), the FK is
+displayed as an **autocomplete** in the form — filtered to exclude records already linked
+to another entity of the same type.
+
+```yaml
+# On the base entity (Side B — holds the FK):
+checkup_id:
+  type: string
+  pattern: "^c[a-z0-9]{24,}$"
+  x-relationship:
+    type: one-to-one
+    target: checkup
+    labelField: checkup_date   # field shown in the autocomplete label
+```
+
+For optional FK (nullable), use:
+
+```yaml
+user_account_id:
+  type: ["string", "null"]
+  pattern: "^c[a-z0-9]{24,}$"
+  x-relationship:
+    type: one-to-one
+    target: user_account
+    labelField: name
+```
+
+**What this generates:**
+
+- **`getters.ts`** — adds `getAvailable{Target}sFor{Parent}(currentParentId?)` that queries
+  which target records are already linked to another parent entity (excluding the current
+  entity when editing), then returns only the available ones.
+- **`page_new.tsx` / `page_edit.tsx`** — import the filtered getter; pass the result as
+  `all{Target}s` to FormUpsert (without `{target}Permissions`, hiding the "create new" link).
+- **`FormUpsert`** — renders an Autocomplete exactly like a many-to-one relation; uses
+  `required` if the FK is non-nullable.
+- **`FormView`** — displays the linked entity's label field with a view link, exactly like
+  a many-to-one relation.
+- **`types.ts`** — generates `{Target}Option = { id: string; {labelField}: string }` and
+  adds `all{Target}s?: {Target}Option[]` to `FormUpsertProps`.
 
 ### Prisma alignment
 
-The FK column must have a `@unique` constraint and the target must declare the back-reference
-as optional (since it is the "one" side):
+The FK column must have a `@unique` constraint in both modes:
 
 ```prisma
-model leave_request {
-  approvable_id  String     @unique    // ← @unique required for one-to-one
-  approvable     approvable @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
+model pre_check {
+  checkup_id  String    @unique    // ← @unique required for one-to-one
+  checkup     checkup   @relation(fields: [checkup_id], references: [id], onDelete: Cascade)
 }
 
-model approvable {
-  id             String          @id @default(cuid())
-  leave_request  leave_request?  // ← optional back-reference
+model patient {
+  user_account_id  String?  @unique   // ← nullable for optional OTO
+  user_account     user_account? @relation("PatientUser", fields: [user_account_id], references: [id], onDelete: SetNull)
 }
 ```
 

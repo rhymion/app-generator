@@ -85,8 +85,11 @@ def get_parent_fk_props(child_def: dict, parent_model: str) -> set[str]:
 
 def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
     """Returns one-to-one outbound FK relationship metadata (FK is on this model).
-    Each entry: {prop_name, relation_name, target, children}
-    'children' = array children of the target's _detail (for nested includes and display)."""
+    Each entry: {prop_name, relation_name, target, label_field, is_selector, nullable, children}
+    'children' = array children of the target's _detail (for nested includes and display).
+    'is_selector' = True when target has its own generated pages (use autocomplete UI);
+                    False when target is auto-created alongside parent (approvable/commentable pattern).
+    'nullable' = True when the FK field itself is nullable (optional relationship)."""
     props = parent_def.get('properties', {})
     result = []
     for prop_name, prop in props.items():
@@ -95,9 +98,18 @@ def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
             continue
         target = rel['target']
         relation_name = prop_name[:-3] if prop_name.endswith('_id') else prop_name
+        label_field = rel.get('labelField', 'name')
 
-        # Collect array children from the target's _detail definition
+        # Determine if this is a selector OTO (target has own generated pages)
         target_detail = schema['definitions'].get(f'{target}_detail', {})
+        target_gen = target_detail.get('x-generate') or {}
+        is_selector = any(target_gen.get(k) for k in ('list', 'view', 'new', 'edit', 'delete', 'api'))
+
+        # Determine if FK is nullable
+        prop_type = prop.get('type')
+        nullable = isinstance(prop_type, list) and 'null' in prop_type
+
+        # Collect array children from the target's _detail definition (only for auto-create OTO)
         target_detail_props = {}
         if 'properties' in target_detail:
             target_detail_props = target_detail['properties']
@@ -108,22 +120,26 @@ def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
                     break
 
         children = []
-        for cp_name, cp in target_detail_props.items():
-            if cp.get('type') == 'array' and (cp.get('items') or {}).get('$ref'):
-                child_name = cp['items']['$ref'].split('/')[-1]
-                child_def = schema['definitions'].get(child_name, {})
-                child_rels = get_parent_relationships(child_def)
-                children.append({
-                    'property_name': cp_name,
-                    'child_name': child_name,
-                    'child_rels': child_rels,
-                    'child_def': child_def,
-                })
+        if not is_selector:
+            for cp_name, cp in target_detail_props.items():
+                if cp.get('type') == 'array' and (cp.get('items') or {}).get('$ref'):
+                    child_name = cp['items']['$ref'].split('/')[-1]
+                    child_def = schema['definitions'].get(child_name, {})
+                    child_rels = get_parent_relationships(child_def)
+                    children.append({
+                        'property_name': cp_name,
+                        'child_name': child_name,
+                        'child_rels': child_rels,
+                        'child_def': child_def,
+                    })
 
         result.append({
             'prop_name': prop_name,
             'relation_name': relation_name,
             'target': target,
+            'label_field': label_field,
+            'is_selector': is_selector,
+            'nullable': nullable,
             'children': children,
         })
     return result

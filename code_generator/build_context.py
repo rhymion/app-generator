@@ -512,12 +512,18 @@ def build_context(entity: dict, schema: dict) -> dict:
         f'{{ id: true, creator_id: true{", assignee_id: true" if has_assignee_id else ""} }}'
     )
 
-    # One-to-one outbound FK rels (FK is on this model, target auto-created)
+    # One-to-one outbound FK rels (FK is on this model)
     one_to_one_rels = get_one_to_one_rels(merged_def, schema)
-    one_to_one_fk_props = {r['prop_name'] for r in one_to_one_rels}
+    auto_create_oto_rels = [r for r in one_to_one_rels if not r['is_selector']]
+    selector_oto_rels    = [r for r in one_to_one_rels if r['is_selector']]
+    # auto-create FK props are excluded from service params (pre-created in transaction)
+    auto_create_oto_fk_props = {r['prop_name'] for r in auto_create_oto_rels}
+    # all OTO FK props are excluded from field categorisation (never treated as plain text fields)
+    all_oto_fk_props = {r['prop_name'] for r in one_to_one_rels}
 
-    # Parent prop infos (excluding id + timestamps + one-to-one FK props)
-    parent_props = [k for k in filtered_props if k not in _EXCLUDE_ID_TS and k not in one_to_one_fk_props]
+    # Parent prop infos: exclude id, timestamps, and auto-create OTO FK props
+    # Selector OTO FK props ARE included — they flow through the form as autocomplete values
+    parent_props = [k for k in filtered_props if k not in _EXCLUDE_ID_TS and k not in auto_create_oto_fk_props]
     parent_prop_infos = [
         {'prop': p, 'var_name': safe_var_name(p), 'def': filtered_props[p]}
         for p in parent_props
@@ -527,25 +533,25 @@ def build_context(entity: dict, schema: dict) -> dict:
         f"{p['var_name']}: {get_ts_type(p['def'])}" for p in parent_prop_infos
     )
     _base_data_lines = [f"        {p['prop']}: {p['var_name']}," for p in parent_prop_infos]
-    # Explicit pre-create statements for one-to-one targets (e.g. const approvable = await tx.approvable.create({ data: {} });)
+    # Explicit pre-create statements for auto-create OTO targets (e.g. const approvable = await tx.approvable.create({ data: {} });)
     one_to_one_pre_creates = '\n'.join(
         f"    const {r['relation_name']} = await tx.{r['target']}.create({{ data: {{}} }});"
-        for r in one_to_one_rels
+        for r in auto_create_oto_rels
     )
-    # FK data lines for one-to-one targets (e.g. approvable_id: approvable.id,)
+    # FK data lines for auto-create OTO targets (e.g. approvable_id: approvable.id,)
     one_to_one_fk_data_lines = '\n'.join(
         f"        {r['prop_name']}: {r['relation_name']}.id,"
-        for r in one_to_one_rels
+        for r in auto_create_oto_rels
     )
     parent_data_obj = '\n'.join(
         _base_data_lines + ([one_to_one_fk_data_lines] if one_to_one_fk_data_lines else [])
     )
     parent_data_obj_update = '\n'.join(_base_data_lines)
     validation_data_obj  = '\n'.join(f"      {p['prop']}: {p['var_name']}," for p in parent_prop_infos)
-    # Synthetic object spreading created record with nested one-to-one stubs for afterCreate
+    # Synthetic object spreading created record with nested auto-create OTO stubs for afterCreate
     one_to_one_spread = ', '.join(
         f"{r['relation_name']}: {{ id: created.{r['prop_name']} }}"
-        for r in one_to_one_rels
+        for r in auto_create_oto_rels
     )
     one_to_one_include = ''  # not used with explicit creation approach
 
@@ -616,7 +622,8 @@ def build_context(entity: dict, schema: dict) -> dict:
     selection_targets = _get_selection_targets(children_raw, parent_rels_raw, schema, model)
 
     # Field categorisation (for FormUpsert / FormView)
-    field_categories = _categorize_form_fields(filtered_props, parent_rels_raw, gen_cfg, one_to_one_fk_props)
+    # Use all_oto_fk_props to exclude BOTH auto-create and selector OTO FK props from plain field treatment
+    field_categories = _categorize_form_fields(filtered_props, parent_rels_raw, gen_cfg, all_oto_fk_props)
 
     # Default props (page_new)
     def _default_value(k: str, defn: dict) -> str:
@@ -637,7 +644,7 @@ def build_context(entity: dict, schema: dict) -> dict:
     parent_default_props = '\n'.join(
         f"    {k}: {_default_value(k, defn)},"
         for k, defn in filtered_props.items()
-        if k not in _EXCLUDE_ID_TS and k != 'id'
+        if k not in _EXCLUDE_ID_TS and k != 'id' and k not in auto_create_oto_fk_props
     )
 
     # Chart config
@@ -677,8 +684,10 @@ def build_context(entity: dict, schema: dict) -> dict:
         for c in embedded_ch
     )
 
-    # Getters: include entries
+    # Getters: include entries (list page)
     include_entries_list = [f"{r['relation_name']}: true" for r in parent_rels]
+    # Selector OTO rels are included in list so the relation column can be displayed
+    include_entries_list.extend(f"{r['relation_name']}: true" for r in selector_oto_rels)
     include_props_list   = ', '.join(include_entries_list)
 
     child_include_entries = []
@@ -703,9 +712,9 @@ def build_context(entity: dict, schema: dict) -> dict:
                 )
                 child_include_entries.append(f"{prop}: {{ include: {{ {child_includes} }} }}")
 
-    # Include entries for one-to-one rels with their nested children
+    # Include entries for auto-create one-to-one rels with their nested children
     one_to_one_include_entries = []
-    for r in one_to_one_rels:
+    for r in auto_create_oto_rels:
         if not r['children']:
             one_to_one_include_entries.append(f"{r['relation_name']}: true")
         else:
@@ -763,10 +772,14 @@ def build_context(entity: dict, schema: dict) -> dict:
                 f"{r['relation_name']}: {{ include: {{ {nested} }} }}"
             )
 
+    # Selector OTO rels included simply — they are independent entities with their own pages
+    selector_oto_include_entries = [f"{r['relation_name']}: true" for r in selector_oto_rels]
+
     include_entries_detail = [
         *child_include_entries,
         *[f"{r['relation_name']}: true" for r in parent_rels],
         *one_to_one_include_entries,
+        *selector_oto_include_entries,
         "creator: { select: { id: true, name: true } }",
         "updater: { select: { id: true, name: true } }",
     ]
@@ -876,7 +889,8 @@ def build_context(entity: dict, schema: dict) -> dict:
         xdisplay=xdisplay,
         xdisplay_table=xdisplay_table_raw,
         # One-to-one outbound FK rels
-        one_to_one_rels=one_to_one_rels,
+        one_to_one_rels=auto_create_oto_rels,      # auto-create OTO only (for types/service templates)
+        selector_oto_rels=selector_oto_rels,        # selector OTO (autocomplete UI, filtered getters)
         one_to_one_pre_creates=one_to_one_pre_creates,
         one_to_one_spread=one_to_one_spread,
         one_to_one_include=one_to_one_include,

@@ -2,6 +2,9 @@
 
 import prisma from '@/lib/prisma';
 import type { {{ parent_pascal }}, {{ parent_pascal }}Detail } from '@/lib/{{ parent }}/types';
+{% for oto in selector_oto_rels %}
+import { getAll{{ oto.target | pascal_case }}s } from '@/lib/{{ oto.target }}/getters';
+{% endfor %}
 import { assertPermission, getModelPermissions, resolvePermissions, toPermissions{% if should_filter_by_org %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
 {% if should_filter_by_org %}
@@ -109,3 +112,26 @@ export async function get{{ parent_pascal }}NewPageAccessCheck() {
   await assertPermission(richPermissions.general, 'create', '{{ parent }}');
   return richPermissions.general;
 }
+{% for oto in selector_oto_rels %}
+
+/**
+ * Returns {{ oto.target }} records not already linked to another {{ parent }}.
+ * Pass current{{ parent_pascal }}Id when editing so the current {{ parent }}'s {{ oto.target }} stays available.
+ */
+export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pascal }}(current{{ parent_pascal }}Id?: string | null) {
+  const takenTargets = await prisma.{{ model }}.findMany({
+    where: {
+{% if oto.nullable %}
+      {{ oto.prop_name }}: { not: null },
+{% endif %}
+      ...(current{{ parent_pascal }}Id ? { id: { not: current{{ parent_pascal }}Id } } : {}),
+    },
+    select: { {{ oto.prop_name }}: true },
+  });
+  const takenIds = new Set(
+    takenTargets.map(r => r.{{ oto.prop_name }}).filter((id): id is string => id !== null),
+  );
+  const all{{ oto.target | pascal_case }}s = await getAll{{ oto.target | pascal_case }}s();
+  return all{{ oto.target | pascal_case }}s.filter(item => !takenIds.has(item.id));
+}
+{% endfor %}

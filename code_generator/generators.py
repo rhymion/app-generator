@@ -512,6 +512,15 @@ def form_view_context(ctx: dict) -> dict:
     use_dayjs     = False
 
     rel_by_prop = {r['prop_name']: r for r in ctx['parent_rels_raw']}
+    # Add selector OTO rels to rel_by_prop so they display like many-to-one (label + view link)
+    for _oto_r in ctx.get('selector_oto_rels', []):
+        rel_by_prop[_oto_r['prop_name']] = {
+            'prop_name': _oto_r['prop_name'],
+            'label_field': _oto_r['label_field'],
+            'relation_name': _oto_r['relation_name'],
+            'target': _oto_r['target'],
+            'is_selector_oto': True,  # FK prop not in src type; use relation?.id for linking
+        }
     one_to_one_fk_props = {r['prop_name'] for r in ctx.get('one_to_one_rels', [])}
     EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'} | one_to_one_fk_props
     parent_props = [k for k in filtered_props if k not in EXCLUDE]
@@ -578,14 +587,18 @@ def form_view_context(ctx: dict) -> dict:
             rel_name      = rel.get('relation_name', p.removesuffix('_id'))
             target        = rel.get('target', p.removesuffix('_id'))
             target_pascal = to_pascal_case(target)
+            is_oto        = rel.get('is_selector_oto', False)
+            # For selector OTO, the FK prop is excluded from src type; use relation?.id instead
+            fk_id_expr    = f"src.{rel_name}?.id" if is_oto else f"src.{p}"
+            value_expr    = f"src.{rel_name}?.{label_f} || ''" if is_oto else f"src.{rel_name}?.{label_f} || src.{p} || ''"
             text_jsxs.append(
                 f"      <TextField\n        label={{tf('{label_fk}')}}\n"
-                f"        value={{src.{rel_name}?.{label_f} || src.{p} || ''}}\n"
+                f"        value={{{value_expr}}}\n"
                 f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n"
-                f"        slotProps={{{{ input: {{ endAdornment: src.{p} ? (\n"
+                f"        slotProps={{{{ input: {{ endAdornment: {fk_id_expr} ? (\n"
                 f"          <InputAdornment position=\"end\">\n"
                 f"            <Tooltip title=\"View\">\n"
-                f"              <Link href={{`/{target}/view/${{src.{p}}}`}} aria-label=\"View {target_pascal}\">\n"
+                f"              <Link href={{`/{target}/view/${{{fk_id_expr}}}`}} aria-label=\"View {target_pascal}\">\n"
                 f"                <IconButton component=\"span\" size=\"small\" tabIndex={{-1}}>\n"
                 f"                  <OpenInNewIcon fontSize=\"small\" />\n"
                 f"                </IconButton>\n"
@@ -798,6 +811,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     model_def     = ctx['model_def']
     parent_rels   = ctx['parent_rels']
     parent_rels_raw = ctx['parent_rels_raw']
+    selector_oto_rels = ctx.get('selector_oto_rels', [])
     children_raw  = ctx['children_raw']
     can_delete    = ctx['can_delete']
     selection_targets = ctx['selection_targets']
@@ -850,10 +864,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<number | null>(src.{p} ?? null);"
         for p in enum_int_props
     )
-    rel_states = '\n'.join(
+    # Many-to-one: FK prop is in src type → initialize from src.{prop_name}
+    # Selector OTO: FK prop is excluded from src type, but relation object is present → use src.{relation_name}?.id
+    rel_states_lines = [
         f"  const [{safe_var_name(r['prop_name'])}, set{_setter(safe_var_name(r['prop_name']))}] = useState<string | null>(src.{r['prop_name']} || null);"
         for r in parent_rels_raw
-    )
+    ]
+    for r in selector_oto_rels:
+        sn = safe_var_name(r['prop_name'])
+        rel_states_lines.append(
+            f"  const [{sn}, set{_setter(sn)}] = useState<string | null>(src.{r['relation_name']}?.id || null);"
+        )
+    rel_states = '\n'.join(rel_states_lines)
     custom_states = '\n'.join(
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
         for p in custom_upsert_props
@@ -897,18 +919,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      />"
         )
 
-    # Relationship fields (Autocomplete)
-    rel_jsxs = []
-    for r in parent_rels_raw:
-        prop_name     = r['prop_name']
+    def _autocomplete_rel_jsx(prop_name: str, target: str, required: bool) -> str:
         label_base    = prop_name.removesuffix('_id')
         label_fk      = _tf(label_base)
         state_name    = safe_var_name(prop_name)
         setter        = _setter(state_name)
-        target        = r['target']
         target_pascal = to_pascal_case(target)
         opts_var      = f'{state_name}Options'
-        rel_jsxs.append(
+        return (
             f"      <Box sx={{{{ display: 'flex', alignItems: 'flex-start', gap: 1 }}}}>\n"
             f"        <Autocomplete\n"
             f"          sx={{{{ flex: 1 }}}}\n"
@@ -920,7 +938,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"              {{...params}}\n"
             f"              label={{tf('{label_fk}')}}\n"
             f"              margin=\"normal\"\n"
-            f"              {'required' if r.get('required') else ''}\n"
+            f"              {'required' if required else ''}\n"
             f"            />\n"
             f"          )}}\n"
             f"        />\n"
@@ -935,6 +953,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        )}}\n"
             f"      </Box>"
         )
+
+    # Relationship fields (Autocomplete) — many-to-one and selector OTO
+    rel_jsxs = []
+    for r in parent_rels_raw:
+        rel_jsxs.append(_autocomplete_rel_jsx(r['prop_name'], r['target'], bool(r.get('required'))))
+    for r in selector_oto_rels:
+        # Selector OTO: required = FK is not nullable
+        rel_jsxs.append(_autocomplete_rel_jsx(r['prop_name'], r['target'], not r.get('nullable', True)))
 
     # Number fields
     num_jsxs = []
@@ -1042,7 +1068,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      />"
         )
 
-    for r in parent_rels_raw:
+    for r in list(parent_rels_raw) + list(selector_oto_rels):
         prop_name    = r['prop_name']
         target_pascal = to_pascal_case(r['target'])
         label_field  = r.get('label_field', 'name')
@@ -1123,7 +1149,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             dt_ds_parts.append(f"    formData.set('{p}', {sn}?.toISOString() || '');")
     dt_ds = '\n'.join(dt_ds_parts)
     img_ds   = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in image_props)
-    rel_ds   = '\n'.join(f"    formData.set('{r['prop_name']}', {safe_var_name(r['prop_name'])} || '');" for r in parent_rels_raw)
+    rel_ds   = '\n'.join(f"    formData.set('{r['prop_name']}', {safe_var_name(r['prop_name'])} || '');" for r in list(parent_rels_raw) + list(selector_oto_rels))
     bool_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}.toString());" for p in boolean_props)
     enum_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} !== null ? String({safe_var_name(p)}) : '');" for p in enum_int_props)
     cust_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in custom_upsert_props)
@@ -1144,7 +1170,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     has_comment_children = bool(comment_children)
     has_children = bool(non_comment_ch)
     has_many_to_many = any((c.get('relationship') or {}).get('type') == 'many-to-many' for c in children_raw)
-    has_many_to_one = bool(parent_rels_raw)
+    has_many_to_one = bool(parent_rels_raw) or bool(selector_oto_rels)
 
     # Column fn names (grid children only)
     col_fn_names = [
@@ -1588,7 +1614,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     child_grid_components = '\n'.join(child_grid_components_parts)
 
     # FormUpsert params signature
-    extra_default_props = ', '.join(f"all{to_pascal_case(t)}s = []" for t in selection_targets)
+    # selection_targets have both allXxxs and XxxPermissions; selector OTO only has allXxxs
+    _sel_default = [f"all{to_pascal_case(t)}s = []" for t in selection_targets]
+    _oto_default = [f"all{to_pascal_case(r['target'])}s = []" for r in selector_oto_rels]
+    extra_default_props = ', '.join(_sel_default + _oto_default)
     sel_perm_props = ', '.join(f"{to_camel_case(t)}Permissions" for t in selection_targets)
     entity_edit_component = ctx.get('entity_edit_component')
     has_current_user_role_ids = bool(entity_edit_component)
@@ -1610,6 +1639,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         '    id: src.id,',
         '\n'.join(f"    {p}: {safe_var_name(p)}," for p in date_time_props),
         '\n'.join(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in parent_rels_raw),
+        '\n'.join(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in selector_oto_rels),
         '\n'.join(f"    {p}: {safe_var_name(p)}," for p in boolean_props),
         '\n'.join(f"    {p}: {safe_var_name(p)}," for p in enum_int_props),
         '\n'.join(f"    {p}: {safe_var_name(p)}," for p in custom_upsert_props),
