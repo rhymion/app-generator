@@ -1202,11 +1202,13 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # Number fields
     num_jsxs = []
     for p in number_props:
-        prop = filtered_props[p]
-        fk   = _tf(p)
-        req  = p in (model_def.get('required') or [])
-        mn   = prop.get('minimum', 0)
-        mx   = prop.get('maximum', 1000000)
+        prop   = filtered_props[p]
+        fk     = _tf(p)
+        req    = p in (model_def.get('required') or [])
+        mn     = prop.get('minimum', 0)
+        mx     = prop.get('maximum', 1000000)
+        is_float = _get_actual_type(prop) == 'number'
+        step_str = '\n        step={0.01}' if is_float else ''
         num_jsxs.append(
             f"      <NumberField\n"
             f"        label={{tf('{fk}')}}\n"
@@ -1214,7 +1216,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        defaultValue={{src.{p} || undefined}}\n"
             f"        {'required' if req else ''}\n"
             f"        min={{{mn}}}\n"
-            f"        max={{{mx}}}\n"
+            f"        max={{{mx}}}{step_str}\n"
             f"      />"
         )
 
@@ -2082,13 +2084,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 _full_prop = _target_props.get(_fname, {})
                 _mn = _full_prop.get('minimum', 0)
                 _mx = _full_prop.get('maximum', 1000000)
+                _is_float = _ftype == 'number'
+                _step_str = '\n          step={0.01}' if _is_float else ''
                 _accordion_fields_jsx.append(
                     f"        <NumberField\n"
                     f"          label={{tf('{_fk_label}')}}\n"
                     f"          inputRef={{{_ref_var}}}\n"
                     f"          defaultValue={{src.{_prop}?.{_fname} ?? undefined}}\n"
                     f"          min={{{_mn}}}\n"
-                    f"          max={{{_mx}}}\n"
+                    f"          max={{{_mx}}}{_step_str}\n"
                     f"        />"
                 )
 
