@@ -43,6 +43,13 @@ import Checkbox from '@mui/material/Checkbox';
 {% if custom_upsert_imports %}
 {{ custom_upsert_imports }}
 {% endif %}
+{% if has_flatten_accordion_upsert %}
+import Accordion from '@mui/material/Accordion';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import Typography from '@mui/material/Typography';
+{% endif %}
 import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({{ form_upsert_params }}) {
@@ -145,6 +152,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% endif %}
 {% if child_grid_components %}
 {{ child_grid_components }}
+{% endif %}
+{% if flatten_edit_sections %}
+{{ flatten_edit_sections }}
 {% endif %}
       {validationError && <p style={{ '{{' }} color: 'red' {{ '}}' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}

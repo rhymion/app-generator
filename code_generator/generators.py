@@ -261,10 +261,68 @@ def actions_context(ctx: dict) -> dict:
     sep = ', ' if (parent_params and child_args) else ''
     full_child_args = f'{sep}{child_args}' if child_args else ''
 
+    # Flatten rel extraction code and update args
+    flatten_rels_raw = ctx.get('flatten_rels', [])
+    non_m2o_flatten = [r for r in flatten_rels_raw if not r['is_m2o']]
+
+    def _flatten_field_extraction_expr(form_key: str, f: dict) -> str:
+        ftype = f['prop_type']
+        fmt   = f.get('format')
+        null  = f.get('nullable', True)
+        raw   = f"data.get('{form_key}')"
+        if ftype == 'string' and fmt in ('date', 'date-time', 'time'):
+            return f"{raw} ? new Date({raw} as string) : null" if null else f"new Date({raw} as string)"
+        if ftype in ('integer', 'number'):
+            return f"{raw} ? Number({raw}) : null" if null else f"Number({raw})"
+        if ftype == 'boolean':
+            return f"{raw} === 'true'"
+        return f"({raw} as string | null) || null" if null else f"{raw} as string"
+
+    def _flatten_field_ts_type(f: dict) -> str:
+        ftype = f['prop_type']
+        fmt   = f.get('format')
+        null  = f.get('nullable', True)
+        sfx   = ' | null' if null else ''
+        if ftype == 'string' and fmt in ('date', 'date-time', 'time'):
+            return f'Date{sfx}'
+        if ftype in ('integer', 'number'):
+            return f'number{sfx}'
+        if ftype == 'boolean':
+            return 'boolean'
+        return f'string{sfx}'
+
+    flatten_extractions_lines: list[str] = []
+    flatten_update_var_names: list[str] = []
+
+    for _flat in non_m2o_flatten:
+        _prop    = _flat['prop_name']
+        _fields  = [f for f in _flat['fields'] if not f.get('is_fk')]
+        if not _fields:
+            continue
+        _var     = to_camel_case(_prop) + 'UpdateData'
+        _ts_type = '{ ' + '; '.join(
+            f"{f['name']}: {_flatten_field_ts_type(f)}" for f in _fields
+        ) + ' }'
+        _sentinel_key = f'{_prop}__{_fields[0]["name"]}'
+        _field_exprs  = '\n'.join(
+            "    " + f['name'] + ": " + _flatten_field_extraction_expr(f'{_prop}__{f["name"]}', f) + ","
+            for f in _fields
+        )
+        flatten_extractions_lines.append(
+            f"  const {_var}: {_ts_type} | null = data.get('{_sentinel_key}') !== null\n"
+            f"    ? {{\n{_field_exprs}\n    }}\n"
+            f"    : null;"
+        )
+        flatten_update_var_names.append(_var)
+
+    flatten_extractions_code = '\n'.join(flatten_extractions_lines)
+    flatten_args_str = (', ' + ', '.join(flatten_update_var_names)) if flatten_update_var_names else ''
+
     def _upsert_body(has_ch: bool) -> str:
+        _flatten_block = (f"{flatten_extractions_code}\n" if flatten_extractions_code else "")
         if can_create and can_update:
             create_call = f'await add{parent_pascal}(userId, {parent_params}{full_child_args});'
-            update_call = f'await update{parent_pascal}(userId, id, {parent_params}{full_child_args}, srcSnapshotRaw);'
+            update_call = f'await update{parent_pascal}(userId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
             return (
                 f"  const id = data.get('id') as string | null;\n"
                 f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
@@ -275,7 +333,8 @@ def actions_context(ctx: dict) -> dict:
                 f"    await requirePermission('{parent}', 'create');\n"
                 f"  }}\n"
                 f"{form_data_gets}\n"
-                + (f"{child_form_data_extractions}\n" if has_ch else "") +
+                + (f"{child_form_data_extractions}\n" if has_ch else "")
+                + _flatten_block +
                 f"  const userId = await getSessionUserIdOrThrow();\n\n"
                 f"  if (id) {{\n"
                 f"    {update_call}\n"
@@ -291,9 +350,10 @@ def actions_context(ctx: dict) -> dict:
                 f"  const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
                 f"  await requirePermission('{parent}', 'update', existing);\n"
                 f"{form_data_gets}\n"
-                + (f"{child_form_data_extractions}\n" if has_ch else "") +
+                + (f"{child_form_data_extractions}\n" if has_ch else "")
+                + _flatten_block +
                 f"\n  const userId = await getSessionUserIdOrThrow();\n"
-                f"  await update{parent_pascal}(userId, id, {parent_params}{full_child_args}, srcSnapshotRaw);"
+                f"  await update{parent_pascal}(userId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
             )
         else:  # create only
             return (
@@ -338,6 +398,52 @@ def service_context(ctx: dict) -> dict:
 
     has_non_comment_ch = bool(non_comment_ch)
 
+    # Flatten non-m2o rel update params and nested update calls
+    flatten_rels_raw = ctx.get('flatten_rels', [])
+    non_m2o_flatten  = [r for r in flatten_rels_raw if not r['is_m2o']]
+
+    def _flatten_field_ts_type(f: dict) -> str:
+        ftype = f['prop_type']
+        fmt   = f.get('format')
+        null  = f.get('nullable', True)
+        sfx   = ' | null' if null else ''
+        if ftype == 'string' and fmt in ('date', 'date-time', 'time'):
+            return f'Date{sfx}'
+        if ftype in ('integer', 'number'):
+            return f'number{sfx}'
+        if ftype == 'boolean':
+            return 'boolean'
+        return f'string{sfx}'
+
+    flatten_update_params_parts: list[str] = []
+    flatten_nested_update_lines: list[str] = []
+
+    for _flat in non_m2o_flatten:
+        _prop    = _flat['prop_name']
+        _target  = _flat['target']
+        _rel_name = _flat['relation_name']
+        _fields  = [f for f in _flat['fields'] if not f.get('is_fk')]
+        if not _fields:
+            continue
+        _var     = to_camel_case(_prop) + 'UpdateData'
+        _ts_type = '{ ' + '; '.join(
+            f"{f['name']}: {_flatten_field_ts_type(f)}" for f in _fields
+        ) + ' }'
+        flatten_update_params_parts.append(f"{_var}: {_ts_type} | null")
+        # FK pointing back to parent: {parent_model}_id
+        _fk_field = f'{model}_id'
+        flatten_nested_update_lines.append(
+            f"    if ({_var}) {{\n"
+            f"      await tx.{_target}.updateMany({{\n"
+            f"        where: {{ {_fk_field}: id }},\n"
+            f"        data: {_var},\n"
+            f"      }});\n"
+            f"    }}"
+        )
+
+    flatten_update_params = ', '.join(flatten_update_params_parts)
+    flatten_nested_updates = '\n'.join(flatten_nested_update_lines)
+
     utility_code = (
         f"import prisma from '@/lib/prisma';\n"
         f"import {{ normalizeValue,{' normalizeChildRefs,' if has_non_comment_ch else ''}"
@@ -364,9 +470,11 @@ def service_context(ctx: dict) -> dict:
     )
 
     return {
-        'utility_code':           utility_code,
-        'child_params_for_add':   child_params_for_add,
-        'child_params_for_update': child_params_for_update,
+        'utility_code':             utility_code,
+        'child_params_for_add':     child_params_for_add,
+        'child_params_for_update':  child_params_for_update,
+        'flatten_update_params':    flatten_update_params,
+        'flatten_nested_updates':   flatten_nested_updates,
     }
 
 
@@ -1824,11 +1932,214 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"import {to_pascal_case(p)} from './{p}';" for p in custom_upsert_props
     )
 
+    # ---- Flatten edit sections (non-m2o only, edit-mode accordion) ----
+    flatten_rels_raw = ctx.get('flatten_rels', [])
+    non_m2o_flatten = [r for r in flatten_rels_raw if not r['is_m2o']]
+    has_flatten_accordion_upsert = bool(non_m2o_flatten)
+
+    flatten_edit_states_lines: list[str] = []
+    flatten_enum_ns_hooks_upsert: list[str] = []
+    flatten_enum_ns_seen_upsert: set[str] = set()
+    flatten_enum_opt_setups_upsert: list[str] = []
+    flatten_edit_form_data_sets_lines: list[str] = []
+    flatten_edit_section_parts: list[str] = []
+    flatten_needs_datetime = False
+    flatten_needs_boolean = False
+    flatten_needs_autocomplete = False
+    flatten_needs_number_field = False
+
+    def _flatten_field_ts_type(f: dict) -> str:
+        ftype = f['prop_type']
+        fmt   = f.get('format')
+        null  = f.get('nullable', True)
+        sfx   = ' | null' if null else ''
+        if ftype == 'string' and fmt in ('date', 'date-time', 'time'):
+            return f'Date{sfx}'
+        if ftype in ('integer', 'number'):
+            return f'number{sfx}'
+        if ftype == 'boolean':
+            return 'boolean'
+        return f'string{sfx}'
+
+    for _flat in non_m2o_flatten:
+        _prop   = _flat['prop_name']
+        _target = _flat['target']
+        _fields = _flat['fields']
+        _rel_camel = to_camel_case(_prop)
+        _target_props = schema['definitions'].get(_target, {}).get('properties', {})
+
+        _accordion_fields_jsx: list[str] = []
+
+        for _f in _fields:
+            if _f.get('is_fk'):
+                continue  # FK fields are read-only in edit view
+
+            _fname   = _f['name']
+            _ftype   = _f['prop_type']
+            _fmt     = _f.get('format')
+            _nullable = _f.get('nullable', True)
+            _enum_vals = _f.get('enum')
+            _fk_label  = to_camel_case(_fname)
+            _form_key  = f'{_prop}__{_fname}'
+            _sn        = safe_var_name(f'{_prop}_{_fname}')
+            _fsetter   = _setter(_sn)
+
+            _is_date = _ftype == 'string' and _fmt in ('date', 'date-time', 'time')
+            _is_bool = _ftype == 'boolean'
+            _is_enum = _ftype in ('integer', 'number') and isinstance(_enum_vals, list)
+            _is_num  = _ftype in ('integer', 'number') and not _is_enum
+
+            if _is_date:
+                flatten_needs_datetime = True
+                if _fmt == 'date':
+                    _init = (f"src.{_prop}?.{_fname} ? dayjs(new Date(src.{_prop}?.{_fname} as string | Date)"
+                             f".toISOString().slice(0, 10) + 'T00:00:00') : null")
+                else:
+                    _init = f"src.{_prop}?.{_fname} ? dayjs(src.{_prop}?.{_fname}) : null"
+                flatten_edit_states_lines.append(
+                    f"  const [{_sn}, set{_fsetter}] = useState<Dayjs | null>({_init});"
+                )
+                if _fmt == 'date':
+                    flatten_edit_form_data_sets_lines.append(
+                        f"    formData.set('{_form_key}', {_sn}?.format('YYYY-MM-DD') || '');"
+                    )
+                else:
+                    flatten_edit_form_data_sets_lines.append(
+                        f"    formData.set('{_form_key}', {_sn}?.toISOString() || '');"
+                    )
+                _sd = '\n          show_date={false}' if _fmt == 'time' else ''
+                _st = '\n          show_time={false}' if _fmt == 'date' else ''
+                _accordion_fields_jsx.append(
+                    f"        <DateTimeWrapper\n"
+                    f"          label={{tf('{_fk_label}')}} {_sd}{_st}\n"
+                    f"          date_time={{{_sn} ? {_sn}.toDate() : null}}\n"
+                    f"          onChange={{(newValue: dayjs.Dayjs | null) => set{_fsetter}(newValue)}}\n"
+                    f"        />"
+                )
+
+            elif _is_bool:
+                flatten_needs_boolean = True
+                flatten_edit_states_lines.append(
+                    f"  const [{_sn}, set{_fsetter}] = useState<boolean>(Boolean(src.{_prop}?.{_fname}));"
+                )
+                flatten_edit_form_data_sets_lines.append(
+                    f"    formData.set('{_form_key}', {_sn}.toString());"
+                )
+                _accordion_fields_jsx.append(
+                    f"        <FormControlLabel\n"
+                    f"          control={{<Checkbox checked={{{_sn}}} onChange={{(e) => set{_fsetter}(e.target.checked)}} />}}\n"
+                    f"          label={{tf('{_fk_label}')}}\n"
+                    f"        />"
+                )
+
+            elif _is_enum:
+                flatten_needs_autocomplete = True
+                flatten_edit_states_lines.append(
+                    f"  const [{_sn}, set{_fsetter}] = useState<number | null>(src.{_prop}?.{_fname} ?? null);"
+                )
+                flatten_edit_form_data_sets_lines.append(
+                    f"    formData.set('{_form_key}', {_sn} !== null ? String({_sn}) : '');"
+                )
+                _opts_var = f'{_sn}Options'
+                _full_prop = _target_props.get(_fname, {})
+                _ns = _full_prop.get('x-enum-namespace')
+                if _ns and _ns not in flatten_enum_ns_seen_upsert:
+                    flatten_enum_ns_seen_upsert.add(_ns)
+                    flatten_enum_ns_hooks_upsert.append(f"  const t{_ns} = useTranslations('{_ns}');")
+                if _ns:
+                    _opts = ', '.join(
+                        (f"{{ value: {(v if isinstance(v, (int, float)) else (i if not str(v).lstrip('-').isdigit() else int(v)))}, "
+                         f"label: t{_ns}('{(v.lower()[0]+v[1:] if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))}') }}")
+                        for i, v in enumerate(_enum_vals)
+                    )
+                else:
+                    _opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(_enum_vals))
+                flatten_enum_opt_setups_upsert.append(f"  const {_opts_var} = [{_opts}];")
+                _accordion_fields_jsx.append(
+                    f"        <Autocomplete\n"
+                    f"          options={{{_opts_var}}}\n"
+                    f"          value={{{_opts_var}.find((o) => o.value === {_sn}) ?? null}}\n"
+                    f"          onChange={{(_, newValue) => set{_fsetter}(newValue?.value ?? null)}}\n"
+                    f"          renderInput={{(params) => (\n"
+                    f"            <TextField\n"
+                    f"              {{...params}}\n"
+                    f"              label={{tf('{_fk_label}')}}\n"
+                    f"              margin=\"normal\"\n"
+                    f"            />\n"
+                    f"          )}}\n"
+                    f"        />"
+                )
+
+            elif _is_num:
+                flatten_needs_number_field = True
+                _ref_var = f'{_sn}Ref'
+                flatten_edit_states_lines.append(
+                    f"  const {_ref_var} = useRef<HTMLInputElement>(null);"
+                )
+                flatten_edit_form_data_sets_lines.append(
+                    f"    formData.set('{_form_key}', {_ref_var}.current?.value || '');"
+                )
+                _full_prop = _target_props.get(_fname, {})
+                _mn = _full_prop.get('minimum', 0)
+                _mx = _full_prop.get('maximum', 1000000)
+                _accordion_fields_jsx.append(
+                    f"        <NumberField\n"
+                    f"          label={{tf('{_fk_label}')}}\n"
+                    f"          inputRef={{{_ref_var}}}\n"
+                    f"          defaultValue={{src.{_prop}?.{_fname} ?? undefined}}\n"
+                    f"          min={{{_mn}}}\n"
+                    f"          max={{{_mx}}}\n"
+                    f"        />"
+                )
+
+            else:
+                # Text field — use ref
+                _ref_var = f'{_sn}Ref'
+                flatten_edit_states_lines.append(
+                    f"  const {_ref_var} = useRef<HTMLInputElement>(null);"
+                )
+                flatten_edit_form_data_sets_lines.append(
+                    f"    formData.set('{_form_key}', {_ref_var}.current?.value || '');"
+                )
+                _ml  = 'true' if _fname == 'description' else 'false'
+                _rows = '4'   if _fname == 'description' else 'undefined'
+                _accordion_fields_jsx.append(
+                    f"        <TextField\n"
+                    f"          label={{tf('{_fk_label}')}}\n"
+                    f"          inputRef={{{_ref_var}}}\n"
+                    f"          defaultValue={{src.{_prop}?.{_fname} || ''}}\n"
+                    f"          fullWidth\n"
+                    f"          margin=\"normal\"\n"
+                    f"          multiline={{{_ml}}}\n"
+                    f"          rows={{{_rows}}}\n"
+                    f"        />"
+                )
+
+        if _accordion_fields_jsx:
+            flatten_edit_section_parts.append(
+                f"      <Accordion>\n"
+                f"        <AccordionSummary expandIcon={{<ExpandMoreIcon />}}>\n"
+                f"          <Typography>{{te('{_rel_camel}')}}</Typography>\n"
+                f"        </AccordionSummary>\n"
+                f"        <AccordionDetails>\n"
+                + '\n'.join(_accordion_fields_jsx) + '\n'
+                + f"        </AccordionDetails>\n"
+                + f"      </Accordion>"
+            )
+
+    # Merge flatten states/opts into existing strings
+    _flatten_states_str = '\n'.join(flatten_edit_states_lines)
+    all_states_merged = '\n'.join(filter(None, [all_states, _flatten_states_str]))
+    _flatten_fds_str = '\n'.join(flatten_edit_form_data_sets_lines)
+    parent_form_data_sets_merged = '\n'.join(filter(None, [parent_form_data_sets, _flatten_fds_str]))
+    _all_enum_ns_hooks = '\n'.join(enum_ns_hooks + flatten_enum_ns_hooks_upsert)
+    _all_enum_opt_setups = '\n'.join(enum_opt_setups + entity_select_opt_setups + flatten_enum_opt_setups_upsert)
+
     return {
         'parent_refs':              parent_refs,
-        'all_states':               all_states,
+        'all_states':               all_states_merged,
         'all_parent_fields_jsx':    all_parent_fields_jsx,
-        'parent_form_data_sets':    parent_form_data_sets,
+        'parent_form_data_sets':    parent_form_data_sets_merged,
         'child_variables':          child_variables,
         'child_imports':            child_imports,
         'child_grid_setup':         child_grid_setup,
@@ -1836,8 +2147,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'child_validation_code':    child_validation_code,
         'child_grid_components':    child_grid_components,
         'form_upsert_params':       form_upsert_params,
-        'enum_ns_hooks':            '\n'.join(enum_ns_hooks),
-        'enum_opt_setups':          '\n'.join(enum_opt_setups + entity_select_opt_setups),
+        'enum_ns_hooks':            _all_enum_ns_hooks,
+        'enum_opt_setups':          _all_enum_opt_setups,
         'rel_opt_setups':           '\n'.join(rel_opt_setups),
         'child_entity_rel_opt':     child_entity_rel_option_setups,
         'validation_call':          validation_call,
@@ -1846,9 +2157,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'custom_upsert_imports':    custom_upsert_imports,
         'has_children':             has_children,
         'has_comment_children':     has_comment_children,
-        'has_many_to_one':          has_many_to_one or bool(enum_int_props) or bool(entity_select_props),
-        'has_datetime_props':       bool(date_time_props),
+        'has_many_to_one':          has_many_to_one or bool(enum_int_props) or bool(entity_select_props) or flatten_needs_autocomplete,
+        'has_datetime_props':       bool(date_time_props) or flatten_needs_datetime,
         'has_image_props':          bool(image_props),
-        'has_number_props':         bool(number_props),
-        'has_boolean_props':        bool(boolean_props),
+        'has_number_props':         bool(number_props) or flatten_needs_number_field,
+        'has_boolean_props':        bool(boolean_props) or flatten_needs_boolean,
+        'has_flatten_accordion_upsert': has_flatten_accordion_upsert,
+        'flatten_edit_sections':    '\n'.join(flatten_edit_section_parts),
     }
