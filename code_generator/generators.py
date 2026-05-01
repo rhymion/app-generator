@@ -1069,16 +1069,22 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         )
 
     for r in list(parent_rels_raw) + list(selector_oto_rels):
-        prop_name    = r['prop_name']
+        prop_name     = r['prop_name']
         target_pascal = to_pascal_case(r['target'])
-        label_field  = r.get('label_field', 'name')
-        sn           = safe_var_name(prop_name)
-        opts_var     = f'{sn}Options'
+        label_field   = r.get('label_field', 'name')
+        label_is_date = r.get('label_field_is_date', False)
+        sn            = safe_var_name(prop_name)
+        opts_var      = f'{sn}Options'
+        # For date fields, convert to locale string; otherwise use as-is
+        if label_is_date:
+            label_expr = f"item.{label_field}?.toLocaleDateString() ?? ''"
+        else:
+            label_expr = f"item.{label_field}"
         rel_opt_setups.append(
             f"  const {opts_var} = useMemo(() => {{\n"
             f"    return all{target_pascal}s.map((item) => ({{\n"
             f"      value: item.id,\n"
-            f"      label: item.{label_field},\n"
+            f"      label: {label_expr},\n"
             f"    }}));\n"
             f"  }}, [all{target_pascal}s]);"
         )

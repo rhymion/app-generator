@@ -1,5 +1,24 @@
 """Schema navigation utilities — port of helpers/schema-helpers.ts"""
 
+_DATE_FORMATS = frozenset({'date', 'date-time', 'time'})
+
+
+def _get_entity_base_props(entity: str, schema: dict) -> dict:
+    """Returns the base (non-detail) properties for an entity, resolving allOf if needed."""
+    defn = schema['definitions'].get(entity, {})
+    if 'properties' in defn:
+        return defn['properties']
+    for item in defn.get('allOf', []):
+        if 'properties' in item:
+            return item['properties']
+    return {}
+
+
+def _label_field_is_date(label_field: str, target: str, schema: dict) -> bool:
+    """Returns True if the label_field on the target entity has a date/time format."""
+    props = _get_entity_base_props(target, schema)
+    return props.get(label_field, {}).get('format') in _DATE_FORMATS
+
 
 def get_detail_properties(parent: str, schema: dict, detail_key: str | None = None) -> dict | None:
     key = detail_key or f'{parent}_detail'
@@ -138,6 +157,7 @@ def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
             'relation_name': relation_name,
             'target': target,
             'label_field': label_field,
+            'label_field_is_date': _label_field_is_date(label_field, target, schema),
             'is_selector': is_selector,
             'nullable': nullable,
             'children': children,
@@ -145,9 +165,9 @@ def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
     return result
 
 
-def get_parent_relationships(parent_def: dict) -> list[dict]:
+def get_parent_relationships(parent_def: dict, schema: dict | None = None) -> list[dict]:
     """Returns many-to-one relationship metadata from a schema definition.
-    Each entry: {prop_name, target, label_field, required}"""
+    Each entry: {prop_name, target, label_field, label_field_is_date, required}"""
     props = parent_def.get('properties', {})
     required = set(parent_def.get('required') or [])
     result = []
@@ -157,10 +177,13 @@ def get_parent_relationships(parent_def: dict) -> list[dict]:
             continue
         if prop_name == 'creator_id':
             continue
+        target = rel['target']
+        lf = rel.get('labelField', 'name')
         result.append({
             'prop_name': prop_name,
-            'target': rel['target'],
-            'label_field': rel.get('labelField', 'name'),
+            'target': target,
+            'label_field': lf,
+            'label_field_is_date': _label_field_is_date(lf, target, schema) if schema else False,
             'required': prop_name in required,
         })
     return result

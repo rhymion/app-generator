@@ -3,7 +3,9 @@
 import prisma from '@/lib/prisma';
 import type { {{ parent_pascal }}, {{ parent_pascal }}Detail } from '@/lib/{{ parent }}/types';
 {% for oto in selector_oto_rels %}
+{% if oto.target != parent %}
 import { getAll{{ oto.target | pascal_case }}s } from '@/lib/{{ oto.target }}/getters';
+{% endif %}
 {% endfor %}
 import { assertPermission, getModelPermissions, resolvePermissions, toPermissions{% if should_filter_by_org %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';

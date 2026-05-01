@@ -488,7 +488,7 @@ def build_context(entity: dict, schema: dict) -> dict:
 
     # Parent relationships (many-to-one) — all of them, not deduplicated by target
     merged_def    = {**model_def, 'properties': filtered_props}
-    parent_rels_raw = get_parent_relationships(merged_def)
+    parent_rels_raw = get_parent_relationships(merged_def, schema)
     # relationship_targets: deduplicated by target for import / type purposes
     seen: dict[str, dict] = {}
     for r in parent_rels_raw:
@@ -795,6 +795,11 @@ def build_context(entity: dict, schema: dict) -> dict:
     relationship_mapping = '\n'.join(
         f"    {r['relation_name']}: {parent_camel}.{r['relation_name']},"
         for r in parent_rels
+    ) + (
+        '\n' + '\n'.join(
+            f"    {r['relation_name']}: {parent_camel}.{r['relation_name']},"
+            for r in selector_oto_rels
+        ) if selector_oto_rels else ''
     )
     child_mappings = '\n'.join(
         f"    {c['property_name']}: {parent_camel}.{c['property_name']},"
