@@ -165,6 +165,70 @@ def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
     return result
 
 
+def _get_first_label_field(target: str, schema: dict) -> str:
+    """Returns the first non-id/non-timestamp/non-fk simple field of target entity."""
+    _SKIP = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
+    props = _get_entity_base_props(target, schema)
+    for field_name, prop in props.items():
+        if field_name in _SKIP or field_name.endswith('_id'):
+            continue
+        prop_type = prop.get('type')
+        if isinstance(prop_type, list):
+            prop_type = next((t for t in prop_type if t != 'null'), None)
+        if prop_type in ('string', 'integer', 'number', 'boolean'):
+            return field_name
+    return 'id'
+
+
+def get_detail_ref_rels(parent: str, parent_def: dict, schema: dict) -> list[dict]:
+    """Returns reverse one-to-one relation metadata from a _detail definition.
+
+    These are plain $ref properties in the {parent}_detail extension that have NO
+    corresponding FK field in the base model (the FK lives in the target, pointing back).
+    Each entry: {prop_name, target, label_field}
+    """
+    detail_props = get_detail_properties(parent, schema)
+    if not detail_props:
+        return []
+
+    base_props = parent_def.get('properties', {})
+    # Many-to-one relation names (derived from FK prop_name by stripping _id)
+    m2o_relation_names = {
+        r['prop_name'].removesuffix('_id')
+        for r in get_parent_relationships(parent_def, schema)
+    }
+    # Outbound OTO FK prop names (FK is in this model)
+    oto_fk_names = {r['prop_name'] for r in get_one_to_one_rels(parent_def, schema)}
+
+    result = []
+    for prop_name, prop in detail_props.items():
+        ref = prop.get('$ref', '')
+        if not ref or prop.get('type') == 'array':
+            continue
+        target = ref.split('/')[-1]
+        # Skip if base model has a corresponding FK for this relation
+        if f'{prop_name}_id' in base_props:
+            continue
+        # Skip if already handled as a many-to-one (relation name matches)
+        if prop_name in m2o_relation_names:
+            continue
+        # Skip if the corresponding FK is an outbound OTO
+        if f'{prop_name}_id' in oto_fk_names:
+            continue
+        label_field = prop.get('x-labelField') or _get_first_label_field(target, schema)
+        # x-relationName lets the YAML override the Prisma relation name when it differs
+        # from the property name (e.g. checkup.judgement vs detail property checkup_judgment)
+        relation_name = prop.get('x-relationName') or prop_name
+        result.append({
+            'prop_name': prop_name,
+            'relation_name': relation_name,
+            'target': target,
+            'label_field': label_field,
+            'label_field_is_date': _label_field_is_date(label_field, target, schema),
+        })
+    return result
+
+
 def get_parent_relationships(parent_def: dict, schema: dict | None = None) -> list[dict]:
     """Returns many-to-one relationship metadata from a schema definition.
     Each entry: {prop_name, target, label_field, label_field_is_date, required}"""

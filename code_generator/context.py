@@ -14,6 +14,7 @@ from helpers.schema_helpers import (
     get_detail_relation_name,
     is_optional_fk_to_parent,
     get_one_to_one_rels,
+    get_detail_ref_rels,
 )
 
 
@@ -60,6 +61,15 @@ class OneToOneRelInfo:
 
 
 @dataclass
+class ReverseOtoRelInfo:
+    prop_name: str           # TypeScript property name, e.g. "checkup_judgment"
+    relation_name: str       # Prisma relation field name (may differ), e.g. "judgement"
+    target: str              # entity name, e.g. "checkup_judgment"
+    label_field: str         # field to show as display value
+    label_field_is_date: bool
+
+
+@dataclass
 class EntityContext:
     parent: str
     model: str
@@ -71,6 +81,7 @@ class EntityContext:
     form_view_fields: list[FieldInfo]   # parent fields minus timestamps
     all_option_targets: list[str]       # for FormUpsertProps allXxx / xxxPermissions
     one_to_one_rels: list[OneToOneRelInfo]  # one-to-one outbound FK rels with nested children
+    reverse_oto_rels: list[ReverseOtoRelInfo]  # reverse OTO: FK in target pointing back to this model
     entity_view_component: str | None = None   # custom component rendered in FormView
     entity_edit_component: str | None = None   # custom component rendered in FormUpsert
 
@@ -178,12 +189,16 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             label_field=r['label_field'],
         ))
 
-    # Import targets = union of parent + child + auto-create OTO nested rel targets + selector OTO targets
+    # Reverse OTO rels (FK lives in target, not in this model) — display-only in detail view
+    _reverse_oto_early = get_detail_ref_rels(parent, {**model_def, 'properties': filtered_props}, schema)
+
+    # Import targets = union of parent + child + auto-create OTO nested rel targets + selector OTO + reverse OTO
     all_import_targets = _dedupe_ordered([
         *[r['target'] for r in relationship_targets],
         *[r['target'] for r in child_rels_early],
         *oto_child_rel_targets,
         *[r['target'] for r in _selector_oto_early],
+        *[r['target'] for r in _reverse_oto_early],
     ])
     import_targets = [t for t in all_import_targets if t != model]
 
@@ -295,6 +310,18 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             children=oto_children,
         ))
 
+    # Reverse OTO rels for template rendering
+    reverse_oto_rels = [
+        ReverseOtoRelInfo(
+            prop_name=r['prop_name'],
+            relation_name=r.get('relation_name', r['prop_name']),
+            target=r['target'],
+            label_field=r['label_field'],
+            label_field_is_date=r.get('label_field_is_date', False),
+        )
+        for r in _reverse_oto_early
+    ]
+
     # Custom view/edit components from x-custom-component config
     _xcc = schema['definitions'].get(def_key, {}).get('x-custom-component') or {}
     _xcc_name = _xcc.get('name')
@@ -313,6 +340,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         form_view_fields=form_view_fields,
         all_option_targets=all_option_targets,
         one_to_one_rels=one_to_one_rels,
+        reverse_oto_rels=reverse_oto_rels,
         entity_view_component=entity_view_component,
         entity_edit_component=entity_edit_component,
     )

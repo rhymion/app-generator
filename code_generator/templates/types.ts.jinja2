@@ -54,10 +54,13 @@ export type {{ rel.target | pascal_case }}Option = {
 };
 
 {% endfor %}
-{% if children %}
+{% if children or reverse_oto_rels %}
 export type {{ parent | pascal_case }}Detail = {{ parent | pascal_case }} & {
 {% for child in children %}
   {{ child.property_name }}: {{ child.name | pascal_case }}[];
+{% endfor %}
+{% for rel in reverse_oto_rels %}
+  {{ rel.prop_name }}?: {{ rel.target | pascal_case }} | null;
 {% endfor %}
 };
 
@@ -136,6 +139,9 @@ export type FormViewProps = Readonly<{
       }[];
 {% endfor %}
     } | null;
+{% endfor %}
+{% for rel in reverse_oto_rels %}
+    {{ rel.prop_name }}?: {{ rel.target | pascal_case }} | null;
 {% endfor %}
     created_at?: string | Date;
     updated_at?: string | Date;

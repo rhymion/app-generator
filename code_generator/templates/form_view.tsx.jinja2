@@ -87,6 +87,9 @@ export default function FormView({ src, permissions{% if entity_view_component %
         </div>
       </div>
 {{ all_parent_fields }}
+{% if reverse_oto_fields %}
+{{ reverse_oto_fields }}
+{% endif %}
 {% if child_view_grids %}
 {{ child_view_grids }}
 {% endif %}

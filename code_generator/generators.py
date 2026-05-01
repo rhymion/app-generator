@@ -689,6 +689,36 @@ def form_view_context(ctx: dict) -> dict:
         '\n'.join(custom_jsxs),
     ]))
 
+    # Reverse OTO rels (FK in target): display as labeled fields with view links
+    reverse_oto_rels = ctx.get('reverse_oto_rels', [])
+    reverse_oto_jsxs = []
+    for r in reverse_oto_rels:
+        prop       = r['prop_name']
+        target     = r['target']
+        label_f    = r['label_field']
+        label_fk   = to_camel_case(prop)
+        target_pascal = to_pascal_case(target)
+        value_expr = f"src.{prop}?.{label_f}?.toString() || ''"
+        fk_id_expr = f"src.{prop}?.id"
+        reverse_oto_jsxs.append(
+            f"      <TextField\n        label={{tf('{label_fk}')}}\n"
+            f"        value={{{value_expr}}}\n"
+            f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n"
+            f"        slotProps={{{{ input: {{ endAdornment: {fk_id_expr} ? (\n"
+            f"          <InputAdornment position=\"end\">\n"
+            f"            <Tooltip title=\"View\">\n"
+            f"              <Link href={{`/{target}/view/${{{fk_id_expr}}}`}} aria-label=\"View {target_pascal}\">\n"
+            f"                <IconButton component=\"span\" size=\"small\" tabIndex={{-1}}>\n"
+            f"                  <OpenInNewIcon fontSize=\"small\" />\n"
+            f"                </IconButton>\n"
+            f"              </Link>\n"
+            f"            </Tooltip>\n"
+            f"          </InputAdornment>\n"
+            f"        ) : null }} }}}}\n"
+            f"      />"
+        )
+    reverse_oto_fields = '\n'.join(reverse_oto_jsxs)
+
     # Children view grids
     has_commentable      = ctx.get('has_commentable', False)
     commentable_rel_name = ctx.get('commentable_rel_name', 'commentable')
@@ -778,7 +808,7 @@ def form_view_context(ctx: dict) -> dict:
         for c in grid_children
     )
 
-    has_rel_links = any(rel_by_prop.get(p) for p in other_flds)
+    has_rel_links = any(rel_by_prop.get(p) for p in other_flds) or bool(reverse_oto_rels)
 
     return {
         'needs_datetime_wrapper': needs_datetime_wrapper,
@@ -791,6 +821,7 @@ def form_view_context(ctx: dict) -> dict:
         'view_enum_ns_hooks':     '\n'.join(enum_ns_hooks),
         'view_enum_opt_setups':   '\n'.join(enum_opt_setups),
         'all_parent_fields':      all_parent_fields,
+        'reverse_oto_fields':     reverse_oto_fields,
         'child_view_grids':       '\n'.join(child_view_grids),
         'column_variables':       column_variables,
         'custom_view_imports':    custom_view_imports,

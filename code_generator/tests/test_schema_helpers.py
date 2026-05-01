@@ -6,6 +6,7 @@ from helpers.schema_helpers import (
     filter_fields,
     get_detail_properties,
     get_detail_relation_name,
+    get_detail_ref_rels,
 )
 
 
@@ -260,3 +261,97 @@ class TestGetDetailRelationName:
 
     def test_falls_back_to_target_when_not_found(self):
         assert get_detail_relation_name("booking", "missing", self._schema()) == "missing"
+
+
+# ---------------------------------------------------------------------------
+# get_detail_ref_rels
+# ---------------------------------------------------------------------------
+
+class TestGetDetailRefRels:
+    def _schema(self):
+        return {
+            "definitions": {
+                "checkup": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "patient_rel_id": {
+                            "type": "string",
+                            "x-relationship": {"type": "many-to-one", "target": "patient_rel", "labelField": "patient_no"},
+                        },
+                    },
+                },
+                "checkup_detail": {
+                    "allOf": [
+                        {"$ref": "#/definitions/checkup"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "patient_rel": {"$ref": "#/definitions/patient_rel"},
+                                "pre_check": {"$ref": "#/definitions/pre_check"},
+                                "medicines": {"type": "array", "x-outputType": "list", "items": {"$ref": "#/definitions/medicine"}},
+                            },
+                        },
+                    ]
+                },
+                "patient_rel": {
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}, "patient_no": {"type": "string"}},
+                },
+                "pre_check": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "checkup_id": {"type": "string"},
+                        "ams_score": {"type": ["integer", "null"]},
+                    },
+                },
+                "medicine": {
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+                },
+            }
+        }
+
+    def test_detects_reverse_oto(self):
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_detail_ref_rels("checkup", parent_def, schema)
+        assert len(rels) == 1
+        assert rels[0]["prop_name"] == "pre_check"
+        assert rels[0]["target"] == "pre_check"
+
+    def test_skips_many_to_one_rel(self):
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_detail_ref_rels("checkup", parent_def, schema)
+        prop_names = [r["prop_name"] for r in rels]
+        assert "patient_rel" not in prop_names
+
+    def test_skips_array_children(self):
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_detail_ref_rels("checkup", parent_def, schema)
+        prop_names = [r["prop_name"] for r in rels]
+        assert "medicines" not in prop_names
+
+    def test_label_field_auto_detected(self):
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_detail_ref_rels("checkup", parent_def, schema)
+        assert rels[0]["label_field"] == "ams_score"
+
+    def test_label_field_from_x_labelField(self):
+        schema = self._schema()
+        # Add x-labelField to the detail property
+        detail_props = schema["definitions"]["checkup_detail"]["allOf"][1]["properties"]
+        detail_props["pre_check"]["x-labelField"] = "custom_field"
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_detail_ref_rels("checkup", parent_def, schema)
+        assert rels[0]["label_field"] == "custom_field"
+
+    def test_empty_when_no_detail_def(self):
+        schema = {"definitions": {"thing": {"type": "object", "properties": {"id": {"type": "string"}}}}}
+        parent_def = schema["definitions"]["thing"]
+        rels = get_detail_ref_rels("thing", parent_def, schema)
+        assert rels == []
