@@ -7,6 +7,7 @@ from helpers.schema_helpers import (
     get_detail_properties,
     get_detail_relation_name,
     get_detail_ref_rels,
+    get_flatten_rels,
 )
 
 
@@ -354,4 +355,196 @@ class TestGetDetailRefRels:
         schema = {"definitions": {"thing": {"type": "object", "properties": {"id": {"type": "string"}}}}}
         parent_def = schema["definitions"]["thing"]
         rels = get_detail_ref_rels("thing", parent_def, schema)
+        assert rels == []
+
+    def test_skips_flatten_properties(self):
+        """Properties with x-outputType: flatten are excluded from reverse OTO rels."""
+        schema = self._schema()
+        detail_props = schema["definitions"]["checkup_detail"]["allOf"][1]["properties"]
+        detail_props["pre_check"]["x-outputType"] = "flatten"
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_detail_ref_rels("checkup", parent_def, schema)
+        prop_names = [r["prop_name"] for r in rels]
+        assert "pre_check" not in prop_names
+
+
+# ---------------------------------------------------------------------------
+# get_flatten_rels
+# ---------------------------------------------------------------------------
+
+class TestGetFlattenRels:
+    def _schema(self):
+        return {
+            "definitions": {
+                "checkup": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "patient_rel_id": {
+                            "type": "string",
+                            "x-relationship": {"type": "many-to-one", "target": "patient_rel", "labelField": "patient_no"},
+                        },
+                    },
+                },
+                "checkup_detail": {
+                    "allOf": [
+                        {"$ref": "#/definitions/checkup"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "patient_rel": {
+                                    "x-outputType": "flatten",
+                                    "$ref": "#/definitions/patient_rel",
+                                },
+                                "pre_check": {
+                                    "x-outputType": "flatten",
+                                    "$ref": "#/definitions/pre_check",
+                                },
+                                "lifestyle": {
+                                    "$ref": "#/definitions/lifestyle",  # no flatten — should be excluded
+                                },
+                                "medicines": {
+                                    "type": "array",
+                                    "x-outputType": "flatten",
+                                    "items": {"$ref": "#/definitions/medicine"},
+                                },
+                            },
+                        },
+                    ]
+                },
+                "patient_rel": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "patient_id": {
+                            "type": "string",
+                            "x-relationship": {"type": "many-to-one", "target": "patient", "labelField": "name"},
+                        },
+                        "patient_no": {"type": "string"},
+                    },
+                },
+                "pre_check": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "checkup_id": {
+                            "type": "string",
+                            "x-relationship": {"type": "one-to-one", "target": "checkup", "labelField": "name"},
+                        },
+                        "ams_score": {"type": ["integer", "null"]},
+                    },
+                },
+                "lifestyle": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "checkup_id": {"type": "string"},
+                        "quolity_of_sleep": {"type": "integer"},
+                    },
+                },
+                "medicine": {
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+                },
+                "patient": {
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+                },
+            }
+        }
+
+    def test_returns_only_flatten_annotated_properties(self):
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        prop_names = [r["prop_name"] for r in rels]
+        assert "patient_rel" in prop_names
+        assert "pre_check" in prop_names
+        # lifestyle has no x-outputType: flatten
+        assert "lifestyle" not in prop_names
+
+    def test_skips_array_properties(self):
+        """Arrays with x-outputType: flatten should still be skipped."""
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        prop_names = [r["prop_name"] for r in rels]
+        assert "medicines" not in prop_names
+
+    def test_m2o_flag_when_fk_in_parent(self):
+        """patient_rel is m2o because patient_rel_id exists in checkup base props."""
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        patient_rel_entry = next(r for r in rels if r["prop_name"] == "patient_rel")
+        assert patient_rel_entry["is_m2o"] is True
+
+    def test_non_m2o_when_fk_not_in_parent(self):
+        """pre_check is non-m2o because pre_check_id is not in checkup base props."""
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
+        assert pre_check_entry["is_m2o"] is False
+
+    def test_extracts_fields_from_target(self):
+        """Fields from target entity are returned, excluding back-refs and system fields."""
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
+        field_names = [f["name"] for f in pre_check_entry["fields"]]
+        # ams_score should be included
+        assert "ams_score" in field_names
+        # checkup_id (back-ref to parent) should be excluded
+        assert "checkup_id" not in field_names
+        # id (system field) should be excluded
+        assert "id" not in field_names
+
+    def test_fk_field_in_target_marked_as_is_fk(self):
+        """FK field (patient_id in patient_rel) should have is_fk=True."""
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        patient_rel_entry = next(r for r in rels if r["prop_name"] == "patient_rel")
+        fk_fields = [f for f in patient_rel_entry["fields"] if f.get("is_fk")]
+        assert len(fk_fields) == 1
+        assert fk_fields[0]["name"] == "patient_id"
+        assert fk_fields[0]["fk_target"] == "patient"
+        assert fk_fields[0]["fk_label_field"] == "name"
+        assert fk_fields[0]["relation_name"] == "patient"
+
+    def test_x_relation_name_override(self):
+        """x-relationName annotation overrides the relation name."""
+        schema = self._schema()
+        detail_props = schema["definitions"]["checkup_detail"]["allOf"][1]["properties"]
+        detail_props["pre_check"]["x-relationName"] = "preCheckOverride"
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
+        assert pre_check_entry["relation_name"] == "preCheckOverride"
+
+    def test_empty_when_no_flatten_properties(self):
+        """Returns empty list when no detail properties have x-outputType: flatten."""
+        schema = {
+            "definitions": {
+                "thing": {"type": "object", "properties": {"id": {"type": "string"}}},
+                "thing_detail": {
+                    "allOf": [
+                        {"$ref": "#/definitions/thing"},
+                        {"type": "object", "properties": {"other": {"$ref": "#/definitions/other"}}},
+                    ]
+                },
+                "other": {"type": "object", "properties": {"id": {"type": "string"}}},
+            }
+        }
+        parent_def = schema["definitions"]["thing"]
+        rels = get_flatten_rels("thing", parent_def, schema)
+        assert rels == []
+
+    def test_empty_when_no_detail_def(self):
+        """Returns empty list when there is no _detail definition."""
+        schema = {"definitions": {"thing": {"type": "object", "properties": {"id": {"type": "string"}}}}}
+        parent_def = schema["definitions"]["thing"]
+        rels = get_flatten_rels("thing", parent_def, schema)
         assert rels == []

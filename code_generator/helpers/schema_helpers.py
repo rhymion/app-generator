@@ -1,6 +1,7 @@
 """Schema navigation utilities — port of helpers/schema-helpers.ts"""
 
 _DATE_FORMATS = frozenset({'date', 'date-time', 'time'})
+_SYSTEM_FIELDS = frozenset({'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'})
 
 
 def _get_entity_base_props(entity: str, schema: dict) -> dict:
@@ -180,11 +181,92 @@ def _get_first_label_field(target: str, schema: dict) -> str:
     return 'id'
 
 
+def _extract_flatten_fields(target_props: dict, parent_model: str) -> list[dict]:
+    """Extract field info for flatten accordion display.
+    Excludes system fields, back-references to parent, and arrays.
+    """
+    fields = []
+    for field_name, prop in target_props.items():
+        if field_name in _SYSTEM_FIELDS:
+            continue
+        prop_type = prop.get('type')
+        if prop_type == 'array':
+            continue
+        rel = prop.get('x-relationship')
+        if rel:
+            rel_target = rel.get('target', '')
+            if rel_target == parent_model:
+                continue  # back-reference to parent — skip
+            if rel.get('type') in ('many-to-one', 'one-to-one'):
+                nullable = isinstance(prop_type, list) and 'null' in prop_type
+                fields.append({
+                    'name': field_name,
+                    'prop_type': 'string',
+                    'format': None,
+                    'nullable': nullable,
+                    'enum': None,
+                    'is_fk': True,
+                    'fk_target': rel_target,
+                    'fk_label_field': rel.get('labelField', 'name'),
+                    'relation_name': field_name.removesuffix('_id'),
+                })
+                continue
+        # Regular field
+        nullable = False
+        if isinstance(prop_type, list):
+            nullable = 'null' in prop_type
+            prop_type = next((t for t in prop_type if t != 'null'), 'string')
+        fields.append({
+            'name': field_name,
+            'prop_type': prop_type or 'string',
+            'format': prop.get('format'),
+            'nullable': nullable,
+            'enum': prop.get('enum') if isinstance(prop.get('enum'), list) else None,
+            'is_fk': False,
+        })
+    return fields
+
+
+def get_flatten_rels(parent: str, parent_def: dict, schema: dict) -> list[dict]:
+    """Returns $ref properties from the _detail definition with x-outputType: flatten.
+
+    These are rendered as collapsible accordion sections showing the target entity's fields
+    inline in the detail view (read-only). Fields that back-reference the parent are excluded.
+    Each entry: {prop_name, relation_name, target, is_m2o, fields}
+    """
+    detail_props = get_detail_properties(parent, schema)
+    if not detail_props:
+        return []
+
+    base_props = parent_def.get('properties', {})
+    result = []
+    for prop_name, prop in detail_props.items():
+        if prop.get('x-outputType') != 'flatten':
+            continue
+        ref = prop.get('$ref', '')
+        if not ref or prop.get('type') == 'array':
+            continue
+        target = ref.split('/')[-1]
+        relation_name = prop.get('x-relationName') or prop_name
+        is_m2o = f'{prop_name}_id' in base_props
+        target_props = _get_entity_base_props(target, schema)
+        fields = _extract_flatten_fields(target_props, parent)
+        result.append({
+            'prop_name': prop_name,
+            'relation_name': relation_name,
+            'target': target,
+            'is_m2o': is_m2o,
+            'fields': fields,
+        })
+    return result
+
+
 def get_detail_ref_rels(parent: str, parent_def: dict, schema: dict) -> list[dict]:
     """Returns reverse one-to-one relation metadata from a _detail definition.
 
     These are plain $ref properties in the {parent}_detail extension that have NO
     corresponding FK field in the base model (the FK lives in the target, pointing back).
+    Properties with x-outputType: flatten are excluded (handled by get_flatten_rels).
     Each entry: {prop_name, target, label_field}
     """
     detail_props = get_detail_properties(parent, schema)
@@ -204,6 +286,9 @@ def get_detail_ref_rels(parent: str, parent_def: dict, schema: dict) -> list[dic
     for prop_name, prop in detail_props.items():
         ref = prop.get('$ref', '')
         if not ref or prop.get('type') == 'array':
+            continue
+        # flatten properties are handled separately by get_flatten_rels
+        if prop.get('x-outputType') == 'flatten':
             continue
         target = ref.split('/')[-1]
         # Skip if base model has a corresponding FK for this relation

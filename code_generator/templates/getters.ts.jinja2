@@ -64,6 +64,9 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 {% for rel in reverse_oto_rels if rel.relation_name != rel.prop_name %}
     {{ rel.prop_name }}: {{ parent_camel }}.{{ rel.relation_name }},
 {% endfor %}
+{% for rel in flatten_rels if rel.relation_name != rel.prop_name %}
+    {{ rel.prop_name }}: {{ parent_camel }}.{{ rel.relation_name }},
+{% endfor %}
   };
 }
 

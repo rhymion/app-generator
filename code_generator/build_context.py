@@ -14,7 +14,7 @@ from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
     is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
-    get_detail_ref_rels,
+    get_detail_ref_rels, get_flatten_rels,
 )
 import copy
 
@@ -521,6 +521,37 @@ def build_context(entity: dict, schema: dict) -> dict:
     # Reverse one-to-one rels (FK is in the target, pointing back to this model)
     # e.g. pre_check.checkup_id → checkup; defined as plain $ref in the _detail extension
     reverse_oto_rels = get_detail_ref_rels(parent, merged_def, schema)
+
+    # Flatten rels (x-outputType: flatten on non-array $ref properties in _detail)
+    flatten_rels = get_flatten_rels(parent, merged_def, schema)
+    # FK props in the parent model for m2o flatten rels — shown as accordion, not plain TextField
+    flatten_m2o_fk_props = {f'{r["prop_name"]}_id' for r in flatten_rels if r['is_m2o']}
+
+    # For m2o flatten rels with FK fields in their target: upgrade the simple 'rel: true' include
+    # to 'rel: { include: { nested_rel: true } }' so the nested labels are fetchable in detail
+    _flatten_m2o_nested: dict[str, str] = {}
+    for _fr in flatten_rels:
+        if not _fr['is_m2o']:
+            continue
+        _nested_fk = [f for f in _fr['fields'] if f.get('is_fk')]
+        if _nested_fk:
+            _parts = ', '.join(f"{f['relation_name']}: true" for f in _nested_fk)
+            _flatten_m2o_nested[_fr['relation_name']] = f'{{ include: {{ {_parts} }} }}'
+
+    # Non-m2o flatten rel include entries (FK is in target; add to detail query)
+    flatten_non_m2o_include_entries: list[str] = []
+    for _fr in flatten_rels:
+        if _fr['is_m2o']:
+            continue
+        _nested_fk = [f for f in _fr['fields'] if f.get('is_fk')]
+        if _nested_fk:
+            _parts = ', '.join(f"{f['relation_name']}: true" for f in _nested_fk)
+            flatten_non_m2o_include_entries.append(
+                f"{_fr['relation_name']}: {{ include: {{ {_parts} }} }}"
+            )
+        else:
+            flatten_non_m2o_include_entries.append(f"{_fr['relation_name']}: true")
+
     # auto-create FK props are excluded from service params (pre-created in transaction)
     auto_create_oto_fk_props = {r['prop_name'] for r in auto_create_oto_rels}
     # all OTO FK props are excluded from field categorisation (never treated as plain text fields)
@@ -785,10 +816,12 @@ def build_context(entity: dict, schema: dict) -> dict:
 
     include_entries_detail = [
         *child_include_entries,
-        *[f"{r['relation_name']}: true" for r in parent_rels],
+        # Use nested includes for m2o flatten rels that have FK fields (need label resolution)
+        *[f"{r['relation_name']}: {_flatten_m2o_nested.get(r['relation_name'], 'true')}" for r in parent_rels],
         *one_to_one_include_entries,
         *selector_oto_include_entries,
         *reverse_oto_include_entries,
+        *flatten_non_m2o_include_entries,
         "creator: { select: { id: true, name: true } }",
         "updater: { select: { id: true, name: true } }",
     ]
@@ -908,6 +941,8 @@ def build_context(entity: dict, schema: dict) -> dict:
         one_to_one_rels=auto_create_oto_rels,      # auto-create OTO only (for types/service templates)
         selector_oto_rels=selector_oto_rels,        # selector OTO (autocomplete UI, filtered getters)
         reverse_oto_rels=reverse_oto_rels,          # reverse OTO: FK in target pointing back to this model
+        flatten_rels=flatten_rels,                  # flatten rels: shown as accordion in detail view
+        flatten_m2o_fk_props=flatten_m2o_fk_props, # FK prop names in parent for m2o flatten rels
         one_to_one_pre_creates=one_to_one_pre_creates,
         one_to_one_spread=one_to_one_spread,
         one_to_one_include=one_to_one_include,

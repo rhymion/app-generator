@@ -739,9 +739,11 @@ model bug {
 
 ---
 
-## 8. `x-outputType` — Array Rendering Mode
+## 8. `x-outputType` — Rendering Mode for Children and Related Entities
 
-Controls how an array property is displayed in forms and views.
+Controls how a property in a `_detail` definition is displayed in the detail view.
+
+### Array properties
 
 ```yaml
 some_child_array:
@@ -763,6 +765,51 @@ some_child_array:
 **Validation rule:** if a child entity has `x-generate`, it _must_ use `x-outputType: list`
 in the parent's detail definition. Using `table` or `comments` for a generated child is a
 configuration error caught at generator run time.
+
+### Non-array `$ref` properties — `x-outputType: flatten`
+
+Place `x-outputType: flatten` on a plain `$ref` property (not an array) in a `_detail`
+definition to display all fields of the related entity inline in the detail view as a
+collapsible accordion section.
+
+```yaml
+checkup_detail:
+  allOf:
+    - $ref: "#/definitions/checkup"
+    - type: object
+      properties:
+        # Many-to-one: checkup has patient_rel_id — shown as accordion in detail
+        patient_rel:
+          x-outputType: flatten
+          $ref: "#/definitions/patient_rel"
+        # Reverse one-to-one: FK lives in pre_check.checkup_id — shown as accordion
+        pre_check:
+          x-outputType: flatten
+          $ref: "#/definitions/pre_check"
+        # Prisma relation name differs from YAML property name — use x-relationName
+        checkup_judgment:
+          x-outputType: flatten
+          x-relationName: judgement     # Prisma field on the checkup model
+          $ref: "#/definitions/checkup_judgment"
+```
+
+**Behaviour:**
+
+- The related entity's fields are shown read-only in a collapsible MUI Accordion section in `FormView`.
+- Back-references to the parent entity (FK fields pointing back to the parent) are automatically excluded.
+- System fields (`id`, `created_at`, `updated_at`, `creator_id`, `updater_id`) are excluded.
+- FK fields to other entities are shown with a view link (opens the related record).
+- Array fields within the target entity are excluded.
+- **No upsert changes** — the flatten section is view-only; it does not appear in `FormUpsert`.
+- For many-to-one flatten rels (FK is in the parent model), the FK prop (e.g. `patient_rel_id`) is hidden from the standard field list and shown only in the accordion.
+
+**Supported annotations on a flatten property:**
+
+| Annotation | Description |
+|---|---|
+| `x-relationName: <name>` | Override the Prisma relation field name when it differs from the YAML property name (e.g. Prisma has `judgement` but detail property is `checkup_judgment`) |
+
+> **Note:** `x-labelField` and `x-relationName` on plain non-array `$ref` properties also work for reverse one-to-one relations that are **not** flatten-annotated (shown as a labeled text field with view link instead of accordion).
 
 ### `comments` detail
 
@@ -1954,7 +2001,7 @@ Both patterns produce identical runtime behavior for the end user.
 | `x-relationship` | On FK field in base entity | Many-to-one |
 | `x-relationships` | On detail entity | Many-to-many |
 
-### Array rendering (`x-outputType`)
+### Array rendering (`x-outputType` on array properties)
 
 | Value | Context | Renders as |
 |---|---|---|
@@ -1963,6 +2010,14 @@ Both patterns produce identical runtime behavior for the end user.
 | `list` | M2M or optional-FK independent child | Autocomplete — add/delete only in FormUpsert; read-only in FormView |
 | `list` | Mandatory-FK **independent** child (has own page) | Read-only in both FormUpsert and FormView |
 | `comments` | Comment thread | Comment input + list |
+
+### Flat display (`x-outputType: flatten` on non-array `$ref` properties)
+
+| Annotation | Placement | Effect |
+|---|---|---|
+| `x-outputType: flatten` | Non-array `$ref` in `_detail` | Fields of related entity shown inline in collapsible accordion (view-only) |
+| `x-relationName: <name>` | Same property | Override Prisma relation name when it differs from the YAML property name |
+| `x-labelField: <field>` | Non-array `$ref` in `_detail` (non-flatten) | Override the field shown as display value for a reverse one-to-one relation |
 
 ### Chart spans
 

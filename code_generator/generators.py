@@ -522,7 +522,10 @@ def form_view_context(ctx: dict) -> dict:
             'is_selector_oto': True,  # FK prop not in src type; use relation?.id for linking
         }
     one_to_one_fk_props = {r['prop_name'] for r in ctx.get('one_to_one_rels', [])}
-    EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'} | one_to_one_fk_props
+    flatten_rels_raw = ctx.get('flatten_rels', [])
+    flatten_m2o_fk_props = ctx.get('flatten_m2o_fk_props', set())
+    # m2o flatten FK props are rendered as accordion sections, not plain FK TextFields
+    EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'} | one_to_one_fk_props | flatten_m2o_fk_props
     parent_props = [k for k in filtered_props if k not in EXCLUDE]
 
     custom_view_props = [
@@ -719,6 +722,99 @@ def form_view_context(ctx: dict) -> dict:
         )
     reverse_oto_fields = '\n'.join(reverse_oto_jsxs)
 
+    # Flatten accordion sections
+    flatten_enum_opt_setups: list[str] = []
+    flatten_sections_list: list[str] = []
+    has_accordion_rel_links = False
+
+    for _fr in flatten_rels_raw:
+        _prop = _fr['prop_name']
+        _prop_camel = to_camel_case(_prop)
+        _inner: list[str] = []
+
+        for _field in _fr['fields']:
+            _fname = _field['name']
+            _fcamel = to_camel_case(_fname)
+
+            if _field.get('is_fk'):
+                has_accordion_rel_links = True
+                _rel_name = _field['relation_name']
+                _rel_camel = to_camel_case(_rel_name)
+                _fk_target = _field['fk_target']
+                _fk_target_pascal = to_pascal_case(_fk_target)
+                _fk_label = _field['fk_label_field']
+                # Use 'as any' to bypass TypeScript since the nested FK may not be in the base type
+                _id_expr = f"(src.{_prop} as any)?.{_rel_name}?.id"
+                _val_expr = f"(src.{_prop} as any)?.{_rel_name}?.{_fk_label}?.toString() || ''"
+                _inner.append(
+                    f"        {{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}}\n"
+                    f"        <TextField\n          label={{tf('{_rel_camel}')}}\n"
+                    f"          value={{{_val_expr}}}\n"
+                    f"          fullWidth\n          margin=\"normal\"\n          aria-readonly\n"
+                    f"          slotProps={{{{ input: {{ endAdornment: {_id_expr} ? (\n"
+                    f"            <InputAdornment position=\"end\">\n"
+                    f"              <Tooltip title=\"View\">\n"
+                    f"                <Link href={{`/{_fk_target}/view/${{{_id_expr}}}`}} aria-label=\"View {_fk_target_pascal}\">\n"
+                    f"                  <IconButton component=\"span\" size=\"small\" tabIndex={{-1}}>\n"
+                    f"                    <OpenInNewIcon fontSize=\"small\" />\n"
+                    f"                  </IconButton>\n"
+                    f"                </Link>\n"
+                    f"              </Tooltip>\n"
+                    f"            </InputAdornment>\n"
+                    f"          ) : null }} }}}}\n"
+                    f"        />"
+                )
+            elif _field.get('format') in ('date', 'date-time', 'time'):
+                _fmt = _field.get('format')
+                needs_datetime_wrapper = True
+                _show_time = '' if _fmt in ('date-time', 'time') else ' show_time={false}'
+                _show_date = ' show_date={false}' if _fmt == 'time' else ''
+                if _fmt == 'date':
+                    use_dayjs = True
+                    _date_expr = f"{{src.{_prop}?.{_fname} ? dayjs(new Date(src.{_prop}?.{_fname}).toISOString().slice(0, 10) + 'T00:00:00').toDate() : null}}"
+                else:
+                    _date_expr = f"{{src.{_prop}?.{_fname} ?? null}}"
+                _inner.append(
+                    f"        <DateTimeWrapper label={{tf('{_fcamel}')}} date_time={_date_expr}{_show_time}{_show_date} readOnly />"
+                )
+            elif _field.get('prop_type') == 'boolean':
+                _inner.append(
+                    f"        <FormControlLabel\n"
+                    f"          control={{<Checkbox checked={{Boolean(src.{_prop}?.{_fname})}} readOnly />}}\n"
+                    f"          label={{tf('{_fcamel}')}}\n"
+                    f"        />"
+                )
+            elif _field.get('prop_type') in ('integer', 'number') and _field.get('enum'):
+                _enum_vals = _field['enum']
+                _opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(_enum_vals))
+                _state = safe_var_name(f'{_prop}_{_fname}')
+                flatten_enum_opt_setups.append(f"  const {_state}Options = [{_opts}];")
+                _inner.append(
+                    f"        <TextField\n          label={{tf('{_fcamel}')}}\n"
+                    f"          value={{{_state}Options.find(o => o.value === src.{_prop}?.{_fname})?.label ?? ''}}\n"
+                    f"          fullWidth\n          margin=\"normal\"\n          aria-readonly\n        />"
+                )
+            else:
+                _inner.append(
+                    f"        <TextField\n          label={{tf('{_fcamel}')}}\n"
+                    f"          value={{src.{_prop}?.{_fname}?.toString() ?? ''}}\n"
+                    f"          fullWidth\n          margin=\"normal\"\n          aria-readonly\n        />"
+                )
+
+        flatten_sections_list.append(
+            f"      <Accordion>\n"
+            f"        <AccordionSummary expandIcon={{<ExpandMoreIcon />}}>\n"
+            f"          <Typography>{{te('{_prop_camel}')}}</Typography>\n"
+            f"        </AccordionSummary>\n"
+            f"        <AccordionDetails>\n"
+            + ('\n'.join(_inner) + '\n' if _inner else '')
+            + "        </AccordionDetails>\n"
+            + "      </Accordion>"
+        )
+
+    needs_accordion = bool(flatten_rels_raw)
+    flatten_sections = '\n'.join(flatten_sections_list)
+
     # Children view grids
     has_commentable      = ctx.get('has_commentable', False)
     commentable_rel_name = ctx.get('commentable_rel_name', 'commentable')
@@ -808,20 +904,22 @@ def form_view_context(ctx: dict) -> dict:
         for c in grid_children
     )
 
-    has_rel_links = any(rel_by_prop.get(p) for p in other_flds) or bool(reverse_oto_rels)
+    has_rel_links = any(rel_by_prop.get(p) for p in other_flds) or bool(reverse_oto_rels) or has_accordion_rel_links
 
     return {
         'needs_datetime_wrapper': needs_datetime_wrapper,
         'needs_image_display':    needs_image_display,
         'has_rel_links':          has_rel_links,
+        'needs_accordion':        needs_accordion,
         'has_comment_children':   has_comment_children,
         'has_list_children':      has_list_children,
         'has_grid_children':      bool(grid_children),
         'col_fn_names':           col_fn_names,
         'view_enum_ns_hooks':     '\n'.join(enum_ns_hooks),
-        'view_enum_opt_setups':   '\n'.join(enum_opt_setups),
+        'view_enum_opt_setups':   '\n'.join(enum_opt_setups + flatten_enum_opt_setups),
         'all_parent_fields':      all_parent_fields,
         'reverse_oto_fields':     reverse_oto_fields,
+        'flatten_sections':       flatten_sections,
         'child_view_grids':       '\n'.join(child_view_grids),
         'column_variables':       column_variables,
         'custom_view_imports':    custom_view_imports,
