@@ -12,7 +12,7 @@ import re
 from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
 )
-from helpers.schema_helpers import filter_fields, get_parent_relationships, is_optional_fk_to_parent
+from helpers.schema_helpers import filter_fields, get_parent_relationships, is_optional_fk_to_parent, get_flatten_rels
 from build_context import _get_entity_options
 
 
@@ -217,6 +217,7 @@ def get_internal_one_to_one_fks(model_name: str, schema: dict) -> list[dict]:
     """
     model_def = schema['definitions'].get(model_name, {})
     props = model_def.get('properties', {})
+    required_fields = set(model_def.get('required', []))
     result = []
     for prop_name, prop in props.items():
         rel = prop.get('x-relationship')
@@ -227,8 +228,26 @@ def get_internal_one_to_one_fks(model_name: str, schema: dict) -> list[dict]:
             continue
         if not prop_name.endswith('_id'):
             continue
+        # Only include required (non-nullable) FKs — optional FKs can be left null in test data
+        if prop_name not in required_fields:
+            continue
+        # Only include bridge/system models (no x-display) — skip user-visible entities
+        # whose dependencies must be resolved through helper_context deps instead
+        target_def = schema['definitions'].get(target, {})
+        if 'x-display' in target_def:
+            continue
         var_name = to_camel_case(re.sub(r'_id$', '', prop_name))
-        result.append({'prop_name': prop_name, 'target': target, 'var_name': var_name})
+        if target == 'user_account':
+            create_data = (
+                "{ name: 'Test User Account', "
+                "email: `test-dep-ua-${Date.now()}-${Math.random()}@example.com`, "
+                "password: 'test-password', "
+                "creator_id: testUser.id, "
+                "updater_id: testUser.id }"
+            )
+        else:
+            create_data = '{}'
+        result.append({'prop_name': prop_name, 'target': target, 'var_name': var_name, 'create_data': create_data})
     return result
 
 
@@ -713,6 +732,131 @@ def gen_child_datagrid_fk_fields(fields: list) -> list[dict]:
     ]
 
 
+def _compute_flatten_test_rels(parent: str, pascal: str, definition_key: str, schema: dict) -> list[dict]:
+    """Compute flatten_test_rels: one entry per testable non-m2o flatten relation.
+
+    Each entry contains Cypress fill/clear/assert commands and Prisma data for
+    creating the child record in populate helpers.
+    """
+    parent_def = schema['definitions'].get(parent, {})
+    flatten_rels_all = get_flatten_rels(parent, parent_def, schema)
+    non_m2o_flatten = [r for r in flatten_rels_all if not r['is_m2o']]
+    indent = '      '
+
+    result = []
+    for _flat in non_m2o_flatten:
+        _target = _flat['target']
+        _prop = _flat['prop_name']
+        _non_fk_fields = [f for f in _flat['fields'] if not f.get('is_fk')]
+        if not _non_fk_fields:
+            continue
+
+        _has_external_req_fk = any(
+            f.get('is_fk') and not f.get('nullable', True)
+            for f in _flat['fields']
+        )
+        _can_create_inline = not _has_external_req_fk
+
+        _target_def = schema['definitions'].get(_target, {})
+        _is_optional_parent_fk = is_optional_fk_to_parent(_target_def, parent)
+
+        _title = to_title_case(_prop)
+        _pascal_prop = to_pascal_case(_prop)
+
+        # Convert flat fields to FieldMeta-compatible dicts for command generators
+        _field_metas = []
+        for f in _non_fk_fields:
+            _ftype = f.get('prop_type', 'string')
+            _ffmt = f.get('format')
+            _fenum = f.get('enum')
+            if _fenum:
+                _cat = 'enum'
+            elif _ftype in ('integer', 'number'):
+                _cat = 'number'
+            elif _ftype == 'string' and _ffmt in ('date', 'date-time', 'time'):
+                _cat = 'datetime'
+            elif _ftype == 'boolean':
+                _cat = 'boolean'
+            else:
+                _cat = 'text'
+            _field_metas.append({
+                'prop_name': f['name'],
+                'label': to_title_case(f['name']),
+                'category': _cat,
+                'required': not f.get('nullable', True),
+                'enum_values': _fenum,
+                'format': _ffmt,
+                'dep_target': None,
+                'min': None,
+                'max': None,
+                'entity_options': None,
+            })
+
+        _has_required = any(m['required'] for m in _field_metas)
+        _req_metas = [m for m in _field_metas if m['required']]
+
+        _fill_cmds = [gen_fill_command(m, cypress_create_value(m, _title), indent) for m in _field_metas]
+        _req_fill_cmds = [gen_fill_command(m, cypress_create_value(m, _title), indent) for m in _req_metas]
+        _clear_cmds = [gen_clear_command(m, indent) for m in _field_metas]
+        _assert_cmds = [gen_assert_command(m, cypress_create_value(m, _title), indent) for m in _field_metas]
+
+        # Partial fill: only the first required field (leaves others empty → validation fail)
+        _partial_fill_cmds = []
+        if _has_required:
+            _first_req = _req_metas[0]
+            _partial_fill_cmds = [gen_fill_command(_first_req, cypress_create_value(_first_req, _title), indent)]
+
+        # Prisma data for populate helpers (non-FK non-nullable fields)
+        _prisma_fields = []
+        for f in _non_fk_fields:
+            _ptype = f.get('prop_type', 'string')
+            _pfmt = f.get('format')
+            _penum = f.get('enum')
+            if _penum:
+                _pval = '0'
+            elif _ptype in ('integer', 'number'):
+                _pval = '0'
+            elif _ptype == 'string' and _pfmt == 'date':
+                _pval = 'new Date(Date.UTC(2025, 0, 1)).toISOString()'
+            elif _ptype == 'string' and _pfmt in ('date-time', 'time'):
+                _pval = 'new Date(2025, 0, 1).toISOString()'
+            elif _ptype == 'boolean':
+                _pval = 'false'
+            else:
+                _fname = f['name']
+                _pval = f"'Test {to_title_case(_fname)}'"
+            _prisma_fields.append({'name': f['name'], 'prisma_val': _pval, 'nullable': f.get('nullable', True)})
+
+        # External FK fields needed to create the target record (e.g. lifestyle needs patient_id)
+        _external_fk_fields = [
+            {'name': f['name'], 'dep_var': to_camel_case(f.get('fk_target', ''))}
+            for f in _flat['fields']
+            if f.get('is_fk') and f.get('fk_target') and f.get('fk_target') != parent
+        ]
+
+        result.append({
+            'title': _title,
+            'pascal': _pascal_prop,
+            'target': _target,
+            'prop_name': _prop,
+            'section_label': _title,
+            'can_create_inline': _can_create_inline,
+            'is_optional_parent_fk': _is_optional_parent_fk,
+            'field_metas': _field_metas,
+            'fill_cmds': _fill_cmds,
+            'required_fill_cmds': _req_fill_cmds,
+            'clear_cmds': _clear_cmds,
+            'assert_cmds': _assert_cmds,
+            'partial_fill_cmds': _partial_fill_cmds,
+            'has_required': _has_required,
+            'prisma_fields': _prisma_fields,
+            'external_fk_fields': _external_fk_fields,
+            'has_external_fks': bool(_external_fk_fields),
+            'populate_with_task': f'db:populate{pascal}With{_pascal_prop}',
+        })
+
+    return result
+
 
 # ---------------------------------------------------------------------------
 # Context builders (Jinja2 template contexts)
@@ -745,6 +889,48 @@ def helper_context(
     fields = [f for f in fields if f['prop_name'] not in internal_fk_prop_names]
     deps = resolve_dependencies(model_name, schema)
     entity_fk_deps = get_entity_fk_deps(model_name, schema, deps)
+
+    # Detect required one-to-one FK fields that point to user-visible entities (e.g. pre_check.checkup_id).
+    # These are reverse-parent FKs (FK in this model, parent in target) that must be created as deps
+    # in populate helpers. They are not bridge models (handled by internal_fk_deps) and not M2O
+    # (handled by resolve_dependencies), so they need explicit insertion into deps/entity_fk_deps.
+    # We also update the field metadata so the template treats them as autocomplete (FK) fields.
+    for prop_name, prop in properties.items():
+        rel = prop.get('x-relationship')
+        if not rel or rel.get('type') != 'one-to-one':
+            continue
+        if not prop_name.endswith('_id'):
+            continue
+        if prop_name not in set(required_fields):
+            continue
+        oto_target = rel.get('target')
+        if not oto_target or oto_target == model_name:
+            continue
+        oto_target_def = schema['definitions'].get(oto_target, {})
+        if 'x-display' not in oto_target_def:
+            continue  # bridge models are handled by internal_fk_deps
+        # Add transitive deps of this target first
+        for td in resolve_dependencies(oto_target, schema):
+            if not any(d['target'] == td['target'] for d in deps):
+                deps.append(td)
+        # Add the target itself as a dep
+        oto_var = to_camel_case(oto_target)
+        if not any(d['var_name'] == oto_var for d in deps):
+            oto_fk_deps = [
+                {'prop_name': r['prop_name'], 'dep_var_name': to_camel_case(r['target'])}
+                for r in get_parent_relationships(oto_target_def, schema)
+                if any(d['target'] == r['target'] for d in deps)
+            ]
+            deps.append({'target': oto_target, 'var_name': oto_var, 'fk_deps': oto_fk_deps,
+                         'title': to_title_case(oto_target), 'extra_required_fields': []})
+        # Map the FK prop to this dep
+        entity_fk_deps.append({'prop_name': prop_name, 'dep_var_name': oto_var})
+        # Update the field metadata so the template treats this as an autocomplete (FK) field
+        for f in fields:
+            if f['prop_name'] == prop_name:
+                f['category'] = 'autocomplete'
+                f['dep_var_name'] = oto_var
+                break
 
     # Split same-target deps into prop-stem deps when multiple FK fields point to the same target.
     # Mirrors user_account handling: each FK field gets its own dep with a prop-stem var name.
@@ -1014,9 +1200,15 @@ def helper_context(
     primary_fk_is_ua = primary_fk_dep is not None and primary_fk_dep.get('is_user_account', False)
     primary_fk_ua_dep_var = primary_fk_dep_var if primary_fk_is_ua else None
     non_primary_ua_dep_fields = [f for f in ua_dep_fields if f['dep_var_name'] != primary_fk_ua_dep_var]
-    needs_deps_in_populate = bool(non_primary_ua_dep_fields) or any(
-        f['category'] == 'autocomplete' and f['dep_var_name'] and f['dep_var_name'] != primary_fk_dep_var
-        for f in required_fields_prisma
+    needs_deps_in_populate = (
+        bool(non_primary_ua_dep_fields)
+        or any(
+            f['category'] == 'autocomplete' and f['dep_var_name'] and f['dep_var_name'] != primary_fk_dep_var
+            for f in required_fields_prisma
+        )
+        # Also needed when the primary FK dep itself has FK deps (e.g. patient_rel needs patient + clinic).
+        # Without this, the template generates deps.X.id references without defining deps.
+        or bool(primary_fk_dep and primary_fk_dep.get('fk_deps'))
     )
     # populateFullData also needs deps when there are any UA FK fields or optional FK fields
     needs_deps_in_populate_full = bool(ua_dep_fields_full) or any(
@@ -1025,6 +1217,8 @@ def helper_context(
     )
 
     has_approvable = any(d['target'] == 'approvable' for d in internal_fk_deps)
+
+    flatten_test_rels = _compute_flatten_test_rels(parent, pascal, definition_key, schema)
 
     return {
         'pascal': pascal,
@@ -1049,6 +1243,7 @@ def helper_context(
         'primary_fk_dep': primary_fk_dep,
         'internal_fk_deps': internal_fk_deps,
         'has_approvable': has_approvable,
+        'flatten_test_rels': flatten_test_rels,
     }
 
 
@@ -1482,6 +1677,7 @@ def spec_context(
         'check_field_value_1': check_field_value_1,
         'check_field_updated': check_field_updated,
         'has_approvable': any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model_name, schema)),
+        'flatten_test_rels': _compute_flatten_test_rels(parent, pascal, definition_key, schema),
     }
 
 
@@ -1507,6 +1703,8 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
             d['target'] == 'approvable'
             for d in get_internal_one_to_one_fks(entity['model_name'], schema)
         )
+        definition_key = entity.get('definition_key', f'{parent}_detail')
+        flatten_test_rels = _compute_flatten_test_rels(parent, pascal, definition_key, schema)
         enriched_entities.append({
             'parent': parent,
             'pascal': pascal,
@@ -1520,6 +1718,7 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
                 for c in comment_children_registry
             ],
             'has_approvable': has_approvable,
+            'flatten_test_rels': flatten_test_rels,
         })
     return {'entities': enriched_entities, 'has_user_account_populate': has_user_account_populate}
 

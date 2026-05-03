@@ -285,6 +285,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'parent': parent,
                 'model_name': model,
                 'children': children,
+                'definition_key': def_key,
             })
 
         # Task registry (covers all test-enabled entities)

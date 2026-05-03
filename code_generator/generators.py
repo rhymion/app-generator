@@ -303,13 +303,13 @@ def actions_context(ctx: dict) -> dict:
         _ts_type = '{ ' + '; '.join(
             f"{f['name']}: {_flatten_field_ts_type(f)}" for f in _fields
         ) + ' }'
-        _sentinel_key = f'{_prop}__{_fields[0]["name"]}'
+        _all_form_keys = ', '.join(f"'{_prop}__{f['name']}'" for f in _fields)
         _field_exprs  = '\n'.join(
             "    " + f['name'] + ": " + _flatten_field_extraction_expr(f'{_prop}__{f["name"]}', f) + ","
             for f in _fields
         )
         flatten_extractions_lines.append(
-            f"  const {_var}: {_ts_type} | null = data.get('{_sentinel_key}') !== null\n"
+            f"  const {_var}: {_ts_type} | null = [{_all_form_keys}].some(k => {{ const v = data.get(k); return v !== null && v !== ''; }})\n"
             f"    ? {{\n{_field_exprs}\n    }}\n"
             f"    : null;"
         )
@@ -321,7 +321,7 @@ def actions_context(ctx: dict) -> dict:
     def _upsert_body(has_ch: bool) -> str:
         _flatten_block = (f"{flatten_extractions_code}\n" if flatten_extractions_code else "")
         if can_create and can_update:
-            create_call = f'await add{parent_pascal}(userId, {parent_params}{full_child_args});'
+            create_call = f'await add{parent_pascal}(userId, {parent_params}{full_child_args}{flatten_args_str});'
             update_call = f'await update{parent_pascal}(userId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
             return (
                 f"  const id = data.get('id') as string | null;\n"
@@ -361,7 +361,7 @@ def actions_context(ctx: dict) -> dict:
                 f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "") +
                 f"\n  const userId = await getSessionUserIdOrThrow();\n"
-                f"  await add{parent_pascal}(userId, {parent_params}{full_child_args});"
+                f"  await add{parent_pascal}(userId, {parent_params}{full_child_args}{flatten_args_str});"
             )
 
     service_fns = [
@@ -417,6 +417,7 @@ def service_context(ctx: dict) -> dict:
 
     flatten_update_params_parts: list[str] = []
     flatten_nested_update_lines: list[str] = []
+    flatten_nested_create_lines: list[str] = []
 
     for _flat in non_m2o_flatten:
         _prop    = _flat['prop_name']
@@ -432,17 +433,53 @@ def service_context(ctx: dict) -> dict:
         flatten_update_params_parts.append(f"{_var}: {_ts_type} | null")
         # FK pointing back to parent: {parent_model}_id
         _fk_field = f'{model}_id'
-        flatten_nested_update_lines.append(
-            f"    if ({_var}) {{\n"
-            f"      await tx.{_target}.updateMany({{\n"
-            f"        where: {{ {_fk_field}: id }},\n"
-            f"        data: {_var},\n"
-            f"      }});\n"
-            f"    }}"
+        # Detect if any non-nullable FK field points to an external entity (not the parent)
+        # Such rels can't be created inline (missing required FK data)
+        _has_external_req_fk = any(
+            f.get('is_fk') and not f.get('nullable', True)
+            for f in _flat['fields']
         )
+        if _has_external_req_fk:
+            # Can only update existing records — use updateMany
+            # On null: unlink by setting FK to null (parent FK is optional in target)
+            flatten_nested_update_lines.append(
+                f"    if ({_var}) {{\n"
+                f"      await tx.{_target}.updateMany({{\n"
+                f"        where: {{ {_fk_field}: id }},\n"
+                f"        data: {_var},\n"
+                f"      }});\n"
+                f"    }} else {{\n"
+                f"      await tx.{_target}.updateMany({{\n"
+                f"        where: {{ {_fk_field}: id }},\n"
+                f"        data: {{ {_fk_field}: null }},\n"
+                f"      }});\n"
+                f"    }}"
+            )
+        else:
+            # No external required FKs — can create or update inline using upsert
+            # On null: delete the child record (parent FK is required, orphan not possible)
+            flatten_nested_update_lines.append(
+                f"    if ({_var}) {{\n"
+                f"      await tx.{_target}.upsert({{\n"
+                f"        where: {{ {_fk_field}: id }},\n"
+                f"        create: {{ {_fk_field}: id, creator_id: userId, updater_id: userId, ...{_var} }},\n"
+                f"        update: {_var},\n"
+                f"      }});\n"
+                f"    }} else {{\n"
+                f"      await tx.{_target}.deleteMany({{ where: {{ {_fk_field}: id }} }});\n"
+                f"    }}"
+            )
+            flatten_nested_create_lines.append(
+                f"    if ({_var}) {{\n"
+                f"      await tx.{_target}.create({{\n"
+                f"        data: {{ {_fk_field}: created.id, creator_id: userId, updater_id: userId, ...{_var} }},\n"
+                f"      }});\n"
+                f"    }}"
+            )
 
     flatten_update_params = ', '.join(flatten_update_params_parts)
     flatten_nested_updates = '\n'.join(flatten_nested_update_lines)
+    flatten_nested_creates = '\n'.join(flatten_nested_create_lines)
 
     utility_code = (
         f"import prisma from '@/lib/prisma';\n"
@@ -475,6 +512,7 @@ def service_context(ctx: dict) -> dict:
         'child_params_for_update':  child_params_for_update,
         'flatten_update_params':    flatten_update_params,
         'flatten_nested_updates':   flatten_nested_updates,
+        'flatten_nested_creates':   flatten_nested_creates,
     }
 
 
@@ -1943,8 +1981,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     flatten_enum_ns_hooks_upsert: list[str] = []
     flatten_enum_ns_seen_upsert: set[str] = set()
     flatten_enum_opt_setups_upsert: list[str] = []
-    flatten_edit_form_data_sets_lines: list[str] = []
+    flatten_edit_form_data_sets_blocks: list[str] = []
     flatten_edit_section_parts: list[str] = []
+    flatten_validation_parts: list[str] = []
     flatten_needs_datetime = False
     flatten_needs_boolean = False
     flatten_needs_autocomplete = False
@@ -1971,6 +2010,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         _target_props = schema['definitions'].get(_target, {}).get('properties', {})
 
         _accordion_fields_jsx: list[str] = []
+        _rel_fds_lines: list[str] = []
+        _all_filled_checks: list[str] = []       # any non-bool field is non-empty
+        _mandatory_filled_checks: list[str] = [] # non-nullable non-bool fields are non-empty
 
         for _f in _fields:
             if _f.get('is_fk'):
@@ -2002,11 +2044,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"  const [{_sn}, set{_fsetter}] = useState<Dayjs | null>({_init});"
                 )
                 if _fmt == 'date':
-                    flatten_edit_form_data_sets_lines.append(
+                    _rel_fds_lines.append(
                         f"    formData.set('{_form_key}', {_sn}?.format('YYYY-MM-DD') || '');"
                     )
                 else:
-                    flatten_edit_form_data_sets_lines.append(
+                    _rel_fds_lines.append(
                         f"    formData.set('{_form_key}', {_sn}?.toISOString() || '');"
                     )
                 _sd = '\n          show_date={false}' if _fmt == 'time' else ''
@@ -2018,13 +2060,17 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"          onChange={{(newValue: dayjs.Dayjs | null) => set{_fsetter}(newValue)}}\n"
                     f"        />"
                 )
+                _check = f"{_sn} !== null"
+                _all_filled_checks.append(_check)
+                if not _nullable:
+                    _mandatory_filled_checks.append(_check)
 
             elif _is_bool:
                 flatten_needs_boolean = True
                 flatten_edit_states_lines.append(
                     f"  const [{_sn}, set{_fsetter}] = useState<boolean>(Boolean(src.{_prop}?.{_fname}));"
                 )
-                flatten_edit_form_data_sets_lines.append(
+                _rel_fds_lines.append(
                     f"    formData.set('{_form_key}', {_sn}.toString());"
                 )
                 _accordion_fields_jsx.append(
@@ -2033,13 +2079,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"          label={{tf('{_fk_label}')}}\n"
                     f"        />"
                 )
+                # booleans always have a value — excluded from filled/mandatory checks
 
             elif _is_enum:
                 flatten_needs_autocomplete = True
                 flatten_edit_states_lines.append(
                     f"  const [{_sn}, set{_fsetter}] = useState<number | null>(src.{_prop}?.{_fname} ?? null);"
                 )
-                flatten_edit_form_data_sets_lines.append(
+                _rel_fds_lines.append(
                     f"    formData.set('{_form_key}', {_sn} !== null ? String({_sn}) : '');"
                 )
                 _opts_var = f'{_sn}Options'
@@ -2071,6 +2118,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"          )}}\n"
                     f"        />"
                 )
+                _check = f"{_sn} !== null"
+                _all_filled_checks.append(_check)
+                if not _nullable:
+                    _mandatory_filled_checks.append(_check)
 
             elif _is_num:
                 flatten_needs_number_field = True
@@ -2078,7 +2129,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 flatten_edit_states_lines.append(
                     f"  const {_ref_var} = useRef<HTMLInputElement>(null);"
                 )
-                flatten_edit_form_data_sets_lines.append(
+                _rel_fds_lines.append(
                     f"    formData.set('{_form_key}', {_ref_var}.current?.value || '');"
                 )
                 _full_prop = _target_props.get(_fname, {})
@@ -2095,6 +2146,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"          max={{{_mx}}}{_step_str}\n"
                     f"        />"
                 )
+                _check = f"({_ref_var}.current?.value ?? '') !== ''"
+                _all_filled_checks.append(_check)
+                if not _nullable:
+                    _mandatory_filled_checks.append(_check)
 
             else:
                 # Text field — use ref
@@ -2102,7 +2157,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 flatten_edit_states_lines.append(
                     f"  const {_ref_var} = useRef<HTMLInputElement>(null);"
                 )
-                flatten_edit_form_data_sets_lines.append(
+                _rel_fds_lines.append(
                     f"    formData.set('{_form_key}', {_ref_var}.current?.value || '');"
                 )
                 _ml  = 'true' if _fname == 'description' else 'false'
@@ -2118,6 +2173,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"          rows={{{_rows}}}\n"
                     f"        />"
                 )
+                _check = f"({_ref_var}.current?.value ?? '') !== ''"
+                _all_filled_checks.append(_check)
+                if not _nullable:
+                    _mandatory_filled_checks.append(_check)
 
         if _accordion_fields_jsx:
             flatten_edit_section_parts.append(
@@ -2131,13 +2190,33 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 + f"      </Accordion>"
             )
 
+        if _rel_fds_lines:
+            flatten_edit_form_data_sets_blocks.append('\n'.join(_rel_fds_lines))
+
+        # Validation: if any non-bool field has a value, all mandatory ones must be filled
+        if _all_filled_checks and _mandatory_filled_checks:
+            _rel_label = ' '.join(w.capitalize() for w in _prop.split('_'))
+            _any_expr = ' ||\n      '.join(_all_filled_checks)
+            _all_mandatory_expr = ' &&\n      '.join(_mandatory_filled_checks)
+            flatten_validation_parts.append(
+                f"    if (\n"
+                f"      ({_any_expr}) &&\n"
+                f"      !({_all_mandatory_expr})\n"
+                f"    ) {{\n"
+                f"      setError('{_rel_label}: all required fields must be filled when providing data.');\n"
+                f"      return;\n"
+                f"    }}"
+            )
+
     # Merge flatten states/opts into existing strings
     _flatten_states_str = '\n'.join(flatten_edit_states_lines)
     all_states_merged = '\n'.join(filter(None, [all_states, _flatten_states_str]))
-    _flatten_fds_str = '\n'.join(flatten_edit_form_data_sets_lines)
+    _flatten_fds_str = '\n'.join(flatten_edit_form_data_sets_blocks)
     parent_form_data_sets_merged = '\n'.join(filter(None, [parent_form_data_sets, _flatten_fds_str]))
     _all_enum_ns_hooks = '\n'.join(enum_ns_hooks + flatten_enum_ns_hooks_upsert)
     _all_enum_opt_setups = '\n'.join(enum_opt_setups + entity_select_opt_setups + flatten_enum_opt_setups_upsert)
+    _flatten_validation_code = '\n\n'.join(flatten_validation_parts)
+    _child_validation_code_merged = '\n\n'.join(filter(None, [child_validation_code, _flatten_validation_code]))
 
     return {
         'parent_refs':              parent_refs,
@@ -2148,7 +2227,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'child_imports':            child_imports,
         'child_grid_setup':         child_grid_setup,
         'child_form_data_handling': child_form_data_handling,
-        'child_validation_code':    child_validation_code,
+        'child_validation_code':    _child_validation_code_merged,
         'child_grid_components':    child_grid_components,
         'form_upsert_params':       form_upsert_params,
         'enum_ns_hooks':            _all_enum_ns_hooks,

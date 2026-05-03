@@ -857,15 +857,15 @@ def build_context(entity: dict, schema: dict) -> dict:
         *(f"{c['child_var']}_ids" if c['use_connect'] else c['property_name']
           for c in embedded_ch),
     ])
-    service_args_for_create = f"userId, {parent_service_args}" + (
-        f", {child_service_args}" if child_service_args else ""
-    )
-    # Null placeholders for flatten rel update params (API routes don't edit flatten rels)
+    # Null placeholders for flatten rel params (API routes don't edit flatten rels inline)
     _flatten_null_args = ', '.join(
         'null'
         for r in flatten_rels
         if not r['is_m2o'] and any(not f.get('is_fk') for f in r['fields'])
     )
+    service_args_for_create = f"userId, {parent_service_args}" + (
+        f", {child_service_args}" if child_service_args else ""
+    ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
     service_args_for_update = f"userId, id, {parent_service_args}" + (
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")

@@ -18,7 +18,7 @@ async function _create{{ pascal }}BaseDeps() {
   const testUser = await getTestUser();
 {% for dep in non_self_deps %}
 {% for fk in dep.internal_fk_deps %}
-  const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {} });
+  const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
   const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
     data: {
@@ -42,7 +42,7 @@ async function _create{{ pascal }}BaseDeps() {
   });
 {% if dep.needs_second %}
 {% for fk in dep.internal_fk_deps %}
-  const {{ dep.var_name }}2{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {} });
+  const {{ dep.var_name }}2{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
   const {{ dep.var_name }}2 = await prisma.{{ dep.target }}.create({
     data: {
@@ -70,7 +70,7 @@ export async function populate{{ pascal }}Dependencies() {
   const testUser = await getTestUser();
 {% for dep in self_ref_deps %}
 {% for fk in dep.internal_fk_deps %}
-  const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {} });
+  const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
   const {{ dep.var_name }}Record = await prisma.{{ dep.target }}.create({
     data: {
@@ -103,7 +103,7 @@ export async function populate{{ pascal }}Dependencies() {
   const testUser = await getTestUser();
 {% for dep in deps %}
 {% for fk in dep.internal_fk_deps %}
-  const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {} });
+  const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
   const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
     data: {
@@ -127,7 +127,7 @@ export async function populate{{ pascal }}Dependencies() {
   });
 {% if dep.needs_second %}
 {% for fk in dep.internal_fk_deps %}
-  const {{ dep.var_name }}2{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {} });
+  const {{ dep.var_name }}2{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
   const {{ dep.var_name }}2 = await prisma.{{ dep.target }}.create({
     data: {
@@ -187,7 +187,7 @@ export async function populate{{ pascal }}Data(length: number) {
 {% endif %}
 {% endif %}
 {% for fk in internal_fk_deps %}
-    const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {} });
+    const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
     const record = await prisma.{{ model_name }}.create({
       data: {
@@ -257,7 +257,7 @@ export async function populate{{ pascal }}FullData(length: number) {
 {% endif %}
 {% endif %}
 {% for fk in internal_fk_deps %}
-    const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {} });
+    const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
     const record = await prisma.{{ model_name }}.create({
       data: {
@@ -333,6 +333,35 @@ export async function populate{{ pascal }}{{ child.pascal }}Data(parentId: strin
       },
     });
     records.push(record);
+  }
+  // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
+  return JSON.parse(JSON.stringify(records));
+}
+{% endfor %}
+{% for rel in flatten_test_rels %}
+
+export async function populate{{ pascal }}With{{ rel.pascal }}Data(length: number) {
+  const testUser = await getTestUser();
+{% if rel.has_external_fks %}
+  const deps = await populate{{ pascal }}Dependencies();
+{% endif %}
+  const records = await populate{{ pascal }}Data(length);
+  for (const record of records) {
+    await prisma.{{ rel.target }}.create({
+      data: {
+        {{ model_name }}_id: record.id,
+{% for fk in rel.external_fk_fields %}
+        {{ fk.name }}: deps.{{ fk.dep_var }}.id,
+{% endfor %}
+{% for field in rel.prisma_fields %}
+{% if not field.nullable %}
+        {{ field.name }}: {{ field.prisma_val }},
+{% endif %}
+{% endfor %}
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
   }
   // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
   return JSON.parse(JSON.stringify(records));
@@ -477,7 +506,7 @@ export async function setup{{ pascal }}OrderedApprovalFlow() {
 export async function populate{{ pascal }}WithRejectedApproval(creatorId: string, approvalFlowIds: string[]) {
   const testUser = await getTestUser();
 {% for fk in internal_fk_deps %}
-  const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {} });
+  const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
 {% set approvable_dep = internal_fk_deps | selectattr('target', 'equalto', 'approvable') | first %}
   const record = await prisma.{{ model_name }}.create({
@@ -510,7 +539,7 @@ export async function populate{{ pascal }}WithRejectedApproval(creatorId: string
 export async function populate{{ pascal }}WithApproval(creatorId: string, approvalFlowIds: string[]) {
   const testUser = await getTestUser();
 {% for fk in internal_fk_deps %}
-  const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {} });
+  const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
 {% set approvable_dep = internal_fk_deps | selectattr('target', 'equalto', 'approvable') | first %}
   const record = await prisma.{{ model_name }}.create({

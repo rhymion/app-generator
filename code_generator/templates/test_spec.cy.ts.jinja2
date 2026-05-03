@@ -554,6 +554,208 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endif %}
   });
 {% endif %}
+{% if flatten_test_rels %}
+
+  describe('Flatten section (one-to-one)', () => {
+{% set creatable_flatten = flatten_test_rels | selectattr('can_create_inline') | list %}
+{% set updatable_flatten = flatten_test_rels | list %}
+{% set has_partial_fail = flatten_test_rels | selectattr('has_required') | list %}
+{% if creatable_flatten and can_new %}
+    describe('Create with flatten section', () => {
+{% for rel in creatable_flatten %}
+      it('8.{{ loop.index }}.1 create: {{ parent }} with {{ rel.title }} section filled', () => {
+{% if has_deps %}
+        cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% if can_list %}
+{{ I }}cy.visit('/en/{{ parent }}');
+{{ I }}cy.clickButton('Create New {{ title }}');
+{% else %}
+{{ I }}cy.visit('/en/{{ parent }}/new');
+{% endif %}
+{% for cmd in required_fill_cmds %}
+{{ cmd }}
+{% endfor %}
+{{ I }}cy.contains('{{ rel.section_label }}').click();
+{% for cmd in rel.fill_cmds %}
+{{ cmd }}
+{% endfor %}
+{{ I }}cy.clickButton('Save');
+{{ I }}cy.url().should('include', '/{{ parent }}');
+{{ I }}cy.url().should('not.include', '/{{ parent }}/');
+{% if can_list and can_view %}
+{{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
+{{ I }}cy.url().should('include', '/{{ parent }}/view');
+{{ I }}cy.get('[aria-label="Edit"]').click();
+{{ I }}cy.url().should('include', '/{{ parent }}/edit');
+{{ I }}cy.contains('{{ rel.section_label }}').click();
+{% for cmd in rel.assert_cmds %}
+{{ cmd }}
+{% endfor %}
+{% endif %}
+        });
+{% else %}
+{% if can_list %}
+        cy.visit('/en/{{ parent }}');
+        cy.clickButton('Create New {{ title }}');
+{% else %}
+        cy.visit('/en/{{ parent }}/new');
+{% endif %}
+{% for cmd in required_fill_cmds %}
+{{ cmd }}
+{% endfor %}
+        cy.contains('{{ rel.section_label }}').click();
+{% for cmd in rel.fill_cmds %}
+{{ cmd }}
+{% endfor %}
+        cy.clickButton('Save');
+        cy.url().should('include', '/{{ parent }}');
+        cy.url().should('not.include', '/{{ parent }}/');
+{% endif %}
+      });
+
+{% endfor %}
+    });
+{% endif %}
+
+    describe('Edit flatten section', () => {
+{% for rel in updatable_flatten %}
+{% if rel.can_create_inline and can_edit %}
+      it('9.{{ loop.index }}.1 edit: add {{ rel.title }} to {{ parent }} without one (without → with)', () => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+{% if can_list and can_view %}
+          cy.visit('/en/{{ parent }}');
+          cy.contains('{{ list_id_1 }}').click();
+          cy.get('[aria-label="Edit"]').click();
+{% elif can_view %}
+          cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
+          cy.get('[aria-label="Edit"]').click();
+{% else %}
+          cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
+{% endif %}
+          cy.url().should('include', '/{{ parent }}/edit');
+          cy.contains('{{ rel.section_label }}').click();
+{% for cmd in rel.fill_cmds %}
+          {{ cmd | trim }}
+{% endfor %}
+          cy.clickButton('Save');
+          cy.url().should('include', '/{{ parent }}');
+          cy.url().should('not.include', '/{{ parent }}/');
+        });
+      });
+
+{% endif %}
+{% if can_edit %}
+      it('9.{{ loop.index }}.2 edit: update existing {{ rel.title }} (with → with)', () => {
+        cy.task<any[]>('db:populate{{ pascal }}With{{ rel.pascal }}', 1).then((records) => {
+{% if can_list and can_view %}
+          cy.visit('/en/{{ parent }}');
+          cy.contains('{{ list_id_1 }}').click();
+          cy.get('[aria-label="Edit"]').click();
+{% elif can_view %}
+          cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
+          cy.get('[aria-label="Edit"]').click();
+{% else %}
+          cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
+{% endif %}
+          cy.url().should('include', '/{{ parent }}/edit');
+          cy.contains('{{ rel.section_label }}').click();
+{% for cmd in rel.fill_cmds %}
+          {{ cmd | trim }}
+{% endfor %}
+          cy.clickButton('Save');
+          cy.url().should('include', '/{{ parent }}');
+          cy.url().should('not.include', '/{{ parent }}/');
+        });
+      });
+
+      it('9.{{ loop.index }}.3 edit: remove {{ rel.title }} (with → without, {{ "unlinked" if rel.is_optional_parent_fk else "deleted" }})', () => {
+        cy.task<any[]>('db:populate{{ pascal }}With{{ rel.pascal }}', 1).then((records) => {
+{% if can_list and can_view %}
+          cy.visit('/en/{{ parent }}');
+          cy.contains('{{ list_id_1 }}').click();
+          cy.get('[aria-label="Edit"]').click();
+{% elif can_view %}
+          cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
+          cy.get('[aria-label="Edit"]').click();
+{% else %}
+          cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
+{% endif %}
+          cy.url().should('include', '/{{ parent }}/edit');
+          cy.contains('{{ rel.section_label }}').click();
+{% for cmd in rel.clear_cmds %}
+          {{ cmd | trim }}
+{% endfor %}
+          cy.clickButton('Save');
+          cy.url().should('include', '/{{ parent }}');
+          cy.url().should('not.include', '/{{ parent }}/');
+        });
+      });
+
+{% endif %}
+{% endfor %}
+    });
+{% if has_partial_fail and can_new %}
+
+    describe('Fail: partial flatten section data', () => {
+{% for rel in has_partial_fail %}
+{% if rel.partial_fill_cmds %}
+      it('10.{{ loop.index }}.1 fail create: partial {{ rel.title }} (some required fields empty)', () => {
+{% if has_deps %}
+        cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+          cy.visit('/en/{{ parent }}/new');
+{% for cmd in required_fill_cmds %}
+{{ cmd }}
+{% endfor %}
+          cy.contains('{{ rel.section_label }}').click();
+{% for cmd in rel.partial_fill_cmds %}
+          {{ cmd | trim }}
+{% endfor %}
+          cy.clickButton('Save');
+          cy.url().should('include', '/{{ parent }}/new');
+        });
+{% else %}
+        cy.visit('/en/{{ parent }}/new');
+{% for cmd in required_fill_cmds %}
+{{ cmd }}
+{% endfor %}
+        cy.contains('{{ rel.section_label }}').click();
+{% for cmd in rel.partial_fill_cmds %}
+        {{ cmd | trim }}
+{% endfor %}
+        cy.clickButton('Save');
+        cy.url().should('include', '/{{ parent }}/new');
+{% endif %}
+      });
+
+{% if can_edit %}
+      it('10.{{ loop.index }}.2 fail edit: partial {{ rel.title }} (some required fields empty)', () => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+{% if can_list and can_view %}
+          cy.visit('/en/{{ parent }}');
+          cy.contains('{{ list_id_1 }}').click();
+          cy.get('[aria-label="Edit"]').click();
+{% elif can_view %}
+          cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
+          cy.get('[aria-label="Edit"]').click();
+{% else %}
+          cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
+{% endif %}
+          cy.url().should('include', '/{{ parent }}/edit');
+          cy.contains('{{ rel.section_label }}').click();
+{% for cmd in rel.partial_fill_cmds %}
+          {{ cmd | trim }}
+{% endfor %}
+          cy.clickButton('Save');
+          cy.url().should('include', '/{{ parent }}/edit');
+        });
+      });
+{% endif %}
+{% endif %}
+{% endfor %}
+    });
+{% endif %}
+  });
+{% endif %}
 {% if has_approvable %}
 
   describe('Approval', () => {
