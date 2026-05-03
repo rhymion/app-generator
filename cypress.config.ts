@@ -3,7 +3,7 @@ import { getGeneratedTasks } from "./cypress/support/generated-tasks";
 
 export default defineConfig({
   e2e: {
-    baseUrl: "http://localhost:3000",
+    baseUrl: `http://localhost:${process.env.PORT || 3000}`,
     setupNodeEvents(on, config) {
       // Load test environment variables
       require('dotenv').config({ path: '.env.test' });
