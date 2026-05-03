@@ -5,8 +5,11 @@ export default defineConfig({
   e2e: {
     baseUrl: `http://localhost:${process.env.PORT || 3000}`,
     setupNodeEvents(on, config) {
-      // Load test environment variables
-      require('dotenv').config({ path: '.env.test' });
+      // Load test environment variables. Use dotenv-expand so ${VAR}
+      // references in .env.test (e.g. DATABASE_URL referencing POSTGRES_PORT)
+      // get resolved — plain dotenv does not expand them.
+      const dotenvResult = require('dotenv').config({ path: '.env.test' });
+      require('dotenv-expand').expand(dotenvResult);
       config.defaultCommandTimeout = 10000; // Increase default command timeout to 10 seconds
 
       // Task to reset and seed database before tests
