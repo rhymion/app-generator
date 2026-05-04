@@ -40,10 +40,17 @@ def find_model_blocks(text: str) -> list[tuple[int, int, str]]:
 
 
 def existing_indexed_columns(block: str) -> set[str]:
+    """Columns that appear as the LEFTMOST column of some @@index([...]).
+
+    Matches the rule enforced by code_generator/validate.py — only the leading
+    column of a composite index is usable for single-column lookups in
+    Postgres, so trailing positions don't count as 'indexed' here.
+    """
     cols: set[str] = set()
     for decl in re.findall(r"@@index\(\s*\[([^\]]+)\]", block):
-        for col in decl.split(","):
-            cols.add(col.strip())
+        first = decl.split(",", 1)[0].strip()
+        if first:
+            cols.add(first)
     return cols
 
 

@@ -32,7 +32,7 @@ from generators import (
     form_upsert_context,
 )
 from generators_i18n import update_i18n_and_config
-from validate import validate_schema, SchemaValidationError
+from validate import validate_schema, validate_prisma_indexes, SchemaValidationError
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
 from generators_test import (
     helper_context,
@@ -93,6 +93,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     try:
         validate_schema(schema)
+        validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma')
     except SchemaValidationError as exc:
         print(f'\n{exc}', file=sys.stderr)
         sys.exit(1)

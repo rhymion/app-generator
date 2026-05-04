@@ -167,7 +167,31 @@ updated_at DateTime @updatedAt @db.Timestamptz(0)
 
 ---
 
-## 5. Relation disambiguation
+## 5. Required indexes
+
+Every model that has any of the following columns **must** declare a matching `@@index([col])` (or a composite index whose **leftmost** column is that column):
+
+| Column | Why |
+|---|---|
+| `creator_id` | Filters on this column scope rows for users with Creator-only permissions; without an index, every list query falls back to a full table scan as the dataset grows. |
+| `assignee_id` | Same reasoning, for the Assignee role. |
+| `organization_id` | Filters on this column scope rows to organizations the user belongs to. |
+
+Postgres does not auto-index foreign-key columns. The code generator runs `validate_prisma_indexes()` before generation and will refuse to proceed if any required index is missing — this fails fast rather than silently shipping a slow query.
+
+To add the indexes idempotently:
+
+```bash
+python3 scripts/add_required_indexes.py
+```
+
+The script emits `@@index([creator_id])`, `@@index([assignee_id])`, and `@@index([organization_id])` for every model that needs them, and exits cleanly when nothing is missing.
+
+A composite index counts only when the required column is its first entry. `@@index([creator_id, name])` satisfies the rule for `creator_id`; `@@index([name, creator_id])` does not.
+
+---
+
+## 6. Relation disambiguation
 
 Every `@relation` on a custom model must include a unique string name to prevent Prisma's "ambiguous relation" error. This is especially important for self-relations and models with multiple relations to the same target. Use a descriptive name that identifies the semantic role:
 
