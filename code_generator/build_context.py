@@ -24,6 +24,15 @@ import copy
 
 _EXCLUDE_FIELDS = {'created_at', 'updated_at'}
 _EXCLUDE_ID_TS  = {'id', 'created_at', 'updated_at', 'creator_id'}
+_SCALAR_TYPES   = {'string', 'integer', 'number', 'boolean'}
+
+
+def _is_scalar_prop(prop: dict) -> bool:
+    """True for plain scalar fields safe to filter/sort on (no relations, arrays, objects)."""
+    t = prop.get('type')
+    if isinstance(t, list):
+        return any(x in _SCALAR_TYPES for x in t)
+    return t in _SCALAR_TYPES
 
 
 def _get_actual_type(defn: dict) -> str | None:
@@ -513,6 +522,18 @@ def build_context(entity: dict, schema: dict) -> dict:
         f'{{ id: true, creator_id: true{", assignee_id: true" if has_assignee_id else ""} }}'
     )
 
+    # Scalar columns the paginated API/page-list will accept for sort/filter.
+    # Always include audit columns. Anything not in this set is silently ignored
+    # at request time so external input cannot pick arbitrary Prisma columns.
+    _scalar_props = [k for k, v in filtered_props.items() if _is_scalar_prop(v)]
+    for _extra in ('id', 'created_at', 'updated_at', 'creator_id'):
+        if _extra not in _scalar_props:
+            _scalar_props.append(_extra)
+    if has_assignee_id and 'assignee_id' not in _scalar_props:
+        _scalar_props.append('assignee_id')
+    sortable_fields_quoted = ', '.join(f"'{c}'" for c in _scalar_props)
+    filterable_fields_quoted = sortable_fields_quoted
+
     # One-to-one outbound FK rels (FK is on this model)
     one_to_one_rels = get_one_to_one_rels(merged_def, schema)
     auto_create_oto_rels = [r for r in one_to_one_rels if not r['is_selector']]
@@ -893,6 +914,8 @@ def build_context(entity: dict, schema: dict) -> dict:
         should_filter_by_org=should_filter_by_org,
         has_assignee_id=has_assignee_id,
         item_context_select=item_context_select,
+        sortable_fields_quoted=sortable_fields_quoted,
+        filterable_fields_quoted=filterable_fields_quoted,
         self_parent_prop=self_parent_prop,
         # Props
         parent_prop_infos=parent_prop_infos,

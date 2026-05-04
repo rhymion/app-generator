@@ -22,6 +22,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import type { ModelPermissions } from '@/lib/authz';
+import type { PageOpts, PageResult } from '@/lib/_pagination';
 
 interface BaseEntity {
   id: string;
@@ -37,7 +38,14 @@ interface DisplayFieldConfig<T> {
 }
 
 interface CardListClientProps<T extends BaseEntity> {
-  src: T[];
+  /** Client-mode rows. Required when initialRows is not provided. */
+  src?: T[];
+  /** Server-mode initial page rows. Currently rendered without a load-more control. */
+  initialRows?: T[];
+  initialRowCount?: number;
+  initialPage?: number;
+  initialPageSize?: number;
+  fetchPage?: (opts: PageOpts) => Promise<PageResult<T>>;
   basePath: string;
   removeAction?: (ids: string[]) => Promise<void>;
   entityLabel?: string;
@@ -62,6 +70,7 @@ function formatValue<T>(item: T, field: keyof T, format?: 'date-time' | 'date' |
 
 export default function CardListClient<T extends BaseEntity>({
   src,
+  initialRows,
   basePath,
   removeAction,
   entityLabel = 'Item',
@@ -69,7 +78,7 @@ export default function CardListClient<T extends BaseEntity>({
   permissions = { create: true, read: true, update: true, delete: true },
   primaryField = 'name' as keyof T,
 }: CardListClientProps<T>) {
-  const [items] = useState(src);
+  const [items] = useState<T[]>(initialRows ?? src ?? []);
   const [isPending, startTransition] = useTransition();
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());

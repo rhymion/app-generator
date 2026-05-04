@@ -10,20 +10,22 @@ describe('API: User Account', () => {
   });
 
   describe('GET /api/user_account', () => {
-    it('1.1 returns empty list when no items', () => {
+    it('1.1 returns page with only the default seeded user when none added', () => {
       cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           expect(res.status).to.eq(200);
-          expect(res.body).to.have.length(1); // Default seeded user account
+          expect(res.body.rows).to.have.length(1); // Default seeded user account
+          expect(res.body.total).to.eq(1);
         });
     });
 
-    it('1.2 returns list with items', () => {
+    it('1.2 returns page with seeded + added items', () => {
       cy.task('db:populateUserAccount', 1);
       cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           expect(res.status).to.eq(200);
-          expect(res.body).to.have.length(2); // Default seeded + 1 populated
+          expect(res.body.rows).to.have.length(2); // Default seeded + 1 populated
+          expect(res.body.total).to.eq(2);
         });
     });
   });

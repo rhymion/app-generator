@@ -4,6 +4,7 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import DataGridClient from './DataGridClient';
 import CardListClient from './CardListClient';
 import type { ModelPermissions } from '@/lib/authz';
+import type { PageOpts, PageResult } from '@/lib/_pagination';
 
 interface BaseEntity {
   id: string;
@@ -19,7 +20,14 @@ interface DisplayFieldConfig<T> {
 }
 
 interface ResponsiveListClientProps<T extends BaseEntity> {
-  src: T[];
+  /** Client-mode rows. Use either `src` or the server-mode `initialRows` set. */
+  src?: T[];
+  /** Server-mode initial page rows. */
+  initialRows?: T[];
+  initialRowCount?: number;
+  initialPage?: number;
+  initialPageSize?: number;
+  fetchPage?: (opts: PageOpts) => Promise<PageResult<T>>;
   basePath: string;
   removeAction?: (ids: string[]) => Promise<void>;
   entityLabel?: string;
@@ -33,6 +41,11 @@ interface ResponsiveListClientProps<T extends BaseEntity> {
 
 export default function ResponsiveListClient<T extends BaseEntity>({
   src,
+  initialRows,
+  initialRowCount,
+  initialPage,
+  initialPageSize,
+  fetchPage,
   basePath,
   removeAction,
   entityLabel = 'Item',
@@ -47,6 +60,11 @@ export default function ResponsiveListClient<T extends BaseEntity>({
     return (
       <CardListClient
         src={src}
+        initialRows={initialRows}
+        initialRowCount={initialRowCount}
+        initialPage={initialPage}
+        initialPageSize={initialPageSize}
+        fetchPage={fetchPage}
         basePath={basePath}
         removeAction={removeAction}
         entityLabel={entityLabel}
@@ -60,6 +78,11 @@ export default function ResponsiveListClient<T extends BaseEntity>({
   return (
     <DataGridClient
       src={src}
+      initialRows={initialRows}
+      initialRowCount={initialRowCount}
+      initialPage={initialPage}
+      initialPageSize={initialPageSize}
+      fetchPage={fetchPage}
       basePath={basePath}
       removeAction={removeAction}
       entityLabel={entityLabel}

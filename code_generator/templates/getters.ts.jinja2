@@ -8,10 +8,47 @@ import { getAll{{ oto.target | pascal_case }}s } from '@/lib/{{ oto.target }}/ge
 {% endif %}
 {% endfor %}
 import { assertPermission, getModelPermissions, resolvePermissions, toPermissions{% if should_filter_by_org %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
-import type { Operation } from '@/lib/authz';
+import type { Operation, RichPermissions } from '@/lib/authz';
+import {
+  type PageOpts, type PageResult,
+  DEFAULT_PAGE_SIZE, clampPage, buildOrderBy, buildFilter,
+} from '@/lib/_pagination';
 {% if should_filter_by_org %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
+
+// Allow-lists for sort/filter — anything not in here is silently dropped at
+// request time so external input cannot pick arbitrary columns.
+const SORTABLE_FIELDS = new Set<string>([{{ sortable_fields_quoted }}]);
+const FILTERABLE_FIELDS = new Set<string>([{{ filterable_fields_quoted }}]);
+
+/** Build the where clauses that enforce read scope (org + Creator/Assignee). */
+function build{{ parent_pascal }}AccessWhere(
+  perms: RichPermissions,
+  userId: string | null,
+{% if should_filter_by_org %}
+  associatedOrganizationIds: string[],
+{% endif %}
+): Record<string, unknown>[] {
+  const and: Record<string, unknown>[] = [];
+{% if should_filter_by_org %}
+  and.push({ organization_id: { in: associatedOrganizationIds } });
+{% endif %}
+  if (!perms.general.read) {
+    const or: Record<string, unknown>[] = [];
+    if (perms.creator?.read && userId) or.push({ creator_id: userId });
+{% if has_assignee_id %}
+    if (perms.assignee?.read && userId) or.push({ assignee_id: userId });
+{% endif %}
+    if (or.length === 0) {
+      // No read scope at all — force empty result without throwing here.
+      and.push({ id: '__no_access__' });
+    } else {
+      and.push({ OR: or });
+    }
+  }
+  return and;
+}
 
 export async function getAll{{ parent_pascal }}s({% if should_filter_by_org %}userId: string{% endif %}): Promise<{{ parent_pascal }}[]> {
 {% if should_filter_by_org %}
@@ -119,6 +156,82 @@ export async function get{{ parent_pascal }}NewPageAccessCheck() {
   const { permissions: richPermissions } = await getModelPermissions('{{ parent }}');
   await assertPermission(richPermissions.general, 'create', '{{ parent }}');
   return richPermissions.general;
+}
+
+/**
+ * Paginated query for {{ parent }} — pushes Creator/Assignee/org filters into the
+ * where clause so the DB never has to scan the full table for restricted users.
+ * `perms` and `userId` must already be loaded by the caller (so server actions
+ * and route handlers can reuse the permission lookup they already did).
+ */
+export async function get{{ parent_pascal }}Page(
+  opts: PageOpts,
+  perms: RichPermissions,
+  userId: string | null,
+): Promise<PageResult<{{ parent_pascal }}>> {
+  const { page, pageSize, skip, take } = clampPage(opts);
+{% if should_filter_by_org %}
+  const associatedOrganizations = userId ? await getAssociatedOrganizations(userId) : [];
+  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
+{% endif %}
+  const accessAnd = build{{ parent_pascal }}AccessWhere(perms, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+  const filterAnd = buildFilter(opts.filter, FILTERABLE_FIELDS);
+  const where = { AND: [...accessAnd, ...filterAnd] };
+  const orderBy = buildOrderBy(opts.sort, SORTABLE_FIELDS);
+
+  const [rowsRaw, total] = await prisma.$transaction([
+    prisma.{{ model }}.findMany({
+      where,
+      orderBy,
+      skip,
+      take,
+{% if include_props_list %}
+      include: { {{ include_props_list }} },
+{% endif %}
+    }),
+    prisma.{{ model }}.count({ where }),
+  ]);
+
+  const rows = rowsRaw.map(({{ parent_camel }}) => ({
+{{ parent_mapping }}
+{% if relationship_mapping %}
+{{ relationship_mapping }}
+{% endif %}
+  }));
+  return { rows, total, page, pageSize };
+}
+
+/**
+ * Server-component entry point for the paginated list page. Asserts read
+ * permission and returns the requested page + the user's effective permissions.
+ */
+export async function get{{ parent_pascal }}PagedData(
+  opts: PageOpts = { page: 0, pageSize: DEFAULT_PAGE_SIZE },
+  isAssertPermission: boolean = true,
+) {
+{% if should_filter_by_org %}
+  const userId = await getSessionUserIdOrThrow();
+  const { permissions } = await getModelPermissions('{{ parent }}', userId);
+{% else %}
+  const { permissions, userId } = await getModelPermissions('{{ parent }}');
+{% endif %}
+  if (isAssertPermission) {
+    await assertPermission(permissions, 'read', '{{ parent }}');
+  }
+  const pageData = await get{{ parent_pascal }}Page(opts, permissions, userId);
+  return { {{ parent_camel }}Page: pageData, userPermissions: await toPermissions(permissions) };
+}
+
+/** Server Action used by the DataGrid client for subsequent pages / sort / filter. */
+export async function fetch{{ parent_pascal }}Page(opts: PageOpts): Promise<PageResult<{{ parent_pascal }}>> {
+{% if should_filter_by_org %}
+  const userId = await getSessionUserIdOrThrow();
+  const { permissions } = await getModelPermissions('{{ parent }}', userId);
+{% else %}
+  const { permissions, userId } = await getModelPermissions('{{ parent }}');
+{% endif %}
+  await assertPermission(permissions, 'read', '{{ parent }}');
+  return get{{ parent_pascal }}Page(opts, permissions, userId);
 }
 {% for oto in selector_oto_rels %}
 
