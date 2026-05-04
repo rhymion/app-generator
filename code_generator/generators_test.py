@@ -31,7 +31,7 @@ def get_child_names(child: dict) -> dict:
         'singular_pascal_name': singularize(pascal_name),
         'title': to_title_case(property_name),
         'form_key': singularize(property_name),
-        'columns_fn_name': f'{property_name}_columns',
+        'columns_fn_name': f'use{to_pascal_case(property_name)}Columns',
     }
 
 

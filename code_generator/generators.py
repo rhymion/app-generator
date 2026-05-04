@@ -537,7 +537,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
         if not child_props:
             column_children.append({
                 'fn_code': (
-                    f"export function {prop_name}_columns(editable: boolean = false): GridColDef[] {{\n"
+                    f"export function use{to_pascal_case(prop_name)}Columns(editable: boolean = false): GridColDef[] {{\n"
                     f"  const t = useTranslations('Fields');\n"
                     f"  return [];\n"
                     f"}}"
@@ -627,7 +627,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
 
         rel_params_str = (', ' + ', '.join(rel_params)) if rel_params else ''
         fn_code = (
-            f"export function {prop_name}_columns(editable: boolean = false{rel_params_str}): GridColDef[] {{\n"
+            f"export function use{to_pascal_case(prop_name)}Columns(editable: boolean = false{rel_params_str}): GridColDef[] {{\n"
             f"  const t = useTranslations('Fields');\n"
             f"  return [\n"
             + '\n'.join(columns) +
@@ -967,7 +967,7 @@ def form_view_context(ctx: dict) -> dict:
     has_comment_children = has_commentable or any(c.get('output_type') == 'comments' for c in children_raw)
     has_list_children    = any(c.get('output_type') == 'list' for c in children_raw)
     grid_children        = [c for c in children_raw if c.get('output_type') not in ('list', 'comments')]
-    col_fn_names         = [f"{c['property_name']}_columns" for c in grid_children]
+    col_fn_names         = [f"use{to_pascal_case(c['property_name'])}Columns" for c in grid_children]
 
     child_view_grids = []
     # Bridge-based comment section (commentable one-to-one)
@@ -1046,7 +1046,7 @@ def form_view_context(ctx: dict) -> dict:
             )
 
     column_variables = '\n'.join(
-        f"  const {safe_var_name(c['property_name'])}Columns: GridColDef[] = {c['property_name']}_columns(false);"
+        f"  const {safe_var_name(c['property_name'])}Columns: GridColDef[] = use{to_pascal_case(c['property_name'])}Columns(false);"
         for c in grid_children
     )
 
@@ -1457,7 +1457,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # Column fn names (grid children only)
     col_fn_names = [
-        f"{c['property_name']}_columns"
+        f"use{to_pascal_case(c['property_name'])}Columns"
         for c in non_comment_ch
         if c.get('output_type') not in ('list', None) or c.get('output_type') is None
         if c.get('output_type') != 'list' and (c.get('relationship') or {}).get('type') != 'many-to-many'
@@ -1617,7 +1617,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"    {fk_prop}: src.id," for fk_prop in sorted(parent_fk_props_child)
         )
         child_grid_setup_parts.append(
-            f"  const {child_var}Columns = {prop_name}_columns(true{rel_args_str});\n\n"
+            f"  const {child_var}Columns = use{to_pascal_case(prop_name)}Columns(true{rel_args_str});\n\n"
             f"  const [initial{child_pascal}] = useState<GridRowsProp>(() => src.{prop_name}.map(f => ({{ ...f, id: f.id || `temp-${{Date.now()}}-${{Math.random()}}` }})));\n\n"
             f"  const createNew{child_pascal} = () => ({{\n"
             f"    id: `temp-${{Date.now()}}-${{Math.random()}}`,\n"
@@ -1772,7 +1772,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
         req_props_js = ', '.join(f"'{p}'" for p in required_validatable)
         child_validation_parts.append(
-            f"    const invalid{child_pascal} = ({child_var}Ref.current?.getFields?.() || []).filter((row: any) =>\n"
+            f"    const invalid{child_pascal} = ({child_var}Ref.current?.getFields?.() || []).filter((row: Record<string, unknown>) =>\n"
             f"      [{req_props_js}].some((prop: string) => row[prop] == null || row[prop] === '')\n"
             f"    );\n"
             f"    if (invalid{child_pascal}.length > 0) {{\n"

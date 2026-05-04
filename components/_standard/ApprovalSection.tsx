@@ -189,7 +189,7 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
                                 {' '}{STATUS_LABELS[h.pre_status] ?? h.pre_status} → {STATUS_LABELS[h.post_status] ?? h.post_status}
                               </Typography>
                               {h.message && (
-                                <Typography variant="body2" sx={{ ml: 1 }}>"{h.message}"</Typography>
+                                <Typography variant="body2" sx={{ ml: 1 }}>&quot;{h.message}&quot;</Typography>
                               )}
                             </Box>
                           ))}
