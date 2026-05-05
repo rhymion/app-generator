@@ -51,26 +51,6 @@ export async function getAssociatedOrganizationDetail(id: string, userId: string
   };
 }
 
-export async function getAssociatedOrganizationListPageData(isAssertPermission: boolean = true) {
-  const userId = await getSessionUserIdOrThrow();
-  const [{ permissions: userPermissions }, organizations] = await Promise.all([
-    getModelPermissions('organization', userId),
-    getAssociatedOrganizations(userId),
-  ]);
-  if (isAssertPermission) {
-    await assertPermission(userPermissions, 'read', 'organization');
-  }
-  // If the user lacks general read but has Creator/Assignee read, filter to their own items.
-  const filteredOrganizations = userPermissions.general.read
-    ? organizations
-    : organizations.filter(item =>
-        (userPermissions.creator?.read && item.creator_id === userId) ||
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (userPermissions.assignee?.read && (item as any).assignee_id === userId)
-      );
-  return { organizations: filteredOrganizations, userPermissions: await toPermissions(userPermissions) };
-}
-
 /**
  * Lightweight search for the organization autocomplete picker. Restricted to
  * organizations the user is a member of (mirrors getAssociatedOrganizations);
