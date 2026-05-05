@@ -168,10 +168,8 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
 {% for target in all_option_targets %}
-  all{{ target | pascal_case }}s?: {{ target | pascal_case }}[];
+  initial{{ target | pascal_case }}s?: {{ target | pascal_case }}[];
+  search{{ target | pascal_case }}Options?: (query: string, includeIds: string[]) => Promise<{{ target | pascal_case }}[]>;
 {% endfor %}
   currentUserId?: string | null;
-{% for target in all_option_targets %}
-  {{ target | camel_case }}Permissions?: ModelPermissions;
-{% endfor %}
 }>;

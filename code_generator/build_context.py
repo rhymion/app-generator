@@ -534,6 +534,20 @@ def build_context(entity: dict, schema: dict) -> dict:
     sortable_fields_quoted = ', '.join(f"'{c}'" for c in _scalar_props)
     filterable_fields_quoted = sortable_fields_quoted
 
+    # Text fields used by searchXxxOptions for substring matching. Limited to
+    # the conventional human-readable columns so callers don't accidentally
+    # search across freeform fields.
+    searchable_text_fields = [f for f in ('name', 'code') if f in filtered_props]
+    # Default ordering for the search action — newest entities are the most
+    # likely autocomplete picks. Falls back to id when no audit column exists.
+    default_search_order_field = (
+        'name' if 'name' in filtered_props
+        else 'code' if 'code' in filtered_props
+        else 'created_at' if 'created_at' in filtered_props
+        else 'id'
+    )
+    default_search_order_dir = 'asc' if default_search_order_field in ('name', 'code') else 'desc'
+
     # One-to-one outbound FK rels (FK is on this model)
     one_to_one_rels = get_one_to_one_rels(merged_def, schema)
     auto_create_oto_rels = [r for r in one_to_one_rels if not r['is_selector']]
@@ -916,6 +930,9 @@ def build_context(entity: dict, schema: dict) -> dict:
         item_context_select=item_context_select,
         sortable_fields_quoted=sortable_fields_quoted,
         filterable_fields_quoted=filterable_fields_quoted,
+        searchable_text_fields=searchable_text_fields,
+        default_search_order_field=default_search_order_field,
+        default_search_order_dir=default_search_order_dir,
         self_parent_prop=self_parent_prop,
         # Props
         parent_prop_infos=parent_prop_infos,

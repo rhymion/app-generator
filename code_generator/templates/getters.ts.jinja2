@@ -233,6 +233,63 @@ export async function fetch{{ parent_pascal }}Page(opts: PageOpts): Promise<Page
   await assertPermission(permissions, 'read', '{{ parent }}');
   return get{{ parent_pascal }}Page(opts, permissions, userId);
 }
+
+/**
+ * Lightweight search for autocomplete pickers. Returns up to `limit` rows
+ * matching `query`{% if searchable_text_fields %} (substring on {{ searchable_text_fields | join(' / ') }}){% endif %} plus any rows in `includeIds` so the
+ * currently-selected option is always present even when it doesn't match the
+ * query. Applies the same access scope as the list page.
+ */
+export async function search{{ parent_pascal }}Options(
+  query: string,
+  includeIds: string[] = [],
+  limit: number = 50,
+): Promise<{{ parent_pascal }}[]> {
+{% if should_filter_by_org %}
+  const userId = await getSessionUserIdOrThrow();
+  const { permissions } = await getModelPermissions('{{ parent }}', userId);
+{% else %}
+  const { permissions, userId } = await getModelPermissions('{{ parent }}');
+{% endif %}
+  await assertPermission(permissions, 'read', '{{ parent }}');
+{% if should_filter_by_org %}
+  const associatedOrganizations = await getAssociatedOrganizations(userId);
+  const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
+{% endif %}
+  const accessAnd = build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+
+  const trimmed = query.trim();
+  const orClauses: Record<string, unknown>[] = [];
+  if (trimmed) {
+{% for f in searchable_text_fields %}
+    orClauses.push({ {{ f }}: { contains: trimmed, mode: 'insensitive' } });
+{% endfor %}
+  }
+  if (includeIds.length > 0) {
+    orClauses.push({ id: { in: includeIds } });
+  }
+  const where = {
+    AND: [
+      ...accessAnd,
+      ...(orClauses.length > 0 ? [{ OR: orClauses }] : []),
+    ],
+  };
+  const safeLimit = Math.min(Math.max(Math.floor(limit) || 50, 1), 200);
+  const rowsRaw = await prisma.{{ model }}.findMany({
+    where,
+    orderBy: [{ {{ default_search_order_field }}: '{{ default_search_order_dir }}' }],
+    take: safeLimit + includeIds.length,
+{% if include_props_list %}
+    include: { {{ include_props_list }} },
+{% endif %}
+  });
+  return rowsRaw.map(({{ parent_camel }}) => ({
+{{ parent_mapping }}
+{% if relationship_mapping %}
+{{ relationship_mapping }}
+{% endif %}
+  }));
+}
 {% for oto in selector_oto_rels %}
 
 /**

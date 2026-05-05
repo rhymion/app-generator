@@ -526,6 +526,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
     parent_rels_raw  = ctx['parent_rels_raw']
 
     needs_datetime_imports = False
+    needs_entity_autocomplete_cell = False
     column_children = []
 
     for child_raw in non_comment_ch:
@@ -552,7 +553,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
             rel = prop.get('x-relationship', {})
             if rel.get('type') == 'many-to-one':
                 param_camel = to_camel_case(key)
-                rel_params.append(f"{param_camel}Options?: Array<{{ value: string | null; label: string }}>")
+                rel_params.append(f"{param_camel}Config?: EntityAutocompleteCellConfig")
 
         columns = []
         for key, prop in child_props.items():
@@ -561,14 +562,22 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
 
             rel = prop.get('x-relationship', {})
             if rel.get('type') == 'many-to-one':
+                needs_entity_autocomplete_cell = True
                 label_base   = key.removesuffix('_id')
                 header_camel = to_camel_case(label_base)
                 prop_camel   = to_camel_case(key)
-                param_name   = f'{prop_camel}Options'
+                param_name   = f'{prop_camel}Config'
                 label_field  = rel.get('labelField', 'name')
+                # When the config is provided, pick uses EntityAutocomplete (any object selectable
+                # via server-side search). When it's missing, the column is read-only with the
+                # included relation's label.
                 columns.append(
-                    f"    ...({param_name} && {param_name}.length > 0\n"
-                    f"      ? [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: editable, type: 'singleSelect' as const, valueOptions: {param_name} }}]\n"
+                    f"    ...({param_name}\n"
+                    f"      ? [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: editable,\n"
+                    f"          renderEditCell: (params: GridRenderEditCellParams) => (\n"
+                    f"            <EntityAutocompleteCellEditor {{...params}} config={{{param_name}}} />\n"
+                    f"          ),\n"
+                    f"          valueFormatter: entityAutocompleteValueFormatter({param_name}) }}]\n"
                     f"      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
                     f"      : [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: false, valueGetter: (_value: any, row: any) => row.{label_base}?.{label_field} ?? '' }}]),"
                 )
@@ -639,6 +648,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
     return {
         'column_children': column_children,
         'needs_datetime_imports': needs_datetime_imports,
+        'needs_entity_autocomplete_cell': needs_entity_autocomplete_cell,
     }
 
 
@@ -1200,22 +1210,20 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         state_name    = safe_var_name(prop_name)
         setter        = _setter(state_name)
         target_pascal = to_pascal_case(target)
-        opts_var      = f'{state_name}Options'
+        search_var    = f'{state_name}SearchAction'
+        initial_var   = f'{state_name}InitialOptions'
+        current_var   = f'{state_name}CurrentOption'
         return (
             f"      <Box sx={{{{ display: 'flex', alignItems: 'flex-start', gap: 1 }}}}>\n"
-            f"        <Autocomplete\n"
+            f"        <EntityAutocomplete\n"
             f"          sx={{{{ flex: 1 }}}}\n"
-            f"          options={{{opts_var}}}\n"
-            f"          value={{{opts_var}.find((option) => option.value === {state_name}) || null}}\n"
-            f"          onChange={{(_, newValue) => set{setter}(newValue?.value ?? null)}}\n"
-            f"          renderInput={{(params) => (\n"
-            f"            <TextField\n"
-            f"              {{...params}}\n"
-            f"              label={{tf('{label_fk}')}}\n"
-            f"              margin=\"normal\"\n"
-            f"              {'required' if required else ''}\n"
-            f"            />\n"
-            f"          )}}\n"
+            f"          value={{{state_name}}}\n"
+            f"          onChange={{(id) => set{setter}(id)}}\n"
+            f"          searchAction={{{search_var}}}\n"
+            f"          initialOptions={{{initial_var}}}\n"
+            f"          currentOption={{{current_var}}}\n"
+            f"          label={{tf('{label_fk}')}}\n"
+            f"          required={{{'true' if required else 'false'}}}\n"
             f"        />\n"
             f"        {{{state_name} && (\n"
             f"          <Tooltip title=\"View\">\n"
@@ -1345,25 +1353,44 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      />"
         )
 
+    # For each many-to-one (and selector OTO) relation, emit:
+    #   - {prop}InitialOptions  : useMemo over the limited initial set (initial{Target}s)
+    #   - {prop}SearchAction    : useCallback that delegates to search{Target}Options and
+    #                             remaps full records to {id, label} using the rel's label_field
+    #   - {prop}CurrentOption   : useMemo over src.{relation_name} for the resolved label
     for r in list(parent_rels_raw) + list(selector_oto_rels):
         prop_name     = r['prop_name']
-        target_pascal = to_pascal_case(r['target'])
+        target        = r['target']
+        target_pascal = to_pascal_case(target)
         label_field   = r.get('label_field', 'name')
         label_is_date = r.get('label_field_is_date', False)
+        rel_name      = prop_name.removesuffix('_id') if prop_name.endswith('_id') else prop_name
         sn            = safe_var_name(prop_name)
-        opts_var      = f'{sn}Options'
-        # For date fields, convert to locale string; otherwise use as-is
+        initial_var   = f'{sn}InitialOptions'
+        search_var    = f'{sn}SearchAction'
+        current_var   = f'{sn}CurrentOption'
+        prop_initial  = f'initial{target_pascal}s'
+        prop_search   = f'search{target_pascal}Options'
+
         if label_is_date:
             label_expr = f"item.{label_field}?.toLocaleDateString() ?? ''"
+            current_label_expr = f"src.{rel_name}.{label_field}?.toLocaleDateString() ?? ''"
         else:
             label_expr = f"item.{label_field}"
+            current_label_expr = f"src.{rel_name}.{label_field}"
+
         rel_opt_setups.append(
-            f"  const {opts_var} = useMemo(() => {{\n"
-            f"    return all{target_pascal}s.map((item) => ({{\n"
-            f"      value: item.id,\n"
-            f"      label: {label_expr},\n"
-            f"    }}));\n"
-            f"  }}, [all{target_pascal}s]);"
+            f"  const {initial_var} = useMemo(() => ({prop_initial} ?? []).map((item) => ({{\n"
+            f"    id: item.id,\n"
+            f"    label: {label_expr},\n"
+            f"  }})), [{prop_initial}]);\n"
+            f"  const {search_var} = useCallback(async (query: string, includeIds: string[]) => {{\n"
+            f"    const rows = (await {prop_search}?.(query, includeIds)) ?? [];\n"
+            f"    return rows.map((item) => ({{ id: item.id, label: {label_expr} }}));\n"
+            f"  }}, [{prop_search}]);\n"
+            f"  const {current_var} = useMemo(() => (\n"
+            f"    src.{rel_name} ? {{ id: src.{rel_name}.id, label: {current_label_expr} }} : null\n"
+            f"  ), [src.{rel_name}]);"
         )
 
     # Entity select fields (static options embedded in the file)
@@ -1551,7 +1578,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             else:
                 _label_expr = f"f.{_uc_label}"
             child_grid_setup_parts.append(
-                f"  const [initial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
+                f"  const [localInitial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                 f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
                 f"    value: f.id,\n"
                 f"    label: {_label_expr},\n"
@@ -1566,7 +1593,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             order_line = '\n    order: f.order,' if has_order else ''
             if ft:
                 child_grid_setup_parts.append(
-                    f"  const [initial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
+                    f"  const [localInitial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                     f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
                     f"    value: f.path,\n"
                     f"    label: f.name,\n"
@@ -1575,7 +1602,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 )
             else:
                 child_grid_setup_parts.append(
-                    f"  const [initial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
+                    f"  const [localInitial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                     f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
                     f"    value: f.name,\n"
                     f"    label: f.name,\n"
@@ -1588,7 +1615,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # annotations (not all FKs targeting the parent, e.g. reference_id → db_table stays).
         parent_fk_props_child = get_parent_fk_props(child_def, model)
         child_rels = [r for r in get_parent_relationships(child_def) if r['prop_name'] not in parent_fk_props_child]
-        rel_opt_args = ', '.join(f'{to_camel_case(r["prop_name"])}Options' for r in child_rels)
+        rel_opt_args = ', '.join(f'{to_camel_case(r["prop_name"])}Config' for r in child_rels)
         rel_args_str = f', {rel_opt_args}' if rel_opt_args else ''
 
         exclude_in_create = parent_fk_props_child | {'id', 'created_at', 'updated_at', 'creator_id'}
@@ -1618,7 +1645,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         )
         child_grid_setup_parts.append(
             f"  const {child_var}Columns = use{to_pascal_case(prop_name)}Columns(true{rel_args_str});\n\n"
-            f"  const [initial{child_pascal}] = useState<GridRowsProp>(() => src.{prop_name}.map(f => ({{ ...f, id: f.id || `temp-${{Date.now()}}-${{Math.random()}}` }})));\n\n"
+            f"  const [localInitial{child_pascal}] = useState<GridRowsProp>(() => src.{prop_name}.map(f => ({{ ...f, id: f.id || `temp-${{Date.now()}}-${{Math.random()}}` }})));\n\n"
             f"  const createNew{child_pascal} = () => ({{\n"
             f"    id: `temp-${{Date.now()}}-${{Math.random()}}`,\n"
             f"{create_body}\n"
@@ -1628,30 +1655,60 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     child_grid_setup = '\n'.join(child_grid_setup_parts)
 
-    # Child entity rel option setups (for child grid many-to-one dropdowns)
-    all_child_rels = []
+    # For each child grid m2o relation, build an EntityAutocompleteCellConfig.
+    # The label-lookup map is seeded from src.{child}.{relation} (the FK-included rows
+    # already on screen) and from initial{Target}s (the limited initial fetch).
+    parent_rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
+    processed_rels: set[str] = set()
+    child_entity_rel_opt = []
     for c in non_comment_ch:
         if c.get('output_type') == 'list' or (c.get('relationship') or {}).get('type') == 'many-to-many':
             continue
         cdef = schema['definitions'].get(c['name'], {})
         parent_fk_props_cdef = get_parent_fk_props(cdef, model)
-        all_child_rels.extend(r for r in get_parent_relationships(cdef) if r['prop_name'] not in parent_fk_props_cdef)
-    parent_rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
-    seen_rel = set()
-    child_entity_rel_opt = []
-    for r in all_child_rels:
-        if r['prop_name'] in seen_rel or r['prop_name'] in parent_rel_prop_names:
-            continue
-        seen_rel.add(r['prop_name'])
-        prop_camel   = to_camel_case(r['prop_name'])
-        target_pascal = to_pascal_case(r['target'])
-        label_field  = r.get('label_field', 'name')
-        opts_var     = f'{prop_camel}Options'
-        child_entity_rel_opt.append(
-            f"  const {opts_var} = useMemo(() =>\n"
-            f"    (all{target_pascal}s ?? []).map(item => ({{ value: item.id, label: item.{label_field} }})),\n"
-            f"  [all{target_pascal}s]);"
-        )
+        child_prop_name = c['property_name']
+        for r in get_parent_relationships(cdef):
+            if r['prop_name'] in parent_fk_props_cdef or r['prop_name'] in parent_rel_prop_names:
+                continue
+            if r['prop_name'] in processed_rels:
+                continue
+            processed_rels.add(r['prop_name'])
+
+            prop_camel    = to_camel_case(r['prop_name'])
+            target        = r['target']
+            target_pascal = to_pascal_case(target)
+            label_field   = r.get('label_field', 'name')
+            label_base    = r['prop_name'].removesuffix('_id') if r['prop_name'].endswith('_id') else r['prop_name']
+            label_camel   = to_camel_case(label_base)
+            config_var    = f'{prop_camel}Config'
+            lookup_var    = f'{prop_camel}Lookup'
+            initial_opts_var = f'{prop_camel}InitialOpts'
+            prop_initial  = f'initial{target_pascal}s'
+            prop_search   = f'search{target_pascal}Options'
+
+            child_entity_rel_opt.append(
+                f"  const {lookup_var} = useRef<Map<string, string>>(new Map());\n"
+                f"  const {initial_opts_var} = useMemo(() =>\n"
+                f"    ({prop_initial} ?? []).map(item => ({{ id: item.id, label: item.{label_field} }})),\n"
+                f"  [{prop_initial}]);\n"
+                f"  useMemo(() => {{\n"
+                f"    {lookup_var}.current.clear();\n"
+                f"    src.{child_prop_name}.forEach(row => {{\n"
+                f"      if (row.{label_base}) {lookup_var}.current.set(row.{label_base}.id, row.{label_base}.{label_field});\n"
+                f"    }});\n"
+                f"    ({prop_initial} ?? []).forEach(item => {{ {lookup_var}.current.set(item.id, item.{label_field}); }});\n"
+                f"  }}, [src.{child_prop_name}, {prop_initial}]);\n"
+                f"  const {config_var} = useMemo<EntityAutocompleteCellConfig>(() => ({{\n"
+                f"    searchAction: async (query, includeIds) => {{\n"
+                f"      const rows = (await {prop_search}?.(query, includeIds)) ?? [];\n"
+                f"      rows.forEach(item => {{ {lookup_var}.current.set(item.id, item.{label_field}); }});\n"
+                f"      return rows.map(item => ({{ id: item.id, label: item.{label_field} }}));\n"
+                f"    }},\n"
+                f"    initialOptions: {initial_opts_var},\n"
+                f"    labelLookup: {lookup_var}.current,\n"
+                f"    label: tf('{label_camel}'),\n"
+                f"  }}), [{initial_opts_var}, {prop_search}, tf]);"
+            )
     child_entity_rel_option_setups = '\n'.join(child_entity_rel_opt)
 
     # Child form data handling
@@ -1823,20 +1880,29 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 ac_label_expr = f"item.{ac_label_field} + (item.{_sec_rel} ? ` - ${{item.{_sec_rel}.{_sec_field}}}` : '')"
             else:
                 ac_label_expr = f"item.{ac_label_field}"
+            # Server-search variant: pass initialAutocompleteOptions (limited initial set
+            # mapped to {id, label}) and a wrapped searchOptions action. Self-referential
+            # filtering (avoid picking your own row) is preserved on top of the server
+            # results client-side via excludeOptionIds.
+            search_action_var = f'search{target_pascal}Options'
+            initial_data_var  = f'initial{target_pascal}s'
             child_grid_components_parts.append(
                 f"      <EditableListWrapper\n"
                 f"        ref={{{child_var}Ref}}\n"
-                f"        initialItems={{initial{child_pascal}}}\n"
+                f"        initialItems={{localInitial{child_pascal}}}\n"
                 f"        itemType=\"autocomplete\"\n"
                 f"        addButtonLabel=\"Add {child_title_label}\"\n"
                 f"        showTitle={{true}}\n"
                 f"        title={{tf('{child_camel}')}}\n"
                 f"        textFieldLabel=\"Name\"\n"
                 f"        textFieldPlaceholder=\"Enter name\"\n"
-                f"        allAutocompleteOptions={{all{target_pascal}s{filter_logic}.map(item => ({{\n"
+                f"        searchOptions={{async (query, includeIds) => {{\n"
+                f"          const rows = (await {search_action_var}?.(query, includeIds)) ?? [];\n"
+                f"          return rows{filter_logic}.map(item => ({{ id: item.id, label: {ac_label_expr} }}));\n"
+                f"        }}}}\n"
+                f"        initialAutocompleteOptions={{({initial_data_var} ?? []){filter_logic}.map(item => ({{\n"
                 f"          id: item.id,\n"
                 f"          label: {ac_label_expr},\n"
-                f"          value: item.id,\n"
                 f"        }}))}}\n"
                 f"        excludeOptionIds={{[src.id]}}\n"
                 f"      />"
@@ -1853,7 +1919,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 child_grid_components_parts.append(
                     f"      <{list_comp}\n"
                     f"        ref={{{child_var}Ref}}\n"
-                    f"        initialItems={{initial{child_pascal}}}\n"
+                    f"        initialItems={{localInitial{child_pascal}}}\n"
                     f"        itemType=\"file\"\n"
                     f"        fileVariant=\"{ft}\"\n"
                     f"        acceptedFileTypes=\"{accepted}\"\n"
@@ -1866,7 +1932,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 child_grid_components_parts.append(
                     f"      <{list_comp}\n"
                     f"        ref={{{child_var}Ref}}\n"
-                    f"        initialItems={{initial{child_pascal}}}\n"
+                    f"        initialItems={{localInitial{child_pascal}}}\n"
                     f"        itemType=\"text\"\n"
                     f"        addButtonLabel=\"Add {child_title_label}\"\n"
                     f"        showTitle={{true}}\n"
@@ -1883,7 +1949,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         child_grid_components_parts.append(
             f"      <{grid_comp}\n"
             f"        ref={{{child_var}Ref}}\n"
-            f"        initialFields={{initial{child_pascal}}}\n"
+            f"        initialFields={{localInitial{child_pascal}}}\n"
             f"        columns={{{child_var}Columns}}\n"
             f"        createNewRow={{createNew{child_pascal}}}\n"
             f"        addButtonLabel=\"Add {child_title_label}\"\n"
@@ -1896,21 +1962,30 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     child_grid_components = '\n'.join(child_grid_components_parts)
 
-    # FormUpsert params signature
-    # selection_targets have both allXxxs and XxxPermissions; selector OTO only has allXxxs
-    _sel_default = [f"all{to_pascal_case(t)}s = []" for t in selection_targets]
-    _oto_default = [f"all{to_pascal_case(r['target'])}s = []" for r in selector_oto_rels]
-    extra_default_props = ', '.join(_sel_default + _oto_default)
-    sel_perm_props = ', '.join(f"{to_camel_case(t)}Permissions" for t in selection_targets)
+    # FormUpsert params signature.
+    # Each selection target / selector OTO target now contributes:
+    #   - initial{Xxx}s   : Xxx[] (limited initial set fetched server-side)
+    #   - search{Xxx}Options : (query, includeIds) => Promise<Xxx[]>
+    # The page server-fetches both and passes them as props.
+    _all_targets = list(selection_targets) + [r['target'] for r in selector_oto_rels]
+    # Dedupe while preserving order
+    _seen: set[str] = set()
+    _ordered_targets: list[str] = []
+    for _t in _all_targets:
+        if _t not in _seen:
+            _seen.add(_t)
+            _ordered_targets.append(_t)
+    _initial_props = [f"initial{to_pascal_case(t)}s = []" for t in _ordered_targets]
+    _search_props  = [f"search{to_pascal_case(t)}Options" for t in _ordered_targets]
+    extra_default_props = ', '.join(_initial_props + _search_props)
     entity_edit_component = ctx.get('entity_edit_component')
     has_current_user_role_ids = bool(entity_edit_component)
-    if extra_default_props or sel_perm_props or has_comment_children or has_current_user_role_ids:
+    if extra_default_props or has_comment_children or has_current_user_role_ids:
         form_upsert_params = (
             f"{{ src, isEdit, permissions"
             + (', currentUserId' if has_comment_children else '')
             + (', currentUserRoleIds' if has_current_user_role_ids else '')
             + (f', {extra_default_props}' if extra_default_props else '')
-            + (f', {sel_perm_props}' if sel_perm_props else '')
             + " }: FormUpsertProps"
         )
     else:
@@ -2241,6 +2316,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'has_children':             has_children,
         'has_comment_children':     has_comment_children,
         'has_many_to_one':          has_many_to_one or bool(enum_int_props) or bool(entity_select_props) or flatten_needs_autocomplete,
+        'has_entity_autocomplete':  bool(parent_rels_raw) or bool(selector_oto_rels),
+        'has_child_entity_autocomplete': bool(child_entity_rel_opt),
         'has_datetime_props':       bool(date_time_props) or flatten_needs_datetime,
         'has_image_props':          bool(image_props),
         'has_number_props':         bool(number_props) or flatten_needs_number_field,

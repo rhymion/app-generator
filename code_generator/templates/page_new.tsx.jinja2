@@ -3,9 +3,9 @@ import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/{{ parent }}/FormUpsert';
 {% for target in selection_targets %}
 {% if target == 'organization' %}
-import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';
+import { searchAssociatedOrganizationOptions } from '@/lib/organization/getters_associated';
 {% else %}
-import { get{{ target | pascal_case }}ListPageData } from '@/lib/{{ target }}/getters';
+import { search{{ target | pascal_case }}Options } from '@/lib/{{ target }}/getters';
 {% endif %}
 {% endfor %}
 {% for oto in selector_oto_rels %}
@@ -23,18 +23,18 @@ export default function Add{{ parent_pascal }}Page() {
 
 async function {{ parent_pascal }}NewContent() {
 {% if selection_targets or selector_oto_rels %}
-  const [userPermissions, {% for target in selection_targets %}{{ target | camel_case }}sData{% if not loop.last or selector_oto_rels %}, {% endif %}{% endfor %}{% for oto in selector_oto_rels %}available{{ oto.target | pascal_case }}s{% if not loop.last %}, {% endif %}{% endfor %}] = await Promise.all([
+  const [userPermissions, {% for target in selection_targets %}initial{{ target | pascal_case }}s{% if not loop.last or selector_oto_rels %}, {% endif %}{% endfor %}{% for oto in selector_oto_rels %}initialAvailable{{ oto.target | pascal_case }}s{% if not loop.last %}, {% endif %}{% endfor %}] = await Promise.all([
     get{{ parent_pascal }}NewPageAccessCheck(),
 {% for target in selection_targets %}
 {% if target == 'organization' %}
-    getAssociatedOrganizationListPageData(),
+    searchAssociatedOrganizationOptions('', [], 50),
 {% else %}
-    get{{ target | pascal_case }}ListPageData(false),
+    search{{ target | pascal_case }}Options('', [], 50),
 {% endif %}
 {% endfor %}
 {% for oto in selector_oto_rels %}
     getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pascal }}(),
-{% endfor %}
+{% endfor %}{# selector OTO returns full record array; FormUpsert maps it client-side #}
   ]);
 {% else %}
   const userPermissions = await get{{ parent_pascal }}NewPageAccessCheck();
@@ -46,5 +46,5 @@ async function {{ parent_pascal }}NewContent() {
     {{ child.property_name }}: [],
 {% endfor %}
   };
-  return <FormUpsert src={src} isEdit={false} permissions={userPermissions}{% for target in selection_targets %} all{{ target | pascal_case }}s={{ '{' }}{{ target | camel_case }}sData.{{ target | camel_case }}s{{ '}' }} {{ target | camel_case }}Permissions={{ '{' }}{{ target | camel_case }}sData.userPermissions{{ '}' }}{% endfor %}{% for oto in selector_oto_rels %} all{{ oto.target | pascal_case }}s={{ '{' }}available{{ oto.target | pascal_case }}s{{ '}' }}{% endfor %} />;
+  return <FormUpsert src={src} isEdit={false} permissions={userPermissions}{% for target in selection_targets %} initial{{ target | pascal_case }}s={ initial{{ target | pascal_case }}s } search{{ target | pascal_case }}Options={ {% if target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ target | pascal_case }}Options{% endif %} }{% endfor %}{% for oto in selector_oto_rels %} initial{{ oto.target | pascal_case }}s={ initialAvailable{{ oto.target | pascal_case }}s }{% endfor %} />;
 }

@@ -222,7 +222,8 @@ class TestOptionalFKListChild:
 
     def test_optional_child_in_props_signature(self):
         ctx = self._ctx()
-        assert "allBugs" in ctx["form_upsert_params"]
+        assert "initialBugs" in ctx["form_upsert_params"]
+        assert "searchBugOptions" in ctx["form_upsert_params"]
 
     def test_optional_child_uses_autocomplete_item_type(self):
         ctx = self._ctx()
@@ -275,15 +276,17 @@ class TestM2MChild:
 
     def test_m2m_child_in_props_signature(self):
         ctx = self._ctx()
-        assert "allRoles" in ctx["form_upsert_params"]
+        assert "initialRoles" in ctx["form_upsert_params"]
+        assert "searchRoleOptions" in ctx["form_upsert_params"]
 
     def test_m2m_child_uses_autocomplete(self):
         ctx = self._ctx()
         assert 'itemType="autocomplete"' in ctx["child_grid_components"]
 
-    def test_m2m_child_role_permissions_in_params(self):
+    def test_m2m_child_role_permissions_dropped_from_params(self):
+        """The rolePermissions prop was unused — the new template drops it."""
         ctx = self._ctx()
-        assert "rolePermissions" in ctx["form_upsert_params"]
+        assert "rolePermissions" not in ctx["form_upsert_params"]
 
 
 # ---------------------------------------------------------------------------
@@ -446,9 +449,10 @@ class TestSelectorOTOMandatory:
         return build_context(_entity("pre_check"), self._schema())
 
     def test_selector_oto_in_form_upsert_params(self):
-        """allCheckups prop is destructured from FormUpsertProps."""
+        """initialCheckups + searchCheckupOptions are destructured from FormUpsertProps."""
         ctx = self._ctx()
-        assert "allCheckups" in ctx["form_upsert_params"]
+        assert "initialCheckups" in ctx["form_upsert_params"]
+        assert "searchCheckupOptions" in ctx["form_upsert_params"]
 
     def test_selector_oto_not_in_selection_targets(self):
         """Selector OTO targets are NOT in selection_targets (they use a different getter)."""
@@ -470,10 +474,11 @@ class TestSelectorOTOMandatory:
         ctx = self._ctx()
         assert "checkup_id" in ctx["parent_form_data_sets"]
 
-    def test_selector_oto_rel_opt_setup_uses_all_checkups(self):
-        """A useMemo opt setup maps allCheckups to {value, label}."""
+    def test_selector_oto_rel_opt_setup_wires_initial_and_search(self):
+        """rel_opt_setups exposes initialCheckups + searchCheckupOptions for EntityAutocomplete."""
         ctx = self._ctx()
-        assert "allCheckups" in ctx["rel_opt_setups"]
+        assert "initialCheckups" in ctx["rel_opt_setups"]
+        assert "searchCheckupOptions" in ctx["rel_opt_setups"]
         assert "checkup_date" in ctx["rel_opt_setups"]
 
     def test_selector_oto_autocomplete_required(self):
@@ -553,7 +558,8 @@ class TestSelectorOTOOptional:
 
     def test_selector_oto_optional_in_params(self):
         ctx = self._ctx()
-        assert "allUserAccounts" in ctx["form_upsert_params"]
+        assert "initialUserAccounts" in ctx["form_upsert_params"]
+        assert "searchUserAccountOptions" in ctx["form_upsert_params"]
 
     def test_selector_oto_optional_in_selector_oto_rels(self):
         ctx = self._build_ctx()
@@ -574,4 +580,5 @@ class TestSelectorOTOOptional:
 
     def test_selector_oto_optional_rel_opt_setup(self):
         ctx = self._ctx()
-        assert "allUserAccounts" in ctx["rel_opt_setups"]
+        assert "initialUserAccounts" in ctx["rel_opt_setups"]
+        assert "searchUserAccountOptions" in ctx["rel_opt_setups"]

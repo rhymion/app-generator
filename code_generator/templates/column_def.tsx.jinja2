@@ -1,8 +1,11 @@
-import { GridColDef{% if needs_datetime_imports %}, GridRenderEditCellParams{% endif %} } from '@mui/x-data-grid';
+import { GridColDef{% if needs_datetime_imports or needs_entity_autocomplete_cell %}, GridRenderEditCellParams{% endif %} } from '@mui/x-data-grid';
 import { useTranslations } from 'next-intl';
 {% if needs_datetime_imports %}
 import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
 import dayjs from 'dayjs';
+{% endif %}
+{% if needs_entity_autocomplete_cell %}
+import EntityAutocompleteCellEditor, { entityAutocompleteValueFormatter, type EntityAutocompleteCellConfig } from '@/components/_standard/EntityAutocompleteCellEditor';
 {% endif %}
 
 {% for child in column_children %}
