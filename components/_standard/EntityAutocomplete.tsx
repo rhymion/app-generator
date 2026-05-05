@@ -1,0 +1,137 @@
+'use client';
+
+import { useState, useEffect, useMemo, useRef } from 'react';
+import Autocomplete from '@mui/material/Autocomplete';
+import TextField from '@mui/material/TextField';
+import CircularProgress from '@mui/material/CircularProgress';
+
+export interface EntityOption {
+  id: string;
+  label: string;
+}
+
+export type EntitySearchAction = (
+  query: string,
+  includeIds: string[],
+) => Promise<EntityOption[]>;
+
+interface EntityAutocompleteProps {
+  /** Currently selected entity id, or null for unselected. */
+  value: string | null;
+  onChange: (id: string | null, option: EntityOption | null) => void;
+  /** Server action that returns up to N options matching the query, plus any includeIds verbatim. */
+  searchAction: EntitySearchAction;
+  /** Initial limited set of options shown before the user types (server-fetched on render). */
+  initialOptions?: EntityOption[];
+  /** Pre-resolved option for the current value. Required to render the right label on edit when the
+   *  selected entity isn't in initialOptions. */
+  currentOption?: EntityOption | null;
+  label: string;
+  required?: boolean;
+  disabled?: boolean;
+  sx?: object;
+  /** Debounce window before firing searchAction (ms). */
+  debounceMs?: number;
+}
+
+export default function EntityAutocomplete({
+  value,
+  onChange,
+  searchAction,
+  initialOptions = [],
+  currentOption = null,
+  label,
+  required = false,
+  disabled = false,
+  sx,
+  debounceMs = 250,
+}: EntityAutocompleteProps) {
+  const [inputValue, setInputValue] = useState('');
+  const [options, setOptions] = useState<EntityOption[]>(initialOptions);
+  const [loading, setLoading] = useState(false);
+  const seqRef = useRef(0);
+
+  // Always keep the currently-selected option present so the displayed label is correct,
+  // even if it falls outside the search results.
+  const mergedOptions = useMemo(() => {
+    const out: EntityOption[] = [];
+    const seen = new Set<string>();
+    if (currentOption) {
+      out.push(currentOption);
+      seen.add(currentOption.id);
+    }
+    for (const opt of options) {
+      if (!seen.has(opt.id)) {
+        out.push(opt);
+        seen.add(opt.id);
+      }
+    }
+    return out;
+  }, [options, currentOption]);
+
+  const selectedOption = useMemo(() => {
+    if (!value) return null;
+    return mergedOptions.find((o) => o.id === value) ?? currentOption ?? null;
+  }, [value, mergedOptions, currentOption]);
+
+  useEffect(() => {
+    // No search until user types — initialOptions is what's shown.
+    const trimmed = inputValue.trim();
+    if (trimmed === '') {
+      setOptions(initialOptions);
+      return;
+    }
+    const mySeq = ++seqRef.current;
+    const handle = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const results = await searchAction(trimmed, value ? [value] : []);
+        if (mySeq === seqRef.current) {
+          setOptions(results);
+        }
+      } finally {
+        if (mySeq === seqRef.current) {
+          setLoading(false);
+        }
+      }
+    }, debounceMs);
+    return () => clearTimeout(handle);
+  }, [inputValue, searchAction, value, initialOptions, debounceMs]);
+
+  return (
+    <Autocomplete
+      sx={sx}
+      options={mergedOptions}
+      getOptionLabel={(option) => option.label}
+      isOptionEqualToValue={(opt, val) => opt.id === val.id}
+      value={selectedOption}
+      onChange={(_, newValue) => onChange(newValue?.id ?? null, newValue)}
+      onInputChange={(_, newInput, reason) => {
+        if (reason === 'input') setInputValue(newInput);
+        if (reason === 'clear') setInputValue('');
+      }}
+      filterOptions={(x) => x}
+      loading={loading}
+      disabled={disabled}
+      renderInput={(params) => (
+        <TextField
+          {...params}
+          label={label}
+          margin="normal"
+          required={required}
+          slotProps={{
+            input: {
+              ...params.InputProps,
+              endAdornment: (
+                <>
+                  {loading ? <CircularProgress color="inherit" size={16} /> : null}
+                  {params.InputProps.endAdornment}
+                </>
+              ),
+            },
+          }}
+        />
+      )}
+    />
+  );
+}

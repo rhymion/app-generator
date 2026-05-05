@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, forwardRef, useImperativeHandle, useMemo, useEffect } from 'react';
+import { useState, forwardRef, useImperativeHandle, useMemo, useEffect, useRef } from 'react';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
@@ -26,6 +26,7 @@ import Typography from '@mui/material/Typography';
 import Link from '@mui/material/Link';
 
 import type { ItemType, EditableListWrapperItem, AutocompleteOption } from './EditableListWrapper';
+import type { EntitySearchAction } from './EntityAutocomplete';
 
 const EMPTY_ITEMS: EditableListWrapperItem[] = [];
 
@@ -46,6 +47,9 @@ interface OrderedEditableListWrapperProps {
   // For autocomplete with internal filtering
   allAutocompleteOptions?: AutocompleteOption[];
   excludeOptionIds?: (string | number)[];
+  // For autocomplete with server-side search.
+  searchOptions?: EntitySearchAction;
+  initialAutocompleteOptions?: AutocompleteOption[];
   // For file type
   acceptedFileTypes?: string;
   maxFileSize?: number;
@@ -78,6 +82,8 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
     autocompletePlaceholder = 'Select an option',
     allAutocompleteOptions,
     excludeOptionIds,
+    searchOptions,
+    initialAutocompleteOptions,
     acceptedFileTypes = '*',
     maxFileSize = 10 * 1024 * 1024,
     uploadEndpoint = '/api/upload',
@@ -120,23 +126,59 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
       onItemsChange?.(withOrder);
     };
 
-    // Internal filtering for autocomplete options
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<AutocompleteOption[]>(
+      initialAutocompleteOptions ?? []
+    );
+    const [searchLoading, setSearchLoading] = useState(false);
+    const searchSeqRef = useRef(0);
+
+    const assignedIdSet = useMemo(() => {
+      return new Set(
+        items
+          .map((item) => item.originalId ?? item.value)
+          .filter((id): id is string | number =>
+            typeof id === 'string' || typeof id === 'number'
+          )
+      );
+    }, [items]);
+
+    const excludeSet = useMemo(() => new Set(excludeOptionIds ?? []), [excludeOptionIds]);
+
     const availableOptions = useMemo(() => {
+      const filterAssigned = (opts: AutocompleteOption[]) =>
+        opts.filter((o) => !assignedIdSet.has(o.id) && !excludeSet.has(o.id));
+
+      if (searchOptions) {
+        return filterAssigned(searchResults);
+      }
       if (allAutocompleteOptions) {
-        const assignedIds = new Set(
-          items
-            .map((item) => item.originalId ?? item.value)
-            .filter((id): id is string | number =>
-              typeof id === 'string' || typeof id === 'number'
-            )
-        );
-        const excludeSet = new Set(excludeOptionIds ?? []);
-        return allAutocompleteOptions
-          .filter((option) => !assignedIds.has(option.id))
-          .filter((option) => !excludeSet.has(option.id));
+        return filterAssigned(allAutocompleteOptions);
       }
       return autocompleteOptions;
-    }, [allAutocompleteOptions, excludeOptionIds, items, autocompleteOptions]);
+    }, [searchOptions, searchResults, allAutocompleteOptions, autocompleteOptions, assignedIdSet, excludeSet]);
+
+    useEffect(() => {
+      if (!searchOptions || !openAddDialog) return;
+      const trimmed = searchQuery.trim();
+      if (trimmed === '') {
+        setSearchResults(initialAutocompleteOptions ?? []);
+        return;
+      }
+      const mySeq = ++searchSeqRef.current;
+      const handle = setTimeout(async () => {
+        setSearchLoading(true);
+        try {
+          const results = await searchOptions(trimmed, []);
+          if (mySeq === searchSeqRef.current) {
+            setSearchResults(results.map((r) => ({ id: r.id, label: r.label })));
+          }
+        } finally {
+          if (mySeq === searchSeqRef.current) setSearchLoading(false);
+        }
+      }, 250);
+      return () => clearTimeout(handle);
+    }, [searchQuery, searchOptions, openAddDialog, initialAutocompleteOptions]);
 
     useImperativeHandle(ref, () => ({
       getItems: () => items,
@@ -147,6 +189,8 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
       setSelectedAutocomplete(null);
       setSelectedFile(null);
       setError(null);
+      setSearchQuery('');
+      setSearchResults(initialAutocompleteOptions ?? []);
       setOpenAddDialog(true);
     };
 
@@ -435,11 +479,18 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
               <Autocomplete
                 options={availableOptions}
                 getOptionLabel={(option) => option.label}
+                isOptionEqualToValue={(opt, val) => opt.id === val.id}
                 value={selectedAutocomplete}
                 onChange={(_, newValue) => {
                   setSelectedAutocomplete(newValue);
                   setError(null);
                 }}
+                onInputChange={(_, newInput, reason) => {
+                  if (searchOptions && reason === 'input') setSearchQuery(newInput);
+                  if (searchOptions && reason === 'clear') setSearchQuery('');
+                }}
+                filterOptions={searchOptions ? (x) => x : undefined}
+                loading={searchLoading}
                 renderInput={(params) => (
                   <TextField
                     {...params}
@@ -448,6 +499,17 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
                     margin="dense"
                     error={!!error}
                     helperText={error}
+                    slotProps={{
+                      input: {
+                        ...params.InputProps,
+                        endAdornment: (
+                          <>
+                            {searchLoading ? <CircularProgress color="inherit" size={16} /> : null}
+                            {params.InputProps.endAdornment}
+                          </>
+                        ),
+                      },
+                    }}
                   />
                 )}
               />
