@@ -43,6 +43,9 @@ export default function EntityAutocompleteCellEditor({
       config.labelLookup.set(newId, newOption.label);
     }
     apiRef.current.setEditCellValue({ id, field, value: newId });
+    // Don't try to commit here — FieldsDataGrid uses editMode="row", so the
+    // surrounding row stays in edit mode until the user tabs away or saves the
+    // form. The user-visible label lives on the input's `value` while editing.
   };
 
   return (
@@ -55,6 +58,7 @@ export default function EntityAutocompleteCellEditor({
       currentOption={currentOption}
       label={config.label}
       required={config.required}
+      openOnFocus
     />
   );
 }

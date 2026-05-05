@@ -32,6 +32,9 @@ interface EntityAutocompleteProps {
   sx?: object;
   /** Debounce window before firing searchAction (ms). */
   debounceMs?: number;
+  /** Open the dropdown as soon as the input is focused. Defaults to false for form fields;
+   *  the DataGrid cell editor sets it true so a single click after edit-mode reveals options. */
+  openOnFocus?: boolean;
 }
 
 export default function EntityAutocomplete({
@@ -45,6 +48,7 @@ export default function EntityAutocomplete({
   disabled = false,
   sx,
   debounceMs = 250,
+  openOnFocus = false,
 }: EntityAutocompleteProps) {
   const [inputValue, setInputValue] = useState('');
   const [options, setOptions] = useState<EntityOption[]>(initialOptions);
@@ -81,21 +85,31 @@ export default function EntityAutocomplete({
       setOptions(initialOptions);
       return;
     }
+    let cancelled = false;
     const mySeq = ++seqRef.current;
     const handle = setTimeout(async () => {
+      if (cancelled) return;
       setLoading(true);
       try {
         const results = await searchAction(trimmed, value ? [value] : []);
-        if (mySeq === seqRef.current) {
+        if (!cancelled && mySeq === seqRef.current) {
           setOptions(results);
         }
+      } catch {
+        // Swallow — the component may have unmounted (e.g. form submit redirect)
+        // mid-flight; surfacing this as an unhandled rejection trips React's
+        // server-action error boundary and shows "An unexpected response was
+        // received from the server" to the user.
       } finally {
-        if (mySeq === seqRef.current) {
+        if (!cancelled && mySeq === seqRef.current) {
           setLoading(false);
         }
       }
     }, debounceMs);
-    return () => clearTimeout(handle);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
   }, [inputValue, searchAction, value, initialOptions, debounceMs]);
 
   return (
@@ -111,6 +125,7 @@ export default function EntityAutocomplete({
         if (reason === 'clear') setInputValue('');
       }}
       filterOptions={(x) => x}
+      openOnFocus={openOnFocus}
       loading={loading}
       disabled={disabled}
       renderInput={(params) => (
