@@ -1,0 +1,26 @@
+# Project-local Codex settings for my-next.
+#
+# Codex loads this project layer only when the project is trusted. Keep
+# machine-specific auth and secrets in ~/.codex/config.toml or the environment.
+
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"
+
+[tools]
+web_search = true
+
+[tui]
+alternate_screen = "never"
+
+[sandbox_workspace_write]
+network_access = false
+
+[features]
+codex_hooks = true
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = 'bash "$(git rev-parse --show-toplevel)/.codex/hooks/stop-sanity-check.sh"'
+timeout = 30
+statusMessage = "Checking completion summary"
