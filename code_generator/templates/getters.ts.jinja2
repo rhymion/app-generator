@@ -263,7 +263,10 @@ export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pa
   return prisma.{{ oto.target }}.findMany({
     where: takenIds.length > 0 ? { id: { notIn: takenIds } } : {},
     take: safeLimit,
-    orderBy: [{ name: 'asc' }],
+    // Order by id — the target's "natural" label column varies per entity, and
+    // we don't want to pull target-specific schema knowledge into the parent's
+    // generated getter. id sort is stable and always present.
+    orderBy: [{ id: 'asc' }],
   });
 }
 {% endfor %}
