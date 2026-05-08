@@ -46,6 +46,7 @@ model user_account {
   created_comments          comment[]        @relation("CommentCreator")
 
   @@index([api_key])
+  @@index([creator_id])
 }
 
 model role {
@@ -63,6 +64,7 @@ model role {
   permissions   permission[]
   requestor_approval_flows approval_flow[] @relation("ApprovalFlowRequestorRole")
   approver_approval_flows  approval_flow[] @relation("ApprovalFlowApproverRole")
+  @@index([creator_id])
 }
 
 model organization {
@@ -77,6 +79,7 @@ model organization {
   updater     user_account @relation("OrganizationUpdater", fields: [updater_id], references: [id])
 
   user_accounts user_account[] @relation("UserOrganizations")
+  @@index([creator_id])
 }
 
 model permission {
@@ -96,6 +99,7 @@ model permission {
   updater    user_account @relation("PermissionUpdater", fields: [updater_id], references: [id])
 
   @@unique([name, role_id])
+  @@index([creator_id])
 }
 
 model approvable {
@@ -103,6 +107,7 @@ model approvable {
   creator_id       String?
   creator          user_account? @relation("ApprovableCreator", fields: [creator_id], references: [id])
   approval_requests approval_request[]
+  @@index([creator_id])
 }
 
 model approval_flow {
@@ -121,6 +126,7 @@ model approval_flow {
   creator          user_account @relation("ApprovalFlowCreator", fields: [creator_id], references: [id])
   updater_id       String
   updater          user_account @relation("ApprovalFlowUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
 }
 
 model approval_request {
@@ -146,6 +152,7 @@ model approval_history {
   updated_at       DateTime @updatedAt @db.Timestamptz(0)
   creator_id       String
   creator          user_account @relation("ApprovalHistoryCreator", fields: [creator_id], references: [id])
+  @@index([creator_id])
 }
 
 model commentable {
@@ -162,4 +169,5 @@ model comment {
   updated_at     DateTime    @updatedAt @db.Timestamptz(0)
   creator_id     String
   creator        user_account @relation("CommentCreator", fields: [creator_id], references: [id])
+  @@index([creator_id])
 }
