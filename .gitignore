@@ -68,3 +68,5 @@ __pycache__/
 
 # sample data
 custom/
+memory/
+*.log*
