@@ -58,8 +58,8 @@ Install the following tools before starting. Links point to official installatio
 ### 1. Clone the repository
 
 ```bash
-git clone git@github.com:doreen-admin/my-next.git
-cd my-next
+git clone git@github.com:rhymion/app-generator.git
+cd app-generator
 ```
 
 ### 2. Install JavaScript dependencies
