@@ -29,6 +29,7 @@ model db_table {
   updater        user_account @relation("DbTableUpdater", fields: [updater_id], references: [id])
   fields         field[]     @relation("ParentTable")
   referenced_by  field[]     @relation("ReferenceTable")
+  @@index([creator_id])
 }
 
 model field {
@@ -62,6 +63,7 @@ model comment {
   updated_at     DateTime    @updatedAt @db.Timestamptz(0)
   creator_id     String
   creator        user_account @relation("CommentCreator", fields: [creator_id], references: [id])
+  @@index([creator_id])
 }
 
 model xxxxx_xxxxx {
@@ -76,6 +78,7 @@ model xxxxx_xxxxx {
   updater_id String
   updater    user_account @relation("XxxxxXxxxxUpdater", fields: [updater_id], references: [id])
   yyyyy_yyyyys yyyyy_yyyyy[]
+  @@index([creator_id])
 }
 
 model yyyyy_yyyyy {
@@ -111,6 +114,8 @@ model parent1 {
   parent1_child1s parent1_child1[]
   parent1_child2s parent1_child2[]
   parent1_lists   parent1_list[]
+  @@index([creator_id])
+  @@index([organization_id])
 }
 
 model parent1_child1 {
@@ -162,6 +167,7 @@ model parent_only {
   creator    user_account @relation("ParentOnlyCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user_account @relation("ParentOnlyUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
 }
 
 model user_account {
@@ -224,6 +230,7 @@ model user_account {
   created_approval_historys  approval_history[] @relation("ApprovalHistoryCreator")
   created_approvables     approvable[]    @relation("ApprovableCreator")
   @@index([api_key])
+  @@index([creator_id])
 }
 
 model role {
@@ -240,6 +247,7 @@ model role {
   permissions permission[]
   requestor_approval_flows approval_flow[] @relation("ApprovalFlowRequestorRole")
   approver_approval_flows  approval_flow[] @relation("ApprovalFlowApproverRole")
+  @@index([creator_id])
 }
 
 model organization {
@@ -255,6 +263,7 @@ model organization {
   user_accounts user_account[] @relation("UserOrganizations")
   parent1s parent1[]
   resources resource[]
+  @@index([creator_id])
 }
 
 model permission {
@@ -273,6 +282,7 @@ model permission {
   updater_id String
   updater    user_account @relation("PermissionUpdater", fields: [updater_id], references: [id])
   @@unique([name, role_id])
+  @@index([creator_id])
 }
 
 model procedure {
@@ -292,6 +302,8 @@ model procedure {
   children     procedure[] @relation("ParentChild")
   preceded_by  procedure[] @relation("BeforeAfter")
   followed_by  procedure[] @relation("BeforeAfter")
+  @@index([creator_id])
+  @@index([assignee_id])
 }
 
 model resource {
@@ -309,6 +321,8 @@ model resource {
   creator    user_account @relation("ResourceCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user_account @relation("ResourceUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([organization_id])
 }
 
 model resource_attachment {
@@ -345,6 +359,7 @@ model booking {
   creator      user_account @relation("BookingCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user_account @relation("BookingUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
 }
 
 model shift_template {
@@ -360,6 +375,7 @@ model shift_template {
   creator     user_account @relation("ShiftTemplateCreator", fields: [creator_id], references: [id])
   updater_id  String
   updater     user_account @relation("ShiftTemplateUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
 }
 
 model shift {
@@ -375,6 +391,7 @@ model shift {
   creator     user_account @relation("ShiftCreator", fields: [creator_id], references: [id])
   updater_id  String
   updater     user_account @relation("ShiftUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
 }
 
 model product {
@@ -392,6 +409,7 @@ model product {
   creator     user_account @relation("ProductCreator", fields: [creator_id], references: [id])
   updater_id  String
   updater     user_account @relation("ProductUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
 }
 
 model product_image {
@@ -419,6 +437,7 @@ model inventory {
   creator     user_account @relation("InventoryCreator", fields: [creator_id], references: [id])
   updater_id  String
   updater     user_account @relation("InventoryUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
 }
 
 model purchase_order {
@@ -433,6 +452,7 @@ model purchase_order {
   creator     user_account @relation("PurchaseOrderCreator", fields: [creator_id], references: [id])
   updater_id  String
   updater     user_account @relation("PurchaseOrderUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
 }
 
 model purchase_per_item {
@@ -462,6 +482,7 @@ model leave_request {
   creator         user_account @relation("LeaveRequestCreator", fields: [creator_id], references: [id])
   updater_id      String
   updater         user_account @relation("LeaveRequestUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
 }
 
 model approvable {
@@ -470,6 +491,7 @@ model approvable {
   creator          user_account? @relation("ApprovableCreator", fields: [creator_id], references: [id])
   approval_requests approval_request[]
   leave_request    leave_request?
+  @@index([creator_id])
 }
 
 model approval_flow {
@@ -488,6 +510,7 @@ model approval_flow {
   creator          user_account @relation("ApprovalFlowCreator", fields: [creator_id], references: [id])
   updater_id       String
   updater          user_account @relation("ApprovalFlowUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
 }
 
 model approval_request {
@@ -513,4 +536,5 @@ model approval_history {
   updated_at       DateTime @updatedAt @db.Timestamptz(0)
   creator_id       String
   creator          user_account @relation("ApprovalHistoryCreator", fields: [creator_id], references: [id])
+  @@index([creator_id])
 }
