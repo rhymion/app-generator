@@ -106,7 +106,7 @@ class TestGetSelectionTargets:
         from helpers.schema_helpers import get_parent_relationships
         epic_def = {"required": ["epic_id"], "properties": {"epic_id": _fk_field("epic")}}
         parent_rels = get_parent_relationships(epic_def)
-        targets = self._run([], parent_rels, {})
+        targets = self._run([], parent_rels, {"parent": epic_def})
         assert "epic" in targets
 
     def test_inline_child_with_own_rels_included(self):

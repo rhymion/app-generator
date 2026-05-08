@@ -1093,8 +1093,21 @@ def helper_context(
         if r['target'] == model_name and r['prop_name'] not in ('updater_id',):
             prop_stem = re.sub(r'_id$', '', r['prop_name'])
             var_name = to_camel_case(prop_stem)
+            fk_prop_to_dep_var = {fk['prop_name']: fk['dep_var_name'] for fk in entity_fk_deps}
+            self_ref_fk_deps = [
+                {'prop_name': rel['prop_name'], 'dep_var_name': fk_prop_to_dep_var[rel['prop_name']]}
+                for rel in relationships
+                if rel.get('required')
+                and rel['target'] not in (model_name, 'user_account')
+                and rel['prop_name'] in fk_prop_to_dep_var
+            ]
             if not any(d['var_name'] == var_name for d in deps):
-                deps.append({'target': model_name, 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': []})
+                deps.append({
+                    'target': model_name,
+                    'var_name': var_name,
+                    'title': to_title_case(prop_stem),
+                    'fk_deps': self_ref_fk_deps,
+                })
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
 
     # Add editable-list-autocomplete children as deps only for self-ref children.
@@ -1630,12 +1643,14 @@ def spec_context(
     ]
 
     # Section 3.3: primary field edit command
+    use_deps_in_3_3 = False
     if has_edit_primary and edit_field_label and edit_update_value:
         prim_edit_meta = next(
             (f for f in fields if f.get('label') == edit_field_label), None
         )
         if prim_edit_meta and prim_edit_meta.get('category') in ('entity_select', 'autocomplete'):
             edit_primary_cmd = f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
+            use_deps_in_3_3 = prim_edit_meta.get('category') == 'autocomplete' and has_deps
         else:
             edit_primary_cmd = f"        cy.clearAndFillField('{edit_field_label}', '{edit_update_value}');"
     else:
@@ -1751,6 +1766,7 @@ def spec_context(
         'use_deps_in_3_1': use_deps_in_3_1,
         'opt_fill_cmds_3_1': opt_fill_cmds_3_1,
         'opt_clear_cmds_3_2': opt_clear_cmds_3_2,
+        'use_deps_in_3_3': use_deps_in_3_3,
         'edit_primary_cmd': edit_primary_cmd,
         'edit_fill_cmd_3_3': edit_fill_cmd_3_3,
         'fail_create_5_1': fail_create_5_1,
@@ -1964,12 +1980,21 @@ def api_spec_context(
 
     # 5.1: choose which required non-autocomplete field to omit
     non_ac_required = [f for f in all_field_metas if f['required'] and f['category'] != 'autocomplete']
+    required_autocomplete = [f for f in all_field_metas if f['required'] and f['category'] == 'autocomplete']
     field_to_skip_5_1 = None
     if non_ac_required:
         field_to_skip_5_1 = next(
             (f['prop_name'] for f in non_ac_required if f['prop_name'] == 'name'),
             non_ac_required[0]['prop_name'],
         )
+    elif required_autocomplete:
+        primary_required_fk = next(
+            (f for f in required_autocomplete if primary_is_fk and f['prop_name'] == f'{primary_field_name}_id'),
+            required_autocomplete[0],
+        )
+        field_to_skip_5_1 = primary_required_fk['prop_name']
+    elif ua_fk_fields_for_api:
+        field_to_skip_5_1 = ua_fk_fields_for_api[0]['prop_name']
 
     def _post_body_impl(skip_field: str | None, indent: str) -> list[str]:
         out = []

@@ -316,6 +316,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
 
 {% endif %}
     it('3.3 edits with mixed changes', () => {
+{% if use_deps_in_3_3 %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
 {% if can_list and can_view %}
         cy.visit('/en/{{ parent }}');
@@ -354,6 +357,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.checkField('{{ check_field_label }}', '{{ check_field_updated }}');
 {% endif %}
       });
+{% if use_deps_in_3_3 %}
+      });
+{% endif %}
     });
   });
 {% endif %}
