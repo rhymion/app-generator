@@ -164,17 +164,27 @@ def page_list_context(ctx: dict) -> dict:
 
     model_props = model_def.get('properties', {})
     formatting_entries = []
+    formatting_keys: set[str] = set()
     enum_ns_list = []       # [{var_name, ns, keys}]
     display_fields_code = ''
     primary_field = ''
 
     # Build map from relation display name (e.g. 'epic') to label_field (e.g. 'title')
     # parent_rels_raw entries: { prop_name: 'epic_id', label_field: 'title', ... }
-    rel_label_map: dict[str, str] = {}
-    for r in ctx.get('parent_rels_raw', []):
+    rel_label_map: dict[str, dict[str, object]] = {}
+    for r in list(ctx.get('parent_rels_raw', [])) + list(ctx.get('selector_oto_rels', [])):
         prop = r['prop_name']
         if prop.endswith('_id'):
-            rel_label_map[prop[:-3]] = r['label_field']
+            rel_label_map[prop[:-3]] = {
+                'label_field': r['label_field'],
+                'label_field_is_date': r.get('label_field_is_date', False),
+            }
+
+    def add_formatting(field_name: str, expr: str) -> None:
+        if field_name in formatting_keys:
+            return
+        formatting_keys.add(field_name)
+        formatting_entries.append(f'    {field_name}: {expr},')
 
     if xdisplay_table:
         fields_code_parts = []
@@ -200,24 +210,54 @@ def page_list_context(ctx: dict) -> dict:
                         # avoid duplicates
                         if not any(e['var_name'] == var_name for e in enum_ns_list):
                             enum_ns_list.append({'var_name': var_name, 'ns': enum_ns, 'keys': keys})
-                        formatting_entries.append(f'    {field_name}: {var_name}[item.{field_name} as number] ?? \'\',')
+                        add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
                     else:
                         labels = ', '.join(f"'{v}'" for v in enum_vals)
-                        formatting_entries.append(f"    {field_name}: ([{labels}] as const)[item.{field_name} as number] ?? '',")
+                        add_formatting(field_name, f"([{labels}] as const)[item.{field_name} as number] ?? ''")
 
             if config.get('primary'):
                 primary_field = field_name
 
             # If this field is a relationship object, format it server-side (no functions to client)
             if field_name in rel_label_map:
-                label_f = rel_label_map[field_name]
-                formatting_entries.append(f"    {field_name}: item.{field_name}?.{label_f} ?? '',")
+                rel_info = rel_label_map[field_name]
+                label_f = str(rel_info['label_field'])
+                if rel_info.get('label_field_is_date'):
+                    add_formatting(field_name, f"item.{field_name}?.{label_f} ? new Date(item.{field_name}.{label_f}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''")
+                else:
+                    add_formatting(field_name, f"item.{field_name}?.{label_f} ?? ''")
 
             fmt = model_props[field_name].get('format') if field_name in model_props else None
             format_attr = f", format: '{fmt}'" if fmt in ('date-time', 'date', 'time') else ''
             fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr} }}")
 
         display_fields_code = ',\n'.join(fields_code_parts)
+
+    if not xdisplay_table:
+        for field_name, rel_info in rel_label_map.items():
+            label_f = str(rel_info['label_field'])
+            if rel_info.get('label_field_is_date'):
+                add_formatting(field_name, f"item.{field_name}?.{label_f} ? new Date(item.{field_name}.{label_f}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''")
+            else:
+                add_formatting(field_name, f"item.{field_name}?.{label_f} ?? ''")
+
+        for field_name, prop in model_props.items():
+            actual = _get_actual_type(prop)
+            enum_vals = prop.get('enum')
+            enum_ns = prop.get('x-enum-namespace')
+            if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+                if enum_ns:
+                    keys = [
+                        (v.lower()[0] + v[1:] if isinstance(v, str) and not v.lstrip('-').isdigit() else str(v))
+                        for v in enum_vals
+                    ]
+                    var_name = f'{to_camel_case(field_name)}Labels'
+                    if not any(e['var_name'] == var_name for e in enum_ns_list):
+                        enum_ns_list.append({'var_name': var_name, 'ns': enum_ns, 'keys': keys})
+                    add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
+                else:
+                    labels = ', '.join(f"'{v}'" for v in enum_vals)
+                    add_formatting(field_name, f"([{labels}] as const)[item.{field_name} as number] ?? ''")
 
     needs_formatting = bool(formatting_entries)
     formatted_var    = f'formatted{parent_pascal}s'
@@ -673,6 +713,7 @@ def form_view_context(ctx: dict) -> dict:
         rel_by_prop[_oto_r['prop_name']] = {
             'prop_name': _oto_r['prop_name'],
             'label_field': _oto_r['label_field'],
+            'label_field_is_date': _oto_r.get('label_field_is_date', False),
             'relation_name': _oto_r['relation_name'],
             'target': _oto_r['target'],
             'is_selector_oto': True,  # FK prop not in src type; use relation?.id for linking
@@ -747,9 +788,14 @@ def form_view_context(ctx: dict) -> dict:
             target        = rel.get('target', p.removesuffix('_id'))
             target_pascal = to_pascal_case(target)
             is_oto        = rel.get('is_selector_oto', False)
+            label_is_date = rel.get('label_field_is_date', False)
             # For selector OTO, the FK prop is excluded from src type; use relation?.id instead
             fk_id_expr    = f"src.{rel_name}?.id" if is_oto else f"src.{p}"
-            value_expr    = f"src.{rel_name}?.{label_f} || ''" if is_oto else f"src.{rel_name}?.{label_f} || src.{p} || ''"
+            if label_is_date:
+                rel_value_expr = f"src.{rel_name}?.{label_f} ? new Date(src.{rel_name}.{label_f}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''"
+            else:
+                rel_value_expr = f"src.{rel_name}?.{label_f} || ''"
+            value_expr    = rel_value_expr if is_oto else f"src.{rel_name}?.{label_f} || src.{p} || ''"
             text_jsxs.append(
                 f"      <TextField\n        label={{tf('{label_fk}')}}\n"
                 f"        value={{{value_expr}}}\n"
@@ -1097,6 +1143,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     parent_rels   = ctx['parent_rels']
     parent_rels_raw = ctx['parent_rels_raw']
     selector_oto_rels = ctx.get('selector_oto_rels', [])
+    selector_oto_prop_names = {r['prop_name'] for r in selector_oto_rels}
+    parent_rels_raw = [r for r in parent_rels_raw if r['prop_name'] not in selector_oto_prop_names]
     children_raw  = ctx['children_raw']
     can_delete    = ctx['can_delete']
     selection_targets = ctx['selection_targets']
@@ -1373,8 +1421,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         prop_search   = f'search{target_pascal}Options'
 
         if label_is_date:
-            label_expr = f"item.{label_field}?.toLocaleDateString() ?? ''"
-            current_label_expr = f"src.{rel_name}.{label_field}?.toLocaleDateString() ?? ''"
+            label_expr = f"item.{label_field} ? new Date(item.{label_field}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''"
+            current_label_expr = f"src.{rel_name}.{label_field} ? new Date(src.{rel_name}.{label_field}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''"
         else:
             label_expr = f"item.{label_field}"
             current_label_expr = f"src.{rel_name}.{label_field}"
@@ -1992,17 +2040,19 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         form_upsert_params = "{ src, isEdit, permissions }: FormUpsertProps"
 
     # Validation call
-    val_entries = '\n'.join(filter(None, [
-        '    isEdit,',
-        '    id: src.id,',
-        '\n'.join(f"    {p}: {safe_var_name(p)}," for p in date_time_props),
-        '\n'.join(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in parent_rels_raw),
-        '\n'.join(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in selector_oto_rels),
-        '\n'.join(f"    {p}: {safe_var_name(p)}," for p in boolean_props),
-        '\n'.join(f"    {p}: {safe_var_name(p)}," for p in enum_int_props),
-        '\n'.join(f"    {p}: {safe_var_name(p)}," for p in custom_upsert_props),
-    ]))
-    validation_call = f"  const validationError = useFormValidation({{\n{val_entries}\n  }});"
+    validation_entry_lines = ['    isEdit,', '    id: src.id,']
+    validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in text_props)
+    validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in number_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in date_time_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in image_props)
+    validation_entry_lines.extend(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in parent_rels_raw)
+    validation_entry_lines.extend(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in selector_oto_rels)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in boolean_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in enum_int_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in custom_upsert_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in entity_select_props)
+    val_entries = '\n'.join(validation_entry_lines)
+    validation_call = f"  const getValidationError = () => useFormValidation({{\n{val_entries}\n  }});"
 
     # Comment children JSX
     comment_jsx_parts = []

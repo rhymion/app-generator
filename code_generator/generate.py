@@ -41,6 +41,7 @@ from generators_test import (
     api_spec_context,
     db_helpers_context,
 )
+from validation_context import build_validation_context
 
 
 # ---------------------------------------------------------------------------
@@ -161,10 +162,8 @@ def generate(schema_path: str, output_dir: str) -> None:
             svc_ctx = {**ctx, **service_context(ctx)}
             _write(lib_dir / 'service.ts', _render(env, 'service.ts.jinja2', svc_ctx))
             if can_new or can_edit:
-                _write_stub(
-                    lib_dir / 'service_validation.ts',
-                    _render(env, 'service_validation_stub.ts.jinja2', ctx),
-                )
+                val_ctx = {**ctx, **build_validation_context(ctx)}
+                _write(lib_dir / 'service_validation.ts', _render(env, 'service_validation.ts.jinja2', val_ctx))
             if can_new:
                 _write_stub(
                     lib_dir / 'service_after_create.ts',
@@ -197,10 +196,8 @@ def generate(schema_path: str, output_dir: str) -> None:
         if can_new or can_edit:
             ups_ctx = {**ctx, **form_upsert_context(ctx, schema)}
             _write(components_dir / 'FormUpsert.tsx', _render(env, 'form_upsert.tsx.jinja2', ups_ctx))
-            _write_stub(
-                components_dir / 'form_validation.ts',
-                _render(env, 'form_validation_stub.ts.jinja2', ctx),
-            )
+            val_ctx = {**ctx, **build_validation_context(ctx)}
+            _write(components_dir / 'form_validation.ts', _render(env, 'form_validation.ts.jinja2', val_ctx))
 
         # --- FormView.tsx ---
         if can_view:

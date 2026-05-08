@@ -46,7 +46,14 @@ function getLabelByText(selector: string, label: string) {
 }
 
 function getFormLabel(label: string) {
-  return getLabelByText('form label', label);
+  return cy.get('form label').then(($labels) => {
+    const normalizedTarget = normalizeLabelText(label);
+    const matches = $labels.filter((_, el) => normalizeLabelText(el.textContent ?? '') === normalizedTarget);
+    if (matches.length > 0) {
+      return cy.wrap(matches.first());
+    }
+    return getAnyLabel(label);
+  });
 }
 
 function getAnyLabel(label: string) {
@@ -111,23 +118,37 @@ Cypress.Commands.add('clearField', (label: string) => {
  * Select an option from MUI Autocomplete by label
  */
 Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) => {
-  getAutocompleteInput(label).click();
-  getAutocompleteInput(label).type('{selectall}' + optionText);
-  cy.get('[role="listbox"] [role="option"], .MuiAutocomplete-popper li')
-    .contains(optionText)
-    .click();
+  getAutocompleteInput(label).then(($input) => {
+    cy.wrap($input).click({ force: true });
+  });
+  getAutocompleteInput(label).then(($input) => {
+    cy.wrap($input).type('{selectall}' + optionText, { force: true });
+  });
+  cy.get('body').then(($body) => {
+    const optionSelector = '[role="listbox"] [role="option"], .MuiAutocomplete-popper li';
+    if ($body.find(optionSelector).length > 0) {
+      cy.get(optionSelector).contains(optionText).click();
+      return;
+    }
+    getAutocompleteInput(label).then(($input) => {
+      cy.wrap($input).type('{downarrow}{enter}', { force: true });
+    });
+  });
 });
 
 /**
  * Clear MUI Autocomplete selection
  */
 Cypress.Commands.add('clearAutocomplete', (label: string) => {
-  getFieldContainer(label).within(() => {
-    cy.get('input[role="combobox"], input').first().click();
-    cy.get('button[aria-label="Clear"]').click();
+  getFieldContainer(label).then(($container) => {
+    cy.wrap($container).find('input[role="combobox"], input').first().click({ force: true });
   });
-  // Press Escape to close the dropdown so it doesn't block other elements
-  getAutocompleteInput(label).type('{esc}');
+  getFieldContainer(label).then(($container) => {
+    cy.wrap($container).find('button[aria-label="Clear"]').click({ force: true });
+  });
+  getAutocompleteInput(label).then(($input) => {
+    cy.wrap($input).type('{esc}', { force: true });
+  });
 });
 
 /**

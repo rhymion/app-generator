@@ -348,6 +348,7 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
 
 def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict],
                            schema: dict, model: str = '') -> list[str]:
+    model_props = schema['definitions'].get(model, {}).get('properties', {})
     m2m_targets = [
         c['relationship']['target']
         for c in children_raw
@@ -359,7 +360,11 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
             and (c.get('relationship') or {}).get('type') != 'many-to-many'
             and is_optional_fk_to_parent(schema['definitions'].get(c['name'], {}), model))
     ]
-    many_to_one_targets = [r['target'] for r in parent_rels_raw]
+    many_to_one_targets = [
+        r['target']
+        for r in parent_rels_raw
+        if (model_props.get(r['prop_name'], {}).get('x-relationship') or {}).get('type') == 'many-to-one'
+    ]
 
     child_entity_rel_targets = []
     for child_raw in children_raw:
@@ -372,7 +377,8 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
             parent_fk_props = get_parent_fk_props(child_def, model)
             child_entity_rel_targets.extend(
                 r['target'] for r in get_parent_relationships(child_def)
-                if r['prop_name'] not in parent_fk_props  # exclude only the actual parent FK column(s)
+                if r['prop_name'] not in parent_fk_props
+                and ((child_def.get('properties', {}).get(r['prop_name'], {}).get('x-relationship') or {}).get('type') == 'many-to-one')
             )
 
     return _dedupe_ordered([*m2m_targets, *optional_fk_list_targets, *many_to_one_targets, *child_entity_rel_targets])
@@ -496,9 +502,16 @@ def build_context(entity: dict, schema: dict) -> dict:
     can_list   = gen_cfg.get('list',   True) is not False
     can_view   = gen_cfg.get('view',   True) is not False
 
-    # Parent relationships (many-to-one) — all of them, not deduplicated by target
+    # Parent relationships (many-to-one) — all of them, not deduplicated by target.
+    # Selector one-to-one relations are handled separately via `selector_oto_rels`
+    # to avoid duplicate relation fields/includes in generated output.
     merged_def    = {**model_def, 'properties': filtered_props}
-    parent_rels_raw = get_parent_relationships(merged_def, schema)
+    _all_parent_rels_raw = get_parent_relationships(merged_def, schema)
+    one_to_one_rels = get_one_to_one_rels(merged_def, schema)
+    auto_create_oto_rels = [r for r in one_to_one_rels if not r['is_selector']]
+    selector_oto_rels    = [r for r in one_to_one_rels if r['is_selector']]
+    selector_oto_prop_names = {r['prop_name'] for r in selector_oto_rels}
+    parent_rels_raw = [r for r in _all_parent_rels_raw if r['prop_name'] not in selector_oto_prop_names]
     # relationship_targets: deduplicated by target for import / type purposes
     seen: dict[str, dict] = {}
     for r in parent_rels_raw:
@@ -547,11 +560,6 @@ def build_context(entity: dict, schema: dict) -> dict:
         else 'id'
     )
     default_search_order_dir = 'asc' if default_search_order_field in ('name', 'code') else 'desc'
-
-    # One-to-one outbound FK rels (FK is on this model)
-    one_to_one_rels = get_one_to_one_rels(merged_def, schema)
-    auto_create_oto_rels = [r for r in one_to_one_rels if not r['is_selector']]
-    selector_oto_rels    = [r for r in one_to_one_rels if r['is_selector']]
 
     # Reverse one-to-one rels (FK is in the target, pointing back to this model)
     # e.g. pre_check.checkup_id → checkup; defined as plain $ref in the _detail extension

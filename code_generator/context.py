@@ -131,6 +131,19 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     merged_def = {**model_def, 'properties': filtered_props}
     rels_raw = get_parent_relationships(merged_def)
 
+    parent_fields = [FieldInfo(k, get_ts_type(v)) for k, v in filtered_props.items()]
+    parent_fields.append(FieldInfo('creator_id', 'string | null'))  # enforce id as string for permissions
+
+    # Compute all OTO rels early so we can split and use for FK-name exclusions
+    oto_rels_early = get_one_to_one_rels({**model_def, 'properties': filtered_props}, schema)
+    _auto_create_oto_early = [r for r in oto_rels_early if not r['is_selector']]
+    _selector_oto_early    = [r for r in oto_rels_early if r['is_selector']]
+    _selector_oto_prop_names = {r['prop_name'] for r in _selector_oto_early}
+
+    # Remove selector OTO relations here; they are appended once below so generated
+    # types expose them like many-to-one without duplicating fields.
+    rels_raw = [r for r in rels_raw if r['prop_name'] not in _selector_oto_prop_names]
+
     # Dedupe by target for import purposes only (each target type imported once)
     seen_targets: dict[str, dict] = {}
     for r in rels_raw:
@@ -146,14 +159,6 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         )
         for r in rels_raw
     ]
-
-    parent_fields = [FieldInfo(k, get_ts_type(v)) for k, v in filtered_props.items()]
-    parent_fields.append(FieldInfo('creator_id', 'string | null'))  # enforce id as string for permissions
-
-    # Compute all OTO rels early so we can split and use for FK-name exclusions
-    oto_rels_early = get_one_to_one_rels({**model_def, 'properties': filtered_props}, schema)
-    _auto_create_oto_early = [r for r in oto_rels_early if not r['is_selector']]
-    _selector_oto_early    = [r for r in oto_rels_early if r['is_selector']]
 
     # All OTO FK props are excluded from form_view_fields — the selector OTO rels will be
     # displayed through parent_rels (like many-to-one), and auto-create OTO via nested includes

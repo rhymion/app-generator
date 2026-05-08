@@ -68,6 +68,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {{ enum_ns_hooks }}
 {% endif %}
   const [error, setError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 {% if all_states %}
@@ -98,6 +99,11 @@ export default function FormUpsert({{ form_upsert_params }}) {
     e.preventDefault();
 
     if (isPending) return;
+    const validationMessage = getValidationError();
+    setValidationError(validationMessage);
+    if (validationMessage) {
+      return;
+    }
 
 {% if child_validation_code %}
 {{ child_validation_code }}

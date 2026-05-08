@@ -315,14 +315,14 @@ def get_detail_ref_rels(parent: str, parent_def: dict, schema: dict) -> list[dic
 
 
 def get_parent_relationships(parent_def: dict, schema: dict | None = None) -> list[dict]:
-    """Returns many-to-one relationship metadata from a schema definition.
+    """Returns selectable FK relationship metadata from a schema definition.
     Each entry: {prop_name, target, label_field, label_field_is_date, required}"""
     props = parent_def.get('properties', {})
     required = set(parent_def.get('required') or [])
     result = []
     for prop_name, prop in props.items():
         rel = prop.get('x-relationship')
-        if not rel or rel.get('type') != 'many-to-one' or not rel.get('target'):
+        if not rel or rel.get('type') not in ('many-to-one', 'one-to-one') or not rel.get('target'):
             continue
         if prop_name == 'creator_id':
             continue
