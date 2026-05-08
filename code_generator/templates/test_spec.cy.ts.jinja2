@@ -53,6 +53,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list %}
 {{ I }}cy.visit('/en/{{ parent }}');
 {{ I }}cy.clickButton('Create New {{ title }}');
+{{ I }}cy.url().should('include', '/{{ parent }}/new');
 {% else %}
 {{ I }}cy.visit('/en/{{ parent }}/new');
 {% endif %}
@@ -112,6 +113,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list %}
 {{ I }}cy.visit('/en/{{ parent }}');
 {{ I }}cy.clickButton('Create New {{ title }}');
+{{ I }}cy.url().should('include', '/{{ parent }}/new');
 {% else %}
 {{ I }}cy.visit('/en/{{ parent }}/new');
 {% endif %}
@@ -581,7 +583,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for cmd in required_fill_cmds %}
 {{ cmd }}
 {% endfor %}
-{{ I }}cy.contains('{{ rel.section_label }}').click();
+{{ I }}cy.openAccordion('{{ rel.section_label }}');
 {% for cmd in rel.fill_cmds %}
 {{ cmd }}
 {% endfor %}
@@ -593,7 +595,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}cy.url().should('include', '/{{ parent }}/view');
 {{ I }}cy.get('[aria-label="Edit"]').click();
 {{ I }}cy.url().should('include', '/{{ parent }}/edit');
-{{ I }}cy.contains('{{ rel.section_label }}').click();
+{{ I }}cy.openAccordion('{{ rel.section_label }}');
 {% for cmd in rel.assert_cmds %}
 {{ cmd }}
 {% endfor %}
@@ -639,7 +641,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
           cy.url().should('include', '/{{ parent }}/edit');
-          cy.contains('{{ rel.section_label }}').click();
+          cy.openAccordion('{{ rel.section_label }}');
 {% for cmd in rel.fill_cmds %}
           {{ cmd | trim }}
 {% endfor %}
@@ -664,7 +666,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
           cy.url().should('include', '/{{ parent }}/edit');
-          cy.contains('{{ rel.section_label }}').click();
+          cy.openAccordion('{{ rel.section_label }}');
 {% for cmd in rel.fill_cmds %}
           {{ cmd | trim }}
 {% endfor %}
@@ -687,7 +689,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
           cy.url().should('include', '/{{ parent }}/edit');
-          cy.contains('{{ rel.section_label }}').click();
+          cy.openAccordion('{{ rel.section_label }}');
 {% for cmd in rel.clear_cmds %}
           {{ cmd | trim }}
 {% endfor %}
@@ -712,7 +714,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for cmd in required_fill_cmds %}
 {{ cmd }}
 {% endfor %}
-          cy.contains('{{ rel.section_label }}').click();
+          cy.openAccordion('{{ rel.section_label }}');
 {% for cmd in rel.partial_fill_cmds %}
           {{ cmd | trim }}
 {% endfor %}
@@ -747,7 +749,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
           cy.url().should('include', '/{{ parent }}/edit');
-          cy.contains('{{ rel.section_label }}').click();
+          cy.openAccordion('{{ rel.section_label }}');
 {% for cmd in rel.partial_fill_cmds %}
           {{ cmd | trim }}
 {% endfor %}

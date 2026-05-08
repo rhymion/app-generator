@@ -134,6 +134,11 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val = 'new Date(2025, 0, 1).toISOString()'
             val_unique = 'new Date(2025, 0, i).toISOString()'
             val_second = 'new Date(2025, 0, 2).toISOString()'
+        elif actual == 'string':
+            field_title = to_title_case(prop_name)
+            val = f"'Test {field_title}'"
+            val_unique = f'`Test {field_title} ${{i}}`'
+            val_second = f"'Test {field_title} 2'"
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
             val = val_unique = str(mn)
@@ -184,6 +189,11 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
             val = 'new Date(2025, 0, 1).toISOString()'
             val_unique = 'new Date(2025, 0, i).toISOString()'
             val_second = 'new Date(2025, 0, 2).toISOString()'
+        elif actual == 'string':
+            field_title = to_title_case(prop_name)
+            val = f"'Test {field_title}'"
+            val_unique = f'`Test {field_title} ${{i}}`'
+            val_second = f"'Test {field_title} 2'"
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
             val = str(mn)

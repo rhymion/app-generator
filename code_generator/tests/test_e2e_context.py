@@ -174,3 +174,57 @@ def test_helper_context_self_ref_dep_keeps_required_non_self_fk_deps():
     ctx = helper_context("medicine", [], schema, "medicine", "medicine_detail", _entity("medicine")["generate_config"])
     prev_dep = next(d for d in ctx["self_ref_deps"] if d["var_name"] == "prev")
     assert prev_dep["fk_deps"] == [{"prop_name": "patient_id", "dep_var_name": "patient"}]
+
+
+def test_helper_context_primary_fk_string_labels_are_human_readable():
+    schema = {
+        "definitions": {
+            "patient": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+            },
+            "clinic": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+            },
+            "patient_rel": {
+                "type": "object",
+                "required": ["id", "patient_no", "patient_id", "clinic_id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "patient_no": {"type": "string"},
+                    "patient_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "patient", "labelField": "name"},
+                    },
+                    "clinic_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "clinic", "labelField": "name"},
+                    },
+                },
+                "x-display": {"table": [{"patient_no": {"primary": True}}]},
+            },
+            "checkup": {
+                "type": "object",
+                "required": ["id", "patient_rel_id", "checkup_date"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "patient_rel_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "patient_rel", "labelField": "patient_no"},
+                    },
+                    "checkup_date": {"type": "string", "format": "date"},
+                },
+                "x-display": {"table": [{"patient_rel": {"primary": True}}]},
+            },
+            "checkup_detail": {"allOf": [{"$ref": "#/definitions/checkup"}]},
+        },
+    }
+
+    ctx = helper_context("checkup", [], schema, "checkup", "checkup_detail", _entity("checkup")["generate_config"])
+    assert ctx["primary_fk_dep"]["target"] == "patient_rel"
+    patient_no = next(f for f in ctx["primary_fk_dep"]["extra_required_fields"] if f["prop_name"] == "patient_no")
+    assert patient_no["prisma_val"] == "'Test Patient No'"
+    assert patient_no["prisma_val_unique"] == '`Test Patient No ${i}`'
