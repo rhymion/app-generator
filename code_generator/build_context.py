@@ -503,15 +503,19 @@ def build_context(entity: dict, schema: dict) -> dict:
     can_view   = gen_cfg.get('view',   True) is not False
 
     # Parent relationships (many-to-one) — all of them, not deduplicated by target.
-    # Selector one-to-one relations are handled separately via `selector_oto_rels`
-    # to avoid duplicate relation fields/includes in generated output.
+    # Both selector and auto-create one-to-one relations are excluded here:
+    # selector OTO is re-added through `selector_oto_rels` (autocomplete UI),
+    # and auto-create OTO (commentable/approvable bridges) is handled through
+    # `auto_create_oto_rels` (pre-create in transaction + nested include).
+    # Leaving them in `parent_rels_raw` would produce duplicate relation fields,
+    # duplicate includes, and bogus import/option types.
     merged_def    = {**model_def, 'properties': filtered_props}
     _all_parent_rels_raw = get_parent_relationships(merged_def, schema)
     one_to_one_rels = get_one_to_one_rels(merged_def, schema)
     auto_create_oto_rels = [r for r in one_to_one_rels if not r['is_selector']]
     selector_oto_rels    = [r for r in one_to_one_rels if r['is_selector']]
-    selector_oto_prop_names = {r['prop_name'] for r in selector_oto_rels}
-    parent_rels_raw = [r for r in _all_parent_rels_raw if r['prop_name'] not in selector_oto_prop_names]
+    oto_prop_names = {r['prop_name'] for r in one_to_one_rels}
+    parent_rels_raw = [r for r in _all_parent_rels_raw if r['prop_name'] not in oto_prop_names]
     # relationship_targets: deduplicated by target for import / type purposes
     seen: dict[str, dict] = {}
     for r in parent_rels_raw:

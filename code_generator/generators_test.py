@@ -109,7 +109,10 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     props = dep_def.get('properties', {})
     required = set(dep_def.get('required') or [])
     rel_props = {r['prop_name'] for r in get_parent_relationships(dep_def)}
-    oto_props = {k for k, v in props.items() if (v.get('x-relationship') or {}).get('type') == 'one-to-one'}
+    oto_props = {
+        k for k, v in props.items()
+        if (v.get('x-relationship') or {}).get('type') in ('one-to-one', 'one-to-one_bridge')
+    }
     exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props | oto_props
     _entity_opts = _get_entity_options(schema)
     _first_entity_val = f"'{_entity_opts[0]['value']}'" if _entity_opts else "''"
@@ -163,7 +166,10 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
     props = dep_def.get('properties', {})
     required = set(dep_def.get('required') or [])
     rel_props = {r['prop_name'] for r in get_parent_relationships(dep_def)}
-    oto_props = {k for k, v in props.items() if (v.get('x-relationship') or {}).get('type') == 'one-to-one'}
+    oto_props = {
+        k for k, v in props.items()
+        if (v.get('x-relationship') or {}).get('type') in ('one-to-one', 'one-to-one_bridge')
+    }
     exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props | oto_props
 
     _entity_opts = _get_entity_options(schema)
@@ -271,13 +277,12 @@ def get_entity_fk_deps(model_name: str, schema: dict, deps: list[dict]) -> list[
 
 
 def get_internal_one_to_one_fks(model_name: str, schema: dict) -> list[dict]:
-    """Returns outbound one-to-one FK fields on model_name.
+    """Returns outbound bridge OTO FK fields on model_name.
 
-    These are properties with x-relationship.type == 'one-to-one' where the FK
-    is owned by this model (prop_name ends in _id). The target is an internal
-    bridge model (e.g. approvable) that the service creates automatically.
-    Test helpers must create these records directly rather than treating them
-    as user-facing fields.
+    These are properties with x-relationship.type == 'one-to-one_bridge'
+    (e.g. approvable_id, commentable_id). The target is a bridge model that
+    the service creates automatically — test helpers must create these
+    records directly rather than treating them as user-facing fields.
     """
     model_def = schema['definitions'].get(model_name, {})
     props = model_def.get('properties', {})
@@ -285,7 +290,7 @@ def get_internal_one_to_one_fks(model_name: str, schema: dict) -> list[dict]:
     result = []
     for prop_name, prop in props.items():
         rel = prop.get('x-relationship')
-        if not rel or rel.get('type') != 'one-to-one':
+        if not rel or rel.get('type') != 'one-to-one_bridge':
             continue
         target = rel.get('target')
         if not target or target == model_name:
@@ -294,11 +299,6 @@ def get_internal_one_to_one_fks(model_name: str, schema: dict) -> list[dict]:
             continue
         # Only include required (non-nullable) FKs — optional FKs can be left null in test data
         if prop_name not in required_fields:
-            continue
-        # Only include bridge/system models (no x-display) — skip user-visible entities
-        # whose dependencies must be resolved through helper_context deps instead
-        target_def = schema['definitions'].get(target, {})
-        if 'x-display' in target_def:
             continue
         var_name = to_camel_case(re.sub(r'_id$', '', prop_name))
         if target == 'user_account':
@@ -962,11 +962,11 @@ def helper_context(
     deps = resolve_dependencies(model_name, schema)
     entity_fk_deps = get_entity_fk_deps(model_name, schema, deps)
 
-    # Detect required one-to-one FK fields that point to user-visible entities (e.g. pre_check.checkup_id).
+    # Detect required selector one-to-one FK fields (e.g. pre_check.checkup_id).
     # These are reverse-parent FKs (FK in this model, parent in target) that must be created as deps
-    # in populate helpers. They are not bridge models (handled by internal_fk_deps) and not M2O
-    # (handled by resolve_dependencies), so they need explicit insertion into deps/entity_fk_deps.
-    # We also update the field metadata so the template treats them as autocomplete (FK) fields.
+    # in populate helpers. Bridge OTOs are handled by internal_fk_deps and M2O by resolve_dependencies,
+    # so this loop only covers the selector pattern (`type: one-to-one`) where the target is a
+    # user-visible entity with its own pages.
     existing_fk_props = {fk['prop_name'] for fk in entity_fk_deps}
     for prop_name, prop in properties.items():
         rel = prop.get('x-relationship')
@@ -979,11 +979,9 @@ def helper_context(
         oto_target = rel.get('target')
         if not oto_target or oto_target == model_name:
             continue
-        oto_target_def = schema['definitions'].get(oto_target, {})
-        if 'x-display' not in oto_target_def:
-            continue  # bridge models are handled by internal_fk_deps
         if prop_name in existing_fk_props:
             continue
+        oto_target_def = schema['definitions'].get(oto_target, {})
         # Add transitive deps of this target first
         for td in resolve_dependencies(oto_target, schema):
             if not any(d['target'] == td['target'] for d in deps):
@@ -2122,8 +2120,9 @@ def db_helpers_context(schema: dict) -> dict:
         fk_targets: set[str] = set()
         for prop_name, prop in defn.get('properties', {}).items():
             rel = prop.get('x-relationship', {})
-            if rel.get('type') in ('many-to-one', 'one-to-one'):
-                # Explicit x-relationship annotation
+            if rel.get('type') in ('many-to-one', 'one-to-one', 'one-to-one_bridge'):
+                # Explicit x-relationship annotation — bridge OTO is included so the
+                # bridge row's deletion ordering is correct relative to its parent.
                 target = rel.get('target')
                 if target and target in base_entities and target != name:
                     fk_targets.add(target)

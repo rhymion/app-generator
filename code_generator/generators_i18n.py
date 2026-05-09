@@ -60,8 +60,11 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
                 base = prop_name[:-3] if prop_name.endswith('_id') else prop_name
                 key = to_camel_case(base)
                 label = to_title_case(base)
-            elif rel.get('type') == 'one-to-one':
-                # Outbound one-to-one FK = internal bridge model, not user-facing — skip
+            elif rel.get('type') in ('one-to-one', 'one-to-one_bridge'):
+                # Outbound OTO FK — bridge targets are internal records (approvable,
+                # commentable); selector targets are rendered with their own i18n keys
+                # via parent_rels elsewhere. Either way, skip the field-level key here
+                # to preserve the prior generated output.
                 continue
             else:
                 key = to_camel_case(prop_name)

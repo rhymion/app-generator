@@ -104,43 +104,54 @@ def get_parent_fk_props(child_def: dict, parent_model: str) -> set[str]:
 
 
 def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
-    """Returns one-to-one outbound FK relationship metadata (FK is on this model).
-    Each entry: {prop_name, relation_name, target, label_field, is_selector, nullable, children}
-    'children' = array children of the target's _detail (for nested includes and display).
-    'is_selector' = True when target has its own generated pages (use autocomplete UI);
-                    False when target is auto-created alongside parent (approvable/commentable pattern).
-    'nullable' = True when the FK field itself is nullable (optional relationship)."""
+    """Returns outbound one-to-one FK relationship metadata (FK is on this model).
+
+    Recognises two relation types and tags each entry accordingly:
+      - 'one-to-one'        → selector OTO (target has own pages, picker UI)
+      - 'one-to-one_bridge' → bridge OTO (target auto-created alongside parent,
+                              e.g. approvable/commentable; no picker)
+
+    Each entry: {prop_name, relation_name, target, label_field, relation_type,
+                 is_selector, nullable, children}.
+    'children' = array children of the target's _detail (for nested includes
+    and display) — only populated for bridge OTO.
+    'is_selector' = True for 'one-to-one', False for 'one-to-one_bridge';
+    kept as a convenience so existing callers don't need to switch on the type
+    string everywhere.
+    'nullable' = True when the FK field itself is nullable."""
     props = parent_def.get('properties', {})
     result = []
     for prop_name, prop in props.items():
         rel = prop.get('x-relationship')
-        if not rel or rel.get('type') != 'one-to-one' or not rel.get('target'):
+        if not rel or not rel.get('target'):
+            continue
+        relation_type = rel.get('type')
+        if relation_type not in ('one-to-one', 'one-to-one_bridge'):
             continue
         target = rel['target']
         relation_name = prop_name[:-3] if prop_name.endswith('_id') else prop_name
         label_field = rel.get('labelField', 'name')
 
-        # Determine if this is a selector OTO (target has own generated pages)
-        target_detail = schema['definitions'].get(f'{target}_detail', {})
-        target_gen = target_detail.get('x-generate') or {}
-        is_selector = any(target_gen.get(k) for k in ('list', 'view', 'new', 'edit', 'delete', 'api'))
+        is_selector = relation_type == 'one-to-one'
 
         # Determine if FK is nullable
         prop_type = prop.get('type')
         nullable = isinstance(prop_type, list) and 'null' in prop_type
 
-        # Collect array children from the target's _detail definition (only for auto-create OTO)
-        target_detail_props = {}
-        if 'properties' in target_detail:
-            target_detail_props = target_detail['properties']
-        else:
-            for item in target_detail.get('allOf', []):
-                if 'properties' in item:
-                    target_detail_props = item['properties']
-                    break
-
+        # Collect array children from the target's _detail definition (only for bridge OTO).
+        # Selector OTO has no nested children rendered through this list — its target has its
+        # own pages and uses regular m2o/list rendering.
         children = []
         if not is_selector:
+            target_detail = schema['definitions'].get(f'{target}_detail', {})
+            target_detail_props = {}
+            if 'properties' in target_detail:
+                target_detail_props = target_detail['properties']
+            else:
+                for item in target_detail.get('allOf', []):
+                    if 'properties' in item:
+                        target_detail_props = item['properties']
+                        break
             for cp_name, cp in target_detail_props.items():
                 if cp.get('type') == 'array' and (cp.get('items') or {}).get('$ref'):
                     child_name = cp['items']['$ref'].split('/')[-1]
@@ -159,6 +170,7 @@ def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
             'target': target,
             'label_field': label_field,
             'label_field_is_date': _label_field_is_date(label_field, target, schema),
+            'relation_type': relation_type,
             'is_selector': is_selector,
             'nullable': nullable,
             'children': children,

@@ -138,11 +138,14 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     oto_rels_early = get_one_to_one_rels({**model_def, 'properties': filtered_props}, schema)
     _auto_create_oto_early = [r for r in oto_rels_early if not r['is_selector']]
     _selector_oto_early    = [r for r in oto_rels_early if r['is_selector']]
-    _selector_oto_prop_names = {r['prop_name'] for r in _selector_oto_early}
+    _all_oto_prop_names = {r['prop_name'] for r in oto_rels_early}
 
-    # Remove selector OTO relations here; they are appended once below so generated
-    # types expose them like many-to-one without duplicating fields.
-    rels_raw = [r for r in rels_raw if r['prop_name'] not in _selector_oto_prop_names]
+    # Remove all OTO relations from the m2o-style list. Selector OTO is re-added
+    # below as a parent_rel (autocomplete UI). Auto-create OTO (commentable/
+    # approvable bridges) is handled via the dedicated `one_to_one_rels` list
+    # downstream — letting it stay here would produce duplicate type fields,
+    # duplicate includes, and bogus initial/search option props.
+    rels_raw = [r for r in rels_raw if r['prop_name'] not in _all_oto_prop_names]
 
     # Dedupe by target for import purposes only (each target type imported once)
     seen_targets: dict[str, dict] = {}
@@ -162,12 +165,10 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
 
     # All OTO FK props are excluded from form_view_fields — the selector OTO rels will be
     # displayed through parent_rels (like many-to-one), and auto-create OTO via nested includes
-    _oto_fk_names_early = {r['prop_name'] for r in oto_rels_early}
-
     form_view_fields = [
         FieldInfo(k, get_ts_type(v, for_view_props=True))
         for k, v in filtered_props.items()
-        if k not in _TIMESTAMP_FIELDS and k not in _oto_fk_names_early
+        if k not in _TIMESTAMP_FIELDS and k not in _all_oto_prop_names
     ]
 
     # Child many-to-one rels — needed early for import target and option calculation.
