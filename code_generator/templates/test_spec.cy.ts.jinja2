@@ -321,7 +321,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if use_deps_in_3_3 %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
-      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+      cy.task<any[]>('db:populate{{ pascal }}', {{ populate_count_3_3 }}).then((records) => {
 {% if can_list and can_view %}
         cy.visit('/en/{{ parent }}');
         cy.contains('{{ list_id_1 }}').click();

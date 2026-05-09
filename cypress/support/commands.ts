@@ -46,14 +46,16 @@ function getLabelByText(selector: string, label: string) {
 }
 
 function getFormLabel(label: string) {
-  return cy.get('form label').then(($labels) => {
-    const normalizedTarget = normalizeLabelText(label);
-    const matches = $labels.filter((_, el) => normalizeLabelText(el.textContent ?? '') === normalizedTarget);
-    if (matches.length > 0) {
-      return cy.wrap(matches.first());
-    }
-    return getAnyLabel(label);
-  });
+  // Use cy.get(...).filter(...).first() so the chain re-queries the DOM on
+  // every retry. The previous implementation used .then(() => cy.wrap(matches))
+  // which captured a static jQuery reference — when MUI X / hydration
+  // detached the wrapped <label>, downstream .parent() / .find() would fail
+  // with "page updated as a result of this command, ... no longer attached
+  // to the DOM" instead of retrying.
+  const normalizedTarget = normalizeLabelText(label);
+  return cy.get('form label').filter((_, el) =>
+    normalizeLabelText(el.textContent ?? '') === normalizedTarget
+  ).first();
 }
 
 function getAnyLabel(label: string) {

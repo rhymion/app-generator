@@ -139,9 +139,15 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val_second = 'new Date(2025, 0, 2).toISOString()'
         elif actual == 'string':
             field_title = to_title_case(prop_name)
-            val = f"'Test {field_title}'"
-            val_unique = f'`Test {field_title} ${{i}}`'
-            val_second = f"'Test {field_title} 2'"
+            # Non-name strings on a dep target may carry @unique constraints
+            # (e.g. product.code). The dep helper is invoked multiple times in a
+            # single test (once for the parent populator, again for child
+            # populators), so the value MUST differ across calls. Suffix with
+            # Date.now() + Math.random() so back-to-back invocations within the
+            # same test never collide.
+            val = f'`Test {field_title} ${{Date.now()}}-${{Math.random()}}`'
+            val_unique = f'`Test {field_title} ${{Date.now()}}-${{Math.random()}}-${{i}}`'
+            val_second = f'`Test {field_title} ${{Date.now()}}-${{Math.random()}}-2`'
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
             val = val_unique = str(mn)
@@ -1652,6 +1658,10 @@ def spec_context(
 
     # Section 3.3: primary field edit command
     use_deps_in_3_3 = False
+    # If the primary field is a FK the form renders an autocomplete picker, and the
+    # populate() helper creates a fresh target row per index — so we need at least
+    # two rows in the DB for the test to switch from "Test X 1" to "Test X 2".
+    populate_count_3_3 = 2 if prim_is_fk else 1
     if has_edit_primary and edit_field_label and edit_update_value:
         prim_edit_meta = next(
             (f for f in fields if f.get('label') == edit_field_label), None
@@ -1659,6 +1669,13 @@ def spec_context(
         if prim_edit_meta and prim_edit_meta.get('category') in ('entity_select', 'autocomplete'):
             edit_primary_cmd = f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
             use_deps_in_3_3 = prim_edit_meta.get('category') == 'autocomplete' and has_deps
+        elif prim_is_fk:
+            # User-account primary FKs (and any other primary FK that
+            # `get_field_metas` filters out of `fields`) miss the lookup above
+            # but still render as autocomplete pickers in the form. Use
+            # selectAutocomplete and rely on populate_count_3_3==2 to ensure
+            # the "Test X 2" target row exists.
+            edit_primary_cmd = f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
         else:
             edit_primary_cmd = f"        cy.clearAndFillField('{edit_field_label}', '{edit_update_value}');"
     else:
@@ -1775,6 +1792,7 @@ def spec_context(
         'opt_fill_cmds_3_1': opt_fill_cmds_3_1,
         'opt_clear_cmds_3_2': opt_clear_cmds_3_2,
         'use_deps_in_3_3': use_deps_in_3_3,
+        'populate_count_3_3': populate_count_3_3,
         'edit_primary_cmd': edit_primary_cmd,
         'edit_fill_cmd_3_3': edit_fill_cmd_3_3,
         'fail_create_5_1': fail_create_5_1,

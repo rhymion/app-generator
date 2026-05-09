@@ -129,6 +129,48 @@ def test_spec_context_uses_deps_for_fk_primary_edit():
     assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('Patient', 'Test Patient 2');"
 
 
+def test_spec_context_3_3_populates_two_when_primary_is_fk():
+    """Edit-3.3 switches the primary FK from "Test X 1" to "Test X 2", so the
+    populate task must seed at least two records to make the second target row
+    available in the autocomplete picker."""
+    ctx = spec_context("lifestyle", [], _schema(), "lifestyle", "lifestyle_detail", _entity("lifestyle")["generate_config"])
+    assert ctx["populate_count_3_3"] == 2
+
+
+def test_spec_context_3_3_user_account_primary_uses_select_autocomplete():
+    """A primary FK to user_account is filtered out of `fields` (it goes through
+    req_ua_spec instead), so the prim_edit_meta lookup misses it. Even so, the
+    field renders as an autocomplete in the form — fall through to
+    selectAutocomplete rather than clearAndFillField, and bump the populate
+    count so two distinct user_account rows exist."""
+    schema = {
+        "definitions": {
+            "user_account": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+            },
+            "shift": {
+                "type": "object",
+                "required": ["id", "user_account_id", "start_time"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "user_account_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "user_account", "labelField": "name"},
+                    },
+                    "start_time": {"type": "string", "format": "date-time"},
+                },
+                "x-display": {"table": [{"user_account": {"primary": True}}]},
+            },
+            "shift_detail": {"allOf": [{"$ref": "#/definitions/shift"}]},
+        },
+    }
+    ctx = spec_context("shift", [], schema, "shift", "shift_detail", _entity("shift")["generate_config"])
+    assert ctx["populate_count_3_3"] == 2
+    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User Account', 'Test User Account 2');"
+
+
 def test_api_spec_context_omits_required_one_to_one_fk_in_missing_field_case():
     ctx = api_spec_context("pre_check", [], _schema(), "pre_check", "pre_check_detail", _entity("pre_check")["generate_config"])
     body_lines = "\n".join(ctx["post_body_missing_field"])
@@ -226,5 +268,12 @@ def test_helper_context_primary_fk_string_labels_are_human_readable():
     ctx = helper_context("checkup", [], schema, "checkup", "checkup_detail", _entity("checkup")["generate_config"])
     assert ctx["primary_fk_dep"]["target"] == "patient_rel"
     patient_no = next(f for f in ctx["primary_fk_dep"]["extra_required_fields"] if f["prop_name"] == "patient_no")
-    assert patient_no["prisma_val"] == "'Test Patient No'"
-    assert patient_no["prisma_val_unique"] == '`Test Patient No ${i}`'
+    # The dep helper is called repeatedly in a single test (parent populator +
+    # child populators), so non-name string values must be unique per call.
+    # The prefix stays human-readable; uniqueness comes from a Date.now() +
+    # Math.random() suffix so back-to-back invocations don't collide on
+    # @unique fields like product.code.
+    assert patient_no["prisma_val"].startswith('`Test Patient No ')
+    assert '${Date.now()}' in patient_no["prisma_val"]
+    assert patient_no["prisma_val_unique"].startswith('`Test Patient No ')
+    assert '${i}' in patient_no["prisma_val_unique"]
