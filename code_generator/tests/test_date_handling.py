@@ -135,6 +135,49 @@ class TestDepPopulateFieldsDateFormat:
 
 
 # ---------------------------------------------------------------------------
+# 2b. _get_dep_populate_fields — boolean fields must emit `false` (not a string)
+# ---------------------------------------------------------------------------
+
+class TestDepPopulateFieldsBoolean:
+    """Required boolean fields on a dep target (e.g. `medicine.continuous`)
+    must be seeded with the literal `false`, not a `TEST-FOO-${Date.now()}`
+    string. Prisma rejects strings on boolean columns with a type error in
+    the dep populator and the generated API tests fail before the assertion
+    phase even runs."""
+
+    def _schema(self) -> dict:
+        return {
+            "definitions": {
+                "medicine": {
+                    "type": "object",
+                    "required": ["id", "name", "continuous"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "continuous": {"type": "boolean"},
+                    },
+                }
+            }
+        }
+
+    def test_boolean_dep_field_uses_literal_false(self):
+        fields = _get_dep_populate_fields('medicine', 'medicine', 'Medicine', self._schema())
+        cont = next((f for f in fields if f['prop_name'] == 'continuous'), None)
+        assert cont is not None
+        assert cont['prisma_val'] == 'false'
+        assert cont['prisma_val_unique'] == 'false'
+        assert cont['prisma_val_second'] == 'false'
+
+    def test_boolean_dep_field_does_not_emit_test_string(self):
+        """The previous behaviour fell through to the generic `TEST-FOO-…`
+        template literal — make sure that regression cannot return."""
+        fields = _get_dep_populate_fields('medicine', 'medicine', 'Medicine', self._schema())
+        cont = next(f for f in fields if f['prop_name'] == 'continuous')
+        assert 'TEST-' not in cont['prisma_val']
+        assert 'Date.now' not in cont['prisma_val']
+
+
+# ---------------------------------------------------------------------------
 # 3. _get_dep_extra_required_fields — Date.UTC for format: date
 # ---------------------------------------------------------------------------
 

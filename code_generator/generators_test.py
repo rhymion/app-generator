@@ -152,6 +152,12 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             mn = prop.get('minimum', 0)
             val = val_unique = str(mn)
             val_second = str(mn)
+        elif actual == 'boolean':
+            # Booleans must emit a literal `false` / `true`, not a string. The
+            # previous fall-through produced `TEST-FOO-${Date.now()}` which
+            # Prisma rejects with a type-mismatch error on required boolean
+            # columns (e.g. medicine.continuous in dep populators).
+            val = val_unique = val_second = 'false'
         else:
             val = f'`TEST-{prop_name.upper()}-${{Date.now()}}`'
             val_unique = f'`TEST-{prop_name.upper()}-${{Date.now()}}-${{i}}`'
