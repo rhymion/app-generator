@@ -23,8 +23,17 @@ function getAutocompleteInput(label: string) {
   // outer `<NumberField>` and an Autocomplete inside a flatten Accordion.
   // Without this filter, getFormLabel picks the first match (often the
   // non-autocomplete one) and selectAutocomplete fails to find a dropdown.
+  //
+  // Selector is `'label'` filtered by `closest('form')` (not `'form label'`).
+  // When this helper runs inside `cy.within(.MuiAccordionDetails-root)`,
+  // the within-subject restricts cy.get's search root — but the accordion
+  // body has no `<form>` descendant of its own (the form wraps the accordion).
+  // So `'form label'` returns nothing inside the within-scope. `closest('form')`
+  // walks up the actual DOM tree, independent of within-subject, so it still
+  // finds the outer FormUpsert form correctly in both contexts.
   const normalizedTarget = normalizeLabelText(label);
-  return cy.get('form label').filter((_, el) => {
+  return cy.get('label').filter((_, el) => {
+    if (!el.closest('form')) return false;
     if (normalizeLabelText(el.textContent ?? '') !== normalizedTarget) return false;
     const forAttr = el.getAttribute('for');
     if (!forAttr) return false;
@@ -68,8 +77,16 @@ function getFormLabel(label: string) {
   // detached the wrapped <label>, downstream .parent() / .find() would fail
   // with "page updated as a result of this command, ... no longer attached
   // to the DOM" instead of retrying.
+  //
+  // Selector is `'label'` filtered by `closest('form')` (not `'form label'`).
+  // Reason: when this helper runs inside `cy.within(.MuiAccordionDetails-root)`
+  // the within-subject restricts cy.get's search root, and the accordion body
+  // has no `<form>` descendant of its own — so `'form label'` returns nothing.
+  // `closest('form')` walks up the actual DOM tree (ignoring the within-subject)
+  // and still finds the outer FormUpsert form ancestor in both contexts.
   const normalizedTarget = normalizeLabelText(label);
-  return cy.get('form label').filter((_, el) =>
+  return cy.get('label').filter((_, el) =>
+    !!el.closest('form') &&
     normalizeLabelText(el.textContent ?? '') === normalizedTarget
   ).first();
 }
@@ -100,7 +117,11 @@ Cypress.Commands.add('fillField', (label: string, value: string) => {
   // navigation (FormView renders real <input> elements with identical labels).
   // Use DOM traversal — not forAttr ID lookup — because MUI auto-generates input IDs
   // that can differ between SSR and hydration, making a cached ID stale.
-  getFormLabel(label).parent().find('input, textarea').first().type(value);
+  // Type with `{selectall}` so the new value REPLACES whatever the field already
+  // holds. Without this, `cy.fillField('Comment', 'Test Comment')` on an edit
+  // form whose Comment is pre-populated with 'Test Comment' produces
+  // 'Test CommentTest Comment' — caught by 9.x.2 post-save verification.
+  getFormLabel(label).parent().find('input, textarea').first().type('{selectall}' + value);
 });
 
 /**
@@ -149,10 +170,18 @@ Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) =
   });
   const escaped = optionText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const exactRe = new RegExp(`^${escaped}$`);
-  cy.get('body').then(($body) => {
+  // The MUI Autocomplete popper portals to document.body — it is NOT a
+  // descendant of the input's accordion. When this command runs inside
+  // `cy.within(.MuiAccordionDetails-root)` (e.g. via cy.withinAccordion),
+  // the previous `cy.get('body')` failed with "Expected to find element: body"
+  // because cy.get respects the within-subject. Use cy.document() / Cypress.$
+  // to query the popper from the real document, bypassing the within scope.
+  cy.document().then((doc) => {
     const optionSelector = '[role="listbox"] [role="option"], .MuiAutocomplete-popper li';
-    if ($body.find(optionSelector).length > 0) {
-      cy.get(optionSelector).contains(exactRe).click();
+    const $opts = Cypress.$(doc.body).find(optionSelector);
+    if ($opts.length > 0) {
+      const $matched = $opts.filter((_, el) => exactRe.test(el.textContent ?? '')).first();
+      cy.wrap($matched).click();
       return;
     }
     getAutocompleteInput(label).then(($input) => {
@@ -254,9 +283,13 @@ Cypress.Commands.add('selectDataGridRows', (indices: number[]) => {
  * already-open accordion would close it, so we only click when collapsed.
  */
 Cypress.Commands.add('openAccordion', (label: string) => {
+  // Re-query inside the conditional click instead of `cy.wrap($el).click()`.
+  // Capturing $el and clicking the wrap fails with "page updated while this
+  // command was executing" when MUI / Next hydration re-renders the summary
+  // mid-test (especially on the view page right after navigation).
   cy.contains('.MuiAccordionSummary-root', label).then(($el) => {
     if ($el.attr('aria-expanded') !== 'true') {
-      cy.wrap($el).click();
+      cy.contains('.MuiAccordionSummary-root', label).click();
     }
   });
 });
@@ -273,9 +306,10 @@ Cypress.Commands.add('openAccordion', (label: string) => {
  * label on the page — almost always the wrong one.
  */
 Cypress.Commands.add('withinAccordion', (label: string, fn: () => void) => {
+  // Same detached-element guard as openAccordion.
   cy.contains('.MuiAccordionSummary-root', label).then(($el) => {
     if ($el.attr('aria-expanded') !== 'true') {
-      cy.wrap($el).click();
+      cy.contains('.MuiAccordionSummary-root', label).click();
     }
   });
   cy.contains('.MuiAccordionSummary-root', label)

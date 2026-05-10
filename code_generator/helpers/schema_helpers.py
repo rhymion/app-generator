@@ -235,6 +235,12 @@ def _extract_flatten_fields(target_props: dict, parent_model: str) -> list[dict]
             'nullable': nullable,
             'enum': prop.get('enum') if isinstance(prop.get('enum'), list) else None,
             'is_fk': False,
+            # Numeric bounds — needed downstream by cypress_create_value so the
+            # generated test value respects the schema cap (e.g. lifestyle's
+            # quolity_of_sleep has max: 10; emitting '100' would be clipped by
+            # the BaseNumberField on input and break the post-save assertion).
+            'minimum': prop.get('minimum'),
+            'maximum': prop.get('maximum'),
         })
     return fields
 

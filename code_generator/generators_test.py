@@ -733,6 +733,21 @@ def gen_assert_command(field: dict, value: str, indent: str) -> str:
         return f"{indent}cy.setCheckbox('{label}', {value}); // verify checkbox state"
 
 
+def gen_empty_assert_command(field: dict, indent: str) -> str:
+    """Assert that a field is empty / cleared.
+
+    Used after the 9.x.3 'remove flatten section' edit-and-save flow to verify
+    that the inside-accordion fields render as empty when the form is reopened.
+    For text/number/datetime/enum/autocomplete the input value should be ''.
+    For booleans we assert the checkbox is not checked.
+    """
+    cat = field['category']
+    label = field['label']
+    if cat == 'boolean':
+        return f"{indent}cy.setCheckbox('{label}', false); // verify checkbox cleared"
+    return f"{indent}cy.checkField('{label}', '');"
+
+
 def gen_fill_commands(fields: list, entity_title: str, indent: str, fk_dep_vars: dict | None = None) -> list[str]:
     """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup."""
     lines = []
@@ -895,8 +910,13 @@ def _compute_flatten_test_rels(parent: str, pascal: str, definition_key: str, sc
                 'enum_values': _fenum,
                 'format': _ffmt,
                 'dep_target': None,
-                'min': None,
-                'max': None,
+                # Pull the schema's min/max so cypress_create_value picks a value
+                # that fits the BaseNumberField cap. Without this, flatten fields
+                # with a small max (e.g. lifestyle.quolity_of_sleep max: 10) get
+                # the default '100' which the input clips to '10' on entry,
+                # breaking the post-save assertion.
+                'min': f.get('minimum'),
+                'max': f.get('maximum'),
                 'entity_options': None,
             })
 
@@ -907,6 +927,7 @@ def _compute_flatten_test_rels(parent: str, pascal: str, definition_key: str, sc
         _req_fill_cmds = [gen_fill_command(m, cypress_create_value(m, _title), indent) for m in _req_metas]
         _clear_cmds = [gen_clear_command(m, indent) for m in _field_metas]
         _assert_cmds = [gen_assert_command(m, cypress_create_value(m, _title), indent) for m in _field_metas]
+        _empty_assert_cmds = [gen_empty_assert_command(m, indent) for m in _field_metas]
 
         # Partial fill: only the first required field (leaves others empty → validation fail)
         _partial_fill_cmds = []
@@ -955,6 +976,7 @@ def _compute_flatten_test_rels(parent: str, pascal: str, definition_key: str, sc
             'required_fill_cmds': _req_fill_cmds,
             'clear_cmds': _clear_cmds,
             'assert_cmds': _assert_cmds,
+            'empty_assert_cmds': _empty_assert_cmds,
             'partial_fill_cmds': _partial_fill_cmds,
             'has_required': _has_required,
             'prisma_fields': _prisma_fields,

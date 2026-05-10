@@ -604,10 +604,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for cmd in required_fill_cmds %}
 {{ cmd }}
 {% endfor %}
-{{ I }}cy.openAccordion('{{ rel.section_label }}');
+{{ I }}cy.withinAccordion('{{ rel.section_label }}', () => {
 {% for cmd in rel.fill_cmds %}
 {{ cmd }}
 {% endfor %}
+{{ I }}});
 {{ I }}cy.clickButton('Save');
 {{ I }}cy.url().should('include', '/{{ parent }}');
 {{ I }}cy.url().should('not.include', '/{{ parent }}/');
@@ -633,10 +634,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for cmd in required_fill_cmds %}
 {{ cmd }}
 {% endfor %}
-        cy.contains('{{ rel.section_label }}').click();
+        cy.withinAccordion('{{ rel.section_label }}', () => {
 {% for cmd in rel.fill_cmds %}
 {{ cmd }}
 {% endfor %}
+        });
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}');
         cy.url().should('not.include', '/{{ parent }}/');
@@ -663,13 +665,22 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
           cy.url().should('include', '/{{ parent }}/edit');
-          cy.openAccordion('{{ rel.section_label }}');
+          cy.withinAccordion('{{ rel.section_label }}', () => {
 {% for cmd in rel.fill_cmds %}
-          {{ cmd | trim }}
+            {{ cmd | trim }}
 {% endfor %}
+          });
           cy.clickButton('Save');
           cy.url().should('include', '/{{ parent }}');
           cy.url().should('not.include', '/{{ parent }}/');
+          // Verify the new {{ rel.title }} values were persisted.
+          cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
+          cy.url().should('include', '/{{ parent }}/edit');
+          cy.withinAccordion('{{ rel.section_label }}', () => {
+{% for cmd in rel.assert_cmds %}
+            {{ cmd | trim }}
+{% endfor %}
+          });
         });
       });
 
@@ -688,13 +699,22 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
           cy.url().should('include', '/{{ parent }}/edit');
-          cy.openAccordion('{{ rel.section_label }}');
+          cy.withinAccordion('{{ rel.section_label }}', () => {
 {% for cmd in rel.fill_cmds %}
-          {{ cmd | trim }}
+            {{ cmd | trim }}
 {% endfor %}
+          });
           cy.clickButton('Save');
           cy.url().should('include', '/{{ parent }}');
           cy.url().should('not.include', '/{{ parent }}/');
+          // Verify the updated {{ rel.title }} values were persisted.
+          cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
+          cy.url().should('include', '/{{ parent }}/edit');
+          cy.withinAccordion('{{ rel.section_label }}', () => {
+{% for cmd in rel.assert_cmds %}
+            {{ cmd | trim }}
+{% endfor %}
+          });
         });
       });
 
@@ -711,13 +731,22 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
           cy.url().should('include', '/{{ parent }}/edit');
-          cy.openAccordion('{{ rel.section_label }}');
+          cy.withinAccordion('{{ rel.section_label }}', () => {
 {% for cmd in rel.clear_cmds %}
-          {{ cmd | trim }}
+            {{ cmd | trim }}
 {% endfor %}
+          });
           cy.clickButton('Save');
           cy.url().should('include', '/{{ parent }}');
           cy.url().should('not.include', '/{{ parent }}/');
+          // Verify the {{ rel.title }} fields render empty after removal.
+          cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
+          cy.url().should('include', '/{{ parent }}/edit');
+          cy.withinAccordion('{{ rel.section_label }}', () => {
+{% for cmd in rel.empty_assert_cmds %}
+            {{ cmd | trim }}
+{% endfor %}
+          });
         });
       });
 
@@ -736,10 +765,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for cmd in required_fill_cmds %}
 {{ cmd }}
 {% endfor %}
-          cy.openAccordion('{{ rel.section_label }}');
+          cy.withinAccordion('{{ rel.section_label }}', () => {
 {% for cmd in rel.partial_fill_cmds %}
-          {{ cmd | trim }}
+            {{ cmd | trim }}
 {% endfor %}
+          });
           cy.clickButton('Save');
           cy.url().should('include', '/{{ parent }}/new');
         });
@@ -748,10 +778,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for cmd in required_fill_cmds %}
 {{ cmd }}
 {% endfor %}
-        cy.contains('{{ rel.section_label }}').click();
+        cy.withinAccordion('{{ rel.section_label }}', () => {
 {% for cmd in rel.partial_fill_cmds %}
-        {{ cmd | trim }}
+          {{ cmd | trim }}
 {% endfor %}
+        });
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}/new');
 {% endif %}
@@ -771,10 +802,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
           cy.url().should('include', '/{{ parent }}/edit');
-          cy.openAccordion('{{ rel.section_label }}');
+          cy.withinAccordion('{{ rel.section_label }}', () => {
 {% for cmd in rel.partial_fill_cmds %}
-          {{ cmd | trim }}
+            {{ cmd | trim }}
 {% endfor %}
+          });
           cy.clickButton('Save');
           cy.url().should('include', '/{{ parent }}/edit');
         });
