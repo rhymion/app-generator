@@ -354,3 +354,48 @@ def get_parent_relationships(parent_def: dict, schema: dict | None = None) -> li
             'required': prop_name in required,
         })
     return result
+
+
+def find_fk_derivation_path(parent: str, parent_def: dict, target_q: str, schema: dict) -> dict | None:
+    """Walk the parent's m2o/o2o FKs to find a way to derive a value of target_q's id.
+
+    Used by the service generator when a flatten OTO target carries an external
+    required FK (e.g. lifestyle has required `patient_id` while it lives flatten-
+    inside `checkup`). The form does not ask the user for that FK — instead the
+    service must derive it from data the parent already has.
+
+    Walk depth = 2 (direct + one hop):
+      * direct  : parent has its own m2o/o2o FK pointing to `target_q`.
+      * one_hop : parent has FK to entity X, and X has a m2o/o2o FK to `target_q`.
+
+    Returns dict {kind, parent_fk, parent_fk_var, intermediate, intermediate_fk}
+    or None if no path exists. The caller emits the appropriate Prisma query
+    against the resolved path.
+    """
+    parent_rels = get_parent_relationships(parent_def, schema)
+
+    # Direct path — parent itself has an FK to target_q.
+    for rel in parent_rels:
+        if rel['target'] == target_q:
+            return {
+                'kind': 'direct',
+                'parent_fk': rel['prop_name'],
+                'intermediate': None,
+                'intermediate_fk': None,
+            }
+
+    # One-hop path — parent → X → target_q.
+    for rel in parent_rels:
+        x_def = schema['definitions'].get(rel['target'], {})
+        if not x_def:
+            continue
+        for x_rel in get_parent_relationships(x_def, schema):
+            if x_rel['target'] == target_q:
+                return {
+                    'kind': 'one_hop',
+                    'parent_fk': rel['prop_name'],
+                    'intermediate': rel['target'],
+                    'intermediate_fk': x_rel['prop_name'],
+                }
+
+    return None

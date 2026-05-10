@@ -874,13 +874,20 @@ def _compute_flatten_test_rels(parent: str, pascal: str, definition_key: str, sc
         if not _non_fk_fields:
             continue
 
-        _has_external_req_fk = any(
-            f.get('is_fk') and not f.get('nullable', True)
-            for f in _flat['fields']
-        )
-        _can_create_inline = not _has_external_req_fk
+        # The flatten OTO target may carry external required FKs (e.g.
+        # lifestyle.patient_id) that the form does not collect. The service
+        # generator derives those values from the parent's own FK chain
+        # (see find_fk_derivation_path), so the test always exercises the
+        # inline-create path — there is no longer a separate "update-only"
+        # category. _can_create_inline is kept True for every flatten OTO so
+        # that 8.x.1 (create with section) and 9.x.1 (add to existing) are
+        # generated for ALL of them.
+        _can_create_inline = True
 
         _target_def = schema['definitions'].get(_target, {})
+        # _is_optional_parent_fk is no longer used for test description wording
+        # (we render a single phrase regardless), but the rel data still carries
+        # it so future templates can branch if needed.
         _is_optional_parent_fk = is_optional_fk_to_parent(_target_def, parent)
 
         _title = to_title_case(_prop)

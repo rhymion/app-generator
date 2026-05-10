@@ -159,7 +159,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # --- service.ts + service_validation stub ---
         if can_new or can_edit or can_delete:
-            svc_ctx = {**ctx, **service_context(ctx)}
+            svc_ctx = {**ctx, **service_context(ctx, schema)}
             _write(lib_dir / 'service.ts', _render(env, 'service.ts.jinja2', svc_ctx))
             if can_new or can_edit:
                 val_ctx = {**ctx, **build_validation_context(ctx)}

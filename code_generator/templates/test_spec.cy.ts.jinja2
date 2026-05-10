@@ -718,7 +718,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         });
       });
 
-      it('9.{{ loop.index }}.3 edit: remove {{ rel.title }} (with → without, {{ "unlinked" if rel.is_optional_parent_fk else "deleted" }})', () => {
+      it('9.{{ loop.index }}.3 edit: remove {{ rel.title }} (with → without)', () => {
         cy.task<any[]>('db:populate{{ pascal }}With{{ rel.pascal }}', 1).then((records) => {
 {% if can_list and can_view %}
           cy.visit('/en/{{ parent }}');

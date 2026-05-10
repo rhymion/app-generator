@@ -239,6 +239,116 @@ def test_compute_flatten_test_rels_populates_empty_assert_cmds_for_checkup():
             )
 
 
+def test_9x3_title_drops_unlinked_or_deleted_word():
+    """The 9.x.3 it() title must use a single phrase regardless of whether the
+    target's parent FK is optional. Earlier versions emitted '(with → without,
+    unlinked)' for lifestyle and '(with → without, deleted)' for pre_check —
+    the user wants no test-side distinction."""
+    block = _block(_read(TEMPLATE), "9.{{ loop.index }}.3 edit")
+    assert "(with → without)" in block, (
+        "9.x.3 title must use the unified '(with → without)' phrasing."
+    )
+    assert "unlinked" not in block, (
+        "9.x.3 title must not branch on rel.is_optional_parent_fk (no 'unlinked')."
+    )
+    assert '"deleted"' not in block and "'deleted'" not in block, (
+        "9.x.3 title must not branch on rel.is_optional_parent_fk (no 'deleted')."
+    )
+
+
+def test_compute_flatten_test_rels_marks_lifestyle_as_inline_creatable():
+    """`_compute_flatten_test_rels` used to gate 8.x.1/9.x.1 on
+    can_create_inline = not _has_external_req_fk, which excluded lifestyle
+    (it has a required external `patient_id`). The service generator now
+    derives `patient_id` from `checkup.patient_rel.patient_id`, so the test
+    suite should generate inline-create tests for lifestyle too."""
+    import sys
+    sys.path.insert(0, str(REPO_ROOT / 'code_generator'))
+    import yaml
+    from generators_test import _compute_flatten_test_rels  # noqa: WPS433
+
+    schema_path = REPO_ROOT / 'code_generator' / 'json_schema.yaml'
+    schema = yaml.safe_load(schema_path.read_text(encoding='utf-8'))
+    rels = _compute_flatten_test_rels('checkup', 'Checkup', 'checkup_detail', schema)
+    by_prop = {r['prop_name']: r for r in rels}
+    assert 'lifestyle' in by_prop, "lifestyle must be a flatten rel of checkup"
+    assert by_prop['lifestyle']['can_create_inline'] is True, (
+        "lifestyle must be inline-creatable now that the service derives patient_id"
+    )
+    # All flatten rels of checkup share the same can_create_inline = True contract.
+    for prop, r in by_prop.items():
+        assert r['can_create_inline'] is True, (
+            f"flatten rel {prop} should be inline-creatable (no more update-only path)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Service-side derivation for external required FKs
+# ---------------------------------------------------------------------------
+
+def test_find_fk_derivation_path_resolves_one_hop():
+    """checkup → patient_rel → patient is a one-hop derivation path."""
+    import sys
+    sys.path.insert(0, str(REPO_ROOT / 'code_generator'))
+    import yaml
+    from helpers.schema_helpers import find_fk_derivation_path  # noqa: WPS433
+
+    schema_path = REPO_ROOT / 'code_generator' / 'json_schema.yaml'
+    schema = yaml.safe_load(schema_path.read_text(encoding='utf-8'))
+    parent_def = schema['definitions']['checkup']
+    path = find_fk_derivation_path('checkup', parent_def, 'patient', schema)
+    assert path is not None, "checkup must reach patient via patient_rel"
+    assert path['kind'] == 'one_hop'
+    assert path['parent_fk'] == 'patient_rel_id'
+    assert path['intermediate'] == 'patient_rel'
+    assert path['intermediate_fk'] == 'patient_id'
+
+
+def test_find_fk_derivation_path_returns_none_when_unreachable():
+    """Schema with no path returns None — caller falls back to update-only."""
+    import sys
+    sys.path.insert(0, str(REPO_ROOT / 'code_generator'))
+    from helpers.schema_helpers import find_fk_derivation_path  # noqa: WPS433
+    schema = {
+        'definitions': {
+            'parent_only': {
+                'type': 'object',
+                'required': ['id'],
+                'properties': {'id': {'type': 'string'}},
+            },
+            'unreachable_target': {
+                'type': 'object',
+                'required': ['id'],
+                'properties': {'id': {'type': 'string'}},
+            },
+        },
+    }
+    parent_def = schema['definitions']['parent_only']
+    assert find_fk_derivation_path('parent_only', parent_def, 'unreachable_target', schema) is None
+
+
+def test_generated_service_creates_lifestyle_inline_with_derived_patient_id():
+    """Real-codegen check: lib/checkup/service.ts must contain the inline
+    lifestyle.create with patient_id derived from patient_rel.findUnique."""
+    service_src = (REPO_ROOT / 'lib' / 'checkup' / 'service.ts').read_text(encoding='utf-8')
+    # The addCheckup branch must inline-create lifestyle.
+    assert 'tx.lifestyle.create' in service_src, (
+        "addCheckup must inline-create lifestyle now that the test gen "
+        "expects 8.3.1 ('create checkup with Lifestyle section filled') to work."
+    )
+    # And it must derive patient_id from patient_rel.
+    assert 'tx.patient_rel.findUnique' in service_src, (
+        "Service must derive lifestyle.patient_id from patient_rel "
+        "(the form does not collect patient_id for the inline lifestyle)."
+    )
+    # The legacy update-only branch (`updateMany` without create-on-miss) must
+    # not be present alone for lifestyle on the update path.
+    assert 'tx.lifestyle.upsert' in service_src, (
+        "updateCheckup must upsert lifestyle so a freshly-added section "
+        "(9.3.1: add Lifestyle to checkup without one) gets persisted."
+    )
+
+
 def test_gen_empty_assert_command_emits_empty_check_for_text_and_enum():
     """gen_empty_assert_command must emit `cy.checkField(label, '')` for non-bool fields."""
     import sys

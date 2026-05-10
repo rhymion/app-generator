@@ -11,7 +11,11 @@ from helpers.naming import (
     safe_var_name, singularize,
 )
 from helpers.type_mapping import get_ts_type
-from helpers.schema_helpers import get_parent_relationships, get_parent_fk_props
+from helpers.schema_helpers import (
+    get_parent_relationships,
+    get_parent_fk_props,
+    find_fk_derivation_path,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -421,8 +425,9 @@ def actions_context(ctx: dict) -> dict:
 # service.ts
 # ---------------------------------------------------------------------------
 
-def service_context(ctx: dict) -> dict:
+def service_context(ctx: dict, schema: dict | None = None) -> dict:
     parent                  = ctx['parent']
+    parent_def              = (schema or {}).get('definitions', {}).get(parent, {})
     model                   = ctx['model']
     parent_pascal           = ctx['parent_pascal']
     can_create              = ctx['can_create']
@@ -473,15 +478,64 @@ def service_context(ctx: dict) -> dict:
         flatten_update_params_parts.append(f"{_var}: {_ts_type} | null")
         # FK pointing back to parent: {parent_model}_id
         _fk_field = f'{model}_id'
-        # Detect if any non-nullable FK field points to an external entity (not the parent)
-        # Such rels can't be created inline (missing required FK data)
-        _has_external_req_fk = any(
-            f.get('is_fk') and not f.get('nullable', True)
-            for f in _flat['fields']
-        )
-        if _has_external_req_fk:
-            # Can only update existing records — use updateMany
-            # On null: unlink by setting FK to null (parent FK is optional in target)
+        # Whether the FK back to parent is optional on the target side. When it's
+        # optional, "remove" means unlink (set to null and keep the row); when
+        # it's required, "remove" means delete. The inline-create path is the
+        # same in both cases.
+        _target_def = (schema or {}).get('definitions', {}).get(_target, {}) if schema else {}
+        _target_props = _target_def.get('properties', {})
+        _fk_prop = _target_props.get(_fk_field, {})
+        _fk_type = _fk_prop.get('type')
+        _parent_fk_optional_on_target = isinstance(_fk_type, list) and 'null' in _fk_type
+
+        # External required FKs that the form does NOT collect — must be
+        # derived from the parent's own data (e.g. lifestyle.patient_id is
+        # derived from checkup.patient_rel.patient_id). When a derivation path
+        # exists, generate the lookup; otherwise fall back to update-only and
+        # leave a TODO so the schema author can supply a path.
+        _external_req_fks = [
+            f for f in _flat['fields']
+            if f.get('is_fk') and not f.get('nullable', True) and f.get('fk_target') != parent
+        ]
+
+        _derivation_decls: list[str] = []  # `const xId = …` lines
+        _create_extras: list[str] = []     # extra `field: xId,` entries spread into create.data
+        _derivation_failed = False
+        for _fk in _external_req_fks:
+            _fk_name = _fk['name']                          # e.g. 'patient_id'
+            _fk_target_q = _fk['fk_target']                 # e.g. 'patient'
+            _path = find_fk_derivation_path(parent, parent_def, _fk_target_q, schema or {}) if schema else None
+            if _path is None:
+                _derivation_failed = True
+                break
+            _local_var = to_camel_case(_target) + to_pascal_case(_fk_name)  # e.g. 'lifestylePatientId'
+            if _path['kind'] == 'direct':
+                # Parent already has its own FK to this entity — use it.
+                _parent_fk_param = to_camel_case(_path['parent_fk'])
+                _derivation_decls.append(f"      const {_local_var} = {_parent_fk_param};")
+            else:
+                # one_hop: query the intermediate table to fetch the FK.
+                _parent_fk_param = to_camel_case(_path['parent_fk'])
+                _intermediate = _path['intermediate']
+                _intermediate_fk = _path['intermediate_fk']
+                _row_var = to_camel_case(_target) + to_pascal_case(_intermediate) + 'Row'
+                _derivation_decls.append(
+                    f"      const {_row_var} = await tx.{_intermediate}.findUnique({{\n"
+                    f"        where: {{ id: {_parent_fk_param} }},\n"
+                    f"        select: {{ {_intermediate_fk}: true }},\n"
+                    f"      }});\n"
+                    f"      if (!{_row_var}) throw new Error('{_intermediate} not found while deriving {_target}.{_fk_name}');\n"
+                    f"      const {_local_var} = {_row_var}.{_intermediate_fk};"
+                )
+            _create_extras.append(f"{_fk_name}: {_local_var}, ")
+
+        if _derivation_failed:
+            # Schema doesn't expose a path to the external FK — keep the old
+            # update-only behaviour so we don't break generation. This branch
+            # is hit when the flatten target's required FK target isn't
+            # reachable from the parent within two FK hops.
+            _create_extras_str = ''
+            _has_create_block = False
             flatten_nested_update_lines.append(
                 f"    if ({_var}) {{\n"
                 f"      await tx.{_target}.updateMany({{\n"
@@ -489,33 +543,54 @@ def service_context(ctx: dict) -> dict:
                 f"        data: {_var},\n"
                 f"      }});\n"
                 f"    }} else {{\n"
+                f"      // TODO: external required FK on {_target} has no derivable path from {parent}\n"
                 f"      await tx.{_target}.updateMany({{\n"
                 f"        where: {{ {_fk_field}: id }},\n"
                 f"        data: {{ {_fk_field}: null }},\n"
                 f"      }});\n"
                 f"    }}"
             )
-        else:
-            # No external required FKs — can create or update inline using upsert
-            # On null: delete the child record (parent FK is required, orphan not possible)
-            flatten_nested_update_lines.append(
-                f"    if ({_var}) {{\n"
-                f"      await tx.{_target}.upsert({{\n"
+            continue
+
+        _create_extras_str = ''.join(_create_extras)
+        # On remove (`null` UpdateData): if the target's parent FK is optional,
+        # keep the row and unlink (set FK to null); otherwise delete the row.
+        if _parent_fk_optional_on_target:
+            _on_null_update = (
+                f"      await tx.{_target}.updateMany({{\n"
                 f"        where: {{ {_fk_field}: id }},\n"
-                f"        create: {{ {_fk_field}: id, creator_id: userId, updater_id: userId, ...{_var} }},\n"
-                f"        update: {_var},\n"
-                f"      }});\n"
-                f"    }} else {{\n"
-                f"      await tx.{_target}.deleteMany({{ where: {{ {_fk_field}: id }} }});\n"
-                f"    }}"
+                f"        data: {{ {_fk_field}: null }},\n"
+                f"      }});"
             )
-            flatten_nested_create_lines.append(
-                f"    if ({_var}) {{\n"
-                f"      await tx.{_target}.create({{\n"
-                f"        data: {{ {_fk_field}: created.id, creator_id: userId, updater_id: userId, ...{_var} }},\n"
-                f"      }});\n"
-                f"    }}"
+        else:
+            _on_null_update = (
+                f"      await tx.{_target}.deleteMany({{ where: {{ {_fk_field}: id }} }});"
             )
+
+        # Update path — always upsert so a freshly-added flatten section gets
+        # created on save, regardless of whether the target's parent FK is
+        # optional (lifestyle) or required (pre_check, checkup_judgment).
+        flatten_nested_update_lines.append(
+            f"    if ({_var}) {{\n"
+            + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
+            + f"      await tx.{_target}.upsert({{\n"
+            f"        where: {{ {_fk_field}: id }},\n"
+            f"        create: {{ {_fk_field}: id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_var} }},\n"
+            f"        update: {_var},\n"
+            f"      }});\n"
+            f"    }} else {{\n"
+            f"{_on_null_update}\n"
+            f"    }}"
+        )
+        # Add path — always emit inline-create.
+        flatten_nested_create_lines.append(
+            f"    if ({_var}) {{\n"
+            + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
+            + f"      await tx.{_target}.create({{\n"
+            f"        data: {{ {_fk_field}: created.id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_var} }},\n"
+            f"      }});\n"
+            f"    }}"
+        )
 
     flatten_update_params = ', '.join(flatten_update_params_parts)
     flatten_nested_updates = '\n'.join(flatten_nested_update_lines)
