@@ -18,7 +18,19 @@ function getFieldContainer(label: string) {
 }
 
 function getAutocompleteInput(label: string) {
-  return getFormLabel(label).then(($label) => {
+  // Filter to labels whose target input is inside a `.MuiAutocomplete-root`.
+  // The base form may render two TextFields with the same label — e.g. an
+  // outer `<NumberField>` and an Autocomplete inside a flatten Accordion.
+  // Without this filter, getFormLabel picks the first match (often the
+  // non-autocomplete one) and selectAutocomplete fails to find a dropdown.
+  const normalizedTarget = normalizeLabelText(label);
+  return cy.get('form label').filter((_, el) => {
+    if (normalizeLabelText(el.textContent ?? '') !== normalizedTarget) return false;
+    const forAttr = el.getAttribute('for');
+    if (!forAttr) return false;
+    const input = el.ownerDocument.getElementById(forAttr);
+    return !!input?.closest('.MuiAutocomplete-root');
+  }).first().then(($label) => {
     const inputId = $label.attr('for');
     if (inputId) {
       const input = $label[0].ownerDocument.getElementById(inputId);
@@ -35,7 +47,11 @@ function getAutocompleteInput(label: string) {
 }
 
 function normalizeLabelText(text: string) {
-  return text.replace(/\*/g, '').replace(/\s+/g, ' ').trim();
+  // Lowercase so the test's `to_title_case` form (e.g. "Date Of Birth") matches
+  // a hand-edited i18n string like "Date of Birth". The generator emits
+  // labels via `to_title_case(prop_name)`, but i18n strings are user-editable
+  // and frequently lowercase short connectors ("of", "in", "and", …).
+  return text.replace(/\*/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 function getLabelByText(selector: string, label: string) {
@@ -117,7 +133,12 @@ Cypress.Commands.add('clearField', (label: string) => {
 });
 
 /**
- * Select an option from MUI Autocomplete by label
+ * Select an option from MUI Autocomplete by label.
+ *
+ * Uses an EXACT-MATCH regex on the option text so that picking
+ * "Test Patient No" doesn't accidentally hit "Test Patient No 2"
+ * (which substring-contains the former). Default `cy.contains` is
+ * substring-based, and the dropdown order isn't predictable.
  */
 Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) => {
   getAutocompleteInput(label).then(($input) => {
@@ -126,10 +147,12 @@ Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) =
   getAutocompleteInput(label).then(($input) => {
     cy.wrap($input).type('{selectall}' + optionText, { force: true });
   });
+  const escaped = optionText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const exactRe = new RegExp(`^${escaped}$`);
   cy.get('body').then(($body) => {
     const optionSelector = '[role="listbox"] [role="option"], .MuiAutocomplete-popper li';
     if ($body.find(optionSelector).length > 0) {
-      cy.get(optionSelector).contains(optionText).click();
+      cy.get(optionSelector).contains(exactRe).click();
       return;
     }
     getAutocompleteInput(label).then(($input) => {
@@ -223,6 +246,44 @@ Cypress.Commands.add('selectDataGridRows', (indices: number[]) => {
   });
 });
 
+/**
+ * Expand a MUI Accordion section by its header label.
+ *
+ * The generated forms render flatten-rel sections as `<Accordion>` blocks; e2e
+ * tests need to open them before filling fields. Idempotent — clicking an
+ * already-open accordion would close it, so we only click when collapsed.
+ */
+Cypress.Commands.add('openAccordion', (label: string) => {
+  cy.contains('.MuiAccordionSummary-root', label).then(($el) => {
+    if ($el.attr('aria-expanded') !== 'true') {
+      cy.wrap($el).click();
+    }
+  });
+});
+
+/**
+ * Open an Accordion by header label and run the callback scoped to its body.
+ *
+ * Cypress' `cy.within` restricts subsequent `cy.get` calls to descendants of
+ * the subject. The flatten section may render fields whose labels collide
+ * with fields on the outer parent form (e.g. `checkup.total_testosterone` is
+ * a NumberField on the parent and `checkup_judgment.total_testosterone` is
+ * an enum Autocomplete inside the Checkup Judgment accordion). Without
+ * scoping, `cy.checkField('Total Testosterone', …)` would match the first
+ * label on the page — almost always the wrong one.
+ */
+Cypress.Commands.add('withinAccordion', (label: string, fn: () => void) => {
+  cy.contains('.MuiAccordionSummary-root', label).then(($el) => {
+    if ($el.attr('aria-expanded') !== 'true') {
+      cy.wrap($el).click();
+    }
+  });
+  cy.contains('.MuiAccordionSummary-root', label)
+    .parents('.MuiAccordion-root')
+    .find('.MuiAccordionDetails-root')
+    .within(fn);
+});
+
 // TypeScript definitions
 declare global {
   namespace Cypress {
@@ -241,6 +302,8 @@ declare global {
       fillTime(label: string, dateString: string): Chainable<void>;
       clearDateTime(label: string): Chainable<void>;
       selectDataGridRows(indices: number[]): Chainable<void>;
+      openAccordion(label: string): Chainable<void>;
+      withinAccordion(label: string, fn: () => void): Chainable<void>;
     }
   }
 }

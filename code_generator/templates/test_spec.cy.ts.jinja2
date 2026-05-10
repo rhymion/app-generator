@@ -85,7 +85,12 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_view and can_list %}
 {{ I }}// Verify on view page
 {% if after_create_id_is_expr %}
-{{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
+{{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).should('be.visible');
+{{ I }}// Click the newest row (last in default id-asc order) to navigate. The
+{{ I }}// dep helper may have left other rows with the same primary FK label
+{{ I }}// (e.g. self-ref `prev` medicine sharing the test patient), which would
+{{ I }}// make a substring `cy.contains` ambiguous.
+{{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
 {% elif not list_id_is_unique %}
 {{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
 {% else %}
@@ -162,7 +167,8 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_view and can_list %}
 {{ I }}// Verify on view page
 {% if after_create_id_is_expr %}
-{{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
+{{ I }}// Click the newest row (last in default id-asc order); see 2.1 above.
+{{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
 {% elif not list_id_is_unique %}
 {{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
 {% else %}
@@ -263,7 +269,12 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
 {% endif %}
         cy.url().should('include', '/{{ parent }}/view');
+{% if check_field_use_accordion %}
+        cy.openAccordion('{{ check_field_label }}');
+        cy.checkField('{{ check_field_inner_label }}', '{{ check_field_value_1 }}');
+{% else %}
         cy.checkField('{{ check_field_label }}', '{{ check_field_value_1 }}');
+{% endif %}
 {% endif %}
       });
     });
@@ -351,12 +362,22 @@ describe('Testing {{ title }} pages and their behavior', () => {
         // Verify on view page
         cy.contains('{{ list_id_updated }}').click();
         cy.url().should('include', '/{{ parent }}/view');
+{% if check_field_use_accordion %}
+        cy.openAccordion('{{ check_field_label }}');
+        cy.checkField('{{ check_field_inner_label }}', '{{ check_field_updated }}');
+{% else %}
         cy.checkField('{{ check_field_label }}', '{{ check_field_updated }}');
+{% endif %}
 {% elif can_view %}
         // Verify on view page
         cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
         cy.url().should('include', '/{{ parent }}/view');
+{% if check_field_use_accordion %}
+        cy.openAccordion('{{ check_field_label }}');
+        cy.checkField('{{ check_field_inner_label }}', '{{ check_field_updated }}');
+{% else %}
         cy.checkField('{{ check_field_label }}', '{{ check_field_updated }}');
+{% endif %}
 {% endif %}
       });
 {% if use_deps_in_3_3 %}
@@ -595,10 +616,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}cy.url().should('include', '/{{ parent }}/view');
 {{ I }}cy.get('[aria-label="Edit"]').click();
 {{ I }}cy.url().should('include', '/{{ parent }}/edit');
-{{ I }}cy.openAccordion('{{ rel.section_label }}');
+{{ I }}cy.withinAccordion('{{ rel.section_label }}', () => {
 {% for cmd in rel.assert_cmds %}
 {{ cmd }}
 {% endfor %}
+{{ I }}});
 {% endif %}
         });
 {% else %}
