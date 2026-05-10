@@ -162,7 +162,21 @@ export default function DataGridClient<T extends BaseEntity>({
         width: fieldConfig.width || 150,
         renderCell: (params) => {
           const fieldValue = params.row[fieldConfig.field];
-          return <Link href={`${basePath}/view/${params.id}`}>
+          // The link must stay within the cell's width. Without these styles
+          // the `<a>` extends to its full text width and visually overlaps the
+          // next column, which makes Cypress' `cy.click()` fail with "is being
+          // covered by another element" because the next cell's div sits over
+          // the overflowing portion of the link.
+          return <Link
+            href={`${basePath}/view/${params.id}`}
+            sx={{
+              display: 'block',
+              maxWidth: '100%',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
             {`${(fieldValue && typeof fieldValue === 'object' && 'name' in fieldValue ? fieldValue.name : String(fieldValue || params.id))}`}
           </Link>;
         },
