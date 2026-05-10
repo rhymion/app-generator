@@ -14,6 +14,8 @@ from helpers.schema_helpers import (
     get_detail_relation_name,
     is_optional_fk_to_parent,
     get_one_to_one_rels,
+    get_detail_ref_rels,
+    get_flatten_rels,
 )
 
 
@@ -60,6 +62,23 @@ class OneToOneRelInfo:
 
 
 @dataclass
+class ReverseOtoRelInfo:
+    prop_name: str           # TypeScript property name, e.g. "checkup_judgment"
+    relation_name: str       # Prisma relation field name (may differ), e.g. "judgement"
+    target: str              # entity name, e.g. "checkup_judgment"
+    label_field: str         # field to show as display value
+    label_field_is_date: bool
+
+
+@dataclass
+class FlattenRelInfo:
+    prop_name: str           # TypeScript property name, e.g. "lifestyle"
+    relation_name: str       # Prisma relation name (may differ), e.g. "lifestyle"
+    target: str              # entity name, e.g. "lifestyle"
+    is_m2o: bool             # True when FK lives in the parent model
+
+
+@dataclass
 class EntityContext:
     parent: str
     model: str
@@ -71,6 +90,8 @@ class EntityContext:
     form_view_fields: list[FieldInfo]   # parent fields minus timestamps
     all_option_targets: list[str]       # for FormUpsertProps allXxx / xxxPermissions
     one_to_one_rels: list[OneToOneRelInfo]  # one-to-one outbound FK rels with nested children
+    reverse_oto_rels: list[ReverseOtoRelInfo]  # reverse OTO: FK in target pointing back to this model
+    flatten_rels: list[FlattenRelInfo]         # flatten rels: shown as collapsible accordion in detail view
     entity_view_component: str | None = None   # custom component rendered in FormView
     entity_edit_component: str | None = None   # custom component rendered in FormUpsert
 
@@ -110,6 +131,22 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     merged_def = {**model_def, 'properties': filtered_props}
     rels_raw = get_parent_relationships(merged_def)
 
+    parent_fields = [FieldInfo(k, get_ts_type(v)) for k, v in filtered_props.items()]
+    parent_fields.append(FieldInfo('creator_id', 'string | null'))  # enforce id as string for permissions
+
+    # Compute all OTO rels early so we can split and use for FK-name exclusions
+    oto_rels_early = get_one_to_one_rels({**model_def, 'properties': filtered_props}, schema)
+    _auto_create_oto_early = [r for r in oto_rels_early if not r['is_selector']]
+    _selector_oto_early    = [r for r in oto_rels_early if r['is_selector']]
+    _all_oto_prop_names = {r['prop_name'] for r in oto_rels_early}
+
+    # Remove all OTO relations from the m2o-style list. Selector OTO is re-added
+    # below as a parent_rel (autocomplete UI). Auto-create OTO (commentable/
+    # approvable bridges) is handled via the dedicated `one_to_one_rels` list
+    # downstream — letting it stay here would produce duplicate type fields,
+    # duplicate includes, and bogus initial/search option props.
+    rels_raw = [r for r in rels_raw if r['prop_name'] not in _all_oto_prop_names]
+
     # Dedupe by target for import purposes only (each target type imported once)
     seen_targets: dict[str, dict] = {}
     for r in rels_raw:
@@ -126,19 +163,12 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         for r in rels_raw
     ]
 
-    parent_fields = [FieldInfo(k, get_ts_type(v)) for k, v in filtered_props.items()]
-    parent_fields.append(FieldInfo('creator_id', 'string | null'))  # enforce id as string for permissions
-
-    # One-to-one FK props (computed early for form_view_fields exclusion)
-    _oto_fk_names_early = {
-        p for p, v in filtered_props.items()
-        if (v.get('x-relationship') or {}).get('type') == 'one-to-one'
-    }
-
+    # All OTO FK props are excluded from form_view_fields — the selector OTO rels will be
+    # displayed through parent_rels (like many-to-one), and auto-create OTO via nested includes
     form_view_fields = [
         FieldInfo(k, get_ts_type(v, for_view_props=True))
         for k, v in filtered_props.items()
-        if k not in _TIMESTAMP_FIELDS and k not in _oto_fk_names_early
+        if k not in _TIMESTAMP_FIELDS and k not in _all_oto_prop_names
     ]
 
     # Child many-to-one rels — needed early for import target and option calculation.
@@ -152,9 +182,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         if child_def.get('properties'):
             child_rels_early.extend(get_parent_relationships(child_def))
 
-    # One-to-one outbound FK rels (computed early for import targets)
-    oto_rels_early = get_one_to_one_rels({**model_def, 'properties': filtered_props}, schema)
-    # Only import oto child rel targets that have their own generated types
+    # Only import auto-create OTO child rel targets that have their own generated types
     def _has_generated_types(target: str) -> bool:
         detail = schema['definitions'].get(f'{target}_detail', {})
         gen = detail.get('x-generate') or {}
@@ -162,21 +190,41 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
 
     oto_child_rel_targets = [
         cr['target']
-        for oto in oto_rels_early
+        for oto in _auto_create_oto_early
         for c in oto['children']
         for cr in c['child_rels']
         if cr['target'] != oto['target'] and _has_generated_types(cr['target'])
     ]
 
-    # Import targets = union of parent + child + one-to-one nested rel targets
+    # Selector OTO rels are treated like many-to-one for display and type generation
+    # Add them to parent_rels so they get RelInfo, XxxOption types, and autocomplete UI
+    for r in _selector_oto_early:
+        parent_rels.append(RelInfo(
+            relation_name=r['relation_name'],
+            target=r['target'],
+            label_field=r['label_field'],
+        ))
+
+    # Reverse OTO rels (FK lives in target, not in this model) — display-only in detail view
+    _reverse_oto_early = get_detail_ref_rels(parent, {**model_def, 'properties': filtered_props}, schema)
+
+    # Flatten rels (x-outputType: flatten on non-array $ref in _detail)
+    _flatten_rels_raw = get_flatten_rels(parent, {**model_def, 'properties': filtered_props}, schema)
+    # Only non-m2o flatten rels need new type imports (m2o targets are already in parent_rels)
+    _flatten_non_m2o_targets = [r['target'] for r in _flatten_rels_raw if not r['is_m2o']]
+
+    # Import targets = union of parent + child + auto-create OTO nested rel targets + selector OTO + reverse OTO + flatten
     all_import_targets = _dedupe_ordered([
         *[r['target'] for r in relationship_targets],
         *[r['target'] for r in child_rels_early],
         *oto_child_rel_targets,
+        *[r['target'] for r in _selector_oto_early],
+        *[r['target'] for r in _reverse_oto_early],
+        *_flatten_non_m2o_targets,
     ])
     import_targets = [t for t in all_import_targets if t != model]
 
-    # XxxOption types — parent rels whose target is not the model itself (deduplicated by target)
+    # XxxOption types — parent rels (including selector OTO) whose target is not the model (deduplicated)
     _seen_option_targets: set[str] = set()
     option_types = []
     for r in parent_rels:
@@ -254,10 +302,10 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         *child_rel_targets,
     ])
 
-    # One-to-one outbound FK rels with nested children (for types + display)
-    oto_rels_raw = get_one_to_one_rels({**model_def, 'properties': filtered_props}, schema)
+    # Auto-create OTO rels with nested children (for types + display)
+    # Selector OTO rels are already handled via parent_rels above
     one_to_one_rels: list[OneToOneRelInfo] = []
-    for oto in oto_rels_raw:
+    for oto in _auto_create_oto_early:
         oto_children: list[OneToOneChildInfo] = []
         for c in oto['children']:
             child_def = c['child_def']
@@ -284,6 +332,29 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             children=oto_children,
         ))
 
+    # Reverse OTO rels for template rendering
+    reverse_oto_rels = [
+        ReverseOtoRelInfo(
+            prop_name=r['prop_name'],
+            relation_name=r.get('relation_name', r['prop_name']),
+            target=r['target'],
+            label_field=r['label_field'],
+            label_field_is_date=r.get('label_field_is_date', False),
+        )
+        for r in _reverse_oto_early
+    ]
+
+    # Flatten rels for type generation (non-m2o ones need new optional fields in CheckupDetail)
+    flatten_rels = [
+        FlattenRelInfo(
+            prop_name=r['prop_name'],
+            relation_name=r.get('relation_name', r['prop_name']),
+            target=r['target'],
+            is_m2o=r['is_m2o'],
+        )
+        for r in _flatten_rels_raw
+    ]
+
     # Custom view/edit components from x-custom-component config
     _xcc = schema['definitions'].get(def_key, {}).get('x-custom-component') or {}
     _xcc_name = _xcc.get('name')
@@ -302,6 +373,8 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         form_view_fields=form_view_fields,
         all_option_targets=all_option_targets,
         one_to_one_rels=one_to_one_rels,
+        reverse_oto_rels=reverse_oto_rels,
+        flatten_rels=flatten_rels,
         entity_view_component=entity_view_component,
         entity_edit_component=entity_edit_component,
     )

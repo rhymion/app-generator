@@ -4,6 +4,97 @@
  * Custom Cypress commands
  */
 
+function getFieldContainer(label: string) {
+  return getFormLabel(label).then(($label) => {
+    const inputId = $label.attr('for');
+    if (inputId) {
+      const input = $label[0].ownerDocument.getElementById(inputId);
+      if (input) {
+        return cy.wrap(input).closest('.MuiFormControl-root, .MuiAutocomplete-root');
+      }
+    }
+    return cy.wrap($label).closest('.MuiFormControl-root, .MuiAutocomplete-root');
+  });
+}
+
+function getAutocompleteInput(label: string) {
+  // Filter to labels whose target input is inside a `.MuiAutocomplete-root`.
+  // The base form may render two TextFields with the same label — e.g. an
+  // outer `<NumberField>` and an Autocomplete inside a flatten Accordion.
+  // Without this filter, getFormLabel picks the first match (often the
+  // non-autocomplete one) and selectAutocomplete fails to find a dropdown.
+  //
+  // Selector is `'label'` filtered by `closest('form')` (not `'form label'`).
+  // When this helper runs inside `cy.within(.MuiAccordionDetails-root)`,
+  // the within-subject restricts cy.get's search root — but the accordion
+  // body has no `<form>` descendant of its own (the form wraps the accordion).
+  // So `'form label'` returns nothing inside the within-scope. `closest('form')`
+  // walks up the actual DOM tree, independent of within-subject, so it still
+  // finds the outer FormUpsert form correctly in both contexts.
+  const normalizedTarget = normalizeLabelText(label);
+  return cy.get('label').filter((_, el) => {
+    if (!el.closest('form')) return false;
+    if (normalizeLabelText(el.textContent ?? '') !== normalizedTarget) return false;
+    const forAttr = el.getAttribute('for');
+    if (!forAttr) return false;
+    const input = el.ownerDocument.getElementById(forAttr);
+    return !!input?.closest('.MuiAutocomplete-root');
+  }).first().then(($label) => {
+    const inputId = $label.attr('for');
+    if (inputId) {
+      const input = $label[0].ownerDocument.getElementById(inputId);
+      if (input) {
+        return cy.wrap(input);
+      }
+    }
+    return cy
+      .wrap($label)
+      .closest('.MuiFormControl-root, .MuiAutocomplete-root')
+      .find('input[role="combobox"], input')
+      .first();
+  });
+}
+
+function normalizeLabelText(text: string) {
+  // Lowercase so the test's `to_title_case` form (e.g. "Date Of Birth") matches
+  // a hand-edited i18n string like "Date of Birth". The generator emits
+  // labels via `to_title_case(prop_name)`, but i18n strings are user-editable
+  // and frequently lowercase short connectors ("of", "in", "and", …).
+  return text.replace(/\*/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function getLabelByText(selector: string, label: string) {
+  const normalizedTarget = normalizeLabelText(label);
+  return cy.get(selector).filter((_, el) => {
+    return normalizeLabelText(el.textContent ?? '') === normalizedTarget;
+  }).first();
+}
+
+function getFormLabel(label: string) {
+  // Use cy.get(...).filter(...).first() so the chain re-queries the DOM on
+  // every retry. The previous implementation used .then(() => cy.wrap(matches))
+  // which captured a static jQuery reference — when MUI X / hydration
+  // detached the wrapped <label>, downstream .parent() / .find() would fail
+  // with "page updated as a result of this command, ... no longer attached
+  // to the DOM" instead of retrying.
+  //
+  // Selector is `'label'` filtered by `closest('form')` (not `'form label'`).
+  // Reason: when this helper runs inside `cy.within(.MuiAccordionDetails-root)`
+  // the within-subject restricts cy.get's search root, and the accordion body
+  // has no `<form>` descendant of its own — so `'form label'` returns nothing.
+  // `closest('form')` walks up the actual DOM tree (ignoring the within-subject)
+  // and still finds the outer FormUpsert form ancestor in both contexts.
+  const normalizedTarget = normalizeLabelText(label);
+  return cy.get('label').filter((_, el) =>
+    !!el.closest('form') &&
+    normalizeLabelText(el.textContent ?? '') === normalizedTarget
+  ).first();
+}
+
+function getAnyLabel(label: string) {
+  return getLabelByText('label', label);
+}
+
 // Login command
 Cypress.Commands.add('login', (email, password) => {
     cy.session([email, password], () => {
@@ -26,7 +117,11 @@ Cypress.Commands.add('fillField', (label: string, value: string) => {
   // navigation (FormView renders real <input> elements with identical labels).
   // Use DOM traversal — not forAttr ID lookup — because MUI auto-generates input IDs
   // that can differ between SSR and hydration, making a cached ID stale.
-  cy.get('form').contains('label', label).parent().find('input, textarea').first().type(value);
+  // Type with `{selectall}` so the new value REPLACES whatever the field already
+  // holds. Without this, `cy.fillField('Comment', 'Test Comment')` on an edit
+  // form whose Comment is pre-populated with 'Test Comment' produces
+  // 'Test CommentTest Comment' — caught by 9.x.2 post-save verification.
+  getFormLabel(label).parent().find('input, textarea').first().type('{selectall}' + value);
 });
 
 /**
@@ -41,46 +136,80 @@ Cypress.Commands.add('clickButton', (text: string) => {
  * Handles both associated labels (using 'for' attribute) and wrapped labels
  */
 Cypress.Commands.add('checkField', (label: string, expectedValue: string) => {
-  cy.contains('label', label).parent().find('input, textarea').first().should('have.value', expectedValue);
+  getAnyLabel(label).parent().find('input, textarea').first().should('have.value', expectedValue);
 });
 
 /**
  * Clear and re-fill a labeled form field (for editing existing values)
  */
 Cypress.Commands.add('clearAndFillField', (label: string, value: string) => {
-  cy.get('form').contains('label', label).parent().find('input, textarea').first().type('{selectall}' + value);
+  getFormLabel(label).parent().find('input, textarea').first().type('{selectall}' + value);
 });
 
 /**
  * Clear a labeled form field value entirely
  */
 Cypress.Commands.add('clearField', (label: string) => {
-  cy.get('form').contains('label', label).parent().find('input, textarea').first().type('{selectall}{backspace}');
+  getFormLabel(label).parent().find('input, textarea').first().type('{selectall}{backspace}');
 });
 
 /**
- * Select an option from MUI Autocomplete by label
+ * Select an option from MUI Autocomplete by label.
+ *
+ * Uses an EXACT-MATCH regex on the option text so that picking
+ * "Test Patient No" doesn't accidentally hit "Test Patient No 2"
+ * (which substring-contains the former). Default `cy.contains` is
+ * substring-based, and the dropdown order isn't predictable.
  */
 Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) => {
-  cy.get('form').contains('label', label).parent().find('input').first().type('{selectall}' + optionText);
-  cy.get('.MuiAutocomplete-popper li').contains(optionText).click();
+  getAutocompleteInput(label).then(($input) => {
+    cy.wrap($input).click({ force: true });
+  });
+  getAutocompleteInput(label).then(($input) => {
+    cy.wrap($input).type('{selectall}' + optionText, { force: true });
+  });
+  const escaped = optionText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const exactRe = new RegExp(`^${escaped}$`);
+  // The MUI Autocomplete popper portals to document.body — it is NOT a
+  // descendant of the input's accordion. When this command runs inside
+  // `cy.within(.MuiAccordionDetails-root)` (e.g. via cy.withinAccordion),
+  // the previous `cy.get('body')` failed with "Expected to find element: body"
+  // because cy.get respects the within-subject. Use cy.document() / Cypress.$
+  // to query the popper from the real document, bypassing the within scope.
+  cy.document().then((doc) => {
+    const optionSelector = '[role="listbox"] [role="option"], .MuiAutocomplete-popper li';
+    const $opts = Cypress.$(doc.body).find(optionSelector);
+    if ($opts.length > 0) {
+      const $matched = $opts.filter((_, el) => exactRe.test(el.textContent ?? '')).first();
+      cy.wrap($matched).click();
+      return;
+    }
+    getAutocompleteInput(label).then(($input) => {
+      cy.wrap($input).type('{downarrow}{enter}', { force: true });
+    });
+  });
 });
 
 /**
  * Clear MUI Autocomplete selection
  */
 Cypress.Commands.add('clearAutocomplete', (label: string) => {
-  cy.get('form').contains('label', label).parent().find('input').first().click();
-  cy.get('form').contains('label', label).parent().find('button[aria-label="Clear"]').click();
-  // Press Escape to close the dropdown so it doesn't block other elements
-  cy.get('form').contains('label', label).parent().find('input').first().type('{esc}');
+  getFieldContainer(label).then(($container) => {
+    cy.wrap($container).find('input[role="combobox"], input').first().click({ force: true });
+  });
+  getFieldContainer(label).then(($container) => {
+    cy.wrap($container).find('button[aria-label="Clear"]').click({ force: true });
+  });
+  getAutocompleteInput(label).then(($input) => {
+    cy.wrap($input).type('{esc}', { force: true });
+  });
 });
 
 /**
  * Set checkbox state by label
  */
 Cypress.Commands.add('setCheckbox', (label: string, checked: boolean) => {
-  cy.get('form').contains('label', label).parent().find('input[type="checkbox"]').then(($cb) => {
+  getFormLabel(label).parent().find('input[type="checkbox"]').then(($cb) => {
     if (checked && !$cb.is(':checked')) {
       cy.wrap($cb).check();
     } else if (!checked && $cb.is(':checked')) {
@@ -106,8 +235,8 @@ Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
 
   // Break the chain: MUI X re-renders the input on focus, detaching the original DOM node.
   // Re-querying after click ensures .type() gets the live element.
-  cy.get('form').contains('label', label).parent().find('input').click();
-  cy.get('form').contains('label', label).parent().find('input').type(month + day + year + hour + minute + ampmChar);
+  getFormLabel(label).parent().find('input').click();
+  getFormLabel(label).parent().find('input').type(month + day + year + hour + minute + ampmChar);
 });
 
 Cypress.Commands.add('fillDate', (label: string, dateString: string) => {
@@ -115,8 +244,8 @@ Cypress.Commands.add('fillDate', (label: string, dateString: string) => {
   if (!parts) throw new Error(`fillDate: Expected "MM/DD/YYYY", got "${dateString}"`);
   const [, month, day, year] = parts;
 
-  cy.get('form').contains('label', label).parent().find('input').click();
-  cy.get('form').contains('label', label).parent().find('input').type(month + day + year);
+  getFormLabel(label).parent().find('input').click();
+  getFormLabel(label).parent().find('input').type(month + day + year);
 });
 
 Cypress.Commands.add('fillTime', (label: string, dateString: string) => {
@@ -125,8 +254,8 @@ Cypress.Commands.add('fillTime', (label: string, dateString: string) => {
   const [, hour, minute, ampm] = parts;
   const ampmChar = ampm.toUpperCase() === 'AM' ? 'a' : 'p';
 
-  cy.get('form').contains('label', label).parent().find('input').click();
-  cy.get('form').contains('label', label).parent().find('input').type(hour + minute + ampmChar);
+  getFormLabel(label).parent().find('input').click();
+  getFormLabel(label).parent().find('input').type(hour + minute + ampmChar);
 });
 
 /**
@@ -134,7 +263,7 @@ Cypress.Commands.add('fillTime', (label: string, dateString: string) => {
  * Requires DateTimeWrapper to have clearable={true} on the field slot.
  */
 Cypress.Commands.add('clearDateTime', (label: string) => {
-  cy.get('form').contains('label', label).parent().find('button[title="Clear"]').click();
+  getFormLabel(label).parent().find('button[title="Clear"]').click();
 });
 
 /**
@@ -144,6 +273,49 @@ Cypress.Commands.add('selectDataGridRows', (indices: number[]) => {
   indices.forEach((i) => {
     cy.get(`div[role="row"][data-rowindex="${i}"]`).find('input[type="checkbox"]').check();
   });
+});
+
+/**
+ * Expand a MUI Accordion section by its header label.
+ *
+ * The generated forms render flatten-rel sections as `<Accordion>` blocks; e2e
+ * tests need to open them before filling fields. Idempotent — clicking an
+ * already-open accordion would close it, so we only click when collapsed.
+ */
+Cypress.Commands.add('openAccordion', (label: string) => {
+  // Re-query inside the conditional click instead of `cy.wrap($el).click()`.
+  // Capturing $el and clicking the wrap fails with "page updated while this
+  // command was executing" when MUI / Next hydration re-renders the summary
+  // mid-test (especially on the view page right after navigation).
+  cy.contains('.MuiAccordionSummary-root', label).then(($el) => {
+    if ($el.attr('aria-expanded') !== 'true') {
+      cy.contains('.MuiAccordionSummary-root', label).click();
+    }
+  });
+});
+
+/**
+ * Open an Accordion by header label and run the callback scoped to its body.
+ *
+ * Cypress' `cy.within` restricts subsequent `cy.get` calls to descendants of
+ * the subject. The flatten section may render fields whose labels collide
+ * with fields on the outer parent form (e.g. `checkup.total_testosterone` is
+ * a NumberField on the parent and `checkup_judgment.total_testosterone` is
+ * an enum Autocomplete inside the Checkup Judgment accordion). Without
+ * scoping, `cy.checkField('Total Testosterone', …)` would match the first
+ * label on the page — almost always the wrong one.
+ */
+Cypress.Commands.add('withinAccordion', (label: string, fn: () => void) => {
+  // Same detached-element guard as openAccordion.
+  cy.contains('.MuiAccordionSummary-root', label).then(($el) => {
+    if ($el.attr('aria-expanded') !== 'true') {
+      cy.contains('.MuiAccordionSummary-root', label).click();
+    }
+  });
+  cy.contains('.MuiAccordionSummary-root', label)
+    .parents('.MuiAccordion-root')
+    .find('.MuiAccordionDetails-root')
+    .within(fn);
 });
 
 // TypeScript definitions
@@ -164,6 +336,8 @@ declare global {
       fillTime(label: string, dateString: string): Chainable<void>;
       clearDateTime(label: string): Chainable<void>;
       selectDataGridRows(indices: number[]): Chainable<void>;
+      openAccordion(label: string): Chainable<void>;
+      withinAccordion(label: string, fn: () => void): Chainable<void>;
     }
   }
 }

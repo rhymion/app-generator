@@ -49,6 +49,13 @@ import {{ entity_view_component }} from '{{ entity_view_component_path if entity
 {% if use_dayjs %}
 import dayjs from 'dayjs';
 {% endif %}
+{% if needs_accordion %}
+import Accordion from '@mui/material/Accordion';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import Typography from '@mui/material/Typography';
+{% endif %}
 
 export default function FormView({ src, permissions{% if entity_view_component %}, currentUserRoleIds, currentUserId{% endif %} }: FormViewProps) {
   const tf = useTranslations('Fields');
@@ -87,6 +94,12 @@ export default function FormView({ src, permissions{% if entity_view_component %
         </div>
       </div>
 {{ all_parent_fields }}
+{% if reverse_oto_fields %}
+{{ reverse_oto_fields }}
+{% endif %}
+{% if flatten_sections %}
+{{ flatten_sections }}
+{% endif %}
 {% if child_view_grids %}
 {{ child_view_grids }}
 {% endif %}

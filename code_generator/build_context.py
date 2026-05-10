@@ -14,6 +14,7 @@ from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
     is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
+    get_detail_ref_rels, get_flatten_rels,
 )
 import copy
 
@@ -23,6 +24,15 @@ import copy
 
 _EXCLUDE_FIELDS = {'created_at', 'updated_at'}
 _EXCLUDE_ID_TS  = {'id', 'created_at', 'updated_at', 'creator_id'}
+_SCALAR_TYPES   = {'string', 'integer', 'number', 'boolean'}
+
+
+def _is_scalar_prop(prop: dict) -> bool:
+    """True for plain scalar fields safe to filter/sort on (no relations, arrays, objects)."""
+    t = prop.get('type')
+    if isinstance(t, list):
+        return any(x in _SCALAR_TYPES for x in t)
+    return t in _SCALAR_TYPES
 
 
 def _get_actual_type(defn: dict) -> str | None:
@@ -338,6 +348,7 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
 
 def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict],
                            schema: dict, model: str = '') -> list[str]:
+    model_props = schema['definitions'].get(model, {}).get('properties', {})
     m2m_targets = [
         c['relationship']['target']
         for c in children_raw
@@ -349,7 +360,11 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
             and (c.get('relationship') or {}).get('type') != 'many-to-many'
             and is_optional_fk_to_parent(schema['definitions'].get(c['name'], {}), model))
     ]
-    many_to_one_targets = [r['target'] for r in parent_rels_raw]
+    many_to_one_targets = [
+        r['target']
+        for r in parent_rels_raw
+        if (model_props.get(r['prop_name'], {}).get('x-relationship') or {}).get('type') == 'many-to-one'
+    ]
 
     child_entity_rel_targets = []
     for child_raw in children_raw:
@@ -362,7 +377,8 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
             parent_fk_props = get_parent_fk_props(child_def, model)
             child_entity_rel_targets.extend(
                 r['target'] for r in get_parent_relationships(child_def)
-                if r['prop_name'] not in parent_fk_props  # exclude only the actual parent FK column(s)
+                if r['prop_name'] not in parent_fk_props
+                and ((child_def.get('properties', {}).get(r['prop_name'], {}).get('x-relationship') or {}).get('type') == 'many-to-one')
             )
 
     return _dedupe_ordered([*m2m_targets, *optional_fk_list_targets, *many_to_one_targets, *child_entity_rel_targets])
@@ -486,9 +502,20 @@ def build_context(entity: dict, schema: dict) -> dict:
     can_list   = gen_cfg.get('list',   True) is not False
     can_view   = gen_cfg.get('view',   True) is not False
 
-    # Parent relationships (many-to-one) — all of them, not deduplicated by target
+    # Parent relationships (many-to-one) — all of them, not deduplicated by target.
+    # Both selector and auto-create one-to-one relations are excluded here:
+    # selector OTO is re-added through `selector_oto_rels` (autocomplete UI),
+    # and auto-create OTO (commentable/approvable bridges) is handled through
+    # `auto_create_oto_rels` (pre-create in transaction + nested include).
+    # Leaving them in `parent_rels_raw` would produce duplicate relation fields,
+    # duplicate includes, and bogus import/option types.
     merged_def    = {**model_def, 'properties': filtered_props}
-    parent_rels_raw = get_parent_relationships(merged_def)
+    _all_parent_rels_raw = get_parent_relationships(merged_def, schema)
+    one_to_one_rels = get_one_to_one_rels(merged_def, schema)
+    auto_create_oto_rels = [r for r in one_to_one_rels if not r['is_selector']]
+    selector_oto_rels    = [r for r in one_to_one_rels if r['is_selector']]
+    oto_prop_names = {r['prop_name'] for r in one_to_one_rels}
+    parent_rels_raw = [r for r in _all_parent_rels_raw if r['prop_name'] not in oto_prop_names]
     # relationship_targets: deduplicated by target for import / type purposes
     seen: dict[str, dict] = {}
     for r in parent_rels_raw:
@@ -512,12 +539,74 @@ def build_context(entity: dict, schema: dict) -> dict:
         f'{{ id: true, creator_id: true{", assignee_id: true" if has_assignee_id else ""} }}'
     )
 
-    # One-to-one outbound FK rels (FK is on this model, target auto-created)
-    one_to_one_rels = get_one_to_one_rels(merged_def, schema)
-    one_to_one_fk_props = {r['prop_name'] for r in one_to_one_rels}
+    # Scalar columns the paginated API/page-list will accept for sort/filter.
+    # Always include audit columns. Anything not in this set is silently ignored
+    # at request time so external input cannot pick arbitrary Prisma columns.
+    _scalar_props = [k for k, v in filtered_props.items() if _is_scalar_prop(v)]
+    for _extra in ('id', 'created_at', 'updated_at', 'creator_id'):
+        if _extra not in _scalar_props:
+            _scalar_props.append(_extra)
+    if has_assignee_id and 'assignee_id' not in _scalar_props:
+        _scalar_props.append('assignee_id')
+    sortable_fields_quoted = ', '.join(f"'{c}'" for c in _scalar_props)
+    filterable_fields_quoted = sortable_fields_quoted
 
-    # Parent prop infos (excluding id + timestamps + one-to-one FK props)
-    parent_props = [k for k in filtered_props if k not in _EXCLUDE_ID_TS and k not in one_to_one_fk_props]
+    # Text fields used by searchXxxOptions for substring matching. Limited to
+    # the conventional human-readable columns so callers don't accidentally
+    # search across freeform fields.
+    searchable_text_fields = [f for f in ('name', 'code') if f in filtered_props]
+    # Default ordering for the search action — newest entities are the most
+    # likely autocomplete picks. Falls back to id when no audit column exists.
+    default_search_order_field = (
+        'name' if 'name' in filtered_props
+        else 'code' if 'code' in filtered_props
+        else 'created_at' if 'created_at' in filtered_props
+        else 'id'
+    )
+    default_search_order_dir = 'asc' if default_search_order_field in ('name', 'code') else 'desc'
+
+    # Reverse one-to-one rels (FK is in the target, pointing back to this model)
+    # e.g. pre_check.checkup_id → checkup; defined as plain $ref in the _detail extension
+    reverse_oto_rels = get_detail_ref_rels(parent, merged_def, schema)
+
+    # Flatten rels (x-outputType: flatten on non-array $ref properties in _detail)
+    flatten_rels = get_flatten_rels(parent, merged_def, schema)
+    # FK props in the parent model for m2o flatten rels — shown as accordion, not plain TextField
+    flatten_m2o_fk_props = {f'{r["prop_name"]}_id' for r in flatten_rels if r['is_m2o']}
+
+    # For m2o flatten rels with FK fields in their target: upgrade the simple 'rel: true' include
+    # to 'rel: { include: { nested_rel: true } }' so the nested labels are fetchable in detail
+    _flatten_m2o_nested: dict[str, str] = {}
+    for _fr in flatten_rels:
+        if not _fr['is_m2o']:
+            continue
+        _nested_fk = [f for f in _fr['fields'] if f.get('is_fk')]
+        if _nested_fk:
+            _parts = ', '.join(f"{f['relation_name']}: true" for f in _nested_fk)
+            _flatten_m2o_nested[_fr['relation_name']] = f'{{ include: {{ {_parts} }} }}'
+
+    # Non-m2o flatten rel include entries (FK is in target; add to detail query)
+    flatten_non_m2o_include_entries: list[str] = []
+    for _fr in flatten_rels:
+        if _fr['is_m2o']:
+            continue
+        _nested_fk = [f for f in _fr['fields'] if f.get('is_fk')]
+        if _nested_fk:
+            _parts = ', '.join(f"{f['relation_name']}: true" for f in _nested_fk)
+            flatten_non_m2o_include_entries.append(
+                f"{_fr['relation_name']}: {{ include: {{ {_parts} }} }}"
+            )
+        else:
+            flatten_non_m2o_include_entries.append(f"{_fr['relation_name']}: true")
+
+    # auto-create FK props are excluded from service params (pre-created in transaction)
+    auto_create_oto_fk_props = {r['prop_name'] for r in auto_create_oto_rels}
+    # all OTO FK props are excluded from field categorisation (never treated as plain text fields)
+    all_oto_fk_props = {r['prop_name'] for r in one_to_one_rels}
+
+    # Parent prop infos: exclude id, timestamps, and auto-create OTO FK props
+    # Selector OTO FK props ARE included — they flow through the form as autocomplete values
+    parent_props = [k for k in filtered_props if k not in _EXCLUDE_ID_TS and k not in auto_create_oto_fk_props]
     parent_prop_infos = [
         {'prop': p, 'var_name': safe_var_name(p), 'def': filtered_props[p]}
         for p in parent_props
@@ -527,25 +616,25 @@ def build_context(entity: dict, schema: dict) -> dict:
         f"{p['var_name']}: {get_ts_type(p['def'])}" for p in parent_prop_infos
     )
     _base_data_lines = [f"        {p['prop']}: {p['var_name']}," for p in parent_prop_infos]
-    # Explicit pre-create statements for one-to-one targets (e.g. const approvable = await tx.approvable.create({ data: {} });)
+    # Explicit pre-create statements for auto-create OTO targets (e.g. const approvable = await tx.approvable.create({ data: {} });)
     one_to_one_pre_creates = '\n'.join(
         f"    const {r['relation_name']} = await tx.{r['target']}.create({{ data: {{}} }});"
-        for r in one_to_one_rels
+        for r in auto_create_oto_rels
     )
-    # FK data lines for one-to-one targets (e.g. approvable_id: approvable.id,)
+    # FK data lines for auto-create OTO targets (e.g. approvable_id: approvable.id,)
     one_to_one_fk_data_lines = '\n'.join(
         f"        {r['prop_name']}: {r['relation_name']}.id,"
-        for r in one_to_one_rels
+        for r in auto_create_oto_rels
     )
     parent_data_obj = '\n'.join(
         _base_data_lines + ([one_to_one_fk_data_lines] if one_to_one_fk_data_lines else [])
     )
     parent_data_obj_update = '\n'.join(_base_data_lines)
     validation_data_obj  = '\n'.join(f"      {p['prop']}: {p['var_name']}," for p in parent_prop_infos)
-    # Synthetic object spreading created record with nested one-to-one stubs for afterCreate
+    # Synthetic object spreading created record with nested auto-create OTO stubs for afterCreate
     one_to_one_spread = ', '.join(
         f"{r['relation_name']}: {{ id: created.{r['prop_name']} }}"
-        for r in one_to_one_rels
+        for r in auto_create_oto_rels
     )
     one_to_one_include = ''  # not used with explicit creation approach
 
@@ -616,7 +705,8 @@ def build_context(entity: dict, schema: dict) -> dict:
     selection_targets = _get_selection_targets(children_raw, parent_rels_raw, schema, model)
 
     # Field categorisation (for FormUpsert / FormView)
-    field_categories = _categorize_form_fields(filtered_props, parent_rels_raw, gen_cfg, one_to_one_fk_props)
+    # Use all_oto_fk_props to exclude BOTH auto-create and selector OTO FK props from plain field treatment
+    field_categories = _categorize_form_fields(filtered_props, parent_rels_raw, gen_cfg, all_oto_fk_props)
 
     # Default props (page_new)
     def _default_value(k: str, defn: dict) -> str:
@@ -637,7 +727,7 @@ def build_context(entity: dict, schema: dict) -> dict:
     parent_default_props = '\n'.join(
         f"    {k}: {_default_value(k, defn)},"
         for k, defn in filtered_props.items()
-        if k not in _EXCLUDE_ID_TS and k != 'id'
+        if k not in _EXCLUDE_ID_TS and k != 'id' and k not in auto_create_oto_fk_props
     )
 
     # Chart config
@@ -677,8 +767,10 @@ def build_context(entity: dict, schema: dict) -> dict:
         for c in embedded_ch
     )
 
-    # Getters: include entries
+    # Getters: include entries (list page)
     include_entries_list = [f"{r['relation_name']}: true" for r in parent_rels]
+    # Selector OTO rels are included in list so the relation column can be displayed
+    include_entries_list.extend(f"{r['relation_name']}: true" for r in selector_oto_rels)
     include_props_list   = ', '.join(include_entries_list)
 
     child_include_entries = []
@@ -703,9 +795,9 @@ def build_context(entity: dict, schema: dict) -> dict:
                 )
                 child_include_entries.append(f"{prop}: {{ include: {{ {child_includes} }} }}")
 
-    # Include entries for one-to-one rels with their nested children
+    # Include entries for auto-create one-to-one rels with their nested children
     one_to_one_include_entries = []
-    for r in one_to_one_rels:
+    for r in auto_create_oto_rels:
         if not r['children']:
             one_to_one_include_entries.append(f"{r['relation_name']}: true")
         else:
@@ -763,10 +855,20 @@ def build_context(entity: dict, schema: dict) -> dict:
                 f"{r['relation_name']}: {{ include: {{ {nested} }} }}"
             )
 
+    # Selector OTO rels included simply — they are independent entities with their own pages
+    selector_oto_include_entries = [f"{r['relation_name']}: true" for r in selector_oto_rels]
+
+    # Reverse OTO rels included simply (no FK in this model); use relation_name for Prisma key
+    reverse_oto_include_entries = [f"{r['relation_name']}: true" for r in reverse_oto_rels]
+
     include_entries_detail = [
         *child_include_entries,
-        *[f"{r['relation_name']}: true" for r in parent_rels],
+        # Use nested includes for m2o flatten rels that have FK fields (need label resolution)
+        *[f"{r['relation_name']}: {_flatten_m2o_nested.get(r['relation_name'], 'true')}" for r in parent_rels],
         *one_to_one_include_entries,
+        *selector_oto_include_entries,
+        *reverse_oto_include_entries,
+        *flatten_non_m2o_include_entries,
         "creator: { select: { id: true, name: true } }",
         "updater: { select: { id: true, name: true } }",
     ]
@@ -782,7 +884,14 @@ def build_context(entity: dict, schema: dict) -> dict:
     relationship_mapping = '\n'.join(
         f"    {r['relation_name']}: {parent_camel}.{r['relation_name']},"
         for r in parent_rels
+    ) + (
+        '\n' + '\n'.join(
+            f"    {r['relation_name']}: {parent_camel}.{r['relation_name']},"
+            for r in selector_oto_rels
+        ) if selector_oto_rels else ''
     )
+    # Note: reverse_oto_rels are NOT in relationship_mapping because they are not included in
+    # the list query. They are fetched only in the detail query and auto-spread via { ...entity }.
     child_mappings = '\n'.join(
         f"    {c['property_name']}: {parent_camel}.{c['property_name']},"
         for c in children_raw
@@ -795,12 +904,18 @@ def build_context(entity: dict, schema: dict) -> dict:
         *(f"{c['child_var']}_ids" if c['use_connect'] else c['property_name']
           for c in embedded_ch),
     ])
+    # Null placeholders for flatten rel params (API routes don't edit flatten rels inline)
+    _flatten_null_args = ', '.join(
+        'null'
+        for r in flatten_rels
+        if not r['is_m2o'] and any(not f.get('is_fk') for f in r['fields'])
+    )
     service_args_for_create = f"userId, {parent_service_args}" + (
         f", {child_service_args}" if child_service_args else ""
-    )
+    ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
     service_args_for_update = f"userId, id, {parent_service_args}" + (
         f", {child_service_args}" if child_service_args else ""
-    )
+    ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
 
     return dict(
         # Naming
@@ -825,6 +940,11 @@ def build_context(entity: dict, schema: dict) -> dict:
         should_filter_by_org=should_filter_by_org,
         has_assignee_id=has_assignee_id,
         item_context_select=item_context_select,
+        sortable_fields_quoted=sortable_fields_quoted,
+        filterable_fields_quoted=filterable_fields_quoted,
+        searchable_text_fields=searchable_text_fields,
+        default_search_order_field=default_search_order_field,
+        default_search_order_dir=default_search_order_dir,
         self_parent_prop=self_parent_prop,
         # Props
         parent_prop_infos=parent_prop_infos,
@@ -876,7 +996,11 @@ def build_context(entity: dict, schema: dict) -> dict:
         xdisplay=xdisplay,
         xdisplay_table=xdisplay_table_raw,
         # One-to-one outbound FK rels
-        one_to_one_rels=one_to_one_rels,
+        one_to_one_rels=auto_create_oto_rels,      # auto-create OTO only (for types/service templates)
+        selector_oto_rels=selector_oto_rels,        # selector OTO (autocomplete UI, filtered getters)
+        reverse_oto_rels=reverse_oto_rels,          # reverse OTO: FK in target pointing back to this model
+        flatten_rels=flatten_rels,                  # flatten rels: shown as accordion in detail view
+        flatten_m2o_fk_props=flatten_m2o_fk_props, # FK prop names in parent for m2o flatten rels
         one_to_one_pre_creates=one_to_one_pre_creates,
         one_to_one_spread=one_to_one_spread,
         one_to_one_include=one_to_one_include,

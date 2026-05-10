@@ -9,13 +9,100 @@ Raises SchemaValidationError (a ValueError subclass) on failure so generate()
 can catch it and print a clean message without a traceback.
 """
 import re
+from pathlib import Path
 
 _SNAKE_CASE = re.compile(r'^[a-z][a-z0-9_]*$')
 _ID_SUFFIX  = re.compile(r'_id$')
 
+# Columns that MUST be indexed (leftmost column of some @@index) when present
+# on a model.  See docs/knowledge/prisma-schema-conventions.md.
+_REQUIRED_INDEX_COLUMNS = ('creator_id', 'assignee_id', 'organization_id')
+
 
 class SchemaValidationError(ValueError):
     pass
+
+
+# ---------------------------------------------------------------------------
+# Prisma schema validation (separate from the YAML validation below)
+# ---------------------------------------------------------------------------
+
+_MODEL_HEAD = re.compile(r'^model\s+(\w+)\s*\{', re.MULTILINE)
+_INDEX_DECL = re.compile(r'@@index\(\s*\[([^\]]+)\]')
+
+
+def _iter_model_blocks(text: str):
+    """Yield (model_name, body_text) for each top-level `model X { ... }` block."""
+    for m in _MODEL_HEAD.finditer(text):
+        depth = 1
+        j = m.end()
+        while j < len(text) and depth > 0:
+            ch = text[j]
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+            j += 1
+        if depth != 0:
+            raise SchemaValidationError(
+                f"Prisma schema: unbalanced braces starting at offset {m.start()}"
+            )
+        # body = text between the opening '{' and the matching '}'
+        yield m.group(1), text[m.end():j - 1]
+
+
+def _model_has_column(body: str, col: str) -> bool:
+    # Match `<col>` followed by whitespace and a type — i.e. a field declaration.
+    return bool(re.search(rf'^\s*{re.escape(col)}\s+\S', body, re.MULTILINE))
+
+
+def _leftmost_indexed_columns(body: str) -> set[str]:
+    """Set of columns that appear as the LEFTMOST column in some @@index([...])."""
+    out: set[str] = set()
+    for decl in _INDEX_DECL.findall(body):
+        first = decl.split(',', 1)[0].strip()
+        if first:
+            out.add(first)
+    return out
+
+
+def validate_prisma_indexes(schema_path: str | Path) -> None:
+    """Verify every model has @@index for required hot columns.
+
+    A column counts as indexed when it appears as the leftmost column of some
+    @@index([...]) declaration on the same model — that's what the Postgres
+    planner can use for filtering on that single column.
+
+    Raises SchemaValidationError listing every missing index so the author
+    fixes them in one pass.
+    """
+    path = Path(schema_path)
+    if not path.exists():
+        raise SchemaValidationError(
+            f"Prisma schema not found at {path} — required for index validation."
+        )
+    text = path.read_text()
+
+    errors: list[str] = []
+    for name, body in _iter_model_blocks(text):
+        leftmost = _leftmost_indexed_columns(body)
+        for col in _REQUIRED_INDEX_COLUMNS:
+            if _model_has_column(body, col) and col not in leftmost:
+                errors.append(
+                    f"model '{name}': missing required @@index([{col}]).  "
+                    f"Postgres does not auto-index this column; queries that filter "
+                    f"on it (Creator/Assignee scoping, org filtering) will fall back "
+                    f"to a full table scan.  Run `python3 scripts/add_required_indexes.py` "
+                    f"to add it, or write `@@index([{col}])` (or a composite starting "
+                    f"with this column) by hand."
+                )
+
+    if errors:
+        bullet_list = '\n'.join(f"  • {e}" for e in errors)
+        raise SchemaValidationError(
+            f"Prisma index validation failed — {len(errors)} model(s) missing "
+            f"required indexes:\n\n{bullet_list}\n"
+        )
 
 
 def validate_schema(schema: dict) -> None:

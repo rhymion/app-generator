@@ -12,7 +12,7 @@ import re
 from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
 )
-from helpers.schema_helpers import filter_fields, get_parent_relationships, is_optional_fk_to_parent
+from helpers.schema_helpers import filter_fields, get_parent_relationships, is_optional_fk_to_parent, get_flatten_rels
 from build_context import _get_entity_options
 
 
@@ -31,7 +31,7 @@ def get_child_names(child: dict) -> dict:
         'singular_pascal_name': singularize(pascal_name),
         'title': to_title_case(property_name),
         'form_key': singularize(property_name),
-        'columns_fn_name': f'{property_name}_columns',
+        'columns_fn_name': f'use{to_pascal_case(property_name)}Columns',
     }
 
 
@@ -49,6 +49,48 @@ def _get_primary_display_field_name(model_def: dict) -> str | None:
     return None
 
 
+def _get_base_properties(defn: dict) -> dict:
+    if 'properties' in defn:
+        return defn['properties']
+    for item in defn.get('allOf', []):
+        if 'properties' in item:
+            return item['properties']
+    return {}
+
+
+def _seed_relation_label_value(
+    target: str,
+    label_field: str,
+    label_field_is_date: bool,
+    schema: dict,
+    *,
+    unique_index: int | None = None,
+) -> str:
+    """Expected UI label for a populated FK target."""
+    if label_field_is_date:
+        day = unique_index if unique_index is not None else 1
+        return f'1/{day}/2025'
+
+    target_def = schema['definitions'].get(target, {})
+    label_prop = _get_base_properties(target_def).get(label_field, {})
+    prop_type_raw = label_prop.get('type')
+    prop_type = next((t for t in prop_type_raw if t != 'null'), None) if isinstance(prop_type_raw, list) else prop_type_raw
+
+    if label_field == 'name':
+        title = to_title_case(target)
+        return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title}'
+    if prop_type == 'string':
+        title = to_title_case(label_field)
+        return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title}'
+    if prop_type in ('integer', 'number'):
+        return str(unique_index * 100) if unique_index is not None else str(label_prop.get('minimum', 0))
+    if prop_type == 'boolean':
+        return 'false'
+
+    title = to_title_case(label_field)
+    return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title}'
+
+
 def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dict) -> list[dict]:
     """Compute extra_required_fields for a dep record in populateDependencies.
 
@@ -57,9 +99,9 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     """
     if target == 'user_account':
         return [
-            {'prop_name': 'name', 'prisma_val': f"'Test {title}'", 'prisma_val_unique': f'`Test {title} ${{i}}`'},
-            {'prop_name': 'email', 'prisma_val': f'`test-{var_name}-${{Date.now()}}@example.com`', 'prisma_val_unique': f'`test-{var_name}-${{Date.now()}}-${{i}}@example.com`'},
-            {'prop_name': 'password', 'prisma_val': "'test-password'", 'prisma_val_unique': "'test-password'"},
+            {'prop_name': 'name', 'prisma_val': f"'Test {title}'", 'prisma_val_unique': f'`Test {title} ${{i}}`', 'prisma_val_second': f"'Test {title} 2'"},
+            {'prop_name': 'email', 'prisma_val': f'`test-{var_name}-${{Date.now()}}@example.com`', 'prisma_val_unique': f'`test-{var_name}-${{Date.now()}}-${{i}}@example.com`', 'prisma_val_second': f'`test-{var_name}-${{Date.now()}}-2@example.com`'},
+            {'prop_name': 'password', 'prisma_val': "'test-password'", 'prisma_val_unique': "'test-password'", 'prisma_val_second': "'test-password'"},
         ]
     dep_def = schema['definitions'].get(target)
     if not dep_def:
@@ -67,7 +109,10 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     props = dep_def.get('properties', {})
     required = set(dep_def.get('required') or [])
     rel_props = {r['prop_name'] for r in get_parent_relationships(dep_def)}
-    oto_props = {k for k, v in props.items() if (v.get('x-relationship') or {}).get('type') == 'one-to-one'}
+    oto_props = {
+        k for k, v in props.items()
+        if (v.get('x-relationship') or {}).get('type') in ('one-to-one', 'one-to-one_bridge')
+    }
     exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props | oto_props
     _entity_opts = _get_entity_options(schema)
     _first_entity_val = f"'{_entity_opts[0]['value']}'" if _entity_opts else "''"
@@ -81,19 +126,43 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
         if prop_name == 'name':
             val = f"'Test {title}'"
             val_unique = f'`Test {title} ${{i}}`'
+            val_second = f"'Test {title} 2'"
         elif actual == 'string' and prop.get('x-entity-select'):
-            val = val_unique = _first_entity_val
+            val = val_unique = val_second = _first_entity_val
         elif actual == 'string' and fmt == 'date':
-            val = val_unique = 'new Date(Date.UTC(2025, 0, 1)).toISOString()'
+            val = 'new Date(Date.UTC(2025, 0, 1)).toISOString()'
+            val_unique = 'new Date(Date.UTC(2025, 0, i)).toISOString()'
+            val_second = 'new Date(Date.UTC(2025, 0, 2)).toISOString()'
         elif actual == 'string' and fmt in ('date-time', 'time'):
-            val = val_unique = 'new Date(2025, 0, 1).toISOString()'
+            val = 'new Date(2025, 0, 1).toISOString()'
+            val_unique = 'new Date(2025, 0, i).toISOString()'
+            val_second = 'new Date(2025, 0, 2).toISOString()'
+        elif actual == 'string':
+            field_title = to_title_case(prop_name)
+            # Deterministic, human-readable values. Dep-helper-call collisions
+            # on @unique fields (e.g. product.code) are avoided at a different
+            # layer: populateXxxDependencies is rendered idempotently by the
+            # test_helper template (see `dep_lookup_field` / find-or-create).
+            # Within a populate(N) loop, ${i} provides intra-loop uniqueness;
+            # tests assert on the exact "Test X 1" / "Test X 2" form.
+            val = f"'Test {field_title}'"
+            val_unique = f'`Test {field_title} ${{i}}`'
+            val_second = f"'Test {field_title} 2'"
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
             val = val_unique = str(mn)
+            val_second = str(mn)
+        elif actual == 'boolean':
+            # Booleans must emit a literal `false` / `true`, not a string. The
+            # previous fall-through produced `TEST-FOO-${Date.now()}` which
+            # Prisma rejects with a type-mismatch error on required boolean
+            # columns (e.g. medicine.continuous in dep populators).
+            val = val_unique = val_second = 'false'
         else:
             val = f'`TEST-{prop_name.upper()}-${{Date.now()}}`'
             val_unique = f'`TEST-{prop_name.upper()}-${{Date.now()}}-${{i}}`'
-        result.append({'prop_name': prop_name, 'prisma_val': val, 'prisma_val_unique': val_unique})
+            val_second = f'`TEST-{prop_name.upper()}-${{Date.now()}}-2`'
+        result.append({'prop_name': prop_name, 'prisma_val': val, 'prisma_val_unique': val_unique, 'prisma_val_second': val_second})
     return result
 
 
@@ -109,7 +178,10 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
     props = dep_def.get('properties', {})
     required = set(dep_def.get('required') or [])
     rel_props = {r['prop_name'] for r in get_parent_relationships(dep_def)}
-    oto_props = {k for k, v in props.items() if (v.get('x-relationship') or {}).get('type') == 'one-to-one'}
+    oto_props = {
+        k for k, v in props.items()
+        if (v.get('x-relationship') or {}).get('type') in ('one-to-one', 'one-to-one_bridge')
+    }
     exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props | oto_props
 
     _entity_opts = _get_entity_options(schema)
@@ -124,22 +196,32 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
         if prop_name == 'name':
             val = f"'Test {to_title_case(dep_target)}'"
             val_unique = f'`Test {to_title_case(dep_target)} ${{i}}`'
+            val_second = f"'Test {to_title_case(dep_target)} 2'"
         elif actual == 'string' and prop.get('x-entity-select'):
-            val = val_unique = _first_entity_val
+            val = val_unique = val_second = _first_entity_val
         elif actual == 'string' and fmt == 'date':
             val = 'new Date(Date.UTC(2025, 0, 1)).toISOString()'
-            val_unique = val
+            val_unique = 'new Date(Date.UTC(2025, 0, i)).toISOString()'
+            val_second = 'new Date(Date.UTC(2025, 0, 2)).toISOString()'
         elif actual == 'string' and fmt in ('date-time', 'time'):
             val = 'new Date(2025, 0, 1).toISOString()'
-            val_unique = val
+            val_unique = 'new Date(2025, 0, i).toISOString()'
+            val_second = 'new Date(2025, 0, 2).toISOString()'
+        elif actual == 'string':
+            field_title = to_title_case(prop_name)
+            val = f"'Test {field_title}'"
+            val_unique = f'`Test {field_title} ${{i}}`'
+            val_second = f"'Test {field_title} 2'"
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
             val = str(mn)
             val_unique = val
+            val_second = val
         else:
             val = f'`TEST-{prop_name.upper()}-${{Date.now()}}`'
             val_unique = f'`TEST-{prop_name.upper()}-${{Date.now()}}-${{i}}`'
-        result.append({'prop_name': prop_name, 'prisma_val': val, 'prisma_val_unique': val_unique})
+            val_second = f'`TEST-{prop_name.upper()}-${{Date.now()}}-2`'
+        result.append({'prop_name': prop_name, 'prisma_val': val, 'prisma_val_unique': val_unique, 'prisma_val_second': val_second})
     return result
 
 
@@ -207,28 +289,41 @@ def get_entity_fk_deps(model_name: str, schema: dict, deps: list[dict]) -> list[
 
 
 def get_internal_one_to_one_fks(model_name: str, schema: dict) -> list[dict]:
-    """Returns outbound one-to-one FK fields on model_name.
+    """Returns outbound bridge OTO FK fields on model_name.
 
-    These are properties with x-relationship.type == 'one-to-one' where the FK
-    is owned by this model (prop_name ends in _id). The target is an internal
-    bridge model (e.g. approvable) that the service creates automatically.
-    Test helpers must create these records directly rather than treating them
-    as user-facing fields.
+    These are properties with x-relationship.type == 'one-to-one_bridge'
+    (e.g. approvable_id, commentable_id). The target is a bridge model that
+    the service creates automatically — test helpers must create these
+    records directly rather than treating them as user-facing fields.
     """
     model_def = schema['definitions'].get(model_name, {})
     props = model_def.get('properties', {})
+    required_fields = set(model_def.get('required', []))
     result = []
     for prop_name, prop in props.items():
         rel = prop.get('x-relationship')
-        if not rel or rel.get('type') != 'one-to-one':
+        if not rel or rel.get('type') != 'one-to-one_bridge':
             continue
         target = rel.get('target')
         if not target or target == model_name:
             continue
         if not prop_name.endswith('_id'):
             continue
+        # Only include required (non-nullable) FKs — optional FKs can be left null in test data
+        if prop_name not in required_fields:
+            continue
         var_name = to_camel_case(re.sub(r'_id$', '', prop_name))
-        result.append({'prop_name': prop_name, 'target': target, 'var_name': var_name})
+        if target == 'user_account':
+            create_data = (
+                "{ name: 'Test User Account', "
+                "email: `test-dep-ua-${Date.now()}-${Math.random()}@example.com`, "
+                "password: 'test-password', "
+                "creator_id: testUser.id, "
+                "updater_id: testUser.id }"
+            )
+        else:
+            create_data = '{}'
+        result.append({'prop_name': prop_name, 'target': target, 'var_name': var_name, 'create_data': create_data})
     return result
 
 
@@ -262,6 +357,8 @@ def get_field_metas(
             'enum_values': None,
             'format': None,
             'dep_target': None,
+            'dep_label_field': None,
+            'dep_label_field_is_date': False,
             'min': None,
             'max': None,
             'entity_options': None,
@@ -277,6 +374,8 @@ def get_field_metas(
                 'category': 'autocomplete',
                 'required': prop_name in required_fields,
                 'dep_target': rel['target'],
+                'dep_label_field': rel.get('label_field', 'name'),
+                'dep_label_field_is_date': rel.get('label_field_is_date', False),
             })
             continue
 
@@ -378,7 +477,7 @@ def analyze_children(children: list, schema: dict, parent_model_name: str) -> li
         child_required = child_def.get('required') or []
         parent_fk_prop = f'{parent_model_name}_id'
 
-        child_rels = get_parent_relationships(child_def)
+        child_rels = get_parent_relationships(child_def, schema)
         exclude_keys = {'id', parent_fk_prop, 'order'}
         child_properties = {k: v for k, v in child_def['properties'].items() if k not in exclude_keys}
 
@@ -533,6 +632,12 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
         fmt = field.get('format')
         if fmt == 'date':
             return '06/15/2025'
+        if fmt == 'time':
+            # `cy.fillTime` requires "HH:MM AM/PM" only — datetime format
+            # would crash the helper. Mirror the create_value time branch.
+            if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+                return '06:00 PM'
+            return '02:00 PM'
         if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
             return '06/15/2025 06:00 PM'
         return '06/15/2025 02:00 PM'
@@ -628,6 +733,21 @@ def gen_assert_command(field: dict, value: str, indent: str) -> str:
         return f"{indent}cy.setCheckbox('{label}', {value}); // verify checkbox state"
 
 
+def gen_empty_assert_command(field: dict, indent: str) -> str:
+    """Assert that a field is empty / cleared.
+
+    Used after the 9.x.3 'remove flatten section' edit-and-save flow to verify
+    that the inside-accordion fields render as empty when the form is reopened.
+    For text/number/datetime/enum/autocomplete the input value should be ''.
+    For booleans we assert the checkbox is not checked.
+    """
+    cat = field['category']
+    label = field['label']
+    if cat == 'boolean':
+        return f"{indent}cy.setCheckbox('{label}', false); // verify checkbox cleared"
+    return f"{indent}cy.checkField('{label}', '');"
+
+
 def gen_fill_commands(fields: list, entity_title: str, indent: str, fk_dep_vars: dict | None = None) -> list[str]:
     """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup."""
     lines = []
@@ -643,8 +763,21 @@ def gen_fill_commands(fields: list, entity_title: str, indent: str, fk_dep_vars:
     return lines
 
 
-def gen_assert_commands(fields: list, entity_title: str, indent: str, fk_dep_vars: dict | None = None) -> list[str]:
-    """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup."""
+def gen_assert_commands(
+    fields: list,
+    entity_title: str,
+    indent: str,
+    fk_dep_vars: dict | None = None,
+    flatten_m2o_props: set | None = None,
+) -> list[str]:
+    """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup.
+    flatten_m2o_props: optional set of FK prop names whose target is rendered as a
+    flatten Accordion in FormView. For those, the FK label (e.g. 'Patient Rel')
+    is the Accordion title — not a TextField label — so a direct
+    `cy.checkField('Patient Rel', ...)` cannot match. We instead open the
+    accordion and assert on the inner label-field TextField (e.g. 'Patient No').
+    """
+    flatten_m2o_props = flatten_m2o_props or set()
     lines = []
     for field in fields:
         if field['category'] == 'autocomplete':
@@ -654,12 +787,21 @@ def gen_assert_commands(fields: list, entity_title: str, indent: str, fk_dep_var
                 # so self-ref FKs get the right dep title rather than the entity title.
                 # Must use snake_case prop stem (not camelCase dep_var) so to_title_case splits correctly.
                 dep_var = (fk_dep_vars or {}).get(field['prop_name'])
-                if dep_var:
+                if field.get('dep_label_field_is_date'):
+                    dep_title = '1/1/2025'
+                elif field.get('dep_label_field') and field.get('dep_label_field') != 'name':
+                    dep_title = f"Test {to_title_case(field['dep_label_field'])}"
+                elif dep_var:
                     prop_stem = re.sub(r'_id$', '', field['prop_name'])
-                    dep_title = to_title_case(prop_stem)
+                    dep_title = f'Test {to_title_case(prop_stem)}'
                 else:
-                    dep_title = to_title_case(dep_target)
-                lines.append(f"{indent}cy.checkField('{field['label']}', 'Test {dep_title}');")
+                    dep_title = f'Test {to_title_case(dep_target)}'
+                if field['prop_name'] in flatten_m2o_props:
+                    inner_label = to_title_case(field.get('dep_label_field') or 'name')
+                    lines.append(f"{indent}cy.openAccordion('{field['label']}');")
+                    lines.append(f"{indent}cy.checkField('{inner_label}', '{dep_title}');")
+                else:
+                    lines.append(f"{indent}cy.checkField('{field['label']}', '{dep_title}');")
         else:
             value = cypress_create_value(field, entity_title)
             lines.append(gen_assert_command(field, value, indent))
@@ -713,6 +855,145 @@ def gen_child_datagrid_fk_fields(fields: list) -> list[dict]:
     ]
 
 
+def _compute_flatten_test_rels(parent: str, pascal: str, definition_key: str, schema: dict) -> list[dict]:
+    """Compute flatten_test_rels: one entry per testable non-m2o flatten relation.
+
+    Each entry contains Cypress fill/clear/assert commands and Prisma data for
+    creating the child record in populate helpers.
+    """
+    parent_def = schema['definitions'].get(parent, {})
+    flatten_rels_all = get_flatten_rels(parent, parent_def, schema)
+    non_m2o_flatten = [r for r in flatten_rels_all if not r['is_m2o']]
+    indent = '      '
+
+    result = []
+    for _flat in non_m2o_flatten:
+        _target = _flat['target']
+        _prop = _flat['prop_name']
+        _non_fk_fields = [f for f in _flat['fields'] if not f.get('is_fk')]
+        if not _non_fk_fields:
+            continue
+
+        # The flatten OTO target may carry external required FKs (e.g.
+        # lifestyle.patient_id) that the form does not collect. The service
+        # generator derives those values from the parent's own FK chain
+        # (see find_fk_derivation_path), so the test always exercises the
+        # inline-create path — there is no longer a separate "update-only"
+        # category. _can_create_inline is kept True for every flatten OTO so
+        # that 8.x.1 (create with section) and 9.x.1 (add to existing) are
+        # generated for ALL of them.
+        _can_create_inline = True
+
+        _target_def = schema['definitions'].get(_target, {})
+        # _is_optional_parent_fk is no longer used for test description wording
+        # (we render a single phrase regardless), but the rel data still carries
+        # it so future templates can branch if needed.
+        _is_optional_parent_fk = is_optional_fk_to_parent(_target_def, parent)
+
+        _title = to_title_case(_prop)
+        _pascal_prop = to_pascal_case(_prop)
+
+        # Convert flat fields to FieldMeta-compatible dicts for command generators
+        _field_metas = []
+        for f in _non_fk_fields:
+            _ftype = f.get('prop_type', 'string')
+            _ffmt = f.get('format')
+            _fenum = f.get('enum')
+            if _fenum:
+                _cat = 'enum'
+            elif _ftype in ('integer', 'number'):
+                _cat = 'number'
+            elif _ftype == 'string' and _ffmt in ('date', 'date-time', 'time'):
+                _cat = 'datetime'
+            elif _ftype == 'boolean':
+                _cat = 'boolean'
+            else:
+                _cat = 'text'
+            _field_metas.append({
+                'prop_name': f['name'],
+                'label': to_title_case(f['name']),
+                'category': _cat,
+                'required': not f.get('nullable', True),
+                'enum_values': _fenum,
+                'format': _ffmt,
+                'dep_target': None,
+                # Pull the schema's min/max so cypress_create_value picks a value
+                # that fits the BaseNumberField cap. Without this, flatten fields
+                # with a small max (e.g. lifestyle.quolity_of_sleep max: 10) get
+                # the default '100' which the input clips to '10' on entry,
+                # breaking the post-save assertion.
+                'min': f.get('minimum'),
+                'max': f.get('maximum'),
+                'entity_options': None,
+            })
+
+        _has_required = any(m['required'] for m in _field_metas)
+        _req_metas = [m for m in _field_metas if m['required']]
+
+        _fill_cmds = [gen_fill_command(m, cypress_create_value(m, _title), indent) for m in _field_metas]
+        _req_fill_cmds = [gen_fill_command(m, cypress_create_value(m, _title), indent) for m in _req_metas]
+        _clear_cmds = [gen_clear_command(m, indent) for m in _field_metas]
+        _assert_cmds = [gen_assert_command(m, cypress_create_value(m, _title), indent) for m in _field_metas]
+        _empty_assert_cmds = [gen_empty_assert_command(m, indent) for m in _field_metas]
+
+        # Partial fill: only the first required field (leaves others empty → validation fail)
+        _partial_fill_cmds = []
+        if _has_required:
+            _first_req = _req_metas[0]
+            _partial_fill_cmds = [gen_fill_command(_first_req, cypress_create_value(_first_req, _title), indent)]
+
+        # Prisma data for populate helpers (non-FK non-nullable fields)
+        _prisma_fields = []
+        for f in _non_fk_fields:
+            _ptype = f.get('prop_type', 'string')
+            _pfmt = f.get('format')
+            _penum = f.get('enum')
+            if _penum:
+                _pval = '0'
+            elif _ptype in ('integer', 'number'):
+                _pval = '0'
+            elif _ptype == 'string' and _pfmt == 'date':
+                _pval = 'new Date(Date.UTC(2025, 0, 1)).toISOString()'
+            elif _ptype == 'string' and _pfmt in ('date-time', 'time'):
+                _pval = 'new Date(2025, 0, 1).toISOString()'
+            elif _ptype == 'boolean':
+                _pval = 'false'
+            else:
+                _fname = f['name']
+                _pval = f"'Test {to_title_case(_fname)}'"
+            _prisma_fields.append({'name': f['name'], 'prisma_val': _pval, 'nullable': f.get('nullable', True)})
+
+        # External FK fields needed to create the target record (e.g. lifestyle needs patient_id)
+        _external_fk_fields = [
+            {'name': f['name'], 'dep_var': to_camel_case(f.get('fk_target', ''))}
+            for f in _flat['fields']
+            if f.get('is_fk') and f.get('fk_target') and f.get('fk_target') != parent
+        ]
+
+        result.append({
+            'title': _title,
+            'pascal': _pascal_prop,
+            'target': _target,
+            'prop_name': _prop,
+            'section_label': _title,
+            'can_create_inline': _can_create_inline,
+            'is_optional_parent_fk': _is_optional_parent_fk,
+            'field_metas': _field_metas,
+            'fill_cmds': _fill_cmds,
+            'required_fill_cmds': _req_fill_cmds,
+            'clear_cmds': _clear_cmds,
+            'assert_cmds': _assert_cmds,
+            'empty_assert_cmds': _empty_assert_cmds,
+            'partial_fill_cmds': _partial_fill_cmds,
+            'has_required': _has_required,
+            'prisma_fields': _prisma_fields,
+            'external_fk_fields': _external_fk_fields,
+            'has_external_fks': bool(_external_fk_fields),
+            'populate_with_task': f'db:populate{pascal}With{_pascal_prop}',
+        })
+
+    return result
+
 
 # ---------------------------------------------------------------------------
 # Context builders (Jinja2 template contexts)
@@ -734,7 +1015,7 @@ def helper_context(
     pascal = to_pascal_case(parent)
     properties = filter_fields(parent_def['properties'], generate_config.get('fields'))
     required_fields = parent_def.get('required') or []
-    relationships = get_parent_relationships(parent_def)
+    relationships = get_parent_relationships(parent_def, schema)
     entity_options = _get_entity_options(schema)
     fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'), entity_options)
     # Detect outbound one-to-one FK fields (e.g. approvable_id on leave_request).
@@ -745,6 +1026,49 @@ def helper_context(
     fields = [f for f in fields if f['prop_name'] not in internal_fk_prop_names]
     deps = resolve_dependencies(model_name, schema)
     entity_fk_deps = get_entity_fk_deps(model_name, schema, deps)
+
+    # Detect required selector one-to-one FK fields (e.g. pre_check.checkup_id).
+    # These are reverse-parent FKs (FK in this model, parent in target) that must be created as deps
+    # in populate helpers. Bridge OTOs are handled by internal_fk_deps and M2O by resolve_dependencies,
+    # so this loop only covers the selector pattern (`type: one-to-one`) where the target is a
+    # user-visible entity with its own pages.
+    existing_fk_props = {fk['prop_name'] for fk in entity_fk_deps}
+    for prop_name, prop in properties.items():
+        rel = prop.get('x-relationship')
+        if not rel or rel.get('type') != 'one-to-one':
+            continue
+        if not prop_name.endswith('_id'):
+            continue
+        if prop_name not in set(required_fields):
+            continue
+        oto_target = rel.get('target')
+        if not oto_target or oto_target == model_name:
+            continue
+        if prop_name in existing_fk_props:
+            continue
+        oto_target_def = schema['definitions'].get(oto_target, {})
+        # Add transitive deps of this target first
+        for td in resolve_dependencies(oto_target, schema):
+            if not any(d['target'] == td['target'] for d in deps):
+                deps.append(td)
+        # Add the target itself as a dep
+        oto_var = to_camel_case(oto_target)
+        if not any(d['var_name'] == oto_var for d in deps):
+            oto_fk_deps = [
+                {'prop_name': r['prop_name'], 'dep_var_name': to_camel_case(r['target'])}
+                for r in get_parent_relationships(oto_target_def, schema)
+                if any(d['target'] == r['target'] for d in deps)
+            ]
+            deps.append({'target': oto_target, 'var_name': oto_var, 'fk_deps': oto_fk_deps,
+                         'title': to_title_case(oto_target), 'extra_required_fields': []})
+        # Map the FK prop to this dep
+        entity_fk_deps.append({'prop_name': prop_name, 'dep_var_name': oto_var})
+        # Update the field metadata so the template treats this as an autocomplete (FK) field
+        for f in fields:
+            if f['prop_name'] == prop_name:
+                f['category'] = 'autocomplete'
+                f['dep_var_name'] = oto_var
+                break
 
     # Split same-target deps into prop-stem deps when multiple FK fields point to the same target.
     # Mirrors user_account handling: each FK field gets its own dep with a prop-stem var name.
@@ -842,8 +1166,21 @@ def helper_context(
         if r['target'] == model_name and r['prop_name'] not in ('updater_id',):
             prop_stem = re.sub(r'_id$', '', r['prop_name'])
             var_name = to_camel_case(prop_stem)
+            fk_prop_to_dep_var = {fk['prop_name']: fk['dep_var_name'] for fk in entity_fk_deps}
+            self_ref_fk_deps = [
+                {'prop_name': rel['prop_name'], 'dep_var_name': fk_prop_to_dep_var[rel['prop_name']]}
+                for rel in relationships
+                if rel.get('required')
+                and rel['target'] not in (model_name, 'user_account')
+                and rel['prop_name'] in fk_prop_to_dep_var
+            ]
             if not any(d['var_name'] == var_name for d in deps):
-                deps.append({'target': model_name, 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': []})
+                deps.append({
+                    'target': model_name,
+                    'var_name': var_name,
+                    'title': to_title_case(prop_stem),
+                    'fk_deps': self_ref_fk_deps,
+                })
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
 
     # Add editable-list-autocomplete children as deps only for self-ref children.
@@ -886,21 +1223,46 @@ def helper_context(
     # All dep types (regular, user_account, self-ref, m2m) are handled uniformly.
     # Deps from resolve_dependencies have no 'title' key; direct deps (UA, self-ref, m2m)
     # have 'title' pre-set. Only transitive deps can have needs_second=True.
+    rel_by_prop = {r['prop_name']: r for r in relationships}
+    dep_label_info_by_var = {
+        fk['dep_var_name']: rel_by_prop.get(fk['prop_name'])
+        for fk in entity_fk_deps
+        if rel_by_prop.get(fk['prop_name'])
+    }
     enriched_deps = []
     for dep in deps:
         is_direct = 'title' in dep  # UA / self-ref / m2m deps added directly
         title_str = dep.get('_title_override') or dep.get('title') or to_title_case(dep['target'])
         dep_def = schema['definitions'].get(dep['target'] + '_detail', {})
         x_rels = dep_def.get('x-relationships', {})
+        dep_label_info = dep_label_info_by_var.get(dep['var_name'])
+        extra_required_fields = _get_dep_populate_fields(dep['target'], dep['var_name'], title_str, schema)
+        # Idempotency hook for `populateXxxDependencies`: if the dep target has
+        # a deterministic `name` value (the common case — every required-`name`
+        # entity emits `name: 'Test <Title>'`), the template uses
+        # findFirst({where: {name}}) ?? create(...) so calling the helper twice
+        # in the same test (parent populator + child populator) does not
+        # duplicate the row and trip @unique constraints (e.g. product.code).
+        # Bridges without a `name` field (commentable, approvable) skip this
+        # path — they have no unique constraints, so plain create is safe.
+        name_ef = next((f for f in extra_required_fields if f['prop_name'] == 'name'), None)
+        lookup_field = 'name' if name_ef else None
+        lookup_value = name_ef['prisma_val'] if name_ef else None
+        lookup_value_second = name_ef['prisma_val_second'] if name_ef else None
         enriched_deps.append({
             **dep,
             'title': title_str,
             'has_user_accounts': x_rels.get('user_accounts', {}).get('target') == 'user_account',
-            'extra_required_fields': _get_dep_populate_fields(dep['target'], dep['var_name'], title_str, schema),
+            'extra_required_fields': extra_required_fields,
+            'label_field': dep_label_info.get('label_field', 'name') if dep_label_info else dep.get('label_field', 'name'),
+            'label_field_is_date': dep_label_info.get('label_field_is_date', False) if dep_label_info else dep.get('label_field_is_date', False),
             # needs_second only for transitive (non-direct) deps matching primary FK target
             'needs_second': not is_direct and dep['target'] == primary_fk_dep_target,
             # one-to-one FK pre-creates needed when creating this dep record (e.g. commentable_id)
             'internal_fk_deps': get_internal_one_to_one_fks(dep['target'], schema),
+            'lookup_field': lookup_field,
+            'lookup_value': lookup_value,
+            'lookup_value_second': lookup_value_second,
         })
 
     # Separate self-ref deps (target == model) from non-self deps for _createBaseDeps() split.
@@ -1014,9 +1376,15 @@ def helper_context(
     primary_fk_is_ua = primary_fk_dep is not None and primary_fk_dep.get('is_user_account', False)
     primary_fk_ua_dep_var = primary_fk_dep_var if primary_fk_is_ua else None
     non_primary_ua_dep_fields = [f for f in ua_dep_fields if f['dep_var_name'] != primary_fk_ua_dep_var]
-    needs_deps_in_populate = bool(non_primary_ua_dep_fields) or any(
-        f['category'] == 'autocomplete' and f['dep_var_name'] and f['dep_var_name'] != primary_fk_dep_var
-        for f in required_fields_prisma
+    needs_deps_in_populate = (
+        bool(non_primary_ua_dep_fields)
+        or any(
+            f['category'] == 'autocomplete' and f['dep_var_name'] and f['dep_var_name'] != primary_fk_dep_var
+            for f in required_fields_prisma
+        )
+        # Also needed when the primary FK dep itself has FK deps (e.g. patient_rel needs patient + clinic).
+        # Without this, the template generates deps.X.id references without defining deps.
+        or bool(primary_fk_dep and primary_fk_dep.get('fk_deps'))
     )
     # populateFullData also needs deps when there are any UA FK fields or optional FK fields
     needs_deps_in_populate_full = bool(ua_dep_fields_full) or any(
@@ -1025,6 +1393,8 @@ def helper_context(
     )
 
     has_approvable = any(d['target'] == 'approvable' for d in internal_fk_deps)
+
+    flatten_test_rels = _compute_flatten_test_rels(parent, pascal, definition_key, schema)
 
     return {
         'pascal': pascal,
@@ -1049,6 +1419,7 @@ def helper_context(
         'primary_fk_dep': primary_fk_dep,
         'internal_fk_deps': internal_fk_deps,
         'has_approvable': has_approvable,
+        'flatten_test_rels': flatten_test_rels,
     }
 
 
@@ -1068,7 +1439,7 @@ def spec_context(
     pascal = to_pascal_case(parent)
     properties = filter_fields(parent_def['properties'], generate_config.get('fields'))
     required_fields = parent_def.get('required') or []
-    relationships = get_parent_relationships(parent_def)
+    relationships = get_parent_relationships(parent_def, schema)
     entity_options = _get_entity_options(schema)
     fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'), entity_options)
     # Exclude outbound one-to-one FK fields (internal bridge records, not user-facing).
@@ -1148,13 +1519,25 @@ def spec_context(
     # Indentation for .then((deps) => {}) wrapper in sections 2 and 5
     I = '        ' if has_deps else '      '
 
-    # Pre-compute fill/assert command lists (indent already baked in), with fk_dep_vars
+    # Pre-compute fill/assert command lists (indent already baked in), with fk_dep_vars.
+    # flatten_m2o_fk_props: FK props on this model whose related-entity Detail
+    # was tagged x-outputType: flatten. The FormView renders those as MUI
+    # Accordions (entity-level title in <Typography>, inner fields as
+    # TextFields), not as a single TextField with the FK label. View-page
+    # assertions must navigate into the accordion to a real <label>.
+    flatten_m2o_props_view = {
+        f"{r['prop_name']}_id"
+        for r in get_flatten_rels(parent, parent_def, schema)
+        if r['is_m2o']
+    }
     required_fill_cmds = gen_fill_commands(required_field_metas, title, I, fk_dep_vars)
     all_fill_cmds = gen_fill_commands(fields, title, I, fk_dep_vars)
     required_assert_cmds_no_bool = gen_assert_commands(
-        [f for f in required_field_metas if f['category'] != 'boolean'], title, I, fk_dep_vars)
+        [f for f in required_field_metas if f['category'] != 'boolean'], title, I, fk_dep_vars,
+        flatten_m2o_props=flatten_m2o_props_view)
     all_assert_cmds_no_bool = gen_assert_commands(
-        [f for f in fields if f['category'] != 'boolean'], title, I, fk_dep_vars)
+        [f for f in fields if f['category'] != 'boolean'], title, I, fk_dep_vars,
+        flatten_m2o_props=flatten_m2o_props_view)
 
     # Append user_account FK fill/assert commands (required UA for req_cmds; all UA for all_cmds)
     for ua in req_ua_spec:
@@ -1170,21 +1553,48 @@ def spec_context(
     prim_is_fk = bool(prim and f'{prim}_id' in (parent_def.get('properties') or {}))
     has_name = any(f['prop_name'] == 'name' for f in fields)
     prim_meta = next((f for f in fields if f['prop_name'] == prim), None) if prim else None
+    # Default values; overridden in branches where the primary FK is rendered
+    # as a flatten Accordion (see prim_is_fk + flatten branch below).
+    check_field_use_accordion = False
+    check_field_inner_label = None
 
     if prim_is_fk:
+        primary_rel = next((r for r in relationships if r['prop_name'] == f'{prim}_id'), None)
         dep_title = to_title_case(prim)
-        list_id_1 = f'Test {dep_title} 1'
+        list_id_1 = _seed_relation_label_value(
+            primary_rel['target'],
+            primary_rel.get('label_field', 'name'),
+            primary_rel.get('label_field_is_date', False),
+            schema,
+            unique_index=1,
+        ) if primary_rel else f'Test {dep_title} 1'
         list_id_is_unique = True
         after_create_id = None
         after_create_id_is_expr = True
         primary_dep_var_for_list = to_camel_case(prim)
-        list_id_updated = list_id_1
-        has_edit_primary = False
-        edit_field_label = None
-        edit_update_value = None
+        list_id_updated = _seed_relation_label_value(
+            primary_rel['target'],
+            primary_rel.get('label_field', 'name'),
+            primary_rel.get('label_field_is_date', False),
+            schema,
+            unique_index=2,
+        ) if primary_rel else list_id_1
+        has_edit_primary = True
+        edit_field_label = dep_title
+        edit_update_value = list_id_updated
         check_field_label = dep_title
         check_field_value_1 = list_id_1
-        check_field_updated = list_id_1
+        check_field_updated = list_id_updated
+        # When the primary FK is rendered as a flatten Accordion in FormView,
+        # the FK label is on AccordionSummary's <Typography> — not a TextField
+        # <label>. The view-page assertions for sections 3.1 / 3.3 must drill
+        # into the inner label-field TextField.
+        if f'{prim}_id' in flatten_m2o_props_view and primary_rel:
+            check_field_use_accordion = True
+            check_field_inner_label = to_title_case(primary_rel.get('label_field', 'name'))
+        else:
+            check_field_use_accordion = False
+            check_field_inner_label = None
     elif prim and prim != 'name' and prim_meta:
         # Explicit non-name primary field (e.g., product.code or entity_name).
         # Link in the list is on this column, so use it for all click navigation.
@@ -1348,11 +1758,24 @@ def spec_context(
     ]
 
     # Section 3.3: primary field edit command
+    use_deps_in_3_3 = False
+    # If the primary field is a FK the form renders an autocomplete picker, and the
+    # populate() helper creates a fresh target row per index — so we need at least
+    # two rows in the DB for the test to switch from "Test X 1" to "Test X 2".
+    populate_count_3_3 = 2 if prim_is_fk else 1
     if has_edit_primary and edit_field_label and edit_update_value:
         prim_edit_meta = next(
             (f for f in fields if f.get('label') == edit_field_label), None
         )
-        if prim_edit_meta and prim_edit_meta.get('category') == 'entity_select':
+        if prim_edit_meta and prim_edit_meta.get('category') in ('entity_select', 'autocomplete'):
+            edit_primary_cmd = f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
+            use_deps_in_3_3 = prim_edit_meta.get('category') == 'autocomplete' and has_deps
+        elif prim_is_fk:
+            # User-account primary FKs (and any other primary FK that
+            # `get_field_metas` filters out of `fields`) miss the lookup above
+            # but still render as autocomplete pickers in the form. Use
+            # selectAutocomplete and rely on populate_count_3_3==2 to ensure
+            # the "Test X 2" target row exists.
             edit_primary_cmd = f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
         else:
             edit_primary_cmd = f"        cy.clearAndFillField('{edit_field_label}', '{edit_update_value}');"
@@ -1368,10 +1791,14 @@ def spec_context(
 
     # Section 5.1: fill all required fields except one
     fail_create_5_1 = None
-    if non_autocomplete_required:
+    if required_field_metas:
+        primary_required_fk = next(
+            (f for f in required_field_metas if f['category'] == 'autocomplete' and f['label'] == to_title_case(prim or '')),
+            None,
+        ) if prim_is_fk else None
         field_to_skip = next(
             (f for f in non_autocomplete_required if f['prop_name'] == 'name'),
-            non_autocomplete_required[0],
+            primary_required_fk or (non_autocomplete_required[0] if non_autocomplete_required else required_field_metas[0]),
         )
         fields_to_fill_5_1 = [f for f in required_field_metas if f['prop_name'] != field_to_skip['prop_name']]
         fail_create_5_1 = {'fill_cmds': gen_fill_commands(fields_to_fill_5_1, title, I)}
@@ -1410,10 +1837,14 @@ def spec_context(
 
     # Section 6.1: clear a required field
     fail_edit_6_1 = None
-    if non_autocomplete_required:
+    if required_field_metas:
+        primary_required_fk = next(
+            (f for f in required_field_metas if f['category'] == 'autocomplete' and f['label'] == to_title_case(prim or '')),
+            None,
+        ) if prim_is_fk else None
         field_to_clear = next(
             (f for f in non_autocomplete_required if f['prop_name'] == 'name'),
-            non_autocomplete_required[0],
+            primary_required_fk or (non_autocomplete_required[0] if non_autocomplete_required else required_field_metas[0]),
         )
         fail_edit_6_1 = {
         'clear_cmd': gen_clear_command(field_to_clear, '      '),
@@ -1461,6 +1892,8 @@ def spec_context(
         'use_deps_in_3_1': use_deps_in_3_1,
         'opt_fill_cmds_3_1': opt_fill_cmds_3_1,
         'opt_clear_cmds_3_2': opt_clear_cmds_3_2,
+        'use_deps_in_3_3': use_deps_in_3_3,
+        'populate_count_3_3': populate_count_3_3,
         'edit_primary_cmd': edit_primary_cmd,
         'edit_fill_cmd_3_3': edit_fill_cmd_3_3,
         'fail_create_5_1': fail_create_5_1,
@@ -1481,7 +1914,10 @@ def spec_context(
         'check_field_label': check_field_label,
         'check_field_value_1': check_field_value_1,
         'check_field_updated': check_field_updated,
+        'check_field_use_accordion': check_field_use_accordion,
+        'check_field_inner_label': check_field_inner_label,
         'has_approvable': any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model_name, schema)),
+        'flatten_test_rels': _compute_flatten_test_rels(parent, pascal, definition_key, schema),
     }
 
 
@@ -1507,6 +1943,8 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
             d['target'] == 'approvable'
             for d in get_internal_one_to_one_fks(entity['model_name'], schema)
         )
+        definition_key = entity.get('definition_key', f'{parent}_detail')
+        flatten_test_rels = _compute_flatten_test_rels(parent, pascal, definition_key, schema)
         enriched_entities.append({
             'parent': parent,
             'pascal': pascal,
@@ -1520,6 +1958,7 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
                 for c in comment_children_registry
             ],
             'has_approvable': has_approvable,
+            'flatten_test_rels': flatten_test_rels,
         })
     return {'entities': enriched_entities, 'has_user_account_populate': has_user_account_populate}
 
@@ -1543,7 +1982,7 @@ def api_spec_context(
 
     gen_cfg = generate_config or {}
     filtered_props = filter_fields(model_def.get('properties') or {}, gen_cfg.get('fields'))
-    relationships = get_parent_relationships({**model_def, 'properties': filtered_props})
+    relationships = get_parent_relationships({**model_def, 'properties': filtered_props}, schema)
 
     required_fields_list = model_def.get('required') or []
     _api_entity_options = _get_entity_options(schema)
@@ -1626,15 +2065,15 @@ def api_spec_context(
     # Fallback: use 'name' field if no x-display primary is set
     has_name_field = any(f['prop_name'] == 'name' for f in all_field_metas)
     if primary_fk_is_ua and ua_update_field:
-        assert_create = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}.name);'
+        assert_create = f'expect(getRes.body.{primary_field_name}.id).to.eq(deps.{primary_dep_var}.id);'
         assert_update = f'expect(getRes.body.{ua_update_field["prop_name"]}).to.eq({ua_update_expr});'
     elif primary_fk_is_ua:
         # user_account primary FK but no updatable scalar — can verify create but not update via UA name
-        assert_create = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}.name);'
+        assert_create = f'expect(getRes.body.{primary_field_name}.id).to.eq(deps.{primary_dep_var}.id);'
         assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
     elif primary_is_fk:
-        assert_create = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}.name);'
-        assert_update = f'expect(getRes.body.{primary_field_name}.name).to.eq(deps.{primary_dep_var}2.name);'
+        assert_create = f'expect(getRes.body.{primary_field_name}.id).to.eq(deps.{primary_dep_var}.id);'
+        assert_update = f'expect(getRes.body.{primary_field_name}.id).to.eq(deps.{primary_dep_var}2.id);'
     elif primary_field_name:
         primary_meta = next((f for f in all_field_metas if f['prop_name'] == primary_field_name), None)
         if primary_meta:
@@ -1670,12 +2109,21 @@ def api_spec_context(
 
     # 5.1: choose which required non-autocomplete field to omit
     non_ac_required = [f for f in all_field_metas if f['required'] and f['category'] != 'autocomplete']
+    required_autocomplete = [f for f in all_field_metas if f['required'] and f['category'] == 'autocomplete']
     field_to_skip_5_1 = None
     if non_ac_required:
         field_to_skip_5_1 = next(
             (f['prop_name'] for f in non_ac_required if f['prop_name'] == 'name'),
             non_ac_required[0]['prop_name'],
         )
+    elif required_autocomplete:
+        primary_required_fk = next(
+            (f for f in required_autocomplete if primary_is_fk and f['prop_name'] == f'{primary_field_name}_id'),
+            required_autocomplete[0],
+        )
+        field_to_skip_5_1 = primary_required_fk['prop_name']
+    elif ua_fk_fields_for_api:
+        field_to_skip_5_1 = ua_fk_fields_for_api[0]['prop_name']
 
     def _post_body_impl(skip_field: str | None, indent: str) -> list[str]:
         out = []
@@ -1793,8 +2241,9 @@ def db_helpers_context(schema: dict) -> dict:
         fk_targets: set[str] = set()
         for prop_name, prop in defn.get('properties', {}).items():
             rel = prop.get('x-relationship', {})
-            if rel.get('type') in ('many-to-one', 'one-to-one'):
-                # Explicit x-relationship annotation
+            if rel.get('type') in ('many-to-one', 'one-to-one', 'one-to-one_bridge'):
+                # Explicit x-relationship annotation — bridge OTO is included so the
+                # bridge row's deletion ordering is correct relative to its parent.
                 target = rel.get('target')
                 if target and target in base_entities and target != name:
                     fk_targets.add(target)

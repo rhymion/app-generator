@@ -32,7 +32,7 @@ from generators import (
     form_upsert_context,
 )
 from generators_i18n import update_i18n_and_config
-from validate import validate_schema, SchemaValidationError
+from validate import validate_schema, validate_prisma_indexes, SchemaValidationError
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
 from generators_test import (
     helper_context,
@@ -41,6 +41,7 @@ from generators_test import (
     api_spec_context,
     db_helpers_context,
 )
+from validation_context import build_validation_context
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +94,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     try:
         validate_schema(schema)
+        validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma')
     except SchemaValidationError as exc:
         print(f'\n{exc}', file=sys.stderr)
         sys.exit(1)
@@ -157,13 +159,11 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # --- service.ts + service_validation stub ---
         if can_new or can_edit or can_delete:
-            svc_ctx = {**ctx, **service_context(ctx)}
+            svc_ctx = {**ctx, **service_context(ctx, schema)}
             _write(lib_dir / 'service.ts', _render(env, 'service.ts.jinja2', svc_ctx))
             if can_new or can_edit:
-                _write_stub(
-                    lib_dir / 'service_validation.ts',
-                    _render(env, 'service_validation_stub.ts.jinja2', ctx),
-                )
+                val_ctx = {**ctx, **build_validation_context(ctx)}
+                _write(lib_dir / 'service_validation.ts', _render(env, 'service_validation.ts.jinja2', val_ctx))
             if can_new:
                 _write_stub(
                     lib_dir / 'service_after_create.ts',
@@ -196,10 +196,8 @@ def generate(schema_path: str, output_dir: str) -> None:
         if can_new or can_edit:
             ups_ctx = {**ctx, **form_upsert_context(ctx, schema)}
             _write(components_dir / 'FormUpsert.tsx', _render(env, 'form_upsert.tsx.jinja2', ups_ctx))
-            _write_stub(
-                components_dir / 'form_validation.ts',
-                _render(env, 'form_validation_stub.ts.jinja2', ctx),
-            )
+            val_ctx = {**ctx, **build_validation_context(ctx)}
+            _write(components_dir / 'form_validation.ts', _render(env, 'form_validation.ts.jinja2', val_ctx))
 
         # --- FormView.tsx ---
         if can_view:
@@ -285,6 +283,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'parent': parent,
                 'model_name': model,
                 'children': children,
+                'definition_key': def_key,
             })
 
         # Task registry (covers all test-enabled entities)

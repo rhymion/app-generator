@@ -28,6 +28,12 @@ export function getGeneratedTasks() {
       return await populate{{ entity.pascal }}{{ child.pascal }}Data(params.parentId, params.length || 1);
     },
 {% endfor %}
+{% for rel in entity.flatten_test_rels %}
+    async 'db:populate{{ entity.pascal }}With{{ rel.pascal }}'(length: number) {
+      const { populate{{ entity.pascal }}With{{ rel.pascal }}Data } = require('{{ entity.helper_path }}');
+      return await populate{{ entity.pascal }}With{{ rel.pascal }}Data(length);
+    },
+{% endfor %}
 {% if entity.has_approvable %}
     async 'db:setup{{ entity.pascal }}ApprovalFlow'() {
       const { setup{{ entity.pascal }}ApprovalFlow } = require('{{ entity.helper_path }}');

@@ -11,7 +11,11 @@ from helpers.naming import (
     safe_var_name, singularize,
 )
 from helpers.type_mapping import get_ts_type
-from helpers.schema_helpers import get_parent_relationships, get_parent_fk_props
+from helpers.schema_helpers import (
+    get_parent_relationships,
+    get_parent_fk_props,
+    find_fk_derivation_path,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -164,17 +168,27 @@ def page_list_context(ctx: dict) -> dict:
 
     model_props = model_def.get('properties', {})
     formatting_entries = []
+    formatting_keys: set[str] = set()
     enum_ns_list = []       # [{var_name, ns, keys}]
     display_fields_code = ''
     primary_field = ''
 
     # Build map from relation display name (e.g. 'epic') to label_field (e.g. 'title')
     # parent_rels_raw entries: { prop_name: 'epic_id', label_field: 'title', ... }
-    rel_label_map: dict[str, str] = {}
-    for r in ctx.get('parent_rels_raw', []):
+    rel_label_map: dict[str, dict[str, object]] = {}
+    for r in list(ctx.get('parent_rels_raw', [])) + list(ctx.get('selector_oto_rels', [])):
         prop = r['prop_name']
         if prop.endswith('_id'):
-            rel_label_map[prop[:-3]] = r['label_field']
+            rel_label_map[prop[:-3]] = {
+                'label_field': r['label_field'],
+                'label_field_is_date': r.get('label_field_is_date', False),
+            }
+
+    def add_formatting(field_name: str, expr: str) -> None:
+        if field_name in formatting_keys:
+            return
+        formatting_keys.add(field_name)
+        formatting_entries.append(f'    {field_name}: {expr},')
 
     if xdisplay_table:
         fields_code_parts = []
@@ -200,24 +214,54 @@ def page_list_context(ctx: dict) -> dict:
                         # avoid duplicates
                         if not any(e['var_name'] == var_name for e in enum_ns_list):
                             enum_ns_list.append({'var_name': var_name, 'ns': enum_ns, 'keys': keys})
-                        formatting_entries.append(f'    {field_name}: {var_name}[item.{field_name} as number] ?? \'\',')
+                        add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
                     else:
                         labels = ', '.join(f"'{v}'" for v in enum_vals)
-                        formatting_entries.append(f"    {field_name}: ([{labels}] as const)[item.{field_name} as number] ?? '',")
+                        add_formatting(field_name, f"([{labels}] as const)[item.{field_name} as number] ?? ''")
 
             if config.get('primary'):
                 primary_field = field_name
 
             # If this field is a relationship object, format it server-side (no functions to client)
             if field_name in rel_label_map:
-                label_f = rel_label_map[field_name]
-                formatting_entries.append(f"    {field_name}: item.{field_name}?.{label_f} ?? '',")
+                rel_info = rel_label_map[field_name]
+                label_f = str(rel_info['label_field'])
+                if rel_info.get('label_field_is_date'):
+                    add_formatting(field_name, f"item.{field_name}?.{label_f} ? new Date(item.{field_name}.{label_f}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''")
+                else:
+                    add_formatting(field_name, f"item.{field_name}?.{label_f} ?? ''")
 
             fmt = model_props[field_name].get('format') if field_name in model_props else None
             format_attr = f", format: '{fmt}'" if fmt in ('date-time', 'date', 'time') else ''
             fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr} }}")
 
         display_fields_code = ',\n'.join(fields_code_parts)
+
+    if not xdisplay_table:
+        for field_name, rel_info in rel_label_map.items():
+            label_f = str(rel_info['label_field'])
+            if rel_info.get('label_field_is_date'):
+                add_formatting(field_name, f"item.{field_name}?.{label_f} ? new Date(item.{field_name}.{label_f}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''")
+            else:
+                add_formatting(field_name, f"item.{field_name}?.{label_f} ?? ''")
+
+        for field_name, prop in model_props.items():
+            actual = _get_actual_type(prop)
+            enum_vals = prop.get('enum')
+            enum_ns = prop.get('x-enum-namespace')
+            if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+                if enum_ns:
+                    keys = [
+                        (v.lower()[0] + v[1:] if isinstance(v, str) and not v.lstrip('-').isdigit() else str(v))
+                        for v in enum_vals
+                    ]
+                    var_name = f'{to_camel_case(field_name)}Labels'
+                    if not any(e['var_name'] == var_name for e in enum_ns_list):
+                        enum_ns_list.append({'var_name': var_name, 'ns': enum_ns, 'keys': keys})
+                    add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
+                else:
+                    labels = ', '.join(f"'{v}'" for v in enum_vals)
+                    add_formatting(field_name, f"([{labels}] as const)[item.{field_name} as number] ?? ''")
 
     needs_formatting = bool(formatting_entries)
     formatted_var    = f'formatted{parent_pascal}s'
@@ -261,10 +305,68 @@ def actions_context(ctx: dict) -> dict:
     sep = ', ' if (parent_params and child_args) else ''
     full_child_args = f'{sep}{child_args}' if child_args else ''
 
+    # Flatten rel extraction code and update args
+    flatten_rels_raw = ctx.get('flatten_rels', [])
+    non_m2o_flatten = [r for r in flatten_rels_raw if not r['is_m2o']]
+
+    def _flatten_field_extraction_expr(form_key: str, f: dict) -> str:
+        ftype = f['prop_type']
+        fmt   = f.get('format')
+        null  = f.get('nullable', True)
+        raw   = f"data.get('{form_key}')"
+        if ftype == 'string' and fmt in ('date', 'date-time', 'time'):
+            return f"{raw} ? new Date({raw} as string) : null" if null else f"new Date({raw} as string)"
+        if ftype in ('integer', 'number'):
+            return f"{raw} ? Number({raw}) : null" if null else f"Number({raw})"
+        if ftype == 'boolean':
+            return f"{raw} === 'true'"
+        return f"({raw} as string | null) || null" if null else f"{raw} as string"
+
+    def _flatten_field_ts_type(f: dict) -> str:
+        ftype = f['prop_type']
+        fmt   = f.get('format')
+        null  = f.get('nullable', True)
+        sfx   = ' | null' if null else ''
+        if ftype == 'string' and fmt in ('date', 'date-time', 'time'):
+            return f'Date{sfx}'
+        if ftype in ('integer', 'number'):
+            return f'number{sfx}'
+        if ftype == 'boolean':
+            return 'boolean'
+        return f'string{sfx}'
+
+    flatten_extractions_lines: list[str] = []
+    flatten_update_var_names: list[str] = []
+
+    for _flat in non_m2o_flatten:
+        _prop    = _flat['prop_name']
+        _fields  = [f for f in _flat['fields'] if not f.get('is_fk')]
+        if not _fields:
+            continue
+        _var     = to_camel_case(_prop) + 'UpdateData'
+        _ts_type = '{ ' + '; '.join(
+            f"{f['name']}: {_flatten_field_ts_type(f)}" for f in _fields
+        ) + ' }'
+        _all_form_keys = ', '.join(f"'{_prop}__{f['name']}'" for f in _fields)
+        _field_exprs  = '\n'.join(
+            "    " + f['name'] + ": " + _flatten_field_extraction_expr(f'{_prop}__{f["name"]}', f) + ","
+            for f in _fields
+        )
+        flatten_extractions_lines.append(
+            f"  const {_var}: {_ts_type} | null = [{_all_form_keys}].some(k => {{ const v = data.get(k); return v !== null && v !== ''; }})\n"
+            f"    ? {{\n{_field_exprs}\n    }}\n"
+            f"    : null;"
+        )
+        flatten_update_var_names.append(_var)
+
+    flatten_extractions_code = '\n'.join(flatten_extractions_lines)
+    flatten_args_str = (', ' + ', '.join(flatten_update_var_names)) if flatten_update_var_names else ''
+
     def _upsert_body(has_ch: bool) -> str:
+        _flatten_block = (f"{flatten_extractions_code}\n" if flatten_extractions_code else "")
         if can_create and can_update:
-            create_call = f'await add{parent_pascal}(userId, {parent_params}{full_child_args});'
-            update_call = f'await update{parent_pascal}(userId, id, {parent_params}{full_child_args}, srcSnapshotRaw);'
+            create_call = f'await add{parent_pascal}(userId, {parent_params}{full_child_args}{flatten_args_str});'
+            update_call = f'await update{parent_pascal}(userId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
             return (
                 f"  const id = data.get('id') as string | null;\n"
                 f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
@@ -275,7 +377,8 @@ def actions_context(ctx: dict) -> dict:
                 f"    await requirePermission('{parent}', 'create');\n"
                 f"  }}\n"
                 f"{form_data_gets}\n"
-                + (f"{child_form_data_extractions}\n" if has_ch else "") +
+                + (f"{child_form_data_extractions}\n" if has_ch else "")
+                + _flatten_block +
                 f"  const userId = await getSessionUserIdOrThrow();\n\n"
                 f"  if (id) {{\n"
                 f"    {update_call}\n"
@@ -291,9 +394,10 @@ def actions_context(ctx: dict) -> dict:
                 f"  const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
                 f"  await requirePermission('{parent}', 'update', existing);\n"
                 f"{form_data_gets}\n"
-                + (f"{child_form_data_extractions}\n" if has_ch else "") +
+                + (f"{child_form_data_extractions}\n" if has_ch else "")
+                + _flatten_block +
                 f"\n  const userId = await getSessionUserIdOrThrow();\n"
-                f"  await update{parent_pascal}(userId, id, {parent_params}{full_child_args}, srcSnapshotRaw);"
+                f"  await update{parent_pascal}(userId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
             )
         else:  # create only
             return (
@@ -301,7 +405,7 @@ def actions_context(ctx: dict) -> dict:
                 f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "") +
                 f"\n  const userId = await getSessionUserIdOrThrow();\n"
-                f"  await add{parent_pascal}(userId, {parent_params}{full_child_args});"
+                f"  await add{parent_pascal}(userId, {parent_params}{full_child_args}{flatten_args_str});"
             )
 
     service_fns = [
@@ -321,8 +425,9 @@ def actions_context(ctx: dict) -> dict:
 # service.ts
 # ---------------------------------------------------------------------------
 
-def service_context(ctx: dict) -> dict:
+def service_context(ctx: dict, schema: dict | None = None) -> dict:
     parent                  = ctx['parent']
+    parent_def              = (schema or {}).get('definitions', {}).get(parent, {})
     model                   = ctx['model']
     parent_pascal           = ctx['parent_pascal']
     can_create              = ctx['can_create']
@@ -337,6 +442,159 @@ def service_context(ctx: dict) -> dict:
     child_params_for_update = ctx['child_params_for_update']
 
     has_non_comment_ch = bool(non_comment_ch)
+
+    # Flatten non-m2o rel update params and nested update calls
+    flatten_rels_raw = ctx.get('flatten_rels', [])
+    non_m2o_flatten  = [r for r in flatten_rels_raw if not r['is_m2o']]
+
+    def _flatten_field_ts_type(f: dict) -> str:
+        ftype = f['prop_type']
+        fmt   = f.get('format')
+        null  = f.get('nullable', True)
+        sfx   = ' | null' if null else ''
+        if ftype == 'string' and fmt in ('date', 'date-time', 'time'):
+            return f'Date{sfx}'
+        if ftype in ('integer', 'number'):
+            return f'number{sfx}'
+        if ftype == 'boolean':
+            return 'boolean'
+        return f'string{sfx}'
+
+    flatten_update_params_parts: list[str] = []
+    flatten_nested_update_lines: list[str] = []
+    flatten_nested_create_lines: list[str] = []
+
+    for _flat in non_m2o_flatten:
+        _prop    = _flat['prop_name']
+        _target  = _flat['target']
+        _rel_name = _flat['relation_name']
+        _fields  = [f for f in _flat['fields'] if not f.get('is_fk')]
+        if not _fields:
+            continue
+        _var     = to_camel_case(_prop) + 'UpdateData'
+        _ts_type = '{ ' + '; '.join(
+            f"{f['name']}: {_flatten_field_ts_type(f)}" for f in _fields
+        ) + ' }'
+        flatten_update_params_parts.append(f"{_var}: {_ts_type} | null")
+        # FK pointing back to parent: {parent_model}_id
+        _fk_field = f'{model}_id'
+        # Whether the FK back to parent is optional on the target side. When it's
+        # optional, "remove" means unlink (set to null and keep the row); when
+        # it's required, "remove" means delete. The inline-create path is the
+        # same in both cases.
+        _target_def = (schema or {}).get('definitions', {}).get(_target, {}) if schema else {}
+        _target_props = _target_def.get('properties', {})
+        _fk_prop = _target_props.get(_fk_field, {})
+        _fk_type = _fk_prop.get('type')
+        _parent_fk_optional_on_target = isinstance(_fk_type, list) and 'null' in _fk_type
+
+        # External required FKs that the form does NOT collect — must be
+        # derived from the parent's own data (e.g. lifestyle.patient_id is
+        # derived from checkup.patient_rel.patient_id). When a derivation path
+        # exists, generate the lookup; otherwise fall back to update-only and
+        # leave a TODO so the schema author can supply a path.
+        _external_req_fks = [
+            f for f in _flat['fields']
+            if f.get('is_fk') and not f.get('nullable', True) and f.get('fk_target') != parent
+        ]
+
+        _derivation_decls: list[str] = []  # `const xId = …` lines
+        _create_extras: list[str] = []     # extra `field: xId,` entries spread into create.data
+        _derivation_failed = False
+        for _fk in _external_req_fks:
+            _fk_name = _fk['name']                          # e.g. 'patient_id'
+            _fk_target_q = _fk['fk_target']                 # e.g. 'patient'
+            _path = find_fk_derivation_path(parent, parent_def, _fk_target_q, schema or {}) if schema else None
+            if _path is None:
+                _derivation_failed = True
+                break
+            _local_var = to_camel_case(_target) + to_pascal_case(_fk_name)  # e.g. 'lifestylePatientId'
+            if _path['kind'] == 'direct':
+                # Parent already has its own FK to this entity — use it.
+                _parent_fk_param = to_camel_case(_path['parent_fk'])
+                _derivation_decls.append(f"      const {_local_var} = {_parent_fk_param};")
+            else:
+                # one_hop: query the intermediate table to fetch the FK.
+                _parent_fk_param = to_camel_case(_path['parent_fk'])
+                _intermediate = _path['intermediate']
+                _intermediate_fk = _path['intermediate_fk']
+                _row_var = to_camel_case(_target) + to_pascal_case(_intermediate) + 'Row'
+                _derivation_decls.append(
+                    f"      const {_row_var} = await tx.{_intermediate}.findUnique({{\n"
+                    f"        where: {{ id: {_parent_fk_param} }},\n"
+                    f"        select: {{ {_intermediate_fk}: true }},\n"
+                    f"      }});\n"
+                    f"      if (!{_row_var}) throw new Error('{_intermediate} not found while deriving {_target}.{_fk_name}');\n"
+                    f"      const {_local_var} = {_row_var}.{_intermediate_fk};"
+                )
+            _create_extras.append(f"{_fk_name}: {_local_var}, ")
+
+        if _derivation_failed:
+            # Schema doesn't expose a path to the external FK — keep the old
+            # update-only behaviour so we don't break generation. This branch
+            # is hit when the flatten target's required FK target isn't
+            # reachable from the parent within two FK hops.
+            _create_extras_str = ''
+            _has_create_block = False
+            flatten_nested_update_lines.append(
+                f"    if ({_var}) {{\n"
+                f"      await tx.{_target}.updateMany({{\n"
+                f"        where: {{ {_fk_field}: id }},\n"
+                f"        data: {_var},\n"
+                f"      }});\n"
+                f"    }} else {{\n"
+                f"      // TODO: external required FK on {_target} has no derivable path from {parent}\n"
+                f"      await tx.{_target}.updateMany({{\n"
+                f"        where: {{ {_fk_field}: id }},\n"
+                f"        data: {{ {_fk_field}: null }},\n"
+                f"      }});\n"
+                f"    }}"
+            )
+            continue
+
+        _create_extras_str = ''.join(_create_extras)
+        # On remove (`null` UpdateData): if the target's parent FK is optional,
+        # keep the row and unlink (set FK to null); otherwise delete the row.
+        if _parent_fk_optional_on_target:
+            _on_null_update = (
+                f"      await tx.{_target}.updateMany({{\n"
+                f"        where: {{ {_fk_field}: id }},\n"
+                f"        data: {{ {_fk_field}: null }},\n"
+                f"      }});"
+            )
+        else:
+            _on_null_update = (
+                f"      await tx.{_target}.deleteMany({{ where: {{ {_fk_field}: id }} }});"
+            )
+
+        # Update path — always upsert so a freshly-added flatten section gets
+        # created on save, regardless of whether the target's parent FK is
+        # optional (lifestyle) or required (pre_check, checkup_judgment).
+        flatten_nested_update_lines.append(
+            f"    if ({_var}) {{\n"
+            + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
+            + f"      await tx.{_target}.upsert({{\n"
+            f"        where: {{ {_fk_field}: id }},\n"
+            f"        create: {{ {_fk_field}: id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_var} }},\n"
+            f"        update: {_var},\n"
+            f"      }});\n"
+            f"    }} else {{\n"
+            f"{_on_null_update}\n"
+            f"    }}"
+        )
+        # Add path — always emit inline-create.
+        flatten_nested_create_lines.append(
+            f"    if ({_var}) {{\n"
+            + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
+            + f"      await tx.{_target}.create({{\n"
+            f"        data: {{ {_fk_field}: created.id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_var} }},\n"
+            f"      }});\n"
+            f"    }}"
+        )
+
+    flatten_update_params = ', '.join(flatten_update_params_parts)
+    flatten_nested_updates = '\n'.join(flatten_nested_update_lines)
+    flatten_nested_creates = '\n'.join(flatten_nested_create_lines)
 
     utility_code = (
         f"import prisma from '@/lib/prisma';\n"
@@ -364,9 +622,12 @@ def service_context(ctx: dict) -> dict:
     )
 
     return {
-        'utility_code':           utility_code,
-        'child_params_for_add':   child_params_for_add,
-        'child_params_for_update': child_params_for_update,
+        'utility_code':             utility_code,
+        'child_params_for_add':     child_params_for_add,
+        'child_params_for_update':  child_params_for_update,
+        'flatten_update_params':    flatten_update_params,
+        'flatten_nested_updates':   flatten_nested_updates,
+        'flatten_nested_creates':   flatten_nested_creates,
     }
 
 
@@ -380,6 +641,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
     parent_rels_raw  = ctx['parent_rels_raw']
 
     needs_datetime_imports = False
+    needs_entity_autocomplete_cell = False
     column_children = []
 
     for child_raw in non_comment_ch:
@@ -391,7 +653,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
         if not child_props:
             column_children.append({
                 'fn_code': (
-                    f"export function {prop_name}_columns(editable: boolean = false): GridColDef[] {{\n"
+                    f"export function use{to_pascal_case(prop_name)}Columns(editable: boolean = false): GridColDef[] {{\n"
                     f"  const t = useTranslations('Fields');\n"
                     f"  return [];\n"
                     f"}}"
@@ -406,7 +668,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
             rel = prop.get('x-relationship', {})
             if rel.get('type') == 'many-to-one':
                 param_camel = to_camel_case(key)
-                rel_params.append(f"{param_camel}Options?: Array<{{ value: string | null; label: string }}>")
+                rel_params.append(f"{param_camel}Config?: EntityAutocompleteCellConfig")
 
         columns = []
         for key, prop in child_props.items():
@@ -415,14 +677,22 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
 
             rel = prop.get('x-relationship', {})
             if rel.get('type') == 'many-to-one':
+                needs_entity_autocomplete_cell = True
                 label_base   = key.removesuffix('_id')
                 header_camel = to_camel_case(label_base)
                 prop_camel   = to_camel_case(key)
-                param_name   = f'{prop_camel}Options'
+                param_name   = f'{prop_camel}Config'
                 label_field  = rel.get('labelField', 'name')
+                # When the config is provided, pick uses EntityAutocomplete (any object selectable
+                # via server-side search). When it's missing, the column is read-only with the
+                # included relation's label.
                 columns.append(
-                    f"    ...({param_name} && {param_name}.length > 0\n"
-                    f"      ? [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: editable, type: 'singleSelect' as const, valueOptions: {param_name} }}]\n"
+                    f"    ...({param_name}\n"
+                    f"      ? [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: editable,\n"
+                    f"          renderEditCell: (params: GridRenderEditCellParams) => (\n"
+                    f"            <EntityAutocompleteCellEditor {{...params}} config={{{param_name}}} />\n"
+                    f"          ),\n"
+                    f"          valueFormatter: entityAutocompleteValueFormatter({param_name}) }}]\n"
                     f"      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
                     f"      : [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: false, valueGetter: (_value: any, row: any) => row.{label_base}?.{label_field} ?? '' }}]),"
                 )
@@ -481,7 +751,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
 
         rel_params_str = (', ' + ', '.join(rel_params)) if rel_params else ''
         fn_code = (
-            f"export function {prop_name}_columns(editable: boolean = false{rel_params_str}): GridColDef[] {{\n"
+            f"export function use{to_pascal_case(prop_name)}Columns(editable: boolean = false{rel_params_str}): GridColDef[] {{\n"
             f"  const t = useTranslations('Fields');\n"
             f"  return [\n"
             + '\n'.join(columns) +
@@ -493,6 +763,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
     return {
         'column_children': column_children,
         'needs_datetime_imports': needs_datetime_imports,
+        'needs_entity_autocomplete_cell': needs_entity_autocomplete_cell,
     }
 
 
@@ -512,8 +783,21 @@ def form_view_context(ctx: dict) -> dict:
     use_dayjs     = False
 
     rel_by_prop = {r['prop_name']: r for r in ctx['parent_rels_raw']}
+    # Add selector OTO rels to rel_by_prop so they display like many-to-one (label + view link)
+    for _oto_r in ctx.get('selector_oto_rels', []):
+        rel_by_prop[_oto_r['prop_name']] = {
+            'prop_name': _oto_r['prop_name'],
+            'label_field': _oto_r['label_field'],
+            'label_field_is_date': _oto_r.get('label_field_is_date', False),
+            'relation_name': _oto_r['relation_name'],
+            'target': _oto_r['target'],
+            'is_selector_oto': True,  # FK prop not in src type; use relation?.id for linking
+        }
     one_to_one_fk_props = {r['prop_name'] for r in ctx.get('one_to_one_rels', [])}
-    EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'} | one_to_one_fk_props
+    flatten_rels_raw = ctx.get('flatten_rels', [])
+    flatten_m2o_fk_props = ctx.get('flatten_m2o_fk_props', set())
+    # m2o flatten FK props are rendered as accordion sections, not plain FK TextFields
+    EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'} | one_to_one_fk_props | flatten_m2o_fk_props
     parent_props = [k for k in filtered_props if k not in EXCLUDE]
 
     custom_view_props = [
@@ -578,14 +862,23 @@ def form_view_context(ctx: dict) -> dict:
             rel_name      = rel.get('relation_name', p.removesuffix('_id'))
             target        = rel.get('target', p.removesuffix('_id'))
             target_pascal = to_pascal_case(target)
+            is_oto        = rel.get('is_selector_oto', False)
+            label_is_date = rel.get('label_field_is_date', False)
+            # For selector OTO, the FK prop is excluded from src type; use relation?.id instead
+            fk_id_expr    = f"src.{rel_name}?.id" if is_oto else f"src.{p}"
+            if label_is_date:
+                rel_value_expr = f"src.{rel_name}?.{label_f} ? new Date(src.{rel_name}.{label_f}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''"
+            else:
+                rel_value_expr = f"src.{rel_name}?.{label_f} || ''"
+            value_expr    = rel_value_expr if is_oto else f"src.{rel_name}?.{label_f} || src.{p} || ''"
             text_jsxs.append(
                 f"      <TextField\n        label={{tf('{label_fk}')}}\n"
-                f"        value={{src.{rel_name}?.{label_f} || src.{p} || ''}}\n"
+                f"        value={{{value_expr}}}\n"
                 f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n"
-                f"        slotProps={{{{ input: {{ endAdornment: src.{p} ? (\n"
+                f"        slotProps={{{{ input: {{ endAdornment: {fk_id_expr} ? (\n"
                 f"          <InputAdornment position=\"end\">\n"
                 f"            <Tooltip title=\"View\">\n"
-                f"              <Link href={{`/{target}/view/${{src.{p}}}`}} aria-label=\"View {target_pascal}\">\n"
+                f"              <Link href={{`/{target}/view/${{{fk_id_expr}}}`}} aria-label=\"View {target_pascal}\">\n"
                 f"                <IconButton component=\"span\" size=\"small\" tabIndex={{-1}}>\n"
                 f"                  <OpenInNewIcon fontSize=\"small\" />\n"
                 f"                </IconButton>\n"
@@ -676,13 +969,136 @@ def form_view_context(ctx: dict) -> dict:
         '\n'.join(custom_jsxs),
     ]))
 
+    # Reverse OTO rels (FK in target): display as labeled fields with view links
+    reverse_oto_rels = ctx.get('reverse_oto_rels', [])
+    reverse_oto_jsxs = []
+    for r in reverse_oto_rels:
+        prop       = r['prop_name']
+        target     = r['target']
+        label_f    = r['label_field']
+        label_fk   = to_camel_case(prop)
+        target_pascal = to_pascal_case(target)
+        value_expr = f"src.{prop}?.{label_f}?.toString() || ''"
+        fk_id_expr = f"src.{prop}?.id"
+        reverse_oto_jsxs.append(
+            f"      <TextField\n        label={{tf('{label_fk}')}}\n"
+            f"        value={{{value_expr}}}\n"
+            f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n"
+            f"        slotProps={{{{ input: {{ endAdornment: {fk_id_expr} ? (\n"
+            f"          <InputAdornment position=\"end\">\n"
+            f"            <Tooltip title=\"View\">\n"
+            f"              <Link href={{`/{target}/view/${{{fk_id_expr}}}`}} aria-label=\"View {target_pascal}\">\n"
+            f"                <IconButton component=\"span\" size=\"small\" tabIndex={{-1}}>\n"
+            f"                  <OpenInNewIcon fontSize=\"small\" />\n"
+            f"                </IconButton>\n"
+            f"              </Link>\n"
+            f"            </Tooltip>\n"
+            f"          </InputAdornment>\n"
+            f"        ) : null }} }}}}\n"
+            f"      />"
+        )
+    reverse_oto_fields = '\n'.join(reverse_oto_jsxs)
+
+    # Flatten accordion sections
+    flatten_enum_opt_setups: list[str] = []
+    flatten_sections_list: list[str] = []
+    has_accordion_rel_links = False
+
+    for _fr in flatten_rels_raw:
+        _prop = _fr['prop_name']
+        _prop_camel = to_camel_case(_prop)
+        _inner: list[str] = []
+
+        for _field in _fr['fields']:
+            _fname = _field['name']
+            _fcamel = to_camel_case(_fname)
+
+            if _field.get('is_fk'):
+                has_accordion_rel_links = True
+                _rel_name = _field['relation_name']
+                _rel_camel = to_camel_case(_rel_name)
+                _fk_target = _field['fk_target']
+                _fk_target_pascal = to_pascal_case(_fk_target)
+                _fk_label = _field['fk_label_field']
+                # Use 'as any' to bypass TypeScript since the nested FK may not be in the base type
+                _id_expr = f"(src.{_prop} as any)?.{_rel_name}?.id"
+                _val_expr = f"(src.{_prop} as any)?.{_rel_name}?.{_fk_label}?.toString() || ''"
+                _inner.append(
+                    f"        {{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}}\n"
+                    f"        <TextField\n          label={{tf('{_rel_camel}')}}\n"
+                    f"          value={{{_val_expr}}}\n"
+                    f"          fullWidth\n          margin=\"normal\"\n          aria-readonly\n"
+                    f"          slotProps={{{{ input: {{ endAdornment: {_id_expr} ? (\n"
+                    f"            <InputAdornment position=\"end\">\n"
+                    f"              <Tooltip title=\"View\">\n"
+                    f"                <Link href={{`/{_fk_target}/view/${{{_id_expr}}}`}} aria-label=\"View {_fk_target_pascal}\">\n"
+                    f"                  <IconButton component=\"span\" size=\"small\" tabIndex={{-1}}>\n"
+                    f"                    <OpenInNewIcon fontSize=\"small\" />\n"
+                    f"                  </IconButton>\n"
+                    f"                </Link>\n"
+                    f"              </Tooltip>\n"
+                    f"            </InputAdornment>\n"
+                    f"          ) : null }} }}}}\n"
+                    f"        />"
+                )
+            elif _field.get('format') in ('date', 'date-time', 'time'):
+                _fmt = _field.get('format')
+                needs_datetime_wrapper = True
+                _show_time = '' if _fmt in ('date-time', 'time') else ' show_time={false}'
+                _show_date = ' show_date={false}' if _fmt == 'time' else ''
+                if _fmt == 'date':
+                    use_dayjs = True
+                    _date_expr = f"{{src.{_prop}?.{_fname} ? dayjs(new Date(src.{_prop}?.{_fname}).toISOString().slice(0, 10) + 'T00:00:00').toDate() : null}}"
+                else:
+                    _date_expr = f"{{src.{_prop}?.{_fname} ?? null}}"
+                _inner.append(
+                    f"        <DateTimeWrapper label={{tf('{_fcamel}')}} date_time={_date_expr}{_show_time}{_show_date} readOnly />"
+                )
+            elif _field.get('prop_type') == 'boolean':
+                _inner.append(
+                    f"        <FormControlLabel\n"
+                    f"          control={{<Checkbox checked={{Boolean(src.{_prop}?.{_fname})}} readOnly />}}\n"
+                    f"          label={{tf('{_fcamel}')}}\n"
+                    f"        />"
+                )
+            elif _field.get('prop_type') in ('integer', 'number') and _field.get('enum'):
+                _enum_vals = _field['enum']
+                _opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(_enum_vals))
+                _state = safe_var_name(f'{_prop}_{_fname}')
+                flatten_enum_opt_setups.append(f"  const {_state}Options = [{_opts}];")
+                _inner.append(
+                    f"        <TextField\n          label={{tf('{_fcamel}')}}\n"
+                    f"          value={{{_state}Options.find(o => o.value === src.{_prop}?.{_fname})?.label ?? ''}}\n"
+                    f"          fullWidth\n          margin=\"normal\"\n          aria-readonly\n        />"
+                )
+            else:
+                _inner.append(
+                    f"        <TextField\n          label={{tf('{_fcamel}')}}\n"
+                    f"          value={{src.{_prop}?.{_fname}?.toString() ?? ''}}\n"
+                    f"          fullWidth\n          margin=\"normal\"\n          aria-readonly\n        />"
+                )
+
+        flatten_sections_list.append(
+            f"      <Accordion>\n"
+            f"        <AccordionSummary expandIcon={{<ExpandMoreIcon />}}>\n"
+            f"          <Typography>{{te('{_prop_camel}')}}</Typography>\n"
+            f"        </AccordionSummary>\n"
+            f"        <AccordionDetails>\n"
+            + ('\n'.join(_inner) + '\n' if _inner else '')
+            + "        </AccordionDetails>\n"
+            + "      </Accordion>"
+        )
+
+    needs_accordion = bool(flatten_rels_raw)
+    flatten_sections = '\n'.join(flatten_sections_list)
+
     # Children view grids
     has_commentable      = ctx.get('has_commentable', False)
     commentable_rel_name = ctx.get('commentable_rel_name', 'commentable')
     has_comment_children = has_commentable or any(c.get('output_type') == 'comments' for c in children_raw)
     has_list_children    = any(c.get('output_type') == 'list' for c in children_raw)
     grid_children        = [c for c in children_raw if c.get('output_type') not in ('list', 'comments')]
-    col_fn_names         = [f"{c['property_name']}_columns" for c in grid_children]
+    col_fn_names         = [f"use{to_pascal_case(c['property_name'])}Columns" for c in grid_children]
 
     child_view_grids = []
     # Bridge-based comment section (commentable one-to-one)
@@ -761,23 +1177,26 @@ def form_view_context(ctx: dict) -> dict:
             )
 
     column_variables = '\n'.join(
-        f"  const {safe_var_name(c['property_name'])}Columns: GridColDef[] = {c['property_name']}_columns(false);"
+        f"  const {safe_var_name(c['property_name'])}Columns: GridColDef[] = use{to_pascal_case(c['property_name'])}Columns(false);"
         for c in grid_children
     )
 
-    has_rel_links = any(rel_by_prop.get(p) for p in other_flds)
+    has_rel_links = any(rel_by_prop.get(p) for p in other_flds) or bool(reverse_oto_rels) or has_accordion_rel_links
 
     return {
         'needs_datetime_wrapper': needs_datetime_wrapper,
         'needs_image_display':    needs_image_display,
         'has_rel_links':          has_rel_links,
+        'needs_accordion':        needs_accordion,
         'has_comment_children':   has_comment_children,
         'has_list_children':      has_list_children,
         'has_grid_children':      bool(grid_children),
         'col_fn_names':           col_fn_names,
         'view_enum_ns_hooks':     '\n'.join(enum_ns_hooks),
-        'view_enum_opt_setups':   '\n'.join(enum_opt_setups),
+        'view_enum_opt_setups':   '\n'.join(enum_opt_setups + flatten_enum_opt_setups),
         'all_parent_fields':      all_parent_fields,
+        'reverse_oto_fields':     reverse_oto_fields,
+        'flatten_sections':       flatten_sections,
         'child_view_grids':       '\n'.join(child_view_grids),
         'column_variables':       column_variables,
         'custom_view_imports':    custom_view_imports,
@@ -798,6 +1217,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     model_def     = ctx['model_def']
     parent_rels   = ctx['parent_rels']
     parent_rels_raw = ctx['parent_rels_raw']
+    selector_oto_rels = ctx.get('selector_oto_rels', [])
+    selector_oto_prop_names = {r['prop_name'] for r in selector_oto_rels}
+    parent_rels_raw = [r for r in parent_rels_raw if r['prop_name'] not in selector_oto_prop_names]
     children_raw  = ctx['children_raw']
     can_delete    = ctx['can_delete']
     selection_targets = ctx['selection_targets']
@@ -850,10 +1272,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<number | null>(src.{p} ?? null);"
         for p in enum_int_props
     )
-    rel_states = '\n'.join(
+    # Many-to-one: FK prop is in src type → initialize from src.{prop_name}
+    # Selector OTO: FK prop is excluded from src type, but relation object is present → use src.{relation_name}?.id
+    rel_states_lines = [
         f"  const [{safe_var_name(r['prop_name'])}, set{_setter(safe_var_name(r['prop_name']))}] = useState<string | null>(src.{r['prop_name']} || null);"
         for r in parent_rels_raw
-    )
+    ]
+    for r in selector_oto_rels:
+        sn = safe_var_name(r['prop_name'])
+        rel_states_lines.append(
+            f"  const [{sn}, set{_setter(sn)}] = useState<string | null>(src.{r['relation_name']}?.id || null);"
+        )
+    rel_states = '\n'.join(rel_states_lines)
     custom_states = '\n'.join(
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
         for p in custom_upsert_props
@@ -897,32 +1327,26 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      />"
         )
 
-    # Relationship fields (Autocomplete)
-    rel_jsxs = []
-    for r in parent_rels_raw:
-        prop_name     = r['prop_name']
+    def _autocomplete_rel_jsx(prop_name: str, target: str, required: bool) -> str:
         label_base    = prop_name.removesuffix('_id')
         label_fk      = _tf(label_base)
         state_name    = safe_var_name(prop_name)
         setter        = _setter(state_name)
-        target        = r['target']
         target_pascal = to_pascal_case(target)
-        opts_var      = f'{state_name}Options'
-        rel_jsxs.append(
+        search_var    = f'{state_name}SearchAction'
+        initial_var   = f'{state_name}InitialOptions'
+        current_var   = f'{state_name}CurrentOption'
+        return (
             f"      <Box sx={{{{ display: 'flex', alignItems: 'flex-start', gap: 1 }}}}>\n"
-            f"        <Autocomplete\n"
+            f"        <EntityAutocomplete\n"
             f"          sx={{{{ flex: 1 }}}}\n"
-            f"          options={{{opts_var}}}\n"
-            f"          value={{{opts_var}.find((option) => option.value === {state_name}) || null}}\n"
-            f"          onChange={{(_, newValue) => set{setter}(newValue?.value ?? null)}}\n"
-            f"          renderInput={{(params) => (\n"
-            f"            <TextField\n"
-            f"              {{...params}}\n"
-            f"              label={{tf('{label_fk}')}}\n"
-            f"              margin=\"normal\"\n"
-            f"              {'required' if r.get('required') else ''}\n"
-            f"            />\n"
-            f"          )}}\n"
+            f"          value={{{state_name}}}\n"
+            f"          onChange={{(id) => set{setter}(id)}}\n"
+            f"          searchAction={{{search_var}}}\n"
+            f"          initialOptions={{{initial_var}}}\n"
+            f"          currentOption={{{current_var}}}\n"
+            f"          label={{tf('{label_fk}')}}\n"
+            f"          required={{{'true' if required else 'false'}}}\n"
             f"        />\n"
             f"        {{{state_name} && (\n"
             f"          <Tooltip title=\"View\">\n"
@@ -936,14 +1360,24 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      </Box>"
         )
 
+    # Relationship fields (Autocomplete) — many-to-one and selector OTO
+    rel_jsxs = []
+    for r in parent_rels_raw:
+        rel_jsxs.append(_autocomplete_rel_jsx(r['prop_name'], r['target'], bool(r.get('required'))))
+    for r in selector_oto_rels:
+        # Selector OTO: required = FK is not nullable
+        rel_jsxs.append(_autocomplete_rel_jsx(r['prop_name'], r['target'], not r.get('nullable', True)))
+
     # Number fields
     num_jsxs = []
     for p in number_props:
-        prop = filtered_props[p]
-        fk   = _tf(p)
-        req  = p in (model_def.get('required') or [])
-        mn   = prop.get('minimum', 0)
-        mx   = prop.get('maximum', 1000000)
+        prop   = filtered_props[p]
+        fk     = _tf(p)
+        req    = p in (model_def.get('required') or [])
+        mn     = prop.get('minimum', 0)
+        mx     = prop.get('maximum', 1000000)
+        is_float = _get_actual_type(prop) == 'number'
+        step_str = '\n        step={0.01}' if is_float else ''
         num_jsxs.append(
             f"      <NumberField\n"
             f"        label={{tf('{fk}')}}\n"
@@ -951,7 +1385,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        defaultValue={{src.{p} || undefined}}\n"
             f"        {'required' if req else ''}\n"
             f"        min={{{mn}}}\n"
-            f"        max={{{mx}}}\n"
+            f"        max={{{mx}}}{step_str}\n"
             f"      />"
         )
 
@@ -1042,19 +1476,44 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      />"
         )
 
-    for r in parent_rels_raw:
-        prop_name    = r['prop_name']
-        target_pascal = to_pascal_case(r['target'])
-        label_field  = r.get('label_field', 'name')
-        sn           = safe_var_name(prop_name)
-        opts_var     = f'{sn}Options'
+    # For each many-to-one (and selector OTO) relation, emit:
+    #   - {prop}InitialOptions  : useMemo over the limited initial set (initial{Target}s)
+    #   - {prop}SearchAction    : useCallback that delegates to search{Target}Options and
+    #                             remaps full records to {id, label} using the rel's label_field
+    #   - {prop}CurrentOption   : useMemo over src.{relation_name} for the resolved label
+    for r in list(parent_rels_raw) + list(selector_oto_rels):
+        prop_name     = r['prop_name']
+        target        = r['target']
+        target_pascal = to_pascal_case(target)
+        label_field   = r.get('label_field', 'name')
+        label_is_date = r.get('label_field_is_date', False)
+        rel_name      = prop_name.removesuffix('_id') if prop_name.endswith('_id') else prop_name
+        sn            = safe_var_name(prop_name)
+        initial_var   = f'{sn}InitialOptions'
+        search_var    = f'{sn}SearchAction'
+        current_var   = f'{sn}CurrentOption'
+        prop_initial  = f'initial{target_pascal}s'
+        prop_search   = f'search{target_pascal}Options'
+
+        if label_is_date:
+            label_expr = f"item.{label_field} ? new Date(item.{label_field}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''"
+            current_label_expr = f"src.{rel_name}.{label_field} ? new Date(src.{rel_name}.{label_field}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''"
+        else:
+            label_expr = f"item.{label_field}"
+            current_label_expr = f"src.{rel_name}.{label_field}"
+
         rel_opt_setups.append(
-            f"  const {opts_var} = useMemo(() => {{\n"
-            f"    return all{target_pascal}s.map((item) => ({{\n"
-            f"      value: item.id,\n"
-            f"      label: item.{label_field},\n"
-            f"    }}));\n"
-            f"  }}, [all{target_pascal}s]);"
+            f"  const {initial_var} = useMemo(() => ({prop_initial} ?? []).map((item) => ({{\n"
+            f"    id: item.id,\n"
+            f"    label: {label_expr},\n"
+            f"  }})), [{prop_initial}]);\n"
+            f"  const {search_var} = useCallback(async (query: string, includeIds: string[]) => {{\n"
+            f"    const rows = (await {prop_search}?.(query, includeIds)) ?? [];\n"
+            f"    return rows.map((item) => ({{ id: item.id, label: {label_expr} }}));\n"
+            f"  }}, [{prop_search}]);\n"
+            f"  const {current_var} = useMemo(() => (\n"
+            f"    src.{rel_name} ? {{ id: src.{rel_name}.id, label: {current_label_expr} }} : null\n"
+            f"  ), [src.{rel_name}]);"
         )
 
     # Entity select fields (static options embedded in the file)
@@ -1123,7 +1582,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             dt_ds_parts.append(f"    formData.set('{p}', {sn}?.toISOString() || '');")
     dt_ds = '\n'.join(dt_ds_parts)
     img_ds   = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in image_props)
-    rel_ds   = '\n'.join(f"    formData.set('{r['prop_name']}', {safe_var_name(r['prop_name'])} || '');" for r in parent_rels_raw)
+    rel_ds   = '\n'.join(f"    formData.set('{r['prop_name']}', {safe_var_name(r['prop_name'])} || '');" for r in list(parent_rels_raw) + list(selector_oto_rels))
     bool_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}.toString());" for p in boolean_props)
     enum_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} !== null ? String({safe_var_name(p)}) : '');" for p in enum_int_props)
     cust_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in custom_upsert_props)
@@ -1144,11 +1603,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     has_comment_children = bool(comment_children)
     has_children = bool(non_comment_ch)
     has_many_to_many = any((c.get('relationship') or {}).get('type') == 'many-to-many' for c in children_raw)
-    has_many_to_one = bool(parent_rels_raw)
+    has_many_to_one = bool(parent_rels_raw) or bool(selector_oto_rels)
 
     # Column fn names (grid children only)
     col_fn_names = [
-        f"{c['property_name']}_columns"
+        f"use{to_pascal_case(c['property_name'])}Columns"
         for c in non_comment_ch
         if c.get('output_type') not in ('list', None) or c.get('output_type') is None
         if c.get('output_type') != 'list' and (c.get('relationship') or {}).get('type') != 'many-to-many'
@@ -1242,7 +1701,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             else:
                 _label_expr = f"f.{_uc_label}"
             child_grid_setup_parts.append(
-                f"  const [initial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
+                f"  const [localInitial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                 f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
                 f"    value: f.id,\n"
                 f"    label: {_label_expr},\n"
@@ -1257,7 +1716,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             order_line = '\n    order: f.order,' if has_order else ''
             if ft:
                 child_grid_setup_parts.append(
-                    f"  const [initial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
+                    f"  const [localInitial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                     f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
                     f"    value: f.path,\n"
                     f"    label: f.name,\n"
@@ -1266,7 +1725,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 )
             else:
                 child_grid_setup_parts.append(
-                    f"  const [initial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
+                    f"  const [localInitial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                     f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
                     f"    value: f.name,\n"
                     f"    label: f.name,\n"
@@ -1279,7 +1738,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # annotations (not all FKs targeting the parent, e.g. reference_id → db_table stays).
         parent_fk_props_child = get_parent_fk_props(child_def, model)
         child_rels = [r for r in get_parent_relationships(child_def) if r['prop_name'] not in parent_fk_props_child]
-        rel_opt_args = ', '.join(f'{to_camel_case(r["prop_name"])}Options' for r in child_rels)
+        rel_opt_args = ', '.join(f'{to_camel_case(r["prop_name"])}Config' for r in child_rels)
         rel_args_str = f', {rel_opt_args}' if rel_opt_args else ''
 
         exclude_in_create = parent_fk_props_child | {'id', 'created_at', 'updated_at', 'creator_id'}
@@ -1308,8 +1767,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"    {fk_prop}: src.id," for fk_prop in sorted(parent_fk_props_child)
         )
         child_grid_setup_parts.append(
-            f"  const {child_var}Columns = {prop_name}_columns(true{rel_args_str});\n\n"
-            f"  const [initial{child_pascal}] = useState<GridRowsProp>(() => src.{prop_name}.map(f => ({{ ...f, id: f.id || `temp-${{Date.now()}}-${{Math.random()}}` }})));\n\n"
+            f"  const {child_var}Columns = use{to_pascal_case(prop_name)}Columns(true{rel_args_str});\n\n"
+            f"  const [localInitial{child_pascal}] = useState<GridRowsProp>(() => src.{prop_name}.map(f => ({{ ...f, id: f.id || `temp-${{Date.now()}}-${{Math.random()}}` }})));\n\n"
             f"  const createNew{child_pascal} = () => ({{\n"
             f"    id: `temp-${{Date.now()}}-${{Math.random()}}`,\n"
             f"{create_body}\n"
@@ -1319,30 +1778,60 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     child_grid_setup = '\n'.join(child_grid_setup_parts)
 
-    # Child entity rel option setups (for child grid many-to-one dropdowns)
-    all_child_rels = []
+    # For each child grid m2o relation, build an EntityAutocompleteCellConfig.
+    # The label-lookup map is seeded from src.{child}.{relation} (the FK-included rows
+    # already on screen) and from initial{Target}s (the limited initial fetch).
+    parent_rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
+    processed_rels: set[str] = set()
+    child_entity_rel_opt = []
     for c in non_comment_ch:
         if c.get('output_type') == 'list' or (c.get('relationship') or {}).get('type') == 'many-to-many':
             continue
         cdef = schema['definitions'].get(c['name'], {})
         parent_fk_props_cdef = get_parent_fk_props(cdef, model)
-        all_child_rels.extend(r for r in get_parent_relationships(cdef) if r['prop_name'] not in parent_fk_props_cdef)
-    parent_rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
-    seen_rel = set()
-    child_entity_rel_opt = []
-    for r in all_child_rels:
-        if r['prop_name'] in seen_rel or r['prop_name'] in parent_rel_prop_names:
-            continue
-        seen_rel.add(r['prop_name'])
-        prop_camel   = to_camel_case(r['prop_name'])
-        target_pascal = to_pascal_case(r['target'])
-        label_field  = r.get('label_field', 'name')
-        opts_var     = f'{prop_camel}Options'
-        child_entity_rel_opt.append(
-            f"  const {opts_var} = useMemo(() =>\n"
-            f"    (all{target_pascal}s ?? []).map(item => ({{ value: item.id, label: item.{label_field} }})),\n"
-            f"  [all{target_pascal}s]);"
-        )
+        child_prop_name = c['property_name']
+        for r in get_parent_relationships(cdef):
+            if r['prop_name'] in parent_fk_props_cdef or r['prop_name'] in parent_rel_prop_names:
+                continue
+            if r['prop_name'] in processed_rels:
+                continue
+            processed_rels.add(r['prop_name'])
+
+            prop_camel    = to_camel_case(r['prop_name'])
+            target        = r['target']
+            target_pascal = to_pascal_case(target)
+            label_field   = r.get('label_field', 'name')
+            label_base    = r['prop_name'].removesuffix('_id') if r['prop_name'].endswith('_id') else r['prop_name']
+            label_camel   = to_camel_case(label_base)
+            config_var    = f'{prop_camel}Config'
+            lookup_var    = f'{prop_camel}Lookup'
+            initial_opts_var = f'{prop_camel}InitialOpts'
+            prop_initial  = f'initial{target_pascal}s'
+            prop_search   = f'search{target_pascal}Options'
+
+            child_entity_rel_opt.append(
+                f"  const {lookup_var} = useRef<Map<string, string>>(new Map());\n"
+                f"  const {initial_opts_var} = useMemo(() =>\n"
+                f"    ({prop_initial} ?? []).map(item => ({{ id: item.id, label: item.{label_field} }})),\n"
+                f"  [{prop_initial}]);\n"
+                f"  useMemo(() => {{\n"
+                f"    {lookup_var}.current.clear();\n"
+                f"    src.{child_prop_name}.forEach(row => {{\n"
+                f"      if (row.{label_base}) {lookup_var}.current.set(row.{label_base}.id, row.{label_base}.{label_field});\n"
+                f"    }});\n"
+                f"    ({prop_initial} ?? []).forEach(item => {{ {lookup_var}.current.set(item.id, item.{label_field}); }});\n"
+                f"  }}, [src.{child_prop_name}, {prop_initial}]);\n"
+                f"  const {config_var} = useMemo<EntityAutocompleteCellConfig>(() => ({{\n"
+                f"    searchAction: async (query, includeIds) => {{\n"
+                f"      const rows = (await {prop_search}?.(query, includeIds)) ?? [];\n"
+                f"      rows.forEach(item => {{ {lookup_var}.current.set(item.id, item.{label_field}); }});\n"
+                f"      return rows.map(item => ({{ id: item.id, label: item.{label_field} }}));\n"
+                f"    }},\n"
+                f"    initialOptions: {initial_opts_var},\n"
+                f"    labelLookup: {lookup_var}.current,\n"
+                f"    label: tf('{label_camel}'),\n"
+                f"  }}), [{initial_opts_var}, {prop_search}, tf]);"
+            )
     child_entity_rel_option_setups = '\n'.join(child_entity_rel_opt)
 
     # Child form data handling
@@ -1463,7 +1952,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
         req_props_js = ', '.join(f"'{p}'" for p in required_validatable)
         child_validation_parts.append(
-            f"    const invalid{child_pascal} = ({child_var}Ref.current?.getFields?.() || []).filter((row: any) =>\n"
+            f"    const invalid{child_pascal} = ({child_var}Ref.current?.getFields?.() || []).filter((row: Record<string, unknown>) =>\n"
             f"      [{req_props_js}].some((prop: string) => row[prop] == null || row[prop] === '')\n"
             f"    );\n"
             f"    if (invalid{child_pascal}.length > 0) {{\n"
@@ -1514,20 +2003,29 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 ac_label_expr = f"item.{ac_label_field} + (item.{_sec_rel} ? ` - ${{item.{_sec_rel}.{_sec_field}}}` : '')"
             else:
                 ac_label_expr = f"item.{ac_label_field}"
+            # Server-search variant: pass initialAutocompleteOptions (limited initial set
+            # mapped to {id, label}) and a wrapped searchOptions action. Self-referential
+            # filtering (avoid picking your own row) is preserved on top of the server
+            # results client-side via excludeOptionIds.
+            search_action_var = f'search{target_pascal}Options'
+            initial_data_var  = f'initial{target_pascal}s'
             child_grid_components_parts.append(
                 f"      <EditableListWrapper\n"
                 f"        ref={{{child_var}Ref}}\n"
-                f"        initialItems={{initial{child_pascal}}}\n"
+                f"        initialItems={{localInitial{child_pascal}}}\n"
                 f"        itemType=\"autocomplete\"\n"
                 f"        addButtonLabel=\"Add {child_title_label}\"\n"
                 f"        showTitle={{true}}\n"
                 f"        title={{tf('{child_camel}')}}\n"
                 f"        textFieldLabel=\"Name\"\n"
                 f"        textFieldPlaceholder=\"Enter name\"\n"
-                f"        allAutocompleteOptions={{all{target_pascal}s{filter_logic}.map(item => ({{\n"
+                f"        searchOptions={{async (query, includeIds) => {{\n"
+                f"          const rows = (await {search_action_var}?.(query, includeIds)) ?? [];\n"
+                f"          return rows{filter_logic}.map(item => ({{ id: item.id, label: {ac_label_expr} }}));\n"
+                f"        }}}}\n"
+                f"        initialAutocompleteOptions={{({initial_data_var} ?? []){filter_logic}.map(item => ({{\n"
                 f"          id: item.id,\n"
                 f"          label: {ac_label_expr},\n"
-                f"          value: item.id,\n"
                 f"        }}))}}\n"
                 f"        excludeOptionIds={{[src.id]}}\n"
                 f"      />"
@@ -1544,7 +2042,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 child_grid_components_parts.append(
                     f"      <{list_comp}\n"
                     f"        ref={{{child_var}Ref}}\n"
-                    f"        initialItems={{initial{child_pascal}}}\n"
+                    f"        initialItems={{localInitial{child_pascal}}}\n"
                     f"        itemType=\"file\"\n"
                     f"        fileVariant=\"{ft}\"\n"
                     f"        acceptedFileTypes=\"{accepted}\"\n"
@@ -1557,7 +2055,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 child_grid_components_parts.append(
                     f"      <{list_comp}\n"
                     f"        ref={{{child_var}Ref}}\n"
-                    f"        initialItems={{initial{child_pascal}}}\n"
+                    f"        initialItems={{localInitial{child_pascal}}}\n"
                     f"        itemType=\"text\"\n"
                     f"        addButtonLabel=\"Add {child_title_label}\"\n"
                     f"        showTitle={{true}}\n"
@@ -1574,7 +2072,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         child_grid_components_parts.append(
             f"      <{grid_comp}\n"
             f"        ref={{{child_var}Ref}}\n"
-            f"        initialFields={{initial{child_pascal}}}\n"
+            f"        initialFields={{localInitial{child_pascal}}}\n"
             f"        columns={{{child_var}Columns}}\n"
             f"        createNewRow={{createNew{child_pascal}}}\n"
             f"        addButtonLabel=\"Add {child_title_label}\"\n"
@@ -1587,34 +2085,49 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     child_grid_components = '\n'.join(child_grid_components_parts)
 
-    # FormUpsert params signature
-    extra_default_props = ', '.join(f"all{to_pascal_case(t)}s = []" for t in selection_targets)
-    sel_perm_props = ', '.join(f"{to_camel_case(t)}Permissions" for t in selection_targets)
+    # FormUpsert params signature.
+    # Each selection target / selector OTO target now contributes:
+    #   - initial{Xxx}s   : Xxx[] (limited initial set fetched server-side)
+    #   - search{Xxx}Options : (query, includeIds) => Promise<Xxx[]>
+    # The page server-fetches both and passes them as props.
+    _all_targets = list(selection_targets) + [r['target'] for r in selector_oto_rels]
+    # Dedupe while preserving order
+    _seen: set[str] = set()
+    _ordered_targets: list[str] = []
+    for _t in _all_targets:
+        if _t not in _seen:
+            _seen.add(_t)
+            _ordered_targets.append(_t)
+    _initial_props = [f"initial{to_pascal_case(t)}s = []" for t in _ordered_targets]
+    _search_props  = [f"search{to_pascal_case(t)}Options" for t in _ordered_targets]
+    extra_default_props = ', '.join(_initial_props + _search_props)
     entity_edit_component = ctx.get('entity_edit_component')
     has_current_user_role_ids = bool(entity_edit_component)
-    if extra_default_props or sel_perm_props or has_comment_children or has_current_user_role_ids:
+    if extra_default_props or has_comment_children or has_current_user_role_ids:
         form_upsert_params = (
             f"{{ src, isEdit, permissions"
             + (', currentUserId' if has_comment_children else '')
             + (', currentUserRoleIds' if has_current_user_role_ids else '')
             + (f', {extra_default_props}' if extra_default_props else '')
-            + (f', {sel_perm_props}' if sel_perm_props else '')
             + " }: FormUpsertProps"
         )
     else:
         form_upsert_params = "{ src, isEdit, permissions }: FormUpsertProps"
 
     # Validation call
-    val_entries = '\n'.join(filter(None, [
-        '    isEdit,',
-        '    id: src.id,',
-        '\n'.join(f"    {p}: {safe_var_name(p)}," for p in date_time_props),
-        '\n'.join(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in parent_rels_raw),
-        '\n'.join(f"    {p}: {safe_var_name(p)}," for p in boolean_props),
-        '\n'.join(f"    {p}: {safe_var_name(p)}," for p in enum_int_props),
-        '\n'.join(f"    {p}: {safe_var_name(p)}," for p in custom_upsert_props),
-    ]))
-    validation_call = f"  const validationError = useFormValidation({{\n{val_entries}\n  }});"
+    validation_entry_lines = ['    isEdit,', '    id: src.id,']
+    validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in text_props)
+    validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in number_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in date_time_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in image_props)
+    validation_entry_lines.extend(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in parent_rels_raw)
+    validation_entry_lines.extend(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in selector_oto_rels)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in boolean_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in enum_int_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in custom_upsert_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in entity_select_props)
+    val_entries = '\n'.join(validation_entry_lines)
+    validation_call = f"  const getValidationError = () => useFormValidation({{\n{val_entries}\n  }});"
 
     # Comment children JSX
     comment_jsx_parts = []
@@ -1659,20 +2172,266 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"import {to_pascal_case(p)} from './{p}';" for p in custom_upsert_props
     )
 
+    # ---- Flatten edit sections (non-m2o only, edit-mode accordion) ----
+    flatten_rels_raw = ctx.get('flatten_rels', [])
+    non_m2o_flatten = [r for r in flatten_rels_raw if not r['is_m2o']]
+    has_flatten_accordion_upsert = bool(non_m2o_flatten)
+
+    flatten_edit_states_lines: list[str] = []
+    flatten_enum_ns_hooks_upsert: list[str] = []
+    flatten_enum_ns_seen_upsert: set[str] = set()
+    flatten_enum_opt_setups_upsert: list[str] = []
+    flatten_edit_form_data_sets_blocks: list[str] = []
+    flatten_edit_section_parts: list[str] = []
+    flatten_validation_parts: list[str] = []
+    flatten_needs_datetime = False
+    flatten_needs_boolean = False
+    flatten_needs_autocomplete = False
+    flatten_needs_number_field = False
+
+    def _flatten_field_ts_type(f: dict) -> str:
+        ftype = f['prop_type']
+        fmt   = f.get('format')
+        null  = f.get('nullable', True)
+        sfx   = ' | null' if null else ''
+        if ftype == 'string' and fmt in ('date', 'date-time', 'time'):
+            return f'Date{sfx}'
+        if ftype in ('integer', 'number'):
+            return f'number{sfx}'
+        if ftype == 'boolean':
+            return 'boolean'
+        return f'string{sfx}'
+
+    for _flat in non_m2o_flatten:
+        _prop   = _flat['prop_name']
+        _target = _flat['target']
+        _fields = _flat['fields']
+        _rel_camel = to_camel_case(_prop)
+        _target_props = schema['definitions'].get(_target, {}).get('properties', {})
+
+        _accordion_fields_jsx: list[str] = []
+        _rel_fds_lines: list[str] = []
+        _all_filled_checks: list[str] = []       # any non-bool field is non-empty
+        _mandatory_filled_checks: list[str] = [] # non-nullable non-bool fields are non-empty
+
+        for _f in _fields:
+            if _f.get('is_fk'):
+                continue  # FK fields are read-only in edit view
+
+            _fname   = _f['name']
+            _ftype   = _f['prop_type']
+            _fmt     = _f.get('format')
+            _nullable = _f.get('nullable', True)
+            _enum_vals = _f.get('enum')
+            _fk_label  = to_camel_case(_fname)
+            _form_key  = f'{_prop}__{_fname}'
+            _sn        = safe_var_name(f'{_prop}_{_fname}')
+            _fsetter   = _setter(_sn)
+
+            _is_date = _ftype == 'string' and _fmt in ('date', 'date-time', 'time')
+            _is_bool = _ftype == 'boolean'
+            _is_enum = _ftype in ('integer', 'number') and isinstance(_enum_vals, list)
+            _is_num  = _ftype in ('integer', 'number') and not _is_enum
+
+            if _is_date:
+                flatten_needs_datetime = True
+                if _fmt == 'date':
+                    _init = (f"src.{_prop}?.{_fname} ? dayjs(new Date(src.{_prop}?.{_fname} as string | Date)"
+                             f".toISOString().slice(0, 10) + 'T00:00:00') : null")
+                else:
+                    _init = f"src.{_prop}?.{_fname} ? dayjs(src.{_prop}?.{_fname}) : null"
+                flatten_edit_states_lines.append(
+                    f"  const [{_sn}, set{_fsetter}] = useState<Dayjs | null>({_init});"
+                )
+                if _fmt == 'date':
+                    _rel_fds_lines.append(
+                        f"    formData.set('{_form_key}', {_sn}?.format('YYYY-MM-DD') || '');"
+                    )
+                else:
+                    _rel_fds_lines.append(
+                        f"    formData.set('{_form_key}', {_sn}?.toISOString() || '');"
+                    )
+                _sd = '\n          show_date={false}' if _fmt == 'time' else ''
+                _st = '\n          show_time={false}' if _fmt == 'date' else ''
+                _accordion_fields_jsx.append(
+                    f"        <DateTimeWrapper\n"
+                    f"          label={{tf('{_fk_label}')}} {_sd}{_st}\n"
+                    f"          date_time={{{_sn} ? {_sn}.toDate() : null}}\n"
+                    f"          onChange={{(newValue: dayjs.Dayjs | null) => set{_fsetter}(newValue)}}\n"
+                    f"        />"
+                )
+                _check = f"{_sn} !== null"
+                _all_filled_checks.append(_check)
+                if not _nullable:
+                    _mandatory_filled_checks.append(_check)
+
+            elif _is_bool:
+                flatten_needs_boolean = True
+                flatten_edit_states_lines.append(
+                    f"  const [{_sn}, set{_fsetter}] = useState<boolean>(Boolean(src.{_prop}?.{_fname}));"
+                )
+                _rel_fds_lines.append(
+                    f"    formData.set('{_form_key}', {_sn}.toString());"
+                )
+                _accordion_fields_jsx.append(
+                    f"        <FormControlLabel\n"
+                    f"          control={{<Checkbox checked={{{_sn}}} onChange={{(e) => set{_fsetter}(e.target.checked)}} />}}\n"
+                    f"          label={{tf('{_fk_label}')}}\n"
+                    f"        />"
+                )
+                # booleans always have a value — excluded from filled/mandatory checks
+
+            elif _is_enum:
+                flatten_needs_autocomplete = True
+                flatten_edit_states_lines.append(
+                    f"  const [{_sn}, set{_fsetter}] = useState<number | null>(src.{_prop}?.{_fname} ?? null);"
+                )
+                _rel_fds_lines.append(
+                    f"    formData.set('{_form_key}', {_sn} !== null ? String({_sn}) : '');"
+                )
+                _opts_var = f'{_sn}Options'
+                _full_prop = _target_props.get(_fname, {})
+                _ns = _full_prop.get('x-enum-namespace')
+                if _ns and _ns not in flatten_enum_ns_seen_upsert:
+                    flatten_enum_ns_seen_upsert.add(_ns)
+                    flatten_enum_ns_hooks_upsert.append(f"  const t{_ns} = useTranslations('{_ns}');")
+                if _ns:
+                    _opts = ', '.join(
+                        (f"{{ value: {(v if isinstance(v, (int, float)) else (i if not str(v).lstrip('-').isdigit() else int(v)))}, "
+                         f"label: t{_ns}('{(v.lower()[0]+v[1:] if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))}') }}")
+                        for i, v in enumerate(_enum_vals)
+                    )
+                else:
+                    _opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(_enum_vals))
+                flatten_enum_opt_setups_upsert.append(f"  const {_opts_var} = [{_opts}];")
+                _accordion_fields_jsx.append(
+                    f"        <Autocomplete\n"
+                    f"          options={{{_opts_var}}}\n"
+                    f"          value={{{_opts_var}.find((o) => o.value === {_sn}) ?? null}}\n"
+                    f"          onChange={{(_, newValue) => set{_fsetter}(newValue?.value ?? null)}}\n"
+                    f"          renderInput={{(params) => (\n"
+                    f"            <TextField\n"
+                    f"              {{...params}}\n"
+                    f"              label={{tf('{_fk_label}')}}\n"
+                    f"              margin=\"normal\"\n"
+                    f"            />\n"
+                    f"          )}}\n"
+                    f"        />"
+                )
+                _check = f"{_sn} !== null"
+                _all_filled_checks.append(_check)
+                if not _nullable:
+                    _mandatory_filled_checks.append(_check)
+
+            elif _is_num:
+                flatten_needs_number_field = True
+                _ref_var = f'{_sn}Ref'
+                flatten_edit_states_lines.append(
+                    f"  const {_ref_var} = useRef<HTMLInputElement>(null);"
+                )
+                _rel_fds_lines.append(
+                    f"    formData.set('{_form_key}', {_ref_var}.current?.value || '');"
+                )
+                _full_prop = _target_props.get(_fname, {})
+                _mn = _full_prop.get('minimum', 0)
+                _mx = _full_prop.get('maximum', 1000000)
+                _is_float = _ftype == 'number'
+                _step_str = '\n          step={0.01}' if _is_float else ''
+                _accordion_fields_jsx.append(
+                    f"        <NumberField\n"
+                    f"          label={{tf('{_fk_label}')}}\n"
+                    f"          inputRef={{{_ref_var}}}\n"
+                    f"          defaultValue={{src.{_prop}?.{_fname} ?? undefined}}\n"
+                    f"          min={{{_mn}}}\n"
+                    f"          max={{{_mx}}}{_step_str}\n"
+                    f"        />"
+                )
+                _check = f"({_ref_var}.current?.value ?? '') !== ''"
+                _all_filled_checks.append(_check)
+                if not _nullable:
+                    _mandatory_filled_checks.append(_check)
+
+            else:
+                # Text field — use ref
+                _ref_var = f'{_sn}Ref'
+                flatten_edit_states_lines.append(
+                    f"  const {_ref_var} = useRef<HTMLInputElement>(null);"
+                )
+                _rel_fds_lines.append(
+                    f"    formData.set('{_form_key}', {_ref_var}.current?.value || '');"
+                )
+                _ml  = 'true' if _fname == 'description' else 'false'
+                _rows = '4'   if _fname == 'description' else 'undefined'
+                _accordion_fields_jsx.append(
+                    f"        <TextField\n"
+                    f"          label={{tf('{_fk_label}')}}\n"
+                    f"          inputRef={{{_ref_var}}}\n"
+                    f"          defaultValue={{src.{_prop}?.{_fname} || ''}}\n"
+                    f"          fullWidth\n"
+                    f"          margin=\"normal\"\n"
+                    f"          multiline={{{_ml}}}\n"
+                    f"          rows={{{_rows}}}\n"
+                    f"        />"
+                )
+                _check = f"({_ref_var}.current?.value ?? '') !== ''"
+                _all_filled_checks.append(_check)
+                if not _nullable:
+                    _mandatory_filled_checks.append(_check)
+
+        if _accordion_fields_jsx:
+            flatten_edit_section_parts.append(
+                f"      <Accordion>\n"
+                f"        <AccordionSummary expandIcon={{<ExpandMoreIcon />}}>\n"
+                f"          <Typography>{{te('{_rel_camel}')}}</Typography>\n"
+                f"        </AccordionSummary>\n"
+                f"        <AccordionDetails>\n"
+                + '\n'.join(_accordion_fields_jsx) + '\n'
+                + f"        </AccordionDetails>\n"
+                + f"      </Accordion>"
+            )
+
+        if _rel_fds_lines:
+            flatten_edit_form_data_sets_blocks.append('\n'.join(_rel_fds_lines))
+
+        # Validation: if any non-bool field has a value, all mandatory ones must be filled
+        if _all_filled_checks and _mandatory_filled_checks:
+            _rel_label = ' '.join(w.capitalize() for w in _prop.split('_'))
+            _any_expr = ' ||\n      '.join(_all_filled_checks)
+            _all_mandatory_expr = ' &&\n      '.join(_mandatory_filled_checks)
+            flatten_validation_parts.append(
+                f"    if (\n"
+                f"      ({_any_expr}) &&\n"
+                f"      !({_all_mandatory_expr})\n"
+                f"    ) {{\n"
+                f"      setError('{_rel_label}: all required fields must be filled when providing data.');\n"
+                f"      return;\n"
+                f"    }}"
+            )
+
+    # Merge flatten states/opts into existing strings
+    _flatten_states_str = '\n'.join(flatten_edit_states_lines)
+    all_states_merged = '\n'.join(filter(None, [all_states, _flatten_states_str]))
+    _flatten_fds_str = '\n'.join(flatten_edit_form_data_sets_blocks)
+    parent_form_data_sets_merged = '\n'.join(filter(None, [parent_form_data_sets, _flatten_fds_str]))
+    _all_enum_ns_hooks = '\n'.join(enum_ns_hooks + flatten_enum_ns_hooks_upsert)
+    _all_enum_opt_setups = '\n'.join(enum_opt_setups + entity_select_opt_setups + flatten_enum_opt_setups_upsert)
+    _flatten_validation_code = '\n\n'.join(flatten_validation_parts)
+    _child_validation_code_merged = '\n\n'.join(filter(None, [child_validation_code, _flatten_validation_code]))
+
     return {
         'parent_refs':              parent_refs,
-        'all_states':               all_states,
+        'all_states':               all_states_merged,
         'all_parent_fields_jsx':    all_parent_fields_jsx,
-        'parent_form_data_sets':    parent_form_data_sets,
+        'parent_form_data_sets':    parent_form_data_sets_merged,
         'child_variables':          child_variables,
         'child_imports':            child_imports,
         'child_grid_setup':         child_grid_setup,
         'child_form_data_handling': child_form_data_handling,
-        'child_validation_code':    child_validation_code,
+        'child_validation_code':    _child_validation_code_merged,
         'child_grid_components':    child_grid_components,
         'form_upsert_params':       form_upsert_params,
-        'enum_ns_hooks':            '\n'.join(enum_ns_hooks),
-        'enum_opt_setups':          '\n'.join(enum_opt_setups + entity_select_opt_setups),
+        'enum_ns_hooks':            _all_enum_ns_hooks,
+        'enum_opt_setups':          _all_enum_opt_setups,
         'rel_opt_setups':           '\n'.join(rel_opt_setups),
         'child_entity_rel_opt':     child_entity_rel_option_setups,
         'validation_call':          validation_call,
@@ -1681,9 +2440,13 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'custom_upsert_imports':    custom_upsert_imports,
         'has_children':             has_children,
         'has_comment_children':     has_comment_children,
-        'has_many_to_one':          has_many_to_one or bool(enum_int_props) or bool(entity_select_props),
-        'has_datetime_props':       bool(date_time_props),
+        'has_many_to_one':          has_many_to_one or bool(enum_int_props) or bool(entity_select_props) or flatten_needs_autocomplete,
+        'has_entity_autocomplete':  bool(parent_rels_raw) or bool(selector_oto_rels),
+        'has_child_entity_autocomplete': bool(child_entity_rel_opt),
+        'has_datetime_props':       bool(date_time_props) or flatten_needs_datetime,
         'has_image_props':          bool(image_props),
-        'has_number_props':         bool(number_props),
-        'has_boolean_props':        bool(boolean_props),
+        'has_number_props':         bool(number_props) or flatten_needs_number_field,
+        'has_boolean_props':        bool(boolean_props) or flatten_needs_boolean,
+        'has_flatten_accordion_upsert': has_flatten_accordion_upsert,
+        'flatten_edit_sections':    '\n'.join(flatten_edit_section_parts),
     }

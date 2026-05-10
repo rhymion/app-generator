@@ -1,6 +1,6 @@
 {{ utility_code }}
 {% if can_create %}
-export async function add{{ parent_pascal }}(userId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}): Promise<{ id: string }> {
+export async function add{{ parent_pascal }}(userId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string }> {
   return await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
 {{ validation_data_obj }}
@@ -18,6 +18,9 @@ export async function add{{ parent_pascal }}(userId: string{% if parent_params_w
 {% endif %}
       },
     });
+{% if flatten_nested_creates %}
+{{ flatten_nested_creates }}
+{% endif %}
 {% if one_to_one_spread %}
     await afterCreate(tx, { ...created, {{ one_to_one_spread }} } as Record<string, unknown>, {
 {% else %}
@@ -30,7 +33,7 @@ export async function add{{ parent_pascal }}(userId: string{% if parent_params_w
 }
 {% endif %}
 {% if can_update %}
-export async function update{{ parent_pascal }}(userId: string, id: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_update %}, {{ child_params_for_update }}{% endif %}, srcSnapshotRaw: string | null): Promise<void> {
+export async function update{{ parent_pascal }}(userId: string, id: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_update %}, {{ child_params_for_update }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}, srcSnapshotRaw: string | null): Promise<void> {
   await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -48,6 +51,9 @@ export async function update{{ parent_pascal }}(userId: string, id: string{% if 
 {% endif %}
       },
     });
+{% if flatten_nested_updates %}
+{{ flatten_nested_updates }}
+{% endif %}
   });
 }
 {% endif %}

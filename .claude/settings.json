@@ -1,16 +1,29 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(npm run docker:test:up)",
+      "Bash(npm run docker:test:down)",
+      "Bash(npm run demo:generate)",
+      "Bash(npm run build)",
+      "Bash(npm run test)",
+      "Bash(npm run test:coverage)",
+      "Bash(npm run cy:test:api)",
+      "Bash(npm run cy:run:api)",
+      "Bash(npm run db:reset:test)",
+      "Bash(npm run db:generate)",
+      "Bash(npm run lint)",
+      "Bash(npx vitest:*)",
+      "Bash(npx cypress run --browser chromium --spec cypress/e2e/api*)",
+      "Bash(pytest code_generator/tests*)"
+    ]
+  },
   "hooks": {
     "Stop": [
       {
         "hooks": [
           {
-            "type": "agent",
-            "prompt": "Verify that all unit tests pass for the code generator python code. Run the code generator, and component test suite. Check the results. Only return ok:true if all of them pass.",
-            "timeout": 120
-          },
-          {
             "type": "prompt",
-            "prompt": "Check if all requested tasks are complete and the code change matches the original requirement. If not, respond with {\"ok\": false, \"reason\": \"what remains to be done\"}."
+            "prompt": "Before stopping: (a) state which task type the work was (A/B/C per CLAUDE.md). (b) For Type A or B, confirm the corresponding gate ran successfully end-to-end. For Type C, confirm no source files were modified. (c) Confirm nothing in the original request is still outstanding. If any of these is not satisfied, respond with {\"ok\": false, \"reason\": \"...\"}."
           }
         ]
       }

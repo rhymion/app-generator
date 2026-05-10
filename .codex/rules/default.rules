@@ -1,0 +1,105 @@
+# Project command policy corresponding to .claude/settings.json.
+# These rules allow common project verification commands to run outside the
+# sandbox when Codex asks for escalation.
+
+prefix_rule(
+    pattern = ["npm", "run", "docker:test:up"],
+    decision = "allow",
+    justification = "Required Type A/B gate step for test database services.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "docker:test:down"],
+    decision = "allow",
+    justification = "Allowed cleanup for test database services.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "demo:generate"],
+    decision = "allow",
+    justification = "Required Type A/B gate step for generated app output.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "build"],
+    decision = "allow",
+    justification = "Required Type A/B gate step.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "test"],
+    decision = "allow",
+    justification = "Required Type B gate step.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "test:coverage"],
+    decision = "allow",
+    justification = "Allowed project test coverage command.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "cy:test:api"],
+    decision = "allow",
+    justification = "Required Type A/B API e2e gate step.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "cy:run:api"],
+    decision = "allow",
+    justification = "Allowed API e2e command alias.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "db:reset:test"],
+    decision = "allow",
+    justification = "Allowed database recovery step when generation drift is suspected.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "db:generate"],
+    decision = "allow",
+    justification = "Allowed database recovery step when generation drift is suspected.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "lint"],
+    decision = "allow",
+    justification = "Allowed project lint command.",
+)
+
+prefix_rule(
+    pattern = ["npx", "vitest"],
+    decision = "allow",
+    justification = "Allowed targeted Vitest invocation corresponding to Claude npx vitest:* permission.",
+)
+
+prefix_rule(
+    pattern = ["npx", "cypress", "run", "--browser", "chromium", "--spec", "cypress/e2e/api"],
+    decision = "allow",
+    justification = "Allowed API Cypress run from local Claude settings.",
+)
+
+prefix_rule(
+    pattern = ["npx", "cypress", "run", "--browser", "chromium", "--spec", "cypress/e2e/api*"],
+    decision = "allow",
+    justification = "Allowed API Cypress run from shared Claude settings.",
+)
+
+prefix_rule(
+    pattern = ["pytest", "code_generator/tests"],
+    decision = "allow",
+    justification = "Required Type B Python generator test gate.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "demo:start"],
+    decision = "prompt",
+    justification = "Local dev server may be useful, but prompt before starting a long-running process.",
+)
+
+prefix_rule(
+    pattern = ["npm", "install"],
+    decision = "prompt",
+    justification = "Dependency installation changes lockfiles and may need network access.",
+)

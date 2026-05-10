@@ -1,8 +1,16 @@
 'use client';
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useCallback } from 'react';
 import dayjs from 'dayjs';
 import { useTranslations } from 'next-intl';
-import { DataGrid, GridColDef, gridRowSelectionManagerSelector, useGridApiRef, GridRowSelectionModel } from '@mui/x-data-grid';
+import {
+  DataGrid,
+  GridColDef,
+  GridFilterModel,
+  GridPaginationModel,
+  GridRowSelectionModel,
+  GridSortModel,
+  useGridApiRef,
+} from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
@@ -17,6 +25,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import type { ModelPermissions } from '@/lib/authz';
+import type { PageOpts, PageResult } from '@/lib/_pagination';
 
 interface BaseEntity {
   id: string;
@@ -32,7 +41,18 @@ interface DisplayFieldConfig<T> {
 }
 
 interface DataGridClientProps<T extends BaseEntity> {
-  src: T[];
+  /** Client-mode rows. Required when fetchPage is not provided. */
+  src?: T[];
+  /** Server-mode initial page rows. Required when fetchPage is provided. */
+  initialRows?: T[];
+  /** Server-mode total row count (across all pages). */
+  initialRowCount?: number;
+  /** Server-mode initial page index (0-based). */
+  initialPage?: number;
+  /** Server-mode initial page size. */
+  initialPageSize?: number;
+  /** Server-mode page fetcher (Server Action). When provided, DataGrid runs in server-paginated mode. */
+  fetchPage?: (opts: PageOpts) => Promise<PageResult<T>>;
   basePath: string;
   removeAction?: (ids: string[]) => Promise<void>;
   entityLabel?: string;
@@ -43,6 +63,11 @@ interface DataGridClientProps<T extends BaseEntity> {
 
 export default function DataGridClient<T extends BaseEntity>({
   src,
+  initialRows,
+  initialRowCount,
+  initialPage,
+  initialPageSize,
+  fetchPage,
   basePath,
   removeAction,
   entityLabel = 'Item',
@@ -50,18 +75,44 @@ export default function DataGridClient<T extends BaseEntity>({
   permissions = { create: true, read: true, update: true, delete: true },
   primaryField = 'name' as keyof T,
 }: DataGridClientProps<T>) {
-  const [items, setItems] = useState(src);
+  const serverMode = typeof fetchPage === 'function';
+  const initialItems: T[] = (serverMode ? initialRows : src) ?? [];
+
+  const [items, setItems] = useState<T[]>(initialItems);
+  const [rowCount, setRowCount] = useState<number>(
+    serverMode ? (initialRowCount ?? initialItems.length) : initialItems.length,
+  );
   const [isPending, startTransition] = useTransition();
-  const [paginationModel, setPaginationModel] = useState({
-    pageSize: 10,
-    page: 0,
+  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({
+    pageSize: serverMode ? (initialPageSize ?? 50) : 10,
+    page: serverMode ? (initialPage ?? 0) : 0,
   });
+  const [sortModel, setSortModel] = useState<GridSortModel>([]);
+  const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [selectedRowIds, setSelectedRowIds] = useState<GridRowSelectionModel>({ type: 'include', ids: new Set() });
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
   const apiRef = useGridApiRef();
   const tc = useTranslations('Common');
   const tf = useTranslations('Fields');
+
+  const reload = useCallback((p: GridPaginationModel, s: GridSortModel, f: GridFilterModel) => {
+    if (!fetchPage) return;
+    startTransition(async () => {
+      const result = await fetchPage({
+        page: p.page,
+        pageSize: p.pageSize,
+        sort: s.map(x => ({ field: x.field, dir: x.sort === 'desc' ? 'desc' : 'asc' })),
+        filter: Object.fromEntries(
+          f.items
+            .filter(i => i.value !== undefined && i.value !== null && i.value !== '')
+            .map(i => [i.field, i.value as string | number | boolean]),
+        ),
+      });
+      setItems(result.rows as T[]);
+      setRowCount(result.total);
+    });
+  }, [fetchPage]);
 
   function moveRowUp(index: number) {
     setItems(prev => {
@@ -89,6 +140,7 @@ export default function DataGridClient<T extends BaseEntity>({
   const deleteConfirmed = () => {
     if (pendingDeleteIds.length > 0 && removeAction) {
       setItems(prev => prev.filter(item => !pendingDeleteIds.includes((item as { id: string }).id)));
+      if (serverMode) setRowCount(prev => Math.max(0, prev - pendingDeleteIds.length));
       startTransition(() => removeAction(pendingDeleteIds));
     }
     setOpenDeleteDialog(false);
@@ -110,7 +162,21 @@ export default function DataGridClient<T extends BaseEntity>({
         width: fieldConfig.width || 150,
         renderCell: (params) => {
           const fieldValue = params.row[fieldConfig.field];
-          return <Link href={`${basePath}/view/${params.id}`}>
+          // The link must stay within the cell's width. Without these styles
+          // the `<a>` extends to its full text width and visually overlaps the
+          // next column, which makes Cypress' `cy.click()` fail with "is being
+          // covered by another element" because the next cell's div sits over
+          // the overflowing portion of the link.
+          return <Link
+            href={`${basePath}/view/${params.id}`}
+            sx={{
+              display: 'block',
+              maxWidth: '100%',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
             {`${(fieldValue && typeof fieldValue === 'object' && 'name' in fieldValue ? fieldValue.name : String(fieldValue || params.id))}`}
           </Link>;
         },
@@ -188,8 +254,30 @@ export default function DataGridClient<T extends BaseEntity>({
           apiRef={apiRef}
           rows={items}
           columns={columns}
+          loading={isPending}
+          {...(serverMode
+            ? {
+                rowCount,
+                paginationMode: 'server' as const,
+                sortingMode: 'server' as const,
+                filterMode: 'server' as const,
+                sortModel,
+                onSortModelChange: (m: GridSortModel) => {
+                  setSortModel(m);
+                  reload(paginationModel, m, filterModel);
+                },
+                filterModel,
+                onFilterModelChange: (m: GridFilterModel) => {
+                  setFilterModel(m);
+                  reload(paginationModel, sortModel, m);
+                },
+              }
+            : {})}
           paginationModel={paginationModel}
-          onPaginationModelChange={setPaginationModel}
+          onPaginationModelChange={(m) => {
+            setPaginationModel(m);
+            if (serverMode) reload(m, sortModel, filterModel);
+          }}
           onRowSelectionModelChange={setSelectedRowIds}
           pageSizeOptions={[10, 20, 50]}
           checkboxSelection

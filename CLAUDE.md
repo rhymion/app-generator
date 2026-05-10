@@ -1,26 +1,90 @@
-# Project Rules
+# my-next — App Generator
 
-## CI Gate — Required before finishing any task
+Pipeline: `code_generator/json_schema.yaml` + `prisma/schema.prisma` → Python
+generators (`code_generator/*.py`) → TypeScript modules under `app/generated/`
+and Cypress tests.
 
-Always run these steps before considering a task complete:
+## Authoritative knowledge
 
-1. Stop application if it is already started
-2. `pytest code_generator/tests`
-3. `npm run docker:test:up`
-4. `npm run demo:generate`
+When editing the schema or generators, these docs are the source of truth. If
+behaviour conflicts with a doc, treat the doc as wrong and fix it as part of
+your change.
+
+- `docs/knowledge/prisma-schema-conventions.md` — Prisma model rules
+- `docs/knowledge/schema-yaml-configuration.md` — `code_generator/json_schema.yaml` reference
+- `docs/knowledge/code-generation-custom-extensions.md` — `x-generate` extensions
+- `docs/knowledge/cypress-e2e-testing.md` — generated Cypress patterns
+- Other `docs/knowledge/*.md` — topical references (i18n, dark mode, datagrid, timezone, etc.)
+
+## Task classification
+
+Every request is one of three types. Identify the type before touching anything;
+if unclear, ask. Each type has its own completion gate.
+
+### Type A — Schema-only update
+Edits restricted to `prisma/schema.prisma`, `code_generator/json_schema.yaml`,
+and `docs/knowledge/*.md`. Python generators (`code_generator/*.py`) and
+existing (non-generated) TypeScript are **unchanged**.
+
+Gate:
+1. `npm run docker:test:up`
+2. `npm run demo:generate`
+3. `npm run build`
+4. `npm run cy:test:api`
+
+`pytest` and `npm run test` are skipped — Python and existing TS were not
+touched. The full UI Cypress suite is also skipped (Chromium UI tests don't run
+reliably in Claude Code's environment). The API-only e2e (`cy:test:api`) is
+fast, headless, and covers the generated CRUD endpoints.
+
+### Type B — Feature implementation / update
+Adds or modifies Python generators, non-generated TypeScript modules,
+dependencies, or framework integrations. May include a schema update. Document
+new behaviour under `docs/knowledge/`.
+
+Gate:
+1. `pytest code_generator/tests`
+2. `npm run docker:test:up`
+3. `npm run demo:generate`
+4. `npm run build`
 5. `npm run test`
-6. `npm run build`
+6. `npm run cy:test:api`
 
-If any of these steps fails, try to fix the issues. Ask the user for instruction if the error is caused by problems outside the project (ex. network, hardware usage, etc.) or the provided instruction is not enough for direction for fix.  
-It is fine to skip code generation by running `npm run db:reset:test` and `npm run db:generate` instead of `npm run demo:generate` when the fix is found for the web application but additional instruction is needed for the code generator. Report the inconsistency between the code generator and the web application code in this case.
-E2E tests are excluded in the process above, because Cypress in VS Code via Claude often fails due to environment differences.
+### Type C — Investigation / question
+Reading code, answering "how does X work?", "what would break if…?", or
+proposing solutions. **No** edits to source files.
 
-## Sanity Check — Required after every code change
+Gate: none. Do not run docker, generators, builds, or tests. Cite findings with
+`file:line` references.
 
-Before stopping, review what you changed and ask yourself:
+## Triage rules
 
-* Does this match the original requirement?
-* Are there missing edge cases?
-* Could this break anything else?
-Report the result of this check explicitly.
+- If a request could be Type B *or* Type C, ask before editing.
+- If a Type A change starts requiring Python or non-generated TypeScript edits,
+  it has become Type B — switch gates and announce the change.
+- Slash commands `/schema-update`, `/feature`, `/investigate` correspond to
+  Types A, B, C respectively and are the preferred entry points.
 
+## When a gate step fails
+
+- Failure caused by your change → fix it.
+- `demo:generate` fails but `npm run db:reset:test` + `npm run db:generate`
+  would succeed and the non-generated code is correct → **stop and report**:
+  there is a generator/web inconsistency that needs separate attention.
+- Environmental failure (network, missing OS package, hardware) → report and
+  ask for direction.
+
+## Skip = fail
+
+A skipped test is a failed test unless the user has explicitly approved
+skipping it.
+
+## Sanity check
+
+Before stopping, review the change and answer:
+
+- Does this match the original request?
+- Are there missing edge cases?
+- Could this break anything else?
+
+Report the result explicitly.

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import { useTranslations } from 'next-intl';
@@ -12,6 +12,12 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Link from '@mui/material/Link';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+{% endif %}
+{% if has_entity_autocomplete %}
+import EntityAutocomplete from '@/components/_standard/EntityAutocomplete';
+{% endif %}
+{% if has_child_entity_autocomplete %}
+import type { EntityAutocompleteCellConfig } from '@/components/_standard/EntityAutocompleteCellEditor';
 {% endif %}
 {% if has_number_props %}
 import NumberField from '@/components/_standard/NumberField';
@@ -43,6 +49,13 @@ import Checkbox from '@mui/material/Checkbox';
 {% if custom_upsert_imports %}
 {{ custom_upsert_imports }}
 {% endif %}
+{% if has_flatten_accordion_upsert %}
+import Accordion from '@mui/material/Accordion';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import Typography from '@mui/material/Typography';
+{% endif %}
 import { useFormValidation } from './form_validation';
 
 export default function FormUpsert({{ form_upsert_params }}) {
@@ -55,6 +68,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {{ enum_ns_hooks }}
 {% endif %}
   const [error, setError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 {% if all_states %}
@@ -85,6 +99,11 @@ export default function FormUpsert({{ form_upsert_params }}) {
     e.preventDefault();
 
     if (isPending) return;
+    const validationMessage = getValidationError();
+    setValidationError(validationMessage);
+    if (validationMessage) {
+      return;
+    }
 
 {% if child_validation_code %}
 {{ child_validation_code }}
@@ -145,6 +164,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% endif %}
 {% if child_grid_components %}
 {{ child_grid_components }}
+{% endif %}
+{% if flatten_edit_sections %}
+{{ flatten_edit_sections }}
 {% endif %}
       {validationError && <p style={{ '{{' }} color: 'red' {{ '}}' }}>{validationError}</p>}
       {isEdit && <AuditInfo src={src} />}

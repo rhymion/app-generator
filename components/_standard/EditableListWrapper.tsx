@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, forwardRef, useImperativeHandle, useMemo } from 'react';
+import { useState, forwardRef, useImperativeHandle, useMemo, useEffect, useRef } from 'react';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
@@ -21,6 +21,7 @@ import Paper from '@mui/material/Paper';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
+import type { EntitySearchAction } from './EntityAutocomplete';
 
 export type ItemType = 'text' | 'autocomplete' | 'file';
 
@@ -57,6 +58,9 @@ interface EditableListWrapperProps {
   // NEW: For autocomplete with internal filtering
   allAutocompleteOptions?: AutocompleteOption[];  // All available options (unfiltered)
   excludeOptionIds?: (string | number)[];          // IDs to exclude from options (e.g., [src.id])
+  // For autocomplete with server-side search — preferred over allAutocompleteOptions for large tables.
+  searchOptions?: EntitySearchAction;
+  initialAutocompleteOptions?: AutocompleteOption[];
   // For file type
   acceptedFileTypes?: string;
   maxFileSize?: number; // in bytes
@@ -89,6 +93,8 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
     autocompletePlaceholder = 'Select an option',
     allAutocompleteOptions,
     excludeOptionIds,
+    searchOptions,
+    initialAutocompleteOptions,
     acceptedFileTypes = '*',
     maxFileSize = 10 * 1024 * 1024, // 10MB default
     uploadEndpoint = '/api/upload',
@@ -106,29 +112,62 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [uploading, setUploading] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<AutocompleteOption[]>(
+      initialAutocompleteOptions ?? []
+    );
+    const [searchLoading, setSearchLoading] = useState(false);
+    const searchSeqRef = useRef(0);
+
+    const assignedIdSet = useMemo(() => {
+      return new Set(
+        items
+          .map((item) => item.originalId ?? item.value)
+          .filter((id): id is string | number =>
+            typeof id === 'string' || typeof id === 'number'
+          )
+      );
+    }, [items]);
+
+    const excludeSet = useMemo(() => new Set(excludeOptionIds ?? []), [excludeOptionIds]);
 
     // Internal filtering for autocomplete options
     const availableOptions = useMemo(() => {
-      // If allAutocompleteOptions provided, filter internally
-      if (allAutocompleteOptions) {
-        const assignedIds = new Set(
-          items
-            .map((item) => item.originalId ?? item.value)
-            .filter((id): id is string | number =>
-              typeof id === 'string' || typeof id === 'number'
-            )
-        );
+      const filterAssigned = (opts: AutocompleteOption[]) =>
+        opts.filter((o) => !assignedIdSet.has(o.id) && !excludeSet.has(o.id));
 
-        const excludeSet = new Set(excludeOptionIds ?? []);
-
-        return allAutocompleteOptions
-          .filter((option) => !assignedIds.has(option.id))
-          .filter((option) => !excludeSet.has(option.id));
+      if (searchOptions) {
+        return filterAssigned(searchResults);
       }
-
-      // Fallback to old behavior (backward compatible)
+      if (allAutocompleteOptions) {
+        return filterAssigned(allAutocompleteOptions);
+      }
       return autocompleteOptions;
-    }, [allAutocompleteOptions, excludeOptionIds, items, autocompleteOptions]);
+    }, [searchOptions, searchResults, allAutocompleteOptions, autocompleteOptions, assignedIdSet, excludeSet]);
+
+    useEffect(() => {
+      if (!searchOptions || !openAddDialog) return;
+      const trimmed = searchQuery.trim();
+      if (trimmed === '') {
+        setSearchResults(initialAutocompleteOptions ?? []);
+        return;
+      }
+      const mySeq = ++searchSeqRef.current;
+      const handle = setTimeout(async () => {
+        setSearchLoading(true);
+        try {
+          const results = await searchOptions(trimmed, []);
+          if (mySeq === searchSeqRef.current) {
+            setSearchResults(
+              results.map((r) => ({ id: r.id, label: r.label }))
+            );
+          }
+        } finally {
+          if (mySeq === searchSeqRef.current) setSearchLoading(false);
+        }
+      }, 250);
+      return () => clearTimeout(handle);
+    }, [searchQuery, searchOptions, openAddDialog, initialAutocompleteOptions]);
 
     useImperativeHandle(ref, () => ({
       getItems: () => items,
@@ -139,6 +178,8 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
       setSelectedAutocomplete(null);
       setSelectedFile(null);
       setError(null);
+      setSearchQuery('');
+      setSearchResults(initialAutocompleteOptions ?? []);
       setOpenAddDialog(true);
     };
 
@@ -394,11 +435,18 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
               <Autocomplete
                 options={availableOptions}
                 getOptionLabel={(option) => option.label}
+                isOptionEqualToValue={(opt, val) => opt.id === val.id}
                 value={selectedAutocomplete}
                 onChange={(_, newValue) => {
                   setSelectedAutocomplete(newValue);
                   setError(null);
                 }}
+                onInputChange={(_, newInput, reason) => {
+                  if (searchOptions && reason === 'input') setSearchQuery(newInput);
+                  if (searchOptions && reason === 'clear') setSearchQuery('');
+                }}
+                filterOptions={searchOptions ? (x) => x : undefined}
+                loading={searchLoading}
                 renderInput={(params) => (
                   <TextField
                     {...params}
@@ -407,6 +455,17 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
                     margin="dense"
                     error={!!error}
                     helperText={error}
+                    slotProps={{
+                      input: {
+                        ...params.InputProps,
+                        endAdornment: (
+                          <>
+                            {searchLoading ? <CircularProgress color="inherit" size={16} /> : null}
+                            {params.InputProps.endAdornment}
+                          </>
+                        ),
+                      },
+                    }}
                   />
                 )}
               />

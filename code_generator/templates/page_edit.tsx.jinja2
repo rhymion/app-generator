@@ -4,10 +4,13 @@ import FormUpsert from '@/components/{{ parent }}/FormUpsert';
 import { get{{ parent_pascal }}DetailPageData } from '@/lib/{{ parent }}/getters';
 {% for target in selection_targets %}
 {% if target == 'organization' %}
-import { getAssociatedOrganizationListPageData } from '@/lib/organization/getters_associated';
+import { searchAssociatedOrganizationOptions } from '@/lib/organization/getters_associated';
 {% else %}
-import { get{{ target | pascal_case }}ListPageData } from '@/lib/{{ target }}/getters';
+import { search{{ target | pascal_case }}Options } from '@/lib/{{ target }}/getters';
 {% endif %}
+{% endfor %}
+{% for oto in selector_oto_rels %}
+import { getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pascal }} } from '@/lib/{{ parent }}/getters';
 {% endfor %}
 {% if comment_children or entity_edit_component %}
 import { {% if comment_children %}getSessionUserId{% endif %}{% if comment_children and entity_edit_component %}, {% endif %}{% if entity_edit_component %}getUserRoleIds{% endif %} } from '@/lib/authz';
@@ -25,15 +28,18 @@ export default async function Edit{{ parent_pascal }}Page({ params }: {{ parent_
 }
 
 async function {{ parent_pascal }}EditContent({ id }: { id: string }) {
-{% if selection_targets %}
-  const [detail, {% for target in selection_targets %}{{ target | camel_case }}sData{% if not loop.last %}, {% endif %}{% endfor %}{% if entity_edit_component %}, currentUserRoleIds{% endif %}] = await Promise.all([
+{% if selection_targets or selector_oto_rels %}
+  const [detail, {% for target in selection_targets %}initial{{ target | pascal_case }}s{% if not loop.last or selector_oto_rels or entity_edit_component %}, {% endif %}{% endfor %}{% for oto in selector_oto_rels %}initialAvailable{{ oto.target | pascal_case }}s{% if not loop.last or entity_edit_component %}, {% endif %}{% endfor %}{% if entity_edit_component %}currentUserRoleIds{% endif %}] = await Promise.all([
     get{{ parent_pascal }}DetailPageData(id, 'update'),
 {% for target in selection_targets %}
 {% if target == 'organization' %}
-    getAssociatedOrganizationListPageData(),
+    searchAssociatedOrganizationOptions('', [], 50),
 {% else %}
-    get{{ target | pascal_case }}ListPageData(false),
+    search{{ target | pascal_case }}Options('', [], 50),
 {% endif %}
+{% endfor %}
+{% for oto in selector_oto_rels %}
+    getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pascal }}(id),
 {% endfor %}
 {% if entity_edit_component %}
     getUserRoleIds(),
@@ -55,5 +61,5 @@ async function {{ parent_pascal }}EditContent({ id }: { id: string }) {
   if (!detail.{{ parent_camel }}) {
     notFound();
   }
-  return <FormUpsert src={detail.{{ parent_camel }}} isEdit={true} permissions={detail.userPermissions}{% if entity_edit_component %} currentUserRoleIds={currentUserRoleIds}{% endif %}{% for target in selection_targets %} all{{ target | pascal_case }}s={{ '{' }}{{ target | camel_case }}sData.{{ target | camel_case }}s{{ '}' }} {{ target | camel_case }}Permissions={{ '{' }}{{ target | camel_case }}sData.userPermissions{{ '}' }}{% endfor %}{% if comment_children %} currentUserId={currentUserId}{% endif %} />;
+  return <FormUpsert src={detail.{{ parent_camel }}} isEdit={true} permissions={detail.userPermissions}{% if entity_edit_component %} currentUserRoleIds={currentUserRoleIds}{% endif %}{% for target in selection_targets %} initial{{ target | pascal_case }}s={ initial{{ target | pascal_case }}s } search{{ target | pascal_case }}Options={ {% if target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ target | pascal_case }}Options{% endif %} }{% endfor %}{% for oto in selector_oto_rels %} initial{{ oto.target | pascal_case }}s={ initialAvailable{{ oto.target | pascal_case }}s }{% endfor %}{% if comment_children %} currentUserId={currentUserId}{% endif %} />;
 }
