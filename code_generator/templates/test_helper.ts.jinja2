@@ -17,6 +17,39 @@ async function _create{{ pascal }}BaseDeps() {
 {% else %}
   const testUser = await getTestUser();
 {% for dep in non_self_deps %}
+{% if dep.lookup_field %}
+  // Idempotent: re-use an existing row when the helper is called more than
+  // once in a single test (e.g. parent populator + child populator).
+  let {{ dep.var_name }}Record = await prisma.{{ dep.target }}.findFirst({
+    where: { {{ dep.lookup_field }}: {{ dep.lookup_value }} },
+    orderBy: { created_at: 'asc' },
+  });
+  if (!{{ dep.var_name }}Record) {
+{% for fk in dep.internal_fk_deps %}
+    const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
+    {{ dep.var_name }}Record = await prisma.{{ dep.target }}.create({
+      data: {
+{% for fk in dep.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ dep.var_name }}{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
+{% for ef in dep.extra_required_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+{% for fk in dep.fk_deps %}
+        {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
+{% endfor %}
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+{% if dep.has_user_accounts %}
+        user_accounts: {
+          connect: [testUser.id].map((id) => ({ id })),
+        },
+{% endif %}
+      },
+    });
+  }
+{% else %}
 {% for fk in dep.internal_fk_deps %}
   const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -40,6 +73,7 @@ async function _create{{ pascal }}BaseDeps() {
 {% endif %}
     },
   });
+{% endif %}
 {% if dep.label_field is defined and dep.label_field != 'name' %}
 {% if dep.label_field_is_date %}
   const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: new Date({{ dep.var_name }}Record.{{ dep.label_field }}).toLocaleDateString('en-US', { timeZone: 'UTC' }) };
@@ -50,6 +84,32 @@ async function _create{{ pascal }}BaseDeps() {
   const {{ dep.var_name }} = {{ dep.var_name }}Record;
 {% endif %}
 {% if dep.needs_second %}
+{% if dep.lookup_field %}
+  let {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.findFirst({
+    where: { {{ dep.lookup_field }}: {{ dep.lookup_value_second }} },
+    orderBy: { created_at: 'asc' },
+  });
+  if (!{{ dep.var_name }}2Record) {
+{% for fk in dep.internal_fk_deps %}
+    const {{ dep.var_name }}2{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
+    {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.create({
+      data: {
+{% for fk in dep.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ dep.var_name }}2{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
+{% for ef in dep.extra_required_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val_second }},
+{% endfor %}
+{% for fk in dep.fk_deps %}
+        {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
+{% endfor %}
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
+  }
+{% else %}
 {% for fk in dep.internal_fk_deps %}
   const {{ dep.var_name }}2{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -68,6 +128,7 @@ async function _create{{ pascal }}BaseDeps() {
       updater_id: testUser.id,
     },
   });
+{% endif %}
 {% if dep.label_field is defined and dep.label_field != 'name' %}
 {% if dep.label_field_is_date %}
   const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: new Date({{ dep.var_name }}2Record.{{ dep.label_field }}).toLocaleDateString('en-US', { timeZone: 'UTC' }) };
@@ -124,6 +185,39 @@ export async function populate{{ pascal }}Dependencies() {
 {% else %}
   const testUser = await getTestUser();
 {% for dep in deps %}
+{% if dep.lookup_field %}
+  // Idempotent: re-use an existing row (created by an earlier helper call in
+  // the same test) instead of creating a duplicate that would trip @unique.
+  let {{ dep.var_name }}Record = await prisma.{{ dep.target }}.findFirst({
+    where: { {{ dep.lookup_field }}: {{ dep.lookup_value }} },
+    orderBy: { created_at: 'asc' },
+  });
+  if (!{{ dep.var_name }}Record) {
+{% for fk in dep.internal_fk_deps %}
+    const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
+    {{ dep.var_name }}Record = await prisma.{{ dep.target }}.create({
+      data: {
+{% for fk in dep.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ dep.var_name }}{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
+{% for ef in dep.extra_required_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+{% for fk in dep.fk_deps %}
+        {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
+{% endfor %}
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+{% if dep.has_user_accounts %}
+        user_accounts: {
+          connect: [testUser.id].map((id) => ({ id })),
+        },
+{% endif %}
+      },
+    });
+  }
+{% else %}
 {% for fk in dep.internal_fk_deps %}
   const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -147,6 +241,7 @@ export async function populate{{ pascal }}Dependencies() {
 {% endif %}
     },
   });
+{% endif %}
 {% if dep.label_field is defined and dep.label_field != 'name' %}
 {% if dep.label_field_is_date %}
   const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: new Date({{ dep.var_name }}Record.{{ dep.label_field }}).toLocaleDateString('en-US', { timeZone: 'UTC' }) };
@@ -157,6 +252,32 @@ export async function populate{{ pascal }}Dependencies() {
   const {{ dep.var_name }} = {{ dep.var_name }}Record;
 {% endif %}
 {% if dep.needs_second %}
+{% if dep.lookup_field %}
+  let {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.findFirst({
+    where: { {{ dep.lookup_field }}: {{ dep.lookup_value_second }} },
+    orderBy: { created_at: 'asc' },
+  });
+  if (!{{ dep.var_name }}2Record) {
+{% for fk in dep.internal_fk_deps %}
+    const {{ dep.var_name }}2{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
+    {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.create({
+      data: {
+{% for fk in dep.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ dep.var_name }}2{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
+{% for ef in dep.extra_required_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val_second }},
+{% endfor %}
+{% for fk in dep.fk_deps %}
+        {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
+{% endfor %}
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
+  }
+{% else %}
 {% for fk in dep.internal_fk_deps %}
   const {{ dep.var_name }}2{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -175,6 +296,7 @@ export async function populate{{ pascal }}Dependencies() {
       updater_id: testUser.id,
     },
   });
+{% endif %}
 {% if dep.label_field is defined and dep.label_field != 'name' %}
 {% if dep.label_field_is_date %}
   const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: new Date({{ dep.var_name }}2Record.{{ dep.label_field }}).toLocaleDateString('en-US', { timeZone: 'UTC' }) };

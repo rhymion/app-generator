@@ -23,6 +23,8 @@ from build_context import build_context
 from generators import form_upsert_context
 from generators_test import (
     prisma_value,
+    cypress_create_value,
+    cypress_edit_value,
     _get_dep_populate_fields,
     _get_dep_extra_required_fields,
     helper_context as _test_helper_context,
@@ -175,6 +177,103 @@ class TestDepPopulateFieldsBoolean:
         cont = next(f for f in fields if f['prop_name'] == 'continuous')
         assert 'TEST-' not in cont['prisma_val']
         assert 'Date.now' not in cont['prisma_val']
+
+
+# ---------------------------------------------------------------------------
+# 2c. cypress_edit_value — `time` format must emit "HH:MM AM/PM" only
+# ---------------------------------------------------------------------------
+
+class TestCypressEditValueTimeFormat:
+    """`cy.fillTime` rejects datetime strings — its regex is "HH:MM AM/PM".
+    The edit-value generator was missing the `time` branch and fell through to
+    the datetime fallback ("06/15/2025 02:00 PM"), which crashed the helper
+    on `format: time` fields like `checkup.blood_sampling_time`."""
+
+    def test_time_format_create_value(self):
+        field = {'category': 'datetime', 'prop_name': 'blood_sampling_time', 'format': 'time'}
+        assert cypress_create_value(field, 'Checkup') == '09:00 AM'
+
+    def test_time_format_create_value_end_keyword(self):
+        field = {'category': 'datetime', 'prop_name': 'end_time', 'format': 'time'}
+        assert cypress_create_value(field, 'Shift') == '05:00 PM'
+
+    def test_time_format_edit_value(self):
+        field = {'category': 'datetime', 'prop_name': 'blood_sampling_time', 'format': 'time'}
+        assert cypress_edit_value(field, 'Checkup') == '02:00 PM'
+
+    def test_time_format_edit_value_end_keyword(self):
+        field = {'category': 'datetime', 'prop_name': 'end_time', 'format': 'time'}
+        assert cypress_edit_value(field, 'Shift') == '06:00 PM'
+
+    def test_datetime_format_edit_value_unchanged(self):
+        """The datetime branch (no format key) is preserved."""
+        field = {'category': 'datetime', 'prop_name': 'created_at'}
+        assert cypress_edit_value(field, 'Thing') == '06/15/2025 02:00 PM'
+
+
+# ---------------------------------------------------------------------------
+# 2d. dep helpers must be idempotent — re-callable in a single test without
+# tripping @unique constraints (e.g. product.code)
+# ---------------------------------------------------------------------------
+
+class TestDepHelperIdempotency:
+    """`populateXxxDependencies` is called multiple times in a single test
+    (parent populator + child populators each call it). The helper must be
+    idempotent — find an existing row, fall back to create. The helper
+    context exposes `lookup_field` / `lookup_value` per dep so the template
+    can emit the find-or-create pattern."""
+
+    def _schema(self) -> dict:
+        return {
+            "definitions": {
+                "product": {
+                    "type": "object",
+                    "required": ["id", "code", "name", "price"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "code": {"type": "string"},
+                        "name": {"type": "string"},
+                        "price": {"type": "integer", "minimum": 0},
+                    },
+                    "x-display": {"table": [{"code": {"primary": True}}]},
+                },
+                "purchase_order": {
+                    "type": "object",
+                    "required": ["id", "product_id", "order_no"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "order_no": {"type": "string"},
+                        "product_id": {
+                            "type": "string",
+                            "x-relationship": {"type": "many-to-one", "target": "product", "labelField": "name"},
+                        },
+                    },
+                    "x-display": {"table": [{"order_no": {"primary": True}}]},
+                },
+                "purchase_order_detail": {"allOf": [{"$ref": "#/definitions/purchase_order"}]},
+            }
+        }
+
+    def test_dep_with_name_exposes_lookup_field(self):
+        ctx = _test_helper_context(
+            "purchase_order", [], self._schema(),
+            "purchase_order", "purchase_order_detail",
+            {"list": True, "view": True, "new": True, "edit": True, "delete": True, "api": True, "test": True, "fields": None},
+        )
+        product_dep = next(d for d in ctx["deps"] if d["target"] == "product")
+        assert product_dep["lookup_field"] == "name"
+        assert product_dep["lookup_value"] == "'Test Product'"
+
+    def test_dep_lookup_value_second_for_needs_second(self):
+        """needs_second deps also need a deterministic name for the 2nd row's
+        find-or-create lookup."""
+        ctx = _test_helper_context(
+            "purchase_order", [], self._schema(),
+            "purchase_order", "purchase_order_detail",
+            {"list": True, "view": True, "new": True, "edit": True, "delete": True, "api": True, "test": True, "fields": None},
+        )
+        product_dep = next(d for d in ctx["deps"] if d["target"] == "product")
+        assert product_dep["lookup_value_second"] == "'Test Product 2'"
 
 
 # ---------------------------------------------------------------------------

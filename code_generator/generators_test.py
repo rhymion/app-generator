@@ -139,15 +139,15 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val_second = 'new Date(2025, 0, 2).toISOString()'
         elif actual == 'string':
             field_title = to_title_case(prop_name)
-            # Non-name strings on a dep target may carry @unique constraints
-            # (e.g. product.code). The dep helper is invoked multiple times in a
-            # single test (once for the parent populator, again for child
-            # populators), so the value MUST differ across calls. Suffix with
-            # Date.now() + Math.random() so back-to-back invocations within the
-            # same test never collide.
-            val = f'`Test {field_title} ${{Date.now()}}-${{Math.random()}}`'
-            val_unique = f'`Test {field_title} ${{Date.now()}}-${{Math.random()}}-${{i}}`'
-            val_second = f'`Test {field_title} ${{Date.now()}}-${{Math.random()}}-2`'
+            # Deterministic, human-readable values. Dep-helper-call collisions
+            # on @unique fields (e.g. product.code) are avoided at a different
+            # layer: populateXxxDependencies is rendered idempotently by the
+            # test_helper template (see `dep_lookup_field` / find-or-create).
+            # Within a populate(N) loop, ${i} provides intra-loop uniqueness;
+            # tests assert on the exact "Test X 1" / "Test X 2" form.
+            val = f"'Test {field_title}'"
+            val_unique = f'`Test {field_title} ${{i}}`'
+            val_second = f"'Test {field_title} 2'"
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
             val = val_unique = str(mn)
@@ -632,6 +632,12 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
         fmt = field.get('format')
         if fmt == 'date':
             return '06/15/2025'
+        if fmt == 'time':
+            # `cy.fillTime` requires "HH:MM AM/PM" only — datetime format
+            # would crash the helper. Mirror the create_value time branch.
+            if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+                return '06:00 PM'
+            return '02:00 PM'
         if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
             return '06/15/2025 06:00 PM'
         return '06/15/2025 02:00 PM'
@@ -742,8 +748,21 @@ def gen_fill_commands(fields: list, entity_title: str, indent: str, fk_dep_vars:
     return lines
 
 
-def gen_assert_commands(fields: list, entity_title: str, indent: str, fk_dep_vars: dict | None = None) -> list[str]:
-    """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup."""
+def gen_assert_commands(
+    fields: list,
+    entity_title: str,
+    indent: str,
+    fk_dep_vars: dict | None = None,
+    flatten_m2o_props: set | None = None,
+) -> list[str]:
+    """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup.
+    flatten_m2o_props: optional set of FK prop names whose target is rendered as a
+    flatten Accordion in FormView. For those, the FK label (e.g. 'Patient Rel')
+    is the Accordion title — not a TextField label — so a direct
+    `cy.checkField('Patient Rel', ...)` cannot match. We instead open the
+    accordion and assert on the inner label-field TextField (e.g. 'Patient No').
+    """
+    flatten_m2o_props = flatten_m2o_props or set()
     lines = []
     for field in fields:
         if field['category'] == 'autocomplete':
@@ -762,7 +781,12 @@ def gen_assert_commands(fields: list, entity_title: str, indent: str, fk_dep_var
                     dep_title = f'Test {to_title_case(prop_stem)}'
                 else:
                     dep_title = f'Test {to_title_case(dep_target)}'
-                lines.append(f"{indent}cy.checkField('{field['label']}', '{dep_title}');")
+                if field['prop_name'] in flatten_m2o_props:
+                    inner_label = to_title_case(field.get('dep_label_field') or 'name')
+                    lines.append(f"{indent}cy.openAccordion('{field['label']}');")
+                    lines.append(f"{indent}cy.checkField('{inner_label}', '{dep_title}');")
+                else:
+                    lines.append(f"{indent}cy.checkField('{field['label']}', '{dep_title}');")
         else:
             value = cypress_create_value(field, entity_title)
             lines.append(gen_assert_command(field, value, indent))
@@ -1183,17 +1207,33 @@ def helper_context(
         dep_def = schema['definitions'].get(dep['target'] + '_detail', {})
         x_rels = dep_def.get('x-relationships', {})
         dep_label_info = dep_label_info_by_var.get(dep['var_name'])
+        extra_required_fields = _get_dep_populate_fields(dep['target'], dep['var_name'], title_str, schema)
+        # Idempotency hook for `populateXxxDependencies`: if the dep target has
+        # a deterministic `name` value (the common case — every required-`name`
+        # entity emits `name: 'Test <Title>'`), the template uses
+        # findFirst({where: {name}}) ?? create(...) so calling the helper twice
+        # in the same test (parent populator + child populator) does not
+        # duplicate the row and trip @unique constraints (e.g. product.code).
+        # Bridges without a `name` field (commentable, approvable) skip this
+        # path — they have no unique constraints, so plain create is safe.
+        name_ef = next((f for f in extra_required_fields if f['prop_name'] == 'name'), None)
+        lookup_field = 'name' if name_ef else None
+        lookup_value = name_ef['prisma_val'] if name_ef else None
+        lookup_value_second = name_ef['prisma_val_second'] if name_ef else None
         enriched_deps.append({
             **dep,
             'title': title_str,
             'has_user_accounts': x_rels.get('user_accounts', {}).get('target') == 'user_account',
-            'extra_required_fields': _get_dep_populate_fields(dep['target'], dep['var_name'], title_str, schema),
+            'extra_required_fields': extra_required_fields,
             'label_field': dep_label_info.get('label_field', 'name') if dep_label_info else dep.get('label_field', 'name'),
             'label_field_is_date': dep_label_info.get('label_field_is_date', False) if dep_label_info else dep.get('label_field_is_date', False),
             # needs_second only for transitive (non-direct) deps matching primary FK target
             'needs_second': not is_direct and dep['target'] == primary_fk_dep_target,
             # one-to-one FK pre-creates needed when creating this dep record (e.g. commentable_id)
             'internal_fk_deps': get_internal_one_to_one_fks(dep['target'], schema),
+            'lookup_field': lookup_field,
+            'lookup_value': lookup_value,
+            'lookup_value_second': lookup_value_second,
         })
 
     # Separate self-ref deps (target == model) from non-self deps for _createBaseDeps() split.
@@ -1450,13 +1490,25 @@ def spec_context(
     # Indentation for .then((deps) => {}) wrapper in sections 2 and 5
     I = '        ' if has_deps else '      '
 
-    # Pre-compute fill/assert command lists (indent already baked in), with fk_dep_vars
+    # Pre-compute fill/assert command lists (indent already baked in), with fk_dep_vars.
+    # flatten_m2o_fk_props: FK props on this model whose related-entity Detail
+    # was tagged x-outputType: flatten. The FormView renders those as MUI
+    # Accordions (entity-level title in <Typography>, inner fields as
+    # TextFields), not as a single TextField with the FK label. View-page
+    # assertions must navigate into the accordion to a real <label>.
+    flatten_m2o_props_view = {
+        f"{r['prop_name']}_id"
+        for r in get_flatten_rels(parent, parent_def, schema)
+        if r['is_m2o']
+    }
     required_fill_cmds = gen_fill_commands(required_field_metas, title, I, fk_dep_vars)
     all_fill_cmds = gen_fill_commands(fields, title, I, fk_dep_vars)
     required_assert_cmds_no_bool = gen_assert_commands(
-        [f for f in required_field_metas if f['category'] != 'boolean'], title, I, fk_dep_vars)
+        [f for f in required_field_metas if f['category'] != 'boolean'], title, I, fk_dep_vars,
+        flatten_m2o_props=flatten_m2o_props_view)
     all_assert_cmds_no_bool = gen_assert_commands(
-        [f for f in fields if f['category'] != 'boolean'], title, I, fk_dep_vars)
+        [f for f in fields if f['category'] != 'boolean'], title, I, fk_dep_vars,
+        flatten_m2o_props=flatten_m2o_props_view)
 
     # Append user_account FK fill/assert commands (required UA for req_cmds; all UA for all_cmds)
     for ua in req_ua_spec:
@@ -1472,6 +1524,10 @@ def spec_context(
     prim_is_fk = bool(prim and f'{prim}_id' in (parent_def.get('properties') or {}))
     has_name = any(f['prop_name'] == 'name' for f in fields)
     prim_meta = next((f for f in fields if f['prop_name'] == prim), None) if prim else None
+    # Default values; overridden in branches where the primary FK is rendered
+    # as a flatten Accordion (see prim_is_fk + flatten branch below).
+    check_field_use_accordion = False
+    check_field_inner_label = None
 
     if prim_is_fk:
         primary_rel = next((r for r in relationships if r['prop_name'] == f'{prim}_id'), None)
@@ -1500,6 +1556,16 @@ def spec_context(
         check_field_label = dep_title
         check_field_value_1 = list_id_1
         check_field_updated = list_id_updated
+        # When the primary FK is rendered as a flatten Accordion in FormView,
+        # the FK label is on AccordionSummary's <Typography> — not a TextField
+        # <label>. The view-page assertions for sections 3.1 / 3.3 must drill
+        # into the inner label-field TextField.
+        if f'{prim}_id' in flatten_m2o_props_view and primary_rel:
+            check_field_use_accordion = True
+            check_field_inner_label = to_title_case(primary_rel.get('label_field', 'name'))
+        else:
+            check_field_use_accordion = False
+            check_field_inner_label = None
     elif prim and prim != 'name' and prim_meta:
         # Explicit non-name primary field (e.g., product.code or entity_name).
         # Link in the list is on this column, so use it for all click navigation.
@@ -1819,6 +1885,8 @@ def spec_context(
         'check_field_label': check_field_label,
         'check_field_value_1': check_field_value_1,
         'check_field_updated': check_field_updated,
+        'check_field_use_accordion': check_field_use_accordion,
+        'check_field_inner_label': check_field_inner_label,
         'has_approvable': any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model_name, schema)),
         'flatten_test_rels': _compute_flatten_test_rels(parent, pascal, definition_key, schema),
     }

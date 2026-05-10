@@ -268,12 +268,10 @@ def test_helper_context_primary_fk_string_labels_are_human_readable():
     ctx = helper_context("checkup", [], schema, "checkup", "checkup_detail", _entity("checkup")["generate_config"])
     assert ctx["primary_fk_dep"]["target"] == "patient_rel"
     patient_no = next(f for f in ctx["primary_fk_dep"]["extra_required_fields"] if f["prop_name"] == "patient_no")
-    # The dep helper is called repeatedly in a single test (parent populator +
-    # child populators), so non-name string values must be unique per call.
-    # The prefix stays human-readable; uniqueness comes from a Date.now() +
-    # Math.random() suffix so back-to-back invocations don't collide on
-    # @unique fields like product.code.
-    assert patient_no["prisma_val"].startswith('`Test Patient No ')
-    assert '${Date.now()}' in patient_no["prisma_val"]
-    assert patient_no["prisma_val_unique"].startswith('`Test Patient No ')
-    assert '${i}' in patient_no["prisma_val_unique"]
+    # Values must be human-readable AND deterministic so e2e specs can assert
+    # on the rendered string (e.g. `cy.contains('Test Patient No 1')`).
+    # Idempotency for repeated dep-helper invocations is handled separately at
+    # the helper template level via findFirst-or-create on the dep's `name`
+    # field, NOT by suffixing values with Date.now().
+    assert patient_no["prisma_val"] == "'Test Patient No'"
+    assert patient_no["prisma_val_unique"] == '`Test Patient No ${i}`'
