@@ -55,16 +55,17 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
                 continue
 
             rel = prop.get('x-relationship', {})
-            if rel.get('type') == 'many-to-one':
-                # FK field: strip _id suffix for the display key
+            rel_type = rel.get('type')
+            if rel_type in ('many-to-one', 'one-to-one'):
+                # FK field (regular m2o or selector o2o): strip _id suffix for the
+                # display key. Generated FormUpsert/FormView use tf('<base>') as the
+                # picker label (e.g. medicine.prev_id → tf('prev')).
                 base = prop_name[:-3] if prop_name.endswith('_id') else prop_name
                 key = to_camel_case(base)
                 label = to_title_case(base)
-            elif rel.get('type') in ('one-to-one', 'one-to-one_bridge'):
-                # Outbound OTO FK — bridge targets are internal records (approvable,
-                # commentable); selector targets are rendered with their own i18n keys
-                # via parent_rels elsewhere. Either way, skip the field-level key here
-                # to preserve the prior generated output.
+            elif rel_type == 'one-to-one_bridge':
+                # Bridge OTO targets (approvable, commentable) are internal records
+                # rendered via their own component-level keys, not a field label.
                 continue
             else:
                 key = to_camel_case(prop_name)
@@ -97,9 +98,12 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
                 if cp_name in _child_sys:
                     continue
                 cp_rel = cp_prop.get('x-relationship', {})
-                if cp_rel.get('type') == 'many-to-one':
+                cp_rel_type = cp_rel.get('type')
+                if cp_rel_type in ('many-to-one', 'one-to-one'):
                     base = cp_name[:-3] if cp_name.endswith('_id') else cp_name
                     keys.setdefault(to_camel_case(base), to_title_case(base))
+                elif cp_rel_type == 'one-to-one_bridge':
+                    continue
                 else:
                     keys.setdefault(to_camel_case(cp_name), to_title_case(cp_name))
 
