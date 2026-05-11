@@ -1,6 +1,9 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { prisma } from '../db-helpers';
 import { TEST_CREDENTIALS } from '../test-credentials';
+{% if needs_format_label_value %}
+import { formatLabelValue } from '@/lib/_format';
+{% endif %}
 
 async function getTestUser() {
   const testUser = await prisma.user_account.findUnique({
@@ -47,6 +50,9 @@ async function _create{{ pascal }}BaseDeps() {
         },
 {% endif %}
       },
+{% if dep.prisma_include_str %}
+      include: { {{ dep.prisma_include_str }} },
+{% endif %}
     });
   }
 {% else %}
@@ -72,14 +78,13 @@ async function _create{{ pascal }}BaseDeps() {
       },
 {% endif %}
     },
+{% if dep.prisma_include_str %}
+    include: { {{ dep.prisma_include_str }} },
+{% endif %}
   });
 {% endif %}
-{% if dep.label_field is defined and dep.label_field != 'name' %}
-{% if dep.label_field_is_date %}
-  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: new Date({{ dep.var_name }}Record.{{ dep.label_field }}).toLocaleDateString('en-US', { timeZone: 'UTC' }) };
-{% else %}
-  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.var_name }}Record.{{ dep.label_field }} };
-{% endif %}
+{% if dep.label_expression %}
+  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }} };
 {% else %}
   const {{ dep.var_name }} = {{ dep.var_name }}Record;
 {% endif %}
@@ -107,6 +112,9 @@ async function _create{{ pascal }}BaseDeps() {
         creator_id: testUser.id,
         updater_id: testUser.id,
       },
+{% if dep.prisma_include_str %}
+      include: { {{ dep.prisma_include_str }} },
+{% endif %}
     });
   }
 {% else %}
@@ -127,14 +135,13 @@ async function _create{{ pascal }}BaseDeps() {
       creator_id: testUser.id,
       updater_id: testUser.id,
     },
+{% if dep.prisma_include_str %}
+    include: { {{ dep.prisma_include_str }} },
+{% endif %}
   });
 {% endif %}
-{% if dep.label_field is defined and dep.label_field != 'name' %}
-{% if dep.label_field_is_date %}
-  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: new Date({{ dep.var_name }}2Record.{{ dep.label_field }}).toLocaleDateString('en-US', { timeZone: 'UTC' }) };
-{% else %}
-  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: {{ dep.var_name }}2Record.{{ dep.label_field }} };
-{% endif %}
+{% if dep.label_expression_second %}
+  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: {{ dep.label_expression_second }} };
 {% else %}
   const {{ dep.var_name }}2 = {{ dep.var_name }}2Record;
 {% endif %}
@@ -165,13 +172,12 @@ export async function populate{{ pascal }}Dependencies() {
       creator_id: testUser.id,
       updater_id: testUser.id,
     },
-  });
-{% if dep.label_field is defined and dep.label_field != 'name' %}
-{% if dep.label_field_is_date %}
-  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: new Date({{ dep.var_name }}Record.{{ dep.label_field }}).toLocaleDateString('en-US', { timeZone: 'UTC' }) };
-{% else %}
-  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.var_name }}Record.{{ dep.label_field }} };
+{% if dep.prisma_include_str %}
+    include: { {{ dep.prisma_include_str }} },
 {% endif %}
+  });
+{% if dep.label_expression %}
+  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }} };
 {% else %}
   const {{ dep.var_name }} = {{ dep.var_name }}Record;
 {% endif %}
@@ -215,6 +221,9 @@ export async function populate{{ pascal }}Dependencies() {
         },
 {% endif %}
       },
+{% if dep.prisma_include_str %}
+      include: { {{ dep.prisma_include_str }} },
+{% endif %}
     });
   }
 {% else %}
@@ -240,14 +249,13 @@ export async function populate{{ pascal }}Dependencies() {
       },
 {% endif %}
     },
+{% if dep.prisma_include_str %}
+    include: { {{ dep.prisma_include_str }} },
+{% endif %}
   });
 {% endif %}
-{% if dep.label_field is defined and dep.label_field != 'name' %}
-{% if dep.label_field_is_date %}
-  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: new Date({{ dep.var_name }}Record.{{ dep.label_field }}).toLocaleDateString('en-US', { timeZone: 'UTC' }) };
-{% else %}
-  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.var_name }}Record.{{ dep.label_field }} };
-{% endif %}
+{% if dep.label_expression %}
+  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }} };
 {% else %}
   const {{ dep.var_name }} = {{ dep.var_name }}Record;
 {% endif %}
@@ -275,6 +283,9 @@ export async function populate{{ pascal }}Dependencies() {
         creator_id: testUser.id,
         updater_id: testUser.id,
       },
+{% if dep.prisma_include_str %}
+      include: { {{ dep.prisma_include_str }} },
+{% endif %}
     });
   }
 {% else %}
@@ -295,14 +306,13 @@ export async function populate{{ pascal }}Dependencies() {
       creator_id: testUser.id,
       updater_id: testUser.id,
     },
+{% if dep.prisma_include_str %}
+    include: { {{ dep.prisma_include_str }} },
+{% endif %}
   });
 {% endif %}
-{% if dep.label_field is defined and dep.label_field != 'name' %}
-{% if dep.label_field_is_date %}
-  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: new Date({{ dep.var_name }}2Record.{{ dep.label_field }}).toLocaleDateString('en-US', { timeZone: 'UTC' }) };
-{% else %}
-  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: {{ dep.var_name }}2Record.{{ dep.label_field }} };
-{% endif %}
+{% if dep.label_expression_second %}
+  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: {{ dep.label_expression_second }} };
 {% else %}
   const {{ dep.var_name }}2 = {{ dep.var_name }}2Record;
 {% endif %}

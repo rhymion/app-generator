@@ -22,6 +22,9 @@ import type { EntityAutocompleteCellConfig } from '@/components/_standard/Entity
 {% if has_number_props %}
 import NumberField from '@/components/_standard/NumberField';
 {% endif %}
+{% if uses_format_label_value %}
+import { formatLabelValue } from '@/lib/_format';
+{% endif %}
 import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}{% endif %}{% if has_comment_children %}, add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment{% endif %} } from '@/lib/{{ parent }}/actions';
 import type { FormUpsertProps } from '@/lib/{{ parent }}/types';
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';

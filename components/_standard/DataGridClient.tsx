@@ -1,7 +1,7 @@
 'use client';
 import { useState, useTransition, useCallback } from 'react';
-import dayjs from 'dayjs';
 import { useTranslations } from 'next-intl';
+import { formatLabelValue } from '@/lib/_format';
 import {
   DataGrid,
   GridColDef,
@@ -190,9 +190,7 @@ export default function DataGridClient<T extends BaseEntity>({
       valueGetter: (value, row) => {
         const fieldValue = row[fieldConfig.field];
         if (fieldValue === null || fieldValue === undefined) return '';
-        if (fieldConfig.format === 'date-time') return dayjs(fieldValue as string).format('YYYY-MM-DD HH:mm');
-        if (fieldConfig.format === 'date') return dayjs(new Date(fieldValue as string).toISOString().slice(0, 10) as string).format('YYYY-MM-DD');
-        if (fieldConfig.format === 'time') return dayjs(fieldValue as string).format('HH:mm');
+        if (fieldConfig.format) return formatLabelValue(fieldValue, fieldConfig.format);
         if (typeof fieldValue === 'object' && 'name' in (fieldValue as object)) return (fieldValue as unknown as { name: string }).name;
         return String(fieldValue);
       },

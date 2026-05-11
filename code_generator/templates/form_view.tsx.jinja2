@@ -30,6 +30,9 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 {% if needs_image_display %}
 import ImageDisplay from '@/components/_standard/ImageDisplay';
 {% endif %}
+{% if uses_format_label_value %}
+import { formatLabelValue } from '@/lib/_format';
+{% endif %}
 {% if has_list_children %}
 import ListWrapper from '@/components/_standard/ListWrapper';
 {% endif %}

@@ -13,6 +13,7 @@ from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
 )
 from helpers.schema_helpers import filter_fields, get_parent_relationships, is_optional_fk_to_parent, get_flatten_rels
+from helpers.label_field import build_label_expression, render_prisma_include, resolve_label_paths
 from build_context import _get_entity_options
 
 
@@ -60,34 +61,99 @@ def _get_base_properties(defn: dict) -> dict:
 
 def _seed_relation_label_value(
     target: str,
-    label_field: str,
+    label_field,
     label_field_is_date: bool,
     schema: dict,
     *,
     unique_index: int | None = None,
 ) -> str:
-    """Expected UI label for a populated FK target."""
+    """Expected UI label for a populated FK target.
+
+    `label_field` may be a single field name, a dotted path through outbound
+    m2o / one-to-one relations, or a list of either — mirroring what the UI
+    renders via `formatLabelValue` / nested-relation access. List-form labels
+    are concatenated with a single space, matching `build_label_expression`.
+
+    Date-typed final fields are rendered as `YYYY-MM-DD` to match
+    `formatLabelValue('date')` in `lib/_format.ts`. The legacy `M/D/YYYY` form
+    (from `toLocaleDateString('en-US')`) was incorrect after the format
+    change.
+    """
+    # Resolve every path so list-form labels concatenate to the same string the
+    # UI displays; bare strings are handled too (single-element list).
+    try:
+        resolved = resolve_label_paths(label_field, target, schema)
+    except ValueError:
+        resolved = []
+    if resolved:
+        parts = []
+        for r in resolved:
+            parts.append(_seed_path_part(target, r, schema, unique_index=unique_index))
+        return ' '.join(parts)
+
+    # Fallback for callers that pass a missing/unknown label_field — keep the
+    # date short-circuit working off the legacy boolean.
     if label_field_is_date:
         day = unique_index if unique_index is not None else 1
-        return f'1/{day}/2025'
+        return f'2025-01-{day:02d}'
+    title = to_title_case(label_field) if isinstance(label_field, str) else 'Item'
+    return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title}'
 
-    target_def = schema['definitions'].get(target, {})
-    label_prop = _get_base_properties(target_def).get(label_field, {})
+
+def _seed_path_part(
+    target: str,
+    resolved_path: dict,
+    schema: dict,
+    *,
+    unique_index: int | None,
+) -> str:
+    """Expected UI value of a single resolved labelField path on the target row.
+
+    Mirrors `_get_dep_populate_fields` and `_seed_relation_label_value`'s old
+    scalar branches, but now handles dotted paths (e.g. `patient_rel.patient.name`)
+    by walking the relation chain to find the entity that owns the final field.
+    """
+    segments = resolved_path['segments']
+    final_format = resolved_path['final_format']
+    # Dates: the UI formats with formatLabelValue → YYYY-MM-DD / HH:mm / YYYY-MM-DD HH:mm.
+    if final_format == 'date':
+        day = unique_index if unique_index is not None else 1
+        return f'2025-01-{day:02d}'
+    if final_format == 'time':
+        return '09:00'
+    if final_format == 'date-time':
+        day = unique_index if unique_index is not None else 1
+        return f'2025-01-{day:02d} 09:00'
+
+    # Walk the relation chain to find the entity that owns the final field.
+    cursor_entity = target
+    for seg in segments[:-1]:
+        rels = {}
+        for prop_name, prop in _get_base_properties(schema['definitions'].get(cursor_entity, {})).items():
+            if not isinstance(prop, dict):
+                continue
+            rel = prop.get('x-relationship') or {}
+            if rel.get('type') in ('many-to-one', 'one-to-one', 'one-to-one_bridge'):
+                key = prop_name.removesuffix('_id') if prop_name.endswith('_id') else prop_name
+                rels[key] = rel.get('target')
+        cursor_entity = rels.get(seg) or cursor_entity
+    final_field = segments[-1]
+    leaf_def = schema['definitions'].get(cursor_entity, {})
+    label_prop = _get_base_properties(leaf_def).get(final_field, {})
     prop_type_raw = label_prop.get('type')
     prop_type = next((t for t in prop_type_raw if t != 'null'), None) if isinstance(prop_type_raw, list) else prop_type_raw
 
-    if label_field == 'name':
-        title = to_title_case(target)
+    if final_field == 'name':
+        title = to_title_case(cursor_entity)
         return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title}'
     if prop_type == 'string':
-        title = to_title_case(label_field)
+        title = to_title_case(final_field)
         return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title}'
     if prop_type in ('integer', 'number'):
         return str(unique_index * 100) if unique_index is not None else str(label_prop.get('minimum', 0))
     if prop_type == 'boolean':
         return 'false'
-
-    title = to_title_case(label_field)
+    title = to_title_case(final_field)
     return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title}'
 
 
@@ -769,6 +835,7 @@ def gen_assert_commands(
     indent: str,
     fk_dep_vars: dict | None = None,
     flatten_m2o_props: set | None = None,
+    schema: dict | None = None,
 ) -> list[str]:
     """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup.
     flatten_m2o_props: optional set of FK prop names whose target is rendered as a
@@ -787,17 +854,28 @@ def gen_assert_commands(
                 # so self-ref FKs get the right dep title rather than the entity title.
                 # Must use snake_case prop stem (not camelCase dep_var) so to_title_case splits correctly.
                 dep_var = (fk_dep_vars or {}).get(field['prop_name'])
-                if field.get('dep_label_field_is_date'):
-                    dep_title = '1/1/2025'
-                elif field.get('dep_label_field') and field.get('dep_label_field') != 'name':
-                    dep_title = f"Test {to_title_case(field['dep_label_field'])}"
+                dep_label_field = field.get('dep_label_field')
+                # Prefer the rich resolver (handles list-form labelField, dotted
+                # paths, and the YYYY-MM-DD date format produced by formatLabelValue).
+                if dep_label_field and dep_label_field != 'name' and schema is not None:
+                    dep_title = _seed_relation_label_value(
+                        dep_target,
+                        dep_label_field,
+                        field.get('dep_label_field_is_date', False),
+                        schema,
+                    )
                 elif dep_var:
                     prop_stem = re.sub(r'_id$', '', field['prop_name'])
                     dep_title = f'Test {to_title_case(prop_stem)}'
                 else:
                     dep_title = f'Test {to_title_case(dep_target)}'
                 if field['prop_name'] in flatten_m2o_props:
-                    inner_label = to_title_case(field.get('dep_label_field') or 'name')
+                    inner_label_field = field.get('dep_label_field') or 'name'
+                    # Inner label inside a flattened accordion is the literal field
+                    # title — list-form label_field collapses to its first segment.
+                    if isinstance(inner_label_field, list):
+                        inner_label_field = inner_label_field[0] if inner_label_field else 'name'
+                    inner_label = to_title_case(str(inner_label_field).split('.')[-1])
                     lines.append(f"{indent}cy.openAccordion('{field['label']}');")
                     lines.append(f"{indent}cy.checkField('{inner_label}', '{dep_title}');")
                 else:
@@ -1249,13 +1327,38 @@ def helper_context(
         lookup_field = 'name' if name_ef else None
         lookup_value = name_ef['prisma_val'] if name_ef else None
         lookup_value_second = name_ef['prisma_val_second'] if name_ef else None
+        label_field = dep_label_info.get('label_field', 'name') if dep_label_info else dep.get('label_field', 'name')
+        label_field_is_date = dep_label_info.get('label_field_is_date', False) if dep_label_info else dep.get('label_field_is_date', False)
+        # Pre-compute the TS expression and Prisma include so the template
+        # doesn't have to splice list-form labelField (which would break:
+        # `record.['a', 'b']` is invalid TS). The expression is rooted at
+        # `<var>Record` / `<var>2Record` so it can be inlined verbatim.
+        label_expression = ''
+        label_expression_second = ''
+        prisma_include_str = ''
+        label_has_format = False
+        if label_field and label_field != 'name':
+            built = build_label_expression(
+                f'{dep["var_name"]}Record', label_field, dep['target'], schema,
+            )
+            label_expression = built['expression']
+            label_has_format = built['has_format']
+            prisma_include_str = render_prisma_include(built['prisma_include'])
+            built_second = build_label_expression(
+                f'{dep["var_name"]}2Record', label_field, dep['target'], schema,
+            )
+            label_expression_second = built_second['expression']
         enriched_deps.append({
             **dep,
             'title': title_str,
             'has_user_accounts': x_rels.get('user_accounts', {}).get('target') == 'user_account',
             'extra_required_fields': extra_required_fields,
-            'label_field': dep_label_info.get('label_field', 'name') if dep_label_info else dep.get('label_field', 'name'),
-            'label_field_is_date': dep_label_info.get('label_field_is_date', False) if dep_label_info else dep.get('label_field_is_date', False),
+            'label_field': label_field,
+            'label_field_is_date': label_field_is_date,
+            'label_expression': label_expression,
+            'label_expression_second': label_expression_second,
+            'prisma_include_str': prisma_include_str,
+            'label_has_format': label_has_format,
             # needs_second only for transitive (non-direct) deps matching primary FK target
             'needs_second': not is_direct and dep['target'] == primary_fk_dep_target,
             # one-to-one FK pre-creates needed when creating this dep record (e.g. commentable_id)
@@ -1420,6 +1523,9 @@ def helper_context(
         'internal_fk_deps': internal_fk_deps,
         'has_approvable': has_approvable,
         'flatten_test_rels': flatten_test_rels,
+        # If any dep label expression resolves a date/time field, the helper
+        # must import formatLabelValue so the rendered name matches the UI.
+        'needs_format_label_value': any(d.get('label_has_format') for d in enriched_deps),
     }
 
 
@@ -1534,10 +1640,10 @@ def spec_context(
     all_fill_cmds = gen_fill_commands(fields, title, I, fk_dep_vars)
     required_assert_cmds_no_bool = gen_assert_commands(
         [f for f in required_field_metas if f['category'] != 'boolean'], title, I, fk_dep_vars,
-        flatten_m2o_props=flatten_m2o_props_view)
+        flatten_m2o_props=flatten_m2o_props_view, schema=schema)
     all_assert_cmds_no_bool = gen_assert_commands(
         [f for f in fields if f['category'] != 'boolean'], title, I, fk_dep_vars,
-        flatten_m2o_props=flatten_m2o_props_view)
+        flatten_m2o_props=flatten_m2o_props_view, schema=schema)
 
     # Append user_account FK fill/assert commands (required UA for req_cmds; all UA for all_cmds)
     for ua in req_ua_spec:
@@ -1591,7 +1697,12 @@ def spec_context(
         # into the inner label-field TextField.
         if f'{prim}_id' in flatten_m2o_props_view and primary_rel:
             check_field_use_accordion = True
-            check_field_inner_label = to_title_case(primary_rel.get('label_field', 'name'))
+            inner = primary_rel.get('label_field', 'name')
+            # List-form label collapses to the leaf of its first path so the
+            # inner TextField label rendered by FormView is matched exactly.
+            if isinstance(inner, list):
+                inner = inner[0] if inner else 'name'
+            check_field_inner_label = to_title_case(str(inner).split('.')[-1])
         else:
             check_field_use_accordion = False
             check_field_inner_label = None
