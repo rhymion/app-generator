@@ -3,6 +3,12 @@ import { withAccelerate } from '@prisma/extension-accelerate';
 
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 
+// Production logs only warnings/errors. Per-query logging in prod was a hot
+// per-request stderr write (one log line per Prisma call); see #5 in
+// performance-plan-session.md.
+const prismaLogLevels: ('query' | 'info' | 'warn' | 'error')[] =
+  process.env.NODE_ENV === 'production' ? ['warn', 'error'] : ['query'];
+
 // Use Accelerate URL if available, otherwise fall back to direct connection
 const createPrismaClient = async () => {
   if (process.env.PRISMA_DATABASE_URL) {
@@ -10,7 +16,7 @@ const createPrismaClient = async () => {
     const accelerateUrl = process.env.PRISMA_DATABASE_URL
     const client = new PrismaClient({
       accelerateUrl,
-      log: process.env.NODE_ENV === 'development' ? ['query'] : ['query', 'info'],
+      log: prismaLogLevels,
     }).$extends(withAccelerate());
     return client;
   } else {
@@ -35,7 +41,7 @@ const createPrismaClient = async () => {
     // Dynamic import to avoid bundling @prisma/adapter-pg in production
     const { PrismaPg } = await import('@prisma/adapter-pg');
     const adapter = new PrismaPg({ connectionString }, schemaName ? { schema: schemaName } : undefined);
-    const client = new PrismaClient({ adapter, log: ['query', 'info'] })
+    const client = new PrismaClient({ adapter, log: prismaLogLevels })
     return client;
   }
 };
