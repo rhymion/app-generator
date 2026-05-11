@@ -1,10 +1,23 @@
 'use client';
 
 import useMediaQuery from '@mui/material/useMediaQuery';
-import DataGridClient from './DataGridClient';
-import CardListClient from './CardListClient';
+import dynamic from 'next/dynamic';
+import type DataGridClientStatic from './DataGridClient';
+import type CardListClientStatic from './CardListClient';
 import type { ModelPermissions } from '@/lib/authz';
 import type { PageOpts, PageResult } from '@/lib/_pagination';
+
+// Lazy-load both variants so each route only ships the JS for the breakpoint
+// it actually renders (Phase 4 #7 from performance-plan-session.md).
+//   - DataGridClient keeps SSR — most users are desktop, so the HTML is on
+//     first paint and the @mui/x-data-grid bundle hydrates after.
+//   - CardListClient is client-only because the mobile branch is gated on
+//     useMediaQuery, which resolves to false at SSR. Skipping SSR here means
+//     desktop users never download CardListClient or its MUI deps.
+// `next/dynamic` erases the component's generic, so we cast back to the
+// static type to keep `DisplayFieldConfig<T>` flowing through correctly.
+const DataGridClient = dynamic(() => import('./DataGridClient')) as typeof DataGridClientStatic;
+const CardListClient = dynamic(() => import('./CardListClient'), { ssr: false }) as typeof CardListClientStatic;
 
 interface BaseEntity {
   id: string;
