@@ -33,6 +33,16 @@ export function invalidateApiKeyCache(apiKey: string | null | undefined): void {
   if (apiKey) apiKeyCache.delete(apiKey);
 }
 
+/**
+ * Drop every entry in the api-key cache. Used by the cypress
+ * `/api/test-utils/reset-caches` endpoint so production-build runs of
+ * `cy.task('db:reset')` don't leave the cache pointing at deleted
+ * user_account rows.
+ */
+export function clearApiKeyCache(): void {
+  apiKeyCache.clear();
+}
+
 export async function authenticateApiKey(request: NextRequest): Promise<{ userId: string }> {
   const apiKey =
     request.headers.get('X-API-Key') ||
