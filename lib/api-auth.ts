@@ -18,8 +18,15 @@ export class ApiError extends Error {
 // repeated bad-key probes short-circuit without hammering the DB; the
 // LRU cap keeps unknown-key probing bounded. Rotations invalidate via
 // `invalidateApiKeyCache()` from settings/account mutations.
+//
+// Gated to production: `cy:test:api` runs `cy.task('db:reset')` between
+// tests, which wipes user_account rows but cannot reach into the dev
+// server's process to clear this cache. Without the gate, the cached
+// userId would survive the reset and the next write would fail with
+// `<entity>_updater_id_fkey` violations.
 const API_KEY_TTL_MS = 5 * 60 * 1000;
 const API_KEY_MAX_ENTRIES = 1000;
+const apiKeyCacheEnabled = process.env.NODE_ENV === 'production';
 const apiKeyCache = new TtlLruCache<string, string | null>(API_KEY_MAX_ENTRIES, API_KEY_TTL_MS);
 
 export function invalidateApiKeyCache(apiKey: string | null | undefined): void {
@@ -35,10 +42,12 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
     throw new ApiError(401, 'Missing API key. Provide X-API-Key header or Authorization: Bearer <key>.');
   }
 
-  const cached = apiKeyCache.get(apiKey);
-  if (cached !== undefined) {
-    if (cached === null) throw new ApiError(401, 'Invalid API key.');
-    return { userId: cached };
+  if (apiKeyCacheEnabled) {
+    const cached = apiKeyCache.get(apiKey);
+    if (cached !== undefined) {
+      if (cached === null) throw new ApiError(401, 'Invalid API key.');
+      return { userId: cached };
+    }
   }
 
   const user = await prisma.user_account.findFirst({
@@ -46,7 +55,9 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
     select: { id: true },
   });
 
-  apiKeyCache.set(apiKey, user?.id ?? null);
+  if (apiKeyCacheEnabled) {
+    apiKeyCache.set(apiKey, user?.id ?? null);
+  }
 
   if (!user) {
     throw new ApiError(401, 'Invalid API key.');

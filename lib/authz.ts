@@ -115,13 +115,18 @@ export async function resolvePermissions(
  * window. We don't track a roles_version, so changes don't invalidate
  * instantly — `invalidatePermissionCache()` is exposed for callers that need
  * tighter bounds (admin tools, role-mutation endpoints).
+ *
+ * Gated to production: `cy:test:api` resets the DB between tests but cannot
+ * reach into the dev server's process to clear this cache, so a stale
+ * cached entry would silently widen permissions for the new run.
  */
 const PERMISSION_TTL_MS = 30 * 1000;
 const PERMISSION_MAX_ENTRIES = 1000;
+const permissionCacheEnabled = process.env.NODE_ENV === 'production';
 type PermissionEntry = { permissions: RichPermissions; userId: string };
 const permissionCache = new TtlLruCache<string, PermissionEntry>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS);
 
-export function invalidatePermissionCache(): void {
+export async function invalidatePermissionCache(): Promise<void> {
   permissionCache.clear();
 }
 
@@ -145,8 +150,10 @@ export const getModelPermissions = cache(async (
   }
 
   const cacheKey = `${resolvedUserId}|${model}`;
-  const cached = permissionCache.get(cacheKey);
-  if (cached) return cached;
+  if (permissionCacheEnabled) {
+    const cached = permissionCache.get(cacheKey);
+    if (cached) return cached;
+  }
 
   const rows = await prisma.permission.findMany({
     where: {
@@ -177,7 +184,7 @@ export const getModelPermissions = cache(async (
     // Default: grant all if no explicit permissions are defined for this model
     const full = { ...FULL_FLAGS, general: { ...FULL_FLAGS }, creator: null, assignee: null };
     const result = { permissions: full, userId: resolvedUserId };
-    permissionCache.set(cacheKey, result);
+    if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
     return result;
   }
 
@@ -216,7 +223,7 @@ export const getModelPermissions = cache(async (
     assignee: assigneeFlags,
   };
   const result = { permissions, userId: resolvedUserId };
-  permissionCache.set(cacheKey, result);
+  if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
   return result;
 });
 
