@@ -4,6 +4,7 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/auth';
 import prisma from '@/lib/prisma';
 import { cache } from 'react';
+import { TtlLruCache } from '@/lib/_ttl_lru';
 
 export const getSessionUserId = cache(async function getSessionUserId(): Promise<string | null> {
   const session = await getServerSession(authOptions);
@@ -105,13 +106,33 @@ export async function resolvePermissions(
 }
 
 /**
+ * Per-process cache of (userId, model) → permission result (Phase 2 #3 from
+ * performance-plan-session.md). The original implementation ran a 3-branch OR
+ * permission query (`permission.findMany`) on every server-rendered page and
+ * every API call, gated only by the per-request React `cache()` wrapper.
+ *
+ * Trade-off: a user's role/permission change takes effect within one TTL
+ * window. We don't track a roles_version, so changes don't invalidate
+ * instantly — `invalidatePermissionCache()` is exposed for callers that need
+ * tighter bounds (admin tools, role-mutation endpoints).
+ */
+const PERMISSION_TTL_MS = 30 * 1000;
+const PERMISSION_MAX_ENTRIES = 1000;
+type PermissionEntry = { permissions: RichPermissions; userId: string };
+const permissionCache = new TtlLruCache<string, PermissionEntry>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS);
+
+export function invalidatePermissionCache(): void {
+  permissionCache.clear();
+}
+
+/**
  * Fetch permissions for a model and return them together with the resolved userId.
  * Returning userId avoids a separate getSessionUserId() call in callers and
  * enables fully parallel fetching alongside entity data.
  *
- * Cached per (model, userId) per request. Callers that omit userId share the same
- * cache entry (model, undefined), so list and detail getters for the same model
- * deduplicate to a single DB query.
+ * Layered caching: per-request React `cache()` (dedups concurrent calls within
+ * one render), then per-process TTL LRU (`permissionCache`, deduplicates across
+ * requests until expiry).
  */
 export const getModelPermissions = cache(async (
   model: ModelName,
@@ -122,6 +143,10 @@ export const getModelPermissions = cache(async (
   if (!resolvedUserId) {
     return { permissions: empty, userId: null };
   }
+
+  const cacheKey = `${resolvedUserId}|${model}`;
+  const cached = permissionCache.get(cacheKey);
+  if (cached) return cached;
 
   const rows = await prisma.permission.findMany({
     where: {
@@ -151,7 +176,9 @@ export const getModelPermissions = cache(async (
   if (rows.length === 0) {
     // Default: grant all if no explicit permissions are defined for this model
     const full = { ...FULL_FLAGS, general: { ...FULL_FLAGS }, creator: null, assignee: null };
-    return { permissions: full, userId: resolvedUserId };
+    const result = { permissions: full, userId: resolvedUserId };
+    permissionCache.set(cacheKey, result);
+    return result;
   }
 
   let general = { ...EMPTY_FLAGS };
@@ -188,7 +215,9 @@ export const getModelPermissions = cache(async (
     creator: creatorFlags,
     assignee: assigneeFlags,
   };
-  return { permissions, userId: resolvedUserId };
+  const result = { permissions, userId: resolvedUserId };
+  permissionCache.set(cacheKey, result);
+  return result;
 });
 
 export async function canAccess(
