@@ -104,7 +104,8 @@
     "signIn": "ログイン",
     "signOut": "ログアウト",
     "openMenu": "メニューを開く",
-    "closeMenu": "メニューを閉じる"
+    "closeMenu": "メニューを閉じる",
+    "language": "言語"
   },
   "Nav": {
     "approvalFlow": "承認フロー",

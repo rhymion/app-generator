@@ -104,7 +104,8 @@
     "signIn": "Sign In",
     "signOut": "Sign Out",
     "openMenu": "Open menu",
-    "closeMenu": "Close menu"
+    "closeMenu": "Close menu",
+    "language": "Language"
   },
   "Nav": {
     "approvalFlow": "Approval Flow",
