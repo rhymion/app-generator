@@ -166,11 +166,10 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             k for k in child_props_dict
             if k not in parent_id_props and k not in _EXCLUDE_ID_TS and k != 'id'
         ]
-        # Fields WITH id (for update body)
-        props_with_id = [
-            k for k in child_props_dict
-            if k not in parent_id_props and k not in _EXCLUDE_ID_TS
-        ]
+        # Fields WITH id — same set as props_no_id but with `id` prepended.
+        # Kept as a separate var so call sites that don't need the id (the
+        # create body) don't carry it through.
+        props_with_id = ['id', *props_no_id]
 
         field_type = (
             '{ ' +
@@ -178,14 +177,13 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             ' }'
         ) if props_no_id else '{}'
 
+        # `id?: string` so the form can distinguish kept items (have id, route
+        # to update) from new ones (no id, route to create) at diff time.
         field_type_with_id = (
-            '{ ' +
-            '; '.join(
-                f'{p.replace("id", "id?") if p == "id" else p}: {get_ts_type(child_props_dict[p])}'
-                for p in props_with_id
-            ) +
+            '{ id?: string; ' +
+            '; '.join(f'{p}: {get_ts_type(child_props_dict[p])}' for p in props_no_id) +
             ' }'
-        ) if props_with_id else '{}'
+        ) if props_no_id else '{ id?: string }'
 
         def _is_nullable_cuid(defn: dict) -> bool:
             t = defn.get('type')
@@ -237,6 +235,9 @@ def _build_child_form_data_extractions(children_data: list[dict]) -> str:
                 f"    .filter(({item_id}): {item_id} is string => Boolean({item_id}));"
             )
         else:
+            # Items carry an optional `id` so the service can diff incoming
+            # vs existing rows in the nested update — see #6 in
+            # performance-plan-session.md.
             lines.append(
                 f"  const {child_var}Raw = data.getAll('{form_key}[]') as string[];\n"
                 f"  const {child_var}Items = {child_var}Raw.map(f => JSON.parse(f) as {c['field_type_with_id']});"
@@ -266,7 +267,22 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
         if c['use_connect']:
             lines.append(f"      {pn}: {{\n        set: {cv}Ids.map((id) => ({{ id }})),\n      }},")
         else:
-            lines.append(f"      {pn}: {{\n        deleteMany: {{}},\n        create: {cv}Items.map(f => ({{\n{fmc}\n        }})),\n      }},")
+            # Diff incoming vs existing instead of nuke-and-rebuild
+            # (#6 in performance-plan-session.md). Items the form returned
+            # with an id are kept (and updated in place); ids no longer
+            # present are deleted; items without an id are created. This
+            # turns N statements per update into roughly K_new + K_changed
+            # + 1 (vs the old K_existing + K_new).
+            lines.append(
+                f"      {pn}: {{\n"
+                f"        deleteMany: {{ id: {{ notIn: {cv}Items.map(f => f.id).filter((id): id is string => Boolean(id)) }} }},\n"
+                f"        update: {cv}Items.filter(f => f.id).map(f => ({{\n"
+                f"          where: {{ id: f.id! }},\n"
+                f"          data: {{\n{fmc}\n          }},\n"
+                f"        }})),\n"
+                f"        create: {cv}Items.filter(f => !f.id).map(f => ({{\n{fmc}\n        }})),\n"
+                f"      }},"
+            )
     return '\n'.join(lines)
 
 
