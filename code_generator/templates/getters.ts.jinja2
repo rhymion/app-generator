@@ -224,7 +224,9 @@ export async function search{{ parent_pascal }}Options(
     where,
     orderBy: [{ {{ default_search_order_field }}: '{{ default_search_order_dir }}' }],
     take: safeLimit + includeIds.length,
-{% if include_props_list %}
+{% if search_include_props_list %}
+    include: { {{ search_include_props_list }} },
+{% elif include_props_list %}
     include: { {{ include_props_list }} },
 {% endif %}
   });
@@ -267,6 +269,11 @@ export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pa
     // we don't want to pull target-specific schema knowledge into the parent's
     // generated getter. id sort is stable and always present.
     orderBy: [{ id: 'asc' }],
+{% if oto.available_include %}
+    // Mirror the labelField path so the form's initial-options data carries
+    // every relation the autocomplete label expression dereferences.
+    include: { {{ oto.available_include }} },
+{% endif %}
   });
 }
 {% endfor %}

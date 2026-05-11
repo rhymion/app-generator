@@ -201,7 +201,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # --- FormView.tsx ---
         if can_view:
-            fv_ctx = {**ctx, **form_view_context(ctx)}
+            fv_ctx = {**ctx, **form_view_context(ctx, schema)}
             _write(components_dir / 'FormView.tsx', _render(env, 'form_view.tsx.jinja2', fv_ctx))
 
         # --- Determine which pages to generate (x-display) ---
@@ -214,7 +214,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # --- page list ---
         if can_list and show_table:
-            pl_ctx = {**ctx, **page_list_context(ctx)}
+            pl_ctx = {**ctx, **page_list_context(ctx, schema)}
             _write(app_dir / 'page.tsx', _render(env, 'page_list.tsx.jinja2', pl_ctx))
 
         # --- chart pages ---

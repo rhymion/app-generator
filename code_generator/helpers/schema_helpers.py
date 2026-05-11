@@ -15,10 +15,19 @@ def _get_entity_base_props(entity: str, schema: dict) -> dict:
     return {}
 
 
-def _label_field_is_date(label_field: str, target: str, schema: dict) -> bool:
-    """Returns True if the label_field on the target entity has a date/time format."""
-    props = _get_entity_base_props(target, schema)
-    return props.get(label_field, {}).get('format') in _DATE_FORMATS
+def _label_field_is_date(label_field, target: str, schema: dict) -> bool:
+    """Returns True if the label_field's first path resolves to a date/time field.
+
+    `label_field` may be a single field name, a dotted path through outbound
+    m2o / one-to-one relations, or a list of either. For the legacy callers
+    that gate downstream behaviour on a single boolean (e.g. test helpers
+    reading `dep.label_field_is_date`), True is returned when the FIRST path
+    in the labelField ends on a date/time field.
+    """
+    # Local import to avoid a circular dependency between this module and
+    # label_field — the label_field helper imports nothing from here.
+    from helpers.label_field import first_label_format
+    return first_label_format(label_field, target, schema) in _DATE_FORMATS
 
 
 def get_detail_properties(parent: str, schema: dict, detail_key: str | None = None) -> dict | None:

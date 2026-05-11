@@ -50,7 +50,7 @@ export type {{ parent | pascal_case }} = {
 {% for rel in option_types %}
 export type {{ rel.target | pascal_case }}Option = {
   id: string;
-  {{ rel.label_field }}: string;
+  label: string;
 };
 
 {% endfor %}

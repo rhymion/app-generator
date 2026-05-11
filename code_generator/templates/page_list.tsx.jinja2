@@ -11,6 +11,9 @@ import { get{{ parent_pascal }}PagedData, fetch{{ parent_pascal }}Page } from '@
 import { remove{{ parent_pascal }} } from '@/lib/{{ parent }}/actions';
 {% endif %}
 import { DEFAULT_PAGE_SIZE{% if needs_formatting %}, type PageOpts{% endif %} } from '@/lib/_pagination';
+{% if list_uses_format_label_value %}
+import { formatLabelValue } from '@/lib/_format';
+{% endif %}
 {% if has_chart %}
 import Link from '@mui/material/Link';
 import Button from '@mui/material/Button';

@@ -11,6 +11,8 @@ can catch it and print a clean message without a traceback.
 import re
 from pathlib import Path
 
+from helpers.label_field import resolve_label_paths
+
 _SNAKE_CASE = re.compile(r'^[a-z][a-z0-9_]*$')
 _ID_SUFFIX  = re.compile(r'_id$')
 
@@ -137,7 +139,7 @@ def validate_schema(schema: dict) -> None:
         props = defn.get('properties', {})
         for prop_name, prop_def in props.items():
             rel = prop_def.get('x-relationship', {})
-            if not rel or rel.get('type') != 'many-to-one':
+            if not rel or rel.get('type') not in ('many-to-one', 'one-to-one', 'one-to-one_bridge'):
                 continue
 
             target      = rel.get('target', '')
@@ -168,13 +170,15 @@ def validate_schema(schema: dict) -> None:
 
             target_props = defs[target].get('properties', {})
 
-            # 2c. If labelField is specified, it must exist on the target
-            if label_field and label_field not in target_props:
-                errors.append(
-                    f"Definition '{def_key}', property '{prop_name}': "
-                    f"labelField '{label_field}' does not exist on target '{target}'.  "
-                    f"Available fields: {sorted(target_props.keys()) or '(none)'}."
-                )
+            # 2c. labelField (string | dotted path | list of either) must
+            # resolve through the target's properties / outbound relations.
+            if label_field:
+                try:
+                    resolve_label_paths(label_field, target, schema)
+                except ValueError as exc:
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': {exc}"
+                    )
 
             # 2d. If no labelField, the target must have a 'name' field (fallback label)
             if not label_field and 'name' not in target_props:
@@ -205,12 +209,13 @@ def validate_schema(schema: dict) -> None:
             if not target or target not in defs:
                 continue
             target_props = defs[target].get('properties', {})
-            if label_field and label_field not in target_props:
-                errors.append(
-                    f"Definition '{def_key}', x-relationships '{rel_prop}': "
-                    f"labelField '{label_field}' does not exist on target '{target}'.  "
-                    f"Available fields: {sorted(target_props.keys()) or '(none)'}."
-                )
+            if label_field:
+                try:
+                    resolve_label_paths(label_field, target, schema)
+                except ValueError as exc:
+                    errors.append(
+                        f"Definition '{def_key}', x-relationships '{rel_prop}': {exc}"
+                    )
             elif not label_field and 'name' not in target_props:
                 errors.append(
                     f"Definition '{def_key}', x-relationships '{rel_prop}': "

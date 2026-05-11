@@ -767,11 +767,97 @@ def build_context(entity: dict, schema: dict) -> dict:
         for c in embedded_ch
     )
 
-    # Getters: include entries (list page)
-    include_entries_list = [f"{r['relation_name']}: true" for r in parent_rels]
+    # Getters: include entries (list page).
+    # When a relation's labelField walks through deeper m2o/o2o (e.g.
+    # `patient_rel.patient.name`), the include must mirror that chain so
+    # Prisma actually loads the data the label expression dereferences.
+    from helpers.label_field import build_label_expression, render_prisma_include
+
+    def _include_entry_for_rel(rel: dict) -> str:
+        target = rel.get('target', '')
+        label_field = rel.get('label_field')
+        if not target or not label_field or label_field == 'name':
+            return f"{rel['relation_name']}: true"
+        try:
+            built = build_label_expression('item', label_field, target, schema)
+        except ValueError:
+            return f"{rel['relation_name']}: true"
+        nested = built.get('prisma_include') or {}
+        if not nested:
+            return f"{rel['relation_name']}: true"
+        return f"{rel['relation_name']}: {{ include: {{ {render_prisma_include(nested)} }} }}"
+
+    include_entries_list = [_include_entry_for_rel(r) for r in parent_rels]
     # Selector OTO rels are included in list so the relation column can be displayed
-    include_entries_list.extend(f"{r['relation_name']}: true" for r in selector_oto_rels)
+    include_entries_list.extend(_include_entry_for_rel(r) for r in selector_oto_rels)
     include_props_list   = ', '.join(include_entries_list)
+
+    # searchXxxOptions returns target rows for OTHER entities' autocompletes.
+    # Each consumer renders the label using its OWN labelField path, so the
+    # search include must be the union of (a) the target's own parent_rels
+    # (above) and (b) any cross-entity labelField paths that point at this
+    # entity. Without (b), e.g. lifestyle's form-side label expression
+    # `item.patient_rel?.patient?.name` would resolve to '' because
+    # searchCheckupOptions wouldn't have included `patient_rel.patient`.
+    def _merge_include(dst: dict, src: dict) -> dict:
+        for k, v in src.items():
+            if k not in dst:
+                dst[k] = v
+            else:
+                # Both must end up as nested includes.
+                if dst[k] is True and isinstance(v, dict):
+                    dst[k] = v
+                elif isinstance(dst[k], dict) and v is True:
+                    pass  # keep richer one
+                elif isinstance(dst[k], dict) and isinstance(v, dict):
+                    inner_dst = dst[k].setdefault('include', {})
+                    inner_src = v.get('include', {}) or {}
+                    _merge_include(inner_dst, inner_src)
+        return dst
+
+    consumer_includes: dict = {}
+    for other_def in schema.get('definitions', {}).values():
+        if not isinstance(other_def, dict):
+            continue
+        for other_prop_name, other_prop in (other_def.get('properties', {}) or {}).items():
+            if not isinstance(other_prop, dict):
+                continue
+            other_rel = other_prop.get('x-relationship') or {}
+            if other_rel.get('target') != entity['model']:
+                continue
+            other_label = other_rel.get('labelField')
+            if not other_label:
+                continue
+            try:
+                other_built = build_label_expression('item', other_label, entity['model'], schema)
+            except ValueError:
+                continue
+            _merge_include(consumer_includes, other_built.get('prisma_include') or {})
+
+    # Union: take own includes (already deepened by labelField on this entity)
+    # and merge in the cross-entity consumer paths.
+    own_include_dict: dict = {}
+    for r in list(parent_rels) + list(selector_oto_rels):
+        target = r.get('target', '')
+        label_field = r.get('label_field')
+        if not target or not label_field:
+            own_include_dict[r['relation_name']] = True
+            continue
+        try:
+            built = build_label_expression('item', label_field, target, schema)
+        except ValueError:
+            own_include_dict[r['relation_name']] = True
+            continue
+        nested = built.get('prisma_include') or {}
+        if not nested:
+            own_include_dict[r['relation_name']] = True
+        else:
+            own_include_dict[r['relation_name']] = {'include': nested}
+
+    search_include_dict: dict = {}
+    _merge_include(search_include_dict, own_include_dict)
+    _merge_include(search_include_dict, consumer_includes)
+    search_include_props_list = render_prisma_include(search_include_dict)
 
     child_include_entries = []
     for c in children_raw:
@@ -861,12 +947,50 @@ def build_context(entity: dict, schema: dict) -> dict:
     # Reverse OTO rels included simply (no FK in this model); use relation_name for Prisma key
     reverse_oto_include_entries = [f"{r['relation_name']}: true" for r in reverse_oto_rels]
 
+    # Detail-page parent_rels include: merge labelField path includes (so e.g.
+    # lifestyle.checkup with labelField `patient_rel.patient.name` deepens to
+    # `checkup: { include: { patient_rel: { include: { patient: true } } } }`)
+    # with the legacy `_flatten_m2o_nested` overrides (which surface nested FK
+    # labels inside the flatten section). When both are present, the flatten
+    # override wins because it carries strictly more nested data; when only one
+    # of them is present, that one's include is emitted.
+    def _detail_entry_for_rel(rel: dict) -> str:
+        rel_name = rel['relation_name']
+        flatten_override = _flatten_m2o_nested.get(rel_name)
+        if flatten_override:
+            return f"{rel_name}: {flatten_override}"
+        return _include_entry_for_rel(rel)
+
+    detail_parent_rel_entries  = [_detail_entry_for_rel(r) for r in parent_rels]
+    # Selector OTO rels are independent entities, but their labelField may walk
+    # into deeper relations too (e.g. lifestyle.checkup_id labelField uses
+    # `patient_rel.patient.name`) — apply the same deepening as for m2o.
+    detail_selector_oto_entries = [_include_entry_for_rel(r) for r in selector_oto_rels]
+
+    # Per-selector-OTO include rendered for use by getAvailableXxxsForYyy.
+    # Without this, `initialAvailableCheckups` (the prop seeding the form's
+    # autocomplete) would return checkup rows without `patient_rel.patient`,
+    # so the lifestyle picker's options would render with an empty patient
+    # name even though `searchCheckupOptions` returns the deeper data.
+    for r in selector_oto_rels:
+        target = r.get('target', '')
+        label_field = r.get('label_field')
+        if not target or not label_field:
+            r['available_include'] = ''
+            continue
+        try:
+            built_avail = build_label_expression('item', label_field, target, schema)
+        except ValueError:
+            r['available_include'] = ''
+            continue
+        nested = built_avail.get('prisma_include') or {}
+        r['available_include'] = render_prisma_include(nested) if nested else ''
+
     include_entries_detail = [
         *child_include_entries,
-        # Use nested includes for m2o flatten rels that have FK fields (need label resolution)
-        *[f"{r['relation_name']}: {_flatten_m2o_nested.get(r['relation_name'], 'true')}" for r in parent_rels],
+        *detail_parent_rel_entries,
         *one_to_one_include_entries,
-        *selector_oto_include_entries,
+        *detail_selector_oto_entries,
         *reverse_oto_include_entries,
         *flatten_non_m2o_include_entries,
         "creator: { select: { id: true, name: true } }",
@@ -979,6 +1103,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         snapshot_include_props=snapshot_include_props,
         # Getters
         include_props_list=include_props_list,
+        search_include_props_list=search_include_props_list,
         include_props_detail=include_props_detail,
         include_entries_detail=include_entries_detail,
         # Selection targets (page_new / page_edit)

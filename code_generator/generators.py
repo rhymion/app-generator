@@ -16,6 +16,12 @@ from helpers.schema_helpers import (
     get_parent_fk_props,
     find_fk_derivation_path,
 )
+from helpers.label_field import (
+    build_label_expression,
+    first_label_format,
+    first_label_path,
+    render_prisma_include,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +163,7 @@ def chart_context(ctx: dict, schema: dict) -> dict:
 # page_list
 # ---------------------------------------------------------------------------
 
-def page_list_context(ctx: dict) -> dict:
+def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
     parent     = ctx['parent']
     model_def  = ctx['model_def']
     gen_cfg    = ctx['gen_cfg']
@@ -173,22 +179,43 @@ def page_list_context(ctx: dict) -> dict:
     display_fields_code = ''
     primary_field = ''
 
-    # Build map from relation display name (e.g. 'epic') to label_field (e.g. 'title')
-    # parent_rels_raw entries: { prop_name: 'epic_id', label_field: 'title', ... }
+    # Build map from relation display name (e.g. 'epic') to {label_field, target}.
+    # parent_rels_raw entries: { prop_name: 'epic_id', label_field: 'title' | [...], ... }
     rel_label_map: dict[str, dict[str, object]] = {}
     for r in list(ctx.get('parent_rels_raw', [])) + list(ctx.get('selector_oto_rels', [])):
         prop = r['prop_name']
         if prop.endswith('_id'):
             rel_label_map[prop[:-3]] = {
-                'label_field': r['label_field'],
-                'label_field_is_date': r.get('label_field_is_date', False),
+                'label_field':         r['label_field'],
+                'target':              r.get('target', ''),
             }
+
+    # Set when any list-page formatting expression invokes formatLabelValue —
+    # the generated page_list.tsx must then import it from '@/lib/_format'.
+    list_uses_format_label_value = False
 
     def add_formatting(field_name: str, expr: str) -> None:
         if field_name in formatting_keys:
             return
         formatting_keys.add(field_name)
         formatting_entries.append(f'    {field_name}: {expr},')
+
+    def _label_expr_for_rel(field_name: str, rel_info: dict) -> str:
+        """Build the formatting expression for a relation column (list page)."""
+        nonlocal list_uses_format_label_value
+        target = rel_info.get('target') or ''
+        built = build_label_expression(
+            f'item.{field_name}',
+            rel_info['label_field'],
+            target,
+            schema or {},
+        )
+        if built['has_format']:
+            list_uses_format_label_value = True
+        # Guard: when item.{field_name} is null/undefined, deep accesses inside
+        # the expression already short-circuit via ?., so we just need to
+        # evaluate the expression. formatLabelValue handles nullish itself.
+        return built['expression']
 
     if xdisplay_table:
         fields_code_parts = []
@@ -225,11 +252,7 @@ def page_list_context(ctx: dict) -> dict:
             # If this field is a relationship object, format it server-side (no functions to client)
             if field_name in rel_label_map:
                 rel_info = rel_label_map[field_name]
-                label_f = str(rel_info['label_field'])
-                if rel_info.get('label_field_is_date'):
-                    add_formatting(field_name, f"item.{field_name}?.{label_f} ? new Date(item.{field_name}.{label_f}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''")
-                else:
-                    add_formatting(field_name, f"item.{field_name}?.{label_f} ?? ''")
+                add_formatting(field_name, _label_expr_for_rel(field_name, rel_info))
 
             fmt = model_props[field_name].get('format') if field_name in model_props else None
             format_attr = f", format: '{fmt}'" if fmt in ('date-time', 'date', 'time') else ''
@@ -239,11 +262,7 @@ def page_list_context(ctx: dict) -> dict:
 
     if not xdisplay_table:
         for field_name, rel_info in rel_label_map.items():
-            label_f = str(rel_info['label_field'])
-            if rel_info.get('label_field_is_date'):
-                add_formatting(field_name, f"item.{field_name}?.{label_f} ? new Date(item.{field_name}.{label_f}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''")
-            else:
-                add_formatting(field_name, f"item.{field_name}?.{label_f} ?? ''")
+            add_formatting(field_name, _label_expr_for_rel(field_name, rel_info))
 
         for field_name, prop in model_props.items():
             actual = _get_actual_type(prop)
@@ -280,6 +299,7 @@ def page_list_context(ctx: dict) -> dict:
         'src_var':            src_var,
         'needs_tf':           bool(xdisplay_table),
         'needs_tc':           has_chart,
+        'list_uses_format_label_value': list_uses_format_label_value,
     }
 
 
@@ -771,7 +791,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
 # form_view.tsx
 # ---------------------------------------------------------------------------
 
-def form_view_context(ctx: dict) -> dict:
+def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     parent        = ctx['parent']
     model         = ctx['model']
     parent_pascal = ctx['parent_pascal']
@@ -781,6 +801,9 @@ def form_view_context(ctx: dict) -> dict:
     parent_rels   = ctx['parent_rels']
     children_raw  = ctx['children_raw']
     use_dayjs     = False
+    # Set when any read-only TextField value uses formatLabelValue — the
+    # generated FormView must then import it.
+    uses_format_label_value = False
 
     rel_by_prop = {r['prop_name']: r for r in ctx['parent_rels_raw']}
     # Add selector OTO rels to rel_by_prop so they display like many-to-one (label + view link)
@@ -863,14 +886,19 @@ def form_view_context(ctx: dict) -> dict:
             target        = rel.get('target', p.removesuffix('_id'))
             target_pascal = to_pascal_case(target)
             is_oto        = rel.get('is_selector_oto', False)
-            label_is_date = rel.get('label_field_is_date', False)
             # For selector OTO, the FK prop is excluded from src type; use relation?.id instead
             fk_id_expr    = f"src.{rel_name}?.id" if is_oto else f"src.{p}"
-            if label_is_date:
-                rel_value_expr = f"src.{rel_name}?.{label_f} ? new Date(src.{rel_name}.{label_f}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''"
+            built = build_label_expression(f"src.{rel_name}", label_f, target, schema or {})
+            if built['has_format']:
+                uses_format_label_value = True
+            rel_value_expr = built['expression']
+            # For non-selector m2o, allow falling back to the raw FK value when
+            # the relation row failed to include — preserves the historical
+            # behaviour where empty labels still show *something* identifying.
+            if is_oto:
+                value_expr = rel_value_expr
             else:
-                rel_value_expr = f"src.{rel_name}?.{label_f} || ''"
-            value_expr    = rel_value_expr if is_oto else f"src.{rel_name}?.{label_f} || src.{p} || ''"
+                value_expr = f"({rel_value_expr}) || src.{p} || ''"
             text_jsxs.append(
                 f"      <TextField\n        label={{tf('{label_fk}')}}\n"
                 f"        value={{{value_expr}}}\n"
@@ -1146,13 +1174,17 @@ def form_view_context(ctx: dict) -> dict:
                 _rel = child.get('relationship') or {}
                 _lf = _rel.get('label_field', 'name') if _rel else 'name'
                 _slf = _rel.get('secondary_label_field') if _rel else None
-                if _slf:
+                _target = _rel.get('target', child.get('name', '')) if _rel else child.get('name', '')
+                _built = build_label_expression('f', _lf, _target, schema)
+                if _built['has_format']:
+                    uses_format_label_value = True
+                if _slf and isinstance(_lf, str) and '.' not in _lf:
                     _sec_parts = _slf.split('.')
                     _sec_rel = _sec_parts[0]
                     _sec_field = _sec_parts[1] if len(_sec_parts) > 1 else 'name'
-                    _view_val = f"f.{_sec_rel}?.{_sec_field} || f.{_lf}"
+                    _view_val = f"(f.{_sec_rel}?.{_sec_field} || ({_built['expression']}))"
                 else:
-                    _view_val = f"f.{_lf}"
+                    _view_val = _built['expression']
                 child_view_grids.append(
                     f"      <div>\n"
                     f"        <ListWrapper\n"
@@ -1201,6 +1233,7 @@ def form_view_context(ctx: dict) -> dict:
         'column_variables':       column_variables,
         'custom_view_imports':    custom_view_imports,
         'use_dayjs':              use_dayjs,
+        'uses_format_label_value': uses_format_label_value,
     }
 
 
@@ -1226,6 +1259,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     cats = ctx['field_categories']
     EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'}
+
+    # Set when any autocomplete option / FormView label uses formatLabelValue —
+    # the generated component must then `import { formatLabelValue } from '@/lib/_format';`.
+    uses_format_label_value = False
 
     text_props           = cats['text']
     number_props         = cats['number']
@@ -1486,7 +1523,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         target        = r['target']
         target_pascal = to_pascal_case(target)
         label_field   = r.get('label_field', 'name')
-        label_is_date = r.get('label_field_is_date', False)
         rel_name      = prop_name.removesuffix('_id') if prop_name.endswith('_id') else prop_name
         sn            = safe_var_name(prop_name)
         initial_var   = f'{sn}InitialOptions'
@@ -1495,24 +1531,22 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         prop_initial  = f'initial{target_pascal}s'
         prop_search   = f'search{target_pascal}Options'
 
-        if label_is_date:
-            label_expr = f"item.{label_field} ? new Date(item.{label_field}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''"
-            current_label_expr = f"src.{rel_name}.{label_field} ? new Date(src.{rel_name}.{label_field}).toLocaleDateString('en-US', {{ timeZone: 'UTC' }}) : ''"
-        else:
-            label_expr = f"item.{label_field}"
-            current_label_expr = f"src.{rel_name}.{label_field}"
+        label_built = build_label_expression('item', label_field, target, schema)
+        current_built = build_label_expression(f'src.{rel_name}', label_field, target, schema)
+        if label_built['has_format']:
+            uses_format_label_value = True
 
         rel_opt_setups.append(
             f"  const {initial_var} = useMemo(() => ({prop_initial} ?? []).map((item) => ({{\n"
             f"    id: item.id,\n"
-            f"    label: {label_expr},\n"
+            f"    label: {label_built['expression']},\n"
             f"  }})), [{prop_initial}]);\n"
             f"  const {search_var} = useCallback(async (query: string, includeIds: string[]) => {{\n"
             f"    const rows = (await {prop_search}?.(query, includeIds)) ?? [];\n"
-            f"    return rows.map((item) => ({{ id: item.id, label: {label_expr} }}));\n"
+            f"    return rows.map((item) => ({{ id: item.id, label: {label_built['expression']} }}));\n"
             f"  }}, [{prop_search}]);\n"
             f"  const {current_var} = useMemo(() => (\n"
-            f"    src.{rel_name} ? {{ id: src.{rel_name}.id, label: {current_label_expr} }} : null\n"
+            f"    src.{rel_name} ? {{ id: src.{rel_name}.id, label: {current_built['expression']} }} : null\n"
             f"  ), [src.{rel_name}]);"
         )
 
@@ -1686,20 +1720,30 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             _rel = c.get('relationship') or {}
             if _rel.get('type') == 'many-to-many':
                 _uc_label = _rel.get('label_field', 'name')
+                _uc_target = _rel.get('target', child_name)
                 _uc_secondary = _rel.get('secondary_label_field')
             elif child_name == model:
                 _sr = next((r for r in ctx.get('parent_rels_raw', []) if r['target'] == model), None)
                 _uc_label = _sr.get('label_field', 'name') if _sr else 'name'
+                _uc_target = model
                 _uc_secondary = None
             else:
                 _uc_label = 'name'
+                _uc_target = child_name
                 _uc_secondary = None
-            if _uc_secondary:
+            # Build the label expression via the shared helper so list/dotted-
+            # path/array forms of labelField all work uniformly. The legacy
+            # secondaryLabelField is honoured only when the primary is a single
+            # field (preserves the historical " - <secondary>" suffix shape).
+            built = build_label_expression('f', _uc_label, _uc_target, schema)
+            if built['has_format']:
+                uses_format_label_value = True
+            if _uc_secondary and isinstance(_uc_label, str) and '.' not in _uc_label:
                 _sec_parts = _uc_secondary.split('.')
                 _sec_rel, _sec_field = _sec_parts[0], _sec_parts[1] if len(_sec_parts) > 1 else 'name'
-                _label_expr = f"f.{_uc_label} + (f.{_sec_rel} ? ` - ${{f.{_sec_rel}.{_sec_field}}}` : '')"
+                _label_expr = f"{built['expression']} + (f.{_sec_rel} ? ` - ${{f.{_sec_rel}.{_sec_field}}}` : '')"
             else:
-                _label_expr = f"f.{_uc_label}"
+                _label_expr = built['expression']
             child_grid_setup_parts.append(
                 f"  const [localInitial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                 f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
@@ -1997,12 +2041,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             target_pascal = to_pascal_case(autocomplete_target)
             self_rel = next((r for r in parent_rels_raw if r['target'] == model), None) if is_self else None
             filter_logic = f'.filter(item => !item.{self_rel["prop_name"]} || item.{self_rel["prop_name"]} === src.id)' if self_rel else ''
-            if ac_secondary:
+            ac_built = build_label_expression('item', ac_label_field, autocomplete_target, schema)
+            if ac_built['has_format']:
+                uses_format_label_value = True
+            if ac_secondary and isinstance(ac_label_field, str) and '.' not in ac_label_field:
                 _sec_parts = ac_secondary.split('.')
                 _sec_rel, _sec_field = _sec_parts[0], _sec_parts[1] if len(_sec_parts) > 1 else 'name'
-                ac_label_expr = f"item.{ac_label_field} + (item.{_sec_rel} ? ` - ${{item.{_sec_rel}.{_sec_field}}}` : '')"
+                ac_label_expr = f"{ac_built['expression']} + (item.{_sec_rel} ? ` - ${{item.{_sec_rel}.{_sec_field}}}` : '')"
             else:
-                ac_label_expr = f"item.{ac_label_field}"
+                ac_label_expr = ac_built['expression']
             # Server-search variant: pass initialAutocompleteOptions (limited initial set
             # mapped to {id, label}) and a wrapped searchOptions action. Self-referential
             # filtering (avoid picking your own row) is preserved on top of the server
@@ -2449,4 +2496,5 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'has_boolean_props':        bool(boolean_props) or flatten_needs_boolean,
         'has_flatten_accordion_upsert': has_flatten_accordion_upsert,
         'flatten_edit_sections':    '\n'.join(flatten_edit_section_parts),
+        'uses_format_label_value':  uses_format_label_value,
     }
