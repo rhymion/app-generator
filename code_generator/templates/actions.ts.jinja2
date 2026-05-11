@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation';
 {% if comment_actions_code or (can_list and can_delete) %}import { revalidatePath } from 'next/cache';
 {% endif %}import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
+{% if comment_actions_code %}import { notify } from '@/lib/_notifier';
+{% endif %}
 {% if service_imports %}
 import { {{ service_imports }} } from './service';
 {% endif %}

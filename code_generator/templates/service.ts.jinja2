@@ -1,7 +1,7 @@
 {{ utility_code }}
 {% if can_create %}
 export async function add{{ parent_pascal }}(userId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string }> {
-  return await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
 {{ validation_data_obj }}
     });
@@ -30,10 +30,26 @@ export async function add{{ parent_pascal }}(userId: string{% if parent_params_w
     });
     return { id: created.id };
   });
+{% if has_assignee_id %}
+  // Trigger #1 (notification design 2026-05-11): the new assignee learns
+  // they were assigned. Skipped when self-assigned.
+  if (assigneeId && assigneeId !== userId) {
+    notify(assigneeId, 'assigned', {
+      title: 'You were assigned to {{ parent_pascal }}',
+      href: `/{{ parent }}/view/${result.id}`,
+      itemType: '{{ model }}',
+      itemId: result.id,
+    });
+  }
+{% endif %}
+  return result;
 }
 {% endif %}
 {% if can_update %}
 export async function update{{ parent_pascal }}(userId: string, id: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_update %}, {{ child_params_for_update }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}, srcSnapshotRaw: string | null): Promise<void> {
+{% if has_assignee_id %}
+  let _prevAssigneeId: string | null = null;
+{% endif %}
   await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -41,6 +57,14 @@ export async function update{{ parent_pascal }}(userId: string, id: string{% if 
     await validateOnUpdate(tx, id, {
 {{ validation_data_obj }}
     });
+{% if has_assignee_id %}
+    // Capture the previous assignee so the post-transaction notify can
+    // fire only on actual change (trigger #1, design 2026-05-11).
+    _prevAssigneeId = (await tx.{{ model }}.findUnique({
+      where: { id },
+      select: { assignee_id: true },
+    }))?.assignee_id ?? null;
+{% endif %}
     await tx.{{ model }}.update({
       where: { id },
       data: {
@@ -55,6 +79,16 @@ export async function update{{ parent_pascal }}(userId: string, id: string{% if 
 {{ flatten_nested_updates }}
 {% endif %}
   });
+{% if has_assignee_id %}
+  if (assigneeId && assigneeId !== _prevAssigneeId && assigneeId !== userId) {
+    notify(assigneeId, 'assigned', {
+      title: 'You were assigned to {{ parent_pascal }}',
+      href: `/{{ parent }}/view/${id}`,
+      itemType: '{{ model }}',
+      itemId: id,
+    });
+  }
+{% endif %}
 }
 {% endif %}
 {% if can_delete %}

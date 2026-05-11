@@ -270,8 +270,13 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
     return '\n'.join(lines)
 
 
-def _build_comment_actions(comment_children: list[dict], parent: str, model: str) -> str:
+def _build_comment_actions(comment_children: list[dict], parent: str, model: str, has_assignee_id: bool) -> str:
     parent_pascal = to_pascal_case(parent)
+    assignee_select = ", assignee_id: true" if has_assignee_id else ""
+    recipient_list = (
+        "[parentRow.creator_id, parentRow.assignee_id]"
+        if has_assignee_id else "[parentRow.creator_id]"
+    )
     lines = []
     for c in comment_children:
         child_model   = c['name']
@@ -282,6 +287,24 @@ export async function add{parent_pascal}Comment({parent_id_prop}: string, messag
   await prisma.{child_model}.create({{
     data: {{ message, {parent_id_prop}, creator_id: userId }},
   }});
+  // Trigger #4 (notification design 2026-05-11): notify the entity creator
+  // and (if present) assignee; never the commenter themselves.
+  const parentRow = await prisma.{model}.findUnique({{
+    where: {{ id: {parent_id_prop} }},
+    select: {{ id: true, creator_id: true{assignee_select} }},
+  }});
+  if (parentRow) {{
+    const recipients = new Set<string>(
+      {recipient_list}.filter((id): id is string => Boolean(id) && id !== userId)
+    );
+    for (const recipientId of recipients) {{
+      notify(recipientId, 'comment_created', {{
+        title: 'New comment on {parent_pascal}',
+        href: `/{parent}/view/${{parentRow.id}}`,
+        commentSnippet: message.slice(0, 80),
+      }});
+    }}
+  }}
   revalidatePath('/{parent}');
 }}
 
@@ -308,15 +331,38 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
     return '\n'.join(lines)
 
 
-def _build_comment_actions_bridge(parent: str, model: str) -> str:
+def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool) -> str:
     """Generate comment actions using the shared commentable bridge (single comment table)."""
     parent_pascal = to_pascal_case(parent)
+    assignee_select = ", assignee_id: true" if has_assignee_id else ""
+    recipient_list = (
+        "[parentRow.creator_id, parentRow.assignee_id]"
+        if has_assignee_id else "[parentRow.creator_id]"
+    )
     return f"""
 export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
   await prisma.comment.create({{
     data: {{ message, commentable_id, creator_id: userId }},
   }});
+  // Trigger #4 (notification design 2026-05-11): notify the entity creator
+  // and (if present) assignee; never the commenter themselves.
+  const parentRow = await prisma.{model}.findFirst({{
+    where: {{ commentable_id }},
+    select: {{ id: true, creator_id: true{assignee_select} }},
+  }});
+  if (parentRow) {{
+    const recipients = new Set<string>(
+      {recipient_list}.filter((id): id is string => Boolean(id) && id !== userId)
+    );
+    for (const recipientId of recipients) {{
+      notify(recipientId, 'comment_created', {{
+        title: 'New comment on {parent_pascal}',
+        href: `/{parent}/view/${{parentRow.id}}`,
+        commentSnippet: message.slice(0, 80),
+      }});
+    }}
+  }}
   revalidatePath('/{parent}');
 }}
 
@@ -685,9 +731,9 @@ def build_context(entity: dict, schema: dict) -> dict:
 
     # Comment actions code
     if commentable_rel:
-        comment_actions_code = _build_comment_actions_bridge(parent, model)
+        comment_actions_code = _build_comment_actions_bridge(parent, model, has_assignee_id)
     else:
-        comment_actions_code = _build_comment_actions(comment_children, parent, model)
+        comment_actions_code = _build_comment_actions(comment_children, parent, model, has_assignee_id)
 
     # Snapshot child mappings (for service)
     snapshot_child_mappings = '\n'.join(

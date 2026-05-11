@@ -460,6 +460,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     parent_params_with_types = ctx['parent_params_with_types']
     child_params_for_add    = ctx['child_params_for_add']
     child_params_for_update = ctx['child_params_for_update']
+    has_assignee_id         = ctx.get('has_assignee_id', False)
 
     has_non_comment_ch = bool(non_comment_ch)
 
@@ -621,7 +622,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         f"import {{ normalizeValue,{' normalizeChildRefs,' if has_non_comment_ch else ''}"
         f"{' assertNotStale,' if can_update else ''} type NormalizedSnapshot }} from '@/lib/normalize';"
         + (f"\nimport {{ validateOnAdd, validateOnUpdate }} from './service_validation';" if (can_create or can_update) else '')
-        + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '') +
+        + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '')
+        + (f"\nimport {{ notify }} from '@/lib/_notifier';" if has_assignee_id else '') +
         f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'>;\n\n"
         f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
         f"  const safeSnapshot = (snapshot ?? {{}}) as Record<string, unknown>;\n"

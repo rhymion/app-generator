@@ -7,6 +7,7 @@ import { Link, useRouter, usePathname } from "@/i18n/navigation";
 import { routing } from "@/i18n/routing";
 import Autocomplete from "@mui/material/Autocomplete";
 import TextField from "@mui/material/TextField";
+import NotificationBell from "@/components/_standard/NotificationBell";
 
 // Endonym (the language's own name) for any BCP-47 tag — adding a new locale
 // to routing.locales is the only change needed to expose it in the picker.
@@ -97,6 +98,7 @@ export default function HeaderPage() {
       <div className="flex items-center gap-3 shrink-0">
         {session?.user ? (
           <>
+            <NotificationBell />
             <Link href={`/setting/view/${session.user.id}`} className={`flex items-center gap-2 no-underline`}>
               <span className="hidden sm:block text-sm opacity-75 truncate max-w-40">
                 {session.user.name ?? session.user.email}
