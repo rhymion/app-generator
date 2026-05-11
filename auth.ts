@@ -5,6 +5,11 @@ import bcrypt from "bcryptjs";
 
 export const authOptions = {
   secret: process.env.AUTH_SECRET,
+  // JWT strategy keeps session reads off the DB on every request. Without an
+  // adapter NextAuth defaults to JWT anyway, but pin it explicitly so adding
+  // a future PrismaAdapter doesn't silently flip us to DB-backed sessions
+  // (Phase 2 #9 from performance-plan-session.md).
+  session: { strategy: 'jwt' },
   providers: [
     CredentialsProvider({
       name: "credentials",
