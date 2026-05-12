@@ -913,6 +913,35 @@ The entity must have `start_time` and `end_time` fields.
 | `chart` only | Not generated | Generated |
 | Both `table` and `chart` | Generated (specified columns + Chart button) | Generated |
 
+### Dashboard membership
+
+```yaml
+resource:
+  x-display:
+    table: [...]
+    dashboard: true   # add to the global /dashboard catalog
+```
+
+`x-display.dashboard: true` opts the entity into the global dashboard
+builder. The user-facing dashboard pages live under `/dashboard` (not per
+entity); this flag only marks the entity as a selectable data source.
+
+The generator scans every dashboardable entity for **groupable fields** and
+emits a static catalog at `lib/dashboard/catalog.ts`. A field is groupable
+when it is one of:
+
+- a `many-to-one` FK (each FK value becomes a series, labelled via the
+  relationship's `labelField` on the target);
+- an `integer` with an `enum` (each enum label is a category);
+- a `boolean` (Yes / No).
+
+If an entity has no groupable field (e.g. only free-form strings/numbers),
+it is silently dropped from the catalog — there is nothing meaningful to
+chart. Add a categorical field, or remove the `dashboard: true` flag.
+
+`x-display.dashboard` is independent of `table` and `chart`. Setting it
+does not affect whether the list or chart pages are generated.
+
 ---
 
 ## 11. `x-custom-component` — Custom UI Elements

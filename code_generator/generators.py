@@ -56,6 +56,70 @@ def _int_enum_option(v, i: int) -> str:
 # chart getters / page_chart
 # ---------------------------------------------------------------------------
 
+def build_dashboard_catalog(schema: dict) -> list[dict]:
+    """Catalog of dashboardable entities + their groupable fields.
+
+    An entity is dashboardable when its base definition declares
+    `x-display.dashboard: true`. A field is groupable when it is one of:
+      - a many-to-one FK (each FK value becomes a series, labelled via
+        the relationship's labelField on the target);
+      - an integer with an `enum` (each enum label is a category);
+      - a boolean (Yes / No).
+
+    Entities with no groupable field are dropped — there is nothing
+    meaningful to chart, and exposing them would surface an empty picker.
+    """
+    from helpers.naming import to_title_case
+    catalog = []
+    for entity_name, defn in schema['definitions'].items():
+        if entity_name.endswith('_detail') or entity_name.endswith('_input'):
+            continue
+        xdisplay = defn.get('x-display') or {}
+        if not (isinstance(xdisplay, dict) and xdisplay.get('dashboard')):
+            continue
+        groupable = []
+        for prop_name, prop in (defn.get('properties') or {}).items():
+            if prop_name in ('id', 'created_at', 'updated_at', 'creator_id', 'updater_id'):
+                continue
+            rel = prop.get('x-relationship') or {}
+            if rel.get('type') == 'many-to-one' and rel.get('target'):
+                stem = prop_name[:-3] if prop_name.endswith('_id') else prop_name
+                label_field = rel.get('labelField', 'name')
+                # v1 supports string labelField only; fall back to 'name' for list labels
+                if not isinstance(label_field, str):
+                    label_field = 'name'
+                groupable.append({
+                    'name': prop_name,
+                    'label': to_title_case(stem),
+                    'kind': 'fk',
+                    'fk_target': rel['target'],
+                    'fk_label_field': label_field,
+                })
+                continue
+            actual = _get_actual_type(prop)
+            if actual == 'boolean':
+                groupable.append({
+                    'name': prop_name,
+                    'label': to_title_case(prop_name),
+                    'kind': 'boolean',
+                })
+            elif actual == 'integer' and isinstance(prop.get('enum'), list):
+                groupable.append({
+                    'name': prop_name,
+                    'label': to_title_case(prop_name),
+                    'kind': 'enum',
+                    'enum_values': [str(v) for v in prop['enum']],
+                })
+        if not groupable:
+            continue
+        catalog.append({
+            'name': entity_name,
+            'label': to_title_case(entity_name),
+            'groupable_fields': groupable,
+        })
+    return catalog
+
+
 def chart_context(ctx: dict, schema: dict) -> dict:
     chart_cfg = ctx.get('chart_cfg')
     if not chart_cfg:

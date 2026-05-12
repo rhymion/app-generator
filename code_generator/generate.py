@@ -30,6 +30,7 @@ from generators import (
     column_def_context,
     form_view_context,
     form_upsert_context,
+    build_dashboard_catalog,
 )
 from generators_i18n import update_i18n_and_config
 from validate import validate_schema, validate_prisma_indexes, SchemaValidationError
@@ -235,6 +236,15 @@ def generate(schema_path: str, output_dir: str) -> None:
         # --- page view ---
         if can_view:
             _write(app_dir / 'view' / '[id]' / 'page.tsx', _render(env, 'page_view.tsx.jinja2', ctx))
+
+    # --- Dashboard catalog (lib/dashboard/catalog.ts) ---
+    dashboard_catalog = build_dashboard_catalog(schema)
+    if dashboard_catalog:
+        _write(
+            out / 'lib' / 'dashboard' / 'catalog.ts',
+            _render(env, 'dashboard_catalog.ts.jinja2', {'entities': dashboard_catalog}),
+        )
+        print(f'  Dashboard catalog → lib/dashboard/catalog.ts ({len(dashboard_catalog)} entities)')
 
     # --- docs/generated/index.md + app/[locale]/docs/page.mdx ---
     print('\nGenerating documentation index...')
