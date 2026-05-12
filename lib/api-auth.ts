@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requirePermission, type RichPermissions, type Operation, type ItemContext } from '@/lib/authz';
+import { TtlLruCache } from '@/lib/_ttl_lru';
 
 export class ApiError extends Error {
   constructor(
@@ -12,6 +13,36 @@ export class ApiError extends Error {
   }
 }
 
+// Per-process cache of api_key → userId | null (Phase 2 #4 from
+// performance-plan-session.md). The negative-result cache (`null`) lets
+// repeated bad-key probes short-circuit without hammering the DB; the
+// LRU cap keeps unknown-key probing bounded. Rotations invalidate via
+// `invalidateApiKeyCache()` from settings/account mutations.
+//
+// Gated to production: `cy:test:api` runs `cy.task('db:reset')` between
+// tests, which wipes user_account rows but cannot reach into the dev
+// server's process to clear this cache. Without the gate, the cached
+// userId would survive the reset and the next write would fail with
+// `<entity>_updater_id_fkey` violations.
+const API_KEY_TTL_MS = 5 * 60 * 1000;
+const API_KEY_MAX_ENTRIES = 1000;
+const apiKeyCacheEnabled = process.env.NODE_ENV === 'production';
+const apiKeyCache = new TtlLruCache<string, string | null>(API_KEY_MAX_ENTRIES, API_KEY_TTL_MS);
+
+export function invalidateApiKeyCache(apiKey: string | null | undefined): void {
+  if (apiKey) apiKeyCache.delete(apiKey);
+}
+
+/**
+ * Drop every entry in the api-key cache. Used by the cypress
+ * `/api/test-utils/reset-caches` endpoint so production-build runs of
+ * `cy.task('db:reset')` don't leave the cache pointing at deleted
+ * user_account rows.
+ */
+export function clearApiKeyCache(): void {
+  apiKeyCache.clear();
+}
+
 export async function authenticateApiKey(request: NextRequest): Promise<{ userId: string }> {
   const apiKey =
     request.headers.get('X-API-Key') ||
@@ -21,10 +52,22 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
     throw new ApiError(401, 'Missing API key. Provide X-API-Key header or Authorization: Bearer <key>.');
   }
 
+  if (apiKeyCacheEnabled) {
+    const cached = apiKeyCache.get(apiKey);
+    if (cached !== undefined) {
+      if (cached === null) throw new ApiError(401, 'Invalid API key.');
+      return { userId: cached };
+    }
+  }
+
   const user = await prisma.user_account.findFirst({
     where: { api_key: apiKey },
     select: { id: true },
   });
+
+  if (apiKeyCacheEnabled) {
+    apiKeyCache.set(apiKey, user?.id ?? null);
+  }
 
   if (!user) {
     throw new ApiError(401, 'Invalid API key.');
