@@ -203,3 +203,48 @@ model procedure {
   followed_by  procedure[] @relation("BeforeAfter")
 }
 ```
+
+---
+
+## 7. Polymorphic bridge models
+
+Three reusable bridge models let multiple owner entities share the same child storage instead of each owner declaring its own per-type child model:
+
+| Bridge | Children | Owners declare |
+|---|---|---|
+| `commentable` | `comment` | `commentable_id String @unique` |
+| `approvable` | `approval_request` | `approvable_id String @unique` |
+| `attachable` | `attachment` | `attachable_id String @unique` |
+
+Owner-side pattern (one-to-one with the bridge, auto-created during owner upsert):
+
+```prisma
+model resource {
+  // ...
+  attachable_id String     @unique
+  attachable    attachable @relation(fields: [attachable_id], references: [id])
+}
+
+model attachable {
+  id          String       @id @default(cuid())
+  attachments attachment[]
+  resource    resource?
+  product     product?
+}
+```
+
+JSON-schema side (owner declares the FK with `one-to-one_bridge`):
+
+```yaml
+attachable_id:
+  type: string
+  pattern: "^c[a-z0-9]{24,}$"
+  x-relationship:
+    type: one-to-one_bridge
+    target: attachable
+    labelField: id
+```
+
+`attachment` distinguishes media types via an integer enum (`image=0`, `file=1`, `video=2`, `audio=3`) instead of separate per-type models. Type-specific metadata (image dimensions, video duration, etc.) is not stored today; add side-tables keyed by `attachment_id` if such metadata becomes necessary.
+
+The attachment UI is rendered by the hand-written `components/_standard/AttachmentSection.tsx`, wired through `x-custom-component: { name: AttachmentSection, target: [view, edit] }` on the owner's detail entity.
