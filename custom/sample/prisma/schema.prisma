@@ -312,8 +312,8 @@ model resource {
   description  String?
   organization_id String
   organization organization @relation(fields: [organization_id], references: [id])
-  resource_attachments  resource_attachment[]
-  resource_images  resource_image[]
+  attachable_id String @unique
+  attachable    attachable @relation(fields: [attachable_id], references: [id])
   bookings     booking[]
   created_at DateTime @default(now()) @db.Timestamptz(0)
   updated_at DateTime @updatedAt @db.Timestamptz(0)
@@ -323,27 +323,6 @@ model resource {
   updater    user_account @relation("ResourceUpdater", fields: [updater_id], references: [id])
   @@index([creator_id])
   @@index([organization_id])
-}
-
-model resource_attachment {
-  id           String @id @default(cuid())
-  order        Int @default(0)
-  name         String
-  path         String
-  resource_id  String
-  resource     resource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
-  created_at DateTime @default(now()) @db.Timestamptz(0)
-  updated_at DateTime @updatedAt @db.Timestamptz(0)
-}
-
-model resource_image {
-  id           String @id @default(cuid())
-  name         String
-  path         String
-  resource_id  String
-  resource     resource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
-  created_at DateTime @default(now()) @db.Timestamptz(0)
-  updated_at DateTime @updatedAt @db.Timestamptz(0)
 }
 
 model booking {
@@ -400,7 +379,8 @@ model product {
   name        String
   price       Int
   barcode     String?
-  images      product_image[]
+  attachable_id String @unique
+  attachable    attachable @relation(fields: [attachable_id], references: [id])
   inventories  inventory[]
   purchase_per_items purchase_per_item[]
   created_at  DateTime @default(now()) @db.Timestamptz(0)
@@ -410,16 +390,6 @@ model product {
   updater_id  String
   updater     user_account @relation("ProductUpdater", fields: [updater_id], references: [id])
   @@index([creator_id])
-}
-
-model product_image {
-  id           String @id @default(cuid())
-  name         String
-  path         String
-  product_id   String
-  product      product @relation(fields: [product_id], references: [id], onDelete: Cascade)
-  created_at  DateTime @default(now()) @db.Timestamptz(0)
-  updated_at  DateTime @updatedAt @db.Timestamptz(0)
 }
 
 model inventory {
@@ -537,4 +507,23 @@ model approval_history {
   creator_id       String
   creator          user_account @relation("ApprovalHistoryCreator", fields: [creator_id], references: [id])
   @@index([creator_id])
+}
+
+model attachable {
+  id          String       @id @default(cuid())
+  attachments attachment[]
+  resource    resource?
+  product     product?
+}
+
+model attachment {
+  id            String     @id @default(cuid())
+  type          Int        @default(0)
+  order         Int        @default(0)
+  name          String
+  path          String
+  attachable_id String
+  attachable    attachable @relation(fields: [attachable_id], references: [id], onDelete: Cascade)
+  created_at    DateTime   @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime   @updatedAt @db.Timestamptz(0)
 }
