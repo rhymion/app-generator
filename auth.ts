@@ -62,6 +62,12 @@ function buildProviders(): Provider[] {
       GoogleProvider({
         clientId: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        // Explicit even though false is the NextAuth default — the contract
+        // is "an OAuth login NEVER auto-links to an existing user by email
+        // unless our own signIn callback decides to". With JWT-only sessions
+        // the flag is only consulted by PrismaAdapter, but setting it
+        // explicitly keeps the intent visible if we migrate to DB sessions.
+        allowDangerousEmailAccountLinking: false,
         authorization: {
           params: { prompt: "select_account" },
         },
@@ -97,6 +103,26 @@ export const authOptions = {
         if (verified === false) return false;
       }
 
+      // Optional per-deployment domain allow-list. Empty list = allow all.
+      // Match is case-insensitive on the `@domain` half of the email.
+      const allowed = siteConfig.auth?.allowedDomains ?? [];
+      if (allowed.length > 0) {
+        const domain = email.split("@")[1]?.toLowerCase();
+        const normalised = allowed.map((d) => d.toLowerCase());
+        if (!domain || !normalised.includes(domain)) {
+          console.info(
+            "[auth:signIn:reject]",
+            JSON.stringify({
+              at: new Date().toISOString(),
+              reason: "domain_not_allowed",
+              provider: account.provider,
+              email,
+            }),
+          );
+          return false;
+        }
+      }
+
       const existing = await prisma.user_account.findUnique({ where: { email } });
       if (existing) {
         user.id = existing.id;
@@ -118,6 +144,19 @@ export const authOptions = {
         },
       });
       user.id = newId;
+      // Audit event: new SSO user was provisioned. We log it here rather than
+      // from `events.createUser` because NextAuth only fires that event when
+      // an Adapter creates the User row; on JWT-only sessions, this callback
+      // is the creation site.
+      console.info(
+        "[auth:provision]",
+        JSON.stringify({
+          at: new Date().toISOString(),
+          provider: account.provider,
+          userId: newId,
+          email,
+        }),
+      );
       return true;
     },
     async jwt({ token, user }) {
@@ -125,6 +164,36 @@ export const authOptions = {
     },
     async session({ session, token }) {
       return { ...session, user: { ...session.user, id: token.id } };
+    },
+  },
+  events: {
+    // Minimal structured audit logs for auth events. A log aggregator (Vercel
+    // logs, Cloudwatch, Datadog, …) can collect these by prefix; replace with
+    // a proper audit-log table when role/permission change auditing lands.
+    async signIn({ user, account, isNewUser }) {
+      console.info(
+        "[auth:signIn]",
+        JSON.stringify({
+          at: new Date().toISOString(),
+          provider: account?.provider ?? "unknown",
+          userId: user.id,
+          email: user.email,
+          // NB: with JWT-only sessions NextAuth doesn't know we created the
+          // local row, so `isNewUser` is always undefined here. The matching
+          // creation event is emitted as `[auth:provision]` from signIn().
+          isNewUser: isNewUser ?? null,
+        }),
+      );
+    },
+    async signOut(message) {
+      const token = "token" in message ? message.token : null;
+      console.info(
+        "[auth:signOut]",
+        JSON.stringify({
+          at: new Date().toISOString(),
+          userId: (token as { id?: string } | null)?.id ?? null,
+        }),
+      );
     },
   },
 } satisfies NextAuthOptions;

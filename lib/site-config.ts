@@ -36,14 +36,40 @@ export const siteConfig = {
   /**
    * Authentication providers exposed on the login page. See AuthProviderId
    * above for the runtime gating contract.
+   *
+   * `allowedDomains` (optional) restricts OAuth sign-in to email addresses
+   * whose `@domain` is on the list (case-insensitive). Empty array = allow
+   * all. The check only runs for OAuth providers — credentials accounts are
+   * created by an admin path, not self-service, so a domain filter there
+   * would be defence-in-depth at best.
    */
   auth: {
     providers: ['credentials', 'google'] as AuthProviderId[],
+    allowedDomains: [] as string[],
   },
 
   /** Links listed in the sidebar navigation */
   navLinks: [
     { label: "Home", href: "/", external: false },
+      { label: "Db Table", href: "/db_table" },
+    { label: "Xxxxx Xxxxx", href: "/xxxxx_xxxxx" },
+    { label: "Parent1", href: "/parent1" },
+    { label: "Parent Only", href: "/parent_only" },
+    { label: "User Account", href: "/user_account" },
+    { label: "Role", href: "/role" },
+    { label: "Organization", href: "/organization" },
+    { label: "Permission", href: "/permission" },
+    { label: "Procedure", href: "/procedure" },
+    { label: "Resource", href: "/resource" },
+    { label: "Booking", href: "/booking" },
+    { label: "Shift Template", href: "/shift_template" },
+    { label: "Shift", href: "/shift" },
+    { label: "Product", href: "/product" },
+    { label: "Inventory", href: "/inventory" },
+    { label: "Purchase Order", href: "/purchase_order" },
+    { label: "Leave Request", href: "/leave_request" },
+    { label: "Approval Flow", href: "/approval_flow" },
+    { label: "Dashboard", href: "/dashboard" },
   ] satisfies NavLink[],
 };
 
