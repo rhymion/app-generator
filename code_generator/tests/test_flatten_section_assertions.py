@@ -21,6 +21,16 @@ Edit-flatten tests (9.x.x) also navigate back to the edit page after Save and
 assert that the inside-accordion field values were persisted correctly:
   9.x.1 / 9.x.2: fields hold the create_value (`assert_cmds`).
   9.x.3:        fields render empty after removal (`empty_assert_cmds`).
+
+Schema-independence
+-------------------
+Tests that exercise generator behaviour build their own inline fixture
+schema via `_fixture_schema()`. They must not read the project's
+`code_generator/json_schema.yaml` or any file under `lib/` / `cypress/`,
+because those depend on whichever entities currently live in the repo and
+on whether `demo:generate` has been run. The generator-source files
+(`test_spec.cy.ts.jinja2`, `cypress/support/commands.ts`) are still read
+directly — those are the artefacts under test.
 """
 import re
 from pathlib import Path
@@ -32,6 +42,206 @@ COMMANDS = REPO_ROOT / 'cypress' / 'support' / 'commands.ts'
 
 def _read(path: Path) -> str:
     return path.read_text(encoding='utf-8')
+
+
+# ---------------------------------------------------------------------------
+# Inline fixture schema — enough to exercise:
+#   * `_compute_flatten_test_rels('checkup', ...)` with three flatten OTOs
+#     (pre_check, checkup_judgment, lifestyle), one of which (lifestyle)
+#     carries an external required FK to `patient`.
+#   * `find_fk_derivation_path('checkup', …, 'patient', …)` — one-hop via
+#     `checkup.patient_rel_id → patient_rel.patient_id`.
+#   * `build_context` + `service_context` for `checkup_detail`, so the
+#     resulting `flatten_nested_creates` / `flatten_nested_updates` strings
+#     contain the expected `tx.lifestyle.create` / `tx.patient_rel.findUnique`
+#     / `tx.lifestyle.upsert` snippets.
+#
+# The fixture is intentionally local: no read of json_schema.yaml or of any
+# generated file under `lib/`. That keeps these tests robust to schema
+# changes in the host project (proj_a / proj_b can each evolve independently).
+# ---------------------------------------------------------------------------
+
+def _entity(parent: str, definition_key: str | None = None) -> dict:
+    """Minimal entity dict matching what `extract_entities` would emit."""
+    return {
+        'parent':          parent,
+        'model':           parent,
+        'definition_key':  definition_key or f'{parent}_detail',
+        'children':        [],
+        'generate_config': {
+            'list':   True,
+            'view':   True,
+            'new':    True,
+            'edit':   True,
+            'delete': True,
+            'api':    True,
+            'test':   True,
+            'fields': None,
+        },
+    }
+
+
+def _fixture_schema() -> dict:
+    """Minimal schema covering checkup + three flatten OTOs + the patient_rel→
+    patient one-hop derivation chain.
+
+    Mirrors the shape historically tested against the real proj_a schema, but
+    contains only the entities and properties the assertions below actually
+    touch. Add new top-level definitions here when adding tests that need
+    extra surface — never reach into `code_generator/json_schema.yaml`.
+    """
+    return {
+        'definitions': {
+            'patient': {
+                'type': 'object',
+                'required': ['id', 'name'],
+                'properties': {
+                    'id':   {'type': 'string'},
+                    'name': {'type': 'string'},
+                },
+                'x-display': {'table': [{'name': {'primary': True}}]},
+            },
+            'patient_detail': {'allOf': [{'$ref': '#/definitions/patient'}]},
+
+            'patient_rel': {
+                'type': 'object',
+                'required': ['id', 'patient_no', 'patient_id'],
+                'properties': {
+                    'id':         {'type': 'string'},
+                    'patient_no': {'type': 'string'},
+                    'patient_id': {
+                        'type': 'string',
+                        'x-relationship': {
+                            'type': 'many-to-one',
+                            'target': 'patient',
+                            'labelField': 'name',
+                        },
+                    },
+                },
+                'x-display': {'table': [{'patient_no': {'primary': True}}]},
+            },
+            'patient_rel_detail': {'allOf': [{'$ref': '#/definitions/patient_rel'}]},
+
+            'checkup': {
+                'type': 'object',
+                'required': ['id', 'patient_rel_id', 'checkup_date'],
+                'properties': {
+                    'id':            {'type': 'string'},
+                    'patient_rel_id': {
+                        'type': 'string',
+                        'x-relationship': {
+                            'type': 'many-to-one',
+                            'target': 'patient_rel',
+                            'labelField': 'patient_rel.patient.name',
+                        },
+                    },
+                    'checkup_date':  {'type': 'string', 'format': 'date'},
+                },
+                'x-display': {'table': [{'patient_rel': {'primary': True}}]},
+            },
+            'checkup_detail': {
+                'allOf': [
+                    {'$ref': '#/definitions/checkup'},
+                    {
+                        'type': 'object',
+                        'properties': {
+                            'patient_rel':      {'$ref': '#/definitions/patient_rel'},
+                            'pre_check':        {'$ref': '#/definitions/pre_check',
+                                                 'x-outputType': 'flatten'},
+                            'checkup_judgment': {'$ref': '#/definitions/checkup_judgment',
+                                                 'x-outputType': 'flatten'},
+                            'lifestyle':        {'$ref': '#/definitions/lifestyle',
+                                                 'x-outputType': 'flatten'},
+                        },
+                    },
+                ],
+            },
+
+            # Flatten OTO #1 — required parent FK, no external required FK.
+            'pre_check': {
+                'type': 'object',
+                'required': ['id', 'checkup_id', 'ams_score'],
+                'properties': {
+                    'id':         {'type': 'string'},
+                    'checkup_id': {
+                        'type': 'string',
+                        'x-relationship': {
+                            'type': 'one-to-one', 'target': 'checkup',
+                            'labelField': 'checkup_date',
+                        },
+                    },
+                    'ams_score':  {'type': 'integer', 'minimum': 0, 'maximum': 50},
+                },
+                'x-display': {'table': [{'checkup': {'primary': True}}]},
+            },
+            'pre_check_detail': {'allOf': [{'$ref': '#/definitions/pre_check'}]},
+
+            # Flatten OTO #2 — enum + boolean fields, used to verify
+            # `empty_assert_cmds` emits checkField('', '') and setCheckbox(false).
+            'checkup_judgment': {
+                'type': 'object',
+                'required': ['id', 'checkup_id', 'total_testosterone', 'is_followup'],
+                'properties': {
+                    'id':         {'type': 'string'},
+                    'checkup_id': {
+                        'type': 'string',
+                        'x-relationship': {
+                            'type': 'one-to-one', 'target': 'checkup',
+                            'labelField': 'checkup_date',
+                        },
+                    },
+                    'total_testosterone': {
+                        'type': 'integer', 'minimum': 0, 'maximum': 2,
+                        'enum': ['Low', 'Normal', 'High'],
+                    },
+                    'is_followup': {'type': 'boolean'},
+                },
+                'x-display': {'table': [{'checkup': {'primary': True}}]},
+            },
+            'checkup_judgment_detail': {
+                'allOf': [{'$ref': '#/definitions/checkup_judgment'}],
+            },
+
+            # Flatten OTO #3 — required external FK to `patient` that the form
+            # does not collect. The service generator must derive patient_id via
+            # the parent's `patient_rel_id → patient_rel.patient_id` chain.
+            'lifestyle': {
+                'type': 'object',
+                'required': ['id', 'checkup_id', 'patient_id', 'sleep_hours'],
+                'properties': {
+                    'id':         {'type': 'string'},
+                    'checkup_id': {
+                        'type': ['string', 'null'],
+                        'x-relationship': {
+                            'type': 'one-to-one', 'target': 'checkup',
+                            'labelField': 'checkup_date',
+                        },
+                    },
+                    'patient_id': {
+                        'type': 'string',
+                        'x-relationship': {
+                            'type': 'many-to-one', 'target': 'patient',
+                            'labelField': 'name',
+                        },
+                    },
+                    'sleep_hours': {'type': 'integer', 'minimum': 0, 'maximum': 24},
+                },
+                'x-display': {'table': [{'patient': {'primary': True}}]},
+            },
+            'lifestyle_detail': {
+                'allOf': [
+                    {'$ref': '#/definitions/lifestyle'},
+                    {
+                        'type': 'object',
+                        'properties': {
+                            'checkup': {'$ref': '#/definitions/checkup'},
+                            'patient': {'$ref': '#/definitions/patient'},
+                        },
+                    },
+                ],
+            },
+        },
+    }
 
 
 def _block(template_src: str, it_marker: str) -> str:
@@ -213,16 +423,15 @@ def test_10xx_partial_fill_wrapped():
 # ---------------------------------------------------------------------------
 
 def test_compute_flatten_test_rels_populates_empty_assert_cmds_for_checkup():
-    """Real-schema check: every flatten rel of `checkup` must carry `empty_assert_cmds`."""
-    import sys
-    sys.path.insert(0, str(REPO_ROOT / 'code_generator'))
-    import yaml
+    """Every flatten rel of `checkup` must carry `empty_assert_cmds`.
+
+    Uses the inline fixture so the assertion does not depend on the host
+    project's `json_schema.yaml` carrying checkup/lifestyle/pre_check today.
+    """
     from generators_test import _compute_flatten_test_rels  # noqa: WPS433
 
-    schema_path = REPO_ROOT / 'code_generator' / 'json_schema.yaml'
-    schema = yaml.safe_load(schema_path.read_text(encoding='utf-8'))
-    rels = _compute_flatten_test_rels('checkup', 'Checkup', 'checkup_detail', schema)
-    assert rels, "checkup is expected to have flatten rels (pre_check / checkup_judgment / lifestyle)"
+    rels = _compute_flatten_test_rels('checkup', 'Checkup', 'checkup_detail', _fixture_schema())
+    assert rels, "fixture checkup must have flatten rels (pre_check / checkup_judgment / lifestyle)"
     for r in rels:
         assert 'empty_assert_cmds' in r, f"rel {r.get('prop_name')} missing empty_assert_cmds"
         assert isinstance(r['empty_assert_cmds'], list), "empty_assert_cmds must be a list"
@@ -261,15 +470,14 @@ def test_compute_flatten_test_rels_marks_lifestyle_as_inline_creatable():
     can_create_inline = not _has_external_req_fk, which excluded lifestyle
     (it has a required external `patient_id`). The service generator now
     derives `patient_id` from `checkup.patient_rel.patient_id`, so the test
-    suite should generate inline-create tests for lifestyle too."""
-    import sys
-    sys.path.insert(0, str(REPO_ROOT / 'code_generator'))
-    import yaml
+    suite should generate inline-create tests for lifestyle too.
+
+    Uses the inline fixture so the assertion stays valid regardless of what
+    the host project's `json_schema.yaml` currently defines.
+    """
     from generators_test import _compute_flatten_test_rels  # noqa: WPS433
 
-    schema_path = REPO_ROOT / 'code_generator' / 'json_schema.yaml'
-    schema = yaml.safe_load(schema_path.read_text(encoding='utf-8'))
-    rels = _compute_flatten_test_rels('checkup', 'Checkup', 'checkup_detail', schema)
+    rels = _compute_flatten_test_rels('checkup', 'Checkup', 'checkup_detail', _fixture_schema())
     by_prop = {r['prop_name']: r for r in rels}
     assert 'lifestyle' in by_prop, "lifestyle must be a flatten rel of checkup"
     assert by_prop['lifestyle']['can_create_inline'] is True, (
@@ -287,14 +495,13 @@ def test_compute_flatten_test_rels_marks_lifestyle_as_inline_creatable():
 # ---------------------------------------------------------------------------
 
 def test_find_fk_derivation_path_resolves_one_hop():
-    """checkup → patient_rel → patient is a one-hop derivation path."""
-    import sys
-    sys.path.insert(0, str(REPO_ROOT / 'code_generator'))
-    import yaml
+    """checkup → patient_rel → patient is a one-hop derivation path.
+
+    Uses the inline fixture; the host project's schema is not consulted.
+    """
     from helpers.schema_helpers import find_fk_derivation_path  # noqa: WPS433
 
-    schema_path = REPO_ROOT / 'code_generator' / 'json_schema.yaml'
-    schema = yaml.safe_load(schema_path.read_text(encoding='utf-8'))
+    schema = _fixture_schema()
     parent_def = schema['definitions']['checkup']
     path = find_fk_derivation_path('checkup', parent_def, 'patient', schema)
     assert path is not None, "checkup must reach patient via patient_rel"
@@ -328,24 +535,43 @@ def test_find_fk_derivation_path_returns_none_when_unreachable():
 
 
 def test_generated_service_creates_lifestyle_inline_with_derived_patient_id():
-    """Real-codegen check: lib/checkup/service.ts must contain the inline
-    lifestyle.create with patient_id derived from patient_rel.findUnique."""
-    service_src = (REPO_ROOT / 'lib' / 'checkup' / 'service.ts').read_text(encoding='utf-8')
-    # The addCheckup branch must inline-create lifestyle.
-    assert 'tx.lifestyle.create' in service_src, (
-        "addCheckup must inline-create lifestyle now that the test gen "
-        "expects 8.3.1 ('create checkup with Lifestyle section filled') to work."
+    """The service generator must inline-create lifestyle inside addCheckup
+    with patient_id derived via a `patient_rel.findUnique`, and must upsert
+    lifestyle inside updateCheckup so a freshly-added section is persisted.
+
+    Instead of reading `lib/checkup/service.ts` (which only exists after
+    `npm run demo:generate` and depends on the host project's schema), we
+    drive `build_context` + `service_context` against the inline fixture
+    and inspect the rendered snippets the template would inline. The two
+    keys `flatten_nested_creates` (addCheckup) and `flatten_nested_updates`
+    (updateCheckup) hold exactly the lines that get pasted into the service.
+    """
+    from build_context import build_context  # noqa: WPS433
+    from generators import service_context   # noqa: WPS433
+
+    schema = _fixture_schema()
+    ctx = build_context(_entity('checkup'), schema)
+    svc = service_context(ctx, schema)
+
+    creates = svc['flatten_nested_creates']
+    updates = svc['flatten_nested_updates']
+
+    # addCheckup branch — must inline-create lifestyle with the derived FK,
+    # which means a `tx.patient_rel.findUnique` precedes the create.
+    assert 'tx.lifestyle.create' in creates, (
+        "addCheckup must inline-create lifestyle so 8.x.1 "
+        "(create checkup with Lifestyle section filled) works."
     )
-    # And it must derive patient_id from patient_rel.
-    assert 'tx.patient_rel.findUnique' in service_src, (
-        "Service must derive lifestyle.patient_id from patient_rel "
-        "(the form does not collect patient_id for the inline lifestyle)."
+    assert 'tx.patient_rel.findUnique' in creates, (
+        "Service must derive lifestyle.patient_id from patient_rel — the form "
+        "does not collect patient_id for the inline lifestyle."
     )
-    # The legacy update-only branch (`updateMany` without create-on-miss) must
-    # not be present alone for lifestyle on the update path.
-    assert 'tx.lifestyle.upsert' in service_src, (
+
+    # updateCheckup branch — must upsert lifestyle (not updateMany-only), so a
+    # freshly-added flatten section gets created on save (9.x.1).
+    assert 'tx.lifestyle.upsert' in updates, (
         "updateCheckup must upsert lifestyle so a freshly-added section "
-        "(9.3.1: add Lifestyle to checkup without one) gets persisted."
+        "(9.x.1: add Lifestyle to checkup without one) gets persisted."
     )
 
 
