@@ -401,10 +401,9 @@ definitions:
       - id
       - name
       - email
-      - password
     x-display:
       table:
-        - name: 
+        - name:
             primary: true
             width: 150
     properties:
@@ -416,8 +415,13 @@ definitions:
         minLength: 1
       email:
         type: string
+      # Nullable so SSO-provisioned users (Google, etc.) can exist without a
+      # bcrypt hash. Credentials sign-in still requires a non-null password —
+      # auth.ts authorize() rejects accounts with password === null.
       password:
-        type: string
+        type:
+          - string
+          - "null"
         x-custom-component:
           target:
             - upsert
@@ -860,6 +864,14 @@ definitions:
       - name
       - organization_id
       - attachable_id
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 200
+        - organization:
+            width: 200
+      dashboard: true
     properties:
       id:
         type: string
@@ -935,6 +947,7 @@ definitions:
       chart:
         span: week
         row_by: resource
+      dashboard: true
     properties:
       id:
         type: string
@@ -1127,6 +1140,7 @@ definitions:
             width: 200
         - price:
             width: 100
+      dashboard: true
     properties:
       id:
         type: string
@@ -1341,6 +1355,7 @@ definitions:
             width: 150
         - end_date:
             width: 150
+      dashboard: true
     properties:
       id:
         type: string
@@ -1667,3 +1682,95 @@ definitions:
       attachable_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
+
+  dashboard:
+    type: object
+    required:
+      - id
+      - name
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 200
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+
+  dashboard_widget:
+    type: object
+    required:
+      - id
+      - dashboard_id
+      - name
+      - entity_name
+      - chart_type
+      - group_by_field
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      dashboard_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: dashboard
+          labelField: name
+      name:
+        type: string
+        minLength: 1
+      entity_name:
+        type: string
+        minLength: 1
+      chart_type:
+        type: integer
+        minimum: 0
+        maximum: 1
+        enum:
+          - Pie
+          - Bar
+      group_by_field:
+        type: string
+        minLength: 1
+      filter_field:
+        type:
+          - string
+          - "null"
+      filter_value:
+        type:
+          - string
+          - "null"
+      order:
+        type: integer
+        default: 0
+
+  dashboard_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-custom-component:
+      name: DashboardView
+      path: "@/components/_standard/DashboardView"
+      target:
+        - view
+    allOf:
+      - $ref: "#/definitions/dashboard"
+      - type: object
+        required:
+          - widgets
+        properties:
+          widgets:
+            type: array
+            items:
+              $ref: "#/definitions/dashboard_widget"

@@ -174,7 +174,7 @@ model user_account {
   id       String  @id @default(cuid())
   name     String
   email    String  @unique
-  password String
+  password String?
   api_key  String?
   avatar   String?
   created_at DateTime @default(now()) @db.Timestamptz(0)
@@ -229,6 +229,8 @@ model user_account {
   updated_approval_flows  approval_flow[] @relation("ApprovalFlowUpdater")
   created_approval_historys  approval_history[] @relation("ApprovalHistoryCreator")
   created_approvables     approvable[]    @relation("ApprovableCreator")
+  created_dashboards  dashboard[] @relation("DashboardCreator")
+  updated_dashboards  dashboard[] @relation("DashboardUpdater")
   @@index([api_key])
   @@index([creator_id])
 }
@@ -526,4 +528,32 @@ model attachment {
   attachable    attachable @relation(fields: [attachable_id], references: [id], onDelete: Cascade)
   created_at    DateTime   @default(now()) @db.Timestamptz(0)
   updated_at    DateTime   @updatedAt @db.Timestamptz(0)
+}
+
+model dashboard {
+  id         String             @id @default(cuid())
+  name       String
+  widgets    dashboard_widget[]
+  created_at DateTime           @default(now()) @db.Timestamptz(0)
+  updated_at DateTime           @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user_account       @relation("DashboardCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user_account       @relation("DashboardUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+}
+
+model dashboard_widget {
+  id             String    @id @default(cuid())
+  dashboard_id   String
+  dashboard      dashboard @relation(fields: [dashboard_id], references: [id], onDelete: Cascade)
+  name           String
+  entity_name    String
+  chart_type     Int       @default(0)
+  group_by_field String
+  filter_field   String?
+  filter_value   String?
+  order          Int       @default(0)
+  created_at     DateTime  @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime  @updatedAt @db.Timestamptz(0)
 }
