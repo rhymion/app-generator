@@ -8,6 +8,10 @@ export async function verifyAndHashPassword(currentPassword: string, newPassword
   const userId = await getSessionUserIdOrThrow();
   const user = await prisma.user_account.findUnique({ where: { id: userId }, select: { password: true } });
   if (!user) throw new Error('User not found');
+  // SSO-provisioned accounts have password === null. They can't "change"
+  // a password they never had — surface the same error message as a wrong
+  // password so we don't leak the account's auth mode.
+  if (!user.password) throw new Error('Current password is incorrect');
 
   const isCorrect = await bcrypt.compare(currentPassword, user.password);
   if (!isCorrect) throw new Error('Current password is incorrect');

@@ -7,15 +7,21 @@ import { Link } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Divider from "@mui/material/Divider";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import Paper from "@mui/material/Paper";
 import Alert from "@mui/material/Alert";
+import { siteConfig } from "@/lib/site-config";
 
 export default function LoginPage() {
   const router = useRouter();
   const t = useTranslations("Auth");
   const [error, setError] = useState<string | null>(null);
+
+  const enabledProviders = siteConfig.auth?.providers ?? ["credentials"];
+  const showCredentials = enabledProviders.includes("credentials");
+  const showGoogle = enabledProviders.includes("google");
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     try {
@@ -38,42 +44,76 @@ export default function LoginPage() {
     }
   }
 
+  function handleGoogle() {
+    // Let NextAuth handle the redirect — on success it lands on `/` per the
+    // callbackUrl, on failure it lands back here with ?error=...
+    void signIn("google", { callbackUrl: "/" });
+  }
+
   return (
     <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
       <Paper elevation={3} sx={{ p: 4, width: "100%", maxWidth: 400 }}>
         <Typography variant="h5" fontWeight="bold" textAlign="center" mb={3}>
           {t("signInTitle")}
         </Typography>
-        <Box component="form" onSubmit={handleSubmit} display="flex" flexDirection="column" gap={2}>
-          <TextField
-            id="email"
-            name="email"
-            type="email"
-            label={t("emailPlaceholder")}
-            required
-            fullWidth
-          />
-          <TextField
-            id="password"
-            name="password"
-            type="password"
-            label={t("passwordPlaceholder")}
-            slotProps={{
-              htmlInput: {
-                "data-testid": "password",
-              },
-            }}
-            required
-            fullWidth
-          />
-          {error && <Alert severity="error">{error}</Alert>}
-          <Button type="submit" variant="contained" fullWidth>
-            {t("signInButton")}
-          </Button>
-        </Box>
-        <Typography textAlign="center" mt={2} variant="body2">
-          <Link href="/register">{t("noAccount")}</Link>
-        </Typography>
+
+        {showGoogle && (
+          <Box display="flex" flexDirection="column" gap={2} mb={showCredentials ? 2 : 0}>
+            <Button
+              type="button"
+              variant="outlined"
+              fullWidth
+              onClick={handleGoogle}
+              aria-label={t("signInWithGoogle")}
+            >
+              {t("signInWithGoogle")}
+            </Button>
+          </Box>
+        )}
+
+        {showGoogle && showCredentials && (
+          <Divider sx={{ my: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              {t("orDivider")}
+            </Typography>
+          </Divider>
+        )}
+
+        {showCredentials && (
+          <Box component="form" onSubmit={handleSubmit} display="flex" flexDirection="column" gap={2}>
+            <TextField
+              id="email"
+              name="email"
+              type="email"
+              label={t("emailPlaceholder")}
+              required
+              fullWidth
+            />
+            <TextField
+              id="password"
+              name="password"
+              type="password"
+              label={t("passwordPlaceholder")}
+              slotProps={{
+                htmlInput: {
+                  "data-testid": "password",
+                },
+              }}
+              required
+              fullWidth
+            />
+            {error && <Alert severity="error">{error}</Alert>}
+            <Button type="submit" variant="contained" fullWidth>
+              {t("signInButton")}
+            </Button>
+          </Box>
+        )}
+
+        {showCredentials && (
+          <Typography textAlign="center" mt={2} variant="body2">
+            <Link href="/register">{t("noAccount")}</Link>
+          </Typography>
+        )}
       </Paper>
     </Box>
   );
