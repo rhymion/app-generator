@@ -251,6 +251,7 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False) -> None
         if can_test:
             _delete(out / 'cypress' / 'support' / parent / 'helper.ts')
             _delete(out / 'cypress' / 'e2e' / f'{parent}.cy.ts')
+            _delete(out / 'cypress' / 'e2e' / 'mobile' / f'{parent}.cy.ts')
             if can_api:
                 _delete(out / 'cypress' / 'e2e' / 'api' / f'{parent}.cy.ts')
 

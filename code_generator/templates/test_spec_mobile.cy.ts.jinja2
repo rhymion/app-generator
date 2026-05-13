@@ -1,0 +1,121 @@
+// AUTO-GENERATED - DO NOT EDIT
+//
+// Mobile-viewport spec ({{ title }}). The list page renders a different
+// component below 768px: ResponsiveListClient swaps in CardListClient (cards
+// with per-row Checkboxes and CardActions) instead of the desktop DataGrid.
+// The selectors and interactions below target that mobile DOM directly —
+// `assertDataGridEmpty` / `getDataGridRowCount` / `selectDataGridRows` don't
+// apply here because there is no DataGrid in the tree at this viewport.
+//
+// Forms (`/new`, `/edit`) keep the same FormUpsert at every viewport, so this
+// spec exercises the form via the desktop fill helpers — what's different at
+// mobile is the *list* view and how the user gets in and out of it.
+import { TEST_CREDENTIALS } from '../../support/test-credentials';
+
+const MOBILE = { width: 375, height: 667 }; // iPhone SE
+
+describe('Testing {{ title }} pages and their behavior [mobile]', () => {
+  beforeEach(() => {
+    cy.viewport(MOBILE.width, MOBILE.height);
+    cy.task('db:reset');
+    cy.task('db:seed');
+    Cypress.session.clearAllSavedSessions();
+    cy.clearCookies();
+    cy.clearLocalStorage();
+    cy.visit('/en/');
+    cy.window().then((win) => { win.sessionStorage.clear(); });
+    cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+  });
+{% if can_list %}
+
+  describe('Card list', () => {
+    it('1.1 shows the empty state when there are no items', () => {
+      cy.visit('/en/{{ parent }}');
+      cy.contains('No items found.').should('be.visible');
+      // Sanity: no row Checkboxes when the list is empty.
+      cy.get('input[type="checkbox"][aria-label^="Select "]').should('not.exist');
+    });
+
+    it('1.2 renders one card per item with the primary value as title', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.visit('/en/{{ parent }}');
+      cy.contains('{{ list_id_1 }}').should('be.visible');
+      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', 1);
+    });
+
+    it('1.3 renders multiple cards', () => {
+      cy.task('db:populate{{ pascal }}', 3);
+      cy.visit('/en/{{ parent }}');
+      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', 3);
+    });
+
+    it('1.4 opens the view page when the card title is tapped', () => {
+{% if can_view %}
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.visit('/en/{{ parent }}');
+      cy.contains('{{ list_id_1 }}').click();
+      cy.url().should('include', '/{{ parent }}/view');
+{% else %}
+      // {{ parent }} has can_view = false — view route is not generated.
+      cy.log('skipped: view page not generated for {{ parent }}');
+{% endif %}
+    });
+  });
+{% endif %}
+{% if can_new and can_list %}
+
+  describe('Create from card list', () => {
+    it('2.1 navigates to the new page via the toolbar add button', () => {
+      cy.visit('/en/{{ parent }}');
+      // CardListClient renders the toolbar add as an IconButton with the same
+      // aria-label as the desktop variant ("Create New {{ title }}").
+      cy.get('button[aria-label="Create New {{ title }}"]').click();
+      cy.url().should('include', '/{{ parent }}/new');
+    });
+  });
+{% endif %}
+{% if can_edit and can_list %}
+
+  describe('Edit from card', () => {
+    it('3.1 navigates to the edit page via the card action button', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.visit('/en/{{ parent }}');
+      // CardActions renders an Edit IconButton per card with aria-label="Edit".
+      cy.get('[aria-label="Edit"]').first().click();
+      cy.url().should('include', '/{{ parent }}/edit');
+    });
+  });
+{% endif %}
+{% if can_delete and can_list %}
+
+  describe('Delete from card list', () => {
+    it('4.1 deletes a single item via the card checkbox + toolbar', () => {
+      cy.task('db:populate{{ pascal }}', 2);
+      cy.visit('/en/{{ parent }}');
+      // Select the first card via its Checkbox (aria-label="Select <title>").
+      cy.get('input[type="checkbox"][aria-label^="Select "]').first().check();
+      // Toolbar delete only enables once at least one card is selected.
+      cy.get('button[aria-label="Delete Selected"]').should('not.be.disabled').click();
+      // Confirmation Dialog — the Delete button carries aria-label="Delete".
+      cy.get('div[role="dialog"]').find('button[aria-label="Delete"]').click();
+      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', 1);
+    });
+
+    it('4.2 deletes multiple items in one toolbar action', () => {
+      cy.task('db:populate{{ pascal }}', 3);
+      cy.visit('/en/{{ parent }}');
+      cy.get('input[type="checkbox"][aria-label^="Select "]').eq(0).check();
+      cy.get('input[type="checkbox"][aria-label^="Select "]').eq(1).check();
+      cy.get('button[aria-label="Delete Selected"]').click();
+      cy.get('div[role="dialog"]').find('button[aria-label="Delete"]').click();
+      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', 1);
+    });
+
+    it('4.3 toolbar delete button is disabled when no card is selected', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.visit('/en/{{ parent }}');
+      cy.get('button[aria-label="Delete Selected"]').should('be.disabled');
+    });
+  });
+{% endif %}
+});

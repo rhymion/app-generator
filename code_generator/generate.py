@@ -278,10 +278,19 @@ def generate(schema_path: str, output_dir: str) -> None:
             _write(cypress_support / parent / 'helper.ts',
                    _render(env, 'test_helper.ts.jinja2', helper_ctx))
 
-            # e2e spec
+            # e2e spec (desktop)
             spec_ctx = spec_context(parent, children, schema, model, def_key, gen_cfg)
             _write(cypress_e2e / f'{parent}.cy.ts',
                    _render(env, 'test_spec.cy.ts.jinja2', spec_ctx))
+
+            # e2e spec (mobile) — separate file under cypress/e2e/mobile/.
+            # The mobile list view renders CardListClient instead of the
+            # desktop DataGrid, so the assertions/selectors differ enough to
+            # warrant their own spec rather than a viewport-switched variant
+            # of the desktop one. Forms are responsive but currently share
+            # the same FormUpsert at every viewport.
+            _write(cypress_e2e / 'mobile' / f'{parent}.cy.ts',
+                   _render(env, 'test_spec_mobile.cy.ts.jinja2', spec_ctx))
 
             # api spec (only if api: true)
             if gen_cfg.get('api'):
