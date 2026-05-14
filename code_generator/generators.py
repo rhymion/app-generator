@@ -7,7 +7,7 @@ need.  This keeps complex Python logic out of Jinja2.
 """
 
 from helpers.naming import (
-    to_camel_case, to_pascal_case, to_pascal_case_from_var,
+    to_camel_case, to_pascal_case, to_pascal_case_from_var, to_title_case,
     safe_var_name, singularize,
 )
 from helpers.type_mapping import get_ts_type
@@ -330,6 +330,12 @@ def actions_context(ctx: dict) -> dict:
     non_m2o_flatten = [r for r in flatten_rels_raw if not r['is_m2o']]
 
     def _flatten_field_extraction_expr(form_key: str, f: dict) -> str:
+        # Array-of-$ref fields ship as repeated form entries under a
+        # `field[]` key (the FormUpsert appends one per item via
+        # `formData.append('{prop}__{name}[]', value)`). `data.getAll`
+        # returns them as `FormDataEntryValue[]`; cast to `string[]`.
+        if f.get('is_array'):
+            return f"data.getAll('{form_key}[]') as string[]"
         ftype = f['prop_type']
         fmt   = f.get('format')
         null  = f.get('nullable', True)
@@ -343,6 +349,8 @@ def actions_context(ctx: dict) -> dict:
         return f"({raw} as string | null) || null" if null else f"{raw} as string"
 
     def _flatten_field_ts_type(f: dict) -> str:
+        if f.get('is_array'):
+            return 'string[]'
         ftype = f['prop_type']
         fmt   = f.get('format')
         null  = f.get('nullable', True)
@@ -367,13 +375,24 @@ def actions_context(ctx: dict) -> dict:
         _ts_type = '{ ' + '; '.join(
             f"{f['name']}: {_flatten_field_ts_type(f)}" for f in _fields
         ) + ' }'
-        _all_form_keys = ', '.join(f"'{_prop}__{f['name']}'" for f in _fields)
+        # Truthy gate: scalar fields use `data.get(key)`; array fields use
+        # `data.getAll(key[]).length > 0`. The form may have only changed
+        # the array (e.g., added a symptom) — keep that path live.
+        _gate_scalars = [f"'{_prop}__{f['name']}'" for f in _fields if not f.get('is_array')]
+        _gate_arrays  = [f"data.getAll('{_prop}__{f['name']}[]').length > 0" for f in _fields if f.get('is_array')]
+        _gate_parts: list[str] = []
+        if _gate_scalars:
+            _gate_parts.append(
+                f"[{', '.join(_gate_scalars)}].some(k => {{ const v = data.get(k); return v !== null && v !== ''; }})"
+            )
+        _gate_parts.extend(_gate_arrays)
+        _gate_expr = ' || '.join(_gate_parts) if _gate_parts else 'false'
         _field_exprs  = '\n'.join(
             "    " + f['name'] + ": " + _flatten_field_extraction_expr(f'{_prop}__{f["name"]}', f) + ","
             for f in _fields
         )
         flatten_extractions_lines.append(
-            f"  const {_var}: {_ts_type} | null = [{_all_form_keys}].some(k => {{ const v = data.get(k); return v !== null && v !== ''; }})\n"
+            f"  const {_var}: {_ts_type} | null = {_gate_expr}\n"
             f"    ? {{\n{_field_exprs}\n    }}\n"
             f"    : null;"
         )
@@ -468,6 +487,12 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     non_m2o_flatten  = [r for r in flatten_rels_raw if not r['is_m2o']]
 
     def _flatten_field_ts_type(f: dict) -> str:
+        # Arrays of $ref items (e.g., pre_check_detail.symptoms) carry
+        # `is_array: True`. The form ships them as a flat list of label
+        # strings (e.g., the symptom `name`), which the service then
+        # turns into a Prisma nested create — see below.
+        if f.get('is_array'):
+            return 'string[]'
         ftype = f['prop_type']
         fmt   = f.get('format')
         null  = f.get('nullable', True)
@@ -480,17 +505,45 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
             return 'boolean'
         return f'string{sfx}'
 
+    def _resolve_flatten_base_model(target: str) -> str:
+        """Strip `_detail` from a flatten target when the schema confirms
+        it's an allOf-with-base-$ref view of an existing entity.
+
+        The Prisma client only exposes the base table (`prisma.pre_check`),
+        not the `_detail` extension — generating `tx.pre_check_detail.create`
+        produces a type error. When the schema looks like
+        `pre_check_detail: allOf: [$ref: pre_check, {properties: …}]`,
+        return the base entity name; otherwise return the target as-is so
+        plain-target flatten refs keep working.
+        """
+        if not schema:
+            return target
+        defn = schema.get('definitions', {}).get(target, {})
+        for item in defn.get('allOf', []):
+            if '$ref' in item:
+                base = item['$ref'].split('/')[-1]
+                if base in schema.get('definitions', {}):
+                    return base
+                break
+        return target
+
     flatten_update_params_parts: list[str] = []
     flatten_nested_update_lines: list[str] = []
     flatten_nested_create_lines: list[str] = []
 
     for _flat in non_m2o_flatten:
         _prop    = _flat['prop_name']
-        _target  = _flat['target']
+        _target_raw = _flat['target']
+        _target  = _resolve_flatten_base_model(_target_raw)
         _rel_name = _flat['relation_name']
         _fields  = [f for f in _flat['fields'] if not f.get('is_fk')]
         if not _fields:
             continue
+        # Array-of-$ref fields are transformed into Prisma nested-create
+        # shape (`symptoms: { create: [{name}, …] }`) rather than spread
+        # raw. Pull them out of the scalar bag and emit explicit relations.
+        _array_fields = [f for f in _fields if f.get('is_array')]
+        _scalar_fields = [f for f in _fields if not f.get('is_array')]
         _var     = to_camel_case(_prop) + 'UpdateData'
         _ts_type = '{ ' + '; '.join(
             f"{f['name']}: {_flatten_field_ts_type(f)}" for f in _fields
@@ -587,30 +640,105 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                 f"      await tx.{_target}.deleteMany({{ where: {{ {_fk_field}: id }} }});"
             )
 
-        # Update path — always upsert so a freshly-added flatten section gets
-        # created on save, regardless of whether the target's parent FK is
-        # optional (lifestyle) or required (pre_check, checkup_judgment).
-        flatten_nested_update_lines.append(
-            f"    if ({_var}) {{\n"
-            + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
-            + f"      await tx.{_target}.upsert({{\n"
-            f"        where: {{ {_fk_field}: id }},\n"
-            f"        create: {{ {_fk_field}: id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_var} }},\n"
-            f"        update: {_var},\n"
-            f"      }});\n"
-            f"    }} else {{\n"
-            f"{_on_null_update}\n"
-            f"    }}"
-        )
-        # Add path — always emit inline-create.
-        flatten_nested_create_lines.append(
-            f"    if ({_var}) {{\n"
-            + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
-            + f"      await tx.{_target}.create({{\n"
-            f"        data: {{ {_fk_field}: created.id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_var} }},\n"
-            f"      }});\n"
-            f"    }}"
-        )
+        # Compose the data object spread into Prisma create/update.
+        # If there are array-of-$ref fields (e.g., pre_check.symptoms),
+        # they must be peeled off before the spread — Prisma's nested
+        # write expects { create: [{name}, …] } shape, not a raw string[]
+        # — and re-attached as an explicit relation block. For the update
+        # branch of upsert, the array fields can't be set inline; we
+        # follow the upsert with a delete-and-recreate step against the
+        # item entity.
+        if _array_fields:
+            _array_destructure_keys = ', '.join(
+                f"{f['name']}: {to_camel_case(_prop)}{to_pascal_case(f['name'])}"
+                for f in _array_fields
+            )
+            _scalars_var = f"{to_camel_case(_prop)}Scalars"
+            _array_destructure = (
+                f"      const {{ {_array_destructure_keys}, ...{_scalars_var} }} = {_var};"
+            )
+            _array_relation_create_parts: list[str] = []
+            for _af in _array_fields:
+                _af_name = _af['name']
+                _af_var  = f"{to_camel_case(_prop)}{to_pascal_case(_af_name)}"
+                _item_target = _af.get('item_target', '')
+                _item_props  = (schema or {}).get('definitions', {}).get(_item_target, {}).get('properties', {})
+                _item_label  = 'name' if 'name' in _item_props else 'id'
+                _array_relation_create_parts.append(
+                    f"...({_af_var}.length > 0 ? {{ {_af_name}: {{ create: {_af_var}.map((v: string) => ({{ {_item_label}: v }})) }} }} : {{}})"
+                )
+            _array_relation_create_str = ', '.join(_array_relation_create_parts)
+            _create_data_body = (
+                f"{{ {_fk_field}: created.id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_scalars_var}, {_array_relation_create_str} }}"
+            )
+            _upsert_create_body = (
+                f"{{ {_fk_field}: id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_scalars_var}, {_array_relation_create_str} }}"
+            )
+            _upsert_update_body = _scalars_var
+            # After the upsert, replace the array items (delete-all + create-all).
+            _array_post_upsert: list[str] = []
+            for _af in _array_fields:
+                _af_name = _af['name']
+                _af_var  = f"{to_camel_case(_prop)}{to_pascal_case(_af_name)}"
+                _item_target = _af.get('item_target', '')
+                _item_props  = (schema or {}).get('definitions', {}).get(_item_target, {}).get('properties', {})
+                _item_label  = 'name' if 'name' in _item_props else 'id'
+                _row_var = f"{to_camel_case(_target)}Row"
+                _array_post_upsert.append(
+                    f"      const {_row_var} = await tx.{_target}.findUnique({{ where: {{ {_fk_field}: id }}, select: {{ id: true }} }});\n"
+                    f"      if ({_row_var}) {{\n"
+                    f"        await tx.{_item_target}.deleteMany({{ where: {{ {_fk_field.replace(model, _target)}: {_row_var}.id }} }});\n"
+                    f"        if ({_af_var}.length > 0) {{\n"
+                    f"          await tx.{_item_target}.createMany({{ data: {_af_var}.map((v: string) => ({{ {_item_label}: v, {_target}_id: {_row_var}.id }})) }});\n"
+                    f"        }}\n"
+                    f"      }}"
+                )
+            _array_post_upsert_str = '\n'.join(_array_post_upsert)
+            flatten_nested_update_lines.append(
+                f"    if ({_var}) {{\n"
+                + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
+                + f"{_array_destructure}\n"
+                + f"      await tx.{_target}.upsert({{\n"
+                f"        where: {{ {_fk_field}: id }},\n"
+                f"        create: {_upsert_create_body},\n"
+                f"        update: {_upsert_update_body},\n"
+                f"      }});\n"
+                + f"{_array_post_upsert_str}\n"
+                + f"    }} else {{\n"
+                f"{_on_null_update}\n"
+                f"    }}"
+            )
+            flatten_nested_create_lines.append(
+                f"    if ({_var}) {{\n"
+                + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
+                + f"{_array_destructure}\n"
+                + f"      await tx.{_target}.create({{\n"
+                f"        data: {_create_data_body},\n"
+                f"      }});\n"
+                f"    }}"
+            )
+        else:
+            # No array fields — original spread suffices.
+            flatten_nested_update_lines.append(
+                f"    if ({_var}) {{\n"
+                + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
+                + f"      await tx.{_target}.upsert({{\n"
+                f"        where: {{ {_fk_field}: id }},\n"
+                f"        create: {{ {_fk_field}: id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_var} }},\n"
+                f"        update: {_var},\n"
+                f"      }});\n"
+                f"    }} else {{\n"
+                f"{_on_null_update}\n"
+                f"    }}"
+            )
+            flatten_nested_create_lines.append(
+                f"    if ({_var}) {{\n"
+                + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
+                + f"      await tx.{_target}.create({{\n"
+                f"        data: {{ {_fk_field}: created.id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_var} }},\n"
+                f"      }});\n"
+                f"    }}"
+            )
 
     flatten_update_params = ', '.join(flatten_update_params_parts)
     flatten_nested_updates = '\n'.join(flatten_nested_update_lines)
@@ -1031,6 +1159,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     flatten_enum_opt_setups: list[str] = []
     flatten_sections_list: list[str] = []
     has_accordion_rel_links = False
+    has_flatten_array = False
 
     for _fr in flatten_rels_raw:
         _prop = _fr['prop_name']
@@ -1040,6 +1169,36 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         for _field in _fr['fields']:
             _fname = _field['name']
             _fcamel = to_camel_case(_fname)
+
+            if _field.get('is_array'):
+                # Render the array as a read-only ListWrapper, matching how
+                # the standalone _detail page of the target entity shows
+                # its own children. The data path is `src.{prop}.{field}`
+                # (e.g., `src.pre_check.symptoms`) — the parent's getter
+                # already fetches it through the *_detail $ref include
+                # chain. `as any` cast: the parent's static type may not
+                # carry the nested array shape (it's typed as the bare
+                # target's properties, not the _detail's extension).
+                _item_target = _field.get('item_target', '')
+                _item_props  = schema['definitions'].get(_item_target, {}).get('properties', {})
+                _item_label  = 'name' if 'name' in _item_props else 'id'
+                has_flatten_array = True
+                _inner.append(
+                    f"        <div>\n"
+                    f"          {{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}}\n"
+                    f"          <ListWrapper\n"
+                    f"            items={{((src.{_prop} as any)?.{_fname} ?? []).map((f: any) => ({{\n"
+                    f"              id: f.id,\n"
+                    f"              value: (f.{_item_label} ?? ''),\n"
+                    f"              label: (f.{_item_label} ?? ''),\n"
+                    f"            }}))}}\n"
+                    f"            itemType=\"text\"\n"
+                    f"            showTitle={{true}}\n"
+                    f"            title={{tf('{_fcamel}')}}\n"
+                    f"          />\n"
+                    f"        </div>"
+                )
+                continue
 
             if _field.get('is_fk'):
                 has_accordion_rel_links = True
@@ -1221,7 +1380,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         'has_rel_links':          has_rel_links,
         'needs_accordion':        needs_accordion,
         'has_comment_children':   has_comment_children,
-        'has_list_children':      has_list_children,
+        'has_list_children':      has_list_children or has_flatten_array,
         'has_grid_children':      bool(grid_children),
         'col_fn_names':           col_fn_names,
         'view_enum_ns_hooks':     '\n'.join(enum_ns_hooks),
@@ -1652,7 +1811,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'order' in (schema['definitions'].get(c['name'], {}).get('properties') or {})
         for c in non_comment_ch
     )
-    has_list_ch = any(
+    # Flatten arrays (e.g., pre_check_detail.symptoms) need EditableListWrapper
+    # too — detect early so the import is included alongside the standard
+    # list-child case.
+    _flatten_has_array_upsert = any(
+        f.get('is_array')
+        for fr in ctx.get('flatten_rels', [])
+        if not fr.get('is_m2o')
+        for f in fr.get('fields', [])
+    )
+    has_list_ch = _flatten_has_array_upsert or any(
         c.get('output_type') == 'list' or (c.get('relationship') or {}).get('type') == 'many-to-many'
         for c in non_comment_ch
     )
@@ -2264,6 +2432,52 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         for _f in _fields:
             if _f.get('is_fk'):
                 continue  # FK fields are read-only in edit view
+
+            if _f.get('is_array'):
+                # Array $ref (e.g., pre_check_detail.symptoms): render an
+                # EditableListWrapper matching the standalone _detail
+                # page's pattern. Items are submitted as repeated
+                # `{prop}__{name}[]` form entries (one per item) — the
+                # parent's actions.ts reads them via `data.getAll(...)`
+                # as `string[]`, and the service translates them into
+                # Prisma nested-create shape.
+                _fname        = _f['name']
+                _fcamel_label = to_camel_case(_fname)
+                _item_target  = _f.get('item_target', '')
+                _item_props   = schema['definitions'].get(_item_target, {}).get('properties', {})
+                _item_label   = 'name' if 'name' in _item_props else 'id'
+                _title_field  = to_title_case(_fname)
+                _ref_var      = safe_var_name(f'{_prop}_{_fname}') + 'Ref'
+                _init_var     = f'localInitial{to_pascal_case(_prop)}{to_pascal_case(_fname)}'
+                _form_key     = f'{_prop}__{_fname}'
+                _rel_fds_lines.append(
+                    f"    ({_ref_var}.current?.getItems() ?? []).forEach((it) => formData.append('{_form_key}[]', String(it.value ?? '')));"
+                )
+                # State declarations go before the JSX, alongside the
+                # other flatten state.
+                flatten_edit_states_lines.append(
+                    f"  const {_ref_var} = useRef<{{ getItems: () => EditableListWrapperItem[] }}>(null);\n"
+                    f"  // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
+                    f"  const [{_init_var}] = useState<EditableListWrapperItem[]>(() => (((src.{_prop} as any)?.{_fname} ?? []) as Array<{{ id: string; {_item_label}: string }}>).map((f) => ({{\n"
+                    f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
+                    f"    value: f.{_item_label},\n"
+                    f"    label: f.{_item_label},\n"
+                    f"    originalId: f.id,\n"
+                    f"  }})));"
+                )
+                _accordion_fields_jsx.append(
+                    f"        <EditableListWrapper\n"
+                    f"          ref={{{_ref_var}}}\n"
+                    f"          initialItems={{{_init_var}}}\n"
+                    f"          itemType=\"text\"\n"
+                    f"          addButtonLabel=\"Add {_title_field}\"\n"
+                    f"          showTitle={{true}}\n"
+                    f"          title={{tf('{_fcamel_label}')}}\n"
+                    f"          textFieldLabel=\"Name\"\n"
+                    f"          textFieldPlaceholder=\"Enter name\"\n"
+                    f"        />"
+                )
+                continue
 
             _fname   = _f['name']
             _ftype   = _f['prop_type']

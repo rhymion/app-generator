@@ -2,6 +2,9 @@ import type { ModelPermissions } from '@/lib/authz';
 {% for target in import_targets %}
 import type { {{ target | pascal_case }} } from '@/lib/{{ target }}/types';
 {% endfor %}
+{% for type_name, module in flatten_detail_imports %}
+import type { {{ type_name | pascal_case }} } from '@/lib/{{ module }}/types';
+{% endfor %}
 
 export type {{ parent | pascal_case }} = {
 {% for field in parent_fields %}

@@ -606,11 +606,20 @@ def build_context(entity: dict, schema: dict) -> dict:
     for _fr in flatten_rels:
         if _fr['is_m2o']:
             continue
-        _nested_fk = [f for f in _fr['fields'] if f.get('is_fk')]
-        if _nested_fk:
-            _parts = ', '.join(f"{f['relation_name']}: true" for f in _nested_fk)
+        _nested_fk    = [f for f in _fr['fields'] if f.get('is_fk')]
+        _nested_array = [f for f in _fr['fields'] if f.get('is_array')]
+        _inner_parts: list[str] = []
+        _inner_parts.extend(f"{f['relation_name']}: true" for f in _nested_fk)
+        # Array fields (e.g., pre_check_detail.symptoms) need to be pulled
+        # into the parent's detail query — otherwise the typed result
+        # misses the field declared on the *_detail type and TS rejects
+        # the return shape (see TypeError on
+        # `Property 'symptoms' is missing in type … but required in
+        # type { symptoms: Symptom[] }`).
+        _inner_parts.extend(f"{f['name']}: true" for f in _nested_array)
+        if _inner_parts:
             flatten_non_m2o_include_entries.append(
-                f"{_fr['relation_name']}: {{ include: {{ {_parts} }} }}"
+                f"{_fr['relation_name']}: {{ include: {{ {', '.join(_inner_parts)} }} }}"
             )
         else:
             flatten_non_m2o_include_entries.append(f"{_fr['relation_name']}: true")

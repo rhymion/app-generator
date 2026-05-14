@@ -92,6 +92,7 @@ class EntityContext:
     one_to_one_rels: list[OneToOneRelInfo]  # one-to-one outbound FK rels with nested children
     reverse_oto_rels: list[ReverseOtoRelInfo]  # reverse OTO: FK in target pointing back to this model
     flatten_rels: list[FlattenRelInfo]         # flatten rels: shown as collapsible accordion in detail view
+    flatten_detail_imports: list[tuple[str, str]] = ()  # (type_name, module_name) for *_detail flatten targets
     entity_view_component: str | None = None   # custom component rendered in FormView
     entity_edit_component: str | None = None   # custom component rendered in FormUpsert
 
@@ -212,6 +213,20 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     _flatten_rels_raw = get_flatten_rels(parent, {**model_def, 'properties': filtered_props}, schema)
     # Only non-m2o flatten rels need new type imports (m2o targets are already in parent_rels)
     _flatten_non_m2o_targets = [r['target'] for r in _flatten_rels_raw if not r['is_m2o']]
+    # `*_detail` flatten targets reference a TYPE (e.g., PreCheckDetail)
+    # that lives in the base entity's module (`lib/pre_check/types.ts`).
+    # Pull them out of the regular import_targets list so we don't try to
+    # import from a nonexistent `lib/pre_check_detail/types` module —
+    # they're handled by `flatten_detail_imports` below, paired with the
+    # base module name.
+    _detail_suffix = '_detail'
+    _flatten_detail_imports: list[tuple[str, str]] = []
+    _flatten_non_detail_targets: list[str] = []
+    for _t in _flatten_non_m2o_targets:
+        if _t.endswith(_detail_suffix) and _t[:-len(_detail_suffix)] in schema.get('definitions', {}):
+            _flatten_detail_imports.append((_t, _t[:-len(_detail_suffix)]))
+        else:
+            _flatten_non_detail_targets.append(_t)
 
     # Import targets = union of parent + child + auto-create OTO nested rel targets + selector OTO + reverse OTO + flatten
     all_import_targets = _dedupe_ordered([
@@ -220,7 +235,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         *oto_child_rel_targets,
         *[r['target'] for r in _selector_oto_early],
         *[r['target'] for r in _reverse_oto_early],
-        *_flatten_non_m2o_targets,
+        *_flatten_non_detail_targets,
     ])
     import_targets = [t for t in all_import_targets if t != model]
 
@@ -375,6 +390,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         one_to_one_rels=one_to_one_rels,
         reverse_oto_rels=reverse_oto_rels,
         flatten_rels=flatten_rels,
+        flatten_detail_imports=_flatten_detail_imports,
         entity_view_component=entity_view_component,
         entity_edit_component=entity_edit_component,
     )
