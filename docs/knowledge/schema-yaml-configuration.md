@@ -26,30 +26,30 @@ account management — the generator and runtime both depend on them.
 
 | Entity | Prisma model? | Role |
 |---|---|---|
-| `user_account` | Yes | Authenticated user; every generated entity references it via `creator_id` / `updater_id` |
+| `user` | Yes | Authenticated user; every generated entity references it via `creator_id` / `updater_id` |
 | `role` | Yes | Named role assigned to users; controls access via the permission system |
 | `permission` | Yes | Grants `create`/`read`/`update`/`delete` on a model to a role |
 | `organization` | Yes | Top-level tenant; entities carry `organization_id` for automatic list filtering |
-| `setting` | **No** | UI interface that operates on the `user_account` model — no own Prisma table |
+| `setting` | **No** | UI interface that operates on the `user` model — no own Prisma table |
 
 ### Notes on each entity
 
-**`user_account`** — Every generated service writes `creator_id` and `updater_id` on every
-mutation. Both are FKs to `user_account`. If the model is absent, all generated services throw
+**`user`** — Every generated service writes `creator_id` and `updater_id` on every
+mutation. Both are FKs to `user`. If the model is absent, all generated services throw
 at runtime.
 
 **`role` / `permission`** — `getModelPermissions(model, userId)` (called in every generated
 page and API route) resolves allowed actions by joining
-`user_account → roles → permissions`. Both tables must exist.
+`user → roles → permissions`. Both tables must exist.
 
 **`organization`** — Any entity with an `organization_id` field and `x-relationship` to
 `organization` gets automatic org-scoped filtering in its list queries (see §15.4).
 
 **`setting`** — Not a separate Prisma model. The `setting` definition in the JSON schema uses
-`allOf: - $ref: user_account`, which means the generator creates pages (e.g. `/setting/view`,
-`/setting/edit`) that operate on the `user_account` Prisma table. This provides a
+`allOf: - $ref: user`, which means the generator creates pages (e.g. `/setting/view`,
+`/setting/edit`) that operate on the `user` Prisma table. This provides a
 self-service "My Account" interface where the logged-in user manages their own profile and
-roles, separate from the admin-facing `user_account` pages.
+roles, separate from the admin-facing `user` pages.
 
 ### Preserving system entity configurations
 
@@ -64,7 +64,7 @@ feature that depends on those pages.
 
 | Missing definition | Build / runtime failure |
 |---|---|
-| `user_account_detail` | User management pages missing; sidebar link 404s |
+| `user_detail` | User management pages missing; sidebar link 404s |
 | `role_detail` | Role management pages missing |
 | `organization_detail` | Organization management pages missing |
 | `permission_detail` | Permission management pages missing |
@@ -73,7 +73,7 @@ feature that depends on those pages.
 ### Minimal YAML skeleton
 
 These definitions must be present so that app entities can reference them via `x-relationship`.
-The `setting` definition re-uses `user_account` as its base — no extra Prisma model is needed.
+The `setting` definition re-uses `user` as its base — no extra Prisma model is needed.
 
 ```yaml
 organization:
@@ -87,7 +87,7 @@ organization:
       type: string
       minLength: 1
 
-user_account:
+user:
   type: object
   required: [id, name, email, password]
   properties:
@@ -141,7 +141,7 @@ permission:
         target: role
         labelField: name
 
-# "My Account" interface — operates on user_account table, no own Prisma model
+# "My Account" interface — operates on user table, no own Prisma model
 setting:
   x-generate:
     view: true
@@ -151,7 +151,7 @@ setting:
       type: many-to-many
       target: role
   allOf:
-    - $ref: "#/definitions/user_account"
+    - $ref: "#/definitions/user"
     - type: object
       required: [roles]
       properties:
@@ -440,13 +440,13 @@ If it is missing, the generator will not include it in `include:` clauses.
 Declare on the **detail entity** using `x-relationships` (plural):
 
 ```yaml
-user_account_detail:
+user_detail:
   x-relationships:
     roles:                      # property name in the detail definition
       type: many-to-many
       target: role
   allOf:
-    - $ref: "#/definitions/user_account"
+    - $ref: "#/definitions/user"
     - type: object
       properties:
         roles:
@@ -472,7 +472,7 @@ work_detail:
       labelField: title       # funding uses "title" not "name"
     followers:
       type: many-to-many
-      target: user_account
+      target: user
   allOf:
     - $ref: "#/definitions/work"
     - type: object
@@ -486,7 +486,7 @@ work_detail:
           type: array
           x-outputType: list
           items:
-            $ref: "#/definitions/user_account"
+            $ref: "#/definitions/user"
 ```
 
 **Rule:** add an `x-relationships` entry with `type: one-to-many` and `labelField: <field>`
@@ -514,11 +514,11 @@ data: {
 Prisma must declare an implicit many-to-many:
 
 ```prisma
-model user_account {
+model user {
   roles role[] @relation("UserRoles")
 }
 model role {
-  user_accounts user_account[] @relation("UserRoles")
+  users user[] @relation("UserRoles")
 }
 ```
 
@@ -1028,7 +1028,7 @@ distinguishes two modes based on whether the **target entity has its own generat
 | Mode | Criterion | UI behaviour |
 |------|-----------|--------------|
 | **Auto-create** | Target `_detail` has all `x-generate` flags `false` (e.g. `approvable`, `commentable`) | FK excluded from form; target pre-created inside `$transaction` |
-| **Selector** | Target `_detail` has at least one `x-generate` flag `true` (e.g. `checkup`, `user_account`) | FK rendered as **autocomplete** filtered to exclude already-linked records |
+| **Selector** | Target `_detail` has at least one `x-generate` flag `true` (e.g. `checkup`, `user`) | FK rendered as **autocomplete** filtered to exclude already-linked records |
 
 ### Auto-create mode (approvable / commentable pattern)
 
@@ -1093,12 +1093,12 @@ checkup_id:
 For optional FK (nullable), use:
 
 ```yaml
-user_account_id:
+user_id:
   type: ["string", "null"]
   pattern: "^c[a-z0-9]{24,}$"
   x-relationship:
     type: one-to-one
-    target: user_account
+    target: user
     labelField: name
 ```
 
@@ -1127,8 +1127,8 @@ model pre_check {
 }
 
 model patient {
-  user_account_id  String?  @unique   // ← nullable for optional OTO
-  user_account     user_account? @relation("PatientUser", fields: [user_account_id], references: [id], onDelete: SetNull)
+  user_id  String?  @unique   // ← nullable for optional OTO
+  user     user? @relation("PatientUser", fields: [user_id], references: [id], onDelete: SetNull)
 }
 ```
 
@@ -1218,11 +1218,11 @@ parent can be deleted without removing the child.
 Prisma implicit many-to-many (no join table defined) is used for `x-relationships`:
 
 ```prisma
-model user_account {
+model user {
   roles role[] @relation("UserRoles")
 }
 model role {
-  user_accounts user_account[] @relation("UserRoles")
+  users user[] @relation("UserRoles")
 }
 ```
 
@@ -1268,9 +1268,9 @@ Every entity that can be independently updated, which means an entity has `x-gen
 
 ```prisma
 creator_id String
-creator    user_account @relation("SomeEntityCreator", fields: [creator_id], references: [id])
+creator    user @relation("SomeEntityCreator", fields: [creator_id], references: [id])
 updater_id String
-updater    user_account @relation("SomeEntityUpdater", fields: [updater_id], references: [id])
+updater    user @relation("SomeEntityUpdater", fields: [updater_id], references: [id])
 ```
 
 The generator always writes `creator_id` and `updater_id` on create/update. If the columns
@@ -1381,9 +1381,9 @@ model booking {
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
   creator_id   String
-  creator      user_account @relation("BookingCreator", fields: [creator_id], references: [id])
+  creator      user @relation("BookingCreator", fields: [creator_id], references: [id])
   updater_id   String
-  updater      user_account @relation("BookingUpdater", fields: [updater_id], references: [id])
+  updater      user @relation("BookingUpdater", fields: [updater_id], references: [id])
 }
 ```
 
@@ -1480,7 +1480,7 @@ respected in most contexts:
 | `FormUpsert` self-referential autocomplete | Uses `labelField` from the self-ref relation (default `name`) |
 | DataGrid FK column fallback (no `valueOptions`) | Uses `labelField` from `x-relationship` (default `name`) |
 | Test generation fixtures | Uses `name` field when no explicit primary field is set |
-| Comment thread creator display | `user_account.name` and `.avatar` — hardcoded |
+| Comment thread creator display | `user.name` and `.avatar` — hardcoded |
 | Plain text list children (`x-outputType: list`, no file_type) | `f.name` — these children are text containers whose field IS `name` |
 
 **[Strong guideline] Every entity used as a relationship target should have a `name: string` field**
@@ -1544,7 +1544,7 @@ model epic_comment {
   created_at DateTime @default(now()) @db.Timestamptz(0)
   updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
-  creator    user_account @relation("EpicCommentCreator", fields: [creator_id], references: [id])
+  creator    user @relation("EpicCommentCreator", fields: [creator_id], references: [id])
   // No updater_id / updater — comments are immutable after creation except by their creator
 }
 ```
@@ -1795,9 +1795,9 @@ model approval_flow {
   created_at        DateTime           @default(now())
   updated_at        DateTime           @updatedAt
   creator_id        String
-  creator           user_account       @relation("ApprovalFlowCreator", ...)
+  creator           user       @relation("ApprovalFlowCreator", ...)
   updater_id        String
-  updater           user_account       @relation("ApprovalFlowUpdater", ...)
+  updater           user       @relation("ApprovalFlowUpdater", ...)
 }
 
 model approval_request {
@@ -1819,7 +1819,7 @@ model approval_history {
   message             String?
   created_at          DateTime         @default(now())
   creator_id          String
-  creator             user_account     @relation("ApprovalHistoryCreator", ...)
+  creator             user     @relation("ApprovalHistoryCreator", ...)
 }
 ```
 
@@ -1925,7 +1925,7 @@ model comment {
   created_at     DateTime    @default(now()) @db.Timestamptz(0)
   updated_at     DateTime    @updatedAt @db.Timestamptz(0)
   creator_id     String
-  creator        user_account @relation("CommentCreator", fields: [creator_id], references: [id])
+  creator        user @relation("CommentCreator", fields: [creator_id], references: [id])
 }
 ```
 

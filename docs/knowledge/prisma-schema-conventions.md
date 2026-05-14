@@ -21,7 +21,7 @@ Do not rename, alias, or abbreviate the Prisma model name relative to the base e
 
 An entity with `x-generate` does **not** need to have its own Prisma model when its `allOf.$ref` points to an existing entity that already has a model. The generated code uses the model of the referenced base entity.
 
-Example from the system — `setting` provides a "My Account" interface over the `user_account` table:
+Example from the system — `setting` provides a "My Account" interface over the `user` table:
 
 ```yaml
 setting:
@@ -29,7 +29,7 @@ setting:
     edit: true
     ...
   allOf:
-    - $ref: "#/definitions/user_account"   # ← uses user_account model; no `setting` model needed
+    - $ref: "#/definitions/user"   # ← uses user model; no `setting` model needed
 ```
 
 This pattern is also allowed for custom (non-system) entities. Use it when you need multiple distinct interfaces (pages, APIs) for the same underlying data — for example, separate views for different roles or use cases:
@@ -143,12 +143,12 @@ id         String   @id @default(cuid())
 created_at DateTime @default(now()) @db.Timestamptz(0)
 updated_at DateTime @updatedAt @db.Timestamptz(0)
 creator_id String
-creator    user_account @relation("<ModelPascal>Creator", fields: [creator_id], references: [id])
+creator    user @relation("<ModelPascal>Creator", fields: [creator_id], references: [id])
 updater_id String
-updater    user_account @relation("<ModelPascal>Updater", fields: [updater_id], references: [id])
+updater    user @relation("<ModelPascal>Updater", fields: [updater_id], references: [id])
 ```
 
-And reverse relations on `user_account`:
+And reverse relations on `user`:
 
 ```prisma
 created_<models> <model>[] @relation("<ModelPascal>Creator")

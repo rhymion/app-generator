@@ -49,7 +49,7 @@ interface Props { value: string; }
 
 ### Example
 
-`components/user_account/api_key.tsx` — renders the API key with a "Generate" button. The generator references it but never touches it.
+`components/setting/api_key.tsx` — renders the API key with a "Generate" button. The generator references it but never touches it.
 
 ---
 
