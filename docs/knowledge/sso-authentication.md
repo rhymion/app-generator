@@ -4,9 +4,13 @@ The generated app supports SSO sign-in alongside email/password credentials.
 Today only Google is wired up; the layering is designed so adding GitHub /
 Microsoft / generic OIDC is a small, contained change.
 
-MFA / TOTP is **not** in scope for this iteration — it would layer on top of
-whichever provider performs first-factor authentication and is tracked
-separately.
+The auth stack is **Auth.js v5** (`next-auth@5.0.0-beta`) on top of
+`@auth/prisma-adapter`. `session.strategy = "jwt"` is pinned globally
+— Auth.js v5's mixed-strategy story doesn't survive runtime when both
+Credentials and OAuth are configured (see "Session strategy" below).
+The adapter still writes `User` / `Account` rows on OAuth sign-in for
+identity stability, just not `Session` rows. MFA / TOTP is not in
+scope for this iteration.
 
 ---
 
@@ -21,20 +25,25 @@ separately.
                │
                ▼
 ┌──────────────────────────────┐
-│ auth.ts                      │  buildProviders()           — server gate
+│ auth.ts                      │  buildProviders()         — server gate
 │   if siteConfig allows       │  buildAdapter() wraps
 │   && env vars present        │     PrismaAdapter(prisma) — overrides
 │     → register provider      │     createUser to fill domain-required
 │                              │     fields (name, creator_id, updater_id)
-│                              │  session: { strategy: 'jwt' }
+│                              │  session.strategy: 'jwt' (pinned)
+│                              │  exports { handlers, auth, signIn, signOut }
 └──────────────┬───────────────┘
                │
                ▼
 ┌──────────────────────────────┐
-│ NextAuth                     │  Adapter writes the `user` row directly
-│   - OAuth via adapter        │     on first OAuth sign-in. `Account` row
-│   - Credentials direct       │     records (provider, providerAccountId).
-│                              │  Credentials never touches the adapter.
+│ Auth.js v5                   │  Adapter writes the `user` row directly
+│   - OAuth via adapter        │     on first OAuth sign-in, plus an
+│     (JWT cookie)             │     `Account` row recording (provider,
+│   - Credentials direct       │     providerAccountId). `Session` table
+│     (JWT cookie)             │     stays empty under JWT strategy.
+│                              │  Credentials never touches the adapter
+│                              │  — authorize() returns a user object,
+│                              │  Auth.js mints the JWT.
 └──────────────────────────────┘
 ```
 
@@ -45,8 +54,9 @@ lower-casing the model name, so `model user` exposes `prisma.user` exactly
 as the adapter requires. The other three are PascalCase NextAuth-only
 tables at the bottom of `prisma/schema.prisma`, a deliberate exception to
 the snake_case convention. `Account` is populated on every OAuth sign-in;
-`Session` is unused on JWT strategy; `VerificationToken` lights up if/when
-a magic-link provider is added.
+`Session` is **unused today** (we run on `session.strategy = "jwt"` —
+see "Session strategy" below); `VerificationToken` lights up if/when a
+magic-link provider is added.
 
 Two gates have to agree before a provider button works:
 
@@ -54,13 +64,71 @@ Two gates have to agree before a provider button works:
    The login page only renders buttons for providers listed here.
 2. **Server gate** — required env vars (e.g. `GOOGLE_CLIENT_ID` and
    `GOOGLE_CLIENT_SECRET` for Google). `auth.ts` skips registering the
-   provider with NextAuth if either is missing, so the OAuth callback URL
-   would 404 even if a button somehow leaked through.
+   provider if either is missing, so the OAuth callback URL would 404
+   even if a button somehow leaked through.
 
-If a provider is listed in `siteConfig` but its env vars aren't set, clicking
-the button reaches `/api/auth/signin/google` with no `google` provider
-registered — NextAuth returns an error. Keep the two in sync, or use a
-deployment check that asserts both are present together.
+If a provider is listed in `siteConfig` but its env vars aren't set,
+clicking the button reaches `/api/auth/signin/google` with no `google`
+provider registered — Auth.js returns an error. Keep the two in sync, or
+use a deployment check that asserts both are present together.
+
+---
+
+## Session strategy — pinned to JWT (and why)
+
+`auth.ts` sets `session: { strategy: "jwt" }` for the whole deployment.
+That looks like a regression from the "mixed-strategy" claim earlier
+v5-migration drafts made — it isn't. Here's the trap:
+
+- Auth.js v5's config-time assert (`@auth/core/lib/utils/assert.js`)
+  only rejects `strategy: "database"` when **only** the Credentials
+  provider is configured. With Credentials + Google together, the
+  config validates fine.
+- At runtime, however, a credentials sign-in **always** sets a JWT
+  cookie (`authjs.session-token`) regardless of the configured
+  strategy. There is no Auth.js code path that creates a `Session`
+  row from `authorize()`'s return value.
+- The session resolver (`/api/auth/session`, `auth()`) running in
+  database mode then tries to look up that cookie value in the
+  `Session` table, finds nothing, and returns `null`.
+
+Net result of `session.strategy = "database"` with Credentials +
+Google: the user "logs in" (HTTP 302 to `/`, cookie set), but every
+subsequent request resolves to an anonymous session — `useSession()`
+sees `null`, the proxy redirects to `/login`, and the user appears
+stuck on the login screen. Cypress UI tests catch this immediately:
+`cy.contains('Sign Out').should('be.visible')` times out.
+
+Pinning JWT for everyone is the trade-off. OAuth users no longer get
+server-side revocation via row delete — both flows ride a signed
+cookie. The adapter still writes `User` and `Account` rows on OAuth
+sign-in (identity stability via `providerAccountId`, refresh tokens at
+rest, headroom for a future Auth.js release that fixes the mixed-mode
+gap). Only the **Session row stays empty**.
+
+Two paths to recover server-side revocation when needed:
+
+1. **Drop Credentials entirely.** SSO-only deployment, flip
+   `session.strategy = "database"`, full revocation by
+   `DELETE FROM Session`. Already correct config-wise — Auth.js v5
+   only asserts when *only* Credentials is configured.
+2. **Custom session shim.** In `authorize()` (or a follow-up
+   callback), call `adapter.createSession(...)` to write a Session
+   row keyed by a server-generated token, and bind that token to the
+   cookie instead of the default JWT. Several open issues on the
+   Auth.js repo trail this pattern; brittle and not officially
+   supported.
+
+Server-side revocation for the credentials boundary is therefore
+explicitly **not** delivered by this iteration.
+
+`AUTH_SECRET` is required and must be distinct per environment — the
+test env has a generated 64-char hex; production must set its own.
+Auth.js v5 also reads `NEXTAUTH_SECRET` and `NEXTAUTH_URL` as aliases
+for `AUTH_SECRET` / `AUTH_URL` for backward compat; we use `AUTH_SECRET`
+plus `NEXTAUTH_URL` (the latter is retained for the Google redirect-URI
+documentation since Google Cloud Console UIs and the `.env.example`
+both spell it that way).
 
 ---
 
@@ -68,8 +136,8 @@ deployment check that asserts both are present together.
 
 1. Create credentials at the [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
    Add `${NEXTAUTH_URL}/api/auth/callback/google` (e.g.
-   `http://localhost:3000/api/auth/callback/google` in dev) to the authorized
-   redirect URIs.
+   `http://localhost:3000/api/auth/callback/google` in dev) to the
+   authorized redirect URIs.
 2. Set env vars (see `.env.example`):
    ```bash
    GOOGLE_CLIENT_ID="..."
@@ -78,13 +146,17 @@ deployment check that asserts both are present together.
 3. Make sure `'google'` is in `siteConfig.auth.providers`. It is by default.
 4. Restart the dev server.
 
-To **disable** Google without unsetting the env vars (e.g. on a tenant that
-shouldn't see the button), remove `'google'` from `siteConfig.auth.providers`.
+To **disable** Google without unsetting the env vars (e.g. on a tenant
+that shouldn't see the button), remove `'google'` from
+`siteConfig.auth.providers`. Note that this also flips `session.strategy`
+back to `"jwt"` if Google is the only OAuth provider — existing OAuth
+`Session` rows become orphans and the cookie can't be used to recover a
+session.
 
 To **ship an SSO-only deployment**, remove `'credentials'` from
 `siteConfig.auth.providers`. The email/password form, `Register` link, and
-credentials authorize() are all gated on that entry. The `Register` route
-still exists code-wise but is unreachable from the login UI.
+credentials `authorize()` are all gated on that entry. The `Register`
+route still exists code-wise but is unreachable from the login UI.
 
 ---
 
@@ -94,103 +166,156 @@ On the first Google sign-in for a given email:
 
 1. `signIn()` callback runs **before** the adapter writes anything.
    It enforces:
-   - `profile.email_verified !== false` (Google sets this for all completed
-     accounts; an explicit `false` is rejected).
-   - `siteConfig.auth.allowedDomains` — if non-empty, the email's `@domain`
-     must be on the list (case-insensitive). Empty list = allow all.
+   - `profile.email_verified !== false` (Google sets this for all
+     completed accounts; an explicit `false` is rejected).
+   - `siteConfig.auth.allowedDomains` — if non-empty, the email's
+     `@domain` must be on the list (case-insensitive). Empty list =
+     allow all.
    - The **credentials↔OAuth collision rule**: if a `user` row already
      exists for this email with `password !== null`, that account was
      created via `/register`. SSO sign-in is rejected with reason
-     `email_in_use_by_credentials`. Without this guard, the adapter would
-     attempt to create a new `user` row and hit the `@unique(email)`
-     constraint — same outcome, less explicit. Admin reconciliation step:
-     pre-populate a matching `Account` row to link the existing user to
-     the OAuth identity.
-2. If `signIn()` returns true, `buildAdapter().createUser()` (our wrapper
-   around PrismaAdapter) inserts the `user` row with: pre-generated cuid,
-   `email`, `name = profile.name ?? email`, `emailVerified`, `image`, and
-   self-referencing `creator_id`/`updater_id` matching the new id. The
-   wrapper exists because the default PrismaAdapter only writes the
-   NextAuth-shape fields, but our `user` table requires non-null `name`
-   plus the audit-bootstrap pattern shared with `/api/auth/register`.
+     `email_in_use_by_credentials`. Without this guard, the adapter
+     would attempt to create a new `user` row and hit the
+     `@unique(email)` constraint — same outcome, less explicit. Admin
+     reconciliation step: pre-populate a matching `Account` row to link
+     the existing user to the OAuth identity.
+2. If `signIn()` returns true, `buildAdapter().createUser()` (our
+   wrapper around `PrismaAdapter`) inserts the `user` row with:
+   pre-generated cuid, `email`, `name = profile.name ?? email`,
+   `emailVerified`, `image`, and self-referencing `creator_id` /
+   `updater_id` matching the new id. The wrapper exists because the
+   default `PrismaAdapter` only writes the NextAuth-shape fields, but
+   our `user` table requires non-null `name` plus the audit-bootstrap
+   pattern shared with `/api/auth/register`. Note: v5 passes
+   `createUser` a full `AdapterUser` with a pre-generated id; we
+   replace it with `createId()` to keep the cuid2 convention. The
+   returned id is what the adapter then uses for the subsequent
+   `Account` and `Session` row inserts, so the FKs stay correct.
 3. The adapter then writes the `Account` row recording
-   `(provider, providerAccountId, refresh_token, access_token, …)`.
-4. `events.signIn` fires, emitting a structured `[auth:signIn]` JSON line
-   with `isNewUser: true` (it's `null` for credentials sign-ins because
-   credentials never goes through the adapter).
+   `(provider, providerAccountId, refresh_token, access_token, …)` and
+   the `Session` row that backs the user's session cookie.
+4. `events.signIn` fires, emitting a structured `[auth:signIn]` JSON
+   line with `isNewUser: true` (it's `null` for credentials sign-ins
+   because credentials never goes through the adapter).
 
-No role is assigned. An admin grants roles after the user appears in the
-`user` table. This is intentional — auto-granting roles via SSO is the
-kind of decision that should be explicit per deployment.
+No role is assigned. An admin grants roles after the user appears in
+the `user` table. This is intentional — auto-granting roles via SSO is
+the kind of decision that should be explicit per deployment.
 
 ### Returning OAuth sign-in
 
 The adapter finds the existing `Account` row by
-`(provider, providerAccountId)`, reads its `userId`, and reuses the same
-`user` row. `signIn()` runs but doesn't trip the collision rule because
-the matching `user` row was created via SSO (`password === null`). No
-`createUser` is called on the adapter.
+`(provider, providerAccountId)`, reads its `userId`, and reuses the
+same `user` row. A fresh `Session` row is written for the new
+sign-in's cookie. `signIn()` runs but doesn't trip the collision rule
+because the matching `user` row was created via SSO
+(`password === null`). No `createUser` is called on the adapter.
 
-This is the **identity-stability win** of the adapter: if a Google user
-changes their primary email, the `providerAccountId` is the same so they
-stay the same `user` row. The previous (no-adapter) implementation matched
-by email, so the same event would have created a brand-new domain user.
+This is the **identity-stability win** of the adapter: if a Google
+user changes their primary email, the `providerAccountId` is the same
+so they stay the same `user` row. (The previous, pre-adapter
+implementation matched by email, so the same event would have created
+a brand-new domain user.)
+
+---
+
+## Reading the session on the server
+
+Auth.js v5 replaces v4's `getServerSession(authOptions)` with a single
+`auth()` helper exported from `@/auth`. Pattern:
+
+```ts
+import { auth } from '@/auth';
+
+export async function GET() {
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // ...
+}
+```
+
+In middleware (`proxy.ts` in Next.js 16), use the wrapper form:
+
+```ts
+import { auth } from '@/auth';
+
+export const proxy = auth(async (req) => {
+  // req.auth is the resolved Session (or null) — DB-backed for OAuth,
+  // JWT-decoded for credentials. Transparent to the caller.
+  if (!req.auth) return NextResponse.redirect(new URL('/login', req.url));
+  // ...
+});
+```
+
+Next.js 16 proxies always run on the Node.js runtime, so Prisma queries
+from `auth()` work without extra config. (Don't add `runtime: 'nodejs'`
+to the proxy `config` export — Next.js rejects it.)
 
 ---
 
 ## Why `user.password` is nullable
 
-SSO-provisioned users have no password. The `password` column was changed
-from `String` (required) to `String?` in `prisma/schema.prisma`, and the
-matching `required:` list in `code_generator/json_schema.yaml` was updated
-to omit `password`.
+SSO-provisioned users have no password. The `password` column is
+`String?` in `prisma/schema.prisma`, and the matching `required:` list
+in `code_generator/json_schema.yaml` omits `password`.
 
 The credentials `authorize()` in `auth.ts` rejects accounts where
-`password === null`, returning the same "Invalid credentials" message as a
-missing account. This avoids leaking that an email is registered as an SSO
-account when a credentials sign-in is attempted.
+`password === null`, returning the same "Invalid credentials" message
+as a missing account. This avoids leaking that an email is registered
+as an SSO account when a credentials sign-in is attempted.
 
 If an SSO user later wants to *also* sign in with a password, an admin
-(or a future self-serve flow) sets `password` to a bcrypt hash. No other
-change is needed.
+(or a future self-serve flow) sets `password` to a bcrypt hash. No
+other change is needed.
 
 ---
 
 ## Adding another OAuth provider
 
-1. Install the NextAuth provider (most ship inside `next-auth/providers/*`).
+1. Install the provider (most ship inside `next-auth/providers/*`).
 2. Add the provider id to `AuthProviderId` in `lib/site-config.ts` and
    include it in `siteConfig.auth.providers`.
 3. In `auth.ts`'s `buildProviders()`, add a matching `if (siteConfig …
-   includes && env vars present)` block that calls the provider's factory
-   with `clientId`/`clientSecret` from env.
+   includes && env vars present)` block that calls the provider's
+   factory with `clientId` / `clientSecret` from env. The
+   `isGoogleEnabled()` helper is currently only used to decide
+   whether to register the Google provider; the session strategy is
+   pinned to `"jwt"` for everyone (see "Session strategy"), so a new
+   provider doesn't need a session-strategy hook.
 4. Add the env vars to `.env.example` with the redirect URI documented.
-5. Verify the provider sets `profile.email_verified` (or an equivalent) —
-   the `signIn()` callback's verified-email guard is provider-specific.
-   For providers that don't expose this, decide deliberately whether to
-   trust the email or to require admin pre-provisioning.
+5. Verify the provider sets `profile.email_verified` (or an
+   equivalent) — the `signIn()` callback's verified-email guard is
+   provider-specific. For providers that don't expose this, decide
+   deliberately whether to trust the email or to require admin
+   pre-provisioning.
 
 ---
 
 ## Out of scope, for next time
 
-- **Database session strategy (server-side revocation)** — NextAuth v4
-  ties the Credentials provider to JWT sessions; switching to
-  `session.strategy = 'database'` silently breaks credentials sign-in.
-  The migration path is **Auth.js v5**, which natively supports mixed
-  strategies (Credentials on JWT, OAuth on DB). The PrismaAdapter is
-  already in place, so when v5 lands the change is `session.strategy +
-  Credentials adjustments`, not a schema migration.
-- **MFA / TOTP** — second factor on top of either provider. NextAuth doesn't
-  ship this; the typical pattern is a custom `step` in the credentials flow
-  or a separate gate after `session.user.id` is known.
-- **Account linking UI** — letting a signed-in user attach an additional
-  OAuth provider to their existing account. The plumbing is there (one User
-  row can own multiple Account rows), but there's no user-facing flow yet.
-- **Audit-log table** — `events.signIn` / `signOut` / `createUser` currently
-  emit structured `console.info` lines. A real audit-log Prisma model with
-  hooks into role/permission CRUD is its own piece of work.
-- **Rate limiting on `/api/auth/*`** — no middleware today. Realistic plan:
-  Next.js middleware + Upstash Redis (or in-memory for dev).
-- **Per-tenant SSO (SAML)** — would use SAML Jackson / WorkOS rather than
-  rolling SAML ourselves, with per-tenant domain binding.
+- **Server-side revocation for credentials users** — Auth.js v5 routes
+  the Credentials provider through JWT regardless of the configured
+  session strategy. The cookie is a self-contained JWT; the only
+  options today are rotating `AUTH_SECRET` (logs everyone out) or
+  building a custom revocation list. The cleaner long-term path is a
+  custom session shim that calls `adapter.createSession()` after
+  `authorize()` succeeds, writing a `Session` row keyed by a token
+  embedded in the cookie. Then deleting that row revokes the session.
+  Not trivial — there are race conditions around token rotation and
+  the `expires` field — but contained.
+- **MFA / TOTP** — second factor on top of either provider. Auth.js
+  doesn't ship this; the typical pattern is a custom `step` in the
+  credentials flow or a separate gate after `session.user.id` is
+  known.
+- **Account linking UI** — letting a signed-in user attach an
+  additional OAuth provider to their existing account. The plumbing is
+  there (one `user` row can own multiple `Account` rows), but there's
+  no user-facing flow yet.
+- **Audit-log table** — `events.signIn` / `signOut` and the
+  `[auth:createUser]` line emitted from `buildAdapter` currently log
+  via `console.info`. A real audit-log Prisma model with hooks into
+  role/permission CRUD is its own piece of work.
+- **Rate limiting on `/api/auth/*`** — no proxy logic today. Realistic
+  plan: Next.js proxy + Upstash Redis (or in-memory for dev).
+- **Per-tenant SSO (SAML)** — would use SAML Jackson / WorkOS rather
+  than rolling SAML ourselves, with per-tenant domain binding.

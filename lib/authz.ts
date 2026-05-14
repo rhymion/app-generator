@@ -1,12 +1,11 @@
 'use server';
 
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';
+import { auth } from '@/auth';
 import prisma from '@/lib/prisma';
 import { cache } from 'react';
 
 export const getSessionUserId = cache(async function getSessionUserId(): Promise<string | null> {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   return session?.user?.id ?? null;
 });
 

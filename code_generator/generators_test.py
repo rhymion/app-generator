@@ -573,6 +573,11 @@ def prisma_value(field: dict, index: str, entity_title: str) -> str:
     if cat == 'text':
         if prop_name == 'name':
             return f'`{entity_title} ${{{index}}}`'
+        if prop_name == 'email':
+            # @unique on email columns means we need test-run-unique values.
+            # `Date.now()` covers cross-run uniqueness; `${index}` covers
+            # in-loop uniqueness.
+            return f'`test-${{{index}}}-${{Date.now()}}@example.com`'
         if field.get('enum_values'):
             return f"'{field['enum_values'][0]}'"
         return f'`Test {field["label"]} ${{{index}}}`'
@@ -2038,6 +2043,12 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
     `entities` is a list of dicts: {parent, model_name, children}.
     """
     enriched_entities = []
+    # The fallback `db:populateUser` task at the bottom of the registry only
+    # fires when the `user` entity is *not* in the test loop (i.e. user_detail
+    # has `test: false`). When user_detail.test: true, the standard
+    # per-entity loop emits `db:populateUser` from `entity.pascal` — emitting
+    # the hardcoded one too would produce a duplicate-identifier TS error.
+    user_in_entities = any(e.get('parent') == 'user' for e in entities)
     has_user_account_populate = False
     for entity in entities:
         parent = entity['parent']
@@ -2071,6 +2082,8 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
             'has_approvable': has_approvable,
             'flatten_test_rels': flatten_test_rels,
         })
+    if user_in_entities:
+        has_user_account_populate = False
     return {'entities': enriched_entities, 'has_user_account_populate': has_user_account_populate}
 
 

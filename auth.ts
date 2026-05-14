@@ -1,13 +1,26 @@
-import { type NextAuthOptions, type User } from "next-auth";
-import type { Adapter, AdapterUser } from "next-auth/adapters";
-import type { Provider } from "next-auth/providers/index";
+import NextAuth from "next-auth";
+import type { NextAuthConfig } from "next-auth";
+import type { Adapter, AdapterUser } from "@auth/core/adapters";
+import type { Provider } from "@auth/core/providers";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
-import { PrismaAdapter } from "@next-auth/prisma-adapter";
+import { PrismaAdapter } from "@auth/prisma-adapter";
 import { createId } from "@paralleldrive/cuid2";
 import prisma from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { siteConfig } from "@/lib/site-config";
+
+// True iff the Google provider will actually be registered for this deploy.
+// Both the siteConfig opt-in AND the server-side secrets have to be present.
+// We need this *before* building providers so the session strategy can be
+// chosen consistently — see notes on session.strategy below.
+function isGoogleEnabled(): boolean {
+  return Boolean(
+    siteConfig.auth?.providers?.includes("google") &&
+      process.env.GOOGLE_CLIENT_ID &&
+      process.env.GOOGLE_CLIENT_SECRET,
+  );
+}
 
 function buildProviders(): Provider[] {
   const providers: Provider[] = [];
@@ -15,12 +28,12 @@ function buildProviders(): Provider[] {
   // Credentials: always wired up code-wise so the form can be rendered when
   // siteConfig opts in. The login page is the visibility gate.
   //
-  // NOTE: NextAuth v4 routes the Credentials provider through JWT sessions
-  // regardless of the chosen strategy — that is why we keep
-  // `session.strategy = 'jwt'` below even though PrismaAdapter is registered.
-  // Switching to `session.strategy = 'database'` would silently break
-  // credentials sign-in (the user authenticates but no Session row is
-  // written). Auth.js v5 is the migration path that lifts this restriction.
+  // Auth.js v5 still routes Credentials through JWT regardless of the
+  // configured strategy — the Session row is never written for these
+  // sign-ins. With a mixed-provider deployment (Credentials + Google) the
+  // global strategy can still be "database": OAuth users get Session rows
+  // and server-side revocation, Credentials users keep a JWT cookie. See
+  // `session.strategy` below.
   providers.push(
     CredentialsProvider({
       name: "credentials",
@@ -35,7 +48,7 @@ function buildProviders(): Provider[] {
         }
 
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
+          where: { email: credentials.email as string },
         });
 
         // SSO-provisioned users have password === null and must not be allowed
@@ -46,7 +59,7 @@ function buildProviders(): Provider[] {
         }
 
         const isCorrectPassword = await bcrypt.compare(
-          credentials.password,
+          credentials.password as string,
           user.password,
         );
 
@@ -54,28 +67,25 @@ function buildProviders(): Provider[] {
           throw new Error("Invalid credentials");
         }
 
-        return user as unknown as User;
+        // v5 expects authorize() to return a User-shape object (or null).
+        return user as unknown as AdapterUser;
       },
     }),
   );
 
-  // Google: only registered when both the siteConfig flag and the env vars are
-  // present. Listing 'google' in siteConfig.auth.providers without the env
-  // vars set causes /api/auth/signin/google to 500 — keep the two in sync.
-  if (
-    siteConfig.auth?.providers?.includes("google") &&
-    process.env.GOOGLE_CLIENT_ID &&
-    process.env.GOOGLE_CLIENT_SECRET
-  ) {
+  // Google: only registered when both the siteConfig flag and the env vars
+  // are present. Listing 'google' in siteConfig.auth.providers without the
+  // env vars set causes /api/auth/signin/google to 500 — keep the two in
+  // sync.
+  if (isGoogleEnabled()) {
     providers.push(
       GoogleProvider({
-        clientId: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        // Explicit even though false is the NextAuth default. With the adapter
-        // in play, this flag is enforced: an OAuth login whose email matches
-        // an existing User row but whose (provider, providerAccountId) has no
-        // Account row is rejected with OAuthAccountNotLinked rather than
-        // auto-linked.
+        clientId: process.env.GOOGLE_CLIENT_ID!,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+        // Explicit even though false is the v5 default. With the adapter in
+        // play, an OAuth login whose email matches an existing user row but
+        // whose (provider, providerAccountId) has no Account row is rejected
+        // with OAuthAccountNotLinked rather than auto-linked.
         allowDangerousEmailAccountLinking: false,
         authorization: {
           params: { prompt: "select_account" },
@@ -94,11 +104,17 @@ function buildProviders(): Provider[] {
 // /api/auth/register). We override createUser to fill those in atomically;
 // the rest of the adapter (getUser, linkAccount, updateUser, …) is the
 // default behaviour.
+//
+// v5 note: AdapterUser includes a pre-generated `id` (Auth.js core generates
+// it before calling createUser). We override it with a cuid2 to keep the id
+// format consistent with /api/auth/register and the cuid2 pattern enforced
+// on `id` fields in json_schema.yaml. The returned id is what the adapter
+// then uses for the subsequent Account row insert, so the FK stays correct.
 function buildAdapter(): Adapter {
   const base = PrismaAdapter(prisma);
   return {
     ...base,
-    async createUser(data: Omit<AdapterUser, "id">) {
+    async createUser(data: AdapterUser) {
       const id = createId();
       const created = await prisma.user.create({
         data: {
@@ -130,16 +146,37 @@ function buildAdapter(): Adapter {
   };
 }
 
-export const authOptions = {
+// session.strategy: pinned to "jwt" for the whole deployment.
+//
+// v5's assert only blocks `strategy === "database"` when *only* the
+// Credentials provider is configured — it doesn't block the mixed case
+// (Credentials + Google). But at runtime, that mixed case is still
+// broken: v5 sets a JWT cookie for credentials sign-ins regardless of
+// the configured strategy, then the session resolver — running in
+// database mode — tries to look that JWT cookie up in the `Session`
+// table and finds nothing, so `auth()` returns null. Net result: the
+// user is "logged in" (cookie set, 302 to /) but every subsequent
+// request is treated as anonymous and the proxy redirects back to
+// /login.
+//
+// Forcing "jwt" globally means OAuth users *also* get JWT cookies
+// (no server-side revocation by row delete). That's the gap and the
+// trade-off; closing it for credentials needs either an SSO-only
+// deployment (drop credentials entirely) or a custom session-shim that
+// writes a `Session` row from `authorize()` and binds it to the
+// cookie. Both are out of scope today.
+//
+// The adapter stays wired up: it still writes `User` and `Account`
+// rows on OAuth sign-in (identity stability via providerAccountId,
+// refresh tokens at rest, room for future Auth.js v5+ database
+// sessions). Only the *session* row stays empty.
+const sessionStrategy: "jwt" = "jwt";
+
+export const authConfig: NextAuthConfig = {
   secret: process.env.AUTH_SECRET,
 
-  // PrismaAdapter persists `User` / `Account` / `Session` / `VerificationToken`
-  // rows for OAuth flows. We keep JWT sessions (see Credentials note above),
-  // so `Session` stays empty — `User` (== our `user` table) and `Account` are
-  // what we get today: providerAccountId-based identity, refresh tokens at
-  // rest, and a real first-time-sign-in hook (our custom createUser).
   adapter: buildAdapter(),
-  session: { strategy: "jwt" },
+  session: { strategy: sessionStrategy },
 
   providers: buildProviders(),
   pages: {
@@ -147,10 +184,11 @@ export const authOptions = {
   },
   callbacks: {
     /**
-     * OAuth-only gate. Runs *before* the adapter writes any rows, so this is
-     * where we enforce verified email, the optional domain allow-list, and
-     * the credentials↔OAuth email-collision rule. Credentials sign-ins reach
-     * this callback already-authenticated by `authorize()` and pass through.
+     * OAuth-only gate. Runs *before* the adapter writes any rows, so this
+     * is where we enforce verified email, the optional domain allow-list,
+     * and the credentials↔OAuth email-collision rule. Credentials sign-ins
+     * reach this callback already-authenticated by `authorize()` and pass
+     * through unchanged.
      */
     async signIn({ user, account, profile }) {
       if (!account || account.provider === "credentials") return true;
@@ -162,7 +200,8 @@ export const authOptions = {
       // treat an explicit `false` as a hard fail. Other providers we add
       // later need an equivalent check.
       if (account.provider === "google") {
-        const verified = (profile as { email_verified?: boolean } | undefined)?.email_verified;
+        const verified = (profile as { email_verified?: boolean } | undefined)
+          ?.email_verified;
         if (verified === false) return false;
       }
 
@@ -189,10 +228,10 @@ export const authOptions = {
       // Credentials↔OAuth collision guard. After the user_account / User
       // merge, both flows write to the same `user` row. A row with a
       // non-null password was created via /register; rejecting here keeps
-      // the credentials boundary intact (admin reconciles by pre-linking an
-      // Account row to that user). Without this, the adapter would attempt
-      // to create a new `user` row and hit the @unique(email) constraint —
-      // same outcome, less explicit.
+      // the credentials boundary intact (admin reconciles by pre-linking
+      // an Account row to that user). Without this, the adapter would
+      // attempt to create a new `user` row and hit the @unique(email)
+      // constraint — same outcome, less explicit.
       const existing = await prisma.user.findUnique({
         where: { email },
         select: { password: true },
@@ -212,17 +251,25 @@ export const authOptions = {
 
       return true;
     },
-    async jwt({ token, user }) {
-      return { ...token, id: token.id ?? user?.id };
+    // The session callback receives `user` for database sessions (OAuth)
+    // and `token` for JWT sessions (credentials). Forward `id` from
+    // whichever branch fired.
+    async session({ session, user, token }) {
+      const id = (user?.id ?? (token as { id?: string } | undefined)?.id) ?? "";
+      return { ...session, user: { ...session.user, id } };
     },
-    async session({ session, token }) {
-      return { ...session, user: { ...session.user, id: token.id } };
+    // Only fires for JWT-strategy sessions (credentials). Carries the id
+    // from authorize() into the token so the session callback can echo it.
+    async jwt({ token, user }) {
+      if (user?.id) token.id = user.id;
+      return token;
     },
   },
   events: {
-    // Minimal structured audit logs for auth events. A log aggregator (Vercel
-    // logs, Cloudwatch, Datadog, …) can collect these by prefix; replace with
-    // a proper audit-log table when role/permission change auditing lands.
+    // Minimal structured audit logs for auth events. A log aggregator
+    // (Vercel logs, Cloudwatch, Datadog, …) can collect these by prefix;
+    // replace with a proper audit-log table when role/permission change
+    // auditing lands.
     async signIn({ user, account, isNewUser }) {
       console.info(
         "[auth:signIn]",
@@ -239,13 +286,38 @@ export const authOptions = {
     },
     async signOut(message) {
       const token = "token" in message ? message.token : null;
+      const session = "session" in message ? message.session : null;
       console.info(
         "[auth:signOut]",
         JSON.stringify({
           at: new Date().toISOString(),
-          userId: (token as { id?: string } | null)?.id ?? null,
+          userId:
+            (token as { id?: string } | null)?.id ??
+            (session as { userId?: string } | null)?.userId ??
+            null,
         }),
       );
     },
   },
-} satisfies NextAuthOptions;
+};
+
+export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
+
+// Module augmentation. The Session.user shape is project-wide; the JWT
+// augmentation is only needed for the credentials (JWT-strategy) branch.
+declare module "next-auth" {
+  interface Session {
+    user: {
+      id: string;
+      name?: string | null;
+      email?: string | null;
+      image?: string | null;
+    };
+  }
+}
+
+declare module "@auth/core/jwt" {
+  interface JWT {
+    id: string;
+  }
+}
