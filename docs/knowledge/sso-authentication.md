@@ -14,26 +14,35 @@ separately.
 
 ```
 ┌──────────────────────────────┐
-│ lib/site-config.ts           │  siteConfig.auth.providers — UI gate
-│   auth.providers:            │  (decides which buttons are rendered)
-│     ['credentials','google'] │
+│ lib/site-config.ts           │  siteConfig.auth.providers   — UI gate
+│   auth.providers:            │  siteConfig.auth.allowedDomains
+│     ['credentials','google'] │     (optional domain restriction for OAuth)
 └──────────────┬───────────────┘
                │
                ▼
 ┌──────────────────────────────┐
-│ auth.ts                      │  buildProviders() — server gate
-│   if siteConfig allows       │  (decides which providers NextAuth knows)
-│   && env vars present        │
-│     → register provider      │
+│ auth.ts                      │  buildProviders()           — server gate
+│   if siteConfig allows       │  PrismaAdapter(prisma)      — persists
+│   && env vars present        │     User / Account / Session /
+│     → register provider      │     VerificationToken rows
+│                              │  session: { strategy: 'jwt' }
 └──────────────┬───────────────┘
                │
                ▼
 ┌──────────────────────────────┐
-│ NextAuth callbacks           │  signIn() upserts user_account by email
-│   - OAuth: derive user.id    │  jwt()/session() carry the local id
-│   - Credentials: pass-through│
+│ NextAuth                     │  Adapter creates User + Account on first
+│   - OAuth via adapter        │     OAuth sign-in → events.createUser
+│   - Credentials direct       │     mirrors to user_account (shared id).
+│                              │  Credentials never touches the adapter.
 └──────────────────────────────┘
 ```
+
+Two NextAuth-related tables are populated today (`User`, `Account`) and two
+are reserved for later (`Session` is unused on JWT strategy;
+`VerificationToken` lights up if/when we add a magic-link provider). The
+shape of all four is dictated by `@next-auth/prisma-adapter` and lives at
+the bottom of `prisma/schema.prisma` — PascalCase model names, a deliberate
+exception to the rest of the schema's snake_case convention.
 
 Two gates have to agree before a provider button works:
 
@@ -79,26 +88,51 @@ still exists code-wise but is unreachable from the login UI.
 
 On the first Google sign-in for a given email:
 
-1. `signIn()` callback receives `user` + `account` + `profile` from NextAuth.
-2. We require `profile.email_verified === true` (Google sets this for all
-   completed accounts). If it's explicitly `false`, the sign-in is rejected
-   — without verified email we can't safely match-or-create by email.
-3. If a `user_account` with that email already exists, we link by setting
-   `user.id` to that row's id (so the JWT carries the local id, not the
-   OAuth subject). Existing credentials users can therefore add SSO without
-   losing their record.
-4. If no `user_account` exists, we create one with:
-   - `email` from the IdP
-   - `name` from `profile.name` (or the email if name is missing)
-   - `avatar` from `profile.picture`
+1. `signIn()` callback runs **before** the adapter writes anything.
+   It enforces:
+   - `profile.email_verified !== false` (Google sets this for all completed
+     accounts; an explicit `false` is rejected).
+   - `siteConfig.auth.allowedDomains` — if non-empty, the email's `@domain`
+     must be on the list (case-insensitive). Empty list = allow all.
+   - The **credentials↔OAuth collision rule**: if a `user_account` row exists
+     for this email but no `User` row shares its id (i.e. a credentials-only
+     user is trying to SSO with the same address), the sign-in is rejected
+     with reason `email_in_use_by_credentials`. Letting the adapter run
+     would create a fresh `User` row and then explode on the
+     `@unique(email)` constraint when `events.createUser` mirrors it back
+     into `user_account`. Admin reconciliation step: pre-populate matching
+     `User` and `Account` rows for the existing account.
+2. If `signIn()` returns true, NextAuth's PrismaAdapter creates the `User`
+   row (`prisma.user.create`) and the `Account` row recording
+   `(provider, providerAccountId, refresh_token, access_token, …)`.
+3. `events.createUser({ user })` fires. We mirror to `user_account` with
+   the **same id** as the new `User` row so `session.user.id` continues to
+   address `user_account` directly:
+   - `email`, `name`, `avatar` copied from the User row.
    - `password = null` (column was made nullable for this — see schema note
-     below)
-   - `creator_id` and `updater_id` self-referencing the new row's id, the
-     same bootstrap pattern as `/api/auth/register`.
+     below).
+   - `creator_id` / `updater_id` self-reference the new id, the same
+     bootstrap pattern as `/api/auth/register`.
+4. `events.signIn` fires, emitting a structured `[auth:signIn]` JSON line
+   with `isNewUser: true` (it's `null` for credentials sign-ins because
+   credentials never goes through the adapter).
 
 No role is assigned. An admin grants roles after the user appears in the
 `user_account` table. This is intentional — auto-granting roles via SSO is
 the kind of decision that should be explicit per deployment.
+
+### Returning OAuth sign-in
+
+The adapter finds the existing `Account` row by
+`(provider, providerAccountId)`, reads its `userId`, and reuses the same
+`User`. `signIn()` runs but doesn't trip the collision rule because a User
+row already exists for the email. No `createUser` event.
+
+This is the **identity-stability win** of moving to the adapter: if a
+Google user changes their primary email, the `providerAccountId` is the
+same so they stay the same `User` (and therefore the same `user_account`).
+The previous (no-adapter) implementation matched by email, so the same
+event would have created a brand-new domain user.
 
 ---
 
@@ -138,13 +172,23 @@ change is needed.
 
 ## Out of scope, for next time
 
+- **Database session strategy (server-side revocation)** — NextAuth v4
+  ties the Credentials provider to JWT sessions; switching to
+  `session.strategy = 'database'` silently breaks credentials sign-in.
+  The migration path is **Auth.js v5**, which natively supports mixed
+  strategies (Credentials on JWT, OAuth on DB). The PrismaAdapter is
+  already in place, so when v5 lands the change is `session.strategy +
+  Credentials adjustments`, not a schema migration.
 - **MFA / TOTP** — second factor on top of either provider. NextAuth doesn't
   ship this; the typical pattern is a custom `step` in the credentials flow
   or a separate gate after `session.user.id` is known.
 - **Account linking UI** — letting a signed-in user attach an additional
-  OAuth provider to their existing account. Today, linking is implicit via
-  email match.
-- **`@next-auth/prisma-adapter`** — would persist `Account` / `Session` /
-  `VerificationToken` rows instead of using JWT-only sessions. Worth
-  revisiting when (a) we want to revoke sessions server-side, or (b) a user
-  has multiple OAuth providers attached.
+  OAuth provider to their existing account. The plumbing is there (one User
+  row can own multiple Account rows), but there's no user-facing flow yet.
+- **Audit-log table** — `events.signIn` / `signOut` / `createUser` currently
+  emit structured `console.info` lines. A real audit-log Prisma model with
+  hooks into role/permission CRUD is its own piece of work.
+- **Rate limiting on `/api/auth/*`** — no middleware today. Realistic plan:
+  Next.js middleware + Upstash Redis (or in-memory for dev).
+- **Per-tenant SSO (SAML)** — would use SAML Jackson / WorkOS rather than
+  rolling SAML ourselves, with per-tenant domain binding.
