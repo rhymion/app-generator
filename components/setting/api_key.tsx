@@ -12,7 +12,7 @@ import { useTranslations } from 'next-intl';
 export async function generateApiKey(): Promise<string> {
   await getSessionUserIdOrThrow();
   const apiKey = `mk_${randomBytes(32).toString('hex')}`;
-  //await prisma.user_account.update({ where: { id: userId }, data: { api_key: apiKey } });
+  //await prisma.user.update({ where: { id: userId }, data: { api_key: apiKey } });
   //revalidatePath('/');
   return apiKey;
 }

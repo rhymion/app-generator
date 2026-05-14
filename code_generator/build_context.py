@@ -578,7 +578,7 @@ def build_context(entity: dict, schema: dict) -> dict:
     ]
 
     has_org_rel          = any(r['target'] == 'organization' for r in parent_rels)
-    should_filter_by_org = has_org_rel and model not in ('organization', 'user_account')
+    should_filter_by_org = has_org_rel and model not in ('organization', 'user')
 
     has_assignee_id   = 'assignee_id' in filtered_props
     item_context_select = (
@@ -913,7 +913,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         cdef     = schema['definitions'].get(cn, {})
         if out_type == 'comments':
             child_include_entries.append(
-                f"{prop}: {{ include: {{ creator: {{ select: {{ id: true, name: true, avatar: true }} }} }}, orderBy: {{ created_at: 'asc' }} }}"
+                f"{prop}: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }} }}, orderBy: {{ created_at: 'asc' }} }}"
             )
         elif not cdef.get('properties'):
             child_include_entries.append(f"{prop}: true")
@@ -968,7 +968,7 @@ def build_context(entity: dict, schema: dict) -> dict:
                     # comment children always carry creator + orderBy (no FK rels defined in schema)
                     if c.get('child_name') == 'comment':
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, avatar: true }} }} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:
@@ -977,7 +977,7 @@ def build_context(entity: dict, schema: dict) -> dict:
                     # comment child has no FK rels in schema — emit include + orderBy directly
                     if c.get('child_name') == 'comment':
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, avatar: true }} }} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:
@@ -1080,10 +1080,10 @@ def build_context(entity: dict, schema: dict) -> dict:
         for r in flatten_rels
         if not r['is_m2o'] and any(not f.get('is_fk') for f in r['fields'])
     )
-    service_args_for_create = f"userId, {parent_service_args}" + (
+    service_args_for_create = f"actorId, {parent_service_args}" + (
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
-    service_args_for_update = f"userId, id, {parent_service_args}" + (
+    service_args_for_update = f"actorId, id, {parent_service_args}" + (
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
 

@@ -449,8 +449,8 @@ def actions_context(ctx: dict) -> dict:
     def _upsert_body(has_ch: bool) -> str:
         _flatten_block = (f"{flatten_extractions_code}\n" if flatten_extractions_code else "")
         if can_create and can_update:
-            create_call = f'await add{parent_pascal}(userId, {parent_params}{full_child_args}{flatten_args_str});'
-            update_call = f'await update{parent_pascal}(userId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
+            create_call = f'await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});'
+            update_call = f'await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
             return (
                 f"  const id = data.get('id') as string | null;\n"
                 f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
@@ -463,7 +463,7 @@ def actions_context(ctx: dict) -> dict:
                 f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _flatten_block +
-                f"  const userId = await getSessionUserIdOrThrow();\n\n"
+                f"  const actorId = await getSessionUserIdOrThrow();\n\n"
                 f"  if (id) {{\n"
                 f"    {update_call}\n"
                 f"  }} else {{\n"
@@ -480,16 +480,16 @@ def actions_context(ctx: dict) -> dict:
                 f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _flatten_block +
-                f"\n  const userId = await getSessionUserIdOrThrow();\n"
-                f"  await update{parent_pascal}(userId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
+                f"\n  const actorId = await getSessionUserIdOrThrow();\n"
+                f"  await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
             )
         else:  # create only
             return (
                 f"  await requirePermission('{parent}', 'create');\n"
                 f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "") +
-                f"\n  const userId = await getSessionUserIdOrThrow();\n"
-                f"  await add{parent_pascal}(userId, {parent_params}{full_child_args}{flatten_args_str});"
+                f"\n  const actorId = await getSessionUserIdOrThrow();\n"
+                f"  await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});"
             )
 
     service_fns = [
@@ -660,7 +660,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
             + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
             + f"      await tx.{_target}.upsert({{\n"
             f"        where: {{ {_fk_field}: id }},\n"
-            f"        create: {{ {_fk_field}: id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_var} }},\n"
+            f"        create: {{ {_fk_field}: id, {_create_extras_str}creator_id: actorId, updater_id: actorId, ...{_var} }},\n"
             f"        update: {_var},\n"
             f"      }});\n"
             f"    }} else {{\n"
@@ -672,7 +672,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
             f"    if ({_var}) {{\n"
             + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
             + f"      await tx.{_target}.create({{\n"
-            f"        data: {{ {_fk_field}: created.id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_var} }},\n"
+            f"        data: {{ {_fk_field}: created.id, {_create_extras_str}creator_id: actorId, updater_id: actorId, ...{_var} }},\n"
             f"      }});\n"
             f"    }}"
         )

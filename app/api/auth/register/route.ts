@@ -11,13 +11,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    const existing = await prisma.user_account.findUnique({ where: { email } });
+    const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
       return NextResponse.json({ error: "Email already in use" }, { status: 409 });
     }
 
     const userId = createId();
-    await prisma.user_account.create({
+    await prisma.user.create({
       data: {
         id: userId,
         creator_id: userId,

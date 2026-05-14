@@ -131,7 +131,7 @@ export const getModelPermissions = cache(async (
         // Regular roles the user belongs to, excluding special roles
         {
           role: {
-            user_accounts: { some: { id: resolvedUserId } },
+            users: { some: { id: resolvedUserId } },
             name: { notIn: [...SPECIAL_ROLE_NAMES] },
           },
         },
@@ -234,7 +234,7 @@ export async function assertPermission(permissions: OperationFlags, operation: O
 export const getUserRoleIds = cache(async (userId?: string | null): Promise<string[]> => {
   const resolvedUserId = userId ?? await getSessionUserId();
   if (!resolvedUserId) return [];
-  const user = await prisma.user_account.findUnique({
+  const user = await prisma.user.findUnique({
     where: { id: resolvedUserId },
     select: { roles: { select: { id: true } } },
   });

@@ -32,7 +32,7 @@ export async function seedTestDatabase() {
   const hashedPassword = await getTestPasswordHash();
   const userId = createId();
   // Create test user
-  const user = await prisma.user_account.create({
+  const user = await prisma.user.create({
     data: {
       id: userId,
       creator_id: userId,
@@ -56,7 +56,7 @@ export async function seedTestDatabase() {
  * - Limited user has a DenyRole with explicit false permissions → all operations denied → 403
  */
 export async function createLimitedApiUser(entityName: string): Promise<string> {
-  const testUser = await prisma.user_account.findUnique({
+  const testUser = await prisma.user.findUnique({
     where: { email: TEST_CREDENTIALS.email },
   });
   if (!testUser) throw new Error('Test user not found. Run db:seed first.');
@@ -85,7 +85,7 @@ export async function createLimitedApiUser(entityName: string): Promise<string> 
     },
   });
 
-  await prisma.user_account.create({
+  await prisma.user.create({
     data: {
       id: limitedUserId,
       creator_id: limitedUserId,

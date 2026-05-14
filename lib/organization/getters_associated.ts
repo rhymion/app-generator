@@ -9,7 +9,7 @@ import { assertPermission, getModelPermissions, getSessionUserIdOrThrow, Operati
 export async function getAssociatedOrganizations(userId: string): Promise<Organization[]> {
   const organizations = await prisma.organization.findMany({
     where: {
-      user_accounts: {
+      users: {
         some: {
           id: userId
         }
@@ -28,14 +28,14 @@ export async function getAssociatedOrganizationDetail(id: string, userId: string
   const organization = await prisma.organization.findUnique({
     where: { 
       id,
-      user_accounts: {
+      users: {
         some: {
           id: userId
         }
       }
     },
     include: { 
-      user_accounts: {
+      users: {
         where: { id: userId }
       }
     },
@@ -47,7 +47,7 @@ export async function getAssociatedOrganizationDetail(id: string, userId: string
 
   return {
     ...organization,
-    user_accounts: organization.user_accounts,
+    users: organization.users,
   };
 }
 
@@ -75,7 +75,7 @@ export async function searchAssociatedOrganizationOptions(
     orClauses.push({ id: { in: includeIds } });
   }
   const where: Record<string, unknown> = {
-    user_accounts: { some: { id: userId } },
+    users: { some: { id: userId } },
   };
   if (orClauses.length > 0) {
     where.OR = orClauses;

@@ -22,27 +22,31 @@ separately.
                ▼
 ┌──────────────────────────────┐
 │ auth.ts                      │  buildProviders()           — server gate
-│   if siteConfig allows       │  PrismaAdapter(prisma)      — persists
-│   && env vars present        │     User / Account / Session /
-│     → register provider      │     VerificationToken rows
+│   if siteConfig allows       │  buildAdapter() wraps
+│   && env vars present        │     PrismaAdapter(prisma) — overrides
+│     → register provider      │     createUser to fill domain-required
+│                              │     fields (name, creator_id, updater_id)
 │                              │  session: { strategy: 'jwt' }
 └──────────────┬───────────────┘
                │
                ▼
 ┌──────────────────────────────┐
-│ NextAuth                     │  Adapter creates User + Account on first
-│   - OAuth via adapter        │     OAuth sign-in → events.createUser
-│   - Credentials direct       │     mirrors to user_account (shared id).
+│ NextAuth                     │  Adapter writes the `user` row directly
+│   - OAuth via adapter        │     on first OAuth sign-in. `Account` row
+│   - Credentials direct       │     records (provider, providerAccountId).
 │                              │  Credentials never touches the adapter.
 └──────────────────────────────┘
 ```
 
-Two NextAuth-related tables are populated today (`User`, `Account`) and two
-are reserved for later (`Session` is unused on JWT strategy;
-`VerificationToken` lights up if/when we add a magic-link provider). The
-shape of all four is dictated by `@next-auth/prisma-adapter` and lives at
-the bottom of `prisma/schema.prisma` — PascalCase model names, a deliberate
-exception to the rest of the schema's snake_case convention.
+PrismaAdapter expects to read/write `prisma.user`, `prisma.account`,
+`prisma.session`, `prisma.verificationToken`. The schema's domain `user`
+table satisfies the first one — Prisma derives the client name by
+lower-casing the model name, so `model user` exposes `prisma.user` exactly
+as the adapter requires. The other three are PascalCase NextAuth-only
+tables at the bottom of `prisma/schema.prisma`, a deliberate exception to
+the snake_case convention. `Account` is populated on every OAuth sign-in;
+`Session` is unused on JWT strategy; `VerificationToken` lights up if/when
+a magic-link provider is added.
 
 Two gates have to agree before a provider button works:
 
@@ -94,49 +98,47 @@ On the first Google sign-in for a given email:
      accounts; an explicit `false` is rejected).
    - `siteConfig.auth.allowedDomains` — if non-empty, the email's `@domain`
      must be on the list (case-insensitive). Empty list = allow all.
-   - The **credentials↔OAuth collision rule**: if a `user_account` row exists
-     for this email but no `User` row shares its id (i.e. a credentials-only
-     user is trying to SSO with the same address), the sign-in is rejected
-     with reason `email_in_use_by_credentials`. Letting the adapter run
-     would create a fresh `User` row and then explode on the
-     `@unique(email)` constraint when `events.createUser` mirrors it back
-     into `user_account`. Admin reconciliation step: pre-populate matching
-     `User` and `Account` rows for the existing account.
-2. If `signIn()` returns true, NextAuth's PrismaAdapter creates the `User`
-   row (`prisma.user.create`) and the `Account` row recording
+   - The **credentials↔OAuth collision rule**: if a `user` row already
+     exists for this email with `password !== null`, that account was
+     created via `/register`. SSO sign-in is rejected with reason
+     `email_in_use_by_credentials`. Without this guard, the adapter would
+     attempt to create a new `user` row and hit the `@unique(email)`
+     constraint — same outcome, less explicit. Admin reconciliation step:
+     pre-populate a matching `Account` row to link the existing user to
+     the OAuth identity.
+2. If `signIn()` returns true, `buildAdapter().createUser()` (our wrapper
+   around PrismaAdapter) inserts the `user` row with: pre-generated cuid,
+   `email`, `name = profile.name ?? email`, `emailVerified`, `image`, and
+   self-referencing `creator_id`/`updater_id` matching the new id. The
+   wrapper exists because the default PrismaAdapter only writes the
+   NextAuth-shape fields, but our `user` table requires non-null `name`
+   plus the audit-bootstrap pattern shared with `/api/auth/register`.
+3. The adapter then writes the `Account` row recording
    `(provider, providerAccountId, refresh_token, access_token, …)`.
-3. `events.createUser({ user })` fires. We mirror to `user_account` with
-   the **same id** as the new `User` row so `session.user.id` continues to
-   address `user_account` directly:
-   - `email`, `name`, `avatar` copied from the User row.
-   - `password = null` (column was made nullable for this — see schema note
-     below).
-   - `creator_id` / `updater_id` self-reference the new id, the same
-     bootstrap pattern as `/api/auth/register`.
 4. `events.signIn` fires, emitting a structured `[auth:signIn]` JSON line
    with `isNewUser: true` (it's `null` for credentials sign-ins because
    credentials never goes through the adapter).
 
 No role is assigned. An admin grants roles after the user appears in the
-`user_account` table. This is intentional — auto-granting roles via SSO is
-the kind of decision that should be explicit per deployment.
+`user` table. This is intentional — auto-granting roles via SSO is the
+kind of decision that should be explicit per deployment.
 
 ### Returning OAuth sign-in
 
 The adapter finds the existing `Account` row by
 `(provider, providerAccountId)`, reads its `userId`, and reuses the same
-`User`. `signIn()` runs but doesn't trip the collision rule because a User
-row already exists for the email. No `createUser` event.
+`user` row. `signIn()` runs but doesn't trip the collision rule because
+the matching `user` row was created via SSO (`password === null`). No
+`createUser` is called on the adapter.
 
-This is the **identity-stability win** of moving to the adapter: if a
-Google user changes their primary email, the `providerAccountId` is the
-same so they stay the same `User` (and therefore the same `user_account`).
-The previous (no-adapter) implementation matched by email, so the same
-event would have created a brand-new domain user.
+This is the **identity-stability win** of the adapter: if a Google user
+changes their primary email, the `providerAccountId` is the same so they
+stay the same `user` row. The previous (no-adapter) implementation matched
+by email, so the same event would have created a brand-new domain user.
 
 ---
 
-## Why `user_account.password` is nullable
+## Why `user.password` is nullable
 
 SSO-provisioned users have no password. The `password` column was changed
 from `String` (required) to `String?` in `prisma/schema.prisma`, and the

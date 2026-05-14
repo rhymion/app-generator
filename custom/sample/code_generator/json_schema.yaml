@@ -395,7 +395,7 @@ definitions:
     allOf:
       - $ref: "#/definitions/parent_only"
 
-  user_account:
+  user:
     type: object
     required:
       - id
@@ -430,9 +430,9 @@ definitions:
           - string
           - "null"
         x-custom-component:
-          target: 
+          target:
             - upsert
-      avatar:
+      image:
         type:
           - string
           - "null"
@@ -455,7 +455,7 @@ definitions:
           - string
           - "null"
 
-  user_account_detail:
+  user_detail:
     x-generate:
       list: true
       view: true
@@ -467,14 +467,14 @@ definitions:
       test: false
       fields:
         - name
-        - avatar
+        - image
         - roles
     x-relationships:
       roles:
         type: many-to-many
         target: role
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/user"
       - type: object
         required:
           - roles
@@ -499,7 +499,7 @@ definitions:
         type: many-to-many
         target: role
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/user"
       - type: object
         required:
           - roles
@@ -661,20 +661,20 @@ definitions:
       api: true
       test: true
     x-relationships:
-      user_accounts:
+      users:
         type: many-to-many
-        target: user_account
+        target: user
     allOf:
       - $ref: "#/definitions/role"
       - type: object
         required:
-          - user_accounts
+          - users
         properties:
-          user_accounts:
+          users:
             type: array
             x-outputType: list
             items:
-              $ref: "#/definitions/user_account"
+              $ref: "#/definitions/user"
 
   organization:
     type: object
@@ -704,20 +704,20 @@ definitions:
       api: true
       test: true
     x-relationships:
-      user_accounts:
+      users:
         type: many-to-many
-        target: user_account
+        target: user
     allOf:
       - $ref: "#/definitions/organization"
       - type: object
         required:
-          - user_accounts
+          - users
         properties:
-          user_accounts:
+          users:
             type: array
             x-outputType: list
             items:
-              $ref: "#/definitions/user_account"
+              $ref: "#/definitions/user"
 
   permission:
     type: object
@@ -809,7 +809,7 @@ definitions:
         pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
           type: many-to-one
-          target: user_account
+          target: user
           labelField: name
 
   procedure_detail:
@@ -838,7 +838,7 @@ definitions:
           - followed_by
         properties:
           assignee:
-            $ref: "#/definitions/user_account"
+            $ref: "#/definitions/user"
           parent:
             $ref: "#/definitions/procedure"
           children:
@@ -992,16 +992,16 @@ definitions:
     type: object
     required:
       - id
-      - user_account_id
+      - user_id
       - day_of_week
       - start_time
       - end_time
     x-display:
       table:
-        - user_account: 
+        - user:
             primary: true
             width: 200
-        - day_of_week: 
+        - day_of_week:
             width: 100
         - start_time:
             width: 150
@@ -1011,12 +1011,12 @@ definitions:
       id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
-      user_account_id:
+      user_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
           type: many-to-one
-          target: user_account
+          target: user
           labelField: name
       day_of_week:
         type: integer
@@ -1053,22 +1053,22 @@ definitions:
       - $ref: "#/definitions/shift_template"
       - type: object
         required:
-          - user_account
+          - user
         properties:
-          user_account:
-            $ref: "#/definitions/user_account"
+          user:
+            $ref: "#/definitions/user"
 
   shift:
     type: object
     required:
       - id
-      - user_account_id
+      - user_id
       - start_time
       - end_time
       - status
     x-display:
       table:
-        - user_account: 
+        - user:
             primary: true
             width: 200
         - start_time:
@@ -1076,18 +1076,18 @@ definitions:
         - end_time:
             width: 200
       chart:
-        span: week 
-        row_by: user_account
+        span: week
+        row_by: user
     properties:
       id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
-      user_account_id:
+      user_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
           type: many-to-one
-          target: user_account
+          target: user
           labelField: name
       start_time:
         type: string
@@ -1118,10 +1118,10 @@ definitions:
       - $ref: "#/definitions/shift"
       - type: object
         required:
-          - user_account
+          - user
         properties:
-          user_account:
-            $ref: "#/definitions/user_account"
+          user:
+            $ref: "#/definitions/user"
 
   product:
     type: object
@@ -1276,7 +1276,7 @@ definitions:
         pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
           type: many-to-one
-          target: user_account
+          target: user
           labelField: name
 
   purchase_per_item:
@@ -1331,7 +1331,7 @@ definitions:
           - items
         properties:
           customer:
-            $ref: "#/definitions/user_account"
+            $ref: "#/definitions/user"
           items:
             type: array
             items:
@@ -1341,14 +1341,14 @@ definitions:
     type: object
     required:
       - id
-      - user_account_id
+      - user_id
       - start_date
       - end_date
       - reason
       - approvable_id
     x-display:
       table:
-        - user_account:
+        - user:
             primary: true
             width: 200
         - start_date:
@@ -1360,12 +1360,12 @@ definitions:
       id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
-      user_account_id:
+      user_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
           type: many-to-one
-          target: user_account
+          target: user
           labelField: name
       start_date:
         type: string
@@ -1404,10 +1404,10 @@ definitions:
       - $ref: "#/definitions/leave_request"
       - type: object
         required:
-          - user_account
+          - user
         properties:
-          user_account:
-            $ref: "#/definitions/user_account"
+          user:
+            $ref: "#/definitions/user"
           approvable:
             $ref: "#/definitions/approvable"
 

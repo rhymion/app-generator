@@ -557,3 +557,70 @@ model dashboard_widget {
   created_at     DateTime  @default(now()) @db.Timestamptz(0)
   updated_at     DateTime  @updatedAt @db.Timestamptz(0)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NextAuth (@next-auth/prisma-adapter) tables.
+//
+// The four models below are required by PrismaAdapter and must use these
+// exact PascalCase names — the adapter accesses them as `prisma.user`,
+// `prisma.account`, `prisma.session`, `prisma.verificationToken`, which the
+// Prisma client derives by lower-casing the first letter of the model name.
+// The rest of this schema is snake_case; these four are the deliberate
+// exception, owned by NextAuth's contract rather than ours.
+//
+// We deliberately stay on `session: { strategy: 'jwt' }` in auth.ts so the
+// Credentials provider keeps working. As a result:
+//   - `User` and `Account` are populated on every OAuth sign-in.
+//   - `Session` is unused today; it lights up if/when we switch to database
+//     sessions (Auth.js v5 migration territory).
+//   - `VerificationToken` is unused until an Email/magic-link provider is
+//     added.
+//
+// Bridge to our domain user table:  User.id == user_account.id, kept in sync
+// by the `events.createUser` handler in auth.ts. No FK between the two — the
+// invariant is enforced by that handler.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}

@@ -59,7 +59,7 @@ export async function notifyApprovalRequestCreated(
 
   const role = await db.role.findUnique({
     where: { id: req.approval_flow.approver_role_id },
-    select: { user_accounts: { select: { id: true, organizations: { select: { id: true } } } } },
+    select: { users: { select: { id: true, organizations: { select: { id: true } } } } },
   });
   if (!role) return;
 
@@ -68,7 +68,7 @@ export async function notifyApprovalRequestCreated(
 
   const entityLabel = options.entityLabel ?? req.approval_flow.entity_name ?? 'request';
 
-  for (const u of role.user_accounts) {
+  for (const u of role.users) {
     if (u.id === excludeUserId) continue;
     if (orgId && !u.organizations.some((o) => o.id === orgId)) continue;
     notify(u.id, 'approval_requested', {

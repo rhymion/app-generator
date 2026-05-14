@@ -39,8 +39,8 @@ function makeBulkResponse<T>(results: BulkResult<T>[]): BulkResponse<T> {
 {% if can_create %}
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '{{ parent }}', 'create');
+    const { userId: actorId } = await authenticateApiKey(request);
+    await requireApiPermission(actorId, '{{ parent }}', 'create');
     const body = await request.json();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bulkItems: any[] = Array.isArray(body) ? body : [body];
@@ -70,8 +70,8 @@ export async function POST(request: NextRequest) {
 {% if can_update %}
 export async function PUT(request: NextRequest) {
   try {
-    const { userId } = await authenticateApiKey(request);
-    const richPerms = await requireApiPermission(userId, '{{ parent }}', 'update');
+    const { userId: actorId } = await authenticateApiKey(request);
+    const richPerms = await requireApiPermission(actorId, '{{ parent }}', 'update');
     const body = await request.json();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bulkItems: any[] = Array.isArray(body) ? body : [body];
@@ -96,9 +96,9 @@ export async function PUT(request: NextRequest) {
       }
       const canUpdate =
         richPerms.general.update ||
-        (richPerms.creator?.update && existing.creator_id === userId) ||
+        (richPerms.creator?.update && existing.creator_id === actorId) ||
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (richPerms.assignee?.update && (existing as any).assignee_id === userId);
+        (richPerms.assignee?.update && (existing as any).assignee_id === actorId);
       if (!canUpdate) {
         bulkResults.push({ index: i, success: false, error: `Access denied: ${id}` });
         continue;
@@ -124,8 +124,8 @@ export async function PUT(request: NextRequest) {
 {% if can_delete %}
 export async function DELETE(request: NextRequest) {
   try {
-    const { userId } = await authenticateApiKey(request);
-    const richPerms = await requireApiPermission(userId, '{{ parent }}', 'delete');
+    const { userId: actorId } = await authenticateApiKey(request);
+    const richPerms = await requireApiPermission(actorId, '{{ parent }}', 'delete');
     const body = await request.json();
     const bulkItems: { id: string }[] = Array.isArray(body) ? body : [body];
 
@@ -149,9 +149,9 @@ export async function DELETE(request: NextRequest) {
       }
       const canDelete =
         richPerms.general.delete ||
-        (richPerms.creator?.delete && existing.creator_id === userId) ||
+        (richPerms.creator?.delete && existing.creator_id === actorId) ||
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (richPerms.assignee?.delete && (existing as any).assignee_id === userId);
+        (richPerms.assignee?.delete && (existing as any).assignee_id === actorId);
       if (!canDelete) {
         results.push({ index: i, success: false, error: `Access denied: ${id}` });
         continue;

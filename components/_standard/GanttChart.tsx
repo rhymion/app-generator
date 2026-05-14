@@ -37,7 +37,7 @@ export type GanttItem = {
   id: string;
   start_time: string;  // ISO string
   end_time: string;    // ISO string
-  row_id: string;      // grouping key (e.g. user_account_id, resource_id)
+  row_id: string;      // grouping key (e.g. user_id, resource_id)
   row_label: string;   // display label for the row
   tooltip?: string;    // extra info shown in the tooltip (e.g. status label)
 };

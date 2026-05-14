@@ -6,7 +6,7 @@ import { getSessionUserIdOrThrow } from '@/lib/authz';
 
 export async function verifyAndHashPassword(currentPassword: string, newPassword: string): Promise<string> {
   const userId = await getSessionUserIdOrThrow();
-  const user = await prisma.user_account.findUnique({ where: { id: userId }, select: { password: true } });
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { password: true } });
   if (!user) throw new Error('User not found');
   // SSO-provisioned accounts have password === null. They can't "change"
   // a password they never had — surface the same error message as a wrong

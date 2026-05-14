@@ -163,7 +163,7 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     Uses title-based name (e.g. 'Test Parent', 'Test Assignee') and encodes
     user_account email/password so the template needs no user_account special-casing.
     """
-    if target == 'user_account':
+    if target == 'user':
         return [
             {'prop_name': 'name', 'prisma_val': f"'Test {title}'", 'prisma_val_unique': f'`Test {title} ${{i}}`', 'prisma_val_second': f"'Test {title} 2'"},
             {'prop_name': 'email', 'prisma_val': f'`test-{var_name}-${{Date.now()}}@example.com`', 'prisma_val_unique': f'`test-{var_name}-${{Date.now()}}-${{i}}@example.com`', 'prisma_val_second': f'`test-{var_name}-${{Date.now()}}-2@example.com`'},
@@ -312,7 +312,7 @@ def resolve_dependencies(model_name: str, schema: dict) -> list[dict]:
         rels = get_parent_relationships(model_def)
         relevant = [
             r for r in rels
-            if r['target'] != 'user_account'
+            if r['target'] != 'user'
             and r['target'] != model
             and r['prop_name'] != 'updater_id'
             and r['prop_name'] != 'assignee_id'
@@ -346,7 +346,7 @@ def get_entity_fk_deps(model_name: str, schema: dict, deps: list[dict]) -> list[
     return [
         {'prop_name': r['prop_name'], 'dep_var_name': to_camel_case(r['target'])}
         for r in rels
-        if r['target'] != 'user_account'
+        if r['target'] != 'user'
         and r['target'] != model_name
         and r['prop_name'] != 'updater_id'
         and r['prop_name'] != 'assignee_id'
@@ -379,7 +379,7 @@ def get_internal_one_to_one_fks(model_name: str, schema: dict) -> list[dict]:
         if prop_name not in required_fields:
             continue
         var_name = to_camel_case(re.sub(r'_id$', '', prop_name))
-        if target == 'user_account':
+        if target == 'user':
             create_data = (
                 "{ name: 'Test User Account', "
                 "email: `test-dep-ua-${Date.now()}-${Math.random()}@example.com`, "
@@ -432,7 +432,7 @@ def get_field_metas(
 
         rel = next((r for r in relationships if r['prop_name'] == prop_name), None)
         if rel:
-            if rel['target'] == 'user_account':
+            if rel['target'] == 'user':
                 continue
             metas.append({
                 **base,
@@ -1154,7 +1154,7 @@ def helper_context(
     # → creates 'approverRole' dep and 'requestorRole' dep instead of a single 'role' dep.
     target_to_fk_rels: dict[str, list] = {}
     for r in relationships:
-        if (r['target'] not in ('user_account', model_name)
+        if (r['target'] not in ('user', model_name)
                 and r['prop_name'] not in ('updater_id', 'assignee_id')):
             target_to_fk_rels.setdefault(r['target'], []).append(r)
     multi_fk_targets = {t: rels for t, rels in target_to_fk_rels.items() if len(rels) > 1}
@@ -1218,7 +1218,7 @@ def helper_context(
     for child_meta in datagrid_children:
         for field in child_meta['fields']:
             target = field.get('dep_target')
-            if field['category'] == 'autocomplete' and target and target != 'user_account':
+            if field['category'] == 'autocomplete' and target and target != 'user':
                 prop_stem = re.sub(r'_id$', '', field['prop_name'])
                 var_name = to_camel_case(prop_stem)
                 if not any(d['var_name'] == var_name for d in deps):
@@ -1229,11 +1229,11 @@ def helper_context(
     ua_dep_fields = []
     ua_dep_fields_full = []
     for r in relationships:
-        if (r['target'] == 'user_account'
+        if (r['target'] == 'user'
                 and r['prop_name'] not in ('creator_id', 'updater_id')):
             prop_stem = re.sub(r'_id$', '', r['prop_name'])
             var_name = to_camel_case(prop_stem)
-            deps.append({'target': 'user_account', 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': []})
+            deps.append({'target': 'user', 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': []})
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
             ua_dep_fields_full.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
             if r['prop_name'] in required_fields:
@@ -1249,7 +1249,7 @@ def helper_context(
                 {'prop_name': rel['prop_name'], 'dep_var_name': fk_prop_to_dep_var[rel['prop_name']]}
                 for rel in relationships
                 if rel.get('required')
-                and rel['target'] not in (model_name, 'user_account')
+                and rel['target'] not in (model_name, 'user')
                 and rel['prop_name'] in fk_prop_to_dep_var
             ]
             if not any(d['var_name'] == var_name for d in deps):
@@ -1284,7 +1284,7 @@ def helper_context(
             self_ref_fk_deps = [
                 {'prop_name': r['prop_name'], 'dep_var_name': fk_prop_to_dep_var[r['prop_name']]}
                 for r in relationships
-                if r.get('required') and r['target'] != model_name and r['target'] != 'user_account'
+                if r.get('required') and r['target'] != model_name and r['target'] != 'user'
                 and r['prop_name'] in fk_prop_to_dep_var
             ]
             # label_field key is snake_case in the extracted entity relationship dict
@@ -1351,7 +1351,7 @@ def helper_context(
         enriched_deps.append({
             **dep,
             'title': title_str,
-            'has_user_accounts': x_rels.get('user_accounts', {}).get('target') == 'user_account',
+            'has_user_accounts': x_rels.get('users', {}).get('target') == 'user',
             'extra_required_fields': extra_required_fields,
             'label_field': label_field,
             'label_field_is_date': label_field_is_date,
@@ -1434,7 +1434,7 @@ def helper_context(
         child_fields_prisma = []
         for f in child_meta['fields']:
             target = f.get('dep_target')
-            if f['category'] == 'autocomplete' and target and target != 'user_account':
+            if f['category'] == 'autocomplete' and target and target != 'user':
                 # Use prop-stem var name so self-ref FKs (e.g. reference_id → db_table)
                 # get their own dep (e.g. deps.reference) distinct from the parent itself.
                 prop_stem = re.sub(r'_id$', '', f['prop_name'])
@@ -1464,15 +1464,15 @@ def helper_context(
     primary_fk_dep = next((d for d in enriched_deps if d.get('needs_second')), None)
     # Also detect when the primary display FK is a user_account field.
     # In that case the dep var_name equals to_camel_case(primary_field_name_h).
-    if primary_fk_dep is None and primary_is_fk_h and primary_fk_dep_target == 'user_account':
+    if primary_fk_dep is None and primary_is_fk_h and primary_fk_dep_target == 'user':
         primary_ua_var = to_camel_case(primary_field_name_h)
         primary_fk_dep = next(
             (d for d in enriched_deps
-             if d['target'] == 'user_account' and d['var_name'] == primary_ua_var),
+             if d['target'] == 'user' and d['var_name'] == primary_ua_var),
             None,
         )
     if primary_fk_dep is not None:
-        primary_fk_dep = {**primary_fk_dep, 'is_user_account': primary_fk_dep['target'] == 'user_account'}
+        primary_fk_dep = {**primary_fk_dep, 'is_user_account': primary_fk_dep['target'] == 'user'}
 
     # populateData needs deps when there are required FK fields not covered by per-iteration creation.
     primary_fk_dep_var = primary_fk_dep['var_name'] if primary_fk_dep else None
@@ -1558,7 +1558,7 @@ def spec_context(
     req_ua_spec = []
     all_ua_spec = []
     for r in relationships:
-        if r['target'] == 'user_account' and r['prop_name'] not in ('creator_id', 'updater_id'):
+        if r['target'] == 'user' and r['prop_name'] not in ('creator_id', 'updater_id'):
             var_name = to_camel_case(re.sub(r'_id$', '', r['prop_name']))
             field_label = to_title_case(re.sub(r'_id$', '', r['prop_name']))
             entry = {
@@ -1576,7 +1576,7 @@ def spec_context(
     # Uses prop-stem-based var_names so self-ref FKs get e.g. 'parent' not 'procedure'.
     fk_dep_vars = {}
     for r in relationships:
-        if r['target'] != 'user_account' and r['prop_name'] not in ('creator_id', 'updater_id'):
+        if r['target'] != 'user' and r['prop_name'] not in ('creator_id', 'updater_id'):
             prop_stem = re.sub(r'_id$', '', r['prop_name'])
             fk_dep_vars[r['prop_name']] = to_camel_case(prop_stem)
 
@@ -1601,7 +1601,7 @@ def spec_context(
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
     # Datagrid children may have FK deps not on the parent (e.g. field.reference_id → db_table)
     has_child_fk_deps = any(
-        f['category'] == 'autocomplete' and f.get('dep_target') and f.get('dep_target') != 'user_account'
+        f['category'] == 'autocomplete' and f.get('dep_target') and f.get('dep_target') != 'user'
         for c in datagrid_children
         for f in c['fields']
     )
@@ -2048,7 +2048,7 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
         comment_children_registry = [c for c in child_metas if c['render_type'] == 'comments']
         for lc in list_children:
             rel = lc['child'].get('relationship') or {}
-            if rel.get('target') == 'user_account':
+            if rel.get('target') == 'user':
                 has_user_account_populate = True
         has_approvable = any(
             d['target'] == 'approvable'
@@ -2127,13 +2127,13 @@ def api_spec_context(
         (r for r in relationships if r['prop_name'] == f'{primary_field_name}_id'),
         None,
     ) if primary_is_fk else None
-    primary_fk_is_ua = primary_is_fk and bool(primary_fk_rel) and primary_fk_rel['target'] == 'user_account'
+    primary_fk_is_ua = primary_is_fk and bool(primary_fk_rel) and primary_fk_rel['target'] == 'user'
 
     # User_account FK fields required by the entity (e.g. customer_id)
     ua_fk_fields_for_api = [
         {'prop_name': r['prop_name'], 'var_name': to_camel_case(re.sub(r'_id$', '', r['prop_name']))}
         for r in relationships
-        if r['target'] == 'user_account'
+        if r['target'] == 'user'
         and r['prop_name'] in required_fields_list
         and r['prop_name'] not in ('creator_id', 'updater_id')
     ]
@@ -2365,8 +2365,8 @@ def db_helpers_context(schema: dict) -> dict:
                 if inferred in base_entities and inferred != name:
                     fk_targets.add(inferred)
         # All entities implicitly reference user_account via creator_id/updater_id
-        if name != 'user_account' and 'user_account' in base_entities:
-            fk_targets.add('user_account')
+        if name != 'user' and 'user' in base_entities:
+            fk_targets.add('user')
         deps[name] = fk_targets
 
     # --- Compute reverse deps: entity -> set of entities that depend on it ---
