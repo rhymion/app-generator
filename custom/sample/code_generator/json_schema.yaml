@@ -464,7 +464,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
-      test: false
+      test: true
       fields:
         - name
         - image
