@@ -93,8 +93,8 @@ class EntityContext:
     reverse_oto_rels: list[ReverseOtoRelInfo]  # reverse OTO: FK in target pointing back to this model
     flatten_rels: list[FlattenRelInfo]         # flatten rels: shown as collapsible accordion in detail view
     flatten_detail_imports: list[tuple[str, str]] = ()  # (type_name, module_name) for *_detail flatten targets
-    entity_view_component: str | None = None   # custom component rendered in FormView
-    entity_edit_component: str | None = None   # custom component rendered in FormUpsert
+    entity_view_components: list[dict] = ()    # custom components rendered in FormView; [{name, path?}]
+    entity_edit_components: list[dict] = ()    # custom components rendered in FormUpsert; [{name, path?}]
 
 
 # ---------------------------------------------------------------------------
@@ -370,12 +370,24 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         for r in _flatten_rels_raw
     ]
 
-    # Custom view/edit components from x-custom-component config
-    _xcc = schema['definitions'].get(def_key, {}).get('x-custom-component') or {}
-    _xcc_name = _xcc.get('name')
-    _xcc_target = _xcc.get('target') or ['list']
-    entity_view_component = _xcc_name if (_xcc_name and 'view' in _xcc_target) else None
-    entity_edit_component = _xcc_name if (_xcc_name and 'edit' in _xcc_target) else None
+    # Custom view/edit components from x-custom-components config (entity-level, list).
+    _xcc_list_raw = schema['definitions'].get(def_key, {}).get('x-custom-components') or []
+    if not isinstance(_xcc_list_raw, list):
+        raise ValueError(
+            f"x-custom-components on '{def_key}' must be a list of component objects; "
+            f"got {type(_xcc_list_raw).__name__}"
+        )
+    entity_view_components: list[dict] = []
+    entity_edit_components: list[dict] = []
+    for _item in _xcc_list_raw:
+        if not isinstance(_item, dict) or not _item.get('name'):
+            continue
+        _target = _item.get('target') or ['list']
+        _entry = {'name': _item['name'], 'path': _item.get('path')}
+        if 'view' in _target:
+            entity_view_components.append(_entry)
+        if 'edit' in _target:
+            entity_edit_components.append(_entry)
 
     return EntityContext(
         parent=parent,
@@ -391,6 +403,6 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         reverse_oto_rels=reverse_oto_rels,
         flatten_rels=flatten_rels,
         flatten_detail_imports=_flatten_detail_imports,
-        entity_view_component=entity_view_component,
-        entity_edit_component=entity_edit_component,
+        entity_view_components=entity_view_components,
+        entity_edit_components=entity_edit_components,
     )

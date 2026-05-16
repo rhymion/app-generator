@@ -86,11 +86,15 @@ def _collect_field_keys(entities: list, schema: dict) -> set:
                 keys.add(to_camel_case(prop_name))
         for child in entity.get('children', []):
             keys.add(to_camel_case(child['property_name']))
-        # Custom component keys
+        # Custom component keys (entity-level x-custom-components is a list).
         def_key = entity.get('definition_key', '')
-        custom_comp = schema['definitions'].get(def_key, {}).get('x-custom-component') or {}
-        comp_name = custom_comp.get('name', '')
-        keys.update(_CUSTOM_COMPONENT_FIELD_KEYS.get(comp_name, {}).keys())
+        custom_comps = schema['definitions'].get(def_key, {}).get('x-custom-components') or []
+        if isinstance(custom_comps, list):
+            for custom_comp in custom_comps:
+                if not isinstance(custom_comp, dict):
+                    continue
+                comp_name = custom_comp.get('name', '')
+                keys.update(_CUSTOM_COMPONENT_FIELD_KEYS.get(comp_name, {}).keys())
     return keys
 
 

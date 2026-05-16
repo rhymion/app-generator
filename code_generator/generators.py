@@ -2316,8 +2316,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     _initial_props = [f"initial{to_pascal_case(t)}s = []" for t in _ordered_targets]
     _search_props  = [f"search{to_pascal_case(t)}Options" for t in _ordered_targets]
     extra_default_props = ', '.join(_initial_props + _search_props)
-    entity_edit_component = ctx.get('entity_edit_component')
-    has_current_user_role_ids = bool(entity_edit_component)
+    entity_edit_components = ctx.get('entity_edit_components') or []
+    has_current_user_role_ids = bool(entity_edit_components)
     if extra_default_props or has_comment_children or has_current_user_role_ids:
         form_upsert_params = (
             f"{{ src, isEdit, permissions"

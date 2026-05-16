@@ -477,3 +477,91 @@ class TestBuildContextSelectionTargets:
         }
         ctx = build_context(entity, schema)
         assert "epic" in ctx["selection_targets"]
+
+
+# ---------------------------------------------------------------------------
+# build_context — entity-level x-custom-components (plural, list of objects)
+# ---------------------------------------------------------------------------
+
+class TestEntityCustomComponents:
+    """Entity-level `x-custom-components` is a list. Each item is split into
+    `entity_custom_components` / `entity_view_components` / `entity_edit_components`
+    by its `target`. Property-level `x-custom-component` (singular dict) is unrelated
+    to this section and stays as-is."""
+
+    def _schema(self, xcc_list):
+        defs = {
+            "thing": {"type": "object", "required": ["id"], "properties": _base_props()},
+            "thing_detail": {"allOf": [{"$ref": "#/definitions/thing"}]},
+        }
+        if xcc_list is not None:
+            defs["thing_detail"]["x-custom-components"] = xcc_list
+        return {"definitions": defs}
+
+    def test_multiple_components_split_by_target(self):
+        """Three components on the entity, each with multiple targets — appear in
+        every list their target names."""
+        schema = self._schema([
+            {"name": "AggregateScore", "path": "@/components/thing/aggregate_score",
+             "target": ["view", "edit"]},
+            {"name": "JudgeResult", "path": "@/components/thing/judge_result",
+             "target": ["edit"]},
+            {"name": "CreatePDF", "path": "@/components/thing/create_pdf",
+             "target": ["view", "edit", "list"]},
+        ])
+        ctx = build_context(_entity("thing"), schema)
+        view_names = [c["name"] for c in ctx["entity_view_components"]]
+        edit_names = [c["name"] for c in ctx["entity_edit_components"]]
+        list_names = [c["name"] for c in ctx["entity_custom_components"]]
+        assert view_names == ["AggregateScore", "CreatePDF"]
+        assert edit_names == ["AggregateScore", "JudgeResult", "CreatePDF"]
+        assert list_names == ["CreatePDF"]
+
+    def test_path_carried_through(self):
+        """Explicit `path` is preserved; omitted `path` is None (template default)."""
+        schema = self._schema([
+            {"name": "WithPath", "path": "@/components/_standard/WithPath", "target": ["view"]},
+            {"name": "NoPath", "target": ["view"]},
+        ])
+        ctx = build_context(_entity("thing"), schema)
+        comps = {c["name"]: c["path"] for c in ctx["entity_view_components"]}
+        assert comps["WithPath"] == "@/components/_standard/WithPath"
+        assert comps["NoPath"] is None
+
+    def test_default_target_is_list(self):
+        """Omitting `target` defaults to `[list]` (backward compat with the singular form)."""
+        schema = self._schema([{"name": "BarButton"}])
+        ctx = build_context(_entity("thing"), schema)
+        list_names = [c["name"] for c in ctx["entity_custom_components"]]
+        assert list_names == ["BarButton"]
+        assert ctx["entity_view_components"] == []
+        assert ctx["entity_edit_components"] == []
+
+    def test_missing_key_produces_empty_lists(self):
+        """No `x-custom-components` on the entity → all three lists are empty."""
+        schema = self._schema(None)
+        ctx = build_context(_entity("thing"), schema)
+        assert ctx["entity_custom_components"] == []
+        assert ctx["entity_view_components"] == []
+        assert ctx["entity_edit_components"] == []
+
+    def test_non_list_value_raises(self):
+        """A bare dict under the plural key is a schema error — we used to silently
+        accept it, but now `x-custom-components` must be a list."""
+        schema = self._schema(None)
+        schema["definitions"]["thing_detail"]["x-custom-components"] = {
+            "name": "Whoops", "target": ["view"],
+        }
+        with pytest.raises(ValueError, match="must be a list"):
+            build_context(_entity("thing"), schema)
+
+    def test_property_level_singular_key_still_works(self):
+        """Property-level `x-custom-component` (singular dict) is independent of the
+        entity-level rename and still routes the field into `custom_upsert`."""
+        cats = _categorize_form_fields(
+            {"password": {"type": "string", "x-custom-component": {"target": ["upsert"]}}},
+            parent_rels_raw=[],
+            generate_config={},
+        )
+        assert "password" in cats["custom_upsert"]
+        assert "password" not in cats["text"]

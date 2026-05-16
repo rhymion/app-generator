@@ -54,7 +54,7 @@ roles, separate from the admin-facing `user_account` pages.
 ### Preserving system entity configurations
 
 **The system entity definitions in `code_generator/json_schema.yaml` contain carefully tuned
-`x-generate`, `x-relationships`, `x-display`, and `x-custom-component` configurations. These
+`x-generate`, `x-relationships`, `x-display`, `x-custom-component`, and `x-custom-components` configurations. These
 are part of the application framework and must be copied to every new schema file unchanged.**
 
 When adding a new app, copy the system entity block as-is and append app-specific entities
@@ -915,9 +915,16 @@ The entity must have `start_time` and `end_time` fields.
 
 ---
 
-## 11. `x-custom-component` — Custom UI Elements
+## 11. `x-custom-component` / `x-custom-components` — Custom UI Elements
 
-### On a field (skip default rendering)
+Two distinct keys, intentionally different names because they accept different shapes:
+
+| Key | Where | Value shape |
+|---|---|---|
+| `x-custom-component` | On a **field** (property) | Single object |
+| `x-custom-components` | On a **detail entity** | List of objects (one or more) |
+
+### On a field (skip default rendering) — `x-custom-component`
 
 ```yaml
 password:
@@ -931,29 +938,45 @@ password:
 The generator emits no default input for this field in the targeted form. You implement the
 custom component in the extension point file `components/{entity}/{FieldName}.tsx`.
 
-### On the detail entity (add a custom component)
+### On the detail entity (add custom components) — `x-custom-components`
+
+`x-custom-components` is a **list** even when only one component is mounted; this is how an
+entity can carry several independent widgets across `list` / `view` / `edit` pages.
 
 ```yaml
-# List page only (default — no target key)
+# Single component on the list page (target defaults to [list])
 shift_template_detail:
-  x-custom-component:
-    name: CopyShiftsButton        # component name to import and render
+  x-custom-components:
+    - name: CopyShiftsButton
 
-# View and edit pages, with a non-default import path
+# Single component on view + edit, with a non-default import path
 leave_request_detail:
-  x-custom-component:
-    name: ApprovalSection
-    path: "@/components/_standard/ApprovalSection"   # optional; overrides default path
-    target:
-      - view
-      - edit
+  x-custom-components:
+    - name: ApprovalSection
+      path: "@/components/_standard/ApprovalSection"   # optional; overrides default path
+      target:
+        - view
+        - edit
+
+# Multiple components on one entity — each renders on the targets it names
+checkup_detail:
+  x-custom-components:
+    - name: AggregateScore
+      path: "@/components/checkup/aggregate_score"
+      target: [new, edit, view]
+    - name: JudgeResult
+      path: "@/components/checkup/judge_result"
+      target: [new, edit]
+    - name: CreatePDF
+      path: "@/components/checkup/create_pdf"
+      target: [new, edit, view]
 ```
 
 | Option | Required | Default | Description |
 |---|---|---|---|
 | `name` | Yes | — | PascalCase component name; used as the JSX tag |
-| `path` | No | `components/{entity}/{name}` | Import path override; use for shared components in `components/_standard/` |
-| `target` | No | `[list]` | Which pages render the component: `list`, `view`, `edit` |
+| `path` | No | `./{name}` (view/edit) or `@/components/{entity}/{name}` (list) | Import path override; use for shared components in `components/_standard/` |
+| `target` | No | `[list]` | Which pages render this component: `list`, `view`, `edit` |
 
 **`target: [list]`** — component is imported in the list page and rendered in the button bar.
 Props: `{ permissions: ModelPermissions }`.
@@ -969,7 +992,8 @@ Props: `{ permissions: ModelPermissions }`.
 />
 ```
 Both `currentUserRoleIds` and `currentUserId` are fetched server-side by the generated page and
-forwarded to the component. The component file is **never created or overwritten** by the generator.
+forwarded to every component whose `target` includes `view` or `edit`. Component files are
+**never created or overwritten** by the generator.
 
 ---
 
@@ -1644,12 +1668,12 @@ leave_request_detail:
     view: true
     edit: true
     # ... other flags
-  x-custom-component:
-    name: ApprovalSection
-    path: "@/components/_standard/ApprovalSection"
-    target:
-      - view
-      - edit
+  x-custom-components:
+    - name: ApprovalSection
+      path: "@/components/_standard/ApprovalSection"
+      target:
+        - view
+        - edit
   allOf:
     - $ref: "#/definitions/leave_request"
     - type: object

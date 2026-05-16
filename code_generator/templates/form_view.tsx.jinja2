@@ -46,9 +46,9 @@ import AuditInfo from '@/components/_standard/AuditInfo';
 {% if custom_view_imports %}
 {{ custom_view_imports }}
 {% endif %}
-{% if entity_view_component %}
-import {{ entity_view_component }} from '{{ entity_view_component_path if entity_view_component_path else "./" + entity_view_component }}';
-{% endif %}
+{% for comp in entity_view_components %}
+import {{ comp.name }} from '{{ comp.path if comp.path else "./" + comp.name }}';
+{% endfor %}
 {% if use_dayjs %}
 import dayjs from 'dayjs';
 {% endif %}
@@ -60,7 +60,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import Typography from '@mui/material/Typography';
 {% endif %}
 
-export default function FormView({ src, permissions{% if entity_view_component %}, currentUserRoleIds, currentUserId{% endif %} }: FormViewProps) {
+export default function FormView({ src, permissions{% if entity_view_components %}, currentUserRoleIds, currentUserId{% endif %} }: FormViewProps) {
   const tf = useTranslations('Fields');
   const te = useTranslations('EntityLabel');
 {% if view_enum_ns_hooks %}
@@ -107,9 +107,9 @@ export default function FormView({ src, permissions{% if entity_view_component %
 {{ child_view_grids }}
 {% endif %}
       <AuditInfo src={src} />
-{% if entity_view_component %}
-      <{{ entity_view_component }} src={src} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />
-{% endif %}
+{% for comp in entity_view_components %}
+      <{{ comp.name }} src={src} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />
+{% endfor %}
     </div>
   );
 }

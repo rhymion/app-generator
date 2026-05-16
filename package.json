@@ -50,6 +50,7 @@
     "@prisma/adapter-better-sqlite3": "^7.2.0",
     "@prisma/client": "^7.5.0",
     "@prisma/extension-accelerate": "^3.0.1",
+    "@react-pdf/renderer": "^4.5.1",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.18",
     "@types/mdx": "^2.0.13",
