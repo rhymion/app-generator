@@ -6,6 +6,14 @@ import type { {{ target | pascal_case }} } from '@/lib/{{ target }}/types';
 import type { {{ type_name | pascal_case }} } from '@/lib/{{ module }}/types';
 {% endfor %}
 
+{% for t in inline_flatten_types %}
+export type {{ t.name | pascal_case }} = {
+{% for field in t.fields %}
+  {{ field.name }}: {{ field.ts_type }};
+{% endfor %}
+};
+
+{% endfor %}
 export type {{ parent | pascal_case }} = {
 {% for field in parent_fields %}
   {{ field.name }}: {{ field.ts_type }};
