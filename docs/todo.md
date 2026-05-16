@@ -72,6 +72,16 @@ work is currently reactive and manual.
 **References:** `AGENTS.md` task-classification gates, `package.json`,
 `requirements.txt`.
 
+**Status:** shipped.
+- `.github/dependabot.yml` — weekly grouped PRs for npm, pip, github-actions.
+- AGENTS.md gates extended: `npm audit --omit=dev --audit-level=high`
+  on Type A + B; `pip-audit -r requirements.txt` on Type B.
+- `.github/workflows/ci.yml` — new `audit` job runs both on every PR.
+- `pip-audit` added to `requirements.txt`.
+- The original ticket called for `--production` on `npm audit`; that flag
+  was deprecated in npm 7 in favour of `--omit=dev`. The shipped command
+  uses the modern form.
+
 ---
 
 ### S4 — Server-side revocation for credentials sessions

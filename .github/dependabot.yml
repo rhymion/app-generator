@@ -1,0 +1,87 @@
+# Dependabot configuration — see docs/todo.md S3.
+#
+# Scans three ecosystems weekly:
+#   - npm        : the Next.js app's runtime + dev deps.
+#   - pip        : code_generator's Python build/test tooling.
+#   - github-actions : workflow files under .github/workflows/.
+#
+# Strategy
+# --------
+# Security advisories produce PRs immediately (Dependabot does this
+# regardless of `schedule`). Routine version bumps are grouped weekly so the
+# reviewer load stays bounded — one PR per ecosystem per week instead of one
+# PR per dependency.
+#
+# Major upgrades are split out (`update-types: ["major"]`) so a breaking bump
+# never rides on the same PR as a minor or patch and surprises the gate.
+#
+# Policy lives in AGENTS.md (`npm audit` + `pip-audit` in the per-task gates)
+# so the audit also fires on every non-Dependabot change. Dependabot is the
+# proactive half; the gate is the continuous half.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+      npm-security:
+        applies-to: security-updates
+        update-types:
+          - "minor"
+          - "patch"
+          - "major"
+    labels:
+      - "dependencies"
+      - "npm"
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    groups:
+      pip-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+      pip-security:
+        applies-to: security-updates
+        update-types:
+          - "minor"
+          - "patch"
+          - "major"
+    labels:
+      - "dependencies"
+      - "python"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    groups:
+      actions-all:
+        update-types:
+          - "minor"
+          - "patch"
+          - "major"
+    labels:
+      - "dependencies"
+      - "github-actions"

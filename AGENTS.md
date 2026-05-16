@@ -33,6 +33,7 @@ Gate:
 2. `npm run demo:generate`
 3. `npm run build`
 4. `npm run cy:test:api`
+5. `npm audit --omit=dev --audit-level=high`
 
 `pytest` and `npm run test` are skipped - Python and existing TS were not
 touched. The full UI Cypress suite is also skipped (Chromium UI tests do not run
@@ -53,6 +54,8 @@ Gate:
 4. `npm run build`
 5. `npm run test`
 6. `npm run cy:test:api`
+7. `npm audit --omit=dev --audit-level=high`
+8. `pip-audit -r requirements.txt`
 
 ### Type C - Investigation / question
 
@@ -84,6 +87,29 @@ Gate: none. Do not run docker, generators, builds, or tests. Cite findings with
 
 A skipped test is a failed test unless the user has explicitly approved
 skipping it.
+
+## Dependency auditing
+
+`npm audit --omit=dev --audit-level=high` and `pip-audit -r requirements.txt`
+are part of every gate. The two halves of the policy work together:
+
+- **Proactive**: `.github/dependabot.yml` opens weekly grouped PRs for
+  minor/patch updates and immediate PRs for security advisories across
+  npm, pip, and github-actions ecosystems.
+- **Continuous**: the audit commands above run on every Type A/B gate,
+  so a vulnerable dep can't sit unnoticed between Dependabot scans, and
+  any non-Dependabot change still has to pass the same bar.
+
+`--omit=dev` on `npm audit` scopes the check to production deps so
+dev-only tooling (vitest, eslint, prisma generator plugins, …) doesn't
+gate the build; a high-severity dev-only advisory is still triaged via
+the Dependabot PR. `--audit-level=high` only fails on high/critical;
+moderate is warning-only. `pip-audit` runs against `requirements.txt`
+rather than the installed env so the gate is reproducible across
+machines.
+
+If the gate flags a high/critical CVE you can't immediately fix, open a
+PR upgrading the offending dep first; the rest of the change comes after.
 
 ## Sanity check
 
