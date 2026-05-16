@@ -585,6 +585,19 @@ def build_context(entity: dict, schema: dict) -> dict:
         f'{{ id: true, creator_id: true{", assignee_id: true" if has_assignee_id else ""} }}'
     )
 
+    # is_audited: when true, generated service.ts wraps create/update/delete
+    # with calls to recordAuditEvent so role/permission changes (and any other
+    # entity flagged via `x-audit: true` on its `_detail`) leave a row in
+    # `audit_log`. Drive this from `x-audit` on the `_detail` definition so
+    # adding a new protected entity is a schema-only change. Fallback to the
+    # base entity for symmetry with x-generate/x-display.
+    _detail_for_audit = schema['definitions'].get(def_key, {}) or {}
+    _base_for_audit = schema['definitions'].get(model, {}) or {}
+    is_audited = bool(
+        _detail_for_audit.get('x-audit') is True
+        or _base_for_audit.get('x-audit') is True
+    )
+
     # Scalar columns the paginated API/page-list will accept for sort/filter.
     # Always include audit columns. Anything not in this set is silently ignored
     # at request time so external input cannot pick arbitrary Prisma columns.
@@ -1109,6 +1122,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         relationship_targets=relationship_targets,
         should_filter_by_org=should_filter_by_org,
         has_assignee_id=has_assignee_id,
+        is_audited=is_audited,
         item_context_select=item_context_select,
         sortable_fields_quoted=sortable_fields_quoted,
         filterable_fields_quoted=filterable_fields_quoted,

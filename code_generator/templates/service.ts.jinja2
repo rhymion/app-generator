@@ -28,6 +28,15 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% endif %}
 {{ validation_data_obj }}
     });
+{% if is_audited %}
+    await recordAuditEvent({
+      action: '{{ parent }}:create',
+      actor_user_id: actorId,
+      target_table: '{{ model }}',
+      target_id: created.id,
+      tx,
+    });
+{% endif %}
     return { id: created.id };
   });
 {% if has_assignee_id %}
@@ -78,6 +87,15 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% if flatten_nested_updates %}
 {{ flatten_nested_updates }}
 {% endif %}
+{% if is_audited %}
+    await recordAuditEvent({
+      action: '{{ parent }}:update',
+      actor_user_id: actorId,
+      target_table: '{{ model }}',
+      target_id: id,
+      tx,
+    });
+{% endif %}
   });
 {% if has_assignee_id %}
   if (assigneeId && assigneeId !== _prevAssigneeId && assigneeId !== actorId) {
@@ -92,7 +110,24 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 }
 {% endif %}
 {% if can_delete %}
+{% if is_audited %}
+export async function delete{{ parent_pascal }}(actorId: string | null, ids: string[]): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+    for (const id of ids) {
+      await recordAuditEvent({
+        action: '{{ parent }}:delete',
+        actor_user_id: actorId,
+        target_table: '{{ model }}',
+        target_id: id,
+        tx,
+      });
+    }
+  });
+}
+{% else %}
 export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
   await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
 }
+{% endif %}
 {% endif %}

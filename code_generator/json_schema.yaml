@@ -127,6 +127,9 @@ definitions:
       invalidate: false
       api: true
       test: true
+    # Security-sensitive entity: every create/update/delete is recorded in
+    # the audit_log table by the generated service layer.
+    x-audit: true
     x-relationships:
       user_accounts:
         type: many-to-many
@@ -237,6 +240,9 @@ definitions:
       invalidate: false
       api: true
       test: true
+    # Security-sensitive entity: every create/update/delete is recorded in
+    # the audit_log table by the generated service layer.
+    x-audit: true
     allOf:
       - $ref: "#/definitions/permission"
       - type: object

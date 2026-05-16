@@ -32,7 +32,7 @@ export async function remove{{ parent_pascal }}(ids: string[]) {
   if (filtered{{ parent_pascal }}s.length === 0) {
     throw new Error('No permission to delete');
   }
-  await delete{{ parent_pascal }}(filtered{{ parent_pascal }}s.map(item => item.id));
+  await delete{{ parent_pascal }}({% if is_audited %}userId, {% endif %}filtered{{ parent_pascal }}s.map(item => item.id));
 {% if can_list %}
   revalidatePath('/[locale]/{{ parent }}', 'page');
 {% endif %}

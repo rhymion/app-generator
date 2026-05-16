@@ -9,6 +9,7 @@ import { createId } from "@paralleldrive/cuid2";
 import prisma from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { siteConfig } from "@/lib/site-config";
+import { recordAuditEvent } from "@/lib/audit-log";
 
 // True iff the Google provider will actually be registered for this deploy.
 // Both the siteConfig opt-in AND the server-side secrets have to be present.
@@ -135,6 +136,13 @@ function buildAdapter(): Adapter {
           email: created.email,
         }),
       );
+      await recordAuditEvent({
+        action: "auth:createUser",
+        actor_user_id: created.id,
+        target_table: "user",
+        target_id: created.id,
+        metadata: { email: created.email },
+      });
       return {
         id: created.id,
         name: created.name,
@@ -221,6 +229,11 @@ export const authConfig: NextAuthConfig = {
               email,
             }),
           );
+          await recordAuditEvent({
+            action: "auth:signIn.reject",
+            actor_user_id: null,
+            metadata: { reason: "domain_not_allowed", provider: account.provider, email },
+          });
           return false;
         }
       }
@@ -246,6 +259,11 @@ export const authConfig: NextAuthConfig = {
             email,
           }),
         );
+        await recordAuditEvent({
+          action: "auth:signIn.reject",
+          actor_user_id: null,
+          metadata: { reason: "email_in_use_by_credentials", provider: account.provider, email },
+        });
         return false;
       }
 
@@ -271,11 +289,12 @@ export const authConfig: NextAuthConfig = {
     // replace with a proper audit-log table when role/permission change
     // auditing lands.
     async signIn({ user, account, isNewUser }) {
+      const provider = account?.provider ?? "unknown";
       console.info(
         "[auth:signIn]",
         JSON.stringify({
           at: new Date().toISOString(),
-          provider: account?.provider ?? "unknown",
+          provider,
           userId: user.id,
           email: user.email,
           // With the adapter in place, `isNewUser` is true on first OAuth
@@ -283,20 +302,34 @@ export const authConfig: NextAuthConfig = {
           isNewUser: isNewUser ?? null,
         }),
       );
+      await recordAuditEvent({
+        action: "auth:signIn",
+        actor_user_id: user.id ?? null,
+        target_table: "user",
+        target_id: user.id ?? null,
+        metadata: { provider, email: user.email ?? null, isNewUser: isNewUser ?? null },
+      });
     },
     async signOut(message) {
       const token = "token" in message ? message.token : null;
       const session = "session" in message ? message.session : null;
+      const userId =
+        (token as { id?: string } | null)?.id ??
+        (session as { userId?: string } | null)?.userId ??
+        null;
       console.info(
         "[auth:signOut]",
         JSON.stringify({
           at: new Date().toISOString(),
-          userId:
-            (token as { id?: string } | null)?.id ??
-            (session as { userId?: string } | null)?.userId ??
-            null,
+          userId,
         }),
       );
+      await recordAuditEvent({
+        action: "auth:signOut",
+        actor_user_id: userId,
+        target_table: userId ? "user" : null,
+        target_id: userId,
+      });
     },
   },
 };
