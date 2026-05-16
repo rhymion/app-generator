@@ -130,6 +130,27 @@
     "confirmPasswordPlaceholder": "パスワード（確認）",
     "passwordMismatch": "パスワードが一致しません",
     "emailInUse": "このメールアドレスは既に使用されています",
-    "registrationFailed": "登録に失敗しました"
+    "registrationFailed": "登録に失敗しました",
+    "mfaCodeLabel": "6 桁の認証コード",
+    "mfaHelper": "認証アプリを開いて現在のコードを入力してください。リカバリーコードも使用できます。",
+    "mfaRequired": "サインインを完了するため、認証アプリの 6 桁コードを入力してください。",
+    "mfaInvalid": "コードが一致しません。新しい 6 桁コードを入力するか、リカバリーコードを使用してください。"
+  },
+  "Mfa": {
+    "title": "2要素認証",
+    "disabledIntro": "認証アプリ（Google Authenticator、1Password、Authy など）を使ってアカウントに 2 つ目の認証要素を追加します。",
+    "enableButton": "MFA を有効化",
+    "pendingIntro": "認証アプリで QR コードをスキャンするか、シークレットを手動で入力してください。続けて 6 桁のコードを入力します。",
+    "manualEntryLabel": "手動入力用シークレット：",
+    "qrAlt": "2要素認証 QR コード",
+    "verifyCodeLabel": "6 桁のコード",
+    "verifyButton": "確認して有効化",
+    "cancelButton": "キャンセル",
+    "recoveryWarning": "リカバリーコードを安全な場所に保存してください。各コードは 1 回だけ使用でき、認証アプリにアクセスできなくなった際に必要です。再表示はされません。",
+    "recoveryAck": "リカバリーコードを保存しました",
+    "enabledStatus": "このアカウントでは 2 要素認証が有効です。",
+    "disableIntro": "MFA を無効化するには、現在の 6 桁コード（またはリカバリーコード）を入力してください。",
+    "disableCodeLabel": "6 桁またはリカバリーコード",
+    "disableButton": "MFA を無効化"
   }
 }

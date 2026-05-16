@@ -307,6 +307,20 @@ other change is needed.
   doesn't ship this; the typical pattern is a custom `step` in the
   credentials flow or a separate gate after `session.user.id` is
   known.
+
+  **v1 (S5 phase 5a) shipped:** TOTP MFA for the credentials provider
+  only, opt-in per user. The credentials `authorize()` in `auth.ts`
+  throws the sentinel `"MFA_REQUIRED"` when a verified user with
+  `mfa_enabled=true` submits without an `mfa_code`; the login page
+  reveals a 6-digit field on the second submission. Recovery codes
+  (8 per enrolment, base32, single-use) live in `mfa_recovery_code`
+  with bcrypt-hashed values. Secrets at rest are AES-256-GCM
+  encrypted with a key derived from `AUTH_SECRET` (no new env var) —
+  see `lib/mfa/crypto.ts`. The enrolment / disable UI lives at
+  `/setting/mfa`. **OAuth users are not gated yet** — phase 5b is the
+  follow-up: an `/mfa-challenge` step after the Google callback that
+  finalizes the JWT only after a TOTP. **Admin-mandated MFA per role
+  is also not in v1** — opt-in only; revisit when a tenant asks.
 - **Account linking UI** — letting a signed-in user attach an
   additional OAuth provider to their existing account. The plumbing is
   there (one `user` row can own multiple `Account` rows), but there's

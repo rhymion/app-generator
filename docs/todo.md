@@ -119,6 +119,29 @@ credentials or SSO sign-in.
 
 **References:** `auth.ts`, `prisma/schema.prisma`, `app/[locale]/setting/`.
 
+**Status:** phase 5a shipped — credentials-only, opt-in per user.
+- `lib/mfa/{crypto,totp,recovery,verify,enrollment}.ts` — AES-256-GCM
+  secret-at-rest (key derived from `AUTH_SECRET`); otplib v13 TOTP
+  wrapper with ±30 s tolerance; 8 single-use recovery codes
+  (base32, bcrypt-hashed); server-side verify + enrollment lifecycle.
+- `auth.ts` — credentials `authorize()` throws `MFA_REQUIRED` /
+  `Invalid MFA code` when the user has `mfa_enabled=true`.
+- `app/[locale]/login/page.tsx` — reveals the MFA TextField on the
+  second submission when the first comes back with the sentinel.
+- `app/[locale]/setting/mfa/` — `page.tsx` + `mfa-client.tsx` +
+  `actions.ts` covering enable / pending-verify / recovery-display /
+  enabled-disable state machine.
+- `prisma/schema.prisma` — `user.mfa_secret`, `user.mfa_enabled`,
+  `mfa_recovery_code` model (working tree only; same WIP carve-out as
+  S2's `audit_log`, applied at migration time).
+- `messages/{en,ja}.json` — `Auth.mfa*` strings + new `Mfa` section.
+- `docs/knowledge/sso-authentication.md` — v1 decision note in the
+  "Out of scope, for next time" section.
+- 28 Vitest cases across `lib/mfa/{crypto,totp,recovery}.test.ts`.
+
+**Not in this phase:** OAuth + MFA challenge (phase 5b), admin role
+mandate (recorded as deferred in `sso-authentication.md`).
+
 ---
 
 ### S6 — Generator guard against low-level constraint bypass

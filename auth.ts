@@ -10,6 +10,7 @@ import prisma from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { siteConfig } from "@/lib/site-config";
 import { recordAuditEvent } from "@/lib/audit-log";
+import { verifyMfaCode } from "@/lib/mfa/verify";
 
 // True iff the Google provider will actually be registered for this deploy.
 // Both the siteConfig opt-in AND the server-side secrets have to be present.
@@ -42,6 +43,10 @@ function buildProviders(): Provider[] {
         email: { label: "Email", type: "email" },
         name: { label: "Name", type: "name" },
         password: { label: "Password", type: "password" },
+        // Opt-in MFA: the field is always present on the credentials object;
+        // the UI only asks for it after a first attempt comes back with the
+        // sentinel error string "MFA_REQUIRED" (see app/[locale]/login).
+        mfa_code: { label: "MFA Code", type: "text" },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
@@ -66,6 +71,25 @@ function buildProviders(): Provider[] {
 
         if (!isCorrectPassword) {
           throw new Error("Invalid credentials");
+        }
+
+        // MFA gate. The cast covers the case where the generated Prisma
+        // client in the current checkout predates the user.mfa_enabled
+        // field (see lib/mfa/verify.ts for the same rationale). When MFA
+        // is enabled, the credentials submission must carry a valid TOTP
+        // (or recovery) code; if `mfa_code` is missing we throw the
+        // sentinel "MFA_REQUIRED" so the login page knows to reveal the
+        // MFA field rather than re-render the email/password form.
+        const mfaUser = user as unknown as { mfa_enabled?: boolean };
+        if (mfaUser.mfa_enabled) {
+          const code = ((credentials.mfa_code as string | undefined) ?? "").trim();
+          if (code.length === 0) {
+            throw new Error("MFA_REQUIRED");
+          }
+          const ok = await verifyMfaCode(user.id, code);
+          if (!ok) {
+            throw new Error("Invalid MFA code");
+          }
         }
 
         // v5 expects authorize() to return a User-shape object (or null).

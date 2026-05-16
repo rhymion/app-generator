@@ -18,6 +18,11 @@ export default function LoginPage() {
   const router = useRouter();
   const t = useTranslations("Auth");
   const [error, setError] = useState<string | null>(null);
+  // When `authorize()` throws the sentinel "MFA_REQUIRED" we re-render the
+  // form with an extra TOTP field rather than showing a generic error —
+  // the user resubmits everything (email + password + mfa_code) and the
+  // server gates the second submission on the code.
+  const [mfaPrompt, setMfaPrompt] = useState(false);
 
   const enabledProviders = siteConfig.auth?.providers ?? ["credentials"];
   const showCredentials = enabledProviders.includes("credentials");
@@ -33,6 +38,22 @@ export default function LoginPage() {
       });
 
       if (response?.error) {
+        // Auth.js v5 surfaces the message thrown from `authorize()` via the
+        // `code` field on CredentialsSignin errors (with `error` set to the
+        // generic 'CredentialsSignin' string), depending on version. We
+        // accept either path so this works against both shapes.
+        const message =
+          (response as { code?: string }).code ?? response.error ?? "";
+        if (message.includes("MFA_REQUIRED")) {
+          setMfaPrompt(true);
+          setError(t("mfaRequired"));
+          return;
+        }
+        if (message.includes("Invalid MFA code")) {
+          setMfaPrompt(true);
+          setError(t("mfaInvalid"));
+          return;
+        }
         setError(t("invalidCredentials"));
         return;
       }
@@ -102,7 +123,26 @@ export default function LoginPage() {
               required
               fullWidth
             />
-            {error && <Alert severity="error">{error}</Alert>}
+            {mfaPrompt && (
+              <TextField
+                id="mfa_code"
+                name="mfa_code"
+                type="text"
+                label={t("mfaCodeLabel")}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                slotProps={{
+                  htmlInput: {
+                    "data-testid": "mfa_code",
+                  },
+                }}
+                helperText={t("mfaHelper")}
+                required
+                fullWidth
+                autoFocus
+              />
+            )}
+            {error && <Alert severity={mfaPrompt ? "info" : "error"}>{error}</Alert>}
             <Button type="submit" variant="contained" fullWidth>
               {t("signInButton")}
             </Button>

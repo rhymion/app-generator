@@ -130,6 +130,27 @@
     "confirmPasswordPlaceholder": "Confirm password",
     "passwordMismatch": "Passwords do not match",
     "emailInUse": "Email address is already in use",
-    "registrationFailed": "Registration failed"
+    "registrationFailed": "Registration failed",
+    "mfaCodeLabel": "6-digit authentication code",
+    "mfaHelper": "Open your authenticator app and enter the current code, or use a recovery code.",
+    "mfaRequired": "Enter the 6-digit code from your authenticator app to finish signing in.",
+    "mfaInvalid": "That code did not match. Try again with a fresh 6-digit code, or use a recovery code."
+  },
+  "Mfa": {
+    "title": "Two-factor authentication",
+    "disabledIntro": "Add a second factor to your account. You will need an authenticator app (Google Authenticator, 1Password, Authy, ...).",
+    "enableButton": "Enable MFA",
+    "pendingIntro": "Scan the QR code with your authenticator app, or copy the secret manually. Then enter the 6-digit code below to confirm.",
+    "manualEntryLabel": "Manual entry secret:",
+    "qrAlt": "Two-factor authentication QR code",
+    "verifyCodeLabel": "6-digit code",
+    "verifyButton": "Verify and enable",
+    "cancelButton": "Cancel",
+    "recoveryWarning": "Save these recovery codes somewhere safe. Each can be used once if you lose access to your authenticator. They will not be shown again.",
+    "recoveryAck": "I've saved my recovery codes",
+    "enabledStatus": "Two-factor authentication is enabled on this account.",
+    "disableIntro": "To turn MFA off, enter a current 6-digit code (or a recovery code).",
+    "disableCodeLabel": "6-digit or recovery code",
+    "disableButton": "Disable MFA"
   }
 }
