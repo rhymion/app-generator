@@ -2,11 +2,37 @@ import createIntlMiddleware from 'next-intl/middleware';
 import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { routing } from './i18n/routing';
+import { getRateLimiter } from '@/lib/rate-limit';
 
 const intlMiddleware = createIntlMiddleware(routing);
 
 // Paths that do not require authentication (matched after stripping locale prefix)
 const PUBLIC_PATHS = ['/login', '/register', '/docs'];
+
+// Map a request to the rate-limit bucket name. Returns null when the request
+// shouldn't be rate-limited (e.g. `/api/auth/session` is hit on every page
+// load and rate-limiting it would only hurt legitimate users).
+function bucketForAuthRequest(pathname: string, method: string): string | null {
+  if (!pathname.startsWith('/api/auth/')) return null;
+  if (pathname.startsWith('/api/auth/callback/')) return 'auth:callback';
+  if (pathname.startsWith('/api/auth/signin/credentials')) return 'auth:signin:credentials';
+  // Credentials submit goes through `/api/auth/callback/credentials` as a POST
+  // (Auth.js v5 routes the form post through the callback endpoint), so we
+  // catch it under the credentials bucket too.
+  if (pathname === '/api/auth/callback/credentials' && method === 'POST') {
+    return 'auth:signin:credentials';
+  }
+  if (pathname.startsWith('/api/auth/signin/')) return 'auth:signin:provider';
+  // Anything else under /api/auth — session reads, csrf, providers list — is
+  // not abuse-prone, so it's not rate-limited.
+  return null;
+}
+
+function clientIp(req: Request): string {
+  const fwd = req.headers.get('x-forwarded-for');
+  if (fwd) return fwd.split(',')[0]!.trim();
+  return req.headers.get('x-real-ip') ?? 'unknown';
+}
 
 // Auth.js v5 proxy. `auth()` wraps the handler and exposes `req.auth` (the
 // resolved Session, or null). With `session.strategy = "database"` for
@@ -15,6 +41,30 @@ const PUBLIC_PATHS = ['/login', '/register', '/docs'];
 // users still arrive with a JWT cookie and resolve without a DB hit.
 export const proxy = auth(async (req) => {
   const { pathname } = req.nextUrl;
+
+  // Rate-limit auth endpoints before doing anything else. `bucketForAuthRequest`
+  // returns null for paths we don't care about (session reads, csrf, providers
+  // list) — those fall through with no overhead.
+  const bucket = bucketForAuthRequest(pathname, req.method);
+  if (bucket) {
+    const decision = await getRateLimiter().check(bucket, clientIp(req));
+    if (!decision.allowed) {
+      return new NextResponse(
+        JSON.stringify({ error: 'rate_limited', retryAfter: decision.retryAfterSeconds }),
+        {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': String(decision.retryAfterSeconds),
+            'X-RateLimit-Bucket': bucket,
+          },
+        },
+      );
+    }
+    // Allowed — let the request continue to the Auth.js handler. No further
+    // middleware logic applies to /api/auth paths.
+    return NextResponse.next();
+  }
 
   // Strip any locale prefix to normalise the path for public-path checks
   const localePrefix = routing.locales.find(
@@ -49,8 +99,14 @@ export const proxy = auth(async (req) => {
 });
 
 export const config = {
-  // Match all pathnames except API routes, Next.js internals, and static files
-  matcher: ['/((?!api|_next|_vercel|.*\\..*).*)'],
+  // Match all pathnames except Next.js internals and static files, plus
+  // /api/auth/* explicitly (we exclude the rest of /api). Two matchers are
+  // used: the first covers app routes, the second pulls auth API routes
+  // through the proxy so they can be rate-limited.
+  matcher: [
+    '/((?!api|_next|_vercel|.*\\..*).*)',
+    '/api/auth/:path*',
+  ],
 };
 // Next.js 16 proxies always run on the Node.js runtime, so Prisma (needed
 // for database-strategy session resolution via auth()) works here without
