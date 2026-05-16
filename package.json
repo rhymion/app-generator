@@ -17,6 +17,7 @@
     "test": "vitest",
     "test:coverage": "vitest --coverage",
     "generate-code": "python3 code_generator/generate.py code_generator/json_schema.yaml ./",
+    "build:pdf-font": "python3 scripts/build_pdf_font.py",
     "cy:open": "cypress open",
     "cy:run": "cypress run --browser chromium",
     "cy:run:api": "cypress run --browser chromium --spec cypress/e2e/api/*",
@@ -65,6 +66,7 @@
     "react-dom": "^19.2.3"
   },
   "devDependencies": {
+    "@fontsource/noto-sans-jp": "^5.2.9",
     "@marp-team/marp-cli": "^4.2.3",
     "@prisma/adapter-pg": "^7.4.2",
     "@tailwindcss/postcss": "^4",
