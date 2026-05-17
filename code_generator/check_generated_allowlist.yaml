@@ -1,0 +1,19 @@
+# check_generated_allowlist.yaml — exemptions for code_generator/check_generated.py
+#
+# Each exemption lifts a single (path, rule, substring) tuple. The path is
+# the file's POSIX-style location relative to the project root. `rule` is
+# one of:
+#
+#   raw:queryRaw / raw:executeRaw / raw:queryRawUnsafe / raw:executeRawUnsafe
+#       — direct $queryRaw / $executeRaw use anywhere in generator output.
+#   write:direct
+#       — `prisma.<model>.{create,update,...}` outside the entity service layer.
+#
+# `substring` must appear on the offending source line. `reason` is required;
+# the carve-out is auditable from version control.
+#
+# Add entries sparingly. The check exists to prevent generator templates
+# from drifting into bypassing the service layer; every exemption should
+# correspond to a documented, reviewed deviation.
+
+exemptions: []

@@ -51,11 +51,23 @@ Gate:
 1. `pytest code_generator/tests`
 2. `npm run docker:test:up`
 3. `npm run demo:generate`
-4. `npm run build`
-5. `npm run test`
-6. `npm run cy:test:api`
-7. `npm audit --omit=dev --audit-level=high`
-8. `pip-audit -r requirements.txt`
+4. `npm run check:generated`
+5. `npm run build`
+6. `npm run test`
+7. `npm run cy:test:api`
+8. `npm audit --omit=dev --audit-level=high`
+9. `pip-audit -r requirements.txt`
+
+`check:generated` runs after `demo:generate` so it sees the just-emitted
+output. It bans `prisma.$queryRaw` / `prisma.$executeRaw` everywhere in
+generator-emitted files and bans direct `prisma.<model>.{create,update,
+delete,upsert,createMany,updateMany,deleteMany}` calls outside the entity
+service layer (`lib/<entity>/service.ts`, `service_validation.ts`,
+`service_after_create.ts`). Reads (`findUnique`, `findMany`, …) are
+unaffected so api routes and server actions can still load the row they
+need to permission-check before delegating to the service. Genuine
+exceptions go in `code_generator/check_generated_allowlist.yaml` with a
+recorded reason.
 
 ### Type C - Investigation / question
 

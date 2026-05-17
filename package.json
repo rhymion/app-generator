@@ -17,6 +17,7 @@
     "test": "vitest",
     "test:coverage": "vitest --coverage",
     "generate-code": "python3 code_generator/generate.py code_generator/json_schema.yaml ./",
+    "check:generated": "python3 code_generator/check_generated.py code_generator/json_schema.yaml ./",
     "cy:open": "cypress open",
     "cy:run": "cypress run --browser chromium",
     "cy:run:api": "cypress run --browser chromium --spec cypress/e2e/api/*",

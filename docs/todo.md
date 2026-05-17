@@ -159,6 +159,26 @@ bypass constraints"). No automated check today; relies on review discipline.
 **References:** `code_generator/templates/`, `AGENTS.md`,
 `code_generator/validate.py`.
 
+**Status:** shipped.
+- `code_generator/check_generated.py` — re-derives the generator's
+  expected file list via `extract_entities` (mirroring `cleanup.py`)
+  and scans only those files; `app/generated/` (Prisma client) is
+  outside that set by construction.
+- Banned everywhere in generator output: `prisma.$queryRaw`,
+  `prisma.$executeRaw`, and the `*Unsafe` variants.
+- Banned outside the service layer: `prisma.<model>.{create,update,
+  delete,upsert,createMany,updateMany,deleteMany}`. Service layer =
+  `lib/<entity>/{service,service_validation,service_after_create}.ts`.
+  Reads remain allowed so `actions.ts` / api routes can still load
+  the row they need for permission checks before delegating.
+- `code_generator/check_generated_allowlist.yaml` — empty by default;
+  exemptions are `{path, pattern, substring, reason}` tuples matched
+  line-by-line.
+- `npm run check:generated` runs the check; wired into the AGENTS.md
+  Type B gate after `demo:generate`.
+- 16 Vitest-equivalent pytest cases in
+  `code_generator/tests/test_check_generated.py`.
+
 ---
 
 ### S7 — Account linking UI
