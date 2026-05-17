@@ -209,13 +209,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list and can_view %}
         cy.visit('/en/{{ parent }}');
         cy.contains('{{ list_id_1 }}').click();
-        cy.get('[aria-label="Edit"]').click();
+        cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
         cy.visit('/en/{{ parent }}');
-        cy.get('[aria-label="Edit"]').first().click();
+        cy.get('button[aria-label="Edit"]').first().click();
 {% elif can_view %}
         cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
-        cy.get('[aria-label="Edit"]').click();
+        cy.get('a[aria-label="Edit"]').click();
 {% else %}
         cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
@@ -294,13 +294,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list and can_view %}
         cy.visit('/en/{{ parent }}');
         cy.contains('{{ list_id_1 }}').click();
-        cy.get('[aria-label="Edit"]').click();
+        cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
         cy.visit('/en/{{ parent }}');
-        cy.get('[aria-label="Edit"]').first().click();
+        cy.get('button[aria-label="Edit"]').first().click();
 {% elif can_view %}
         cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
-        cy.get('[aria-label="Edit"]').click();
+        cy.get('a[aria-label="Edit"]').click();
 {% else %}
         cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
@@ -336,13 +336,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list and can_view %}
         cy.visit('/en/{{ parent }}');
         cy.contains('{{ list_id_1 }}').click();
-        cy.get('[aria-label="Edit"]').click();
+        cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
         cy.visit('/en/{{ parent }}');
-        cy.get('[aria-label="Edit"]').first().click();
+        cy.get('button[aria-label="Edit"]').first().click();
 {% elif can_view %}
         cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
-        cy.get('[aria-label="Edit"]').click();
+        cy.get('a[aria-label="Edit"]').click();
 {% else %}
         cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
@@ -422,10 +422,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_view %}
       cy.visit('/en/{{ parent }}');
       cy.contains('{{ list_id_1 }}').click();
-      cy.get('[aria-label="Edit"]').click();
+      cy.get('a[aria-label="Edit"]').click();
 {% else %}
       cy.visit('/en/{{ parent }}');
-      cy.get('[aria-label="Edit"]').first().click();
+      cy.get('button[aria-label="Edit"]').first().click();
 {% endif %}
       cy.url().should('include', '/{{ parent }}/edit');
       cy.clickButton('Delete {{ title }}');
@@ -439,7 +439,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
 {% if can_view %}
         cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
-        cy.get('[aria-label="Edit"]').click();
+        cy.get('a[aria-label="Edit"]').click();
 {% else %}
         cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
@@ -529,10 +529,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_view %}
       cy.visit('/en/{{ parent }}');
       cy.contains('{{ list_id_1 }}').click();
-      cy.get('[aria-label="Edit"]').click();
+      cy.get('a[aria-label="Edit"]').click();
 {% else %}
       cy.visit('/en/{{ parent }}');
-      cy.get('[aria-label="Edit"]').first().click();
+      cy.get('button[aria-label="Edit"]').first().click();
 {% endif %}
 {{ fail_edit_6_1.clear_cmd }}
       cy.clickButton('Save');
@@ -541,7 +541,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
 {% if can_view %}
         cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
-        cy.get('[aria-label="Edit"]').click();
+        cy.get('a[aria-label="Edit"]').click();
 {% else %}
         cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
@@ -560,13 +560,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list and can_view %}
         cy.visit('/en/{{ parent }}');
         cy.contains('{{ list_id_1 }}').click();
-        cy.get('[aria-label="Edit"]').click();
+        cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
         cy.visit('/en/{{ parent }}');
-        cy.get('[aria-label="Edit"]').first().click();
+        cy.get('button[aria-label="Edit"]').first().click();
 {% elif can_view %}
         cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
-        cy.get('[aria-label="Edit"]').click();
+        cy.get('a[aria-label="Edit"]').click();
 {% else %}
         cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
@@ -615,7 +615,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list and can_view %}
 {{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
 {{ I }}cy.url().should('include', '/{{ parent }}/view');
-{{ I }}cy.get('[aria-label="Edit"]').click();
+{{ I }}cy.get('a[aria-label="Edit"]').click();
 {{ I }}cy.url().should('include', '/{{ parent }}/edit');
 {{ I }}cy.withinAccordion('{{ rel.section_label }}', () => {
 {% for cmd in rel.assert_cmds %}
@@ -657,10 +657,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list and can_view %}
           cy.visit('/en/{{ parent }}');
           cy.contains('{{ list_id_1 }}').click();
-          cy.get('[aria-label="Edit"]').click();
+          cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
           cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
-          cy.get('[aria-label="Edit"]').click();
+          cy.get('a[aria-label="Edit"]').click();
 {% else %}
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
@@ -691,10 +691,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list and can_view %}
           cy.visit('/en/{{ parent }}');
           cy.contains('{{ list_id_1 }}').click();
-          cy.get('[aria-label="Edit"]').click();
+          cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
           cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
-          cy.get('[aria-label="Edit"]').click();
+          cy.get('a[aria-label="Edit"]').click();
 {% else %}
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
@@ -723,10 +723,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list and can_view %}
           cy.visit('/en/{{ parent }}');
           cy.contains('{{ list_id_1 }}').click();
-          cy.get('[aria-label="Edit"]').click();
+          cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
           cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
-          cy.get('[aria-label="Edit"]').click();
+          cy.get('a[aria-label="Edit"]').click();
 {% else %}
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
@@ -794,10 +794,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list and can_view %}
           cy.visit('/en/{{ parent }}');
           cy.contains('{{ list_id_1 }}').click();
-          cy.get('[aria-label="Edit"]').click();
+          cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
           cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
-          cy.get('[aria-label="Edit"]').click();
+          cy.get('a[aria-label="Edit"]').click();
 {% else %}
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
