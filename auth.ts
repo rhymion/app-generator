@@ -107,11 +107,19 @@ function buildProviders(): Provider[] {
       GoogleProvider({
         clientId: process.env.GOOGLE_CLIENT_ID!,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-        // Explicit even though false is the v5 default. With the adapter in
-        // play, an OAuth login whose email matches an existing user row but
-        // whose (provider, providerAccountId) has no Account row is rejected
-        // with OAuthAccountNotLinked rather than auto-linked.
-        allowDangerousEmailAccountLinking: false,
+        // Account-linking flow (S7): when an OAuth sign-in arrives whose
+        // email matches an existing user row, the adapter links the new
+        // Account row to that user instead of throwing
+        // OAuthAccountNotLinked. The risk this normally carries — an
+        // attacker creating a Google account with the victim's email and
+        // taking over the credentials account — is mitigated by the
+        // signIn() callback below, which (a) keeps the explicit
+        // email_verified gate and (b) rejects an OAuth sign-in for a
+        // credentials-holding email unless the request comes from an
+        // active session for that same user. So `dangerous` here means
+        // "linkable to existing user once the signIn callback authorises";
+        // the unauthenticated take-over path stays blocked.
+        allowDangerousEmailAccountLinking: true,
         authorization: {
           params: { prompt: "select_account" },
         },
@@ -262,6 +270,53 @@ export const authConfig: NextAuthConfig = {
         }
       }
 
+      // Linking flow (S7). When this OAuth sign-in is initiated from an
+      // already-authenticated session, treat it as an attempt to attach a
+      // new Account row to the signed-in user rather than a fresh
+      // sign-in. Reading the current session via `auth()` here is safe:
+      // `auth()` resolves the session cookie via next/headers and does
+      // not recurse into this callback. Only same-email linking is
+      // supported; cross-email linking would require minting an Account
+      // row outside the adapter's email-keyed lookup and is deferred.
+      const currentSession = await auth().catch(() => null);
+      const currentUserId = currentSession?.user?.id ?? null;
+      if (currentUserId) {
+        const current = await prisma.user.findUnique({
+          where: { id: currentUserId },
+          select: { email: true },
+        });
+        if (current?.email !== email) {
+          console.info(
+            "[auth:signIn:reject]",
+            JSON.stringify({
+              at: new Date().toISOString(),
+              reason: "linking_email_mismatch",
+              provider: account.provider,
+              oauthEmail: email,
+            }),
+          );
+          await recordAuditEvent({
+            action: "auth:signIn.reject",
+            actor_user_id: currentUserId,
+            metadata: { reason: "linking_email_mismatch", provider: account.provider },
+          });
+          return false;
+        }
+        // Same-email linking. Skip the credentials/OAuth collision
+        // rejection below — the signed-in user is provably the owner of
+        // the credentials account. PrismaAdapter then writes the new
+        // Account row via allowDangerousEmailAccountLinking + email
+        // match.
+        await recordAuditEvent({
+          action: "auth:account.link",
+          actor_user_id: currentUserId,
+          target_table: "user",
+          target_id: currentUserId,
+          metadata: { provider: account.provider },
+        });
+        return true;
+      }
+
       // Credentials↔OAuth collision guard. After the user_account / User
       // merge, both flows write to the same `user` row. A row with a
       // non-null password was created via /register; rejecting here keeps
@@ -269,6 +324,10 @@ export const authConfig: NextAuthConfig = {
       // an Account row to that user). Without this, the adapter would
       // attempt to create a new `user` row and hit the @unique(email)
       // constraint — same outcome, less explicit.
+      //
+      // Note the linking-flow branch above runs first: an authenticated
+      // user attaching their own Google account never reaches this
+      // rejection.
       const existing = await prisma.user.findUnique({
         where: { email },
         select: { password: true },

@@ -325,6 +325,27 @@ other change is needed.
   additional OAuth provider to their existing account. The plumbing is
   there (one `user` row can own multiple `Account` rows), but there's
   no user-facing flow yet.
+
+  **v1 (S7) shipped:** `/setting/accounts` lists the user's `Account`
+  rows, offers a "Connect <provider>" button for each OAuth provider
+  not yet linked, and a detach button that refuses to remove the last
+  sign-in method (no password + only one Account = detach blocked,
+  enforced inside a single transaction so concurrent calls can't both
+  pass the guard). The attach flow uses the normal Auth.js `signIn()`
+  redirect; auth.ts's signIn callback detects an active session and
+  treats the OAuth callback as a link request (PrismaAdapter then
+  writes the Account row via `allowDangerousEmailAccountLinking`).
+  **Scope limit:** same-email linking only — the OAuth provider's
+  email must match the signed-in user's email. Cross-email linking
+  (attach a Google account `b@example.com` to an app account
+  `a@example.com`) would require minting the Account row outside the
+  adapter's email-keyed lookup; deferred. The security argument for
+  flipping `allowDangerousEmailAccountLinking: true` rests on two
+  things: the existing `email_verified` gate (Google won't say true
+  for an unowned email) and the signIn-callback check that the link
+  request comes from an active session for that same user — so an
+  unauthenticated take-over via a same-email Google account stays
+  blocked. See `lib/account-link/` and `auth.ts`.
 - **Audit-log table** — `events.signIn` / `signOut` and the
   `[auth:createUser]` line emitted from `buildAdapter` currently log
   via `console.info`. A real audit-log Prisma model with hooks into

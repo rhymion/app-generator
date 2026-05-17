@@ -152,5 +152,26 @@
     "disableIntro": "To turn MFA off, enter a current 6-digit code (or a recovery code).",
     "disableCodeLabel": "6-digit or recovery code",
     "disableButton": "Disable MFA"
+  },
+  "Setting": {
+    "title": "Account settings",
+    "mfaTitle": "Two-factor authentication",
+    "mfaBody": "Enable a second factor for credentials sign-in.",
+    "accountsTitle": "Connected accounts",
+    "accountsBody": "Manage which providers can sign you into this account."
+  },
+  "LinkedAccounts": {
+    "title": "Connected accounts",
+    "intro": "These providers can sign you into this account. You can connect another OAuth provider with the same email, or detach one as long as you keep at least one way to sign in.",
+    "emptyState": "No OAuth providers are connected yet.",
+    "detach": "Detach this provider",
+    "cannotDetach": "Removing this would leave you with no way to sign in.",
+    "detachAria": "Detach {provider}",
+    "connectMore": "Connect another provider",
+    "connectButton": "Connect {provider}",
+    "passwordlessNotice": "This is your only sign-in method. Set a password on the account before detaching it.",
+    "errorLastSignInMethod": "Cannot detach: you would no longer be able to sign in.",
+    "errorNotFound": "Linked account not found.",
+    "errorUnknown": "Something went wrong. Please try again."
   }
 }

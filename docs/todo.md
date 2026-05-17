@@ -198,6 +198,35 @@ additional OAuth provider.
 
 **References:** `sso-authentication.md:310-313`, `auth.ts`, `app/[locale]/setting/`.
 
+**Status:** shipped — same-email linking. Cross-email deferred.
+- `lib/account-link/index.ts` — `listLinkedAccounts`,
+  `availableProvidersForLinking`, `hasAnotherSignInMethod`,
+  `detachAccount` (transactional last-sign-in-method guard, audit-logged
+  as `auth:account.unlink`).
+- `auth.ts` — Google provider flipped to
+  `allowDangerousEmailAccountLinking: true`. The signIn callback now
+  detects an active session via `auth()`; same-email = link (logged as
+  `auth:account.link`), different email = reject
+  (`auth:signIn.reject` with reason `linking_email_mismatch`). The
+  existing credentials/OAuth collision rejection still fires for
+  unauthenticated sign-ins, so an attacker can't take over a
+  credentials account via a same-email Google account.
+- `app/[locale]/setting/page.tsx` — new index linking to `mfa` +
+  `accounts`. `app/[locale]/setting/accounts/{page,accounts-client,
+  actions}.{ts,tsx}` — list, connect (`signIn(provider, {redirectTo:
+  /setting/accounts})`), detach with last-method guard.
+- `messages/{en,ja}.json` — new `Setting` + `LinkedAccounts` sections,
+  key parity verified.
+- 13 Vitest cases in `lib/account-link/index.test.ts` covering list /
+  available / detach (password path, multi-account path, last-method
+  rejection, not-found rejection, audit metadata).
+- `docs/knowledge/sso-authentication.md` — design + security note in
+  the "Out of scope, for next time" section.
+
+**Not in this phase:** cross-email linking (attach a Google account
+whose email doesn't match the signed-in user's email) — would require
+custom Account creation outside the adapter's email-keyed lookup.
+
 ---
 
 ### S8 — Per-tenant SSO (SAML)
