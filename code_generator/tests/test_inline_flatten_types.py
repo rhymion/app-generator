@@ -155,19 +155,68 @@ def test_all_user_flags_false_is_treated_as_no_module():
 
 
 # ---------------------------------------------------------------------------
-# Real-world schema: checkup → checkup_result (the original bug report)
+# Regression: checkup → checkup_result (the original bug report)
 # ---------------------------------------------------------------------------
+#
+# Reproduces the exact entity shape that triggered the original bug rather
+# than reading `code_generator/json_schema.yaml`. The live schema is project
+# data and turns over with feature work — a test pinned to it fails the day
+# someone refactors `checkup` out, even when the generator is still correct.
+# The other tests in this file cover the general behaviour with synthetic
+# `parent` / `embedded` names; this one keeps `checkup` / `checkup_result`
+# so a future reader sees the link to the historical regression.
 
-def test_checkup_result_is_inlined_in_real_schema():
-    """`checkup_result` has neither `x-generate` nor a `_detail` variant in
-    `code_generator/json_schema.yaml` — it must land in `inline_flatten_types`
+
+def _checkup_schema() -> dict:
+    """Mirror the checkup / checkup_result shape that originally broke
+    `tsc` on `lib/checkup/types.ts`: `checkup_detail` flattens
+    `checkup_result`, and `checkup_result` has neither `x-generate` nor a
+    `_detail` variant so no module is ever emitted for it."""
+    return {
+        "definitions": {
+            "checkup": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": _id_prop(), "name": {"type": "string"}},
+            },
+            "checkup_result": {
+                "type": "object",
+                "required": ["id", "checkup_id"],
+                "properties": {
+                    "id": _id_prop(),
+                    "checkup_id": {
+                        "type": "string",
+                        "pattern": "^c[a-z0-9]{24,}$",
+                        "x-relationship": {"type": "one-to-one", "target": "checkup"},
+                    },
+                    "score": {"type": "number"},
+                    "note": {"type": ["string", "null"]},
+                },
+            },
+            "checkup_detail": {
+                "x-generate": {"list": True, "view": True, "new": True, "edit": True,
+                               "delete": True, "api": True, "test": True},
+                "allOf": [
+                    {"$ref": "#/definitions/checkup"},
+                    {
+                        "type": "object",
+                        "properties": {
+                            "checkup_result": {
+                                "x-outputType": "flatten",
+                                "$ref": "#/definitions/checkup_result",
+                            }
+                        },
+                    },
+                ],
+            },
+        }
+    }
+
+
+def test_checkup_result_is_inlined():
+    """`checkup_result` has no module → must land in `inline_flatten_types`
     so `lib/checkup/types.ts` no longer imports from a nonexistent module."""
-    import yaml
-    from pathlib import Path
-    schema_path = Path(__file__).resolve().parents[1] / "json_schema.yaml"
-    with open(schema_path) as f:
-        schema = yaml.safe_load(f)
-    ctx = _build("checkup", schema)
+    ctx = _build("checkup", _checkup_schema())
     assert "checkup_result" not in ctx["import_targets"]
     names = [t["name"] for t in ctx["inline_flatten_types"]]
     assert "checkup_result" in names
