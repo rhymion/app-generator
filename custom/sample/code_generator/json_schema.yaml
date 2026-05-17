@@ -1069,8 +1069,8 @@ definitions:
       invalidate: false
       api: true
       test: true
-    x-custom-component:
-      name: CopyShiftsButton
+    x-custom-components:
+      - name: CopyShiftsButton
     allOf:
       - $ref: "#/definitions/shift_template"
       - type: object
@@ -1423,12 +1423,12 @@ definitions:
       invalidate: false
       api: true
       test: true
-    x-custom-component:
-      name: ApprovalSection
-      path: "@/components/_standard/ApprovalSection"
-      target:
-        - view
-        - edit
+    x-custom-components:
+      - name: ApprovalSection
+        path: "@/components/_standard/ApprovalSection"
+        target:
+          - view
+          - edit
     allOf:
       - $ref: "#/definitions/leave_request"
       - type: object

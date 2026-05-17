@@ -4,7 +4,7 @@ import FormView from '@/components/{{ parent }}/FormView';
 import { get{{ parent_pascal }}DetailPageData } from '@/lib/{{ parent }}/getters';
 import { {{ parent_pascal }}DetailPageProps } from '@/lib/{{ parent }}/types';
 import { notFound } from 'next/navigation';
-{% if entity_view_component %}
+{% if entity_view_components %}
 import { getUserRoleIds, getSessionUserId } from '@/lib/authz';
 {% endif %}
 
@@ -18,7 +18,7 @@ export default async function View{{ parent_pascal }}Page({ params }: {{ parent_
 }
 
 async function {{ parent_pascal }}ViewContent({ id }: { id: string }) {
-{% if entity_view_component %}
+{% if entity_view_components %}
   const [{ {{ parent_camel }}, userPermissions }, currentUserRoleIds, currentUserId] = await Promise.all([
     get{{ parent_pascal }}DetailPageData(id),
     getUserRoleIds(),
@@ -30,5 +30,5 @@ async function {{ parent_pascal }}ViewContent({ id }: { id: string }) {
   if (!{{ parent_camel }}) {
     notFound();
   }
-  return <FormView src={{ '{' }}{{ parent_camel }}{{ '}' }} permissions={userPermissions}{% if entity_view_component %} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId}{% endif %} />;
+  return <FormView src={{ '{' }}{{ parent_camel }}{{ '}' }} permissions={userPermissions}{% if entity_view_components %} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId}{% endif %} />;
 }

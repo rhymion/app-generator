@@ -1327,6 +1327,14 @@ def helper_context(
         lookup_field = 'name' if name_ef else None
         lookup_value = name_ef['prisma_val'] if name_ef else None
         lookup_value_second = name_ef['prisma_val_second'] if name_ef else None
+        # Per-iteration lookup value (`Test X ${i}`) used by populateXxxData's
+        # find-or-create on the primary FK. Closes the cross-helper
+        # collision where deps create `Test X 2` and populate(2) would then
+        # try to create another `Test X 2` and trip @unique (e.g.
+        # product.code). When the row already exists, the iteration re-uses
+        # it; otherwise it creates a fresh one. Same lookup field as deps
+        # (`name`) so the two helpers see the same row.
+        lookup_value_unique = name_ef['prisma_val_unique'] if name_ef else None
         label_field = dep_label_info.get('label_field', 'name') if dep_label_info else dep.get('label_field', 'name')
         label_field_is_date = dep_label_info.get('label_field_is_date', False) if dep_label_info else dep.get('label_field_is_date', False)
         # Pre-compute the TS expression and Prisma include so the template
@@ -1366,6 +1374,7 @@ def helper_context(
             'lookup_field': lookup_field,
             'lookup_value': lookup_value,
             'lookup_value_second': lookup_value_second,
+            'lookup_value_unique': lookup_value_unique,
         })
 
     # Separate self-ref deps (target == model) from non-self deps for _createBaseDeps() split.

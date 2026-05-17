@@ -2,7 +2,18 @@ import type { ModelPermissions } from '@/lib/authz';
 {% for target in import_targets %}
 import type { {{ target | pascal_case }} } from '@/lib/{{ target }}/types';
 {% endfor %}
+{% for type_name, module in flatten_detail_imports %}
+import type { {{ type_name | pascal_case }} } from '@/lib/{{ module }}/types';
+{% endfor %}
 
+{% for t in inline_flatten_types %}
+export type {{ t.name | pascal_case }} = {
+{% for field in t.fields %}
+  {{ field.name }}: {{ field.ts_type }};
+{% endfor %}
+};
+
+{% endfor %}
 export type {{ parent | pascal_case }} = {
 {% for field in parent_fields %}
   {{ field.name }}: {{ field.ts_type }};
@@ -159,7 +170,7 @@ export type FormViewProps = Readonly<{
     updater?: { id: string; name: string } | null;
   };
   permissions?: ModelPermissions;
-{% if entity_view_component or entity_edit_component %}
+{% if entity_view_components or entity_edit_components %}
   currentUserRoleIds?: string[];
   currentUserId?: string | null;
 {% endif %}

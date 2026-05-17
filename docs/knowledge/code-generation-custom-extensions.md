@@ -53,27 +53,49 @@ interface Props { value: string; }
 
 ---
 
-## 2. Entity-Level Custom Component (`x-custom-component` on `_detail`)
+## 2. Entity-Level Custom Components (`x-custom-components` on `_detail`)
+
+> **Naming note.** The property-level key is `x-custom-component` (singular, one
+> object); the entity-level key is `x-custom-components` (plural, **list** of
+> objects). The shapes differ on purpose — an entity can mount several
+> independent widgets across `list`, `view`, and `edit` pages.
 
 ### Schema config
 
-Add `x-custom-component` to the `_detail` definition. The `target` field controls which pages render it. Default (no `target`) is `[list]` for backward compatibility.
+Add `x-custom-components` to the `_detail` definition as a list. The `target` field on each
+entry controls which pages render it. Default (no `target`) is `[list]` for backward
+compatibility.
 
 ```yaml
-# List page only (default / backward compat)
+# Single component on the list page only (default / backward compat).
+# Plural key + list value even for a single entry.
 shift_template_detail:
-  x-custom-component:
-    name: CopyShiftsButton
+  x-custom-components:
+    - name: CopyShiftsButton
   allOf: ...
 
-# View and edit pages, using a shared component from components/_standard/
+# Single component on view + edit, with a shared component from components/_standard/.
 leave_request_detail:
-  x-custom-component:
-    name: ApprovalSection
-    path: "@/components/_standard/ApprovalSection"   # optional; overrides default import path
-    target:
-      - view
-      - edit
+  x-custom-components:
+    - name: ApprovalSection
+      path: "@/components/_standard/ApprovalSection"   # optional; overrides default import path
+      target:
+        - view
+        - edit
+  allOf: ...
+
+# Multiple components on one entity.
+checkup_detail:
+  x-custom-components:
+    - name: AggregateScore
+      path: "@/components/checkup/aggregate_score"
+      target: [new, edit, view]
+    - name: JudgeResult
+      path: "@/components/checkup/judge_result"
+      target: [new, edit]
+    - name: CreatePDF
+      path: "@/components/checkup/create_pdf"
+      target: [new, edit, view]
   allOf: ...
 ```
 
@@ -85,7 +107,7 @@ Use it for reusable components shared across entities that live in `components/_
 - **`target: [list]`** — imports `{ComponentName}` in the list page and renders it in the button bar.
 - **`target: [view]`** — imports `{ComponentName}` in `FormView.tsx` and renders `<{ComponentName} src={src} permissions={permissions} />` at the bottom.
 - **`target: [edit]`** — same in `FormUpsert.tsx`.
-- Multiple targets can be combined.
+- Multiple targets can be combined per entry; multiple entries are independent.
 - The component file is **never created or overwritten**.
 
 ### Component interface

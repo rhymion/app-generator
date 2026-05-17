@@ -92,8 +92,10 @@ class EntityContext:
     one_to_one_rels: list[OneToOneRelInfo]  # one-to-one outbound FK rels with nested children
     reverse_oto_rels: list[ReverseOtoRelInfo]  # reverse OTO: FK in target pointing back to this model
     flatten_rels: list[FlattenRelInfo]         # flatten rels: shown as collapsible accordion in detail view
-    entity_view_component: str | None = None   # custom component rendered in FormView
-    entity_edit_component: str | None = None   # custom component rendered in FormUpsert
+    flatten_detail_imports: list[tuple[str, str]] = ()  # (type_name, module_name) for *_detail flatten targets
+    inline_flatten_types: list[dict] = ()      # flatten targets without their own module; [{name, fields}]
+    entity_view_components: list[dict] = ()    # custom components rendered in FormView; [{name, path?}]
+    entity_edit_components: list[dict] = ()    # custom components rendered in FormUpsert; [{name, path?}]
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +214,60 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     _flatten_rels_raw = get_flatten_rels(parent, {**model_def, 'properties': filtered_props}, schema)
     # Only non-m2o flatten rels need new type imports (m2o targets are already in parent_rels)
     _flatten_non_m2o_targets = [r['target'] for r in _flatten_rels_raw if not r['is_m2o']]
+    # Each flatten target falls into one of three buckets:
+    #   1. `_detail` target with a base entity (e.g. `pre_check_detail` → import
+    #      `PreCheckDetail` from `lib/pre_check/types`). Handled via
+    #      `flatten_detail_imports`.
+    #   2. Plain target that has its own generated module (own page or API).
+    #      Imported normally via `import_targets`.
+    #   3. Plain target with NO generated module (embedded one-to-one with no
+    #      `x-generate` anywhere, e.g. `checkup_result`). There is no
+    #      `lib/<target>/types.ts` to import from, so declare the type inline
+    #      in this entity's `types.ts`.
+    _USER_GENERATE_FLAGS = ('list', 'view', 'new', 'edit', 'delete', 'api')
+
+    def _target_has_module(t: str) -> bool:
+        defs = schema.get('definitions', {})
+        for key in (t, f'{t}_detail'):
+            defn = defs.get(key)
+            if not isinstance(defn, dict):
+                continue
+            gen = defn.get('x-generate')
+            if not isinstance(gen, dict):
+                continue
+            # extract_entities skips an entity only when every user-facing flag
+            # is explicitly False; default for missing flags is True.
+            if not all(gen.get(f) is False for f in _USER_GENERATE_FLAGS):
+                return True
+        return False
+
+    _detail_suffix = '_detail'
+    _flatten_detail_imports: list[tuple[str, str]] = []
+    _flatten_non_detail_targets: list[str] = []
+    _inline_flatten_targets: list[str] = []
+    for _t in _flatten_non_m2o_targets:
+        if _t.endswith(_detail_suffix) and _t[:-len(_detail_suffix)] in schema.get('definitions', {}):
+            _flatten_detail_imports.append((_t, _t[:-len(_detail_suffix)]))
+        elif _target_has_module(_t):
+            _flatten_non_detail_targets.append(_t)
+        else:
+            _inline_flatten_targets.append(_t)
+
+    # Build inline type declarations for embedded flatten targets. Field shape
+    # mirrors the independent-entity convention (`parent_fields`): every
+    # schema property plus `creator_id` so consumers can read audit info.
+    _inline_flatten_types: list[dict] = []
+    _seen_inline = set()
+    for _t in _inline_flatten_targets:
+        if _t in _seen_inline:
+            continue
+        _seen_inline.add(_t)
+        _target_def = schema.get('definitions', {}).get(_t, {}) or {}
+        _target_props = _target_def.get('properties', {}) or {}
+        _fields = [FieldInfo(k, get_ts_type(v)) for k, v in _target_props.items()]
+        if 'creator_id' not in _target_props:
+            _fields.append(FieldInfo('creator_id', 'string | null'))
+        _inline_flatten_types.append({'name': _t, 'fields': _fields})
 
     # Import targets = union of parent + child + auto-create OTO nested rel targets + selector OTO + reverse OTO + flatten
     all_import_targets = _dedupe_ordered([
@@ -220,7 +276,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         *oto_child_rel_targets,
         *[r['target'] for r in _selector_oto_early],
         *[r['target'] for r in _reverse_oto_early],
-        *_flatten_non_m2o_targets,
+        *_flatten_non_detail_targets,
     ])
     import_targets = [t for t in all_import_targets if t != model]
 
@@ -355,12 +411,24 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         for r in _flatten_rels_raw
     ]
 
-    # Custom view/edit components from x-custom-component config
-    _xcc = schema['definitions'].get(def_key, {}).get('x-custom-component') or {}
-    _xcc_name = _xcc.get('name')
-    _xcc_target = _xcc.get('target') or ['list']
-    entity_view_component = _xcc_name if (_xcc_name and 'view' in _xcc_target) else None
-    entity_edit_component = _xcc_name if (_xcc_name and 'edit' in _xcc_target) else None
+    # Custom view/edit components from x-custom-components config (entity-level, list).
+    _xcc_list_raw = schema['definitions'].get(def_key, {}).get('x-custom-components') or []
+    if not isinstance(_xcc_list_raw, list):
+        raise ValueError(
+            f"x-custom-components on '{def_key}' must be a list of component objects; "
+            f"got {type(_xcc_list_raw).__name__}"
+        )
+    entity_view_components: list[dict] = []
+    entity_edit_components: list[dict] = []
+    for _item in _xcc_list_raw:
+        if not isinstance(_item, dict) or not _item.get('name'):
+            continue
+        _target = _item.get('target') or ['list']
+        _entry = {'name': _item['name'], 'path': _item.get('path')}
+        if 'view' in _target:
+            entity_view_components.append(_entry)
+        if 'edit' in _target:
+            entity_edit_components.append(_entry)
 
     return EntityContext(
         parent=parent,
@@ -375,6 +443,8 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         one_to_one_rels=one_to_one_rels,
         reverse_oto_rels=reverse_oto_rels,
         flatten_rels=flatten_rels,
-        entity_view_component=entity_view_component,
-        entity_edit_component=entity_edit_component,
+        flatten_detail_imports=_flatten_detail_imports,
+        inline_flatten_types=_inline_flatten_types,
+        entity_view_components=entity_view_components,
+        entity_edit_components=entity_edit_components,
     )

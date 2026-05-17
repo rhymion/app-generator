@@ -204,15 +204,50 @@ def _get_first_label_field(target: str, schema: dict) -> str:
 
 def _extract_flatten_fields(target_props: dict, parent_model: str) -> list[dict]:
     """Extract field info for flatten accordion display.
-    Excludes system fields, back-references to parent, and arrays.
+
+    Excludes system fields and back-references to the parent. Arrays of
+    `$ref` items are surfaced with `is_array: True` so the renderer can
+    show them as a read-only list inline in the accordion (e.g., a
+    `pre_check_detail.symptoms` array shown inside the `pre_check` section
+    of `checkup`'s form).
     """
     fields = []
     for field_name, prop in target_props.items():
         if field_name in _SYSTEM_FIELDS:
             continue
         prop_type = prop.get('type')
+
+        # Array of $ref → render as a read-only list of item labels.
         if prop_type == 'array':
+            items = prop.get('items', {}) if isinstance(prop.get('items'), dict) else {}
+            ref = items.get('$ref', '')
+            if not ref:
+                continue
+            item_target = ref.split('/')[-1]
+            fields.append({
+                'name': field_name,
+                'prop_type': 'array',
+                'is_array': True,
+                'item_target': item_target,
+                'is_fk': False,
+                'format': None,
+                'nullable': True,
+                'enum': None,
+            })
             continue
+
+        # Plain $ref to another entity (no `type`, no `x-relationship`).
+        # In a *_detail extension, these typically point back at the parent
+        # (e.g., pre_check_detail.checkup → "#/definitions/checkup") and
+        # are self-evident in the parent's form. Skip them.
+        if '$ref' in prop and not prop_type:
+            ref_target = prop['$ref'].split('/')[-1]
+            if ref_target == parent_model or ref_target == f'{parent_model}_detail':
+                continue
+            # Forward-reference to a different entity inside a detail
+            # extension — out of scope for inline accordion rendering today.
+            continue
+
         rel = prop.get('x-relationship')
         if rel:
             rel_target = rel.get('target', '')
@@ -254,6 +289,45 @@ def _extract_flatten_fields(target_props: dict, parent_model: str) -> list[dict]
     return fields
 
 
+def _get_flatten_target_props(target: str, schema: dict) -> dict:
+    """Return displayable properties for a flatten target.
+
+    Plain entity (`pre_check`): returns `properties`.
+    Detail entity (`pre_check_detail` = allOf[base $ref, {properties}]):
+        returns the *merge* of base.properties and the extension's
+        properties so flatten rendering sees both the inherited fields
+        (e.g., `ams_score` from `pre_check`) and the extension's added
+        ones (e.g., `symptoms` array, `checkup` back-ref).
+
+    Order in the merge: base first, then extension overrides — extension
+    properties shadow same-name base properties, mirroring JSON Schema
+    semantics for allOf merging.
+
+    Compare with `_get_entity_base_props`, which only returns one block at
+    a time (the first one it finds). That helper has callers that
+    *deliberately* want just the base — keep it; flatten uses this one.
+    """
+    defn = schema['definitions'].get(target, {})
+    if 'properties' in defn:
+        return defn['properties']
+
+    merged: dict = {}
+    for item in defn.get('allOf', []):
+        if '$ref' in item:
+            base_target = item['$ref'].split('/')[-1]
+            base_def = schema['definitions'].get(base_target, {})
+            if 'properties' in base_def:
+                merged = {**merged, **base_def['properties']}
+            else:
+                # Nested allOf (rare) — recurse one level.
+                for nested in base_def.get('allOf', []):
+                    if 'properties' in nested:
+                        merged = {**merged, **nested['properties']}
+        elif 'properties' in item:
+            merged = {**merged, **item['properties']}
+    return merged
+
+
 def get_flatten_rels(parent: str, parent_def: dict, schema: dict) -> list[dict]:
     """Returns $ref properties from the _detail definition with x-outputType: flatten.
 
@@ -276,7 +350,10 @@ def get_flatten_rels(parent: str, parent_def: dict, schema: dict) -> list[dict]:
         target = ref.split('/')[-1]
         relation_name = prop.get('x-relationName') or prop_name
         is_m2o = f'{prop_name}_id' in base_props
-        target_props = _get_entity_base_props(target, schema)
+        # Use the merged (base + detail) properties so a `_detail` target
+        # surfaces both inherited scalar fields (ams_score) and the
+        # extension's additions (symptoms array).
+        target_props = _get_flatten_target_props(target, schema)
         fields = _extract_flatten_fields(target_props, parent)
         result.append({
             'prop_name': prop_name,

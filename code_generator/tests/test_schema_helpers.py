@@ -548,3 +548,196 @@ class TestGetFlattenRels:
         parent_def = schema["definitions"]["thing"]
         rels = get_flatten_rels("thing", parent_def, schema)
         assert rels == []
+
+
+# ---------------------------------------------------------------------------
+# get_flatten_rels — flatten $ref targets a *_detail definition
+# ---------------------------------------------------------------------------
+
+class TestGetFlattenRelsRefToDetail:
+    """When a flatten property's $ref points at `<base>_detail` (an allOf
+    of `[base, {extension properties}]`), the extracted fields should
+    represent the *merged* view — both the base entity's scalars and any
+    extension-only fields (incl. array `$ref` items). Back-references to
+    the parent (whether via x-relationship or a plain `$ref` to the
+    parent) are filtered out so they don't show up in the inline
+    accordion as a self-evident link.
+    """
+
+    def _schema(self):
+        return {
+            "definitions": {
+                # Parent
+                "checkup": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                    },
+                },
+                "checkup_detail": {
+                    "allOf": [
+                        {"$ref": "#/definitions/checkup"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "pre_check": {
+                                    "x-outputType": "flatten",
+                                    "$ref": "#/definitions/pre_check_detail",
+                                },
+                            },
+                        },
+                    ]
+                },
+                # Flatten target: base + detail extension
+                "pre_check": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "checkup_id": {
+                            "type": "string",
+                            "x-relationship": {
+                                "type": "one-to-one",
+                                "target": "checkup",
+                                "labelField": "checkup_date",
+                            },
+                        },
+                        "ams_score": {"type": ["integer", "null"]},
+                    },
+                },
+                "pre_check_detail": {
+                    "allOf": [
+                        {"$ref": "#/definitions/pre_check"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                # Plain $ref back to the parent — should be
+                                # filtered out as self-evident.
+                                "checkup": {"$ref": "#/definitions/checkup"},
+                                # Array $ref → surfaced with is_array=True.
+                                "symptoms": {
+                                    "type": "array",
+                                    "x-outputType": "list",
+                                    "items": {"$ref": "#/definitions/symptom"},
+                                },
+                            },
+                        },
+                    ]
+                },
+                "symptom": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "pre_check_id": {"type": "string"},
+                        "name": {"type": "string"},
+                    },
+                },
+            }
+        }
+
+    def test_merges_base_and_detail_properties(self):
+        """A scalar inherited from `pre_check` (ams_score) must surface
+        even when the flatten target is `pre_check_detail`."""
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
+        names = [f["name"] for f in pre_check_entry["fields"]]
+        assert "ams_score" in names, (
+            "ams_score is defined on the *base* pre_check; merging the "
+            "*_detail allOf should expose it through the flatten fields."
+        )
+
+    def test_includes_array_ref_field_from_detail_extension(self):
+        """`symptoms` (array of $ref in the detail extension) must be
+        present with `is_array=True` and the item target name attached so
+        renderers can build a list-widget against it."""
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
+        symptoms_field = next(
+            (f for f in pre_check_entry["fields"] if f["name"] == "symptoms"),
+            None,
+        )
+        assert symptoms_field is not None
+        assert symptoms_field.get("is_array") is True
+        assert symptoms_field.get("item_target") == "symptom"
+        # Array items are *not* FKs even though their target is another entity.
+        assert symptoms_field.get("is_fk") is False
+
+    def test_filters_ref_back_reference_to_parent(self):
+        """The plain `$ref: checkup` inside pre_check_detail is a
+        self-evident back-reference to the parent and must be excluded —
+        the parent is the form being rendered."""
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
+        names = [f["name"] for f in pre_check_entry["fields"]]
+        assert "checkup" not in names
+
+    def test_filters_xrelationship_back_reference_to_parent(self):
+        """The base entity's `checkup_id` (x-relationship → checkup) is
+        also a back-reference. The pre-existing rule covered this for
+        plain flatten targets; verify it still applies after merging."""
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
+        names = [f["name"] for f in pre_check_entry["fields"]]
+        assert "checkup_id" not in names
+
+    def test_filters_ref_back_reference_via_parent_detail_name(self):
+        """When the detail extension references `<parent>_detail` (not
+        just `<parent>`), that's still a back-reference."""
+        schema = self._schema()
+        # Replace the plain `checkup` $ref with a `checkup_detail` $ref.
+        detail_extension = schema["definitions"]["pre_check_detail"]["allOf"][1]
+        detail_extension["properties"]["checkup"] = {
+            "$ref": "#/definitions/checkup_detail",
+        }
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
+        names = [f["name"] for f in pre_check_entry["fields"]]
+        assert "checkup" not in names
+
+    def test_array_field_with_no_name_in_item_falls_through(self):
+        """`is_array` requires an `$ref` on the array items; bare arrays
+        of primitives (no $ref) are skipped so the renderer can ignore
+        them without special-casing."""
+        schema = self._schema()
+        detail_extension = schema["definitions"]["pre_check_detail"]["allOf"][1]
+        detail_extension["properties"]["raw_tags"] = {
+            "type": "array",
+            "items": {"type": "string"},
+        }
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
+        names = [f["name"] for f in pre_check_entry["fields"]]
+        assert "raw_tags" not in names
+
+    def test_scalar_and_array_fields_coexist(self):
+        """Sanity check: a single flatten entry can carry both a scalar
+        field (ams_score) and an array field (symptoms) — the renderers
+        downstream pick the right widget based on `is_array`."""
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
+        by_name = {f["name"]: f for f in pre_check_entry["fields"]}
+        assert "ams_score" in by_name
+        assert "symptoms" in by_name
+        assert by_name["ams_score"].get("is_array") is not True
+        assert by_name["symptoms"].get("is_array") is True
+
+    def test_target_field_preserves_detail_name(self):
+        """The `target` on the flatten entry retains the `*_detail` name
+        — downstream code uses it as the TypeScript type label
+        (PreCheckDetail). Module-path rewriting happens in context.py."""
+        schema = self._schema()
+        parent_def = schema["definitions"]["checkup"]
+        rels = get_flatten_rels("checkup", parent_def, schema)
+        pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
+        assert pre_check_entry["target"] == "pre_check_detail"

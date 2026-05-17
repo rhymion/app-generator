@@ -207,37 +207,189 @@ def test_first_label_path_returns_first():
 
 # ---------------------------------------------------------------------------
 # Detail-page include deepening (FormView label resolution)
+#
+# These tests verify that `build_context` deepens the Prisma `include` chain
+# whenever a relation's labelField walks through more than one level of m2o /
+# one-to-one — e.g. `lifestyle.checkup_id` with labelField
+# `patient_rel.patient.name` means the lifestyle detail query must include
+# `checkup → patient_rel → patient` so the label expression isn't dereferencing
+# undefined fields at render time.
+#
+# Earlier versions of these tests read `lib/lifestyle/getters.ts` from disk,
+# which (a) required `npm run demo:generate` to have produced the file and
+# (b) made the assertion brittle to whatever entities live in the host
+# project's `json_schema.yaml` today. We now inspect `build_context`'s
+# output directly against an inline fixture schema.
 # ---------------------------------------------------------------------------
 
+def _pipeline_entity(parent: str, definition_key: str | None = None) -> dict:
+    """Minimal entity dict matching what `extract_entities` would emit."""
+    return {
+        'parent':          parent,
+        'model':           parent,
+        'definition_key':  definition_key or f'{parent}_detail',
+        'children':        [],
+        'generate_config': {
+            'list':   True,
+            'view':   True,
+            'new':    True,
+            'edit':   True,
+            'delete': True,
+            'api':    True,
+            'test':   True,
+            'fields': None,
+        },
+    }
+
+
+def _pipeline_schema() -> dict:
+    """Fixture exercising deepened-include behaviour through `build_context`.
+
+    `lifestyle.checkup_id` is a selector one-to-one whose labelField walks
+    `patient_rel.patient.name` on the target. Calling `build_context` on the
+    `lifestyle` entity must therefore emit a `checkup` include that nests
+    `patient_rel → patient` — both inside `include_props_detail` (used by
+    `getLifestyleDetail`) and inside each selector OTO rel's `available_include`
+    (used by `getAvailableCheckupsForLifestyle`).
+    """
+    return {
+        'definitions': {
+            'patient': {
+                'type': 'object',
+                'required': ['id', 'name'],
+                'properties': {
+                    'id':   {'type': 'string'},
+                    'name': {'type': 'string'},
+                },
+                'x-display': {'table': [{'name': {'primary': True}}]},
+            },
+            'patient_detail': {'allOf': [{'$ref': '#/definitions/patient'}]},
+
+            'patient_rel': {
+                'type': 'object',
+                'required': ['id', 'patient_no', 'patient_id'],
+                'properties': {
+                    'id':         {'type': 'string'},
+                    'patient_no': {'type': 'string'},
+                    'patient_id': {
+                        'type': 'string',
+                        'x-relationship': {
+                            'type': 'many-to-one',
+                            'target': 'patient',
+                            'labelField': 'name',
+                        },
+                    },
+                },
+                'x-display': {'table': [{'patient_no': {'primary': True}}]},
+            },
+            'patient_rel_detail': {'allOf': [{'$ref': '#/definitions/patient_rel'}]},
+
+            'checkup': {
+                'type': 'object',
+                'required': ['id', 'patient_rel_id', 'checkup_date'],
+                'properties': {
+                    'id':            {'type': 'string'},
+                    'patient_rel_id': {
+                        'type': 'string',
+                        'x-relationship': {
+                            'type': 'many-to-one',
+                            'target': 'patient_rel',
+                            'labelField': 'patient_no',
+                        },
+                    },
+                    'checkup_date':  {'type': 'string', 'format': 'date'},
+                },
+                'x-display': {'table': [{'patient_rel': {'primary': True}}]},
+            },
+            'checkup_detail': {'allOf': [{'$ref': '#/definitions/checkup'}]},
+
+            'lifestyle': {
+                'type': 'object',
+                'required': ['id', 'patient_id'],
+                'properties': {
+                    'id':         {'type': 'string'},
+                    'patient_id': {
+                        'type': 'string',
+                        'x-relationship': {
+                            'type': 'many-to-one',
+                            'target': 'patient',
+                            'labelField': 'name',
+                        },
+                    },
+                    'checkup_id': {
+                        'type': ['string', 'null'],
+                        'x-relationship': {
+                            'type': 'one-to-one',
+                            'target': 'checkup',
+                            # Two-hop labelField — the include must deepen.
+                            'labelField': 'patient_rel.patient.name',
+                        },
+                    },
+                },
+                'x-display': {'table': [{'patient': {'primary': True}}]},
+            },
+            'lifestyle_detail': {
+                'allOf': [
+                    {'$ref': '#/definitions/lifestyle'},
+                    {
+                        'type': 'object',
+                        'properties': {
+                            'patient': {'$ref': '#/definitions/patient'},
+                            'checkup': {'$ref': '#/definitions/checkup'},
+                        },
+                    },
+                ],
+            },
+        },
+    }
+
+
 def test_lifestyle_detail_include_deepens_for_checkup_labelfield():
-    """Pin: getLifestyleDetail's `include` for the `checkup` selector OTO must
-    deepen to mirror the labelField path. Without this, FormView renders
+    """`include_props_detail` (used by getLifestyleDetail) must deepen the
+    `checkup` selector-OTO include to mirror the labelField path
+    `patient_rel.patient.name`. Without this, FormView renders
     `src.checkup?.patient_rel?.patient?.name` as undefined and the Checkup
     field shows just the date."""
-    src = (REPO_ROOT / 'lib' / 'lifestyle' / 'getters.ts').read_text(encoding='utf-8')
-    # Find the getLifestyleDetail block.
-    detail_start = src.index('async function getLifestyleDetail')
-    detail_end   = src.index('export', detail_start + 1)
-    detail_block = src[detail_start:detail_end]
-    assert 'checkup: { include: { patient_rel: { include: { patient: true } } } }' in detail_block, (
-        "getLifestyleDetail must deepen the `checkup` include to match the "
+    from build_context import build_context  # noqa: WPS433
+
+    schema = _pipeline_schema()
+    ctx = build_context(_pipeline_entity('lifestyle'), schema)
+    include_detail = ctx['include_props_detail']
+    assert (
+        'checkup: { include: { patient_rel: { include: { patient: true } } } }'
+        in include_detail
+    ), (
+        "build_context must deepen the `checkup` include to match the "
         "labelField path `patient_rel.patient.name`. See "
-        "build_context.py → _detail_entry_for_rel."
+        "build_context.py → _detail_entry_for_rel.\n"
+        f"include_props_detail was: {include_detail}"
     )
 
 
 def test_get_available_checkups_for_lifestyle_includes_label_path():
-    """Pin: getAvailableCheckupsForLifestyle must include the labelField path
-    so the form's initial-options data (`initialAvailableCheckups`) carries
-    every relation the autocomplete label expression dereferences. Without
-    this, the lifestyle picker's options render with an empty patient name."""
-    src = (REPO_ROOT / 'lib' / 'lifestyle' / 'getters.ts').read_text(encoding='utf-8')
-    avail_start = src.index('async function getAvailableCheckupsForLifestyle')
-    # Walk to the end of the function — next 'export' or end-of-file.
-    avail_end_marker = src.find('\nexport', avail_start + 1)
-    avail_block = src[avail_start: avail_end_marker if avail_end_marker != -1 else None]
-    assert 'include: { patient_rel: { include: { patient: true } } }' in avail_block, (
-        "getAvailableCheckupsForLifestyle must mirror the labelField path "
-        "`patient_rel.patient.name` in its include. See "
-        "build_context.py → selector_oto_rels.available_include."
+    """Each selector OTO rel must carry an `available_include` string mirroring
+    its labelField path. This is what `getAvailableCheckupsForLifestyle` inlines
+    into its Prisma query so the `initialAvailableCheckups` prop seeds the
+    autocomplete options with every relation the label expression dereferences."""
+    from build_context import build_context  # noqa: WPS433
+
+    schema = _pipeline_schema()
+    ctx = build_context(_pipeline_entity('lifestyle'), schema)
+    selector_rels = ctx['selector_oto_rels']
+    checkup_rel = next(
+        (r for r in selector_rels if r['target'] == 'checkup'),
+        None,
+    )
+    assert checkup_rel is not None, (
+        f"lifestyle should expose `checkup` as a selector OTO rel; got: "
+        f"{[r['target'] for r in selector_rels]}"
+    )
+    assert (
+        checkup_rel['available_include']
+        == 'patient_rel: { include: { patient: true } }'
+    ), (
+        "Selector OTO `checkup` must mirror the labelField path "
+        "`patient_rel.patient.name` in its available_include. See "
+        "build_context.py → selector_oto_rels.available_include.\n"
+        f"available_include was: {checkup_rel['available_include']!r}"
     )

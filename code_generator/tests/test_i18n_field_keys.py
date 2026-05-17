@@ -175,3 +175,33 @@ def test_child_table_selector_oto_emits_field_key():
     entity["children"] = [{"name": "child_model", "property_name": "child_models"}]
     keys = _collect_field_keys([entity], schema)
     assert keys.get("linked") == "Linked"
+
+
+def test_entity_custom_components_inject_keys_for_each_named_component():
+    """`x-custom-components` is a list — every entry whose name has registered keys
+    in `_CUSTOM_COMPONENT_FIELD_KEYS` contributes its keys to the Fields namespace."""
+    schema = {
+        "definitions": {
+            "leave_request": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": _scalar_id_prop()},
+            },
+            "leave_request_detail": {
+                "allOf": [{"$ref": "#/definitions/leave_request"}],
+                "x-custom-components": [
+                    {"name": "ApprovalSection",
+                     "path": "@/components/_standard/ApprovalSection",
+                     "target": ["view", "edit"]},
+                    # An additional unrelated component on the same entity must not
+                    # remove ApprovalSection's keys.
+                    {"name": "Unrelated", "target": ["view"]},
+                ],
+            },
+        }
+    }
+    keys = _collect_field_keys([_entity("leave_request")], schema)
+    # ApprovalSection's registered field keys must all be present.
+    assert keys.get("approve") == "Approve"
+    assert keys.get("reject") == "Reject"
+    assert keys.get("approvalRequests") == "Approval Requests"

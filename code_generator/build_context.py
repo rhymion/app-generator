@@ -606,11 +606,20 @@ def build_context(entity: dict, schema: dict) -> dict:
     for _fr in flatten_rels:
         if _fr['is_m2o']:
             continue
-        _nested_fk = [f for f in _fr['fields'] if f.get('is_fk')]
-        if _nested_fk:
-            _parts = ', '.join(f"{f['relation_name']}: true" for f in _nested_fk)
+        _nested_fk    = [f for f in _fr['fields'] if f.get('is_fk')]
+        _nested_array = [f for f in _fr['fields'] if f.get('is_array')]
+        _inner_parts: list[str] = []
+        _inner_parts.extend(f"{f['relation_name']}: true" for f in _nested_fk)
+        # Array fields (e.g., pre_check_detail.symptoms) need to be pulled
+        # into the parent's detail query — otherwise the typed result
+        # misses the field declared on the *_detail type and TS rejects
+        # the return shape (see TypeError on
+        # `Property 'symptoms' is missing in type … but required in
+        # type { symptoms: Symptom[] }`).
+        _inner_parts.extend(f"{f['name']}: true" for f in _nested_array)
+        if _inner_parts:
             flatten_non_m2o_include_entries.append(
-                f"{_fr['relation_name']}: {{ include: {{ {_parts} }} }}"
+                f"{_fr['relation_name']}: {{ include: {{ {', '.join(_inner_parts)} }} }}"
             )
         else:
             flatten_non_m2o_include_entries.append(f"{_fr['relation_name']}: true")
@@ -758,20 +767,37 @@ def build_context(entity: dict, schema: dict) -> dict:
         xdisplay_table_raw = xdisplay['table']
     has_chart = bool(chart_cfg)
 
-    # Detail def for custom component
+    # Detail def for custom components (entity-level: list of components, plural key).
+    # Each item: {name, path?, target?}. Default target is ['list'] (backward compat).
     detail_def = schema['definitions'].get(def_key, {})
-    _xcc = detail_def.get('x-custom-component') or {}
-    _xcc_name = _xcc.get('name')
-    _xcc_path = _xcc.get('path')  # optional explicit import path; defaults to './ComponentName'
-    _xcc_target = _xcc.get('target') or ['list']  # default: list only (backward compat)
-    # entity_custom_component: shown on list page (no target specified, or 'list' in target)
-    entity_custom_component = _xcc_name if ('list' in _xcc_target) else None
-    # entity_view_component / entity_edit_component: shown in FormView / FormUpsert
-    entity_view_component = _xcc_name if (_xcc_name and 'view' in _xcc_target) else None
-    entity_edit_component = _xcc_name if (_xcc_name and 'edit' in _xcc_target) else None
-    # import path for view/edit components (explicit path overrides default ./ relative import)
-    entity_view_component_path = _xcc_path if (entity_view_component and _xcc_path) else None
-    entity_edit_component_path = _xcc_path if (entity_edit_component and _xcc_path) else None
+    _xcc_list_raw = detail_def.get('x-custom-components') or []
+    if not isinstance(_xcc_list_raw, list):
+        raise ValueError(
+            f"x-custom-components on '{def_key}' must be a list of component objects; "
+            f"got {type(_xcc_list_raw).__name__}"
+        )
+    _xcc_items = []
+    for _item in _xcc_list_raw:
+        if not isinstance(_item, dict) or not _item.get('name'):
+            continue
+        _xcc_items.append({
+            'name': _item['name'],
+            'path': _item.get('path'),
+            'target': _item.get('target') or ['list'],
+        })
+    # Per-target lists. Each entry is {name, path?} so templates can iterate.
+    entity_custom_components = [
+        {'name': i['name'], 'path': i['path']}
+        for i in _xcc_items if 'list' in i['target']
+    ]
+    entity_view_components = [
+        {'name': i['name'], 'path': i['path']}
+        for i in _xcc_items if 'view' in i['target']
+    ]
+    entity_edit_components = [
+        {'name': i['name'], 'path': i['path']}
+        for i in _xcc_items if 'edit' in i['target']
+    ]
 
     # Service args helpers
     parent_service_args = ', '.join(
@@ -1145,12 +1171,10 @@ def build_context(entity: dict, schema: dict) -> dict:
         one_to_one_pre_creates=one_to_one_pre_creates,
         one_to_one_spread=one_to_one_spread,
         one_to_one_include=one_to_one_include,
-        # Page list / view / edit custom components
-        entity_custom_component=entity_custom_component,
-        entity_view_component=entity_view_component,
-        entity_edit_component=entity_edit_component,
-        entity_view_component_path=entity_view_component_path,
-        entity_edit_component_path=entity_edit_component_path,
+        # Page list / view / edit custom components (entity-level, plural).
+        entity_custom_components=entity_custom_components,
+        entity_view_components=entity_view_components,
+        entity_edit_components=entity_edit_components,
         # Helpers exposed for templates
         to_camel_case=to_camel_case,
         to_pascal_case=to_pascal_case,

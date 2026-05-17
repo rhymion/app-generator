@@ -19,12 +19,12 @@ import Link from '@mui/material/Link';
 import Button from '@mui/material/Button';
 import Box from '@mui/material/Box';
 import BarChartIcon from '@mui/icons-material/BarChart';
-{% elif entity_custom_component %}
+{% elif entity_custom_components %}
 import Box from '@mui/material/Box';
 {% endif %}
-{% if entity_custom_component %}
-import {{ entity_custom_component }} from '@/components/{{ parent }}/{{ entity_custom_component }}';
-{% endif %}
+{% for comp in entity_custom_components %}
+import {{ comp.name }} from '{{ comp.path if comp.path else "@/components/" + parent + "/" + comp.name }}';
+{% endfor %}
 
 type SearchParamsRecord = Record<string, string | string[] | undefined>;
 
@@ -105,16 +105,16 @@ async function {{ parent_pascal }}ListContent({
   return (
     <>
       <h1>{t('{{ parent_camel }}')}</h1>
-{% if has_chart or entity_custom_component %}
+{% if has_chart or entity_custom_components %}
       <Box sx={{ '{{' }} display: 'flex', gap: 1, mb: 1 {{ '}}' }}>
 {% if has_chart %}
         <Button component={Link} href="/{{ parent }}/chart" variant="outlined" startIcon={<BarChartIcon />}>
           {tc('chart')}
         </Button>
 {% endif %}
-{% if entity_custom_component %}
-        <{{ entity_custom_component }} permissions={userPermissions} />
-{% endif %}
+{% for comp in entity_custom_components %}
+        <{{ comp.name }} permissions={userPermissions} />
+{% endfor %}
       </Box>
 {% endif %}
       <{{ list_component }}
