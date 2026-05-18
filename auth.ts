@@ -5,12 +5,12 @@ import type { Provider } from "@auth/core/providers";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
-import { createId } from "@paralleldrive/cuid2";
 import prisma from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { siteConfig } from "@/lib/site-config";
 import { recordAuditEvent } from "@/lib/audit-log";
 import { verifyMfaCode } from "@/lib/mfa/verify";
+import { createTenantBoundUser } from "@/lib/auth/create-user";
 
 // True iff the Google provider will actually be registered for this deploy.
 // Both the siteConfig opt-in AND the server-side secrets have to be present.
@@ -132,56 +132,17 @@ function buildProviders(): Provider[] {
 
 // PrismaAdapter wrapper: the default createUser only writes the NextAuth-shape
 // fields (name?, email?, emailVerified?, image?). After merging the User /
-// user_account models, our `user` row also requires non-null name plus a
-// self-referencing creator_id / updater_id (the bootstrap pattern shared with
-// /api/auth/register). We override createUser to fill those in atomically;
-// the rest of the adapter (getUser, linkAccount, updateUser, …) is the
-// default behaviour.
-//
-// v5 note: AdapterUser includes a pre-generated `id` (Auth.js core generates
-// it before calling createUser). We override it with a cuid2 to keep the id
-// format consistent with /api/auth/register and the cuid2 pattern enforced
-// on `id` fields in json_schema.yaml. The returned id is what the adapter
-// then uses for the subsequent Account row insert, so the FK stays correct.
+// user_account models, our `user` row also requires non-null name, a
+// self-referencing creator_id / updater_id, and (since Phase 1.2) a
+// tenant_id. The body lives in @/lib/auth/create-user so it can be
+// unit-tested without booting NextAuth; the rest of the adapter
+// (getUser, linkAccount, updateUser, …) is the default behaviour.
 function buildAdapter(): Adapter {
   const base = PrismaAdapter(prisma);
   return {
     ...base,
-    async createUser(data: AdapterUser) {
-      const id = createId();
-      const created = await prisma.user.create({
-        data: {
-          id,
-          email: data.email!,
-          name: data.name ?? data.email!,
-          emailVerified: data.emailVerified ?? null,
-          image: data.image ?? null,
-          creator_id: id,
-          updater_id: id,
-        },
-      });
-      console.info(
-        "[auth:createUser]",
-        JSON.stringify({
-          at: new Date().toISOString(),
-          userId: created.id,
-          email: created.email,
-        }),
-      );
-      await recordAuditEvent({
-        action: "auth:createUser",
-        actor_user_id: created.id,
-        target_table: "user",
-        target_id: created.id,
-        metadata: { email: created.email },
-      });
-      return {
-        id: created.id,
-        name: created.name,
-        email: created.email,
-        emailVerified: created.emailVerified,
-        image: created.image,
-      } as AdapterUser;
+    createUser(data: AdapterUser) {
+      return createTenantBoundUser(prisma, data);
     },
   };
 }
