@@ -164,3 +164,46 @@ def test_unaudited_delete_keeps_original_signature():
     assert "deleteThing(ids: string[])" in out
     # No transaction wrap, no per-id loop.
     assert "for (const id of ids)" not in out
+
+
+# ---------------------------------------------------------------------------
+# Rendered API route templates
+#
+# Regression guard for the bug where api_detail_route / api_bulk_route always
+# emitted `deleteX([id])` regardless of audit status. Audited services
+# expose `deleteX(actorId, ids)` (2 args), so the 1-arg call broke
+# `npm run build` and the DELETE cypress paths for every audited entity.
+# ---------------------------------------------------------------------------
+
+def _render_route(template: str, schema: dict) -> str:
+    from helpers.naming import to_pascal_case, to_camel_case
+    env = Environment(
+        loader=FileSystemLoader(str(TEMPLATES_DIR)),
+        trim_blocks=True, lstrip_blocks=True,
+    )
+    env.filters['pascal_case'] = to_pascal_case
+    env.filters['camel_case'] = to_camel_case
+    ctx = build_context(_entity(), schema)
+    return env.get_template(template).render(**ctx)
+
+
+def test_audited_detail_route_passes_actor_id_to_delete():
+    out = _render_route('api_detail_route.ts.jinja2', _schema(audited=True))
+    assert "await deleteThing(actorId, [id]);" in out
+
+
+def test_unaudited_detail_route_omits_actor_id_for_delete():
+    out = _render_route('api_detail_route.ts.jinja2', _schema(audited=False))
+    assert "await deleteThing([id]);" in out
+    assert "deleteThing(actorId" not in out
+
+
+def test_audited_bulk_route_passes_actor_id_to_delete():
+    out = _render_route('api_bulk_route.ts.jinja2', _schema(audited=True))
+    assert "await deleteThing(actorId, permitted.map((p) => p.id));" in out
+
+
+def test_unaudited_bulk_route_omits_actor_id_for_delete():
+    out = _render_route('api_bulk_route.ts.jinja2', _schema(audited=False))
+    assert "await deleteThing(permitted.map((p) => p.id));" in out
+    assert "deleteThing(actorId" not in out
