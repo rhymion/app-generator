@@ -1,18 +1,19 @@
 $schema: "http://json-schema.org/draft-07/schema#"
 
+# Support multi-tenancy
+version: 2.0
 definitions:
   # ============================================================
   # System entities (required by all apps — see §1.1)
   # Keep these definitions intact when creating a new app.
   # ============================================================
 
-  user_account:
+  user:
     type: object
     required:
       - id
       - name
       - email
-      - password
     x-display:
       table:
         - name:
@@ -28,7 +29,9 @@ definitions:
       email:
         type: string
       password:
-        type: string
+        type: 
+          - string
+          - "null"
         x-custom-component:
           target:
             - upsert
@@ -39,7 +42,7 @@ definitions:
         x-custom-component:
           target:
             - upsert
-      avatar:
+      image:
         type:
           - string
           - "null"
@@ -62,7 +65,7 @@ definitions:
           - string
           - "null"
 
-  user_account_detail:
+  user_detail:
     x-generate:
       list: true
       view: true
@@ -74,14 +77,14 @@ definitions:
       test: false
       fields:
         - name
-        - avatar
+        - image
         - roles
     x-relationships:
       roles:
         type: many-to-many
         target: role
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/user"
       - type: object
         required:
           - roles
@@ -106,7 +109,7 @@ definitions:
         type: many-to-many
         target: role
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/user"
       - type: object
         required:
           - roles
@@ -131,20 +134,20 @@ definitions:
     # the audit_log table by the generated service layer.
     x-audit: true
     x-relationships:
-      user_accounts:
+      users:
         type: many-to-many
-        target: user_account
+        target: user
     allOf:
       - $ref: "#/definitions/role"
       - type: object
         required:
-          - user_accounts
+          - users
         properties:
-          user_accounts:
+          users:
             type: array
             x-outputType: list
             items:
-              $ref: "#/definitions/user_account"
+              $ref: "#/definitions/user"
 
   organization:
     type: object
@@ -174,20 +177,20 @@ definitions:
       api: true
       test: true
     x-relationships:
-      user_accounts:
+      users:
         type: many-to-many
-        target: user_account
+        target: user
     allOf:
       - $ref: "#/definitions/organization"
       - type: object
         required:
-          - user_accounts
+          - users
         properties:
-          user_accounts:
+          users:
             type: array
             x-outputType: list
             items:
-              $ref: "#/definitions/user_account"
+              $ref: "#/definitions/user"
 
   permission:
     type: object

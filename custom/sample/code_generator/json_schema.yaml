@@ -1,5 +1,7 @@
 $schema: "http://json-schema.org/draft-07/schema#"
 
+# Support multi-tenancy
+version: 2.0
 definitions:
   db_table:
     type: object
@@ -464,9 +466,16 @@ definitions:
       delete: true
       invalidate: false
       api: true
-      test: true
+      # Skip generated cypress specs for `user`. The seed flow creates a
+      # TEST_CREDENTIALS user before any spec runs, so the standard
+      # "list is empty after reset" assertions never hold for this entity.
+      # The hardcoded `db:populateUser` task in test_tasks_registry still
+      # gets emitted (via `has_user_account_populate`) so other entities
+      # that need users for FKs keep working.
+      test: false
       fields:
         - name
+        - email
         - image
         - roles
     x-relationships:
@@ -660,6 +669,9 @@ definitions:
       invalidate: false
       api: true
       test: true
+    # Security-sensitive entity: every create/update/delete is recorded in
+    # the audit_log table by the generated service layer.
+    x-audit: true
     x-relationships:
       users:
         type: many-to-many
@@ -770,6 +782,9 @@ definitions:
       invalidate: false
       api: true
       test: true
+    # Security-sensitive entity: every create/update/delete is recorded in
+    # the audit_log table by the generated service layer.
+    x-audit: true
     allOf:
       - $ref: "#/definitions/permission"
       - type: object
