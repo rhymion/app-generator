@@ -161,7 +161,7 @@ export async function DELETE(request: NextRequest) {
 
     // Batch delete all permitted records in a single query
     if (permitted.length > 0) {
-      await delete{{ parent_pascal }}(permitted.map((p) => p.id));
+      await delete{{ parent_pascal }}({% if is_audited %}actorId, {% endif %}permitted.map((p) => p.id));
       for (const { index } of permitted) {
         results.push({ index, success: true, data: null });
       }

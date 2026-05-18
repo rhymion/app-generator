@@ -54,7 +54,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
     await requireApiPermission(actorId, '{{ parent }}', 'delete', existing);
-    await delete{{ parent_pascal }}([id]);
+    await delete{{ parent_pascal }}({% if is_audited %}actorId, {% endif %}[id]);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     return handleApiError(error);
