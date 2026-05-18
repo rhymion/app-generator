@@ -365,6 +365,16 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_o
     if test_entities:
         _delete(out / 'cypress' / 'support' / 'generated-tasks.ts')
 
+    # Schema-wide auto-generated catalogs. generate.py emits these only when
+    # at least one entity opts in (`x-display.dashboard: true` for the
+    # dashboard catalog, `attachable_id` for the attachment bridge actions);
+    # cleanup deletes them unconditionally so a schema that drops the last
+    # contributing entity doesn't leave a stale file behind.
+    _delete(out / 'lib' / 'dashboard' / 'catalog.ts')
+    _try_rmdir(out / 'lib' / 'dashboard')
+    _delete(out / 'lib' / 'attachment' / 'actions.ts')
+    _try_rmdir(out / 'lib' / 'attachment')
+
     _try_rmdir(out / 'docs' / 'generated')
     _try_rmdir(out / 'app' / '[locale]' / 'docs')
 

@@ -120,6 +120,44 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
     return catalog
 
 
+def build_attachable_owners(schema: dict) -> list[dict]:
+    """Entities that own the polymorphic `attachable` bridge.
+
+    The attachable bridge is shared storage — any base entity that declares
+    an `attachable_id` field with `x-relationship.target: attachable`
+    becomes an owner. The generator templates lib/attachment/actions.ts
+    (creator check + revalidate paths) need this list at runtime so each
+    owner contributes a branch to the `select` clause and a path-revalidate
+    call.
+
+    Returns owner descriptors keyed on the Prisma model name (the back
+    reference on `attachable`, e.g. `attachable.resource`). Entries are
+    sorted by name for deterministic generator output.
+    """
+    owners = []
+    seen = set()
+    for entity_name, defn in (schema.get('definitions') or {}).items():
+        # Detail / input variants aren't owners — only the base entity holds
+        # the FK field. Walking the bases is enough.
+        if entity_name.endswith('_detail') or entity_name.endswith('_input'):
+            continue
+        if entity_name in seen:
+            continue
+        for prop_name, prop in (defn.get('properties') or {}).items():
+            if prop_name != 'attachable_id':
+                continue
+            rel = prop.get('x-relationship') or {}
+            if rel.get('type') != 'one-to-one_bridge':
+                continue
+            if rel.get('target') != 'attachable':
+                continue
+            owners.append({'name': entity_name})
+            seen.add(entity_name)
+            break
+    owners.sort(key=lambda o: o['name'])
+    return owners
+
+
 def chart_context(ctx: dict, schema: dict) -> dict:
     chart_cfg = ctx.get('chart_cfg')
     if not chart_cfg:

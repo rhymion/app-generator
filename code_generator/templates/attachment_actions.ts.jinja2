@@ -20,15 +20,21 @@ async function assertCanEditBridge(attachable_id: string): Promise<void> {
   const owner = await prisma.attachable.findUnique({
     where: { id: attachable_id },
     select: {
-      product: { select: { creator_id: true } },
-      resource: { select: { creator_id: true } },
+{% for owner in owners %}
+      {{ owner.name }}: { select: { creator_id: true } },
+{% endfor %}
     },
   });
   if (!owner) throw new Error('Attachable not found');
+{% if owners %}
   const creatorId =
-    owner.product?.creator_id ??
-    owner.resource?.creator_id ??
+{% for owner in owners %}
+    owner.{{ owner.name }}?.creator_id ??
+{% endfor %}
     null;
+{% else %}
+  const creatorId = null;
+{% endif %}
   if (creatorId && creatorId !== userId) {
     throw new Error('No permission to edit attachments');
   }
@@ -39,19 +45,18 @@ function revalidateForBridge(attachable_id: string): Promise<void> {
     .findUnique({
       where: { id: attachable_id },
       select: {
-        product: { select: { id: true } },
-        resource: { select: { id: true } },
+{% for owner in owners %}
+        {{ owner.name }}: { select: { id: true } },
+{% endfor %}
       },
     })
     .then((row) => {
-      if (row?.product) {
-        revalidatePath(`/[locale]/product/view/${row.product.id}`, 'page');
-        revalidatePath(`/[locale]/product/edit/${row.product.id}`, 'page');
+{% for owner in owners %}
+      if (row?.{{ owner.name }}) {
+        revalidatePath(`/[locale]/{{ owner.name }}/view/${row.{{ owner.name }}.id}`, 'page');
+        revalidatePath(`/[locale]/{{ owner.name }}/edit/${row.{{ owner.name }}.id}`, 'page');
       }
-      if (row?.resource) {
-        revalidatePath(`/[locale]/resource/view/${row.resource.id}`, 'page');
-        revalidatePath(`/[locale]/resource/edit/${row.resource.id}`, 'page');
-      }
+{% endfor %}
     });
 }
 
