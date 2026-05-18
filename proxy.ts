@@ -66,6 +66,17 @@ export const proxy = auth(async (req) => {
     return NextResponse.next();
   }
 
+  // Non-rate-limited Auth.js endpoints (csrf, session, providers, signout)
+  // still flow through this proxy because of the `/api/auth/:path*` matcher,
+  // but they must NOT be touched by the i18n middleware below — that path
+  // rewrites /api/auth/session to /en/api/auth/session, which 404s, and the
+  // next-auth/react client (useSession, signIn) then can't read the session
+  // or fetch a CSRF token. Auth.js owns the entire /api/auth/* surface, so
+  // hand the request straight to the underlying handler.
+  if (pathname.startsWith('/api/auth/')) {
+    return NextResponse.next();
+  }
+
   // Strip any locale prefix to normalise the path for public-path checks
   const localePrefix = routing.locales.find(
     (l) => pathname === `/${l}` || pathname.startsWith(`/${l}/`)
