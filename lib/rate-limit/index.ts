@@ -26,11 +26,15 @@
  * ---------------------------
  * `getRateLimiter()` picks the best implementation available:
  *
- *   1. If `UPSTASH_REDIS_REST_URL` is set, Upstash is selected. The current
- *      adapter is a stub that throws — wire the real adapter in when ready.
- *   2. Otherwise, the in-memory implementation is used. Note: in a multi-
- *      instance deployment, each process gets its own counters — fine for
- *      dev/test/CI, NOT a security boundary in prod.
+ *   1. If `REDIS_URL` is set, the Redis adapter (`./redis.ts`) is selected.
+ *      Talks TCP via `ioredis` so the same code path works against Docker
+ *      Redis locally, Upstash's TCP endpoint on Vercel, and any other
+ *      managed Redis. Sliding-window state is shared across replicas, so
+ *      this is the configuration to use in prod for a real security
+ *      boundary.
+ *   2. Otherwise, the in-memory implementation is used. Each process gets
+ *      its own counters — fine for unit tests and Cypress runs that don't
+ *      stand up Redis, NOT a security boundary in prod.
  */
 
 export type RateLimitDecision = {
@@ -75,11 +79,12 @@ let _instance: RateLimiter | null = null;
 
 export function getRateLimiter(): RateLimiter {
   if (_instance) return _instance;
-  if (process.env.UPSTASH_REDIS_REST_URL) {
-    // Dynamic require keeps the (currently throwing) Upstash adapter out of
-    // the in-memory code path's import graph.
-    const { createUpstashRateLimiter } = require('./upstash') as typeof import('./upstash');
-    _instance = createUpstashRateLimiter(DEFAULT_BUCKETS);
+  if (process.env.REDIS_URL) {
+    // Dynamic require so `ioredis` only lands in the bundle when Redis is
+    // actually configured — keeps the in-memory code path (unit tests,
+    // Cypress without Redis) free of the driver.
+    const { createRedisRateLimiter } = require('./redis') as typeof import('./redis');
+    _instance = createRedisRateLimiter(DEFAULT_BUCKETS);
   } else {
     const { createInMemoryRateLimiter } = require('./in-memory') as typeof import('./in-memory');
     _instance = createInMemoryRateLimiter(DEFAULT_BUCKETS);

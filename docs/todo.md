@@ -22,14 +22,37 @@ credential stuffing and SSO callback abuse have no throttle.
 **Scope:**
 - Next.js proxy (`proxy.ts`) intercepts `/api/auth/*` and applies a per-IP
   rate limit before delegating to Auth.js.
-- Store: Upstash Redis in prod, in-memory fallback for dev/test so Cypress
-  keeps working without external deps.
+- Store: Redis in prod (Upstash on Vercel today, any TCP-reachable Redis
+  later) for shared state across replicas; Docker `redis:7-alpine` locally
+  and in Cypress so the test gate exercises the same code path. In-memory
+  fallback retained for unit tests that don't stand up Redis.
 - Limits: separate buckets for `signin/credentials`, `signin/<provider>`, and
   `callback/*`. Surface 429 with `Retry-After`.
 - Cover with a Vitest test + a Cypress regression that hammers `signin`
   and asserts 429.
 
 **References:** `proxy.ts`, `auth.ts`, `sso-authentication.md:294-321`.
+
+**Status:** shipped.
+- `lib/rate-limit/redis.ts` — `ioredis`-based adapter; sliding-window log
+  in a Redis sorted set inside one Lua script so concurrent requests
+  against the same `(bucket, key)` can't race past the limit. Same client
+  talks Docker locally and Upstash's TCP endpoint (`rediss://`) in prod.
+- `lib/rate-limit/index.ts` — `getRateLimiter()` selects the Redis
+  adapter when `REDIS_URL` is set, else the in-memory implementation.
+  Env-var renamed from the previous `UPSTASH_REDIS_REST_URL` since the
+  shipped adapter is provider-agnostic.
+- `docker-compose.test.yml` — new `redis-test` service
+  (`redis:7-alpine`, host port `${REDIS_PORT:-6379}`, persistence off so
+  tests start clean).
+- `.env.example` / `.env.test` — `REDIS_URL` documented; the test env
+  binds host port `6381` (off the default to avoid collision with a
+  developer's local Redis) and composes `REDIS_URL` from it.
+- `package.json` — `ioredis` dependency added; `@upstash/*` not used.
+- 6 Vitest cases in `lib/rate-limit/redis.test.ts` covering the Lua
+  arg layout, allow/deny decision mapping, per-call member uniqueness,
+  the unknown-bucket fail-open, and the construction-time guard when
+  neither `REDIS_URL` nor an injected client is supplied.
 
 ---
 
