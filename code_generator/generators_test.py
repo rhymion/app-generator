@@ -381,8 +381,8 @@ def get_internal_one_to_one_fks(model_name: str, schema: dict) -> list[dict]:
         var_name = to_camel_case(re.sub(r'_id$', '', prop_name))
         if target == 'user':
             create_data = (
-                "{ name: 'Test User Account', "
-                "email: `test-dep-ua-${Date.now()}-${Math.random()}@example.com`, "
+                "{ name: 'Test User', "
+                "email: `test-dep-user-${Date.now()}-${Math.random()}@example.com`, "
                 "password: 'test-password', "
                 "creator_id: testUser.id, "
                 "updater_id: testUser.id }"

@@ -336,8 +336,8 @@ export async function populate{{ pascal }}Data(length: number) {
 {% if primary_fk_dep.is_user_account %}
     const {{ primary_fk_dep.var_name }}Item = await prisma.user.create({
       data: {
-        name: `Test User Account ${i}`,
-        email: `test-user-account-${Date.now()}-${i}@example.com`,
+        name: `Test User ${i}`,
+        email: `test-user-${Date.now()}-${i}@example.com`,
         password: 'test-password',
         creator_id: testUser.id,
         updater_id: testUser.id,
@@ -355,8 +355,14 @@ export async function populate{{ pascal }}Data(length: number) {
       orderBy: { created_at: 'asc' },
     });
     if (!{{ primary_fk_dep.var_name }}Item) {
+{% for fk in primary_fk_dep.internal_fk_deps %}
+      const {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
       {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.create({
         data: {
+{% for fk in primary_fk_dep.internal_fk_deps %}
+          {{ fk.prop_name }}: {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
 {% for ef in primary_fk_dep.extra_required_fields %}
           {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
 {% endfor %}
@@ -437,8 +443,8 @@ export async function populate{{ pascal }}FullData(length: number) {
 {% if primary_fk_dep.is_user_account %}
     const {{ primary_fk_dep.var_name }}Item = await prisma.user.create({
       data: {
-        name: `Test User Account ${i}`,
-        email: `test-user-account-${Date.now()}-${i}@example.com`,
+        name: `Test User ${i}`,
+        email: `test-user-${Date.now()}-${i}@example.com`,
         password: 'test-password',
         creator_id: testUser.id,
         updater_id: testUser.id,
@@ -451,8 +457,14 @@ export async function populate{{ pascal }}FullData(length: number) {
       orderBy: { created_at: 'asc' },
     });
     if (!{{ primary_fk_dep.var_name }}Item) {
+{% for fk in primary_fk_dep.internal_fk_deps %}
+      const {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
       {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.create({
         data: {
+{% for fk in primary_fk_dep.internal_fk_deps %}
+          {{ fk.prop_name }}: {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
 {% for ef in primary_fk_dep.extra_required_fields %}
           {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
 {% endfor %}
