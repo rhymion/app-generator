@@ -67,6 +67,13 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
   describe('Create from card list', () => {
     it('2.1 navigates to the new page via the toolbar add button', () => {
       cy.visit('/en/{{ parent }}');
+      // ResponsiveListClient's `useMediaQuery` returns false during SSR (no
+      // window), so the initial HTML at any viewport ships the desktop
+      // DataGrid; hydration re-runs the hook and swaps DataGrid → CardListClient
+      // at mobile widths. Clicking the toolbar Add button mid-swap lands on a
+      // non-hydrated handler and navigation silently no-ops — wait for the
+      // DataGrid to be gone first as the mobile-side hydration marker.
+      cy.get('.MuiDataGrid-root').should('not.exist');
       // CardListClient renders the toolbar add as an IconButton with the same
       // aria-label as the desktop variant ("Create New {{ title }}").
       cy.get('button[aria-label="Create New {{ title }}"]').click();
