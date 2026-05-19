@@ -17,6 +17,12 @@ export default defineConfig({
         async 'db:reset'() {
           const { resetTestDatabase } = require('./cypress/support/db-helpers');
           await resetTestDatabase();
+          // Phase 1.2: re-seat the bootstrap tenant after the wipe so the
+          // NOT NULL user.tenant_id constraint is satisfiable in subsequent
+          // seeding. Removed when ticket 3.5 folds this into the generated
+          // db-helpers.
+          const { ensureDefaultTenant } = require('./cypress/support/_tenant');
+          await ensureDefaultTenant();
           return null;
         },
         async 'db:seed'() {

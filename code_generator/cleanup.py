@@ -9,13 +9,22 @@ preserving manual content.
 
 Stubs (form_validation.ts, service_validation.ts) are deleted unless
 --keep-stubs is passed, since they may contain user customizations.
+service_after_create.ts is generated write-once; cleanup deletes it only
+when the file still matches the original stub template output.
+
+--prune-orphans sweeps files that are generator-shaped but no longer
+expected by the current schema (e.g., a column_def.tsx left behind after
+an entity's children were removed). The regular pass is schema-driven and
+only knows about today's entities/gates, so prior-schema artefacts linger
+without this mode.
 
 Usage (run from code_generator/):
-    python cleanup.py <schema.yaml> <output-dir> [--keep-stubs]
+    python cleanup.py <schema.yaml> <output-dir> [--keep-stubs] [--prune-orphans]
 
 Examples:
     python cleanup.py json_schema_db_table.yaml ..
     python cleanup.py json_schema_db_table.yaml .. --keep-stubs
+    python cleanup.py json_schema_db_table.yaml .. --prune-orphans
 """
 import json
 import re
@@ -30,6 +39,18 @@ from helpers.schema_helpers import filter_fields
 
 _SYSTEM_PROPS = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
 
+# Boilerplate content of service_after_create.ts as emitted by
+# templates/service_after_create_stub.ts.jinja2. Mirror the template output
+# exactly (including trailing newline) so the equality check below stays
+# tight — any user customization, even reformatting, will preserve the file.
+_SERVICE_AFTER_CREATE_BOILERPLATE = (
+    "export async function afterCreate(\n"
+    "  _tx: unknown,\n"
+    "  _created: Record<string, unknown>,\n"
+    "  _data: Record<string, unknown>,\n"
+    "): Promise<void> {}\n"
+)
+
 
 # ---------------------------------------------------------------------------
 # File helpers
@@ -39,6 +60,23 @@ def _delete(path: Path) -> None:
     if path.exists():
         path.unlink()
         print(f'  Deleted {path}')
+
+
+def _delete_if_boilerplate(path: Path, expected: str) -> None:
+    """Delete `path` only when its content exactly matches `expected`.
+
+    Used for hook-stub files that the generator emits via _write_stub (i.e.
+    written once, never overwritten). If the user has customized the file,
+    its content will differ from the stub template's output and we preserve
+    it; otherwise it's safe to delete on cleanup.
+    """
+    if not path.exists():
+        return
+    if path.read_text(encoding='utf-8') == expected:
+        path.unlink()
+        print(f'  Deleted {path} (boilerplate)')
+    else:
+        print(f'  Kept {path} (customized)')
 
 
 def _try_rmdir(path: Path) -> None:
@@ -174,7 +212,52 @@ def _clean_sidebar(path: Path, nav_hrefs: list) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
-def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False) -> None:
+def _prune_orphans(out: Path, entities: list) -> None:
+    """Sweep generator-shaped files that the current schema no longer expects.
+
+    The regular cleanup pass is schema-driven: it walks `entities` from the
+    current schema and deletes only files those entities would still
+    produce. When a schema gate flips off (e.g., an entity loses its
+    children list, or is renamed/removed entirely), the file generated
+    under the old gate is invisible to that pass and lingers forever.
+
+    Today this handles one orphan class:
+
+    - **components/<entity>/column_def.tsx** — generated only when an entity
+      has children AND (can_view OR can_edit). When children are removed
+      (e.g., after refactoring attachment/image lists onto the `attachable`
+      bridge model), the file stays on disk. Also caught: entities that no
+      longer exist in the schema at all.
+
+    Add new orphan classes here as they're identified. Each pattern should
+    match a specific path and re-evaluate the original generation gate
+    against the current schema before deleting.
+    """
+    print('\nPruning orphans...')
+    entities_by_parent = {e['parent']: e for e in entities}
+
+    components_root = out / 'components'
+    if components_root.is_dir():
+        for col_def in sorted(components_root.glob('*/column_def.tsx')):
+            parent = col_def.parent.name
+            entity = entities_by_parent.get(parent)
+            if entity is None:
+                # Whole entity gone from schema — definitely an orphan.
+                _delete(col_def)
+                _try_rmdir(col_def.parent)
+                continue
+            gen_cfg  = entity.get('generate_config', {})
+            children = entity.get('children', [])
+            can_view = gen_cfg.get('view', True)
+            can_edit = gen_cfg.get('edit', True)
+            # Mirror generate.py:191 — column_def.tsx is only emitted when
+            # the entity has children AND at least one read/edit page that
+            # consumes the column functions.
+            if not (children and (can_view or can_edit)):
+                _delete(col_def)
+
+
+def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_orphans: bool = False) -> None:
     with open(schema_path) as f:
         schema = yaml.safe_load(f)
 
@@ -219,6 +302,14 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False) -> None
             _delete(lib_dir / 'actions.ts')
             if not keep_stubs:
                 _delete(lib_dir / 'service_validation.ts')
+        # service_after_create.ts is generated with _write_stub (write-once,
+        # never overwritten — user may customize it). Delete only when the
+        # file still matches the original stub template output.
+        if can_new:
+            _delete_if_boilerplate(
+                lib_dir / 'service_after_create.ts',
+                _SERVICE_AFTER_CREATE_BOILERPLATE,
+            )
         _delete(lib_dir / 'chart-getters.ts')  # safe if not present
 
         # components/
@@ -255,6 +346,7 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False) -> None
         if can_test:
             _delete(out / 'cypress' / 'support' / parent / 'helper.ts')
             _delete(out / 'cypress' / 'e2e' / f'{parent}.cy.ts')
+            _delete(out / 'cypress' / 'e2e' / 'mobile' / f'{parent}.cy.ts')
             if can_api:
                 _delete(out / 'cypress' / 'e2e' / 'api' / f'{parent}.cy.ts')
 
@@ -276,6 +368,16 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False) -> None
     _delete(out / 'app' / '[locale]' / 'docs' / 'page.mdx')
     if test_entities:
         _delete(out / 'cypress' / 'support' / 'generated-tasks.ts')
+
+    # Schema-wide auto-generated catalogs. generate.py emits these only when
+    # at least one entity opts in (`x-display.dashboard: true` for the
+    # dashboard catalog, `attachable_id` for the attachment bridge actions);
+    # cleanup deletes them unconditionally so a schema that drops the last
+    # contributing entity doesn't leave a stale file behind.
+    _delete(out / 'lib' / 'dashboard' / 'catalog.ts')
+    _try_rmdir(out / 'lib' / 'dashboard')
+    _delete(out / 'lib' / 'attachment' / 'actions.ts')
+    _try_rmdir(out / 'lib' / 'attachment')
 
     _try_rmdir(out / 'docs' / 'generated')
     _try_rmdir(out / 'app' / '[locale]' / 'docs')
@@ -300,6 +402,9 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False) -> None
     _clean_site_config(out / 'lib' / 'site-config.ts', nav_hrefs)
     _clean_sidebar(out / 'app' / '[locale]' / '@sidebar' / 'page.tsx', nav_hrefs)
 
+    if prune_orphans:
+        _prune_orphans(out, entities)
+
     print('\nCleanup complete!')
 
 
@@ -308,8 +413,13 @@ if __name__ == '__main__':
     flags = [a for a in sys.argv[1:] if a.startswith('-')]
 
     if len(args) < 2:
-        print('Usage: python cleanup.py <schema.yaml> <output-dir> [--keep-stubs]')
+        print('Usage: python cleanup.py <schema.yaml> <output-dir> [--keep-stubs] [--prune-orphans]')
         print('Example: python cleanup.py json_schema_db_table.yaml ..')
         sys.exit(1)
 
-    cleanup(args[0], args[1], keep_stubs='--keep-stubs' in flags)
+    cleanup(
+        args[0],
+        args[1],
+        keep_stubs='--keep-stubs' in flags,
+        prune_orphans='--prune-orphans' in flags,
+    )

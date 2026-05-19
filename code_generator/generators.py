@@ -56,6 +56,108 @@ def _int_enum_option(v, i: int) -> str:
 # chart getters / page_chart
 # ---------------------------------------------------------------------------
 
+def build_dashboard_catalog(schema: dict) -> list[dict]:
+    """Catalog of dashboardable entities + their groupable fields.
+
+    An entity is dashboardable when its base definition declares
+    `x-display.dashboard: true`. A field is groupable when it is one of:
+      - a many-to-one FK (each FK value becomes a series, labelled via
+        the relationship's labelField on the target);
+      - an integer with an `enum` (each enum label is a category);
+      - a boolean (Yes / No).
+
+    Entities with no groupable field are dropped — there is nothing
+    meaningful to chart, and exposing them would surface an empty picker.
+    """
+    from helpers.naming import to_title_case
+    catalog = []
+    for entity_name, defn in schema['definitions'].items():
+        if entity_name.endswith('_detail') or entity_name.endswith('_input'):
+            continue
+        xdisplay = defn.get('x-display') or {}
+        if not (isinstance(xdisplay, dict) and xdisplay.get('dashboard')):
+            continue
+        groupable = []
+        for prop_name, prop in (defn.get('properties') or {}).items():
+            if prop_name in ('id', 'created_at', 'updated_at', 'creator_id', 'updater_id'):
+                continue
+            rel = prop.get('x-relationship') or {}
+            if rel.get('type') == 'many-to-one' and rel.get('target'):
+                stem = prop_name[:-3] if prop_name.endswith('_id') else prop_name
+                label_field = rel.get('labelField', 'name')
+                # v1 supports string labelField only; fall back to 'name' for list labels
+                if not isinstance(label_field, str):
+                    label_field = 'name'
+                groupable.append({
+                    'name': prop_name,
+                    'label': to_title_case(stem),
+                    'kind': 'fk',
+                    'fk_target': rel['target'],
+                    'fk_label_field': label_field,
+                })
+                continue
+            actual = _get_actual_type(prop)
+            if actual == 'boolean':
+                groupable.append({
+                    'name': prop_name,
+                    'label': to_title_case(prop_name),
+                    'kind': 'boolean',
+                })
+            elif actual == 'integer' and isinstance(prop.get('enum'), list):
+                groupable.append({
+                    'name': prop_name,
+                    'label': to_title_case(prop_name),
+                    'kind': 'enum',
+                    'enum_values': [str(v) for v in prop['enum']],
+                })
+        if not groupable:
+            continue
+        catalog.append({
+            'name': entity_name,
+            'label': to_title_case(entity_name),
+            'groupable_fields': groupable,
+        })
+    return catalog
+
+
+def build_attachable_owners(schema: dict) -> list[dict]:
+    """Entities that own the polymorphic `attachable` bridge.
+
+    The attachable bridge is shared storage — any base entity that declares
+    an `attachable_id` field with `x-relationship.target: attachable`
+    becomes an owner. The generator templates lib/attachment/actions.ts
+    (creator check + revalidate paths) need this list at runtime so each
+    owner contributes a branch to the `select` clause and a path-revalidate
+    call.
+
+    Returns owner descriptors keyed on the Prisma model name (the back
+    reference on `attachable`, e.g. `attachable.resource`). Entries are
+    sorted by name for deterministic generator output.
+    """
+    owners = []
+    seen = set()
+    for entity_name, defn in (schema.get('definitions') or {}).items():
+        # Detail / input variants aren't owners — only the base entity holds
+        # the FK field. Walking the bases is enough.
+        if entity_name.endswith('_detail') or entity_name.endswith('_input'):
+            continue
+        if entity_name in seen:
+            continue
+        for prop_name, prop in (defn.get('properties') or {}).items():
+            if prop_name != 'attachable_id':
+                continue
+            rel = prop.get('x-relationship') or {}
+            if rel.get('type') != 'one-to-one_bridge':
+                continue
+            if rel.get('target') != 'attachable':
+                continue
+            owners.append({'name': entity_name})
+            seen.add(entity_name)
+            break
+    owners.sort(key=lambda o: o['name'])
+    return owners
+
+
 def chart_context(ctx: dict, schema: dict) -> dict:
     chart_cfg = ctx.get('chart_cfg')
     if not chart_cfg:
@@ -404,8 +506,8 @@ def actions_context(ctx: dict) -> dict:
     def _upsert_body(has_ch: bool) -> str:
         _flatten_block = (f"{flatten_extractions_code}\n" if flatten_extractions_code else "")
         if can_create and can_update:
-            create_call = f'await add{parent_pascal}(userId, {parent_params}{full_child_args}{flatten_args_str});'
-            update_call = f'await update{parent_pascal}(userId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
+            create_call = f'await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});'
+            update_call = f'await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
             return (
                 f"  const id = data.get('id') as string | null;\n"
                 f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
@@ -418,7 +520,7 @@ def actions_context(ctx: dict) -> dict:
                 f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _flatten_block +
-                f"  const userId = await getSessionUserIdOrThrow();\n\n"
+                f"  const actorId = await getSessionUserIdOrThrow();\n\n"
                 f"  if (id) {{\n"
                 f"    {update_call}\n"
                 f"  }} else {{\n"
@@ -435,16 +537,16 @@ def actions_context(ctx: dict) -> dict:
                 f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _flatten_block +
-                f"\n  const userId = await getSessionUserIdOrThrow();\n"
-                f"  await update{parent_pascal}(userId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
+                f"\n  const actorId = await getSessionUserIdOrThrow();\n"
+                f"  await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
             )
         else:  # create only
             return (
                 f"  await requirePermission('{parent}', 'create');\n"
                 f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "") +
-                f"\n  const userId = await getSessionUserIdOrThrow();\n"
-                f"  await add{parent_pascal}(userId, {parent_params}{full_child_args}{flatten_args_str});"
+                f"\n  const actorId = await getSessionUserIdOrThrow();\n"
+                f"  await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});"
             )
 
     service_fns = [
@@ -479,6 +581,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     parent_params_with_types = ctx['parent_params_with_types']
     child_params_for_add    = ctx['child_params_for_add']
     child_params_for_update = ctx['child_params_for_update']
+    has_assignee_id         = ctx.get('has_assignee_id', False)
+    is_audited              = ctx.get('is_audited', False)
 
     has_non_comment_ch = bool(non_comment_ch)
 
@@ -749,7 +853,9 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         f"import {{ normalizeValue,{' normalizeChildRefs,' if has_non_comment_ch else ''}"
         f"{' assertNotStale,' if can_update else ''} type NormalizedSnapshot }} from '@/lib/normalize';"
         + (f"\nimport {{ validateOnAdd, validateOnUpdate }} from './service_validation';" if (can_create or can_update) else '')
-        + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '') +
+        + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '')
+        + (f"\nimport {{ notify }} from '@/lib/_notifier';" if has_assignee_id else '')
+        + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '') +
         f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'>;\n\n"
         f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
         f"  const safeSnapshot = (snapshot ?? {{}}) as Record<string, unknown>;\n"

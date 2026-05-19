@@ -3,6 +3,29 @@
 import { revalidatePath } from 'next/cache';
 import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow, getUserRoleIds } from '@/lib/authz';
+import { notify } from '@/lib/_notifier';
+
+/**
+ * Look up the user who created the entity behind an approval_request so the
+ * approve/reject paths can notify them. Returns null when the request has no
+ * approvable bridge yet (legacy / mid-migration rows).
+ */
+async function getApprovalRequestRecipient(id: string): Promise<{
+  recipientId: string | null;
+  entityName: string | null;
+}> {
+  const row = await prisma.approval_request.findUnique({
+    where: { id },
+    select: {
+      approval_flow: { select: { entity_name: true } },
+      approvable: { select: { creator_id: true } },
+    },
+  });
+  return {
+    recipientId: row?.approvable?.creator_id ?? null,
+    entityName: row?.approval_flow?.entity_name ?? null,
+  };
+}
 
 async function assertApproverRole(id: string): Promise<void> {
   const req = await prisma.approval_request.findUnique({
@@ -61,6 +84,18 @@ export async function approveApprovalRequest(id: string, message?: string): Prom
       },
     });
   });
+  // Fire-and-forget notification (trigger #3): the requester learns the
+  // outcome without sharing the approval_history transaction.
+  const { recipientId, entityName } = await getApprovalRequestRecipient(id);
+  if (recipientId && recipientId !== userId) {
+    notify(recipientId, 'approval_responded', {
+      title: `Your ${entityName ?? 'request'} was approved`,
+      href: `/approval_request/view/${id}`,
+      approvalRequestId: id,
+      status: 'approved',
+      message: message ?? null,
+    });
+  }
   revalidatePath('/approval_request');
 }
 
@@ -83,6 +118,16 @@ export async function rejectApprovalRequest(id: string, message?: string): Promi
       },
     });
   });
+  const { recipientId, entityName } = await getApprovalRequestRecipient(id);
+  if (recipientId && recipientId !== userId) {
+    notify(recipientId, 'approval_responded', {
+      title: `Your ${entityName ?? 'request'} was rejected`,
+      href: `/approval_request/view/${id}`,
+      approvalRequestId: id,
+      status: 'rejected',
+      message: message ?? null,
+    });
+  }
   revalidatePath('/approval_request');
 }
 

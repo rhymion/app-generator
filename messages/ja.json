@@ -104,7 +104,8 @@
     "signIn": "ログイン",
     "signOut": "ログアウト",
     "openMenu": "メニューを開く",
-    "closeMenu": "メニューを閉じる"
+    "closeMenu": "メニューを閉じる",
+    "language": "言語"
   },
   "Nav": {
     "approvalFlow": "承認フロー",
@@ -129,6 +130,48 @@
     "confirmPasswordPlaceholder": "パスワード（確認）",
     "passwordMismatch": "パスワードが一致しません",
     "emailInUse": "このメールアドレスは既に使用されています",
-    "registrationFailed": "登録に失敗しました"
+    "registrationFailed": "登録に失敗しました",
+    "mfaCodeLabel": "6 桁の認証コード",
+    "mfaHelper": "認証アプリを開いて現在のコードを入力してください。リカバリーコードも使用できます。",
+    "mfaRequired": "サインインを完了するため、認証アプリの 6 桁コードを入力してください。",
+    "mfaInvalid": "コードが一致しません。新しい 6 桁コードを入力するか、リカバリーコードを使用してください。"
+  },
+  "Mfa": {
+    "title": "2要素認証",
+    "disabledIntro": "認証アプリ（Google Authenticator、1Password、Authy など）を使ってアカウントに 2 つ目の認証要素を追加します。",
+    "enableButton": "MFA を有効化",
+    "pendingIntro": "認証アプリで QR コードをスキャンするか、シークレットを手動で入力してください。続けて 6 桁のコードを入力します。",
+    "manualEntryLabel": "手動入力用シークレット：",
+    "qrAlt": "2要素認証 QR コード",
+    "verifyCodeLabel": "6 桁のコード",
+    "verifyButton": "確認して有効化",
+    "cancelButton": "キャンセル",
+    "recoveryWarning": "リカバリーコードを安全な場所に保存してください。各コードは 1 回だけ使用でき、認証アプリにアクセスできなくなった際に必要です。再表示はされません。",
+    "recoveryAck": "リカバリーコードを保存しました",
+    "enabledStatus": "このアカウントでは 2 要素認証が有効です。",
+    "disableIntro": "MFA を無効化するには、現在の 6 桁コード（またはリカバリーコード）を入力してください。",
+    "disableCodeLabel": "6 桁またはリカバリーコード",
+    "disableButton": "MFA を無効化"
+  },
+  "Setting": {
+    "title": "アカウント設定",
+    "mfaTitle": "2要素認証",
+    "mfaBody": "認証情報サインインに 2 つ目の認証要素を有効化します。",
+    "accountsTitle": "連携アカウント",
+    "accountsBody": "このアカウントへサインインできるプロバイダーを管理します。"
+  },
+  "LinkedAccounts": {
+    "title": "連携アカウント",
+    "intro": "ここに表示されているプロバイダーで本アカウントにサインインできます。同じメールアドレスの別 OAuth プロバイダーを連携できます。少なくとも 1 つのサインイン方法を残す限り、連携を解除することもできます。",
+    "emptyState": "連携済みの OAuth プロバイダーはまだありません。",
+    "detach": "このプロバイダーの連携を解除",
+    "cannotDetach": "解除するとサインインできなくなります。",
+    "detachAria": "{provider} の連携を解除",
+    "connectMore": "別のプロバイダーを連携",
+    "connectButton": "{provider} を連携",
+    "passwordlessNotice": "現在これが唯一のサインイン方法です。解除前にアカウントにパスワードを設定してください。",
+    "errorLastSignInMethod": "解除できません: サインイン方法が無くなります。",
+    "errorNotFound": "連携アカウントが見つかりません。",
+    "errorUnknown": "問題が発生しました。再度お試しください。"
   }
 }

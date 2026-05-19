@@ -60,7 +60,7 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
     }
   }
 
-  const user = await prisma.user_account.findFirst({
+  const user = await prisma.user.findFirst({
     where: { api_key: apiKey },
     select: { id: true },
   });

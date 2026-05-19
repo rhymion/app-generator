@@ -5,11 +5,21 @@ import { siteConfig, themeConfig } from "@/lib/site-config";
 import { useTranslations, useLocale } from "next-intl";
 import { Link, useRouter, usePathname } from "@/i18n/navigation";
 import { routing } from "@/i18n/routing";
+import Autocomplete from "@mui/material/Autocomplete";
+import TextField from "@mui/material/TextField";
+import NotificationBell from "@/components/_standard/NotificationBell";
 
-const localeLabels: Record<string, string> = {
-  en: "EN",
-  ja: "日本語",
-};
+// Endonym (the language's own name) for any BCP-47 tag — adding a new locale
+// to routing.locales is the only change needed to expose it in the picker.
+function getLocaleLabel(loc: string): string {
+  try {
+    const name = new Intl.DisplayNames([loc], { type: "language" }).of(loc);
+    if (!name) return loc.toUpperCase();
+    return name.charAt(0).toLocaleUpperCase(loc) + name.slice(1);
+  } catch {
+    return loc.toUpperCase();
+  }
+}
 
 export default function HeaderPage() {
   const { data: session } = useSession();
@@ -54,27 +64,41 @@ export default function HeaderPage() {
       </h1>
 
       {/* Locale switcher */}
-      <div className="flex items-center gap-1 shrink-0">
-        {routing.locales.map((l) => (
-          <button
-            key={l}
-            onClick={() => switchLocale(l)}
-            disabled={l === locale}
-            className={`text-xs px-2 py-1 rounded transition ${
-              l === locale
-                ? "bg-white/40 text-white font-bold cursor-default"
-                : "bg-white/10 hover:bg-white/20 text-white/80"
-            }`}
-          >
-            {localeLabels[l] ?? l.toUpperCase()}
-          </button>
-        ))}
+      <div className="shrink-0">
+        <Autocomplete
+          size="small"
+          disableClearable
+          options={routing.locales as readonly string[]}
+          getOptionLabel={getLocaleLabel}
+          value={locale}
+          onChange={(_, next) => { if (next && next !== locale) switchLocale(next); }}
+          isOptionEqualToValue={(opt, val) => opt === val}
+          sx={{
+            minWidth: 140,
+            "& .MuiOutlinedInput-root": {
+              color: "white",
+              backgroundColor: "rgba(255,255,255,0.1)",
+              "& fieldset": { borderColor: "rgba(255,255,255,0.3)" },
+              "&:hover fieldset": { borderColor: "rgba(255,255,255,0.5)" },
+              "&.Mui-focused fieldset": { borderColor: "rgba(255,255,255,0.7)" },
+            },
+            "& .MuiSvgIcon-root": { color: "white" },
+          }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              variant="outlined"
+              aria-label={t("language")}
+            />
+          )}
+        />
       </div>
 
       {/* Auth */}
       <div className="flex items-center gap-3 shrink-0">
         {session?.user ? (
           <>
+            <NotificationBell />
             <Link href={`/setting/view/${session.user.id}`} className={`flex items-center gap-2 no-underline`}>
               <span className="hidden sm:block text-sm opacity-75 truncate max-w-40">
                 {session.user.name ?? session.user.email}

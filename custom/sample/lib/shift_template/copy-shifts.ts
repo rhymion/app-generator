@@ -31,13 +31,13 @@ export type CopyShiftsResult = {
 
 async function hasShiftOverlap(
   client: TxClient,
-  userAccountId: string,
+  userId: string,
   startTime: Date,
   endTime: Date,
 ): Promise<boolean> {
   // Get the latest shift for this user that started before this shift's start time
   const prevShift = await client.shift.findFirst({
-    where: { user_account_id: userAccountId, start_time: { lt: startTime } },
+    where: { user_id: userId, start_time: { lt: startTime } },
     orderBy: { start_time: 'desc' },
     select: { end_time: true },
   });
@@ -45,7 +45,7 @@ async function hasShiftOverlap(
 
   // Get the earliest shift for this user that starts at or after this shift's start time
   const nextShift = await client.shift.findFirst({
-    where: { user_account_id: userAccountId, start_time: { gte: startTime } },
+    where: { user_id: userId, start_time: { gte: startTime } },
     orderBy: { start_time: 'asc' },
     select: { start_time: true },
   });
@@ -67,7 +67,7 @@ export async function copyShiftTemplatesToShifts(
   const endDay = dayjs.tz(endDateStr, timeZone);
 
   const templates = await prisma.shift_template.findMany({
-    include: { user_account: { select: { name: true } } },
+    include: { user: { select: { name: true } } },
   });
 
   let success = 0;
@@ -101,17 +101,17 @@ export async function copyShiftTemplatesToShifts(
         ? nextDay.hour(endLocal.h).minute(endLocal.m).second(endLocal.s).millisecond(0).toDate()
         : current.hour(endLocal.h).minute(endLocal.m).second(endLocal.s).millisecond(0).toDate();
 
-      const userName = template.user_account?.name ?? template.user_account_id;
+      const userName = template.user?.name ?? template.user_id;
       const label = `${userName} on ${current.format('YYYY-MM-DD')}`;
 
       try {
         await prisma.$transaction(async (tx) => {
-          if (await hasShiftOverlap(tx, template.user_account_id, shiftStart, shiftEnd)) {
+          if (await hasShiftOverlap(tx, template.user_id, shiftStart, shiftEnd)) {
             throw new Error('Shift time overlaps with an existing shift for this user');
           }
           await tx.shift.create({
             data: {
-              user_account_id: template.user_account_id,
+              user_id: template.user_id,
               start_time: shiftStart,
               end_time: shiftEnd,
               status: 0,

@@ -92,7 +92,7 @@ export type {{ child.name | pascal_case }} = {
 {% if child.output_type == 'comments' %}
   created_at?: string | Date | null;
   updated_at?: string | Date | null;
-  creator?: { id: string; name: string; avatar?: string | null } | null;
+  creator?: { id: string; name: string; image?: string | null } | null;
 {% endif %}
 };
 
@@ -146,7 +146,7 @@ export type FormViewProps = Readonly<{
 {% elif child.child_name == 'comment' %}
         created_at?: string | Date | null;
         updated_at?: string | Date | null;
-        creator?: { id: string; name: string; avatar?: string | null } | null;
+        creator?: { id: string; name: string; image?: string | null } | null;
 {% else %}
 {% for rel in child.relationships %}
         {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;

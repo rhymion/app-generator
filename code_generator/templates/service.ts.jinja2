@@ -1,7 +1,7 @@
 {{ utility_code }}
 {% if can_create %}
-export async function add{{ parent_pascal }}(userId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string }> {
-  return await prisma.$transaction(async (tx) => {
+export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string }> {
+  const result = await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
 {{ validation_data_obj }}
     });
@@ -10,8 +10,8 @@ export async function add{{ parent_pascal }}(userId: string{% if parent_params_w
 {% endif %}
     const created = await tx.{{ model }}.create({
       data: {
-        creator_id: userId,
-        updater_id: userId,
+        creator_id: actorId,
+        updater_id: actorId,
 {{ parent_data_obj }}
 {% if child_nested_create %}
 {{ child_nested_create }}
@@ -28,12 +28,37 @@ export async function add{{ parent_pascal }}(userId: string{% if parent_params_w
 {% endif %}
 {{ validation_data_obj }}
     });
+{% if is_audited %}
+    await recordAuditEvent({
+      action: '{{ parent }}:create',
+      actor_user_id: actorId,
+      target_table: '{{ model }}',
+      target_id: created.id,
+      tx,
+    });
+{% endif %}
     return { id: created.id };
   });
+{% if has_assignee_id %}
+  // Trigger #1 (notification design 2026-05-11): the new assignee learns
+  // they were assigned. Skipped when self-assigned.
+  if (assigneeId && assigneeId !== actorId) {
+    notify(assigneeId, 'assigned', {
+      title: 'You were assigned to {{ parent_pascal }}',
+      href: `/{{ parent }}/view/${result.id}`,
+      itemType: '{{ model }}',
+      itemId: result.id,
+    });
+  }
+{% endif %}
+  return result;
 }
 {% endif %}
 {% if can_update %}
-export async function update{{ parent_pascal }}(userId: string, id: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_update %}, {{ child_params_for_update }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}, srcSnapshotRaw: string | null): Promise<void> {
+export async function update{{ parent_pascal }}(actorId: string, id: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_update %}, {{ child_params_for_update }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}, srcSnapshotRaw: string | null): Promise<void> {
+{% if has_assignee_id %}
+  let _prevAssigneeId: string | null = null;
+{% endif %}
   await prisma.$transaction(async (tx) => {
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -41,10 +66,18 @@ export async function update{{ parent_pascal }}(userId: string, id: string{% if 
     await validateOnUpdate(tx, id, {
 {{ validation_data_obj }}
     });
+{% if has_assignee_id %}
+    // Capture the previous assignee so the post-transaction notify can
+    // fire only on actual change (trigger #1, design 2026-05-11).
+    _prevAssigneeId = (await tx.{{ model }}.findUnique({
+      where: { id },
+      select: { assignee_id: true },
+    }))?.assignee_id ?? null;
+{% endif %}
     await tx.{{ model }}.update({
       where: { id },
       data: {
-        updater_id: userId,
+        updater_id: actorId,
 {{ parent_data_obj_update }}
 {% if child_nested_update %}
 {{ child_nested_update }}
@@ -54,11 +87,47 @@ export async function update{{ parent_pascal }}(userId: string, id: string{% if 
 {% if flatten_nested_updates %}
 {{ flatten_nested_updates }}
 {% endif %}
+{% if is_audited %}
+    await recordAuditEvent({
+      action: '{{ parent }}:update',
+      actor_user_id: actorId,
+      target_table: '{{ model }}',
+      target_id: id,
+      tx,
+    });
+{% endif %}
   });
+{% if has_assignee_id %}
+  if (assigneeId && assigneeId !== _prevAssigneeId && assigneeId !== actorId) {
+    notify(assigneeId, 'assigned', {
+      title: 'You were assigned to {{ parent_pascal }}',
+      href: `/{{ parent }}/view/${id}`,
+      itemType: '{{ model }}',
+      itemId: id,
+    });
+  }
+{% endif %}
 }
 {% endif %}
 {% if can_delete %}
+{% if is_audited %}
+export async function delete{{ parent_pascal }}(actorId: string | null, ids: string[]): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+    for (const id of ids) {
+      await recordAuditEvent({
+        action: '{{ parent }}:delete',
+        actor_user_id: actorId,
+        target_table: '{{ model }}',
+        target_id: id,
+        tx,
+      });
+    }
+  });
+}
+{% else %}
 export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
   await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
 }
+{% endif %}
 {% endif %}

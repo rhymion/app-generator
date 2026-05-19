@@ -13,12 +13,12 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const { userId } = await authenticateApiKey(request);
-    const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org %}, userId{% endif %});
+    const { userId: actorId } = await authenticateApiKey(request);
+    const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org %}, actorId{% endif %});
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(userId, '{{ parent }}', 'read', item);
+    await requireApiPermission(actorId, '{{ parent }}', 'read', item);
     return NextResponse.json(item);
   } catch (error) {
     return handleApiError(error);
@@ -29,12 +29,12 @@ export async function GET(request: NextRequest, { params }: Params) {
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const { userId } = await authenticateApiKey(request);
+    const { userId: actorId } = await authenticateApiKey(request);
     const existing = await prisma.{{ model }}.findUnique({ where: { id }, select: {{ item_context_select }} });
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(userId, '{{ parent }}', 'update', existing);
+    await requireApiPermission(actorId, '{{ parent }}', 'update', existing);
     const body = await request.json();
     const { {{ all_body_fields_create }} } = body;
     await update{{ parent_pascal }}({{ service_args_for_update }}, null);
@@ -48,13 +48,13 @@ export async function PUT(request: NextRequest, { params }: Params) {
 export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const { userId } = await authenticateApiKey(request);
+    const { userId: actorId } = await authenticateApiKey(request);
     const existing = await prisma.{{ model }}.findUnique({ where: { id }, select: {{ item_context_select }} });
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(userId, '{{ parent }}', 'delete', existing);
-    await delete{{ parent_pascal }}([id]);
+    await requireApiPermission(actorId, '{{ parent }}', 'delete', existing);
+    await delete{{ parent_pascal }}({% if is_audited %}actorId, {% endif %}[id]);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     return handleApiError(error);
