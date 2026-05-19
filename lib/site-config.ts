@@ -51,25 +51,6 @@ export const siteConfig = {
   /** Links listed in the sidebar navigation */
   navLinks: [
     { label: "Home", href: "/", external: false },
-      { label: "Db Table", href: "/db_table" },
-    { label: "Xxxxx Xxxxx", href: "/xxxxx_xxxxx" },
-    { label: "Parent1", href: "/parent1" },
-    { label: "Parent Only", href: "/parent_only" },
-    { label: "User Account", href: "/user_account" },
-    { label: "Role", href: "/role" },
-    { label: "Organization", href: "/organization" },
-    { label: "Permission", href: "/permission" },
-    { label: "Procedure", href: "/procedure" },
-    { label: "Resource", href: "/resource" },
-    { label: "Booking", href: "/booking" },
-    { label: "Shift Template", href: "/shift_template" },
-    { label: "Shift", href: "/shift" },
-    { label: "Product", href: "/product" },
-    { label: "Inventory", href: "/inventory" },
-    { label: "Purchase Order", href: "/purchase_order" },
-    { label: "Leave Request", href: "/leave_request" },
-    { label: "Approval Flow", href: "/approval_flow" },
-    { label: "Dashboard", href: "/dashboard" },
   ] satisfies NavLink[],
 };
 
