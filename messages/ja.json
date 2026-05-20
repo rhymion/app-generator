@@ -27,7 +27,7 @@
     "role": "ロール",
     "setting": "設定",
     "tenant": "テナント",
-    "userAccount": "ユーザアカウント"
+    "user": "ユーザ"
   },
   "Fields": {
     "actions": "アクション",
@@ -67,8 +67,8 @@
     "type": "タイプ",
     "update": "更新",
     "url": "URL",
-    "userAccount": "ユーザアカウント",
-    "userAccounts": "ユーザアカウント",
+    "user": "ユーザ",
+    "users": "ユーザ",
     "writtenBy": "作成者"
   },
   "Chart": {
@@ -113,7 +113,7 @@
     "organization": "組織",
     "permission": "権限",
     "role": "ロール",
-    "userAccount": "ユーザアカウント"
+    "user": "ユーザ"
   },
   "Auth": {
     "signInTitle": "アカウントにログイン",

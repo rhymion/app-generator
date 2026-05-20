@@ -27,7 +27,7 @@
     "role": "Role",
     "setting": "Setting",
     "tenant": "Tenant",
-    "userAccount": "User Account"
+    "user": "User"
   },
   "Fields": {
     "actions": "Actions",
@@ -67,8 +67,8 @@
     "type": "Type",
     "update": "Update",
     "url": "URL",
-    "userAccount": "User Account",
-    "userAccounts": "User Accounts",
+    "user": "User",
+    "users": "Users",
     "writtenBy": "Written By"
   },
   "Chart": {
@@ -113,7 +113,7 @@
     "organization": "Organization",
     "permission": "Permission",
     "role": "Role",
-    "userAccount": "User Account"
+    "user": "User"
   },
   "Auth": {
     "signInTitle": "Sign in to your account",
