@@ -26,7 +26,7 @@ export type CommentItem = {
   creator?: {
     id: string;
     name: string;
-    avatar?: string | null;
+    image?: string | null;
   } | null;
 };
 
@@ -89,7 +89,7 @@ function CommentItemComponent({ comment, canDelete, onUpdate, onDelete }: Commen
   };
 
   const creatorName = comment.creator?.name ?? 'Unknown';
-  const avatarSrc = comment.creator?.avatar ?? undefined;
+  const avatarSrc = comment.creator?.image ?? undefined;
   const wasEdited =
     comment.created_at &&
     comment.updated_at &&

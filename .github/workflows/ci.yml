@@ -31,6 +31,31 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    # The audit gate is mechanical: any high/critical CVE in production npm
+    # deps or in the pip requirements file blocks merge. Dependabot is the
+    # proactive half (see .github/dependabot.yml); this job is the
+    # continuous half so non-Dependabot PRs can't introduce vulnerable deps
+    # by accident. Policy lives in AGENTS.md ("Dependency auditing").
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      - name: npm audit (production deps, high+)
+        run: npm audit --omit=dev --audit-level=high
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: pip install (audit tool + project deps for resolution)
+        run: pip install -r requirements.txt
+      - name: pip-audit (requirements.txt)
+        run: pip-audit -r requirements.txt
+
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest

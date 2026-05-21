@@ -6,7 +6,7 @@ import { formatLabelValue } from '@/lib/_format';
 {% endif %}
 
 async function getTestUser() {
-  const testUser = await prisma.user_account.findUnique({
+  const testUser = await prisma.user.findUnique({
     where: { email: TEST_CREDENTIALS.email },
   });
   if (!testUser) throw new Error('Test user not found. Make sure db:seed has run first.');
@@ -45,7 +45,7 @@ async function _create{{ pascal }}BaseDeps() {
         creator_id: testUser.id,
         updater_id: testUser.id,
 {% if dep.has_user_accounts %}
-        user_accounts: {
+        users: {
           connect: [testUser.id].map((id) => ({ id })),
         },
 {% endif %}
@@ -73,7 +73,7 @@ async function _create{{ pascal }}BaseDeps() {
       creator_id: testUser.id,
       updater_id: testUser.id,
 {% if dep.has_user_accounts %}
-      user_accounts: {
+      users: {
         connect: [testUser.id].map((id) => ({ id })),
       },
 {% endif %}
@@ -216,7 +216,7 @@ export async function populate{{ pascal }}Dependencies() {
         creator_id: testUser.id,
         updater_id: testUser.id,
 {% if dep.has_user_accounts %}
-        user_accounts: {
+        users: {
           connect: [testUser.id].map((id) => ({ id })),
         },
 {% endif %}
@@ -244,7 +244,7 @@ export async function populate{{ pascal }}Dependencies() {
       creator_id: testUser.id,
       updater_id: testUser.id,
 {% if dep.has_user_accounts %}
-      user_accounts: {
+      users: {
         connect: [testUser.id].map((id) => ({ id })),
       },
 {% endif %}
@@ -334,10 +334,10 @@ export async function populate{{ pascal }}Data(length: number) {
   for (let i = 1; i <= length; i++) {
 {% if primary_fk_dep %}
 {% if primary_fk_dep.is_user_account %}
-    const {{ primary_fk_dep.var_name }}Item = await prisma.user_account.create({
+    const {{ primary_fk_dep.var_name }}Item = await prisma.user.create({
       data: {
-        name: `Test User Account ${i}`,
-        email: `test-user-account-${Date.now()}-${i}@example.com`,
+        name: `Test User ${i}`,
+        email: `test-user-${Date.now()}-${i}@example.com`,
         password: 'test-password',
         creator_id: testUser.id,
         updater_id: testUser.id,
@@ -355,8 +355,14 @@ export async function populate{{ pascal }}Data(length: number) {
       orderBy: { created_at: 'asc' },
     });
     if (!{{ primary_fk_dep.var_name }}Item) {
+{% for fk in primary_fk_dep.internal_fk_deps %}
+      const {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
       {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.create({
         data: {
+{% for fk in primary_fk_dep.internal_fk_deps %}
+          {{ fk.prop_name }}: {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
 {% for ef in primary_fk_dep.extra_required_fields %}
           {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
 {% endfor %}
@@ -369,8 +375,14 @@ export async function populate{{ pascal }}Data(length: number) {
       });
     }
 {% else %}
+{% for fk in primary_fk_dep.internal_fk_deps %}
+    const {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
     const {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.create({
       data: {
+{% for fk in primary_fk_dep.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
 {% for ef in primary_fk_dep.extra_required_fields %}
         {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
 {% endfor %}
@@ -429,10 +441,10 @@ export async function populate{{ pascal }}FullData(length: number) {
   for (let i = 1; i <= length; i++) {
 {% if primary_fk_dep %}
 {% if primary_fk_dep.is_user_account %}
-    const {{ primary_fk_dep.var_name }}Item = await prisma.user_account.create({
+    const {{ primary_fk_dep.var_name }}Item = await prisma.user.create({
       data: {
-        name: `Test User Account ${i}`,
-        email: `test-user-account-${Date.now()}-${i}@example.com`,
+        name: `Test User ${i}`,
+        email: `test-user-${Date.now()}-${i}@example.com`,
         password: 'test-password',
         creator_id: testUser.id,
         updater_id: testUser.id,
@@ -445,8 +457,14 @@ export async function populate{{ pascal }}FullData(length: number) {
       orderBy: { created_at: 'asc' },
     });
     if (!{{ primary_fk_dep.var_name }}Item) {
+{% for fk in primary_fk_dep.internal_fk_deps %}
+      const {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
       {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.create({
         data: {
+{% for fk in primary_fk_dep.internal_fk_deps %}
+          {{ fk.prop_name }}: {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
 {% for ef in primary_fk_dep.extra_required_fields %}
           {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
 {% endfor %}
@@ -459,8 +477,14 @@ export async function populate{{ pascal }}FullData(length: number) {
       });
     }
 {% else %}
+{% for fk in primary_fk_dep.internal_fk_deps %}
+    const {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
     const {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.create({
       data: {
+{% for fk in primary_fk_dep.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
 {% for ef in primary_fk_dep.extra_required_fields %}
         {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
 {% endfor %}
@@ -598,7 +622,7 @@ export async function setup{{ pascal }}ApprovalFlow() {
     data: { name: 'Test {{ title }} Approver Role', creator_id: testUser.id, updater_id: testUser.id },
   });
 
-  const requestorUser = await prisma.user_account.create({
+  const requestorUser = await prisma.user.create({
     data: {
       name: 'Test {{ title }} Requestor User',
       email: 'test-{{ model_name }}-requestor@example.com',
@@ -610,7 +634,7 @@ export async function setup{{ pascal }}ApprovalFlow() {
     },
   });
 
-  const approverUser = await prisma.user_account.create({
+  const approverUser = await prisma.user.create({
     data: {
       name: 'Test {{ title }} Approver User',
       email: 'test-{{ model_name }}-approver@example.com',
@@ -622,7 +646,7 @@ export async function setup{{ pascal }}ApprovalFlow() {
     },
   });
 
-  const noRoleUser = await prisma.user_account.create({
+  const noRoleUser = await prisma.user.create({
     data: {
       name: 'Test {{ title }} No Role User',
       email: 'test-{{ model_name }}-norole@example.com',
@@ -676,7 +700,7 @@ export async function setup{{ pascal }}OrderedApprovalFlow() {
     data: { name: 'Test {{ title }} Ordered Approver Role 2', creator_id: testUser.id, updater_id: testUser.id },
   });
 
-  const approverUser1 = await prisma.user_account.create({
+  const approverUser1 = await prisma.user.create({
     data: {
       name: 'Test {{ title }} Ordered Approver 1',
       email: 'test-{{ model_name }}-ordered-approver1@example.com',
@@ -687,7 +711,7 @@ export async function setup{{ pascal }}OrderedApprovalFlow() {
       roles: { connect: [{ id: approverRole1.id }] },
     },
   });
-  const approverUser2 = await prisma.user_account.create({
+  const approverUser2 = await prisma.user.create({
     data: {
       name: 'Test {{ title }} Ordered Approver 2',
       email: 'test-{{ model_name }}-ordered-approver2@example.com',

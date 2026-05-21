@@ -54,17 +54,17 @@ export function getGeneratedTasks() {
 {% endif %}
 {% endfor %}
 {% if has_user_account_populate %}
-    async 'db:populateUserAccount'(length: number) {
+    async 'db:populateUser'(length: number) {
       const { prisma } = require('./db-helpers');
       const { TEST_CREDENTIALS } = require('./test-credentials');
-      const testUser = await prisma.user_account.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+      const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
       if (!testUser) throw new Error('Test user not found. Run db:seed first.');
       const records = [];
       for (let i = 1; i <= length; i++) {
-        const record = await prisma.user_account.create({
+        const record = await prisma.user.create({
           data: {
-            name: `User Account ${i}`,
-            email: `test-ua-${i}-${Date.now()}@example.com`,
+            name: `User ${i}`,
+            email: `test-user-${i}-${Date.now()}@example.com`,
             password: 'test-password',
             creator_id: testUser.id,
             updater_id: testUser.id,

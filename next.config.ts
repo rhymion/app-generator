@@ -26,6 +26,17 @@ const nextConfig: NextConfig = {
       { hostname: '*.public.blob.vercel-storage.com' },
     ],
   },
+  // /uploads/* is what `/api/upload` returns and what `attachment.path`
+  // rows store. In production (`next start`) the public-asset handler
+  // only serves files that existed in `public/uploads/` at build time —
+  // runtime uploads return 404. Rewriting to `/api/uploads/:path*`
+  // (handled by app/api/uploads/[...path]/route.ts) makes runtime files
+  // reachable in prod too, without changing any stored URL.
+  async rewrites() {
+    return [
+      { source: '/uploads/:path*', destination: '/api/uploads/:path*' },
+    ];
+  },
   // devIndicators: false,
   // cacheComponents: true,
 };

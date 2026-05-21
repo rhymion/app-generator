@@ -30,6 +30,8 @@ from generators import (
     column_def_context,
     form_view_context,
     form_upsert_context,
+    build_dashboard_catalog,
+    build_attachable_owners,
 )
 from generators_i18n import update_i18n_and_config
 from validate import validate_schema, validate_prisma_indexes, SchemaValidationError
@@ -236,6 +238,31 @@ def generate(schema_path: str, output_dir: str) -> None:
         if can_view:
             _write(app_dir / 'view' / '[id]' / 'page.tsx', _render(env, 'page_view.tsx.jinja2', ctx))
 
+    # --- Dashboard catalog (lib/dashboard/catalog.ts) ---
+    dashboard_catalog = build_dashboard_catalog(schema)
+    if dashboard_catalog:
+        _write(
+            out / 'lib' / 'dashboard' / 'catalog.ts',
+            _render(env, 'dashboard_catalog.ts.jinja2', {'entities': dashboard_catalog}),
+        )
+        print(f'  Dashboard catalog → lib/dashboard/catalog.ts ({len(dashboard_catalog)} entities)')
+
+    # --- Attachment bridge actions (lib/attachment/actions.ts) ---
+    #
+    # Emitted whenever at least one base entity owns the `attachable` bridge
+    # (has `attachable_id` with x-relationship.target: attachable). Each
+    # owner contributes a select branch + a revalidate-paths block, mirroring
+    # the polymorphic bridge pattern used by `commentable` and `approvable`.
+    # When no owner exists the file is left out and cleanup.py removes any
+    # stale copy from a previous schema.
+    attachable_owners = build_attachable_owners(schema)
+    if attachable_owners:
+        _write(
+            out / 'lib' / 'attachment' / 'actions.ts',
+            _render(env, 'attachment_actions.ts.jinja2', {'owners': attachable_owners}),
+        )
+        print(f'  Attachment bridge actions → lib/attachment/actions.ts ({len(attachable_owners)} owners)')
+
     # --- docs/generated/index.md + app/[locale]/docs/page.mdx ---
     print('\nGenerating documentation index...')
     index_ctx = build_doc_index_context(entity_doc_summaries)
@@ -268,10 +295,19 @@ def generate(schema_path: str, output_dir: str) -> None:
             _write(cypress_support / parent / 'helper.ts',
                    _render(env, 'test_helper.ts.jinja2', helper_ctx))
 
-            # e2e spec
+            # e2e spec (desktop)
             spec_ctx = spec_context(parent, children, schema, model, def_key, gen_cfg)
             _write(cypress_e2e / f'{parent}.cy.ts',
                    _render(env, 'test_spec.cy.ts.jinja2', spec_ctx))
+
+            # e2e spec (mobile) — separate file under cypress/e2e/mobile/.
+            # The mobile list view renders CardListClient instead of the
+            # desktop DataGrid, so the assertions/selectors differ enough to
+            # warrant their own spec rather than a viewport-switched variant
+            # of the desktop one. Forms are responsive but currently share
+            # the same FormUpsert at every viewport.
+            _write(cypress_e2e / 'mobile' / f'{parent}.cy.ts',
+                   _render(env, 'test_spec_mobile.cy.ts.jinja2', spec_ctx))
 
             # api spec (only if api: true)
             if gen_cfg.get('api'):

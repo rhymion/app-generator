@@ -1,5 +1,7 @@
 $schema: "http://json-schema.org/draft-07/schema#"
 
+# Support multi-tenancy
+version: 2.0
 definitions:
   db_table:
     type: object
@@ -395,16 +397,15 @@ definitions:
     allOf:
       - $ref: "#/definitions/parent_only"
 
-  user_account:
+  user:
     type: object
     required:
       - id
       - name
       - email
-      - password
     x-display:
       table:
-        - name: 
+        - name:
             primary: true
             width: 150
     properties:
@@ -416,8 +417,13 @@ definitions:
         minLength: 1
       email:
         type: string
+      # Nullable so SSO-provisioned users (Google, etc.) can exist without a
+      # bcrypt hash. Credentials sign-in still requires a non-null password —
+      # auth.ts authorize() rejects accounts with password === null.
       password:
-        type: string
+        type:
+          - string
+          - "null"
         x-custom-component:
           target:
             - upsert
@@ -426,9 +432,9 @@ definitions:
           - string
           - "null"
         x-custom-component:
-          target: 
+          target:
             - upsert
-      avatar:
+      image:
         type:
           - string
           - "null"
@@ -451,7 +457,7 @@ definitions:
           - string
           - "null"
 
-  user_account_detail:
+  user_detail:
     x-generate:
       list: true
       view: true
@@ -460,17 +466,24 @@ definitions:
       delete: true
       invalidate: false
       api: true
+      # Skip generated cypress specs for `user`. The seed flow creates a
+      # TEST_CREDENTIALS user before any spec runs, so the standard
+      # "list is empty after reset" assertions never hold for this entity.
+      # The hardcoded `db:populateUser` task in test_tasks_registry still
+      # gets emitted (via `has_user_account_populate`) so other entities
+      # that need users for FKs keep working.
       test: false
       fields:
         - name
-        - avatar
+        - email
+        - image
         - roles
     x-relationships:
       roles:
         type: many-to-many
         target: role
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/user"
       - type: object
         required:
           - roles
@@ -495,7 +508,7 @@ definitions:
         type: many-to-many
         target: role
     allOf:
-      - $ref: "#/definitions/user_account"
+      - $ref: "#/definitions/user"
       - type: object
         required:
           - roles
@@ -656,21 +669,24 @@ definitions:
       invalidate: false
       api: true
       test: true
+    # Security-sensitive entity: every create/update/delete is recorded in
+    # the audit_log table by the generated service layer.
+    x-audit: true
     x-relationships:
-      user_accounts:
+      users:
         type: many-to-many
-        target: user_account
+        target: user
     allOf:
       - $ref: "#/definitions/role"
       - type: object
         required:
-          - user_accounts
+          - users
         properties:
-          user_accounts:
+          users:
             type: array
             x-outputType: list
             items:
-              $ref: "#/definitions/user_account"
+              $ref: "#/definitions/user"
 
   organization:
     type: object
@@ -700,20 +716,20 @@ definitions:
       api: true
       test: true
     x-relationships:
-      user_accounts:
+      users:
         type: many-to-many
-        target: user_account
+        target: user
     allOf:
       - $ref: "#/definitions/organization"
       - type: object
         required:
-          - user_accounts
+          - users
         properties:
-          user_accounts:
+          users:
             type: array
             x-outputType: list
             items:
-              $ref: "#/definitions/user_account"
+              $ref: "#/definitions/user"
 
   permission:
     type: object
@@ -766,6 +782,9 @@ definitions:
       invalidate: false
       api: true
       test: true
+    # Security-sensitive entity: every create/update/delete is recorded in
+    # the audit_log table by the generated service layer.
+    x-audit: true
     allOf:
       - $ref: "#/definitions/permission"
       - type: object
@@ -805,7 +824,7 @@ definitions:
         pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
           type: many-to-one
-          target: user_account
+          target: user
           labelField: name
 
   procedure_detail:
@@ -834,7 +853,7 @@ definitions:
           - followed_by
         properties:
           assignee:
-            $ref: "#/definitions/user_account"
+            $ref: "#/definitions/user"
           parent:
             $ref: "#/definitions/procedure"
           children:
@@ -859,6 +878,15 @@ definitions:
       - id
       - name
       - organization_id
+      - attachable_id
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 200
+        - organization:
+            width: 200
+      dashboard: true
     properties:
       id:
         type: string
@@ -877,43 +905,13 @@ definitions:
           type: many-to-one
           target: organization
           labelField: name
-
-  resource_attachment:
-    type: object
-    required:
-      - id
-      - name
-      - path
-    properties:
-      id:
+      attachable_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
-      order:
-        type: integer
-        default: 0
-      name:
-        type: string
-        minLength: 1
-      path:
-        type: string
-        format: uri
-
-  resource_image:
-    type: object
-    required:
-      - id
-      - name
-      - path
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-      name:
-        type: string
-        minLength: 1
-      path:
-        type: string
-        format: uri
+        x-relationship:
+          type: one-to-one_bridge
+          target: attachable
+          labelField: id
 
   resource_detail:
     x-generate:
@@ -925,28 +923,22 @@ definitions:
       invalidate: false
       api: true
       test: true
+    x-custom-component:
+      name: AttachmentSection
+      path: "@/components/_standard/AttachmentSection"
+      target:
+        - view
+        - edit
     allOf:
       - $ref: "#/definitions/resource"
       - type: object
         required:
           - organization
-          - resource_attachments
-          - resource_images
         properties:
           organization:
             $ref: "#/definitions/organization"
-          resource_attachments:
-            type: array
-            x-outputType: list
-            x-fileType: file
-            items:
-              $ref: "#/definitions/resource_attachment"
-          resource_images:
-            type: array
-            x-outputType: list
-            x-fileType: image
-            items:
-              $ref: "#/definitions/resource_image"
+          attachable:
+            $ref: "#/definitions/attachable"
 
   booking:
     type: object
@@ -970,6 +962,7 @@ definitions:
       chart:
         span: week
         row_by: resource
+      dashboard: true
     properties:
       id:
         type: string
@@ -1014,16 +1007,16 @@ definitions:
     type: object
     required:
       - id
-      - user_account_id
+      - user_id
       - day_of_week
       - start_time
       - end_time
     x-display:
       table:
-        - user_account: 
+        - user:
             primary: true
             width: 200
-        - day_of_week: 
+        - day_of_week:
             width: 100
         - start_time:
             width: 150
@@ -1033,12 +1026,12 @@ definitions:
       id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
-      user_account_id:
+      user_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
           type: many-to-one
-          target: user_account
+          target: user
           labelField: name
       day_of_week:
         type: integer
@@ -1075,22 +1068,22 @@ definitions:
       - $ref: "#/definitions/shift_template"
       - type: object
         required:
-          - user_account
+          - user
         properties:
-          user_account:
-            $ref: "#/definitions/user_account"
+          user:
+            $ref: "#/definitions/user"
 
   shift:
     type: object
     required:
       - id
-      - user_account_id
+      - user_id
       - start_time
       - end_time
       - status
     x-display:
       table:
-        - user_account: 
+        - user:
             primary: true
             width: 200
         - start_time:
@@ -1098,18 +1091,18 @@ definitions:
         - end_time:
             width: 200
       chart:
-        span: week 
-        row_by: user_account
+        span: week
+        row_by: user
     properties:
       id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
-      user_account_id:
+      user_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
           type: many-to-one
-          target: user_account
+          target: user
           labelField: name
       start_time:
         type: string
@@ -1140,10 +1133,10 @@ definitions:
       - $ref: "#/definitions/shift"
       - type: object
         required:
-          - user_account
+          - user
         properties:
-          user_account:
-            $ref: "#/definitions/user_account"
+          user:
+            $ref: "#/definitions/user"
 
   product:
     type: object
@@ -1152,15 +1145,17 @@ definitions:
       - code
       - name
       - price
+      - attachable_id
     x-display:
       table:
-        - code: 
+        - code:
             primary: true
             width: 150
         - name:
             width: 200
         - price:
             width: 100
+      dashboard: true
     properties:
       id:
         type: string
@@ -1174,46 +1169,36 @@ definitions:
       price:
         type: integer
         minimum: 0
-
-  product_image:
-    type: object
-    required:
-      - id
-      - name
-      - path
-    properties:
-      id:
+      attachable_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
-      name:
-        type: string
-        minLength: 1
-      path:
-        type: string
-        format: uri
+        x-relationship:
+          type: one-to-one_bridge
+          target: attachable
+          labelField: id
 
   product_detail:
     x-generate:
       list: true
       view: true
-      new: true 
+      new: true
       edit: true
       delete: true
       invalidate: false
       api: true
       test: true
+    x-custom-component:
+      name: AttachmentSection
+      path: "@/components/_standard/AttachmentSection"
+      target:
+        - view
+        - edit
     allOf:
       - $ref: "#/definitions/product"
       - type: object
-        required:
-          - product_images
         properties:
-          images:
-            type: array
-            x-outputType: list
-            x-fileType: image
-            items:
-              $ref: "#/definitions/product_image"
+          attachable:
+            $ref: "#/definitions/attachable"
 
   inventory:
     type: object
@@ -1306,7 +1291,7 @@ definitions:
         pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
           type: many-to-one
-          target: user_account
+          target: user
           labelField: name
 
   purchase_per_item:
@@ -1361,7 +1346,7 @@ definitions:
           - items
         properties:
           customer:
-            $ref: "#/definitions/user_account"
+            $ref: "#/definitions/user"
           items:
             type: array
             items:
@@ -1371,30 +1356,31 @@ definitions:
     type: object
     required:
       - id
-      - user_account_id
+      - user_id
       - start_date
       - end_date
       - reason
       - approvable_id
     x-display:
       table:
-        - user_account:
+        - user:
             primary: true
             width: 200
         - start_date:
             width: 150
         - end_date:
             width: 150
+      dashboard: true
     properties:
       id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
-      user_account_id:
+      user_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
           type: many-to-one
-          target: user_account
+          target: user
           labelField: name
       start_date:
         type: string
@@ -1433,10 +1419,10 @@ definitions:
       - $ref: "#/definitions/leave_request"
       - type: object
         required:
-          - user_account
+          - user
         properties:
-          user_account:
-            $ref: "#/definitions/user_account"
+          user:
+            $ref: "#/definitions/user"
           approvable:
             $ref: "#/definitions/approvable"
 
@@ -1642,3 +1628,164 @@ definitions:
       commentable_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
+
+  attachable:
+    type: object
+    required:
+      - id
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+
+  attachable_detail:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    allOf:
+      - $ref: "#/definitions/attachable"
+      - type: object
+        required:
+          - attachments
+        properties:
+          attachments:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/attachment"
+          resource:
+            $ref: "#/definitions/resource"
+          product:
+            $ref: "#/definitions/product"
+
+  attachment:
+    type: object
+    required:
+      - id
+      - type
+      - name
+      - path
+      - attachable_id
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      type:
+        type: integer
+        minimum: 0
+        maximum: 3
+        enum:
+          - image
+          - file
+          - video
+          - audio
+      order:
+        type: integer
+        default: 0
+      name:
+        type: string
+        minLength: 1
+      path:
+        type: string
+        format: uri
+      attachable_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+
+  dashboard:
+    type: object
+    required:
+      - id
+      - name
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 200
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+
+  dashboard_widget:
+    type: object
+    required:
+      - id
+      - dashboard_id
+      - name
+      - entity_name
+      - chart_type
+      - group_by_field
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      dashboard_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: dashboard
+          labelField: name
+      name:
+        type: string
+        minLength: 1
+      entity_name:
+        type: string
+        minLength: 1
+      chart_type:
+        type: integer
+        minimum: 0
+        maximum: 1
+        enum:
+          - Pie
+          - Bar
+      group_by_field:
+        type: string
+        minLength: 1
+      filter_field:
+        type:
+          - string
+          - "null"
+      filter_value:
+        type:
+          - string
+          - "null"
+      order:
+        type: integer
+        default: 0
+
+  dashboard_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-custom-component:
+      name: DashboardView
+      path: "@/components/_standard/DashboardView"
+      target:
+        - view
+    allOf:
+      - $ref: "#/definitions/dashboard"
+      - type: object
+        required:
+          - widgets
+        properties:
+          widgets:
+            type: array
+            items:
+              $ref: "#/definitions/dashboard_widget"

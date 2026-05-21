@@ -1,0 +1,42 @@
+// AUTO-GENERATED - DO NOT EDIT
+// Catalog of dashboardable entities and their groupable fields.
+// Source: x-display.dashboard flag in code_generator/json_schema.yaml.
+
+export type DashboardField =
+  | { name: string; label: string; kind: 'boolean' }
+  | { name: string; label: string; kind: 'enum'; enum_values: string[] }
+  | { name: string; label: string; kind: 'fk'; fk_target: string; fk_label_field: string };
+
+export type DashboardEntity = {
+  name: string;
+  label: string;
+  groupable_fields: DashboardField[];
+};
+
+export const DASHBOARDABLE_ENTITIES: DashboardEntity[] = [
+{% for e in entities %}
+  {
+    name: '{{ e.name }}',
+    label: '{{ e.label }}',
+    groupable_fields: [
+{% for f in e.groupable_fields %}
+{% if f.kind == 'fk' %}
+      { name: '{{ f.name }}', label: '{{ f.label }}', kind: 'fk', fk_target: '{{ f.fk_target }}', fk_label_field: '{{ f.fk_label_field }}' },
+{% elif f.kind == 'enum' %}
+      { name: '{{ f.name }}', label: '{{ f.label }}', kind: 'enum', enum_values: [{% for v in f.enum_values %}'{{ v }}'{% if not loop.last %}, {% endif %}{% endfor %}] },
+{% else %}
+      { name: '{{ f.name }}', label: '{{ f.label }}', kind: 'boolean' },
+{% endif %}
+{% endfor %}
+    ],
+  },
+{% endfor %}
+];
+
+export function findDashboardEntity(name: string): DashboardEntity | undefined {
+  return DASHBOARDABLE_ENTITIES.find((e) => e.name === name);
+}
+
+export function findDashboardField(entityName: string, fieldName: string): DashboardField | undefined {
+  return findDashboardEntity(entityName)?.groupable_fields.find((f) => f.name === fieldName);
+}

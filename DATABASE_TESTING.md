@@ -36,7 +36,7 @@ docker run --name postgres-test \
   -d postgres:16
 
 # Run migrations and seed
-npm run db:reset:test
+npm run db:reset
 npm run db:seed:test
 ```
 
@@ -47,7 +47,7 @@ npm run db:seed:test
 createdb my_next_test
 
 # Run migrations and seed
-npm run db:reset:test
+npm run db:reset
 npm run db:seed:test
 ```
 
@@ -94,10 +94,14 @@ npm run db:use:postgres
 
 | Script | Description |
 |--------|-------------|
-| `npm run db:migrate` | Run Prisma migrations (dev) |
-| `npm run db:reset:test` | Reset test database |
+| `npm run env:use -- test` | Symlink `.env` → `.env.test` |
+| `npm run env:use -- off` | Remove `.env` symlink, return to native `.env.local` |
+| `npm run env:current` | Show current environment |
+| `npm run migrate:dev` | Run Prisma migrations (dev) |
+| `npm run migrate:reset:test` | Reset test database migrations |
 | `npm run db:seed:test` | Seed test database |
-| `npm run db:studio` | Open Prisma Studio |
+| `npm run db:studio` | Open Prisma Studio (uses `.env.local` natively) |
+| `npm run db:studio:test` | Open Prisma Studio with test database |
 | `npm run db:use:sqlite` | Switch to SQLite |
 | `npm run db:use:postgres` | Switch to PostgreSQL |
 
@@ -145,7 +149,7 @@ This means you can use `TEST_CREDENTIALS` in your tests without worrying about e
 
 ```bash
 # Reset test database to clean state
-npm run db:reset:test
+npm run db:reset
 
 # Seed with test data
 npm run db:seed:test
@@ -188,7 +192,7 @@ docker restart postgres-test
 npx prisma generate
 
 # Reset and migrate
-npm run db:reset:test
+npm run db:reset
 ```
 
 ### Port Conflicts

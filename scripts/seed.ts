@@ -18,7 +18,7 @@ async function main() {
   const adminId = createId();
   const workerId = createId();
 
-  const admin = await prisma.user_account.upsert({
+  const admin = await prisma.user.upsert({
     where: { email: 'admin@example.com' },
     update: {},
     create: {
@@ -32,7 +32,7 @@ async function main() {
     },
   });
 
-  const worker = await prisma.user_account.upsert({
+  const worker = await prisma.user.upsert({
     where: { email: 'worker@example.com' },
     update: {},
     create: {
@@ -52,7 +52,7 @@ async function main() {
       description: '管理者権限',
       creator_id: admin.id,
       updater_id: admin.id,
-      user_accounts: { connect: { id: admin.id } },
+      users: { connect: { id: admin.id } },
     },
   });
 
@@ -62,7 +62,7 @@ async function main() {
       description: 'レコード作成者',
       creator_id: admin.id,
       updater_id: admin.id,
-      user_accounts: { connect: { id: admin.id } },
+      users: { connect: { id: admin.id } },
     },
   });
 
@@ -72,12 +72,12 @@ async function main() {
       description: '担当者',
       creator_id: admin.id,
       updater_id: admin.id,
-      user_accounts: { connect: { id: worker.id } },
+      users: { connect: { id: worker.id } },
     },
   });
 
   // ── Permissions ────────────────────────────────────────────────────────────
-  const entities = ['user_account', 'role', 'organization', 'permission', 'setting'];
+  const entities = ['user', 'role', 'organization', 'permission', 'setting'];
 
   // Administrator: full CRUD
   await Promise.all(entities.map(entity =>
@@ -182,7 +182,7 @@ async function main() {
       description: '',
       creator_id: admin.id,
       updater_id: admin.id,
-      user_accounts: { connect: [{ id: admin.id }, { id: worker.id }] },
+      users: { connect: [{ id: admin.id }, { id: worker.id }] },
     },
   });
 
@@ -192,12 +192,12 @@ async function main() {
       description: '',
       creator_id: admin.id,
       updater_id: admin.id,
-      user_accounts: { connect: { id: admin.id } },
+      users: { connect: { id: admin.id } },
     },
   });
 
 
-  console.log('ITS database seeded successfully!');
+  console.log('Database seeded successfully!');
   console.log({ admin, worker, adminRole, creatorRole, assigneeRole, devOrg });
 }
 

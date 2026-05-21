@@ -138,37 +138,37 @@ def test_spec_context_3_3_populates_two_when_primary_is_fk():
 
 
 def test_spec_context_3_3_user_account_primary_uses_select_autocomplete():
-    """A primary FK to user_account is filtered out of `fields` (it goes through
-    req_ua_spec instead), so the prim_edit_meta lookup misses it. Even so, the
-    field renders as an autocomplete in the form — fall through to
-    selectAutocomplete rather than clearAndFillField, and bump the populate
-    count so two distinct user_account rows exist."""
+    """A primary FK to user (the user-account target) is filtered out of
+    `fields` (it goes through req_ua_spec instead), so the prim_edit_meta
+    lookup misses it. Even so, the field renders as an autocomplete in the
+    form — fall through to selectAutocomplete rather than clearAndFillField,
+    and bump the populate count so two distinct user rows exist."""
     schema = {
         "definitions": {
-            "user_account": {
+            "user": {
                 "type": "object",
                 "required": ["id", "name"],
                 "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
             },
             "shift": {
                 "type": "object",
-                "required": ["id", "user_account_id", "start_time"],
+                "required": ["id", "user_id", "start_time"],
                 "properties": {
                     "id": {"type": "string"},
-                    "user_account_id": {
+                    "user_id": {
                         "type": "string",
-                        "x-relationship": {"type": "many-to-one", "target": "user_account", "labelField": "name"},
+                        "x-relationship": {"type": "many-to-one", "target": "user", "labelField": "name"},
                     },
                     "start_time": {"type": "string", "format": "date-time"},
                 },
-                "x-display": {"table": [{"user_account": {"primary": True}}]},
+                "x-display": {"table": [{"user": {"primary": True}}]},
             },
             "shift_detail": {"allOf": [{"$ref": "#/definitions/shift"}]},
         },
     }
     ctx = spec_context("shift", [], schema, "shift", "shift_detail", _entity("shift")["generate_config"])
     assert ctx["populate_count_3_3"] == 2
-    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User Account', 'Test User Account 2');"
+    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User', 'Test User 2');"
 
 
 def test_api_spec_context_omits_required_one_to_one_fk_in_missing_field_case():

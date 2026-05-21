@@ -10,10 +10,10 @@ import { add{{ parent_pascal }} } from '@/lib/{{ parent }}/service';
 {% if can_list %}
 export async function GET(request: NextRequest) {
   try {
-    const { userId } = await authenticateApiKey(request);
-    const richPerms = await requireApiPermission(userId, '{{ parent }}', 'read');
+    const { userId: actorId } = await authenticateApiKey(request);
+    const richPerms = await requireApiPermission(actorId, '{{ parent }}', 'read');
     const opts = parsePageOpts(request.nextUrl.searchParams);
-    const result = await get{{ parent_pascal }}Page(opts, richPerms, userId);
+    const result = await get{{ parent_pascal }}Page(opts, richPerms, actorId);
     return NextResponse.json(result);
   } catch (error) {
     return handleApiError(error);
@@ -23,8 +23,8 @@ export async function GET(request: NextRequest) {
 {% if can_create %}
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = await authenticateApiKey(request);
-    await requireApiPermission(userId, '{{ parent }}', 'create');
+    const { userId: actorId } = await authenticateApiKey(request);
+    await requireApiPermission(actorId, '{{ parent }}', 'create');
     const body = await request.json();
     const { {{ all_body_fields_create }} } = body;
     const result = await add{{ parent_pascal }}({{ service_args_for_create }});

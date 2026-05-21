@@ -1,13 +1,12 @@
 'use server';
 
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/auth';
+import { auth } from '@/auth';
 import prisma from '@/lib/prisma';
 import { cache } from 'react';
 import { TtlLruCache } from '@/lib/_ttl_lru';
 
 export const getSessionUserId = cache(async function getSessionUserId(): Promise<string | null> {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   return session?.user?.id ?? null;
 });
 
@@ -163,7 +162,7 @@ export const getModelPermissions = cache(async (
         // Regular roles the user belongs to, excluding special roles
         {
           role: {
-            user_accounts: { some: { id: resolvedUserId } },
+            users: { some: { id: resolvedUserId } },
             name: { notIn: [...SPECIAL_ROLE_NAMES] },
           },
         },
@@ -269,7 +268,7 @@ export async function assertPermission(permissions: OperationFlags, operation: O
 export const getUserRoleIds = cache(async (userId?: string | null): Promise<string[]> => {
   const resolvedUserId = userId ?? await getSessionUserId();
   if (!resolvedUserId) return [];
-  const user = await prisma.user_account.findUnique({
+  const user = await prisma.user.findUnique({
     where: { id: resolvedUserId },
     select: { roles: { select: { id: true } } },
   });
