@@ -279,7 +279,7 @@ issued, login appears to succeed but "Sign Out" never appears, and Cypress fails
 repository secret is configured. Otherwise omit it and let `.env.test` provide it.
 
 ### Database
-The test database is provided by `npm run docker:test:up` (docker-compose), which
+The test database is provided by `npm run docker:up` (docker-compose), which
 starts Postgres on port 5432 matching `DATABASE_URL` in `.env.test`. Do **not** add
 a redundant `services.postgres` block in the workflow — it runs on a different port
 and is never connected to.

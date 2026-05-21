@@ -13,24 +13,6 @@ async function main() {
 
   const hashedPassword = await bcrypt.hash('password123', 10);
 
-  // ── Default tenant ────────────────────────────────────────────────────────
-  // Phase 1 multi-tenancy: every user has a NOT NULL `tenant_id`. The
-  // bootstrap "default" tenant must exist before any user is inserted —
-  // its id is the literal string 'default' so it matches the column
-  // default on `user.tenant_id` and the backfill value used by the 1.5
-  // migration script. Creator/updater stay null on first run; once an
-  // admin exists they could be backfilled, but it isn't required.
-  const defaultTenant = await prisma.tenant.upsert({
-    where: { slug: 'default' },
-    update: {},
-    create: {
-      id: 'default',
-      slug: 'default',
-      name: 'Default Tenant',
-      status: 'active',
-    },
-  });
-
   // ── Users ─────────────────────────────────────────────────────────────────
   // Self-referential: create with own id as creator/updater
   const adminId = createId();
@@ -43,7 +25,6 @@ async function main() {
       id: adminId,
       creator_id: adminId,
       updater_id: adminId,
-      tenant_id: defaultTenant.id,
       api_key: 'mk_78d1e51a47f40912f5a1787367e3f7f6ed17c314590eac84edc5b3f785a527b1',
       email: 'admin@example.com',
       name: 'Test Admin',
@@ -58,7 +39,6 @@ async function main() {
       id: workerId,
       creator_id: workerId,
       updater_id: workerId,
-      tenant_id: defaultTenant.id,
       email: 'worker@example.com',
       name: 'Test Worker',
       password: hashedPassword,
@@ -217,8 +197,8 @@ async function main() {
   });
 
 
-  console.log('ITS database seeded successfully!');
-  console.log({ defaultTenant, admin, worker, adminRole, creatorRole, assigneeRole, devOrg });
+  console.log('Database seeded successfully!');
+  console.log({ admin, worker, adminRole, creatorRole, assigneeRole, devOrg });
 }
 
 main()

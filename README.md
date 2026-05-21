@@ -78,17 +78,24 @@ pip install -r requirements.txt
 
 ### 4. Prepare environment variables
 
-Copy the example environment file and fill in your database connection details:
+For cloud/local development, Next.js automatically loads `.env.local` — no setup needed.
+To use the test database instead, switch environments:
 
 ```bash
-# When you use test environment
-cp .env.test .env
+# Switch to test environment (uses .env.test)
+npm run env:use -- test
+
+# Reset to native Next.js environment loading (.env.local)
+npm run env:use -- off
+
+# Check current environment at any time
+npm run env:current
 ```
 
 ### 5. Start the database
 
 ```bash
-npm run docker:test:up
+npm run docker:up:test
 ```
 
 ### 6. Apply the schema and generate the Prisma client
@@ -130,6 +137,23 @@ npx prisma generate
 
 See [docs/knowledge/schema-yaml-configuration.md](docs/knowledge/schema-yaml-configuration.md) for the full schema reference.
 
+## Environment Configuration
+
+Next.js loads `.env.local` natively for cloud/local development — no configuration needed.
+
+```bash
+npm run dev              # development server (uses .env.local natively)
+npm run dev:test         # development server with test database (.env.test)
+npm run start:test       # production mode with test database (.env.test)
+npm run env:use -- test  # symlink .env → .env.test for tools that read .env directly
+npm run env:use -- off   # remove .env symlink, return to native .env.local loading
+npm run env:current      # show current environment
+```
+
+Next.js `.env` load order: `.env.local` > `.env.$(NODE_ENV)` > `.env`
+
+> **Note**: `npm run env:use -- cloud` is deprecated. Use `npm run env:use -- off` to return to native `.env.local` loading.
+
 ## Running Tests
 
 ```bash
@@ -140,7 +164,7 @@ npm run test
 pytest code_generator/tests
 
 # Full CI gate (generator -> database -> build -> tests)
-npm run docker:test:up
+npm run docker:up:test
 npm run demo:generate
 npm run test
 npm run build
