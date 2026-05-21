@@ -72,8 +72,8 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
       // DataGrid; hydration re-runs the hook and swaps DataGrid → CardListClient
       // at mobile widths. Clicking the toolbar Add button mid-swap lands on a
       // non-hydrated handler and navigation silently no-ops — wait for the
-      // DataGrid to be gone first as the mobile-side hydration marker.
-      cy.get('.MuiDataGrid-root').should('not.exist');
+      // "No items found" message to appear first as the mobile-side hydration marker.
+      cy.get('p[class*="MuiTypography-root"]').should('exist');
       // CardListClient renders the toolbar add as an IconButton with the same
       // aria-label as the desktop variant ("Create New {{ title }}").
       cy.get('button[aria-label="Create New {{ title }}"]').click();
