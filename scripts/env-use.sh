@@ -5,8 +5,8 @@ ENV_NAME="${1:-}"
 PROJ_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # 引数チェック
-if [[ "$ENV_NAME" != "test" && "$ENV_NAME" != "cloud" && "$ENV_NAME" != "off" ]]; then
-  echo "Usage: npm run env:use -- <test|cloud|off>" >&2
+if [[ "$ENV_NAME" != "test" && "$ENV_NAME" != "development" && "$ENV_NAME" != "production" && "$ENV_NAME" != "off" ]]; then
+  echo "Usage: npm run env:use -- <test|development|production|off>" >&2
   exit 1
 fi
 
@@ -26,10 +26,12 @@ if [[ "$ENV_NAME" == "off" ]]; then
 fi
 
 # ソースファイルの決定
-if [[ "$ENV_NAME" == "test" ]]; then
-  SRC=".env.test"
+if [[ "$ENV_NAME" == "production" ]]; then
+  SRC=".env.production"
+elif [[ "$ENV_NAME" == "development" ]]; then
+  SRC=".env.development"
 else
-  SRC=".env.cloud.local"
+  SRC=".env.test"
 fi
 
 # ソースファイルの存在チェック
