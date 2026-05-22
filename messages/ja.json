@@ -34,6 +34,7 @@
     "apiKey": "APIキー",
     "approverRole": "承認者ロール",
     "avatar": "アバター",
+    "chartType": "チャート種別",
     "comments": "コメント",
     "create": "作成",
     "dateOfBirth": "生年月日",
@@ -172,6 +173,7 @@
     "connectMore": "別のプロバイダーを連携",
     "connectButton": "{provider} を連携",
     "passwordlessNotice": "現在これが唯一のサインイン方法です。解除前にアカウントにパスワードを設定してください。",
+    "registrationFailed": "登録に失敗しました",
     "errorLastSignInMethod": "解除できません: サインイン方法が無くなります。",
     "errorNotFound": "連携アカウントが見つかりません。",
     "errorUnknown": "問題が発生しました。再度お試しください。"

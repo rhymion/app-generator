@@ -34,6 +34,7 @@
     "apiKey": "API Key",
     "approverRole": "Approver Role",
     "avatar": "Avatar",
+    "chartType": "Chart Type",
     "comments": "Comments",
     "create": "Create",
     "dateOfBirth": "Date of Birth",
@@ -172,6 +173,7 @@
     "connectMore": "Connect another provider",
     "connectButton": "Connect {provider}",
     "passwordlessNotice": "This is your only sign-in method. Set a password on the account before detaching it.",
+    "registrationFailed": "Registration failed",
     "errorLastSignInMethod": "Cannot detach: you would no longer be able to sign in.",
     "errorNotFound": "Linked account not found.",
     "errorUnknown": "Something went wrong. Please try again."
