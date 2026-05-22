@@ -176,15 +176,16 @@ npm run env:use -- test  # test 環境に切り替え
 npm run cy:test          # E2E フルスタック実行 (build + start + cypress)
 ```
 
-`cy:test` は内部で `e2e:build`（generate-code → db:push → db:generate → db:seed-tenant → next build）を実行してから Cypress を起動する。test 環境が active でない場合は即 fail する。
+`cy:test` は内部で `e2e:start`（= `start`）を経由して Cypress を起動する。
+`start` は `check:build` を前段で実行するため、.next が古い場合は fail-fast となる。test 環境が active でない場合は即 fail する。
 
 個別実行:
 ```bash
-npm run e2e:build        # ビルドのみ（Cypress 不要の場合）
-npm run start            # ビルド済み状態でサーバ起動
+npm run build:all        # full build (generate → db:push → next build)
+npm run start            # starts server; check:build always runs first
 ```
 
-> **Note**: E2E は `npm run cy:test` または `npm run e2e:start` で実行すること。
+> **Note**: E2E は `npm run cy:test` で実行すること。`e2e:start` は `start` の alias として残存。
 
 ## Project Structure
 
