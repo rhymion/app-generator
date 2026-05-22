@@ -30,7 +30,7 @@ existing (non-generated) TypeScript are **unchanged**.
 Gate:
 
 1. `npm run docker:up:test`
-2. `npm run demo:generate`
+2. `npm run generate-code`
 3. `npm run build`
 4. `npm run cy:test:api`
 
@@ -49,7 +49,7 @@ Gate:
 
 1. `pytest code_generator/tests`
 2. `npm run docker:up:test`
-3. `npm run demo:generate`
+3. `npm run generate-code`
 4. `npm run build`
 5. `npm run test`
 6. `npm run cy:test:api`
@@ -74,7 +74,7 @@ Gate: none. Do not run docker, generators, builds, or tests. Cite findings with
 ## When a gate step fails
 
 - Failure caused by your change -> fix it.
-- `demo:generate` fails but `npm run db:reset` + `npm run db:generate`
+- `generate-code` fails but `npm run migrate:reset:test:force` + `npm run db:generate`
   would succeed and the non-generated code is correct -> **stop and report**:
   there is a generator/web inconsistency that needs separate attention.
 - Environmental failure (network, missing OS package, hardware) -> report and

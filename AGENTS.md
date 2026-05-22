@@ -30,7 +30,7 @@ existing (non-generated) TypeScript are **unchanged**.
 Gate:
 
 1. `npm run docker:up:test`
-2. `npm run demo:generate`
+2. `npm run generate-code`
 3. `npm run build`
 4. `npm run cy:test:api`
 5. `npm audit --omit=dev --audit-level=high`
@@ -50,7 +50,7 @@ Gate:
 
 1. `pytest code_generator/tests`
 2. `npm run docker:up:test`
-3. `npm run demo:generate`
+3. `npm run generate-code`
 4. `npm run check:generated`
 5. `npm run build`
 6. `npm run test`
@@ -58,7 +58,7 @@ Gate:
 8. `npm audit --omit=dev --audit-level=high`
 9. `pip-audit -r requirements.txt`
 
-`check:generated` runs after `demo:generate` so it sees the just-emitted
+`check:generated` runs after `generate-code` so it sees the just-emitted
 output. It bans `prisma.$queryRaw` / `prisma.$executeRaw` everywhere in
 generator-emitted files and bans direct `prisma.<model>.{create,update,
 delete,upsert,createMany,updateMany,deleteMany}` calls outside the entity
@@ -89,7 +89,7 @@ Gate: none. Do not run docker, generators, builds, or tests. Cite findings with
 ## When a gate step fails
 
 - Failure caused by your change -> fix it.
-- `demo:generate` fails but `npm run db:reset` + `npm run db:generate`
+- `generate-code` fails but `npm run migrate:reset:test:force` + `npm run db:generate`
   would succeed and the non-generated code is correct -> **stop and report**:
   there is a generator/web inconsistency that needs separate attention.
 - Environmental failure (network, missing OS package, hardware) -> report and

@@ -142,17 +142,16 @@ See [docs/knowledge/schema-yaml-configuration.md](docs/knowledge/schema-yaml-con
 Next.js loads `.env.local` natively for cloud/local development — no configuration needed.
 
 ```bash
-npm run dev              # development server (uses .env.local natively)
-npm run dev:test         # development server with test database (.env.test)
-npm run start:test       # production mode with test database (.env.test)
-npm run env:use -- test  # symlink .env → .env.test for tools that read .env directly
-npm run env:use -- off   # remove .env symlink, return to native .env.local loading
-npm run env:current      # show current environment
+npm run dev               # development server (uses .env.local natively)
+npm run env:use -- test   # symlink .env and .env.local → .env.test (dual-link)
+npm run env:use -- cloud  # symlink .env and .env.local → .env.cloud.local (dual-link)
+npm run env:use -- off    # remove .env and .env.local symlinks, return to native loading
+npm run env:current       # show current environment
 ```
 
 Next.js `.env` load order: `.env.local` > `.env.$(NODE_ENV)` > `.env`
 
-> **Note**: `npm run env:use -- cloud` is deprecated. Use `npm run env:use -- off` to return to native `.env.local` loading.
+`.env.cloud.local` stores actual cloud/Vercel credentials (gitignored). `.env.local` is an active symlink pointer managed by `env:use`.
 
 ## Running Tests
 
@@ -165,16 +164,27 @@ pytest code_generator/tests
 
 # Full CI gate (generator -> database -> build -> tests)
 npm run docker:up:test
-npm run demo:generate
+npm run generate-code
 npm run test
 npm run build
 ```
 
-E2E tests (Cypress) are run separately from a terminal due to sandboxed environment limitations:
+## E2E テスト
 
 ```bash
-npm run cy:test
+npm run env:use -- test  # test 環境に切り替え
+npm run cy:test          # E2E フルスタック実行 (build + start + cypress)
 ```
+
+`cy:test` は内部で `e2e:build`（generate-code → db:push → db:generate → db:seed-tenant → next build）を実行してから Cypress を起動する。test 環境が active でない場合は即 fail する。
+
+個別実行:
+```bash
+npm run e2e:build        # ビルドのみ（Cypress 不要の場合）
+npm run start            # ビルド済み状態でサーバ起動
+```
+
+> **Note**: E2E は `npm run cy:test` または `npm run e2e:start` で実行すること。
 
 ## Project Structure
 

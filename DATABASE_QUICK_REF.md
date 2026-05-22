@@ -6,8 +6,9 @@
 # 1. Start test database (Docker Compose - easiest!)
 npm run docker:up:test
 
-# 2. Setup test database
-npm run db:reset
+# 2. Switch to test environment and set up database
+npm run env:use -- test
+npm run migrate:reset:test:force
 
 # 3. Run e2e tests (automatically starts dev server)
 npm run cy:test
@@ -25,7 +26,7 @@ npm run dev
 npm run cy:run
 ```
 
-**Note**: Use `npm run dev:test` to run the dev server against the test database, or `npm run env:use -- test` to symlink `.env` → `.env.test` for tools that read `.env` directly. `npm run dev` uses `.env.local` natively (no setup needed).
+**Note**: Use `npm run env:use -- test` to switch to the test environment (links both `.env` and `.env.local` → `.env.test`), then run `npm run dev`. Without `env:use`, `npm run dev` uses `.env.local` natively (no setup needed).
 
 Alternative (plain Docker):
 ```bash
@@ -41,27 +42,18 @@ npm run docker:up:test
 npm run docker:down:test
 
 # Switch environment
-npm run env:use -- test  # Switch to test environment (.env.test symlink)
+npm run env:use -- test  # Switch to test environment (links .env and .env.local → .env.test)
 npm run env:use -- off   # Reset to native .env.local loading
 npm run env:current      # Show current environment
 
 # Development
-npm run dev              # dev server (uses .env.local natively)
-npm run dev:test         # dev server with test database (.env.test)
+npm run dev              # dev server (uses .env.local natively, or .env.test after env:use -- test)
 
-# Switch to SQLite for quick experimentation  
-npm run db:use:sqlite
-npm run dev
-
-# Switch back to PostgreSQL
-npm run db:use:postgres
-
-# Reset test database
-npm run db:reset
+# Reset test database (requires env:use -- test first)
+npm run migrate:reset:test:force
 
 # View database in Prisma Studio
-npm run db:studio        # uses .env.local natively
-npm run db:studio:test   # uses test database (.env.test)
+npm run db:studio        # uses .env.local natively (or .env.test after env:use -- test)
 ```
 
 ## Database URLs
@@ -84,33 +76,34 @@ npm run db:studio:test   # uses test database (.env.test)
 4. Run unit tests: `npm test`
 
 ### Testing Database Changes
-1. Switch to SQLite: `npm run db:use:sqlite`
-2. Experiment with schema changes
+1. Switch to test environment: `npm run env:use -- test`
+2. Experiment with schema changes: `npm run db:push`
 3. Test with `npm run dev`
-4. When satisfied, switch back: `npm run db:use:postgres`
-5. Apply migrations properly: `npm run migrate:dev`
+4. Apply migrations properly: `npm run migrate:dev`
 
 ### E2E Testing
 1. Ensure test database is running: `npm run docker:up:test`
-2. Reset test DB: `npm run db:reset`
+2. Reset test DB: `npm run migrate:reset:test:force` (requires `env:use -- test`)
 3. Run tests: `npm run cy:test` (auto-starts dev server with test DB)
 
 Or manually:
-1. Terminal 1: `npm run dev:test` (starts dev server against test DB)
-2. Terminal 2: `npm run cy:run`
+1. Run `npm run env:use -- test` (switches both `.env` and `.env.local` to `.env.test`)
+2. Terminal 1: `npm run dev` (now uses test DB via dual-link)
+3. Terminal 2: `npm run cy:run`
 
 ## Files to Update
 
 When you need to fill in your actual credentials:
 
-1. **`.env`** (git-ignored, managed via `env:use` command)
-   - Set by `npm run env:use -- test` (links to `.env.test`); use `npm run env:use -- off` to return to native `.env.local`
+1. **`.env`** and **`.env.local`** (git-ignored, managed via `env:use` command)
+   - Set by `npm run env:use -- test` (links both to `.env.test`); use `npm run env:use -- off` to restore native behavior
 
-2. **`.env.local`** (git-ignored, cloud/Vercel credentials)
+2. **`.env.cloud.local`** (git-ignored, cloud/Vercel credentials — actual credential file)
    ```
    DATABASE_URL="your-vercel-postgres-url"
    PRISMA_DATABASE_URL="your-prisma-accelerate-url"
    ```
+   Note: `.env.local` is an active symlink managed by `env:use`; credential content lives in `.env.cloud.local`.
 
 3. **`.env.test`** (committed to git)
    ```
@@ -123,10 +116,10 @@ When you need to fill in your actual credentials:
 → Start PostgreSQL: `npm run docker:up:test` or `docker start postgres-test`
 
 **Schema out of sync?**
-→ Run: `npm run db:reset`
+→ Run: `npm run env:use -- test && npm run migrate:reset:test:force`
 
 **Want to see test data?**
-→ Run `npm run db:studio:test`
+→ Run `npm run env:use -- test` then `npm run db:studio`
 
-**Made schema changes in SQLite mode?**
-→ Switch back to PostgreSQL and run proper migration: `npm run db:use:postgres && npm run migrate:dev`
+**Made schema changes locally?**
+→ Switch to development environment and run proper migration: `npm run migrate:dev`

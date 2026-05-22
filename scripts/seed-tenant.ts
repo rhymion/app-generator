@@ -1,10 +1,16 @@
 // Script to seed ITS (Issue Tracking System) database with sample data
+import "dotenv/config";
 import { PrismaClient } from '@/app/generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg'
 import * as bcrypt from 'bcryptjs';
 import { createId } from "@paralleldrive/cuid2";
 
-const connectionString = `${process.env.DATABASE_URL}`;
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error(
+    'DATABASE_URL is required. Run `npm run env:use -- test` or select the intended env profile.'
+  );
+}
 const adapter = new PrismaPg({ connectionString });
 const prisma = new PrismaClient({ adapter });
 

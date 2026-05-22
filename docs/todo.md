@@ -198,7 +198,7 @@ bypass constraints"). No automated check today; relies on review discipline.
   exemptions are `{path, pattern, substring, reason}` tuples matched
   line-by-line.
 - `npm run check:generated` runs the check; wired into the AGENTS.md
-  Type B gate after `demo:generate`.
+  Type B gate after `generate-code`.
 - 16 Vitest-equivalent pytest cases in
   `code_generator/tests/test_check_generated.py`.
 
