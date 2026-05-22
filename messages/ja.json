@@ -118,7 +118,7 @@
   },
   "Auth": {
     "signInTitle": "アカウントにログイン",
-    "signInwithGoogle": "Googleでログイン",
+    "signInWithGoogle": "Googleでログイン",
     "orDivider": "または",
     "registerTitle": "アカウントを作成",
     "emailPlaceholder": "メールアドレス",

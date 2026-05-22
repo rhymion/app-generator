@@ -118,7 +118,7 @@
   },
   "Auth": {
     "signInTitle": "Sign in to your account",
-    "signInwithGoogle": "Sign in with Google",
+    "signInWithGoogle": "Sign in with Google",
     "orDivider": "or",
     "registerTitle": "Create your account",
     "emailPlaceholder": "Email address",
