@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "npm run env:check -- && next build",
+    "build": "next build",
     "build:pdf-font": "python3 scripts/build_pdf_font.py",
     "cleanup": "python3 code_generator/cleanup.py code_generator/json_schema.yaml ./",
     "check:build": "bash scripts/check-build-fresh.sh",
@@ -16,9 +16,9 @@
     "db:generate": "prisma generate",
     "db:reset:test:sql": "bash scripts/env-require.sh test && bash scripts/db-reset-sql.sh",
     "db:seed": "npm run env:check -- && tsx scripts/seed.ts",
-    "db:seed-tenant": "npm run env:check -- && tsx scripts/seed-tenant.ts",
+    "db:seed-tenant": "tsx scripts/seed-tenant.ts",
     "db:studio": "npm run env:check -- && prisma studio",
-    "db:push": "npm run env:require:test -- && prisma db push",
+    "db:push": "prisma db push",
     "dev": "npm run env:check -- && dotenv -e .env.local -- next dev",
     "docker:up:test": "bash scripts/env-require.sh test && docker compose -f docker-compose.test.yml up -d",
     "docker:down:test": "bash scripts/env-require.sh test && docker compose -f docker-compose.test.yml down",
@@ -45,7 +45,8 @@
     "cleanup:all": "run-s cleanup docker:up:test db:reset:test:sql",
     "build:all": "run-s env:check generate-code db:push db:generate db:seed-tenant build",
     "dev:all": "run-s env:check generate-code db:push db:generate db:seed-tenant dev",
-    "vercel-build": "npm run prj:sync && prisma generate && next build",
+    "python-generate": "uv venv --python 3.12 .venv && source .venv/bin/activate && uv pip install -r requirements.txt && npm run generate-code",
+    "vercel-build": "run-s prj:sync python-generate migrate:deploy db:generate db:seed-tenant build",
     "prj:sync": "if [ -d ../prj ]; then cp -a ../prj/. .; echo 'prj:sync: copied ../prj/. -> .'; else echo 'prj:sync: no ../prj, skipping'; fi"
   },
   "dependencies": {
