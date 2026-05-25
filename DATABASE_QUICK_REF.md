@@ -3,65 +3,57 @@
 ## TL;DR
 
 ```bash
-# 1. Start test database (Docker Compose - easiest!)
-npm run docker:up:test
-
-# 2. Switch to test environment and set up database
-npm run env:use -- test
-npm run migrate:reset:test:force
-
-# 3. Run e2e tests (automatically starts dev server)
-npm run cy:test
+# Development
+npm run docker:up:dev    # Start postgres-dev (port 5433, DB=my_next_dev)
+npm run setup            # generate-code → db:push → seed
+npm run dev              # Start Next.js dev server (port 3001)
+npm run docker:down:dev  # Stop when done
 ```
 
-**Manual approach** (if you want to keep dev server running):
 ```bash
-# Switch to test environment first
-npm run env:use -- test
+# E2E tests
+npm run docker:up:test   # Start postgres-test (port 5434) + redis-test (port 6381)
+npm run migrate:reset:test
+npm run test:e2e
+npm run docker:down:test
+```
 
+**Manual E2E approach** (if you want to keep dev server running):
+```bash
 # Terminal 1: Start dev server
 npm run dev
 
-# Terminal 2: Run tests
-npm run cy:run
-```
-
-**Note**: Use `npm run env:use -- test` to switch to the test environment (links both `.env` and `.env.local` → `.env.test`), then run `npm run dev`. Without `env:use`, `npm run dev` uses `.env.local` natively (no setup needed).
-
-Alternative (plain Docker):
-```bash
-docker run --name postgres-test -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=my_next_test -p 5432:5432 -d postgres:16
+# Terminal 2: Run tests (NODE_ENV=test is set automatically)
+npm run test:e2e:dev
 ```
 
 ## Common Commands
 
 ```bash
-# Start/stop test database (Docker Compose)
-npm run docker:up:test
+# Start/stop dev database (Docker Compose)
+npm run docker:up:dev    # postgres-dev (port 5433, DB=my_next_dev)
+npm run docker:down:dev
+
+# Start/stop test containers (Docker Compose)
+npm run docker:up:test   # postgres-test (port 5434) + redis-test (port 6381)
 npm run docker:down:test
 
-# Switch environment
-npm run env:use -- test  # Switch to test environment (links .env and .env.local → .env.test)
-npm run env:use -- off   # Reset to native .env.local loading
-npm run env:current      # Show current environment
-
 # Development
-npm run dev              # dev server (uses .env.local natively, or .env.test after env:use -- test)
+npm run dev              # dev server (Next.js native env loading)
 
-# Reset test database (requires env:use -- test first)
-npm run migrate:reset:test:force
+# Reset test database (E2E commands use NODE_ENV=test automatically)
+npm run migrate:reset:test
 
 # View database in Prisma Studio
-npm run db:studio        # uses .env.local natively (or .env.test after env:use -- test)
+npm run db:studio        # uses .env.local or .env.development natively
 ```
 
 ## Database URLs
 
 | Environment | Database | URL Variable |
 |-------------|----------|--------------|
-| Development | PostgreSQL (Vercel) | `DATABASE_URL` in `.env` |
-| E2E Testing | PostgreSQL (Local) | `DATABASE_URL` in `.env.test` |
+| Development | PostgreSQL (Local Docker, port 5433) | `DATABASE_URL` in `.env.development` |
+| E2E Testing | PostgreSQL (Local Docker, port 5434) | `DATABASE_URL` in `.env.test` |
 | Production | PostgreSQL (Vercel) | `DATABASE_URL` + `PRISMA_DATABASE_URL` |
 | Local Experimentation | SQLite | `DATABASE_URL="file:./dev.db"` |
 
@@ -70,56 +62,51 @@ npm run db:studio        # uses .env.local natively (or .env.test after env:use 
 ## Workflow
 
 ### Daily Development
-1. Use PostgreSQL from Vercel (already configured in `.env.local`)
-2. Run `npm run dev` (Next.js loads `.env.local` automatically)
+1. Start dev database: `npm run docker:up:dev` (postgres-dev, port 5433)
+2. Run `npm run dev` (Next.js loads env files automatically)
 3. Make changes
 4. Run unit tests: `npm test`
+5. Stop database when done: `npm run docker:down:dev`
 
 ### Testing Database Changes
-1. Switch to test environment: `npm run env:use -- test`
-2. Experiment with schema changes: `npm run db:push`
-3. Test with `npm run dev`
-4. Apply migrations properly: `npm run migrate:dev`
+1. Experiment with schema changes: `npm run db:push`
+2. Test with `npm run dev`
+3. Apply migrations properly: `npm run migrate:dev`
 
 ### E2E Testing
-1. Ensure test database is running: `npm run docker:up:test`
-2. Reset test DB: `npm run migrate:reset:test:force` (requires `env:use -- test`)
-3. Run tests: `npm run cy:test` (auto-starts dev server with test DB)
+1. Ensure test containers are running: `npm run docker:up:test` (postgres-test + redis-test)
+2. Reset test DB: `npm run migrate:reset:test` (E2E commands use NODE_ENV=test automatically)
+3. Run tests: `npm run test:e2e` (auto-starts server with test env)
+4. Stop containers: `npm run docker:down:test`
 
-Or manually:
-1. Run `npm run env:use -- test` (switches both `.env` and `.env.local` to `.env.test`)
-2. Terminal 1: `npm run dev` (now uses test DB via dual-link)
-3. Terminal 2: `npm run cy:run`
+Or manually (hot-reload):
+1. Terminal 1: `npm run dev`
+2. Terminal 2: `npm run test:e2e:dev` (NODE_ENV=test set automatically)
 
 ## Files to Update
 
 When you need to fill in your actual credentials:
 
-1. **`.env`** and **`.env.local`** (git-ignored, managed via `env:use` command)
-   - Set by `npm run env:use -- test` (links both to `.env.test`); use `npm run env:use -- off` to restore native behavior
-
-2. **`.env.cloud.local`** (git-ignored, cloud/Vercel credentials — actual credential file)
+1. **`.env.local`** (git-ignored, local secrets)
    ```
-   DATABASE_URL="your-vercel-postgres-url"
    PRISMA_DATABASE_URL="your-prisma-accelerate-url"
    ```
-   Note: `.env.local` is an active symlink managed by `env:use`; credential content lives in `.env.cloud.local`.
 
-3. **`.env.test`** (committed to git)
+2. **`.env.test`** (committed to git)
    ```
-   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/my_next_test"
+   DATABASE_URL="postgresql://postgres:postgres@localhost:5434/my_next_test"
    ```
 
 ## Troubleshooting
 
 **"Connection refused" during tests?**
-→ Start PostgreSQL: `npm run docker:up:test` or `docker start postgres-test`
+→ Start test containers: `npm run docker:up:test` or `docker start postgres-test`
 
 **Schema out of sync?**
-→ Run: `npm run env:use -- test && npm run migrate:reset:test:force`
+→ Run: `npm run migrate:reset:test`
 
 **Want to see test data?**
-→ Run `npm run env:use -- test` then `npm run db:studio`
+→ Run: `cross-env NODE_ENV=test npx prisma studio`
 
 **Made schema changes locally?**
-→ Switch to development environment and run proper migration: `npm run migrate:dev`
+→ Apply migrations properly: `npm run migrate:dev`

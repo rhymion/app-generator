@@ -78,40 +78,40 @@ pip install -r requirements.txt
 
 ### 4. Prepare environment variables
 
-For cloud/local development, Next.js automatically loads `.env.local` — no setup needed.
-To use the test database instead, switch environments:
+Next.js loads environment files automatically based on `NODE_ENV` — no setup needed.
 
-```bash
-# Switch to test environment (uses .env.test)
-npm run env:use -- test
-
-# Reset to native Next.js environment loading (.env.local)
-npm run env:use -- off
-
-# Check current environment at any time
-npm run env:current
+```
+.env              # common baseline (committed)
+.env.development  # local dev (PORT 3001, local Docker DB)
+.env.test         # E2E tests (PORT 3000, test Docker DB)
+.env.local        # local secrets (gitignored, created manually if needed)
 ```
 
-### 5. Start the database
+No manual environment switching or symlinks are required.
+
+### 5. Start the development database
 
 ```bash
-npm run docker:up:test
+npm run docker:up:dev    # Start postgres-dev (port 5433, DB=my_next_dev)
 ```
 
-### 6. Apply the schema and generate the Prisma client
+### 6. Apply the schema and seed the database
 
 ```bash
-npx prisma db push
-npx prisma generate
+npm run setup            # generate-code → db:push → seed
 ```
 
 ### 7. Run the development server
 
 ```bash
-npm run dev
+npm run dev              # Start Next.js dev server (port 3001)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to see the application.
+Open [http://localhost:3001](http://localhost:3001) to see the application.
+
+```bash
+npm run docker:down:dev  # Stop the database when done
+```
 
 ## Generating an Application from a Schema
 
@@ -137,21 +137,15 @@ npx prisma generate
 
 See [docs/knowledge/schema-yaml-configuration.md](docs/knowledge/schema-yaml-configuration.md) for the full schema reference.
 
-## Environment Configuration
+## Environment Setup
 
-Next.js loads `.env.local` natively for cloud/local development — no configuration needed.
+Next.js loads environment files automatically based on `NODE_ENV`:
+- Development: `.env.development` (PORT 3001, local Docker DB)
+- Test/E2E: `.env.test` (PORT 3000, test Docker DB)
+- Production: Set variables in Vercel dashboard (`.env.production` is gitignored)
+- Local secrets: `.env.local` (gitignored, created manually if needed)
 
-```bash
-npm run dev               # development server (uses .env.local natively)
-npm run env:use -- test   # symlink .env and .env.local → .env.test (dual-link)
-npm run env:use -- cloud  # symlink .env and .env.local → .env.cloud.local (dual-link)
-npm run env:use -- off    # remove .env and .env.local symlinks, return to native loading
-npm run env:current       # show current environment
-```
-
-Next.js `.env` load order: `.env.local` > `.env.$(NODE_ENV)` > `.env`
-
-`.env.cloud.local` stores actual cloud/Vercel credentials (gitignored). `.env.local` is an active symlink pointer managed by `env:use`.
+No manual environment switching or symlinks are required.
 
 ## Running Tests
 
@@ -163,7 +157,7 @@ npm run test
 pytest code_generator/tests
 
 # Full CI gate (generator -> database -> build -> tests)
-npm run docker:up:test
+npm run docker:up:test   # Start postgres-test + redis-test
 npm run generate-code
 npm run test
 npm run build
@@ -172,20 +166,27 @@ npm run build
 ## E2E テスト
 
 ```bash
-npm run env:use -- test  # test 環境に切り替え
-npm run cy:test          # E2E フルスタック実行 (build + start + cypress)
+# E2E tests
+npm run docker:up:test   # Start postgres-test (port 5434) + redis-test (port 6381)
+npm run test:e2e         # full E2E (build + start + cypress, NODE_ENV=test set automatically)
+npm run docker:down:test
 ```
 
-`cy:test` は内部で `e2e:start`（= `start`）を経由して Cypress を起動する。
-`start` は `check:build` を前段で実行するため、.next が古い場合は fail-fast となる。test 環境が active でない場合は即 fail する。
+ホットリロードモード:
+```bash
+npm run docker:up:test
+npm run test:e2e:dev     # hot-reload mode (no build required)
+npm run docker:down:test
+```
+
+`test:e2e` は `cross-env NODE_ENV=test` でテスト環境を自動設定する。
+手動の環境切り替えや symlink は不要。
 
 個別実行:
 ```bash
-npm run build:all        # full build (generate → db:push → next build)
-npm run start            # starts server; check:build always runs first
+npm run dev:full         # full dev workflow (setup → dev)
+npm run build:full       # full build workflow (setup → build)
 ```
-
-> **Note**: E2E は `npm run cy:test` で実行すること。`e2e:start` は `start` の alias として残存。
 
 ## Project Structure
 

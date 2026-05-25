@@ -16,6 +16,27 @@ your change.
 - `docs/knowledge/cypress-e2e-testing.md` - generated Cypress patterns
 - Other `docs/knowledge/*.md` - topical references (i18n, dark mode, datagrid, timezone, etc.)
 
+## Docker Compose Setup
+
+Two separate Compose files manage local containers:
+
+| File | Purpose | Containers |
+|------|---------|------------|
+| `docker-compose.dev.yml` | Development database | `postgres-dev` (port 5433, DB `my_next_dev`) |
+| `docker-compose.test.yml` | Test containers | `postgres-test` (port 5434) + `redis-test` (port 6381) |
+
+```bash
+# Development
+npm run docker:up:dev    # start postgres-dev
+npm run docker:down:dev  # stop postgres-dev
+
+# Testing
+npm run docker:up:test   # start postgres-test + redis-test
+npm run docker:down:test # stop test containers
+```
+
+Dev environment sets no `REDIS_URL` in `.env.development`, so `getRateLimiter()` falls back to the in-memory rate limiter automatically. Redis is only required for E2E tests and Redis adapter unit tests.
+
 ## Task classification
 
 Every request is one of three types. Identify the type before touching anything;
@@ -29,14 +50,14 @@ existing (non-generated) TypeScript are **unchanged**.
 
 Gate:
 
-1. `npm run docker:up:test`
+1. `npm run docker:up:test`  ← starts postgres-test + redis-test
 2. `npm run generate-code`
 3. `npm run build`
-4. `npm run cy:test:api`
+4. `npm run test:e2e:dev`
 
 `pytest` and `npm run test` are skipped - Python and existing TS were not
 touched. The full UI Cypress suite is also skipped (Chromium UI tests do not run
-reliably in Codex's environment). The API-only e2e (`cy:test:api`) is fast,
+reliably in Codex's environment). The API-only e2e (`test:e2e:dev`) is fast,
 headless, and covers the generated CRUD endpoints.
 
 ### Type B - Feature implementation / update
@@ -52,7 +73,7 @@ Gate:
 3. `npm run generate-code`
 4. `npm run build`
 5. `npm run test`
-6. `npm run cy:test:api`
+6. `npm run test:e2e:dev`
 
 ### Type C - Investigation / question
 
@@ -74,7 +95,7 @@ Gate: none. Do not run docker, generators, builds, or tests. Cite findings with
 ## When a gate step fails
 
 - Failure caused by your change -> fix it.
-- `generate-code` fails but `npm run migrate:reset:test:force` + `npm run db:generate`
+- `generate-code` fails but `npm run migrate:reset:test` + `npm run db:generate`
   would succeed and the non-generated code is correct -> **stop and report**:
   there is a generator/web inconsistency that needs separate attention.
 - Environmental failure (network, missing OS package, hardware) -> report and
