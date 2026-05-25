@@ -5,6 +5,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Restructured npm scripts by environment (dev/prod/test).
+  Added scripts/run-next-dev.js for PORT-aware dev server startup.
+  dev:full now includes docker:up:dev and uses migrate:dev.
+  build:full now runs with NODE_ENV=production.
+  test:e2e commands now include docker and full setup.
+  cleanup:all simplified to code cleanup only.
+
 ### Breaking Changes
 - **BREAKING**: Split docker-compose into separate dev (`docker-compose.dev.yml`,
   postgres only) and test (`docker-compose.test.yml`, postgres + redis) configurations.
