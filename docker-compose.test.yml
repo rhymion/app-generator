@@ -17,10 +17,11 @@ services:
 
   redis-test:
     image: redis:7-alpine
-    # Backs the rate-limit adapter (`lib/rate-limit/redis.ts`) for Cypress
-    # and local dev. No persistence — the dataset is rebuilt on every test
-    # run anyway, and disabling AOF/snapshotting keeps the container quiet
-    # in the foreground.
+    # Backs the rate-limit adapter for Cypress and Redis adapter unit tests
+    # (lib/rate-limit/redis.test.ts). Not used by `npm run dev` — dev
+    # falls back to in-memory rate limiting when REDIS_URL is unset.
+    # No persistence — the dataset is rebuilt on every test run anyway,
+    # and disabling AOF/snapshotting keeps the container quiet.
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
       - "${REDIS_PORT:-6379}:6379"
