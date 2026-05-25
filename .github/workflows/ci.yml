@@ -76,12 +76,12 @@ jobs:
           key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
       - name: Start docker container for testing
-        run: npm run docker:test:up
+        run: npm run docker:up:test
       - name: Copy required files for testing
         run: cp -a custom/sample/* .
       - name: Generate all (code generation and prisma client)
-        run: npm run demo:generate
+        run: npm run generate-code
       - name: Reset test database
-        run: npm run db:reset:test
+        run: npm run migrate:reset:test
       - name: Run Cypress E2E tests
-        run: npm run cy:test
+        run: npm run test:e2e
