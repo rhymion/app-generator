@@ -10,8 +10,10 @@
  * Transport
  * ---------
  * `ioredis` over TCP. The same client talks to:
- *   - the Docker `redis:7-alpine` container for `npm run cy:test:api` and
- *     local dev (see `docker-compose.test.yml`);
+ *   - the Docker `redis:7-alpine` container started by `npm run docker:up:test`
+ *     (see `docker-compose.test.yml`), used by Cypress E2E tests and Redis
+ *     adapter unit tests. Dev omits Redis — `REDIS_URL` is unset in
+ *     `.env.development`, so `getRateLimiter()` falls back to in-memory;
  *   - Upstash's TCP endpoint (`rediss://default:<token>@<host>:<port>`) when
  *     deployed on Vercel with Fluid Compute / the Node.js runtime;
  *   - any other managed Redis (ElastiCache, Memorystore, …) via the same URL
