@@ -1,4 +1,5 @@
 import { spawnSync, spawn, ChildProcess } from 'child_process';
+import * as fs from 'fs';
 import * as net from 'net';
 import * as path from 'path';
 
@@ -97,6 +98,6 @@ export async function signIn(port: number, data: Record<string, string>): Promis
 
 export function scriptExists(scriptName: string): boolean {
   const pkgPath = path.join(PROJ_ROOT, 'package.json');
-  const pkg = JSON.parse(require('fs').readFileSync(pkgPath, 'utf8'));
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
   return scriptName in (pkg.scripts ?? {});
 }

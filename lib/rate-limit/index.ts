@@ -83,9 +83,11 @@ export function getRateLimiter(): RateLimiter {
     // Dynamic require so `ioredis` only lands in the bundle when Redis is
     // actually configured — keeps the in-memory code path (unit tests,
     // Cypress without Redis) free of the driver.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { createRedisRateLimiter } = require('./redis') as typeof import('./redis');
     _instance = createRedisRateLimiter(DEFAULT_BUCKETS);
   } else {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { createInMemoryRateLimiter } = require('./in-memory') as typeof import('./in-memory');
     _instance = createInMemoryRateLimiter(DEFAULT_BUCKETS);
   }

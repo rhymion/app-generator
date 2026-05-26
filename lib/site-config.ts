@@ -51,6 +51,11 @@ export const siteConfig = {
   /** Links listed in the sidebar navigation */
   navLinks: [
     { label: "Home", href: "/", external: false },
+      { label: "User", href: "/user" },
+    { label: "Role", href: "/role" },
+    { label: "Organization", href: "/organization" },
+    { label: "Permission", href: "/permission" },
+    { label: "Approval Flow", href: "/approval_flow" },
   ] satisfies NavLink[],
 };
 

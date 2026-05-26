@@ -19,7 +19,7 @@ function isMissingValue(value: unknown): boolean {
   return false;
 }
 
-export function useFormValidation(values: Record<string, unknown>): string | null {
+export function validateForm(values: Record<string, unknown>): string | null {
   for (const field of REQUIRED_FIELDS) {
     if (isMissingValue(values[field.key])) {
       return `${field.label} is required`;

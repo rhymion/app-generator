@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 'use strict';
 // E2E orchestrator. Reads PORT from .env.test via @next/env
 // (same loader Next.js and prisma.config.ts use), then invokes

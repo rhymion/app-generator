@@ -27,7 +27,9 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
 
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null);
     const filter = widget.filter_field && widget.filter_value
       ? { field: widget.filter_field, value: widget.filter_value }

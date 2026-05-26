@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 'use strict';
 // Production/test server launcher. Reads PORT from the active
 // .env.{NODE_ENV} via @next/env, then starts next start on that port.

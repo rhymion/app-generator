@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 'use strict';
 // Dev server launcher. Reads PORT from the active .env.{NODE_ENV}
 // via @next/env (same loader Next.js and prisma.config.ts use),
