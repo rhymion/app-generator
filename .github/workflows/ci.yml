@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Generate package-lock.json for npm cache
+        run: npm install --package-lock-only
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -24,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Generate package-lock.json for npm cache
+        run: npm install --package-lock-only
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -41,6 +45,8 @@ jobs:
     # by accident. Policy lives in AGENTS.md ("Dependency auditing").
     steps:
       - uses: actions/checkout@v4
+      - name: Generate package-lock.json for npm cache
+        run: npm install --package-lock-only
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -63,6 +69,8 @@ jobs:
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
+      - name: Generate package-lock.json for npm cache
+        run: npm install --package-lock-only
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
