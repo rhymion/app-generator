@@ -60,8 +60,6 @@ jobs:
     name: E2E Tests
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/my_next_test
-      NEXTAUTH_URL: http://localhost:3000
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
@@ -75,13 +73,35 @@ jobs:
           path: ~/.cache/Cypress
           key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - name: Start docker container for testing
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Start test containers
         run: npm run docker:up:test
-      - name: Copy required files for testing
-        run: cp -a custom/sample/* .
-      - name: Generate all (code generation and prisma client)
+      - name: Generate code
         run: npm run generate-code
-      - name: Reset test database
-        run: npm run migrate:reset:test
-      - name: Run Cypress E2E tests
-        run: npm run test:e2e
+      - name: Check generated code
+        run: npm run check:generated
+      - name: Push schema and generate client
+        run: |
+          npx prisma db push
+          npx prisma generate
+      - name: Seed test data
+        run: npm run db:seed-tenant
+      - name: Build
+        run: npm run test:e2e:build:only
+      - name: Run API E2E tests
+        run: npm run test:e2e:cy:api
+
+  pytest:
+    name: Python Generator Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Run pytest
+        run: pytest code_generator/tests
