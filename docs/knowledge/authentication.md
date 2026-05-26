@@ -291,66 +291,13 @@ other change is needed.
 
 ---
 
-## Out of scope, for next time
+## Out of scope
 
-- **Server-side revocation for credentials users** — Auth.js v5 routes
-  the Credentials provider through JWT regardless of the configured
-  session strategy. The cookie is a self-contained JWT; the only
-  options today are rotating `AUTH_SECRET` (logs everyone out) or
-  building a custom revocation list. The cleaner long-term path is a
-  custom session shim that calls `adapter.createSession()` after
-  `authorize()` succeeds, writing a `Session` row keyed by a token
-  embedded in the cookie. Then deleting that row revokes the session.
-  Not trivial — there are race conditions around token rotation and
-  the `expires` field — but contained.
-- **MFA / TOTP** — second factor on top of either provider. Auth.js
-  doesn't ship this; the typical pattern is a custom `step` in the
-  credentials flow or a separate gate after `session.user.id` is
-  known.
+The following are explicitly out of scope for the current implementation:
 
-  **v1 (S5 phase 5a) shipped:** TOTP MFA for the credentials provider
-  only, opt-in per user. The credentials `authorize()` in `auth.ts`
-  throws the sentinel `"MFA_REQUIRED"` when a verified user with
-  `mfa_enabled=true` submits without an `mfa_code`; the login page
-  reveals a 6-digit field on the second submission. Recovery codes
-  (8 per enrolment, base32, single-use) live in `mfa_recovery_code`
-  with bcrypt-hashed values. Secrets at rest are AES-256-GCM
-  encrypted with a key derived from `AUTH_SECRET` (no new env var) —
-  see `lib/mfa/crypto.ts`. The enrolment / disable UI lives at
-  `/setting/mfa`. **OAuth users are not gated yet** — phase 5b is the
-  follow-up: an `/mfa-challenge` step after the Google callback that
-  finalizes the JWT only after a TOTP. **Admin-mandated MFA per role
-  is also not in v1** — opt-in only; revisit when a tenant asks.
-- **Account linking UI** — letting a signed-in user attach an
-  additional OAuth provider to their existing account. The plumbing is
-  there (one `user` row can own multiple `Account` rows), but there's
-  no user-facing flow yet.
-
-  **v1 (S7) shipped:** `/setting/accounts` lists the user's `Account`
-  rows, offers a "Connect <provider>" button for each OAuth provider
-  not yet linked, and a detach button that refuses to remove the last
-  sign-in method (no password + only one Account = detach blocked,
-  enforced inside a single transaction so concurrent calls can't both
-  pass the guard). The attach flow uses the normal Auth.js `signIn()`
-  redirect; auth.ts's signIn callback detects an active session and
-  treats the OAuth callback as a link request (PrismaAdapter then
-  writes the Account row via `allowDangerousEmailAccountLinking`).
-  **Scope limit:** same-email linking only — the OAuth provider's
-  email must match the signed-in user's email. Cross-email linking
-  (attach a Google account `b@example.com` to an app account
-  `a@example.com`) would require minting the Account row outside the
-  adapter's email-keyed lookup; deferred. The security argument for
-  flipping `allowDangerousEmailAccountLinking: true` rests on two
-  things: the existing `email_verified` gate (Google won't say true
-  for an unowned email) and the signIn-callback check that the link
-  request comes from an active session for that same user — so an
-  unauthenticated take-over via a same-email Google account stays
-  blocked. See `lib/account-link/` and `auth.ts`.
-- **Audit-log table** — `events.signIn` / `signOut` and the
-  `[auth:createUser]` line emitted from `buildAdapter` currently log
-  via `console.info`. A real audit-log Prisma model with hooks into
-  role/permission CRUD is its own piece of work.
-- **Rate limiting on `/api/auth/*`** — no proxy logic today. Realistic
-  plan: Next.js proxy + Upstash Redis (or in-memory for dev).
-- **Per-tenant SSO (SAML)** — would use SAML Jackson / WorkOS rather
-  than rolling SAML ourselves, with per-tenant domain binding.
+- **Server-side revocation for credentials users**: Not implemented. JWT cookie is self-contained; rotating `AUTH_SECRET` is the only global invalidation. Custom `adapter.createSession()` shim deferred. See `auth.ts` `authorize()`.
+- **MFA / TOTP**: Shipped in v1 (S5 phase 5a) for credentials provider, opt-in per user. OAuth MFA gate and admin-mandated MFA deferred. See `lib/mfa/crypto.ts`, `auth.ts`.
+- **Account linking UI**: Shipped in v1 (S7). `/setting/accounts` lists and connects/detaches OAuth providers; cross-email linking deferred. See `lib/account-link/`, `auth.ts`.
+- **Audit-log table**: Not implemented. Auth events log to `console.info` only. Prisma model with role/permission hooks deferred.
+- **Rate limiting on `/api/auth/*`**: Not implemented. Planned: Next.js proxy + Upstash Redis.
+- **Per-tenant SSO (SAML)**: Not implemented. Would use SAML Jackson / WorkOS with per-tenant domain binding.

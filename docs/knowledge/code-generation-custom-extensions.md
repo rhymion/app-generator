@@ -1,6 +1,6 @@
 # Code Generation: Custom Extension Points
 
-The code generator (`utils/scripts/generate.ts` + `templates.ts`) overwrites most files on every run. To minimize manual re-work while still supporting entity-specific logic, four extension points have been established. Each follows the same principle: the generator produces a boilerplate file that delegates to a separate, user-maintained file that is **never overwritten**.
+The code generator (under ./code_generator) overwrites most files on every run. To minimize manual re-work while still supporting entity-specific logic, four extension points have been established. Each follows the same principle: the generator produces a boilerplate file that delegates to a separate, user-maintained file that is **never overwritten**.
 
 ---
 

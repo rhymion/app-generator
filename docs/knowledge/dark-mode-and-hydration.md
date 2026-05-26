@@ -177,6 +177,11 @@ any script injection and eliminates the hydration mismatch.
 - Avoid CSS-in-JS that depends on runtime state during SSR
 - Prefer CSS variables and media queries over JS-driven theming for color schemes
 
+## DataGrid Hydration
+
+For DataGrid hydration issues and workarounds, see
+[`docs/knowledge/testing-cypress.md`](testing-cypress.md).
+
 ## Setup Summary (correct order)
 
 1. Install `@mui/material-nextjs`
