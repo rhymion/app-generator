@@ -37,6 +37,61 @@ async function main() {
     },
   });
 
+  // ── Admin user ────────────────────────────────────────────────────────────
+  // Created here so db:seed-tenant is sufficient for tests requiring a
+  // sign-in with admin@example.com. Future default permission of 'none'
+  // means the admin must exist before general seeding adds any other data.
+  const hashedPassword = await bcrypt.hash('password123', 10);
+  const adminId = createId();
+  const admin = await prisma.user.upsert({
+    where: { email: 'admin@example.com' },
+    update: {},
+    create: {
+      id: adminId,
+      creator_id: adminId,
+      updater_id: adminId,
+      api_key: 'mk_78d1e51a47f40912f5a1787367e3f7f6ed17c314590eac84edc5b3f785a527b1',
+      email: 'admin@example.com',
+      name: 'Test Admin',
+      password: hashedPassword,
+    },
+  });
+
+  // ── Administrator role + full CRUD permissions ────────────────────────────
+  let adminRole = await prisma.role.findFirst({ where: { name: 'Administrator' } });
+  if (!adminRole) {
+    adminRole = await prisma.role.create({
+      data: {
+        name: 'Administrator',
+        description: '管理者権限',
+        creator_id: admin.id,
+        updater_id: admin.id,
+      },
+    });
+  }
+  await prisma.role.update({
+    where: { id: adminRole.id },
+    data: { users: { connect: { id: admin.id } } },
+  });
+
+  const entities = ['user', 'role', 'organization', 'permission', 'setting'];
+  await Promise.all(entities.map(entity =>
+    prisma.permission.upsert({
+      where: { name_role_id: { name: entity, role_id: adminRole!.id } },
+      update: {},
+      create: {
+        name: entity,
+        role_id: adminRole!.id,
+        creator_id: admin.id,
+        updater_id: admin.id,
+        create: true,
+        read: true,
+        update: true,
+        delete: true,
+      },
+    })
+  ));
+
   console.log('Tenant seeded successfully!');
 }
 

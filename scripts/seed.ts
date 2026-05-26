@@ -22,24 +22,11 @@ async function main() {
   const hashedPassword = await bcrypt.hash('password123', 10);
 
   // ── Users ─────────────────────────────────────────────────────────────────
-  // Self-referential: create with own id as creator/updater
-  const adminId = createId();
+  // admin@example.com is created by db:seed-tenant (scripts/seed-tenant.ts).
+  // Run db:seed-tenant before db:seed.
+  const admin = await prisma.user.findFirstOrThrow({ where: { email: 'admin@example.com' } });
+
   const workerId = createId();
-
-  const admin = await prisma.user.upsert({
-    where: { email: 'admin@example.com' },
-    update: {},
-    create: {
-      id: adminId,
-      creator_id: adminId,
-      updater_id: adminId,
-      api_key: 'mk_78d1e51a47f40912f5a1787367e3f7f6ed17c314590eac84edc5b3f785a527b1',
-      email: 'admin@example.com',
-      name: 'Test Admin',
-      password: hashedPassword,
-    },
-  });
-
   const worker = await prisma.user.upsert({
     where: { email: 'worker@example.com' },
     update: {},

@@ -87,10 +87,14 @@ export async function signUp(port: number, data: Record<string, string>): Promis
 export async function signIn(port: number, data: Record<string, string>): Promise<Response> {
   const csrfRes = await fetch(`http://localhost:${port}/api/auth/csrf`);
   const { csrfToken } = await csrfRes.json() as { csrfToken: string };
+  const csrfCookie = csrfRes.headers.get('set-cookie') ?? '';
   const body = new URLSearchParams({ ...data, csrfToken });
   return fetch(`http://localhost:${port}/api/auth/callback/credentials`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Cookie': csrfCookie,
+    },
     body: body.toString(),
     redirect: 'manual',
   });
