@@ -1,205 +1,449 @@
-# Rhymion Web Application Generator — Schema-Driven Web Application Generator
+# Rhymion App Generator — Schema-Driven Web Application Generator
 
-Generate production-ready web applications from schema definitions. Define your data structures and screens in YAML — the generator produces a complete Next.js application with CRUD operations, role-based access control, REST API, and multilingual support.
+Generate production-ready web applications from YAML schema definitions. Describe your data model and screen layout once — the generator produces a complete Next.js application with full CRUD pages, REST API, role-based access control, tenant-aware backend, and multilingual support.
 
 Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and [MUI](https://mui.com/).
 
 ---
 
-## What This Is
-
-This application is a schema-driven code generator. You describe your application's data model and screen layout in a YAML configuration file, and the generator produces a working web application that you own and can extend freely.
-
-The generated application is yours — you can deploy it, sell it, modify it, and build your own business logic on top of it.
-
----
-
 ## Features
 
-- **Web screens** — List, create, edit, delete, and view pages for every entity, including Gantt chart views
-- **Database** — Prisma schema and migrations generated from your YAML definitions
-- **Table relationships** — Including one-to-many, many-to-many and self-relations
-- **REST API** — JSON API endpoints with API key authentication for every entity
-- **E2E tests** — Cypress test suite generated alongside the application code
-- **Documentation** — Knowledge articles and API specs generated from the schema
-- **Authentication & access control** — Login, roles, and per-model CRUD permissions included out of the box
-- **Internationalization** — English and Japanese UI with locale-aware routing
-- **Dark mode** — System-aware theme switching
+### Code Generation
+
+- **Schema-driven generation** — YAML schema (`code_generator/json_schema.yaml`) + Prisma schema → TypeScript, React, and Cypress files via a Python pipeline
+- **Full CRUD pages** — list, view, create, edit, and delete pages generated per entity
+- **Gantt chart views** — entity-level opt-in Gantt chart pages
+- **REST API** — JSON endpoints with API key authentication generated per entity
+- **Generated Cypress tests** — UI and API test suites generated alongside application code
+
+### Relationships
+
+- Many-to-one, many-to-many, one-to-one, and self-referential relationships
+- Inline DataGrid children and embedded lists
+- Independent children with their own pages
+
+### Authentication & Authorization
+
+- Email/password authentication
+- Google SSO (Auth.js v5)
+- Account linking (multiple OAuth providers per user)
+- Role-based access control (per-model CRUD permissions)
+- Creator/Assignee-based access control
+- Organization-based access scoping — entities with organization_id are automatically filtered to organizations the user belongs to
+
+### Built-in Systems
+
+- **Comment threads** — polymorphic bridge pattern for attaching comments to any entity
+- **Attachment management** — file and image upload via polymorphic bridge
+
+### Performance
+
+- Streaming Suspense for fast TTFB
+- Skeleton screens during loading
+- Parallel data and permissions fetching
+
+### Security
+
+- Rate limiting (Redis with in-memory fallback)
+- CSRF protection
+- Parameterized queries via Prisma
+
+### Other
+
+- Internationalization (English and Japanese, next-intl v4)
+- Dark mode (system-aware, SSR-safe)
+- 5 extension points for customization without overwriting generated code
 
 ---
 
-## Current Status
+## Roadmap
 
-This generator is suitable for internal business applications and moderate-scale deployments. **Support for large datasets and high-traffic production environments is planned but not yet available.** Performance improvements are under active development.
+These features have partial implementations and are under active development.
 
-Planned features include:
-- Search beyond column filtering
-- Two-factor authentication and SSO
-- Data aggregation and visualization
-- Performance improvements for large datasets
+### Multi-tenancy (Tenant-level isolation)
+**What works:** The `tenant` model exists with name, slug, and status
+fields (Phase 1.1). Every user has a `tenant_id` linking them to a
+tenant (Phase 1.2). Organization-scoped filtering (a separate, working
+feature) provides sub-tenant data grouping.
+
+**What's missing:** Generated code does not filter by `tenant_id`.
+Phases 1.3–4.3 of the multi-tenancy roadmap are not yet implemented:
+tenant resolution in auth sessions, tenant-aware code generation
+templates, cross-tenant isolation tests, and invite-only sign-up.
+Users from different tenants in the same deployment can currently
+access each other's data. See `docs/multi-tenancy.md` for the full
+phased plan.
+
+### MFA / Two-Factor Authentication
+
+**What works:** TOTP authentication logic, encrypted secret storage
+(AES-256-GCM), and recovery codes (8 per enrollment, bcrypt-hashed)
+are implemented in `lib/mfa/`.
+
+**What's missing:** The MFA enrollment UI (`/setting/mfa`) has a state
+transition defect — the QR code screen may not appear after clicking
+enable. Users cannot reliably enable MFA through the application interface.
+
+### Approval Flow
+
+**What works:** Basic approval workflow with configurable flows
+(`approval_flow`), status tracking (Pending/Approved/Rejected), audit
+trail (`approval_history`), and role-based approve/reject permissions.
+
+**What's missing:** Approval completion does not trigger downstream
+state changes. Approving a record does not automatically update related
+data or enable new operations.
+
+### Dashboard
+
+**What works:** The code generator produces a catalog of dashboard-eligible
+entities based on `x-display.dashboard: true` in the schema.
+
+**What's missing:** No chart rendering on dashboard pages. Defining
+entities with groupable fields does not yet produce actual charts
+on the dashboard page.
 
 ---
 
-## Prerequisites
+## Architecture Overview
 
-Install the following tools before starting. Links point to official installation instructions.
+The core of this project is a Python code generation pipeline. A single YAML schema file drives generators that emit TypeScript, React, and Cypress files.
+
+```
+code_generator/json_schema.yaml
+        │
+        ▼  npm run generate-code
+        │
+        ├── generate_types.py    — entity extraction
+        ├── build_context.py     — base context builder
+        ├── generators.py        — page/service/column_def/chart contexts
+        ├── generators_i18n.py   — i18n message keys + next-intl config
+        ├── generators_test.py   — Cypress helper/spec/api-spec contexts
+        ├── generators_doc.py    — docs entity/index pages
+        ├── validate.py          — schema + Prisma index validation
+        └── templates/*.jinja2   — Jinja2 templates (one per output file type)
+```
+
+For each entity defined in `code_generator/json_schema.yaml`, the pipeline generates CRUD pages, service/getter modules, API routes, Cypress test specs, and entity documentation. All generated files are overwritten on each run — customizations belong in the designated extension points (`lib/{entity}/service_after_create.ts`, `components/_standard/`, `custom/`).
+
+See [docs/knowledge/architecture-overview.md](docs/knowledge/architecture-overview.md) for the full pipeline reference and generated-vs-hand-written boundary documentation.
+
+---
+
+## Getting Started
+
+### Prerequisites
 
 | Tool | Purpose | Minimum version |
 |------|---------|----------------|
 | [Git](https://git-scm.com/downloads) | Clone the repository | any |
 | [Node.js](https://nodejs.org/) | Run the Next.js application | 20 LTS |
-| [npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) | Install JavaScript dependencies (bundled with Node.js) | 10 |
+| [npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) | Install JavaScript dependencies | 10 |
 | [Python 3](https://www.python.org/downloads/) | Run the code generator | 3.10+ |
-| [pip](https://pip.pypa.io/en/stable/installation/) | Install Python dependencies (bundled with Python 3.4+) | any |
-| [Docker](https://docs.docker.com/get-docker/) | Run the PostgreSQL test database | any |
+| [pip](https://pip.pypa.io/en/stable/installation/) | Install Python dependencies | any |
+| [Docker](https://docs.docker.com/get-docker/) | Run PostgreSQL and Redis containers | any |
 
-## Getting Started
-
-### 1. Clone the repository
+### Install
 
 ```bash
 git clone git@github.com:rhymion/app-generator.git
 cd app-generator
-```
 
-### 2. Install JavaScript dependencies
-
-```bash
+# JavaScript dependencies
 npm install
-```
 
-### 3. Install Python dependencies
-
-```bash
+# Python dependencies
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 4. Prepare environment variables
+### Quick Start (One Command)
 
-Next.js loads environment files automatically based on `NODE_ENV` — no setup needed.
-
-```
-.env              # common baseline (committed)
-.env.development  # local dev (PORT 3001, local Docker DB)
-.env.test         # E2E tests (PORT 3000, test Docker DB)
-.env.local        # local secrets (gitignored, created manually if needed)
-```
-
-No manual environment switching or symlinks are required.
-
-### 5. Start the development database
+After installing dependencies, a single command starts the database, generates code, runs migrations, seeds, and launches the dev server:
 
 ```bash
-npm run docker:up:dev    # Start postgres-dev (port 5433, DB=my_next_dev)
+npm run dev:full
 ```
 
-### 6. Apply the schema and seed the database
+`dev:full` runs: `docker:up:dev` → `generate-code` → `migrate:dev` → `db:generate` → `db:seed-tenant` → `dev`
+
+For a production build:
 
 ```bash
-npm run setup            # generate-code → db:push → seed
+npm run build:full
 ```
 
-### 7. Run the development server
+`build:full` runs: `docker:up:prod` → `generate-code` → `migrate:deploy` → `db:generate` → `db:seed-tenant` → `build`
+
+Or follow the step-by-step instructions below.
+
+### Start the Development Database
 
 ```bash
-npm run dev              # Start Next.js dev server (port 3001)
+npm run docker:up:dev    # starts postgres-dev (port 5433, DB: my_next_dev)
+```
+
+### Generate Code, Push Schema, and Seed
+
+```bash
+npm run setup            # generate-code → db:push → db:generate → db:seed-tenant
+```
+
+### Start the Development Server
+
+```bash
+npm run dev              # Next.js dev server on port 3001
 ```
 
 Open [http://localhost:3001](http://localhost:3001) to see the application.
 
 ```bash
-npm run docker:down:dev  # Stop the database when done
+npm run docker:down:dev  # stop the database when done
 ```
 
-## Generating an Application from a Schema
+---
 
-Edit `code_generator/json_schema.yaml` and `prisma/schema.prisma` to define your entities, then run:
+## Usage as a Base Project
+
+This generator is designed to be used as the foundation for your own application. The recommended pattern is to keep your schema definitions and custom code in a separate project directory (`../prj`) and sync them into the generator.
+
+1. Define your entities in `code_generator/json_schema.yaml` and `prisma/schema.prisma`.
+2. Run `npm run generate-code` to produce the TypeScript, React, and Cypress files.
+3. Place any custom business logic in the designated extension points:
+   - `lib/{entity}/service_after_create.ts` — post-create hooks (write-once stub, not overwritten)
+   - `components/_standard/` — shared UI components (never touched by the generator)
+   - `custom/` — per-tenant UI overrides and app-specific extensions
+4. Run `npm run db:push` and `npm run db:generate` after schema changes.
+5. Iterate: update the schema → regenerate → extend.
+
+Use `npm run prj:sync` to copy your project directory (`../prj`) into the generator working tree before running generation.
+
+See [docs/knowledge/code-generation-custom-extensions.md](docs/knowledge/code-generation-custom-extensions.md) for the full extension point reference.
+
+---
+
+## Built-in Systems
+
+### Approval Flow
+
+Multi-step, role-based approval workflows with status tracking (Pending/Approved/Rejected) and a full audit trail. Basic approval and rejection with role-based permissions work; approval completion does not yet trigger downstream state changes. See the Roadmap section for details.
+
+See [docs/knowledge/appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md).
+
+### Comment Threads
+
+A polymorphic bridge pattern allows comment threads to be attached to any entity without schema changes to each entity. Comments are displayed inline on view pages.
+
+See [docs/knowledge/appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md).
+
+### Attachment Management
+
+File and image upload via a polymorphic bridge, backed by Vercel Blob. Any entity that opts in receives a file attachment panel on its view page.
+
+---
+
+## Security
+
+**Rate limiting** is handled by `getRateLimiter()` in the API middleware. In development (no `REDIS_URL`), it falls back to an in-memory limiter automatically. In test and production environments, it uses Redis.
+
+**CSRF protection** is applied to all state-changing API routes.
+
+**Organization-scoped filtering** is applied at the query layer: every list query applies an automatic `organization_id` filter, scoping data to the authenticated user's organization. Tenant-level isolation (cross-tenant data separation) is not yet implemented — see the Roadmap section.
+
+**Role-based access control** is defined per-model in the schema. The `authz.ts` module enforces per-model CRUD permissions on every request.
+
+See [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenancy-and-permissions.md).
+
+---
+
+## Performance
+
+- **Streaming Suspense**: pages stream HTML to the browser immediately, reducing TTFB. Data is loaded asynchronously in Suspense boundaries.
+- **Skeleton screens**: every generated list and view page renders a skeleton while data loads, preventing layout shift.
+- **Parallel fetching**: data and permission checks are fetched in parallel using `Promise.all`, minimizing server round-trips.
+
+See [docs/knowledge/performance-improvements.md](docs/knowledge/performance-improvements.md).
+
+---
+
+## Running Tests
+
+### Unit Tests (Vitest)
 
 ```bash
-npm run generate-code
+npm run test
 ```
 
-You can also update the schema files using sample application by running:
+### Python Generator Tests (pytest)
 
 ```bash
-cp -a custom/sample/* .
-npm run generate-code
+npm run test:pytest
 ```
 
-This overwrites the generated TypeScript files, React components, and API routes. After generation, push the updated schema to the database:
+### Lint
 
 ```bash
-npx prisma db push
-npx prisma generate
+npm run lint
 ```
 
-See [docs/knowledge/schema-yaml-configuration.md](docs/knowledge/schema-yaml-configuration.md) for the full schema reference.
+### E2E Tests — Full Pipeline
+
+```bash
+npm run docker:up:test
+npm run test:e2e:build   # generate-code + db:push + db:generate + db:seed-tenant + build
+npm run test:e2e:cy:api  # API-only Cypress specs
+npm run test:e2e         # full Cypress suite (build + start + run)
+npm run docker:down:test
+```
+
+### E2E Tests — Hot-reload Mode
+
+```bash
+npm run docker:up:test
+npm run test:e2e:dev     # dev server mode (no build required)
+npm run docker:down:test
+```
+
+`NODE_ENV=test` is set automatically by all `test:e2e` scripts — no manual environment switching required.
+
+See [docs/knowledge/testing-cypress.md](docs/knowledge/testing-cypress.md) for Cypress patterns and CI/CD configuration.
+
+---
 
 ## Environment Setup
 
 Next.js loads environment files automatically based on `NODE_ENV`:
-- Development: `.env.development` (PORT 3001, local Docker DB)
-- Test/E2E: `.env.test` (PORT 3000, test Docker DB)
-- Production: Set variables in Vercel dashboard (`.env.production` is gitignored)
-- Local secrets: `.env.local` (gitignored, created manually if needed)
+
+| File | Environment | Notes |
+|------|------------|-------|
+| `.env` | All | Common baseline (committed) |
+| `.env.development` | Development | PORT 3001, postgres-dev (port 5433) |
+| `.env.test` | Test/E2E | PORT 3000, postgres-test (port 5432), redis-test (port 6379) |
+| `.env.production` | Production | Set variables in Vercel dashboard (gitignored) |
+| `.env.local` | Local secrets | Gitignored; created manually if needed |
+
+Key variables:
+
+| Variable | Development | Test | Production |
+|----------|------------|------|-----------|
+| `PORT` | 3001 | 3000 | Vercel-assigned |
+| `DATABASE_URL` | `postgresql://…@localhost:5433/my_next_dev` | `postgresql://…@localhost:5432/my_next_test` | Vercel env var |
+| `REDIS_URL` | not set (in-memory fallback) | `redis://localhost:6379` | managed |
+| `AUTH_SECRET` | set in `.env.development` | set in `.env.test` | set in Vercel |
+| `NEXTAUTH_URL` | `http://localhost:3001` | `http://localhost:3000` | production URL |
 
 No manual environment switching or symlinks are required.
 
-## Running Tests
-
-```bash
-# Unit and integration tests
-npm run test
-
-# Code generator tests
-pytest code_generator/tests
-
-# Full CI gate (generator -> database -> build -> tests)
-npm run docker:up:test   # Start postgres-test + redis-test
-npm run generate-code
-npm run test
-npm run build
-```
-
-## E2E テスト
-
-```bash
-# E2E tests
-npm run docker:up:test   # Start postgres-test (port 5434) + redis-test (port 6381)
-npm run test:e2e         # full E2E (build + start + cypress, NODE_ENV=test set automatically)
-npm run docker:down:test
-```
-
-ホットリロードモード:
-```bash
-npm run docker:up:test
-npm run test:e2e:dev     # hot-reload mode (no build required)
-npm run docker:down:test
-```
-
-`test:e2e` は `cross-env NODE_ENV=test` でテスト環境を自動設定する。
-手動の環境切り替えや symlink は不要。
-
-個別実行:
-```bash
-npm run dev:full         # full dev workflow (setup → dev)
-npm run build:full       # full build workflow (setup → build)
-```
+---
 
 ## Project Structure
 
 ```
-code_generator/    Python generator -- reads YAML, writes TypeScript/React/Cypress
-docs/knowledge/    Architecture guides and configuration reference
-app/               Next.js App Router pages (generated + hand-written)
-components/        React components (generated + extension points)
-lib/               Server-side service and getter modules (generated + extension points)
-prisma/            Database schema and migrations
-cypress/           E2E test suite (generated + custom specs)
-messages/          i18n translation files (en, ja)
+app-generator/
+├── app/                      Next.js App Router
+│   ├── [locale]/             All user-facing pages (locale-prefixed URLs)
+│   │   ├── {entity}/         Generated CRUD pages per entity
+│   │   ├── docs/             Auto-generated entity documentation (MDX)
+│   │   ├── login/            Auth pages (hand-written)
+│   │   ├── register/
+│   │   └── setting/          User settings: MFA, account linking (hand-written)
+│   ├── api/
+│   │   ├── {entity}/         Generated REST endpoints (when api: true)
+│   │   └── auth/             Auth.js v5 route handlers (hand-written)
+│   └── generated/            Placeholder directory
+├── code_generator/           Python code generation pipeline
+│   ├── json_schema.yaml      Single source of truth: entity definitions
+│   ├── generate.py           Main orchestrator
+│   ├── generators*.py        Context builders per output type
+│   ├── templates/            Jinja2 templates (*.jinja2)
+│   └── tests/                Pytest unit tests for the generators
+├── components/               React components
+│   ├── _standard/            Shared UI (ListWrapper, FormSkeleton — hand-written)
+│   └── {entity}/             Generated per-entity components
+├── lib/                      Business logic and utilities
+│   ├── {entity}/             Generated per-entity service/actions/types/getters
+│   ├── auth/                 Auth helpers (hand-written)
+│   ├── mfa/                  TOTP/MFA logic (hand-written)
+│   ├── account-link/         OAuth account linking (hand-written)
+│   ├── authz.ts              Authorization enforcement (hand-written)
+│   └── prisma.ts             Prisma client singleton
+├── prisma/                   Database schema and migrations
+│   ├── schema.prisma         Authoritative DB schema (hand-written)
+│   └── migrations/           Prisma migration history
+├── scripts/                  Utility scripts
+│   ├── seed.ts               DB seeding
+│   ├── seed-tenant.ts        Tenant-specific seeding
+│   └── run-next-dev.js       Dev server launcher
+├── cypress/                  E2E tests
+│   ├── e2e/                  Generated per-entity specs + hand-written flow tests
+│   └── support/              Generated per-entity helpers + fixtures
+├── docs/
+│   ├── generated/            Auto-generated entity reference docs
+│   └── knowledge/            Hand-written architectural knowledge docs
+├── messages/                 i18n translation files (en, ja)
+├── auth.ts                   Auth.js v5 configuration (hand-written)
+├── proxy.ts                  Next.js middleware (hand-written)
+└── docker-compose.*.yml      Per-environment DB + Redis containers
 ```
+
+---
+
+## Documentation
+
+All architectural documentation lives in `docs/knowledge/`:
+
+| File | Contents |
+|------|---------|
+| [architecture-overview.md](docs/knowledge/architecture-overview.md) | Code generation pipeline, project structure, generated vs. hand-written boundary, tech stack, environment configuration |
+| [schema-yaml-configuration.md](docs/knowledge/schema-yaml-configuration.md) | Full reference for `code_generator/json_schema.yaml` |
+| [prisma-schema-conventions.md](docs/knowledge/prisma-schema-conventions.md) | Prisma model naming, index, and relation conventions |
+| [code-generation-custom-extensions.md](docs/knowledge/code-generation-custom-extensions.md) | Extension points: where to add custom code without overwriting generated files |
+| [testing-cypress.md](docs/knowledge/testing-cypress.md) | Generated Cypress patterns, MUI interaction helpers, CI/CD configuration |
+| [multi-tenancy-and-permissions.md](docs/knowledge/multi-tenancy-and-permissions.md) | Tenant isolation, RBAC, creator/assignee access control |
+| [authentication.md](docs/knowledge/authentication.md) | Auth.js v5 setup, Google SSO, MFA/TOTP, account linking |
+| [performance-improvements.md](docs/knowledge/performance-improvements.md) | Streaming Suspense, skeleton screens, parallel fetching |
+| [troubleshooting.md](docs/knowledge/troubleshooting.md) | Common build, test, code generation, and database failure patterns with step-by-step fixes |
+| [i18n-locale-routing.md](docs/knowledge/i18n-locale-routing.md) | next-intl v4 setup, locale routing, translation file conventions |
+| [dark-mode-and-hydration.md](docs/knowledge/dark-mode-and-hydration.md) | System-aware dark mode, SSR-safe theme initialization |
+| [timezone-handling.md](docs/knowledge/timezone-handling.md) | Server/client timezone conventions |
+| [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | Inline DataGrid children, reference column rendering |
+| [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | Responsive layout conventions |
+| [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | Approval flow system detail |
+| [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | Comment bridge system detail |
+
+---
+
+## Current Status & Roadmap
+
+### Implemented
+
+| Feature | Status |
+|---------|--------|
+| Schema-driven CRUD generation | ✅ Implemented |
+| REST API with API key auth | ✅ Implemented |
+| Gantt chart views | ✅ Implemented |
+| Generated Cypress tests | ✅ Implemented |
+| Email/password authentication | ✅ Implemented |
+| Google SSO (Auth.js v5) | ✅ Implemented |
+| Account linking | ✅ Implemented |
+| Role-based access control | ✅ Implemented |
+| Comment threads | ✅ Implemented |
+| Attachment management | ✅ Implemented |
+| Internationalization (en/ja) | ✅ Implemented |
+| Dark mode | ✅ Implemented |
+| Rate limiting | ✅ Implemented |
+| Streaming Suspense / Skeleton screens | ✅ Implemented |
+
+### In Progress
+
+See the [Roadmap](#roadmap) section for features with partial implementations.
+
+### Planned
+
+- Full-text search beyond column filtering
+- Performance improvements for large datasets (100k+ rows)
+- Hosted no-code schema editor
 
 ---
 
@@ -208,32 +452,37 @@ messages/          i18n translation files (en, ja)
 This project is licensed under the **Business Source License 1.1 (BUSL-1.1)**.
 
 ### What you can do
-
-✅ Use the generator freely for any purpose  
-✅ Generate applications and sell them to your clients or as your own product  
-✅ Modify the generator source code  
-✅ Distribute modified versions of the generator, **as long as the modified source is publicly available** (see below)
-
-### What you cannot do
-
-❌ Operate a commercial service that lets third parties define schemas and generate applications using this software — for example, a hosted no-code or low-code platform built on this generator
+- ✅ Use the generator to build and commercialize web applications
+- ✅ Modify the application framework, generated code, and configuration
+  files freely — these modifications do not need to be shared publicly
+- ✅ Distribute your customized application (framework + generated code)
+  without sharing modifications publicly
+- ✅ Modify the generator for internal use
 
 ### Sharing modifications
+The public sharing requirement applies only to modifications of
+**generator source code** — source files (`.py`, `.jinja2`, and similar
+programming language files) within the `code_generator/` directory.
 
-If you distribute a modified version of this generator, the modifications must be made publicly accessible in one of the following ways:
+Schema definitions (`.yaml`, `.json`) and all files outside
+`code_generator/` — including generated code, framework code,
+components, and configuration — may be kept private.
 
-- Submit a pull request or patch to the [official repository](https://github.com/rhymion/app-generator)
-- Maintain a publicly accessible fork on GitHub or an equivalent public code hosting service
+> **Example**: If you improve the Python code generator, share those
+> improvements. If you customize your authentication flow, form
+> components, or API routes, those are yours to keep private.
 
-You may not distribute a modified version with the source kept private.
+### What you cannot do
+- ❌ Use the generator to operate a competing commercial code generation
+  service (Competing Use)
 
 ### Becoming MIT
 
-On the fourth anniversary of the first public release of this version, the license automatically converts to the **MIT License**. At that point, all restrictions are lifted.
+On the fourth anniversary of the first public release of this version, the license automatically converts to the **MIT License**.
 
 ### Commercial license
 
-If you need to use this software in a way not permitted by the BUSL-1.1 — for example, incorporating it into a proprietary closed-source product — please contact us at [contact@rhymion.com](mailto:contact@rhymion.com).
+If you need to use this software in a way not permitted by BUSL-1.1, contact [contact@rhymion.com](mailto:contact@rhymion.com).
 
 See [LICENSE](./LICENSE) for the full license text.
 
