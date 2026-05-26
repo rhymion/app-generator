@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useReducer } from 'react';
 import Card from '@mui/material/Card';
 import CardHeader from '@mui/material/CardHeader';
 import CardContent from '@mui/material/CardContent';
@@ -20,26 +20,34 @@ export type WidgetConfig = {
   filter_value?: string | null;
 };
 
+type State = { data: ChartDatum[]; error: string | null; loading: boolean };
+type Action =
+  | { type: 'start' }
+  | { type: 'success'; data: ChartDatum[] }
+  | { type: 'error'; message: string };
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'start': return { data: state.data, error: null, loading: true };
+    case 'success': return { data: action.data, error: null, loading: false };
+    case 'error': return { data: [], error: action.message, loading: false };
+  }
+}
+
 export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
-  const [data, setData] = useState<ChartDatum[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [{ data, error, loading }, dispatch] = useReducer(reducer, { data: [], error: null, loading: true });
 
   useEffect(() => {
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setError(null);
+    dispatch({ type: 'start' });
     const filter = widget.filter_field && widget.filter_value
       ? { field: widget.filter_field, value: widget.filter_value }
       : null;
     aggregateForWidget(widget.entity_name, widget.group_by_field, filter)
-      .then((rows) => { if (!cancelled) setData(rows); })
+      .then((rows) => { if (!cancelled) dispatch({ type: 'success', data: rows }); })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load');
-      })
-      .finally(() => { if (!cancelled) setLoading(false); });
+        if (!cancelled) dispatch({ type: 'error', message: e instanceof Error ? e.message : 'Failed to load' });
+      });
     return () => { cancelled = true; };
   }, [widget.entity_name, widget.group_by_field, widget.filter_field, widget.filter_value]);
 
