@@ -151,6 +151,10 @@ describe('DataGridClient', () => {
           basePath="/test"
           removeAction={mockRemoveAction}
           entityLabel="Test"
+          displayFields={[
+            { field: 'name' as keyof TestEntity, headerName: 'Name', width: 200 },
+            { field: 'description' as keyof TestEntity, headerName: 'Description', width: 400 },
+          ]}
         />
       );
 
@@ -158,9 +162,9 @@ describe('DataGridClient', () => {
         expect(screen.getByText('Item 1')).toBeInTheDocument();
       });
 
-      // Open column menu for Name column
-      const nameHeader = screen.getByText('Name');
-      const menuButton = nameHeader.closest('[role="columnheader"]')?.querySelector('[aria-label*="Menu"]');
+      // Open column menu for Name column (use data-field to avoid i18n dependency)
+      const nameHeader = document.querySelector('[role="columnheader"][data-field="name"]');
+      const menuButton = nameHeader?.querySelector('[aria-label*="Menu"]');
       
       if (menuButton) {
         await userEvent.click(menuButton);
@@ -180,13 +184,17 @@ describe('DataGridClient', () => {
         { id: '2', name: 'Apple', description: 'First' },
         { id: '3', name: 'Mango', description: 'Middle' },
       ];
-      
+
       renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
           entityLabel="Test"
+          displayFields={[
+            { field: 'name' as keyof TestEntity, headerName: 'Name', width: 200 },
+            { field: 'description' as keyof TestEntity, headerName: 'Description', width: 400 },
+          ]}
         />
       );
 
@@ -194,7 +202,8 @@ describe('DataGridClient', () => {
         expect(screen.getByText('Zebra')).toBeInTheDocument();
       });
 
-      const nameHeader = screen.getByText('Name');
+      // Click the name column header via data-field to avoid i18n dependency
+      const nameHeader = document.querySelector('[role="columnheader"][data-field="name"]') as HTMLElement;
       await userEvent.click(nameHeader);
 
       // After sorting, order should change
@@ -211,13 +220,17 @@ describe('DataGridClient', () => {
         { id: '2', name: 'Item B', description: 'Apple' },
         { id: '3', name: 'Item C', description: 'Mango' },
       ];
-      
+
       renderWithIntl(
         <DataGridClient
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
           entityLabel="Test"
+          displayFields={[
+            { field: 'name' as keyof TestEntity, headerName: 'Name', width: 200 },
+            { field: 'description' as keyof TestEntity, headerName: 'Description', width: 400 },
+          ]}
         />
       );
 
@@ -225,7 +238,8 @@ describe('DataGridClient', () => {
         expect(screen.getByText('Zebra')).toBeInTheDocument();
       });
 
-      const descriptionHeader = screen.getByText('Description');
+      // Click the description column header via data-field to avoid i18n dependency
+      const descriptionHeader = document.querySelector('[role="columnheader"][data-field="description"]') as HTMLElement;
       await userEvent.click(descriptionHeader);
 
       await waitFor(() => {
@@ -236,7 +250,7 @@ describe('DataGridClient', () => {
 
     it('does not allow sorting on Actions column', async () => {
       const mockData = createMockData(3);
-      
+
       renderWithIntl(
         <DataGridClient
           src={mockData}
@@ -247,9 +261,9 @@ describe('DataGridClient', () => {
       );
 
       await waitFor(() => {
-        const actionsHeader = screen.getByText('Actions');
-        const columnHeader = actionsHeader.closest('[role="columnheader"]');
-        
+        // Use data-field selector to avoid dependency on the translated 'Actions' label
+        const columnHeader = document.querySelector('[role="columnheader"][data-field="actions"]');
+
         // Actions column should not have sortable class/attribute
         expect(columnHeader).toHaveAttribute('aria-sort', 'none');
       });

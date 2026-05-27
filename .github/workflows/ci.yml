@@ -33,6 +33,8 @@ jobs:
           node-version: '24'
           cache: 'npm'
       - run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate
       - run: npm test
 
   audit:
