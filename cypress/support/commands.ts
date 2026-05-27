@@ -173,20 +173,22 @@ Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) =
   // The MUI Autocomplete popper portals to document.body — it is NOT a
   // descendant of the input's accordion. When this command runs inside
   // `cy.within(.MuiAccordionDetails-root)` (e.g. via cy.withinAccordion),
-  // the previous `cy.get('body')` failed with "Expected to find element: body"
-  // because cy.get respects the within-subject. Use cy.document() / Cypress.$
-  // to query the popper from the real document, bypassing the within scope.
+  // cy.get('body') fails because cy.get respects the within-subject.
+  // Use cy.document() + cy.wrap(doc.body).find(...).should(...) to:
+  //   1. Bypass the within-scope (cy.document() always targets the real document)
+  //   2. Enable Cypress retry — .should() causes Cypress to re-run .find() until
+  //      options appear or the default timeout is reached, eliminating the race
+  //      condition where Cypress.$(doc.body).find() ran synchronously once and
+  //      returned an empty set before MUI rendered the dropdown.
   cy.document().then((doc) => {
     const optionSelector = '[role="listbox"] [role="option"], .MuiAutocomplete-popper li';
-    const $opts = Cypress.$(doc.body).find(optionSelector);
-    if ($opts.length > 0) {
-      const $matched = $opts.filter((_, el) => exactRe.test(el.textContent ?? '')).first();
-      cy.wrap($matched).click();
-      return;
-    }
-    getAutocompleteInput(label).then(($input) => {
-      cy.wrap($input).type('{downarrow}{enter}', { force: true });
-    });
+    cy.wrap(doc.body)
+      .find(optionSelector)
+      .should('have.length.greaterThan', 0)
+      .then(($opts) => {
+        const $matched = $opts.filter((_, el) => exactRe.test(el.textContent ?? '')).first();
+        cy.wrap($matched).click();
+      });
   });
 });
 
