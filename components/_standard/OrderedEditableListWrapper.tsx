@@ -500,12 +500,13 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
                     error={!!error}
                     helperText={error}
                     slotProps={{
+                      ...params.slotProps,
                       input: {
-                        ...params.InputProps,
+                        ...params.slotProps.input,
                         endAdornment: (
                           <>
                             {searchLoading ? <CircularProgress color="inherit" size={16} /> : null}
-                            {params.InputProps.endAdornment}
+                            {params.slotProps.input.endAdornment}
                           </>
                         ),
                       },
