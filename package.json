@@ -58,7 +58,7 @@
     "@mdx-js/react": "^3.1.1",
     "@mui/icons-material": "^7.3.7",
     "@mui/material": "^7.3.7",
-    "@mui/material-nextjs": "^7.3.9",
+    "@mui/material-nextjs": "^9.0.1",
     "@mui/x-charts": "^9.1.0",
     "@mui/x-data-grid": "^8.25.0",
     "@mui/x-date-pickers": "^8.26.0",
