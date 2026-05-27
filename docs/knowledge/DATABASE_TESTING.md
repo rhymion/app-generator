@@ -2,10 +2,23 @@
 
 This project uses a multi-database strategy for different environments:
 
-- **Development**: PostgreSQL (Vercel)
-- **E2E Testing**: Separate PostgreSQL database
+- **Development**: PostgreSQL via Docker (`docker-compose.dev.yml`, port 5433, DB `my_next_dev`)
+- **E2E Testing**: Separate PostgreSQL + Redis via Docker (`docker-compose.test.yml`)
 - **Unit Testing (optional)**: SQLite for speed
 - **Production**: PostgreSQL (Vercel)
+
+## Dev vs Test Container Overview
+
+| | Development | Test |
+|---|---|---|
+| Compose file | `docker-compose.dev.yml` | `docker-compose.test.yml` |
+| DB name | `my_next_dev` | `my_next_test` |
+| Postgres port | 5433 | 5434 |
+| Redis | なし (in-memory rate limiter) | `redis-test` (port 6381) |
+| Start | `npm run docker:up:dev` | `npm run docker:up:test` |
+| Stop | `npm run docker:down:dev` | `npm run docker:down:test` |
+
+Dev omits Redis — `REDIS_URL` is unset in `.env.development`, so `getRateLimiter()` falls back to the in-memory rate limiter automatically.
 
 ## Quick Start
 
@@ -28,16 +41,11 @@ For e2e tests, you need a separate PostgreSQL database:
 **Option A: Using Docker (Recommended)**
 
 ```bash
-# Start PostgreSQL in Docker
-docker run --name postgres-test \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=my_next_test \
-  -p 5432:5432 \
-  -d postgres:16
+# Start test containers in Docker (postgres-test + redis-test)
+npm run docker:up:test
 
-# Run migrations and seed
-npm run db:reset
-npm run db:seed:test
+# Reset and migrate test database
+npm run migrate:reset:test
 ```
 
 **Option B: Using Local PostgreSQL**
@@ -46,9 +54,8 @@ npm run db:seed:test
 # Create test database
 createdb my_next_test
 
-# Run migrations and seed
-npm run db:reset
-npm run db:seed:test
+# Reset and migrate test database
+npm run migrate:reset:test
 ```
 
 ### 3. Running Tests
@@ -56,13 +63,11 @@ npm run db:seed:test
 **E2E Tests (Cypress with PostgreSQL)**
 
 ```bash
-# Start dev server
-npm run dev
+# Full E2E (build + start + cypress, NODE_ENV=test set automatically)
+npm run test:e2e
 
-# In another terminal, run Cypress
-npm run cy:open
-# or headless
-npm run cy:run
+# Or hot-reload mode (no build required)
+npm run test:e2e:dev
 ```
 
 **Unit Tests (Vitest)**
@@ -71,39 +76,20 @@ npm run cy:run
 npm test
 ```
 
-## Database Switching
-
-### Switch to SQLite (for local experimentation)
-
-```bash
-npm run db:use:sqlite
-```
-
-This will:
-- Switch schema to SQLite
-- Create a local `dev.db` file
-- Generate Prisma client for SQLite
-
-### Switch back to PostgreSQL
-
-```bash
-npm run db:use:postgres
-```
-
 ## NPM Scripts
 
 | Script | Description |
 |--------|-------------|
-| `npm run env:use -- test` | Symlink `.env` → `.env.test` |
-| `npm run env:use -- off` | Remove `.env` symlink, return to native `.env.local` |
-| `npm run env:current` | Show current environment |
+| `npm run docker:up:dev` | Start dev Postgres container (`postgres-dev`, port 5433) |
+| `npm run docker:down:dev` | Stop dev Postgres container |
+| `npm run docker:up:test` | Start test containers (`postgres-test` + `redis-test`) |
+| `npm run docker:down:test` | Stop test containers |
 | `npm run migrate:dev` | Run Prisma migrations (dev) |
-| `npm run migrate:reset:test` | Reset test database migrations |
-| `npm run db:seed:test` | Seed test database |
+| `npm run migrate:reset:test` | Reset test database migrations (NODE_ENV=test) |
 | `npm run db:studio` | Open Prisma Studio (uses `.env.local` natively) |
-| `npm run db:studio:test` | Open Prisma Studio with test database |
-| `npm run db:use:sqlite` | Switch to SQLite |
-| `npm run db:use:postgres` | Switch to PostgreSQL |
+| `cross-env NODE_ENV=test npx prisma studio` | Open Prisma Studio with test database |
+| `npm run test:e2e` | Full E2E tests (build + start + cypress, NODE_ENV=test) |
+| `npm run test:e2e:dev` | E2E tests in hot-reload mode (NODE_ENV=test) |
 
 ## E2E Test Database Management
 
@@ -114,10 +100,8 @@ import { TEST_CREDENTIALS } from '../support/test-credentials';
 
 describe('My Feature', () => {
   beforeEach(() => {
-    // Reset database to clean state
-    cy.task('db:reset');
-    // Seed with test data (creates test user with known credentials)
-    cy.task('db:seed');
+    // Cypress tasks for DB management are registered in cypress.config.ts.
+    // See existing tests under cypress/e2e/ for usage examples.
   });
 
   it('should login with test user', () => {
@@ -148,11 +132,8 @@ This means you can use `TEST_CREDENTIALS` in your tests without worrying about e
 ### Manual Database Reset
 
 ```bash
-# Reset test database to clean state
-npm run db:reset
-
-# Seed with test data
-npm run db:seed:test
+# Reset test database to clean state (runs migrations with NODE_ENV=test)
+npm run migrate:reset:test
 ```
 
 ## Best Practices
@@ -191,8 +172,8 @@ docker restart postgres-test
 # Regenerate Prisma client
 npx prisma generate
 
-# Reset and migrate
-npm run db:reset
+# Reset and migrate (test environment)
+npm run migrate:reset:test
 ```
 
 ### Port Conflicts
@@ -213,8 +194,10 @@ DATABASE_URL="postgresql://postgres:postgres@localhost:5433/my_next_test"
 
 ## Environment Files
 
-- `.env` - Local development (git-ignored)
+- `.env` - Common baseline (committed)
+- `.env.development` - Local development (committed, non-secrets)
 - `.env.test` - Test environment (committed)
+- `.env.local` - Local secrets (git-ignored, created manually if needed)
 - `.env.example` - Template (committed)
 
 ## Architecture Notes
@@ -226,7 +209,7 @@ This project uses **Prisma 7**, which has important changes from Prisma 6:
 **Database URL Configuration**:
 - ❌ No longer in `schema.prisma` (`url = env("DATABASE_URL")`)
 - ✅ Now in `prisma.config.ts` (`datasource.url`)
-- ✅ Environment variables loaded via `dotenv/config`
+- ✅ Environment variables loaded via `@next/env` in `prisma.config.ts` (matches Next.js NODE_ENV-based loading)
 
 **PrismaClient Configuration**:
 - Must provide `accelerateUrl` to constructor (required by `@prisma/extension-accelerate`)

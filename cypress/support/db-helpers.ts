@@ -22,35 +22,22 @@ export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
 
-  // Level 1: approval_request, checkup_judgment, comment, lifestyle, medicine, organization, permission, symptom
+  // Level 1: approval_request, comment, organization, permission
   await prisma.approval_request.deleteMany();
-  await prisma.checkup_judgment.deleteMany();
   await prisma.comment.deleteMany();
-  await prisma.lifestyle.deleteMany();
-  await prisma.medicine.deleteMany();
   await prisma.organization.deleteMany();
   await prisma.permission.deleteMany();
-  await prisma.symptom.deleteMany();
 
-  // Level 2: approvable, approval_flow, commentable, pre_check
+  // Level 2: approvable, approval_flow, commentable
   await prisma.approvable.deleteMany();
   await prisma.approval_flow.deleteMany();
   await prisma.commentable.deleteMany();
-  await prisma.pre_check.deleteMany();
 
-  // Level 3: checkup, role
-  await prisma.checkup.deleteMany();
+  // Level 3: role
   await prisma.role.deleteMany();
 
-  // Level 4: patient_rel
-  await prisma.patient_rel.deleteMany();
-
-  // Level 5: clinic, patient
-  await prisma.clinic.deleteMany();
-  await prisma.patient.deleteMany();
-
-  // Level 6: user_account
-  await prisma.user_account.deleteMany();
+  // Level 4: user
+  await prisma.user.deleteMany();
 
   // Clear in-process LRU caches (api-key, permission) on the running server.
   // Production builds keep these caches active across requests; after the

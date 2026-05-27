@@ -171,7 +171,7 @@ function buildAdapter(): Adapter {
 // rows on OAuth sign-in (identity stability via providerAccountId,
 // refresh tokens at rest, room for future Auth.js v5+ database
 // sessions). Only the *session* row stays empty.
-const sessionStrategy: "jwt" = "jwt";
+const sessionStrategy = "jwt" as const;
 
 export const authConfig: NextAuthConfig = {
   secret: process.env.AUTH_SECRET,

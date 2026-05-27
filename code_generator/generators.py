@@ -2448,7 +2448,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in custom_upsert_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in entity_select_props)
     val_entries = '\n'.join(validation_entry_lines)
-    validation_call = f"  const getValidationError = () => useFormValidation({{\n{val_entries}\n  }});"
+    validation_call = f"  const getValidationError = () => validateForm({{\n{val_entries}\n  }});"
 
     # Comment children JSX
     comment_jsx_parts = []

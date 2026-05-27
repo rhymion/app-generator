@@ -240,7 +240,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- Dashboard catalog (lib/dashboard/catalog.ts) ---
     dashboard_catalog = build_dashboard_catalog(schema)
-    if dashboard_catalog:
+    if True:
         _write(
             out / 'lib' / 'dashboard' / 'catalog.ts',
             _render(env, 'dashboard_catalog.ts.jinja2', {'entities': dashboard_catalog}),
@@ -256,7 +256,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     # When no owner exists the file is left out and cleanup.py removes any
     # stale copy from a previous schema.
     attachable_owners = build_attachable_owners(schema)
-    if attachable_owners:
+    if True:
         _write(
             out / 'lib' / 'attachment' / 'actions.ts',
             _render(env, 'attachment_actions.ts.jinja2', {'owners': attachable_owners}),

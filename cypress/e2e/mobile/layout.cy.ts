@@ -69,9 +69,9 @@ describe('Mobile-responsive shell', () => {
       // Click a nav link inside the drawer — useEffect on usePathname() fires close()
       cy.get('.fixed.inset-0.z-40 nav#sidebar-nav')
         .find('a')
-        .contains('Db Table')
+        .contains('Role')
         .click();
-      cy.url().should('include', '/db_table');
+      cy.url().should('include', '/role');
       cy.get('.fixed.inset-0.z-40').should('not.exist');
     });
   });

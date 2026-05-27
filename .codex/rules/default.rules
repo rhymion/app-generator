@@ -3,33 +3,45 @@
 # sandbox when Codex asks for escalation.
 
 prefix_rule(
-    pattern = ["npm", "run", "docker:test:up"],
+    pattern = ["npm", "run", "docker:up:test"],
     decision = "allow",
-    justification = "Required Type A/B gate step for test database services.",
+    justification = "Required gate step for test database services (generate-schema, update-generator, add-component, update-code tasks).",
 )
 
 prefix_rule(
-    pattern = ["npm", "run", "docker:test:down"],
+    pattern = ["npm", "run", "docker:down:test"],
     decision = "allow",
     justification = "Allowed cleanup for test database services.",
 )
 
 prefix_rule(
-    pattern = ["npm", "run", "demo:generate"],
+    pattern = ["npm", "run", "docker:up:dev"],
     decision = "allow",
-    justification = "Required Type A/B gate step for generated app output.",
+    justification = "Allowed dev database startup for local development tasks.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "docker:down:dev"],
+    decision = "allow",
+    justification = "Allowed cleanup for dev database services.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "generate-code"],
+    decision = "allow",
+    justification = "Required gate step for code generation (generate-schema, update-generator, add-component, update-code tasks).",
 )
 
 prefix_rule(
     pattern = ["npm", "run", "build"],
     decision = "allow",
-    justification = "Required Type A/B gate step.",
+    justification = "Required gate step for build validation (update-generator, add-component, update-code tasks).",
 )
 
 prefix_rule(
     pattern = ["npm", "run", "test"],
     decision = "allow",
-    justification = "Required Type B gate step.",
+    justification = "Required gate step for unit tests (update-generator, add-component, update-code tasks).",
 )
 
 prefix_rule(
@@ -39,27 +51,57 @@ prefix_rule(
 )
 
 prefix_rule(
-    pattern = ["npm", "run", "cy:test:api"],
+    pattern = ["npm", "run", "test:e2e:build"],
     decision = "allow",
-    justification = "Required Type A/B API e2e gate step.",
+    justification = "Required e2e build gate step (update-generator, add-component, update-code tasks).",
 )
 
 prefix_rule(
-    pattern = ["npm", "run", "cy:run:api"],
+    pattern = ["npm", "run", "test:e2e:cy:api"],
     decision = "allow",
-    justification = "Allowed API e2e command alias.",
+    justification = "Required API e2e gate step (update-generator, add-component tasks).",
 )
 
 prefix_rule(
-    pattern = ["npm", "run", "db:reset:test"],
+    pattern = ["npm", "run", "test:e2e:cy:start"],
     decision = "allow",
-    justification = "Allowed database recovery step when generation drift is suspected.",
+    justification = "Required full e2e Cypress gate step.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "test:e2e"],
+    decision = "allow",
+    justification = "Required full e2e pipeline gate step.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "test:pytest"],
+    decision = "allow",
+    justification = "Required Python generator test gate (update-generator tasks).",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "check:generated"],
+    decision = "allow",
+    justification = "Required generated-code drift check gate step.",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "db:push"],
+    decision = "allow",
+    justification = "Required database schema push step (generate-schema, update-code tasks).",
+)
+
+prefix_rule(
+    pattern = ["npm", "run", "db:seed-tenant"],
+    decision = "allow",
+    justification = "Required tenant seed step for e2e test setup.",
 )
 
 prefix_rule(
     pattern = ["npm", "run", "db:generate"],
     decision = "allow",
-    justification = "Allowed database recovery step when generation drift is suspected.",
+    justification = "Allowed database client generation step when schema drift is suspected.",
 )
 
 prefix_rule(
@@ -89,13 +131,19 @@ prefix_rule(
 prefix_rule(
     pattern = ["pytest", "code_generator/tests"],
     decision = "allow",
-    justification = "Required Type B Python generator test gate.",
+    justification = "Required Python generator test gate (update-generator tasks).",
 )
 
 prefix_rule(
-    pattern = ["npm", "run", "demo:start"],
-    decision = "prompt",
-    justification = "Local dev server may be useful, but prompt before starting a long-running process.",
+    pattern = ["npm", "audit"],
+    decision = "allow",
+    justification = "Allowed security audit command for dependency vulnerability checks.",
+)
+
+prefix_rule(
+    pattern = ["pip-audit"],
+    decision = "allow",
+    justification = "Allowed Python dependency security audit command.",
 )
 
 prefix_rule(

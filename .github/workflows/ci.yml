@@ -11,8 +11,10 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - name: Generate package-lock.json for npm cache
+        run: npm install --package-lock-only
+      - uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: 'npm'
@@ -23,12 +25,16 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - name: Generate package-lock.json for npm cache
+        run: npm install --package-lock-only
+      - uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: 'npm'
       - run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate
       - run: npm test
 
   audit:
@@ -40,15 +46,17 @@ jobs:
     # continuous half so non-Dependabot PRs can't introduce vulnerable deps
     # by accident. Policy lives in AGENTS.md ("Dependency auditing").
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - name: Generate package-lock.json for npm cache
+        run: npm install --package-lock-only
+      - uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: 'npm'
       - run: npm ci
       - name: npm audit (production deps, high+)
         run: npm audit --omit=dev --audit-level=high
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: pip install (audit tool + project deps for resolution)
@@ -60,28 +68,50 @@ jobs:
     name: E2E Tests
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/my_next_test
-      NEXTAUTH_URL: http://localhost:3000
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - name: Generate package-lock.json for npm cache
+        run: npm install --package-lock-only
+      - uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: 'npm'
       - name: Cache Cypress binary
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/Cypress
           key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - name: Start docker container for testing
-        run: npm run docker:test:up
-      - name: Copy required files for testing
-        run: cp -a custom/sample/* .
-      - name: Generate all (code generation and prisma client)
-        run: npm run demo:generate
-      - name: Reset test database
-        run: npm run db:reset:test
-      - name: Run Cypress E2E tests
-        run: npm run cy:test
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Start test containers
+        run: npm run docker:up:test
+      - name: Generate code
+        run: npm run generate-code
+      - name: Check generated code
+        run: npm run check:generated
+      - name: Push schema and generate client
+        run: |
+          npx prisma db push
+          npx prisma generate
+      - name: Seed test data
+        run: npm run db:seed-tenant
+      - name: Build
+        run: npm run test:e2e:build:only
+      - name: Run API E2E tests
+        run: npm run test:e2e:cy:api
+
+  pytest:
+    name: Python Generator Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Run pytest
+        run: pytest code_generator/tests

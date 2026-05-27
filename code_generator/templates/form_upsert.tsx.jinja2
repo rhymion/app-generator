@@ -59,7 +59,7 @@ import AccordionDetails from '@mui/material/AccordionDetails';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import Typography from '@mui/material/Typography';
 {% endif %}
-import { useFormValidation } from './form_validation';
+import { validateForm } from './form_validation';
 
 export default function FormUpsert({{ form_upsert_params }}) {
   const router = useRouter();

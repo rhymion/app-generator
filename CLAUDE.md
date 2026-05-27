@@ -13,72 +13,124 @@ your change.
 - `docs/knowledge/prisma-schema-conventions.md` - Prisma model rules
 - `docs/knowledge/schema-yaml-configuration.md` - `code_generator/json_schema.yaml` reference
 - `docs/knowledge/code-generation-custom-extensions.md` - `x-generate` extensions
-- `docs/knowledge/cypress-e2e-testing.md` - generated Cypress patterns
+- `docs/knowledge/testing-cypress.md` - generated Cypress patterns
+- `docs/knowledge/architecture-overview.md` - project structure, code generation pipeline
+- `docs/knowledge/multi-tenancy-and-permissions.md` - tenant isolation, auth/authz system
+- `docs/knowledge/troubleshooting.md` - common errors and fixes
+- `docs/knowledge/appendix/approval-flow.md` - Approval Flow System detail
+- `docs/knowledge/appendix/comment-bridge.md` - Comment Bridge System detail
 - Other `docs/knowledge/*.md` - topical references (i18n, dark mode, datagrid, timezone, etc.)
+
+## Docker Compose Setup
+
+Two separate Compose files manage local containers:
+
+| File | Purpose | Containers |
+|------|---------|------------|
+| `docker-compose.dev.yml` | Development database | `postgres-dev` (port 5433, DB `my_next_dev`) |
+| `docker-compose.test.yml` | Test containers | `postgres-test` (port 5432) + `redis-test` (port 6379) |
+
+```bash
+# Development
+npm run docker:up:dev    # start postgres-dev
+npm run docker:down:dev  # stop postgres-dev
+
+# Testing
+npm run docker:up:test   # start postgres-test + redis-test
+npm run docker:down:test # stop test containers
+```
+
+Dev environment sets no `REDIS_URL` in `.env.development`, so `getRateLimiter()` falls back to the in-memory rate limiter automatically. Redis is only required for E2E tests and Redis adapter unit tests.
 
 ## Task classification
 
-Every request is one of three types. Identify the type before touching anything;
+Every request is one of five types. Identify the type before touching anything;
 if unclear, ask. Each type has its own completion gate.
 
-### Type A - Schema-only update
+### generate-schema
 
 Edits restricted to `prisma/schema.prisma`, `code_generator/json_schema.yaml`,
-and `docs/knowledge/*.md`. Python generators (`code_generator/*.py`) and
-existing (non-generated) TypeScript are **unchanged**.
+and `docs/knowledge/*.md`. Python generators and existing (non-generated) TypeScript
+are **unchanged**.
 
-Gate:
+Use `/generate-schema` slash command.
 
-1. `npm run docker:up:test`
-2. `npm run demo:generate`
-3. `npm run build`
-4. `npm run cy:test:api`
+### update-generator
 
-`pytest` and `npm run test` are skipped - Python and existing TS were not
-touched. The full UI Cypress suite is also skipped (Chromium UI tests do not run
-reliably in Codex's environment). The API-only e2e (`cy:test:api`) is fast,
-headless, and covers the generated CRUD endpoints.
+Adds or modifies Python generators (`code_generator/*.py`) or templates
+(`code_generator/templates/`). May include a schema update. Document new behavior
+under `docs/knowledge/`.
 
-### Type B - Feature implementation / update
+Use `/update-generator` slash command.
 
-Adds or modifies Python generators, non-generated TypeScript modules,
-dependencies, or framework integrations. May include a schema update. Document
-new behavior under `docs/knowledge/`.
+### add-component
 
-Gate:
+Adds or updates a UI component (non-generated TypeScript/React). Always create or
+update the corresponding component test.
 
-1. `pytest code_generator/tests`
-2. `npm run docker:up:test`
-3. `npm run demo:generate`
-4. `npm run build`
-5. `npm run test`
-6. `npm run cy:test:api`
+Use `/add-component` slash command.
 
-### Type C - Investigation / question
+### update-code
 
-Reading code, answering "how does X work?", "what would break if...?", or
-proposing solutions. **No** edits to source files.
+Updates non-generated TypeScript, configuration, or framework integrations (other
+than UI components). May include build config, middleware, auth, etc.
 
-Gate: none. Do not run docker, generators, builds, or tests. Cite findings with
-`file:line` references.
+Use `/update-code` slash command.
 
-## Triage rules
+### investigate
 
-- If a request could be Type B *or* Type C, ask before editing.
-- If a Type A change starts requiring Python or non-generated TypeScript edits,
-  it has become Type B - switch gates and announce the change.
-- Claude slash commands `/schema-update`, `/feature`, `/investigate` correspond
-  to Types A, B, C respectively. In Codex, use the matching prompt files under
-  `.codex/prompts/` as copyable workflow prompts.
+Reading code, answering "how does X work?", or proposing solutions. **No** edits
+to source files, no commands run.
+
+Use `/investigate` slash command.
+
+## Gate matrix
+
+| Task type        | pytest | build | component test | e2e API | eslint |
+|------------------|:------:|:-----:|:--------------:|:-------:|:------:|
+| generate-schema  | -      | ✓     | -              | ✓       | ✓      |
+| update-generator | ✓      | ✓     | -              | ✓       | ✓      |
+| add-component    | -      | ✓     | ✓              | ✓       | ✓      |
+| update-code      | -      | ✓     | -              | ✓       | ✓      |
+| investigate      | -      | -     | -              | -       | -      |
+
+Gate commands:
+- **pytest**: `npm run test:pytest`
+- **build**: `npm run test:e2e:build` (docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build)
+- **component test**: `npm run test`
+- **e2e API**: `npm run test:e2e:cy:api`
+- **eslint**: `npm run lint`
+
+Run in the order listed above (pytest → build → component test → e2e API → eslint).
+
+## Common rules
+
+1. `npm run lint` must pass.
+2. If a gate step fails: investigate root cause → fix → re-run until it passes.
+3. Always maintain compatibility between Prisma schema and JSON schema.
+4. Follow model and field naming conventions (e.g., no models ending with `_detail`).
+   See `docs/knowledge/prisma-schema-conventions.md`.
+5. Follow the docs (`docs/knowledge/` is the source of truth).
+6. If you discover a new rule or useful skill, update the rule/skill documentation.
+7. Read the docs before acting: at minimum CLAUDE.md, and relevant `docs/knowledge/` files.
+
+## Debug priority
+
+| Failure              | Investigate in this order                                          |
+|----------------------|--------------------------------------------------------------------|
+| Code generation fails | 1. schema (check undocumented implicit rules) → 2. generator bug |
+| Build fails          | 1. config → 2. schema → 3. code bug (VCS-managed and generated)  |
+| Test fails           | 1. generated test code bug                                         |
+| Other test fails     | 1. generation logic missing a case → 2. product code bug           |
 
 ## When a gate step fails
 
-- Failure caused by your change -> fix it.
-- `demo:generate` fails but `npm run db:reset` + `npm run db:generate`
-  would succeed and the non-generated code is correct -> **stop and report**:
-  there is a generator/web inconsistency that needs separate attention.
-- Environmental failure (network, missing OS package, hardware) -> report and
-  ask for direction.
+- Failure caused by your change → fix it and re-run.
+- `generate-code` fails but `npm run migrate:reset:test` + `npm run db:generate` would
+  succeed and the non-generated code is correct → **stop and report**: there is a
+  generator/web inconsistency that needs separate attention.
+- Environmental failure (network, missing OS package, hardware) → report and ask for
+  direction.
 
 ## Skip = fail
 

@@ -34,6 +34,7 @@
     "apiKey": "API Key",
     "approverRole": "Approver Role",
     "avatar": "Avatar",
+    "chartType": "Chart Type",
     "comments": "Comments",
     "create": "Create",
     "dateOfBirth": "Date of Birth",
@@ -44,6 +45,7 @@
     "entityName": "Entity Name",
     "followedBy": "Followed By",
     "gender": "Gender",
+    "image": "Image",
     "itemName": "Item Name",
     "judgement": "Judgement",
     "location": "Location",
@@ -117,7 +119,7 @@
   },
   "Auth": {
     "signInTitle": "Sign in to your account",
-    "signInwithGoogle": "Sign in with Google",
+    "signInWithGoogle": "Sign in with Google",
     "orDivider": "or",
     "registerTitle": "Create your account",
     "emailPlaceholder": "Email address",
@@ -172,6 +174,7 @@
     "connectMore": "Connect another provider",
     "connectButton": "Connect {provider}",
     "passwordlessNotice": "This is your only sign-in method. Set a password on the account before detaching it.",
+    "registrationFailed": "Registration failed",
     "errorLastSignInMethod": "Cannot detach: you would no longer be able to sign in.",
     "errorNotFound": "Linked account not found.",
     "errorUnknown": "Something went wrong. Please try again."

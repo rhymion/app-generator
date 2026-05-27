@@ -1,15 +1,18 @@
+import { loadEnvConfig } from '@next/env'
+loadEnvConfig(process.cwd(), false);
+
+const port = process.env.PORT;
+if (!port) {
+  throw new Error('[cypress.config] PORT not set. Ensure .env.test defines PORT and NODE_ENV=test is set.');
+}
+
 import { defineConfig } from "cypress";
 import { getGeneratedTasks } from "./cypress/support/generated-tasks";
 
 export default defineConfig({
   e2e: {
-    baseUrl: `http://localhost:${process.env.PORT || 3000}`,
+    baseUrl: `http://localhost:${port}`,
     setupNodeEvents(on, config) {
-      // Load test environment variables. Use dotenv-expand so ${VAR}
-      // references in .env.test (e.g. DATABASE_URL referencing POSTGRES_PORT)
-      // get resolved — plain dotenv does not expand them.
-      const dotenvResult = require('dotenv').config({ path: '.env.test' });
-      require('dotenv-expand').expand(dotenvResult);
       config.defaultCommandTimeout = 10000; // Increase default command timeout to 10 seconds
 
       // Task to reset and seed database before tests

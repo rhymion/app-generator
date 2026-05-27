@@ -25,17 +25,28 @@ You may:
 
   2. Modify the Licensed Work for your own internal use.
 
-  3. Distribute Modified Versions of the Licensed Work, provided that
-     any such Modified Version is made publicly available under this
-     License or a license with equivalent or greater copyleft conditions.
-     Acceptable forms of public distribution include:
-       (a) contributing the modifications back to the Licensor's
-           official repository as a pull request or patch; or
-       (b) maintaining a publicly accessible fork of the Licensed Work
-           (e.g., on GitHub or an equivalent public code hosting service)
-           that contains your modifications.
-     You may not distribute a Modified Version privately or restrict
-     access to the source of your modifications.
+  3. Distribute Modified Versions of the Licensed Work.
+
+     (a) Generator Source Code — If your Modified Version includes
+         changes to source code files (files with extensions .py,
+         .jinja2, or similar programming language extensions) within
+         the code_generator/ directory, those modifications must be
+         made publicly available under this License or a license with
+         equivalent or greater copyleft conditions. Acceptable forms
+         of public distribution include:
+           (i)  contributing the modifications back to the Licensor's
+                official repository as a pull request or patch; or
+           (ii) maintaining a publicly accessible fork of the Licensed
+                Work (e.g., on GitHub or an equivalent public code
+                hosting service) that contains your modifications.
+
+     (b) All Other Files — Modifications to files outside the
+         code_generator/ directory, and modifications to configuration
+         files (files with extensions .yaml, .json, or similar data
+         serialization extensions) within the code_generator/ directory,
+         may be distributed without the public availability requirement
+         in paragraph (a). Such modifications remain subject to all
+         other terms of this License.
 
 You may not:
 

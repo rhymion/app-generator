@@ -1,19 +1,25 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run docker:test:up)",
-      "Bash(npm run docker:test:down)",
-      "Bash(npm run demo:generate)",
+      "Bash(npm run docker:up:test)",
+      "Bash(npm run docker:down:test)",
+      "Bash(npm run docker:up:dev)",
+      "Bash(npm run docker:down:dev)",
+      "Bash(npm run generate-code)",
       "Bash(npm run build)",
       "Bash(npm run test)",
       "Bash(npm run test:coverage)",
-      "Bash(npm run cy:test:api)",
-      "Bash(npm run cy:run:api)",
-      "Bash(npm run db:reset:test)",
+      "Bash(npm run test:pytest)",
+      "Bash(npm run test:e2e:build)",
+      "Bash(npm run test:e2e:cy:api)",
+      "Bash(npm run test:e2e:cy:start)",
+      "Bash(npm run test:e2e)",
       "Bash(npm run db:generate)",
+      "Bash(npm run db:push)",
+      "Bash(npm run db:seed-tenant)",
       "Bash(npm run lint)",
       "Bash(npx vitest:*)",
-      "Bash(npx cypress run --browser chromium --spec cypress/e2e/api*)",
+      "Bash(npx cypress run --browser chromium --spec *)",
       "Bash(pytest code_generator/tests*)"
     ]
   },
@@ -23,7 +29,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Before stopping: (a) state which task type the work was (A/B/C per CLAUDE.md). (b) For Type A or B, confirm the corresponding gate ran successfully end-to-end. For Type C, confirm no source files were modified. (c) Confirm nothing in the original request is still outstanding. If any of these is not satisfied, respond with {\"ok\": false, \"reason\": \"...\"}."
+            "prompt": "Before stopping: (a) state which task type the work was (generate-schema / update-generator / add-component / update-code / investigate, per CLAUDE.md). (b) For generate-schema, update-generator, add-component, or update-code: confirm each required gate ran successfully end-to-end (check the gate matrix in CLAUDE.md). For investigate: confirm no source files were modified. (c) Confirm nothing in the original request is still outstanding. If any of these is not satisfied, respond with {\"ok\": false, \"reason\": \"...\"}."
           }
         ]
       }

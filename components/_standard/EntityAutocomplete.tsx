@@ -51,7 +51,8 @@ export default function EntityAutocomplete({
   openOnFocus = false,
 }: EntityAutocompleteProps) {
   const [inputValue, setInputValue] = useState('');
-  const [options, setOptions] = useState<EntityOption[]>(initialOptions);
+  const [searchResults, setSearchResults] = useState<EntityOption[]>([]);
+  const options = inputValue.trim() === '' ? initialOptions : searchResults;
   const [loading, setLoading] = useState(false);
   const seqRef = useRef(0);
 
@@ -79,12 +80,9 @@ export default function EntityAutocomplete({
   }, [value, mergedOptions, currentOption]);
 
   useEffect(() => {
-    // No search until user types — initialOptions is what's shown.
+    // No search until user types — initialOptions is shown via derived `options`.
     const trimmed = inputValue.trim();
-    if (trimmed === '') {
-      setOptions(initialOptions);
-      return;
-    }
+    if (trimmed === '') return;
     let cancelled = false;
     const mySeq = ++seqRef.current;
     const handle = setTimeout(async () => {
@@ -93,7 +91,7 @@ export default function EntityAutocomplete({
       try {
         const results = await searchAction(trimmed, value ? [value] : []);
         if (!cancelled && mySeq === seqRef.current) {
-          setOptions(results);
+          setSearchResults(results);
         }
       } catch {
         // Swallow — the component may have unmounted (e.g. form submit redirect)
@@ -110,7 +108,7 @@ export default function EntityAutocomplete({
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [inputValue, searchAction, value, initialOptions, debounceMs]);
+  }, [inputValue, searchAction, value, debounceMs]);
 
   return (
     <Autocomplete

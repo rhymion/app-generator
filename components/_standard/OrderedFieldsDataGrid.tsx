@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, forwardRef, useImperativeHandle, useEffect } from 'react';
+import { useState, forwardRef, useImperativeHandle } from 'react';
 import { DataGrid, GridColDef, GridRowsProp, GridValidRowModel, useGridApiRef, GridRowSelectionModel } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
 import IconButton from '@mui/material/IconButton';
@@ -103,7 +103,14 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
     title = 'Fields',
   }, ref) => {
     const apiRef = useGridApiRef();
-    const [fields, setFields] = useState<GridRowsProp>([]);
+    const [fields, setFields] = useState<GridRowsProp>(() => {
+      const sorted = [...initialFields].sort((a, b) => {
+        const orderA = typeof a.order === 'number' ? a.order : 0;
+        const orderB = typeof b.order === 'number' ? b.order : 0;
+        return orderA - orderB;
+      });
+      return sorted.map((field, index) => ({ ...field, order: index + 1 }));
+    });
     const [paginationModel, setPaginationModel] = useState({
       pageSize: 10,
       page: 0,
@@ -117,24 +124,6 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
     const [editingRow, setEditingRow] = useState<GridValidRowModel | null>(null); // null = new row
     const [editValues, setEditValues] = useState<GridValidRowModel>({});
     const [deleteRowId, setDeleteRowId] = useState<string | null>(null);
-
-    // Initialize fields: sort by order first, then ensure sequential order values
-    useEffect(() => {
-      // Sort by existing order field (ascending)
-      const sortedFields = [...initialFields].sort((a, b) => {
-        const orderA = typeof a.order === 'number' ? a.order : 0;
-        const orderB = typeof b.order === 'number' ? b.order : 0;
-        return orderA - orderB;
-      });
-
-      // Re-assign order values to be sequential (1, 2, 3, ...)
-      const fieldsWithOrder = sortedFields.map((field, index) => ({
-        ...field,
-        order: index + 1,
-      }));
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setFields(fieldsWithOrder);
-    }, [initialFields]);
 
     // Update order values whenever fields change
     const updateFieldsOrder = (updatedFields: GridRowsProp) => {
