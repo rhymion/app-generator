@@ -1,8 +1,8 @@
-# Local development services (postgres only).
-# Redis is not needed for dev — the rate limiter falls back to in-memory
+# Local production services (postgres only).
+# Redis is not needed for prod — the rate limiter falls back to in-memory
 # when REDIS_URL is unset (see lib/rate-limit/index.ts).
 services:
-  postgres-dev:
+  postgres-prod:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
@@ -11,7 +11,7 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres-dev-data:/var/lib/postgresql/data
+      - postgres-prod-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -19,5 +19,5 @@ services:
       retries: 5
 
 volumes:
-  postgres-dev-data:
+  postgres-prod-data:
     driver: local
