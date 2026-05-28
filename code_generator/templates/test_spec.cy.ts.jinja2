@@ -312,7 +312,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         // Delete child: {{ child.title }}
         cy.selectDataGridRows([0]);
         cy.contains('h2', '{{ child.title }}').parent().find('button[aria-label="Delete Selected"]').click();
-        cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+        cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
 {% endfor %}
 {% for child in comment_children_data %}
         // Delete comment: {{ child.title }}
@@ -395,7 +395,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.visit('/en/{{ parent }}');
       cy.selectDataGridRows([0]);
       cy.get('div').find('button[aria-label="Delete Selected"]').click();
-      cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+      cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
 {% if list_id_is_unique %}
       cy.contains('{{ list_id_1 }}').should('not.exist');
 {% endif %}
@@ -407,7 +407,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.visit('/en/{{ parent }}');
       cy.selectDataGridRows([0, 1]);
       cy.get('div').find('button[aria-label="Delete Selected"]').click();
-      cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+      cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
 {% if list_id_is_unique %}
       cy.contains('{{ list_id_1 }}').should('not.exist');
 {% endif %}
@@ -429,7 +429,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endif %}
       cy.url().should('include', '/{{ parent }}/edit');
       cy.clickButton('Delete {{ title }}');
-      cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+      cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
       cy.url().should('include', '/{{ parent }}');
       cy.url().should('not.include', '/{{ parent }}/');
 {% if list_id_is_unique %}
@@ -445,7 +445,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endif %}
         cy.url().should('include', '/{{ parent }}/edit');
         cy.clickButton('Delete {{ title }}');
-        cy.get('div[role="dialog"]').find('button').contains('Delete').click();
+        cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
         cy.url().should('include', '/{{ parent }}');
       });
 {% endif %}
