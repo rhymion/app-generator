@@ -128,7 +128,7 @@ Cypress.Commands.add('fillField', (label: string, value: string) => {
  * Click a button or link by aria-label
  */
 Cypress.Commands.add('clickButton', (text: string) => {
-  cy.get(`button[aria-label="${text}"]`).click();
+  cy.get(`button[aria-label="${text}"]`).first().click();
 });
 
 /**
