@@ -102,7 +102,7 @@ jobs:
       - name: Build
         run: npm run test:e2e:build:only
       - name: Run API E2E tests
-        run: npm run test:e2e:cy:api
+        run: npm run test:e2e:cy:start
 
   pytest:
     name: Python Generator Tests
