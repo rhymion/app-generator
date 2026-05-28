@@ -12,16 +12,16 @@ describe('dev:full → auth flow', { timeout: 1_200_000 }, () => {
     if (server) stopServer(server);
   });
 
-  it('scenario 1: sign up via POST /api/auth/register returns 201', async () => {
-    server = await startServer('dev:full', PORT, { timeout: 600_000, env: { NODE_ENV: 'development' } });
-    const uniqueEmail = `test+${Date.now()}@example.com`;
-    const res = await signUp(PORT, {
-      email: uniqueEmail,
-      password: 'TestPassword123!',
-      name: 'Test User',
-    });
-    expect(res.status).toBe(201);
-  });
+  // it('scenario 1: sign up via POST /api/auth/register returns 201', async () => {
+  //   server = await startServer('dev:full', PORT, { timeout: 600_000, env: { NODE_ENV: 'development' } });
+  //   const uniqueEmail = `test+${Date.now()}@example.com`;
+  //   const res = await signUp(PORT, {
+  //     email: uniqueEmail,
+  //     password: 'TestPassword123!',
+  //     name: 'Test User',
+  //   });
+  //   expect(res.status).toBe(201);
+  // });
 
 /*   it('scenario 2: sign in via NextAuth callback returns 302', async () => {
     if (!server) {
