@@ -158,6 +158,18 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+### Configure AUTH_SECRET (required)
+
+`AUTH_SECRET` is required — Auth.js will fail with a `MissingSecret` error if it is not set.
+
+Generate a secret:
+
+```bash
+openssl rand -base64 32
+```
+
+Add the output to `.env.development` (for local dev) and `.env.test` (for E2E tests). For production, set it in the Vercel dashboard.
+
 ### Quick Start (One Command)
 
 After installing dependencies, a single command starts the database, generates code, runs migrations, seeds, and launches the dev server:
@@ -175,6 +187,8 @@ npm run build:full
 ```
 
 `build:full` runs: `docker:up:prod` → `generate-code` → `migrate:deploy` → `db:generate` → `db:seed-tenant` → `build`
+
+> **Important**: Before running `build:full` for the first time, run `dev:full` at least once. `dev:full` uses `migrate:dev` to create Prisma migration files; `build:full` uses `migrate:deploy` which only applies existing ones.
 
 Or follow the step-by-step instructions below.
 
@@ -196,7 +210,7 @@ npm run setup            # generate-code → db:push → db:generate → db:seed
 npm run dev              # Next.js dev server on port 3001
 ```
 
-Open [http://localhost:3001](http://localhost:3001) to see the application.
+Open [http://localhost:3001](http://localhost:3001) to see the application. After the server starts, visit [http://localhost:3001/docs](http://localhost:3001/docs) to browse generated entity documentation (English only).
 
 ```bash
 npm run docker:down:dev  # stop the database when done
@@ -206,20 +220,7 @@ npm run docker:down:dev  # stop the database when done
 
 ## Usage as a Base Project
 
-This generator is designed to be used as the foundation for your own application. The recommended pattern is to keep your schema definitions and custom code in a separate project directory (`../prj`) and sync them into the generator.
-
-1. Define your entities in `code_generator/json_schema.yaml` and `prisma/schema.prisma`.
-2. Run `npm run generate-code` to produce the TypeScript, React, and Cypress files.
-3. Place any custom business logic in the designated extension points:
-   - `lib/{entity}/service_after_create.ts` — post-create hooks (write-once stub, not overwritten)
-   - `components/_standard/` — shared UI components (never touched by the generator)
-   - `custom/` — per-tenant UI overrides and app-specific extensions
-4. Run `npm run db:push` and `npm run db:generate` after schema changes.
-5. Iterate: update the schema → regenerate → extend.
-
-Use `npm run prj:sync` to copy your project directory (`../prj`) into the generator working tree before running generation.
-
-See [docs/knowledge/code-generation-custom-extensions.md](docs/knowledge/code-generation-custom-extensions.md) for the full extension point reference.
+To use this generator as the foundation for your own application, see [app-template](https://github.com/rhymion/app-template). It is a thin wrapper that takes app-generator as a submodule and adds your project-specific schema definitions and custom code on top.
 
 ---
 
@@ -290,19 +291,17 @@ npm run lint
 ### E2E Tests — Full Pipeline
 
 ```bash
-npm run docker:up:test
-npm run test:e2e:build   # generate-code + db:push + db:generate + db:seed-tenant + build
+npm run test:e2e:build   # docker:up:test runs automatically; generate-code + db:push + db:generate + db:seed-tenant + build
 npm run test:e2e:cy:api  # API-only Cypress specs
 npm run test:e2e         # full Cypress suite (build + start + run)
-npm run docker:down:test
+npm run docker:down:test # stop the test database when done
 ```
 
 ### E2E Tests — Hot-reload Mode
 
 ```bash
-npm run docker:up:test
-npm run test:e2e:dev     # dev server mode (no build required)
-npm run docker:down:test
+npm run test:e2e:dev     # docker:up:test runs automatically; dev server mode (no build required)
+npm run docker:down:test # stop the test database when done
 ```
 
 `NODE_ENV=test` is set automatically by all `test:e2e` scripts — no manual environment switching required.
@@ -334,6 +333,17 @@ Key variables:
 | `NEXTAUTH_URL` | `http://localhost:3001` | `http://localhost:3000` | production URL |
 
 No manual environment switching or symlinks are required.
+
+### Changing the Port
+
+If port 3001 (dev) or 3000 (test) conflicts with another application, update `PORT` in the relevant env file — no edits to `docker-compose.*.yml` are needed:
+
+- Development: set `PORT=<new-port>` in `.env.development`
+- Test: set `PORT=<new-port>` in `.env.test`
+
+### Local Production Build
+
+Running `build:full` locally requires `.env.production` and `.env.production.local` (both are gitignored). A simpler alternative for local production testing is to use `.env.test` + `docker-compose.test.yml`, which reuses the existing test containers.
 
 ---
 

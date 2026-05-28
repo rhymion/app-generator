@@ -128,7 +128,7 @@ Cypress.Commands.add('fillField', (label: string, value: string) => {
  * Click a button or link by aria-label
  */
 Cypress.Commands.add('clickButton', (text: string) => {
-  cy.get(`button[aria-label="${text}"]`).click();
+  cy.get(`button[aria-label="${text}"]`).first().click();
 });
 
 /**
@@ -184,7 +184,10 @@ Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) =
     const optionSelector = '[role="listbox"] [role="option"], .MuiAutocomplete-popper li';
     cy.wrap(doc.body)
       .find(optionSelector)
-      .should('have.length.greaterThan', 0)
+      .should(($opts) => {
+        const $matched = $opts.filter((_, el) => exactRe.test(el.textContent ?? ''));
+        expect($matched.length).to.be.greaterThan(0);
+      })
       .then(($opts) => {
         const $matched = $opts.filter((_, el) => exactRe.test(el.textContent ?? '')).first();
         cy.wrap($matched).click();
@@ -211,13 +214,15 @@ Cypress.Commands.add('clearAutocomplete', (label: string) => {
  * Set checkbox state by label
  */
 Cypress.Commands.add('setCheckbox', (label: string, checked: boolean) => {
-  getFormLabel(label).parent().find('input[type="checkbox"]').then(($cb) => {
-    if (checked && !$cb.is(':checked')) {
-      cy.wrap($cb).check();
-    } else if (!checked && $cb.is(':checked')) {
-      cy.wrap($cb).uncheck();
-    }
-  });
+  getFormLabel(label).parent().find('input[type="checkbox"]')
+    .should('be.enabled')
+    .then(($cb) => {
+      if (checked && !$cb.is(':checked')) {
+        cy.wrap($cb).check();
+      } else if (!checked && $cb.is(':checked')) {
+        cy.wrap($cb).uncheck();
+      }
+    });
 });
 
 /**

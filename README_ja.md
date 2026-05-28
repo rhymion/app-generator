@@ -142,6 +142,18 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+### AUTH_SECRET の設定（必須）
+
+`AUTH_SECRET` は必須です — 未設定の場合、Auth.js が `MissingSecret` エラーで起動を拒否します。
+
+以下のコマンドでシークレットを生成してください:
+
+```bash
+openssl rand -base64 32
+```
+
+生成した値を `.env.development`（ローカル開発用）と `.env.test`（E2E テスト用）に追加してください。本番環境では Vercel ダッシュボードで設定します。
+
 ### クイックスタート（コマンド一発）
 
 依存パッケージのインストール後、一つのコマンドでデータベースの起動、コード生成、マイグレーション実行、シーディング、開発サーバー起動まで完了します:
@@ -159,6 +171,8 @@ npm run build:full
 ```
 
 `build:full` の実行順序: `docker:up:prod` → `generate-code` → `migrate:deploy` → `db:generate` → `db:seed-tenant` → `build`
+
+> **重要**: `build:full` を初めて実行する前に、`dev:full` を少なくとも一度実行してください。`dev:full` は `migrate:dev` を使用して Prisma マイグレーションファイルを作成します。`build:full` が使用する `migrate:deploy` は既存のマイグレーションファイルを適用するだけです。
 
 または、以下の手順に従って段階的に実行することもできます。
 
@@ -180,7 +194,7 @@ npm run setup            # generate-code → db:push → db:generate → db:seed
 npm run dev              # ポート 3001 で Next.js 開発サーバーを起動
 ```
 
-[http://localhost:3001](http://localhost:3001) を開いてアプリケーションを確認してください。
+[http://localhost:3001](http://localhost:3001) を開いてアプリケーションを確認してください。サーバー起動後、[http://localhost:3001/docs](http://localhost:3001/docs) で生成されたエンティティドキュメントを閲覧できます（現在英語のみ）。
 
 ```bash
 npm run docker:down:dev  # 作業終了時にデータベースを停止
@@ -190,20 +204,7 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 ## ベースプロジェクトとしての使い方
 
-このジェネレーターはご自身のアプリケーションの基盤として使用するよう設計されています。スキーマ定義とカスタムコードを別のプロジェクトディレクトリ（`../prj`）に保持し、ジェネレーターに同期する方法を推奨します。
-
-1. `code_generator/json_schema.yaml` と `prisma/schema.prisma` にエンティティを定義します。
-2. `npm run generate-code` を実行して TypeScript、React、Cypress ファイルを生成します。
-3. カスタムビジネスロジックを指定の拡張ポイントに配置します:
-   - `lib/{entity}/service_after_create.ts` — 作成後フック（一度書いたら上書きされないスタブ）
-   - `components/_standard/` — 共有 UI コンポーネント（ジェネレーターが触れることはない）
-   - `custom/` — テナントごとの UI オーバーライドとアプリ固有の拡張
-4. スキーマ変更後は `npm run db:push` と `npm run db:generate` を実行します。
-5. スキーマ更新 → 再生成 → 拡張 のサイクルを繰り返します。
-
-生成前にプロジェクトディレクトリ（`../prj`）をジェネレーターの作業ツリーにコピーするには `npm run prj:sync` を使用してください。
-
-拡張ポイントの全リファレンスについては [docs/knowledge/code-generation-custom-extensions.md](docs/knowledge/code-generation-custom-extensions.md) を参照してください。
+このジェネレーターをご自身のアプリケーションの基盤として利用したい場合は [app-template](https://github.com/rhymion/app-template) を参照してください。app-template は app-generator を submodule として取り込む thin wrapper で、プロジェクト固有のスキーマ定義とカスタムコードをその上に追加する構成になっています。
 
 ---
 
@@ -274,19 +275,17 @@ npm run lint
 ### E2E テスト — フルパイプライン
 
 ```bash
-npm run docker:up:test
-npm run test:e2e:build   # generate-code + db:push + db:generate + db:seed-tenant + build
+npm run test:e2e:build   # docker:up:test は自動起動; generate-code + db:push + db:generate + db:seed-tenant + build
 npm run test:e2e:cy:api  # API のみの Cypress スペック
 npm run test:e2e         # Cypress フルスイート（build + start + run）
-npm run docker:down:test
+npm run docker:down:test # テスト終了後にテスト用データベースを停止
 ```
 
 ### E2E テスト — ホットリロードモード
 
 ```bash
-npm run docker:up:test
-npm run test:e2e:dev     # 開発サーバーモード（ビルド不要）
-npm run docker:down:test
+npm run test:e2e:dev     # docker:up:test は自動起動; 開発サーバーモード（ビルド不要）
+npm run docker:down:test # テスト終了後にテスト用データベースを停止
 ```
 
 `NODE_ENV=test` はすべての `test:e2e` スクリプトで自動的に設定されます — 手動での環境切り替えは不要です。
@@ -318,6 +317,17 @@ Next.js は `NODE_ENV` に基づいて環境ファイルを自動的に読み込
 | `NEXTAUTH_URL` | `http://localhost:3001` | `http://localhost:3000` | 本番 URL |
 
 手動での環境切り替えやシンボリックリンクは不要です。
+
+### ポート番号の変更
+
+ポート 3001（開発）または 3000（テスト）が他のアプリケーションと競合する場合は、該当する env ファイルの `PORT` を変更してください — `docker-compose.*.yml` の編集は不要です:
+
+- 開発: `.env.development` に `PORT=<新しいポート番号>` を設定
+- テスト: `.env.test` に `PORT=<新しいポート番号>` を設定
+
+### ローカルでの本番ビルド
+
+`build:full` をローカルで実行するには `.env.production` と `.env.production.local`（いずれも gitignore 済み）が必要です。ローカルで本番コードパスをテストする場合は、既存のテスト用コンテナを再利用できる `.env.test` + `docker-compose.test.yml` の組み合わせが手軽な代替手段です。
 
 ---
 

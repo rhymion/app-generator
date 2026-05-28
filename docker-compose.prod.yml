@@ -1,8 +1,8 @@
-# Local development services (postgres only).
-# Redis is not needed for dev — the rate limiter falls back to in-memory
+# Local production services (postgres only).
+# Redis is not needed for prod — the rate limiter falls back to in-memory
 # when REDIS_URL is unset (see lib/rate-limit/index.ts).
 services:
-  postgres-dev:
+  postgres-prod:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
@@ -11,13 +11,29 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres-dev-data:/var/lib/postgresql/data
+      - postgres-prod-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  redis-prod:
+    image: redis:7-alpine
+    # Backs the rate-limit adapter for Cypress and Redis adapter unit tests
+    # (lib/rate-limit/redis.test.ts). Not used by `npm run dev` — dev
+    # falls back to in-memory rate limiting when REDIS_URL is unset.
+    # No persistence — the dataset is rebuilt on every test run anyway,
+    # and disabling AOF/snapshotting keeps the container quiet.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
-  postgres-dev-data:
+  postgres-prod-data:
     driver: local
