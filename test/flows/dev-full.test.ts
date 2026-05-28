@@ -5,25 +5,25 @@ import { startServer, stopServer, signUp, signIn, waitForPortFree } from './help
 
 const PORT = 3001;
 
-describe('dev:full → auth flow', { timeout: 1_200_000 }, () => {
+/* describe('dev:full → auth flow', { timeout: 1_200_000 }, () => {
   let server: ChildProcess | null = null;
 
   afterAll(() => {
     if (server) stopServer(server);
   });
 
-  // it('scenario 1: sign up via POST /api/auth/register returns 201', async () => {
-  //   server = await startServer('dev:full', PORT, { timeout: 600_000, env: { NODE_ENV: 'development' } });
-  //   const uniqueEmail = `test+${Date.now()}@example.com`;
-  //   const res = await signUp(PORT, {
-  //     email: uniqueEmail,
-  //     password: 'TestPassword123!',
-  //     name: 'Test User',
-  //   });
-  //   expect(res.status).toBe(201);
-  // });
+  it('scenario 1: sign up via POST /api/auth/register returns 201', async () => {
+    server = await startServer('dev:full', PORT, { timeout: 600_000, env: { NODE_ENV: 'development' } });
+    const uniqueEmail = `test+${Date.now()}@example.com`;
+    const res = await signUp(PORT, {
+      email: uniqueEmail,
+      password: 'TestPassword123!',
+      name: 'Test User',
+    });
+    expect(res.status).toBe(201);
+  });
 
-/*   it('scenario 2: sign in via NextAuth callback returns 302', async () => {
+  it('scenario 2: sign in via NextAuth callback returns 302', async () => {
     if (!server) {
       server = await startServer('dev:full', PORT, { timeout: 600_000, env: { NODE_ENV: 'development' } });
     }
@@ -34,8 +34,8 @@ describe('dev:full → auth flow', { timeout: 1_200_000 }, () => {
     });
     expect(res.status).toBe(302);
   });
- */});
-
+});
+ */
 describe('port conflict handling', { timeout: 120_000 }, () => {
   it('scenario 11: dev:full times out when port 3001 is already occupied', async () => {
     // Wait for any previous dev server to release the port
