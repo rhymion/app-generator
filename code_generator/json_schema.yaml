@@ -1,7 +1,7 @@
 $schema: "http://json-schema.org/draft-07/schema#"
 
 # Support multi-tenancy
-version: 2.0
+format-version: 1.0
 definitions:
   # ============================================================
   # System entities (required by all apps — see §1.1)
