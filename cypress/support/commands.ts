@@ -184,7 +184,10 @@ Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) =
     const optionSelector = '[role="listbox"] [role="option"], .MuiAutocomplete-popper li';
     cy.wrap(doc.body)
       .find(optionSelector)
-      .should('have.length.greaterThan', 0)
+      .should(($opts) => {
+        const $matched = $opts.filter((_, el) => exactRe.test(el.textContent ?? ''));
+        expect($matched.length).to.be.greaterThan(0);
+      })
       .then(($opts) => {
         const $matched = $opts.filter((_, el) => exactRe.test(el.textContent ?? '')).first();
         cy.wrap($matched).click();
