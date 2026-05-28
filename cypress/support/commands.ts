@@ -214,13 +214,15 @@ Cypress.Commands.add('clearAutocomplete', (label: string) => {
  * Set checkbox state by label
  */
 Cypress.Commands.add('setCheckbox', (label: string, checked: boolean) => {
-  getFormLabel(label).parent().find('input[type="checkbox"]').then(($cb) => {
-    if (checked && !$cb.is(':checked')) {
-      cy.wrap($cb).check();
-    } else if (!checked && $cb.is(':checked')) {
-      cy.wrap($cb).uncheck();
-    }
-  });
+  getFormLabel(label).parent().find('input[type="checkbox"]')
+    .should('be.enabled')
+    .then(($cb) => {
+      if (checked && !$cb.is(':checked')) {
+        cy.wrap($cb).check();
+      } else if (!checked && $cb.is(':checked')) {
+        cy.wrap($cb).uncheck();
+      }
+    });
 });
 
 /**
