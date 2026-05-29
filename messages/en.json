@@ -158,7 +158,12 @@
     "disableButton": "Disable MFA",
     "regenerateButton": "Regenerate recovery codes",
     "regenerateIntro": "Enter your current TOTP code or a recovery code to generate new codes. Old codes will be invalidated.",
-    "regenerateSuccess": "Recovery codes regenerated. Save these codes — they will not be shown again."
+    "regenerateSuccess": "Recovery codes regenerated. Save these codes — they will not be shown again.",
+    "errorInvalidCode": "Invalid code. Please try again.",
+    "errorNotEnabled": "MFA is not enabled.",
+    "errorAlreadyEnabled": "MFA is already enabled.",
+    "errorSessionRequired": "Please sign in again.",
+    "errorUnknown": "An unexpected error occurred."
   },
   "Setting": {
     "title": "Account settings",

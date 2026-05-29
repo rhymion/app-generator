@@ -23,10 +23,27 @@ import { recordAuditEvent } from '@/lib/audit-log';
  * the server-rendered status block to refresh.
  */
 
+export type MfaErrorCode =
+  | 'INVALID_CODE'
+  | 'MFA_NOT_ENABLED'
+  | 'MFA_ALREADY_ENABLED'
+  | 'SESSION_REQUIRED'
+  | 'UNKNOWN_ERROR';
+
 export type ActionResult =
   | { ok: true }
   | { ok: true; recoveryCodes: string[] }
-  | { ok: false; error: string };
+  | { ok: false; error: MfaErrorCode };
+
+function toErrorCode(err: unknown): MfaErrorCode {
+  const msg = err instanceof Error ? err.message : '';
+  if (msg === 'User not authenticated') return 'SESSION_REQUIRED';
+  if (msg === 'MFA already enabled') return 'MFA_ALREADY_ENABLED';
+  if (msg === 'Invalid MFA code') return 'INVALID_CODE';
+  if (msg === 'MFA_NOT_ENABLED') return 'MFA_NOT_ENABLED';
+  if (msg === 'INVALID_CODE') return 'INVALID_CODE';
+  return 'UNKNOWN_ERROR';
+}
 
 export async function startEnrollmentAction(): Promise<ActionResult> {
   try {
@@ -41,7 +58,7 @@ export async function startEnrollmentAction(): Promise<ActionResult> {
     revalidatePath('/setting/mfa');
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Unknown error' };
+    return { ok: false, error: toErrorCode(err) };
   }
 }
 
@@ -58,7 +75,7 @@ export async function completeEnrollmentAction(code: string): Promise<ActionResu
     revalidatePath('/setting/mfa');
     return { ok: true, recoveryCodes };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Unknown error' };
+    return { ok: false, error: toErrorCode(err) };
   }
 }
 
@@ -75,13 +92,13 @@ export async function disableMfaAction(code: string): Promise<ActionResult> {
     revalidatePath('/setting/mfa');
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Unknown error' };
+    return { ok: false, error: toErrorCode(err) };
   }
 }
 
 export type RegenerateResult =
   | { success: true; recoveryCodes: string[] }
-  | { success: false; error: 'INVALID_CODE' | 'MFA_NOT_ENABLED' | 'UNKNOWN_ERROR' };
+  | { success: false; error: MfaErrorCode };
 
 export async function regenerateRecoveryCodesAction(code: string): Promise<RegenerateResult> {
   try {
@@ -96,10 +113,7 @@ export async function regenerateRecoveryCodesAction(code: string): Promise<Regen
     revalidatePath('/setting/mfa');
     return { success: true, recoveryCodes };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : '';
-    if (msg === 'MFA_NOT_ENABLED') return { success: false, error: 'MFA_NOT_ENABLED' };
-    if (msg === 'INVALID_CODE') return { success: false, error: 'INVALID_CODE' };
-    return { success: false, error: 'UNKNOWN_ERROR' };
+    return { success: false, error: toErrorCode(err) };
   }
 }
 

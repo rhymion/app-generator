@@ -13,6 +13,7 @@ import Typography from '@mui/material/Typography';
 import { useTranslations } from 'next-intl';
 
 import type { EnrollmentStatus } from '@/lib/mfa/enrollment';
+import type { MfaErrorCode } from './actions';
 import {
   cancelEnrollmentAction,
   completeEnrollmentAction,
@@ -20,6 +21,14 @@ import {
   regenerateRecoveryCodesAction,
   startEnrollmentAction,
 } from './actions';
+
+const MFA_ERROR_KEYS: Record<MfaErrorCode, string> = {
+  INVALID_CODE: 'errorInvalidCode',
+  MFA_NOT_ENABLED: 'errorNotEnabled',
+  MFA_ALREADY_ENABLED: 'errorAlreadyEnabled',
+  SESSION_REQUIRED: 'errorSessionRequired',
+  UNKNOWN_ERROR: 'errorUnknown',
+};
 
 // Three persistent states (mirroring the server-fetched EnrollmentStatus)
 // plus a transient one — `recovery-display` — that only the client sees
@@ -46,7 +55,7 @@ export default function MfaClient({ initial }: { initial: EnrollmentStatus }) {
   const t = useTranslations('Mfa');
   const router = useRouter();
   const [state, setState] = useState<LocalState>(() => statusToLocal(initial));
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<MfaErrorCode | null>(null);
   const [code, setCode] = useState('');
   const [regenerateOpen, setRegenerateOpen] = useState(false);
   const [regenerateCode, setRegenerateCode] = useState('');
@@ -126,7 +135,7 @@ export default function MfaClient({ initial }: { initial: EnrollmentStatus }) {
         {t('title')}
       </Typography>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{t(MFA_ERROR_KEYS[error] ?? 'errorUnknown')}</Alert>}
 
       {state.kind === 'disabled' && (
         <Paper variant="outlined" sx={{ p: 3 }}>
