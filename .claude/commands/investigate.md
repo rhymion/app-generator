@@ -21,3 +21,7 @@ Task: $ARGUMENTS
 ## Completion gate
 
 None. No files modified, no commands run.
+
+> **Note**: When running lint or typecheck in isolation, prefix with
+> `npm run generate-code` first. See `AGENTS.md §Generated-code prerequisites
+> for gates` for the full rule.
