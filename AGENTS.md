@@ -170,8 +170,9 @@ and other tools emit **false-positive errors** that are not real bugs.
 3. **Restore the working tree after PASS.**
    After gates pass, return the working tree to its pre-generate-code state:
    - Files in `.gitignore`-covered directories remain as untracked — no action needed.
-   - For directories not covered by `.gitignore`, use `git clean -fdx <dir>`
-     (verify the target before running).
+   - For directories not covered by `.gitignore`, first verify with
+     `git clean -n <dir>` (dry-run), then clean only confirmed generated
+     directories: `git clean -fd <dir>`.
 
 4. **Never commit generated code.**
    Generated files produced by `npm run generate-code` must not be included

@@ -87,3 +87,7 @@ Minimum docs to read before starting:
 - **In-memory rate limiter in prod without REDIS_URL** — no visible error at startup; only discovered under attack. Add a startup check that logs a warning when `NODE_ENV=production` and `REDIS_URL` is absent.
 - **Raw `<img>` in display/upload components** — not a direct XSS vector (React escapes `src`), but bypasses `next/image`'s domain restriction and optimization pipeline.
 - **Tenant suspension enforcement** — `tenant.status` column exists but verify the `signIn()` callback actually queries and checks `tenant.status` for credentials users (not just OAuth).
+
+> **Note**: When running lint or typecheck in isolation, prefix with
+> `npm run generate-code` first. See `AGENTS.md §Generated-code prerequisites
+> for gates` for the full rule.

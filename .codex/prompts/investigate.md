@@ -17,8 +17,5 @@ Gate: none. Cite findings with `file:line` references.
 
 No file edits, no builds, no tests, no docker.
 
-> When running lint/typecheck in isolation, prefix with `npm run generate-code`.
-> See `.codex/rules/generated-code-gates.md` for details.
-
 ## Input
 $ARGUMENTS
