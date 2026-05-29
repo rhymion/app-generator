@@ -4,18 +4,18 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardActionArea from '@mui/material/CardActionArea';
 import Typography from '@mui/material/Typography';
-import { getSessionUserIdOrThrow } from '@/lib/authz';
 import { Link } from '@/i18n/navigation';
+import type { ModelPermissions } from '@/lib/authz';
 
-export default async function SettingPage() {
-  await getSessionUserIdOrThrow();
+interface Props {
+  permissions: ModelPermissions;
+}
+
+export default async function SettingsHub({ permissions: _ }: Props) {
   const t = await getTranslations('Setting');
 
   return (
-    <Box sx={{ maxWidth: 600, mx: 'auto', mt: 4, px: 2 }}>
-      <Typography variant="h5" fontWeight="bold" mb={3}>
-        {t('title')}
-      </Typography>
+    <Box sx={{ maxWidth: 600, mt: 2, mb: 3 }}>
       <Box display="flex" flexDirection="column" gap={2}>
         <Card variant="outlined">
           <CardActionArea component={Link} href="/setting/mfa">

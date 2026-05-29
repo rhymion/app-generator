@@ -165,7 +165,8 @@ _Core MFA lifecycle (original phase 5a):_
 
 _Additional features shipped after original phase 5a:_
 - `app/[locale]/setting/page.tsx` — replaced CRUD list with an account
-  settings hub that includes a direct link to `/setting/mfa`.
+  settings hub that includes a direct link to `/setting/mfa`; hub is
+  regen-safe via `x-custom-components` (`components/setting/SettingsHub.tsx`).
 - `lib/mfa/enrollment.ts regenerateRecoveryCodes` + `actions.ts
   regenerateRecoveryCodesAction` — re-issue fresh recovery codes once
   the user verifies with a current TOTP or an existing recovery code;

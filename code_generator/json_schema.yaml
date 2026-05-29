@@ -104,6 +104,10 @@ definitions:
       delete: false
       invalidate: false
       api: true
+    x-custom-components:
+      - name: SettingsHub
+        target:
+          - list
     x-relationships:
       roles:
         type: many-to-many

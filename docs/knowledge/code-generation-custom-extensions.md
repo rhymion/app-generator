@@ -132,6 +132,7 @@ automatically to the component whenever `target` includes `view` or `edit`.
 
 `components/shift_template/CopyShiftsButton.tsx` — list-page button to copy shift templates.
 `components/leave_request/ApprovalSection.tsx` — shows approval requests with Approve/Reject buttons in view and edit pages.
+`components/setting/SettingsHub.tsx` — account-settings hub (MFA + connected-accounts cards) rendered at the top of the `/setting` list page, regen-safe because it lives in `components/setting/` and is mounted via `x-custom-components`.
 
 ---
 
