@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Divider from '@mui/material/Divider';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
@@ -16,6 +17,7 @@ import {
   cancelEnrollmentAction,
   completeEnrollmentAction,
   disableMfaAction,
+  regenerateRecoveryCodesAction,
   startEnrollmentAction,
 } from './actions';
 
@@ -24,10 +26,12 @@ import {
 // because the plaintext codes are returned from the action but never
 // committed to any client-readable storage. Once the user clicks "I've
 // saved them", we router.refresh() and the page re-renders as `enabled`.
+// `regenerated` distinguishes a post-regeneration display from the initial
+// enrollment display so the correct success message is shown.
 type LocalState =
   | { kind: 'disabled' }
   | { kind: 'pending'; qrDataUrl: string; secret: string }
-  | { kind: 'recovery-display'; codes: string[] }
+  | { kind: 'recovery-display'; codes: string[]; regenerated?: boolean }
   | { kind: 'enabled' };
 
 function statusToLocal(s: EnrollmentStatus): LocalState {
@@ -44,6 +48,8 @@ export default function MfaClient({ initial }: { initial: EnrollmentStatus }) {
   const [state, setState] = useState<LocalState>(() => statusToLocal(initial));
   const [error, setError] = useState<string | null>(null);
   const [code, setCode] = useState('');
+  const [regenerateOpen, setRegenerateOpen] = useState(false);
+  const [regenerateCode, setRegenerateCode] = useState('');
   const [pending, startTransition] = useTransition();
 
   async function onEnable() {
@@ -92,6 +98,20 @@ export default function MfaClient({ initial }: { initial: EnrollmentStatus }) {
     startTransition(async () => {
       await cancelEnrollmentAction();
       router.refresh();
+    });
+  }
+
+  async function onRegenerateCodes() {
+    setError(null);
+    startTransition(async () => {
+      const res = await regenerateRecoveryCodesAction(regenerateCode);
+      if (!res.success) {
+        setError(res.error);
+        return;
+      }
+      setRegenerateCode('');
+      setRegenerateOpen(false);
+      setState({ kind: 'recovery-display', codes: res.recoveryCodes, regenerated: true });
     });
   }
 
@@ -159,7 +179,7 @@ export default function MfaClient({ initial }: { initial: EnrollmentStatus }) {
       {state.kind === 'recovery-display' && (
         <Paper variant="outlined" sx={{ p: 3 }}>
           <Alert severity="warning" sx={{ mb: 2 }}>
-            {t('recoveryWarning')}
+            {state.regenerated ? t('regenerateSuccess') : t('recoveryWarning')}
           </Alert>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, fontFamily: 'monospace', mb: 3 }}>
             {state.codes.map((c) => (
@@ -193,6 +213,42 @@ export default function MfaClient({ initial }: { initial: EnrollmentStatus }) {
           >
             {t('disableButton')}
           </Button>
+
+          <Divider sx={{ my: 3 }} />
+
+          <Typography variant="body1" mb={2}>{t('regenerateIntro')}</Typography>
+          {!regenerateOpen ? (
+            <Button variant="outlined" onClick={() => setRegenerateOpen(true)} disabled={pending}>
+              {t('regenerateButton')}
+            </Button>
+          ) : (
+            <Stack spacing={2}>
+              <TextField
+                label={t('disableCodeLabel')}
+                value={regenerateCode}
+                onChange={(e) => setRegenerateCode(e.target.value)}
+                fullWidth
+                autoComplete="one-time-code"
+                inputMode="numeric"
+              />
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="contained"
+                  onClick={onRegenerateCodes}
+                  disabled={pending || regenerateCode.length === 0}
+                >
+                  {t('regenerateButton')}
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={() => { setRegenerateOpen(false); setRegenerateCode(''); setError(null); }}
+                  disabled={pending}
+                >
+                  {t('cancelButton')}
+                </Button>
+              </Stack>
+            </Stack>
+          )}
         </Paper>
       )}
     </Box>

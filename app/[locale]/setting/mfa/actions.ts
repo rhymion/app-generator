@@ -7,6 +7,7 @@ import { getSessionUserIdOrThrow } from '@/lib/authz';
 import {
   completeEnrollment,
   disableMfa,
+  regenerateRecoveryCodes,
   startEnrollment,
 } from '@/lib/mfa/enrollment';
 import { recordAuditEvent } from '@/lib/audit-log';
@@ -75,6 +76,30 @@ export async function disableMfaAction(code: string): Promise<ActionResult> {
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+export type RegenerateResult =
+  | { success: true; recoveryCodes: string[] }
+  | { success: false; error: 'INVALID_CODE' | 'MFA_NOT_ENABLED' | 'UNKNOWN_ERROR' };
+
+export async function regenerateRecoveryCodesAction(code: string): Promise<RegenerateResult> {
+  try {
+    const userId = await getSessionUserIdOrThrow();
+    const { recoveryCodes } = await regenerateRecoveryCodes(userId, code);
+    await recordAuditEvent({
+      action: 'auth:mfa.regenerateCodes',
+      actor_user_id: userId,
+      target_table: 'user',
+      target_id: userId,
+    });
+    revalidatePath('/setting/mfa');
+    return { success: true, recoveryCodes };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '';
+    if (msg === 'MFA_NOT_ENABLED') return { success: false, error: 'MFA_NOT_ENABLED' };
+    if (msg === 'INVALID_CODE') return { success: false, error: 'INVALID_CODE' };
+    return { success: false, error: 'UNKNOWN_ERROR' };
   }
 }
 

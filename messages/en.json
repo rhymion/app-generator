@@ -155,7 +155,10 @@
     "enabledStatus": "Two-factor authentication is enabled on this account.",
     "disableIntro": "To turn MFA off, enter a current 6-digit code (or a recovery code).",
     "disableCodeLabel": "6-digit or recovery code",
-    "disableButton": "Disable MFA"
+    "disableButton": "Disable MFA",
+    "regenerateButton": "Regenerate recovery codes",
+    "regenerateIntro": "Enter your current TOTP code or a recovery code to generate new codes. Old codes will be invalidated.",
+    "regenerateSuccess": "Recovery codes regenerated. Save these codes — they will not be shown again."
   },
   "Setting": {
     "title": "Account settings",

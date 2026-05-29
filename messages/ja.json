@@ -155,7 +155,10 @@
     "enabledStatus": "このアカウントでは 2 要素認証が有効です。",
     "disableIntro": "MFA を無効化するには、現在の 6 桁コード（またはリカバリーコード）を入力してください。",
     "disableCodeLabel": "6 桁またはリカバリーコード",
-    "disableButton": "MFA を無効化"
+    "disableButton": "MFA を無効化",
+    "regenerateButton": "リカバリーコードを再発行",
+    "regenerateIntro": "新しいコードを発行するには、現在の TOTP コードまたはリカバリーコードを入力してください。古いコードは無効になります。",
+    "regenerateSuccess": "リカバリーコードを再発行しました。これらのコードを保存してください。再表示されません。"
   },
   "Setting": {
     "title": "アカウント設定",
