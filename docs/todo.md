@@ -143,6 +143,8 @@ credentials or SSO sign-in.
 **References:** `auth.ts`, `prisma/schema.prisma`, `app/[locale]/setting/`.
 
 **Status:** phase 5a shipped — credentials-only, opt-in per user.
+
+_Core MFA lifecycle (original phase 5a):_
 - `lib/mfa/{crypto,totp,recovery,verify,enrollment}.ts` — AES-256-GCM
   secret-at-rest (key derived from `AUTH_SECRET`); otplib v13 TOTP
   wrapper with ±30 s tolerance; 8 single-use recovery codes
@@ -160,10 +162,26 @@ credentials or SSO sign-in.
 - `messages/{en,ja}.json` — `Auth.mfa*` strings + new `Mfa` section.
 - `docs/knowledge/sso-authentication.md` — v1 decision note in the
   "Out of scope, for next time" section.
-- 28 Vitest cases across `lib/mfa/{crypto,totp,recovery}.test.ts`.
 
-**Not in this phase:** OAuth + MFA challenge (phase 5b), admin role
-mandate (recorded as deferred in `sso-authentication.md`).
+_Additional features shipped after original phase 5a:_
+- `app/[locale]/setting/page.tsx` — replaced CRUD list with an account
+  settings hub that includes a direct link to `/setting/mfa`.
+- `lib/mfa/enrollment.ts regenerateRecoveryCodes` + `actions.ts
+  regenerateRecoveryCodesAction` — re-issue fresh recovery codes once
+  the user verifies with a current TOTP or an existing recovery code;
+  old codes deleted atomically. UI surface in `mfa-client.tsx`.
+- `messages/{en,ja}.json` — MFA error codes (`MFA_NOT_ENABLED`,
+  `INVALID_CODE`) returned by server actions and surfaced as i18n
+  strings so the UI never displays raw error identifiers.
+
+_Tests:_
+- 32 Vitest cases across `lib/mfa/{crypto,totp,recovery,enrollment}.test.ts`
+  (enrollment.test.ts adds 4 cases for `regenerateRecoveryCodes`: happy
+  path TOTP, happy path recovery code, MFA-not-enabled guard,
+  invalid-code guard).
+
+**Not yet implemented (phase 5b+):** OAuth + MFA challenge, admin role
+mandate. Both recorded as deferred in `sso-authentication.md`.
 
 ---
 
