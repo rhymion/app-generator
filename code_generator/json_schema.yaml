@@ -47,6 +47,9 @@ definitions:
           - string
           - "null"
         format: uri
+      mfa_enabled:
+        type: boolean
+        default: false
 
   role:
     type: object
@@ -79,6 +82,11 @@ definitions:
         - name
         - image
         - roles
+    x-custom-components:
+      - name: MfaToggle
+        path: "@/components/_standard/MfaToggle"
+        target:
+          - edit
     x-relationships:
       roles:
         type: many-to-many

@@ -51,6 +51,7 @@
     "location": "Location",
     "max": "Max",
     "maxLength": "Max Length",
+    "mfaEnabled": "Mfa Enabled",
     "name": "Name",
     "order": "No.",
     "password": "Password",
@@ -163,7 +164,10 @@
     "errorNotEnabled": "MFA is not enabled.",
     "errorAlreadyEnabled": "MFA is already enabled.",
     "errorSessionRequired": "Please sign in again.",
-    "errorUnknown": "An unexpected error occurred."
+    "errorUnknown": "An unexpected error occurred.",
+    "toggleEnableButton": "Enable MFA",
+    "toggleEnabledLabel": "MFA Enabled",
+    "toggleDisableButton": "Disable MFA"
   },
   "Setting": {
     "title": "Account settings",

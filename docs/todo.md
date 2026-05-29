@@ -174,6 +174,9 @@ _Additional features shipped after original phase 5a:_
 - `messages/{en,ja}.json` — MFA error codes (`MFA_NOT_ENABLED`,
   `INVALID_CODE`) returned by server actions and surfaced as i18n
   strings so the UI never displays raw error identifiers.
+- `user.mfa_enabled` is now schema-exposed via `x-custom-component` MfaToggle
+  (`components/_standard/MfaToggle.tsx`); user admin edit page shows enable/disable
+  widget; direct boolean flip forbidden, enable redirects to enrollment flow.
 
 _Tests:_
 - 32 Vitest cases across `lib/mfa/{crypto,totp,recovery,enrollment}.test.ts`

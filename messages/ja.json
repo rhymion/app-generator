@@ -51,6 +51,7 @@
     "location": "所在地",
     "max": "最大",
     "maxLength": "最大長",
+    "mfaEnabled": "Mfa Enabled",
     "name": "名前",
     "order": "No.",
     "password": "パスワード",
@@ -163,7 +164,10 @@
     "errorNotEnabled": "MFA が有効化されていません。",
     "errorAlreadyEnabled": "MFA はすでに有効化されています。",
     "errorSessionRequired": "再度サインインしてください。",
-    "errorUnknown": "予期しないエラーが発生しました。"
+    "errorUnknown": "予期しないエラーが発生しました。",
+    "toggleEnableButton": "MFA を有効化",
+    "toggleEnabledLabel": "MFA 有効",
+    "toggleDisableButton": "MFA を無効化"
   },
   "Setting": {
     "title": "アカウント設定",
