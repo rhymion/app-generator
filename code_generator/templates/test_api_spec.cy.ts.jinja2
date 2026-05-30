@@ -7,6 +7,7 @@ describe('API: {{ title }}', () => {
   beforeEach(() => {
     cy.task('db:reset');
     cy.task('db:seed');
+    cy.task('db:grantAllPermissions');
   });
 {% if can_list %}
 

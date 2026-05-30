@@ -19,6 +19,7 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
     cy.viewport(MOBILE.width, MOBILE.height);
     cy.task('db:reset');
     cy.task('db:seed');
+    cy.task('db:grantAllPermissions');
     Cypress.session.clearAllSavedSessions();
     cy.clearCookies();
     cy.clearLocalStorage();

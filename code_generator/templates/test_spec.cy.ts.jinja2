@@ -12,6 +12,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
   beforeEach(() => {
     cy.task('db:reset');
     cy.task('db:seed');
+    cy.task('db:grantAllPermissions');
     Cypress.session.clearAllSavedSessions();
     cy.clearCookies();
     cy.clearLocalStorage();
