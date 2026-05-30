@@ -120,7 +120,7 @@ definitions:
         - api_key
     x-custom-components:
       - name: SettingsHub
-        path: "@/components/_standard/SettingsHub"
+        path: "@/components/setting/SettingsHub"
         target:
           - list
     x-relationships:
