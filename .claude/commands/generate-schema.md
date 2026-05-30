@@ -48,3 +48,7 @@ Run in this order:
 | Build fails | 1. config → 2. schema → 3. code bug (both VCS-managed and generated) |
 | Test fails | 1. generated test code bug |
 | Other test fails | 1. generation logic missing a case → 2. product code bug |
+
+> **Note**: When running lint or typecheck in isolation, prefix with
+> `npm run generate-code` first. See `AGENTS.md §Generated-code prerequisites
+> for gates` for the full rule.

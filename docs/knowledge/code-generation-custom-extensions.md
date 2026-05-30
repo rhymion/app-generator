@@ -132,6 +132,20 @@ automatically to the component whenever `target` includes `view` or `edit`.
 
 `components/shift_template/CopyShiftsButton.tsx` — list-page button to copy shift templates.
 `components/leave_request/ApprovalSection.tsx` — shows approval requests with Approve/Reject buttons in view and edit pages.
+`components/_standard/MfaToggle.tsx` — Read-only MFA status chip on the admin user-detail (view) page. Schema config:
+
+```yaml
+user_detail:
+  x-custom-components:
+    - name: MfaToggle
+      path: "@/components/_standard/MfaToggle"
+      target:
+        - view
+```
+
+`props.src` is typed as `{ id: string; mfa_enabled?: boolean }` (minimal interface). At runtime Prisma includes `mfa_enabled` via the `...user` spread. Component renders an MUI `Chip` (green "MFA Enabled" / neutral "MFA Disabled") — **no edit/toggle widget**. Self-service Enable/Disable lives in the `/setting/mfa` flow accessed from the handwritten `/setting` page.
+
+> **Note:** `components/setting/SettingsHub.tsx` was abolished in cmd_075 (Option B). The `/setting` page is now a committed handwritten `app/[locale]/setting/page.tsx` (not generated). The `setting` entity uses `list: false` in `json_schema.yaml` to prevent overwriting.
 
 ---
 

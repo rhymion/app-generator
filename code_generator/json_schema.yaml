@@ -47,6 +47,12 @@ definitions:
           - string
           - "null"
         format: uri
+      mfa_enabled:
+        type: boolean
+        default: false
+        x-custom-component:
+          target:
+            - upsert
 
   role:
     type: object
@@ -79,6 +85,11 @@ definitions:
         - name
         - image
         - roles
+    x-custom-components:
+      - name: MfaToggle
+        path: "@/components/_standard/MfaToggle"
+        target:
+          - view
     x-relationships:
       roles:
         type: many-to-many
@@ -97,13 +108,20 @@ definitions:
 
   setting:
     x-generate:
-      list: true
+      list: false
       view: true
       new: false
       edit: true
       delete: false
       invalidate: false
       api: true
+      fields:
+        - name
+        - email
+        - image
+        - password
+        - api_key
+        - mfa_enabled
     x-relationships:
       roles:
         type: many-to-many

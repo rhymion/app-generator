@@ -143,6 +143,8 @@ credentials or SSO sign-in.
 **References:** `auth.ts`, `prisma/schema.prisma`, `app/[locale]/setting/`.
 
 **Status:** phase 5a shipped — credentials-only, opt-in per user.
+
+_Core MFA lifecycle (original phase 5a):_
 - `lib/mfa/{crypto,totp,recovery,verify,enrollment}.ts` — AES-256-GCM
   secret-at-rest (key derived from `AUTH_SECRET`); otplib v13 TOTP
   wrapper with ±30 s tolerance; 8 single-use recovery codes
@@ -160,10 +162,58 @@ credentials or SSO sign-in.
 - `messages/{en,ja}.json` — `Auth.mfa*` strings + new `Mfa` section.
 - `docs/knowledge/sso-authentication.md` — v1 decision note in the
   "Out of scope, for next time" section.
-- 28 Vitest cases across `lib/mfa/{crypto,totp,recovery}.test.ts`.
 
-**Not in this phase:** OAuth + MFA challenge (phase 5b), admin role
-mandate (recorded as deferred in `sso-authentication.md`).
+_Additional features shipped after original phase 5a:_
+- `app/[locale]/setting/page.tsx` — replaced CRUD list with an account
+  settings hub that includes a direct link to `/setting/mfa`; hub is a
+  committed handwritten page (cmd_075 Option B: SettingsHub abolished,
+  `setting` entity uses `list: false` in json_schema to prevent overwriting).
+- `lib/mfa/enrollment.ts regenerateRecoveryCodes` + `actions.ts
+  regenerateRecoveryCodesAction` — re-issue fresh recovery codes once
+  the user verifies with a current TOTP or an existing recovery code;
+  old codes deleted atomically. UI surface in `mfa-client.tsx`.
+- `messages/{en,ja}.json` — MFA error codes (`MFA_NOT_ENABLED`,
+  `INVALID_CODE`) returned by server actions and surfaced as i18n
+  strings so the UI never displays raw error identifiers.
+- `user.mfa_enabled` is now schema-exposed via `x-custom-component` MfaToggle
+  (`components/_standard/MfaToggle.tsx`); **target=[view] only** — admin user-detail
+  page shows read-only MFA status chip; no toggle/edit widget in admin UI.
+- ~~`components/setting/SettingsHub.tsx`~~ — **abolished in cmd_075** (Option B):
+  SettingsHub caused `/setting` 'Something went wrong!' (TypeScript build failure
+  from generated setting CRUD list + mfa_enabled boolean mismatch). Replaced by
+  committed handwritten `app/[locale]/setting/page.tsx` with MFA/Accounts navigation.
+- `app/[locale]/setting/mfa/mfa-client.tsx` — QR-display race condition fixed:
+  `startEnrollmentAction` now returns `{ qrDataUrl, secret }` directly; client sets
+  state immediately without waiting for `router.refresh()`.
+- `auth.ts` — `MfaRequiredError` / `InvalidMfaError` extend `CredentialsSignin` so
+  the error `code` field is preserved through @auth/core; login page checks `.code`
+  first to detect `MFA_REQUIRED` correctly.
+- `prisma/schema.prisma` — `mfa_recovery_code` already has `onDelete: Cascade`
+  (confirmed; no new migration needed for user deletion).
+
+_Tests:_
+- 32 Vitest cases across `lib/mfa/{crypto,totp,recovery,enrollment}.test.ts`
+  (enrollment.test.ts adds 4 cases for `regenerateRecoveryCodes`: happy
+  path TOTP, happy path recovery code, MFA-not-enabled guard,
+  invalid-code guard).
+
+**Not yet implemented (phase 5b+):** OAuth + MFA challenge, admin role
+mandate. Both recorded as deferred in `sso-authentication.md`.
+
+_Deferred (Issue 4 — user deletion blocked by missing cascade):_
+- **Problem:** Deleting a user via the admin UI fails because other records
+  owned by the user (e.g. `approval_flow` and similar creator-linked models)
+  do not yet carry `onDelete: Cascade` in `prisma/schema.prisma`.
+- **Root cause:** The cascade-delete specification for creator-owned records is
+  undecided — which models need it, and what the desired behavior is when a
+  user is deleted (cascade vs. set-null vs. restrict) must be confirmed with
+  product stakeholders before any migration is written.
+- **Resolution condition:** Once the spec is confirmed, add `onDelete: Cascade`
+  (or the appropriate policy) to each affected FK in `schema.prisma` and create
+  a new Prisma migration. Verify with E2E test that user deletion succeeds and
+  leaves no orphaned rows.
+- **Not in this cmd (cmd_073):** deferred pending spec decision.
+- **Related cmds:** cmd_071 subtask_071b (cascade delete partially implemented; mfa_recovery_code already has onDelete: Cascade).
 
 ---
 

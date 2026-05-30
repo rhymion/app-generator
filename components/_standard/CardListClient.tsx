@@ -167,7 +167,7 @@ export default function CardListClient<T extends BaseEntity>({
                         onChange={() => toggleSelection(item.id)}
                         size="small"
                         sx={{ mt: -0.5, mr: -1 }}
-                        inputProps={{ 'aria-label': `Select ${primaryValue || item.id}` }}
+                        slotProps={{ input: { 'aria-label': `Select ${primaryValue || item.id}` } }}
                       />
                     )}
                   </Box>

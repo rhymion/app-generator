@@ -82,3 +82,7 @@ Scope: $ARGUMENTS (if empty, review the entire codebase)
 - **Organization-filtered models add extra query** — `getAssociatedOrganizations(userId)` is called on every page load for org-filtered entities; result is not cached across the request. A React `cache()` wrapper or request-scoped memoization would eliminate redundant calls if multiple getters run in the same request.
 - **Wide-table `include` without `select`** — generated `getters.ts` uses `include:` for relations but fetches all scalar columns; for entities with many fields, explicit `select` projections would reduce DB payload.
 - **No DB-level index on `assignee_id`** — generated models with `assignee_id` are filtered in the `WHERE OR` clause, but verify `@@index([assignee_id])` exists in each generated schema; missing index causes full table scan for assignee-restricted users.
+
+> **Note**: When running lint or typecheck in isolation, prefix with
+> `npm run generate-code` first. See `AGENTS.md §Generated-code prerequisites
+> for gates` for the full rule.

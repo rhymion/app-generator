@@ -139,3 +139,30 @@ export async function disableMfa(userId: string, code: string): Promise<void> {
     data: { mfa_secret: null, mfa_enabled: false },
   });
 }
+
+/** Re-issue fresh recovery codes for an already-enabled MFA account.
+ *  Requires a current TOTP or recovery code. Old codes are deleted
+ *  atomically before the new ones are written. Returns the new plaintext
+ *  codes ONCE — callers must display and then discard them. */
+export async function regenerateRecoveryCodes(
+  userId: string,
+  code: string,
+): Promise<{ recoveryCodes: string[] }> {
+  const user = await db().user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, mfa_secret: true, mfa_enabled: true },
+  });
+  if (!user) throw new Error('User not found');
+  if (!user.mfa_enabled) throw new Error('MFA_NOT_ENABLED');
+
+  const { verifyMfaCode } = await import('./verify');
+  const ok = await verifyMfaCode(userId, code);
+  if (!ok) throw new Error('INVALID_CODE');
+
+  const codes = await generateRecoveryCodes();
+  await db().mfa_recovery_code.deleteMany({ where: { user_id: userId } });
+  await db().mfa_recovery_code.createMany({
+    data: codes.map((c) => ({ user_id: userId, code_hash: c.hash })),
+  });
+  return { recoveryCodes: codes.map((c) => c.plaintext) };
+}
