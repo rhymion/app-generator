@@ -46,6 +46,7 @@
     "followedBy": "後続",
     "gender": "性別",
     "image": "Image",
+    "imageUrl": "画像URL",
     "itemName": "項目名",
     "judgement": "判定",
     "location": "所在地",
