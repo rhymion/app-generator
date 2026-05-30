@@ -133,6 +133,17 @@ export function getDataGridRowCount() {
 }
 
 /**
+ * Get the total number of rows from MUI DataGrid's aria-rowcount attribute.
+ * Unlike getDataGridRowCount, this is not affected by virtual-scroll windowing:
+ * MUI DataGrid sets aria-rowcount = 1 (header) + total_data_rows on the grid element.
+ */
+export function getDataGridTotalRowCount() {
+  return cy.get('div[role="grid"]')
+    .invoke('attr', 'aria-rowcount')
+    .then(val => parseInt(val ?? '1', 10) - 1);
+}
+
+/**
  * Assert the value of a specific cell in DataGrid
  * @param rowIndex - 0-based row index
  * @param field - Field name (column)

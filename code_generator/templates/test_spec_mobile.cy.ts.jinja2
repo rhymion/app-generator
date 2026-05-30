@@ -30,24 +30,32 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
 {% if can_list %}
 
   describe('Card list', () => {
+{% if seed_count == 0 %}
     it('1.1 shows the empty state when there are no items', () => {
       cy.visit('/en/{{ parent }}');
       cy.contains('No items found.').should('be.visible');
       // Sanity: no row Checkboxes when the list is empty.
       cy.get('input[type="checkbox"][aria-label^="Select "]').should('not.exist');
     });
+{% else %}
+    it('1.1 shows {{ seed_count }} seed-only card(s) before any user data', () => {
+      cy.visit('/en/{{ parent }}');
+      // db:seed + db:grantAllPermissions pre-populate {{ seed_count }} {{ parent }} record(s)
+      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', {{ seed_count }});
+    });
+{% endif %}
 
     it('1.2 renders one card per item with the primary value as title', () => {
       cy.task('db:populate{{ pascal }}', 1);
       cy.visit('/en/{{ parent }}');
       cy.contains('{{ list_id_1 }}').should('be.visible');
-      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', 1);
+      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', {{ seed_count + 1 }});
     });
 
     it('1.3 renders multiple cards', () => {
       cy.task('db:populate{{ pascal }}', 3);
       cy.visit('/en/{{ parent }}');
-      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', 3);
+      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', {{ seed_count + 3 }});
     });
 
     it('1.4 opens the view page when the card title is tapped', () => {
@@ -73,8 +81,14 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
       // DataGrid; hydration re-runs the hook and swaps DataGrid → CardListClient
       // at mobile widths. Clicking the toolbar Add button mid-swap lands on a
       // non-hydrated handler and navigation silently no-ops — wait for the
-      // "No items found" message to appear first as the mobile-side hydration marker.
+      // CardListClient to finish hydration before clicking.
+{% if seed_count == 0 %}
+      // No seed items: wait for the "No items found" message as hydration marker.
       cy.get('p[class*="MuiTypography-root"]').should('exist');
+{% else %}
+      // Seed items exist: wait for cards to appear as hydration marker.
+      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', {{ seed_count }});
+{% endif %}
       // CardListClient renders the toolbar add as an IconButton with the same
       // aria-label as the desktop variant ("Create New {{ title }}").
       cy.get('button[aria-label="Create New {{ title }}"]').click();
@@ -106,9 +120,11 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
       cy.get('button[aria-label="Delete Selected"]').should('not.be.disabled').click();
       // Confirmation Dialog — the Delete button carries aria-label="Delete".
       cy.get('div[role="dialog"]').find('button[aria-label="Delete"]').click();
-      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', 1);
+      // 2 populated + {{ seed_count }} seed − 1 deleted = {{ seed_count + 1 }} remaining.
+      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', {{ seed_count + 1 }});
     });
 
+{% if seed_count == 0 %}
     it('4.2 deletes multiple items in one toolbar action', () => {
       cy.task('db:populate{{ pascal }}', 3);
       cy.visit('/en/{{ parent }}');
@@ -116,8 +132,31 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
       cy.get('input[type="checkbox"][aria-label^="Select "]').eq(1).check();
       cy.get('button[aria-label="Delete Selected"]').click();
       cy.get('div[role="dialog"]').find('button[aria-label="Delete"]').click();
+      // 3 populated − 2 deleted = 1 remaining.
       cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', 1);
     });
+{% else %}
+    it('4.2 deletes multiple items in one toolbar action', () => {
+      // Use task return value to target known-populated records by name,
+      // avoiding seed items that may have FK restrictions preventing deletion.
+      cy.task<any[]>('db:populate{{ pascal }}', 3).then((records) => {
+        cy.visit('/en/{{ parent }}');
+        const firstName = records[0].name as string;
+        const secondName = records[1].name as string;
+        if (firstName !== secondName) {
+          cy.get(`input[type="checkbox"][aria-label="Select ${firstName}"]`).first().check();
+          cy.get(`input[type="checkbox"][aria-label="Select ${secondName}"]`).first().check();
+        } else {
+          cy.get('input[type="checkbox"][aria-label^="Select "]').eq(0).check();
+          cy.get('input[type="checkbox"][aria-label^="Select "]').eq(1).check();
+        }
+        cy.get('button[aria-label="Delete Selected"]').click();
+        cy.get('div[role="dialog"]').find('button[aria-label="Delete"]').click();
+        // 3 populated + {{ seed_count }} seed − 2 deleted = {{ seed_count + 1 }} remaining.
+        cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', {{ seed_count + 1 }});
+      });
+    });
+{% endif %}
 
     it('4.3 toolbar delete button is disabled when no card is selected', () => {
       cy.task('db:populate{{ pascal }}', 1);

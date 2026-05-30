@@ -2009,6 +2009,24 @@ def spec_context(
                 'field_prop_name': child_field_to_clear['prop_name'],
             }
 
+    # Count records pre-created by db:seed + db:grantAllPermissions.
+    # role: 1 Administrator role; permission: 1 per base entity; user: 1 test user.
+    def _count_base_entities_spec(s: dict) -> int:
+        return sum(
+            1 for k, d in s['definitions'].items()
+            if not k.endswith('_detail') and not k.endswith('_input')
+            and d.get('type') == 'object'
+            and 'id' in (d.get('properties') or {})
+        )
+    if parent == 'role':
+        seed_count = 1
+    elif parent == 'permission':
+        seed_count = _count_base_entities_spec(schema)
+    elif parent == 'user':
+        seed_count = 1
+    else:
+        seed_count = 0
+
     return {
         'parent': parent,
         'pascal': pascal,
@@ -2061,6 +2079,7 @@ def spec_context(
         'check_field_inner_label': check_field_inner_label,
         'has_approvable': any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model_name, schema)),
         'flatten_test_rels': _compute_flatten_test_rels(parent, pascal, definition_key, schema),
+        'seed_count': seed_count,
     }
 
 

@@ -128,3 +128,37 @@ email: `test-${i}-${Date.now()}@example.com`,
   the `role` case in `api_spec_context()`.
 - If `seedTestDatabase` is changed to create multiple users, update `seed_count = 1` for the
   `user` case accordingly.
+
+## Non-API e2e Test Seed/Grant Adjustments
+
+### Problem: desktop DataGrid virtual-scroll limitation
+
+The desktop Cypress specs use `getDataGridRowCount()` which counts rendered DOM rows
+(`div[role="row"][data-rowindex]`). With a fixed-height 500px DataGrid container and MUI's
+default row height (~52px), only ~11 rows are rendered in the DOM at once. For `permission`
+(seed_count=9), test 1.3 expects 12 rows (9 + 3 populated) but the DOM shows only 11.
+
+**Solution**: Test 1.3 uses `getDataGridTotalRowCount()` (new helper in `datagrid-helpers.ts`)
+which reads MUI DataGrid's `aria-rowcount` attribute. MUI DataGrid sets
+`aria-rowcount = 1 (header) + total_data_rows` regardless of virtual-scroll state, so
+`getDataGridTotalRowCount()` correctly returns the full dataset size.
+
+### Problem: mobile test 4.2 FK constraint violation for user entity
+
+In the mobile CardList spec, test 4.2 selects 2 checkboxes by index and deletes them.
+With `seed_count=1` for `user`, the seed test user appears in the card list. Because the
+seed user is the `creator_id` of all populated users and has a RESTRICT FK constraint,
+deleting it fails and crashes the page (all checkboxes disappear).
+
+**Solution**: When `seed_count > 0`, test 4.2 uses the `cy.task` return value to identify
+the two populated records by name (e.g., `records[0].name = 'User 1'`) and selects them
+explicitly via `aria-label="Select User 1"`. This avoids selecting the seed user entirely.
+
+### Gate expansion: API + non-API e2e tests run together
+
+`update-generator` and `update-code` tasks now require both:
+- `npm run test:e2e:cy:api` — API-layer Cypress specs
+- `npm run test:e2e:cy:ui` — desktop + mobile Cypress specs (non-API)
+- `npm run test:vitest` — Vitest component/unit tests (excludes `test/flows/`)
+
+These are reflected in `AGENTS.md` gate matrix and `package.json` scripts.
