@@ -1,4 +1,6 @@
-import { getTranslations } from 'next-intl/server';
+'use client';
+
+import { useTranslations } from 'next-intl';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -6,8 +8,8 @@ import CardActionArea from '@mui/material/CardActionArea';
 import Typography from '@mui/material/Typography';
 import { Link } from '@/i18n/navigation';
 
-export default async function SettingPage() {
-  const t = await getTranslations('Setting');
+export default function SettingPage() {
+  const t = useTranslations('Setting');
 
   return (
     <Box sx={{ maxWidth: 600, mt: 2, mb: 3 }}>
