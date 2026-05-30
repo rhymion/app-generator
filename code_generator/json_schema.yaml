@@ -108,7 +108,7 @@ definitions:
 
   setting:
     x-generate:
-      list: true
+      list: false
       view: true
       new: false
       edit: true

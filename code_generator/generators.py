@@ -1586,10 +1586,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"  const [{sn}, set{_setter(sn)}] = useState<string | null>(src.{r['relation_name']}?.id || null);"
         )
     rel_states = '\n'.join(rel_states_lines)
-    custom_states = '\n'.join(
-        f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
-        for p in custom_upsert_props
-    )
+    def _custom_state_line(p: str) -> str:
+        defn = filtered_props.get(p, {})
+        if _get_actual_type(defn) == 'boolean':
+            return f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(String(src.{p} ?? false));"
+        return f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
+    custom_states = '\n'.join(_custom_state_line(p) for p in custom_upsert_props)
     entity_select_states = '\n'.join(
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string | null>(src.{p} || null);"
         for p in entity_select_props
