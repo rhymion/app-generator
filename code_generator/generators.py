@@ -1589,7 +1589,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     def _custom_state_line(p: str) -> str:
         defn = filtered_props.get(p, {})
         if _get_actual_type(defn) == 'boolean':
-            return f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(String(src.{p} ?? false));"
+            return f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<boolean>(Boolean(src.{p}));"
         return f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
     custom_states = '\n'.join(_custom_state_line(p) for p in custom_upsert_props)
     entity_select_states = '\n'.join(
@@ -1886,7 +1886,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     rel_ds   = '\n'.join(f"    formData.set('{r['prop_name']}', {safe_var_name(r['prop_name'])} || '');" for r in list(parent_rels_raw) + list(selector_oto_rels))
     bool_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}.toString());" for p in boolean_props)
     enum_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} !== null ? String({safe_var_name(p)}) : '');" for p in enum_int_props)
-    cust_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in custom_upsert_props)
+    def _custom_form_data_line(p: str) -> str:
+        defn = filtered_props.get(p, {})
+        if _get_actual_type(defn) == 'boolean':
+            return f"    formData.set('{p}', {safe_var_name(p)}.toString());"
+        return f"    formData.set('{p}', {safe_var_name(p)});"
+    cust_ds  = '\n'.join(_custom_form_data_line(p) for p in custom_upsert_props)
     parent_form_data_sets = '\n'.join(filter(None, [text_ds, entity_select_ds, rel_ds, num_ds, enum_ds, bool_ds, dt_ds, img_ds, cust_ds]))
 
     # ---- Children analysis ----
