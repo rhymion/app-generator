@@ -165,8 +165,9 @@ _Core MFA lifecycle (original phase 5a):_
 
 _Additional features shipped after original phase 5a:_
 - `app/[locale]/setting/page.tsx` — replaced CRUD list with an account
-  settings hub that includes a direct link to `/setting/mfa`; hub is
-  regen-safe via `x-custom-components` (`components/setting/SettingsHub.tsx`).
+  settings hub that includes a direct link to `/setting/mfa`; hub is a
+  committed handwritten page (cmd_075 Option B: SettingsHub abolished,
+  `setting` entity uses `list: false` in json_schema to prevent overwriting).
 - `lib/mfa/enrollment.ts regenerateRecoveryCodes` + `actions.ts
   regenerateRecoveryCodesAction` — re-issue fresh recovery codes once
   the user verifies with a current TOTP or an existing recovery code;
@@ -177,8 +178,10 @@ _Additional features shipped after original phase 5a:_
 - `user.mfa_enabled` is now schema-exposed via `x-custom-component` MfaToggle
   (`components/_standard/MfaToggle.tsx`); **target=[view] only** — admin user-detail
   page shows read-only MFA status chip; no toggle/edit widget in admin UI.
-- `components/_standard/SettingsHub.tsx` — self-service hub card with MFA status chip;
-  links to `/setting/mfa` for enable/disable flow (button-based, not checkbox).
+- ~~`components/setting/SettingsHub.tsx`~~ — **abolished in cmd_075** (Option B):
+  SettingsHub caused `/setting` 'Something went wrong!' (TypeScript build failure
+  from generated setting CRUD list + mfa_enabled boolean mismatch). Replaced by
+  committed handwritten `app/[locale]/setting/page.tsx` with MFA/Accounts navigation.
 - `app/[locale]/setting/mfa/mfa-client.tsx` — QR-display race condition fixed:
   `startEnrollmentAction` now returns `{ qrDataUrl, secret }` directly; client sets
   state immediately without waiting for `router.refresh()`.
