@@ -197,6 +197,21 @@ _Tests:_
 **Not yet implemented (phase 5b+):** OAuth + MFA challenge, admin role
 mandate. Both recorded as deferred in `sso-authentication.md`.
 
+_Deferred (Issue 4 — user deletion blocked by missing cascade):_
+- **Problem:** Deleting a user via the admin UI fails because other records
+  owned by the user (e.g. `approval_flow` and similar creator-linked models)
+  do not yet carry `onDelete: Cascade` in `prisma/schema.prisma`.
+- **Root cause:** The cascade-delete specification for creator-owned records is
+  undecided — which models need it, and what the desired behavior is when a
+  user is deleted (cascade vs. set-null vs. restrict) must be confirmed with
+  product stakeholders before any migration is written.
+- **Resolution condition:** Once the spec is confirmed, add `onDelete: Cascade`
+  (or the appropriate policy) to each affected FK in `schema.prisma` and create
+  a new Prisma migration. Verify with E2E test that user deletion succeeds and
+  leaves no orphaned rows.
+- **Not in this cmd (cmd_073):** deferred pending spec decision.
+- **Related cmds:** cmd_071 subtask_071b (cascade delete partially implemented; mfa_recovery_code already has onDelete: Cascade).
+
 ---
 
 ### S6 — Generator guard against low-level constraint bypass
