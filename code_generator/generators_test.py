@@ -1513,6 +1513,23 @@ def helper_context(
 
     flatten_test_rels = _compute_flatten_test_rels(parent, pascal, definition_key, schema)
 
+    # Fields required by Prisma but hidden from the UI via x-generate.fields filter.
+    # These must still be included in prisma.create() populate calls.
+    _visible_prop_names = set(properties.keys())
+    _SYSTEM_PROPS = {'id', 'creator_id', 'updater_id', 'created_at', 'updated_at'}
+    _fields_filter = generate_config.get('fields') or []
+    extra_prisma_fields = []
+    if _fields_filter:
+        _all_parent_props = parent_def.get('properties') or {}
+        for _prop_name in sorted(parent_def.get('required') or []):
+            if _prop_name in _SYSTEM_PROPS or _prop_name in _visible_prop_names:
+                continue
+            _prop = _all_parent_props.get(_prop_name)
+            if not _prop:
+                continue
+            _fake_field = {'category': 'text', 'prop_name': _prop_name, 'label': to_title_case(_prop_name)}
+            extra_prisma_fields.append({'prop_name': _prop_name, 'prisma_val': prisma_value(_fake_field, 'i', title)})
+
     return {
         'pascal': pascal,
         'title': title,
@@ -1530,6 +1547,7 @@ def helper_context(
         'ua_dep_fields_full': ua_dep_fields_full,
         'required_fields_prisma': required_fields_prisma,
         'all_fields_prisma': all_fields_prisma,
+        'extra_prisma_fields': extra_prisma_fields,
         'has_optional': bool(optional_field_metas),
         'datagrid_children': enriched_datagrid_children,
         'comment_children': enriched_comment_children,
@@ -2310,6 +2328,27 @@ def api_spec_context(
 
     has_approvable = any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model, schema))
 
+    # Count items pre-created by db:seed + db:grantAllPermissions so that
+    # generated tests can adjust expected row counts accordingly.
+    # - role:       grantAllPermissions creates 1 Administrator role
+    # - permission: grantAllPermissions creates 1 permission per base entity
+    # - user:       seedTestDatabase creates 1 test user
+    def _count_base_entities(s: dict) -> int:
+        return sum(
+            1 for k, d in s['definitions'].items()
+            if not k.endswith('_detail') and not k.endswith('_input')
+            and d.get('type') == 'object'
+            and 'id' in (d.get('properties') or {})
+        )
+    if parent == 'role':
+        seed_count = 1
+    elif parent == 'permission':
+        seed_count = _count_base_entities(schema)
+    elif parent == 'user':
+        seed_count = 1
+    else:
+        seed_count = 0
+
     return {
         'parent': parent,
         'pascal': parent_pascal,
@@ -2324,6 +2363,7 @@ def api_spec_context(
         'can_new': gen_cfg.get('new', True) is not False,
         'can_edit': gen_cfg.get('edit', True) is not False,
         'can_delete': gen_cfg.get('delete', True) is not False,
+        'seed_count': seed_count,
         'I': I,
         'I7': I,  # same indentation level as I for section 7
         'assert_create': assert_create,

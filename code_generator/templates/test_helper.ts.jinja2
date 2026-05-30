@@ -421,6 +421,9 @@ export async function populate{{ pascal }}Data(length: number) {
         {{ ua_dep.prop_name }}: deps.{{ ua_dep.dep_var_name }}.id,
 {% endif %}
 {% endfor %}
+{% for ef in extra_prisma_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,
       },
@@ -522,6 +525,9 @@ export async function populate{{ pascal }}FullData(length: number) {
 {% else %}
         {{ ua_dep.prop_name }}: deps.{{ ua_dep.dep_var_name }}.id,
 {% endif %}
+{% endfor %}
+{% for ef in extra_prisma_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val }},
 {% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,

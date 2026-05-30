@@ -12,12 +12,18 @@ describe('API: {{ title }}', () => {
 {% if can_list %}
 
   describe('GET {{ api_path }}', () => {
-    it('1.1 returns empty page when no items', () => {
+    it('1.1 returns{% if seed_count == 0 %} empty page when no items{% else %} {{ seed_count }} seed-only item(s){% endif %}', () => {
       cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           expect(res.status).to.eq(200);
+{% if seed_count == 0 %}
           expect(res.body.rows).to.deep.eq([]);
           expect(res.body.total).to.eq(0);
+{% else %}
+          // db:seed + db:grantAllPermissions pre-populate {{ seed_count }} {{ parent }} record(s) before any user data
+          expect(res.body.rows).to.have.length({{ seed_count }});
+          expect(res.body.total).to.eq({{ seed_count }});
+{% endif %}
           expect(res.body.page).to.eq(0);
           expect(res.body.pageSize).to.be.a('number');
         });
@@ -28,8 +34,8 @@ describe('API: {{ title }}', () => {
       cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           expect(res.status).to.eq(200);
-          expect(res.body.rows).to.have.length(1);
-          expect(res.body.total).to.eq(1);
+          expect(res.body.rows).to.have.length({{ seed_count + 1 }});
+          expect(res.body.total).to.eq({{ seed_count + 1 }});
         });
     });
   });

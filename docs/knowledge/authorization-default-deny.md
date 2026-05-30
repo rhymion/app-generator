@@ -74,3 +74,57 @@ If a test was written before the default-deny change and now fails with access d
 2. Add `cy.task('db:grantAllPermissions')` after `cy.task('db:seed')` in `beforeEach`.
 3. For Vitest integration tests hitting a real DB: call `grantAllEntityPermissions()` from
    `cypress/support/db-helpers.ts` (or create an equivalent helper in `test/helpers/`).
+
+## seed/grant vs Generated Test Expected Value Design
+
+### Problem
+
+`db:seed` and `db:grantAllPermissions` pre-populate rows in the `role`, `permission`, and
+`user` tables before any user data is inserted. This means that the generated "1.1 returns
+empty page" and "1.2 returns page with items" tests cannot expect 0 / 1 rows for these
+specific entities.
+
+### What each hook inserts
+
+| Entity     | Inserted by        | Count                                 |
+|------------|-------------------|---------------------------------------|
+| `role`      | `grantAllPermissions` | 1 ("Administrator")                |
+| `permission`| `grantAllPermissions` | N (1 per base entity in schema)    |
+| `user`      | `seedTestDatabase`    | 1 (test user)                      |
+| all others  | neither               | 0                                  |
+
+N = number of base entities in `code_generator/json_schema.yaml` (entities without `_detail`
+or `_input` suffix that have `type: object` and an `id` property).
+
+### Solution: parameterized `seed_count` in the generator
+
+`code_generator/generators_test.py` → `api_spec_context()` computes a `seed_count` per
+entity:
+- `role` → `seed_count = 1`
+- `permission` → `seed_count = N` (counted from schema at generation time)
+- `user` → `seed_count = 1`
+- all others → `seed_count = 0`
+
+`code_generator/templates/test_api_spec.cy.ts.jinja2` uses `seed_count` to adjust tests:
+- **Test 1.1**: when `seed_count == 0` → expects empty rows; otherwise expects `seed_count` rows
+- **Test 1.2**: always expects `seed_count + 1` rows after `db:populateX, 1`
+
+### user entity: hidden Prisma-required fields
+
+`user_detail.x-generate.fields = [name, image, roles]` omits `email`, but Prisma requires it
+(NOT NULL + UNIQUE). The generator's `helper_context()` now computes `extra_prisma_fields` —
+required schema fields not in the UI fields list — and includes them in `prisma.create()` data
+for populate helpers. For `user`, this adds:
+
+```typescript
+email: `test-${i}-${Date.now()}@example.com`,
+```
+
+### Maintenance notes
+
+- If a new base entity is added to `json_schema.yaml`, the permission `seed_count` automatically
+  increases (re-run `npm run generate-code`).
+- If `grantAllPermissions` is changed to create additional roles, update `seed_count = 1` for
+  the `role` case in `api_spec_context()`.
+- If `seedTestDatabase` is changed to create multiple users, update `seed_count = 1` for the
+  `user` case accordingly.
