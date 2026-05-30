@@ -82,3 +82,6 @@ This is a **performance review** task. Read the relevant source files carefully 
 
 ## Input
 $ARGUMENTS
+
+> When running lint/typecheck in isolation, prefix with `npm run generate-code`.
+> See `.codex/rules/generated-code-gates.md` for details.

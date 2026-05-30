@@ -7,6 +7,7 @@ import { getSessionUserIdOrThrow } from '@/lib/authz';
 import {
   completeEnrollment,
   disableMfa,
+  regenerateRecoveryCodes,
   startEnrollment,
 } from '@/lib/mfa/enrollment';
 import { recordAuditEvent } from '@/lib/audit-log';
@@ -22,15 +23,33 @@ import { recordAuditEvent } from '@/lib/audit-log';
  * the server-rendered status block to refresh.
  */
 
+export type MfaErrorCode =
+  | 'INVALID_CODE'
+  | 'MFA_NOT_ENABLED'
+  | 'MFA_ALREADY_ENABLED'
+  | 'SESSION_REQUIRED'
+  | 'UNKNOWN_ERROR';
+
 export type ActionResult =
   | { ok: true }
   | { ok: true; recoveryCodes: string[] }
-  | { ok: false; error: string };
+  | { ok: true; qrDataUrl: string; secret: string }
+  | { ok: false; error: MfaErrorCode };
+
+function toErrorCode(err: unknown): MfaErrorCode {
+  const msg = err instanceof Error ? err.message : '';
+  if (msg === 'User not authenticated') return 'SESSION_REQUIRED';
+  if (msg === 'MFA already enabled') return 'MFA_ALREADY_ENABLED';
+  if (msg === 'Invalid MFA code') return 'INVALID_CODE';
+  if (msg === 'MFA_NOT_ENABLED') return 'MFA_NOT_ENABLED';
+  if (msg === 'INVALID_CODE') return 'INVALID_CODE';
+  return 'UNKNOWN_ERROR';
+}
 
 export async function startEnrollmentAction(): Promise<ActionResult> {
   try {
     const userId = await getSessionUserIdOrThrow();
-    await startEnrollment(userId);
+    const { qrDataUrl, secret } = await startEnrollment(userId);
     await recordAuditEvent({
       action: 'auth:mfa.startEnrollment',
       actor_user_id: userId,
@@ -38,9 +57,9 @@ export async function startEnrollmentAction(): Promise<ActionResult> {
       target_id: userId,
     });
     revalidatePath('/setting/mfa');
-    return { ok: true };
+    return { ok: true, qrDataUrl, secret };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Unknown error' };
+    return { ok: false, error: toErrorCode(err) };
   }
 }
 
@@ -57,7 +76,7 @@ export async function completeEnrollmentAction(code: string): Promise<ActionResu
     revalidatePath('/setting/mfa');
     return { ok: true, recoveryCodes };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Unknown error' };
+    return { ok: false, error: toErrorCode(err) };
   }
 }
 
@@ -74,7 +93,28 @@ export async function disableMfaAction(code: string): Promise<ActionResult> {
     revalidatePath('/setting/mfa');
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Unknown error' };
+    return { ok: false, error: toErrorCode(err) };
+  }
+}
+
+export type RegenerateResult =
+  | { success: true; recoveryCodes: string[] }
+  | { success: false; error: MfaErrorCode };
+
+export async function regenerateRecoveryCodesAction(code: string): Promise<RegenerateResult> {
+  try {
+    const userId = await getSessionUserIdOrThrow();
+    const { recoveryCodes } = await regenerateRecoveryCodes(userId, code);
+    await recordAuditEvent({
+      action: 'auth:mfa.regenerateCodes',
+      actor_user_id: userId,
+      target_table: 'user',
+      target_id: userId,
+    });
+    revalidatePath('/setting/mfa');
+    return { success: true, recoveryCodes };
+  } catch (err) {
+    return { success: false, error: toErrorCode(err) };
   }
 }
 

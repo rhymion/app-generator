@@ -2128,27 +2128,27 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             prop_search   = f'search{target_pascal}Options'
 
             child_entity_rel_opt.append(
-                f"  const {lookup_var} = useRef<Map<string, string>>(new Map());\n"
+                f"  const {lookup_var} = useMemo<Map<string, string>>(() => {{\n"
+                f"    const m = new Map<string, string>();\n"
+                f"    src.{child_prop_name}.forEach(row => {{\n"
+                f"      if (row.{label_base}) m.set(row.{label_base}.id, row.{label_base}.{label_field});\n"
+                f"    }});\n"
+                f"    ({prop_initial} ?? []).forEach(item => {{ m.set(item.id, item.{label_field}); }});\n"
+                f"    return m;\n"
+                f"  }}, [src.{child_prop_name}, {prop_initial}]);\n"
                 f"  const {initial_opts_var} = useMemo(() =>\n"
                 f"    ({prop_initial} ?? []).map(item => ({{ id: item.id, label: item.{label_field} }})),\n"
                 f"  [{prop_initial}]);\n"
-                f"  useMemo(() => {{\n"
-                f"    {lookup_var}.current.clear();\n"
-                f"    src.{child_prop_name}.forEach(row => {{\n"
-                f"      if (row.{label_base}) {lookup_var}.current.set(row.{label_base}.id, row.{label_base}.{label_field});\n"
-                f"    }});\n"
-                f"    ({prop_initial} ?? []).forEach(item => {{ {lookup_var}.current.set(item.id, item.{label_field}); }});\n"
-                f"  }}, [src.{child_prop_name}, {prop_initial}]);\n"
                 f"  const {config_var} = useMemo<EntityAutocompleteCellConfig>(() => ({{\n"
                 f"    searchAction: async (query, includeIds) => {{\n"
                 f"      const rows = (await {prop_search}?.(query, includeIds)) ?? [];\n"
-                f"      rows.forEach(item => {{ {lookup_var}.current.set(item.id, item.{label_field}); }});\n"
+                f"      rows.forEach(item => {{ {lookup_var}.set(item.id, item.{label_field}); }});\n"
                 f"      return rows.map(item => ({{ id: item.id, label: item.{label_field} }}));\n"
                 f"    }},\n"
                 f"    initialOptions: {initial_opts_var},\n"
-                f"    labelLookup: {lookup_var}.current,\n"
+                f"    labelLookup: {lookup_var},\n"
                 f"    label: tf('{label_camel}'),\n"
-                f"  }}), [{initial_opts_var}, {prop_search}, tf]);"
+                f"  }}), [{initial_opts_var}, {prop_search}, {lookup_var}, tf]);"
             )
     child_entity_rel_option_setups = '\n'.join(child_entity_rel_opt)
 

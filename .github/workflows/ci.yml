@@ -87,22 +87,12 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - name: Start test containers
-        run: npm run docker:up:test
-      - name: Generate code
-        run: npm run generate-code
-      - name: Check generated code
-        run: npm run check:generated
-      - name: Push schema and generate client
-        run: |
-          npx prisma db push
-          npx prisma generate
-      - name: Seed test data
-        run: npm run db:seed-tenant
-      - name: Build
-        run: npm run test:e2e:build:only
+      - name: Create env file
+        run: echo "AUTH_SECRET=${{ secrets.AUTH_SECRET }}" >> .env.test.local
+      - name: Generate code, start test database, push schema and build
+        run: npm run test:e2e:build
       - name: Run API E2E tests
-        run: npm run test:e2e:cy:api
+        run: npm run test:e2e:cy:start
 
   pytest:
     name: Python Generator Tests

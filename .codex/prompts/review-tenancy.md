@@ -76,3 +76,6 @@ Minimum docs to read before starting:
 
 ## Input
 $ARGUMENTS
+
+> When running lint/typecheck in isolation, prefix with `npm run generate-code`.
+> See `.codex/rules/generated-code-gates.md` for details.

@@ -143,6 +143,52 @@ Gate commands:
 
 Run in the order listed above.
 
+See also: [§ Generated-code prerequisites for gates](#generated-code-prerequisites-for-gates) for rules on isolated gate runs.
+
+## Generated-code prerequisites for gates
+
+### Why this matters
+
+Handwritten files in `components/_standard/`, `lib/`, and other locations
+import from generated entity code (e.g. `lib/organization/types.ts`,
+`lib/attachment/actions.ts`). When generated files are absent, TypeScript
+and other tools emit **false-positive errors** that are not real bugs.
+
+### Rule
+
+1. **Standard gate sequence satisfies this automatically.**
+   The `build` gate (`npm run test:e2e:build`) already runs `generate-code`
+   internally as its first step. If you run gates in the standard order,
+   generated code will be present for all subsequent steps.
+
+2. **Isolated runs require explicit prefixing.**
+   When running a single gate (e.g. `npm run lint` or `npx tsc --noEmit`
+   without going through `test:e2e:build` first), run `npm run generate-code`
+   manually before the gate command. Otherwise generated imports will be
+   missing and false-positive TS errors will appear.
+
+3. **Restore the working tree after PASS.**
+   After gates pass, return the working tree to its pre-generate-code state:
+   - Files in `.gitignore`-covered directories remain as untracked — no action needed.
+   - For directories not covered by `.gitignore`, first verify with
+     `git clean -n <dir>` (dry-run), then clean only confirmed generated
+     directories: `git clean -fd <dir>`.
+
+4. **Never commit generated code.**
+   Generated files produced by `npm run generate-code` must not be included
+   in commits. This policy was established in cmd_036 / cmd_051 / cmd_062.
+   Use `npm run check:generated` (see Gate matrix) to verify compliance.
+
+### Distinguishing false-positives from real errors
+
+If TypeScript reports an error:
+- Run `npm run generate-code` first.
+- Re-run `npx tsc --noEmit`.
+- **Error disappears** → it was a false-positive caused by missing generated imports.
+- **Error persists** → it is a real error that must be fixed.
+
+See also: [§ Gate matrix](#gate-matrix) for the standard sequence.
+
 ## Triage rules
 
 - If a request could be update-code *or* investigate, ask before editing.

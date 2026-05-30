@@ -1,4 +1,4 @@
-import NextAuth from "next-auth";
+import NextAuth, { CredentialsSignin } from "next-auth";
 import type { NextAuthConfig } from "next-auth";
 import type { Adapter, AdapterUser } from "@auth/core/adapters";
 import type { Provider } from "@auth/core/providers";
@@ -11,6 +11,15 @@ import { siteConfig } from "@/lib/site-config";
 import { recordAuditEvent } from "@/lib/audit-log";
 import { verifyMfaCode } from "@/lib/mfa/verify";
 import { createTenantBoundUser } from "@/lib/auth/create-user";
+
+// Custom CredentialsSignin subclasses so @auth/core re-throws them as-is
+// (plain Error gets wrapped in CallbackRouteError and the code is lost).
+class MfaRequiredError extends CredentialsSignin {
+  code = "MFA_REQUIRED" as const;
+}
+class InvalidMfaError extends CredentialsSignin {
+  code = "Invalid MFA code" as const;
+}
 
 // True iff the Google provider will actually be registered for this deploy.
 // Both the siteConfig opt-in AND the server-side secrets have to be present.
@@ -84,11 +93,11 @@ function buildProviders(): Provider[] {
         if (mfaUser.mfa_enabled) {
           const code = ((credentials.mfa_code as string | undefined) ?? "").trim();
           if (code.length === 0) {
-            throw new Error("MFA_REQUIRED");
+            throw new MfaRequiredError();
           }
           const ok = await verifyMfaCode(user.id, code);
           if (!ok) {
-            throw new Error("Invalid MFA code");
+            throw new InvalidMfaError();
           }
         }
 
