@@ -175,8 +175,18 @@ _Additional features shipped after original phase 5a:_
   `INVALID_CODE`) returned by server actions and surfaced as i18n
   strings so the UI never displays raw error identifiers.
 - `user.mfa_enabled` is now schema-exposed via `x-custom-component` MfaToggle
-  (`components/_standard/MfaToggle.tsx`); user admin edit page shows enable/disable
-  widget; direct boolean flip forbidden, enable redirects to enrollment flow.
+  (`components/_standard/MfaToggle.tsx`); **target=[view] only** — admin user-detail
+  page shows read-only MFA status chip; no toggle/edit widget in admin UI.
+- `components/_standard/SettingsHub.tsx` — self-service hub card with MFA status chip;
+  links to `/setting/mfa` for enable/disable flow (button-based, not checkbox).
+- `app/[locale]/setting/mfa/mfa-client.tsx` — QR-display race condition fixed:
+  `startEnrollmentAction` now returns `{ qrDataUrl, secret }` directly; client sets
+  state immediately without waiting for `router.refresh()`.
+- `auth.ts` — `MfaRequiredError` / `InvalidMfaError` extend `CredentialsSignin` so
+  the error `code` field is preserved through @auth/core; login page checks `.code`
+  first to detect `MFA_REQUIRED` correctly.
+- `prisma/schema.prisma` — `mfa_recovery_code` already has `onDelete: Cascade`
+  (confirmed; no new migration needed for user deletion).
 
 _Tests:_
 - 32 Vitest cases across `lib/mfa/{crypto,totp,recovery,enrollment}.test.ts`

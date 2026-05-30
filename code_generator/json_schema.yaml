@@ -86,7 +86,7 @@ definitions:
       - name: MfaToggle
         path: "@/components/_standard/MfaToggle"
         target:
-          - edit
+          - view
     x-relationships:
       roles:
         type: many-to-many
@@ -112,8 +112,15 @@ definitions:
       delete: false
       invalidate: false
       api: true
+      fields:
+        - name
+        - email
+        - image
+        - password
+        - api_key
     x-custom-components:
       - name: SettingsHub
+        path: "@/components/_standard/SettingsHub"
         target:
           - list
     x-relationships:

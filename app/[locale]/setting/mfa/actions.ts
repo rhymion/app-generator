@@ -33,6 +33,7 @@ export type MfaErrorCode =
 export type ActionResult =
   | { ok: true }
   | { ok: true; recoveryCodes: string[] }
+  | { ok: true; qrDataUrl: string; secret: string }
   | { ok: false; error: MfaErrorCode };
 
 function toErrorCode(err: unknown): MfaErrorCode {
@@ -48,7 +49,7 @@ function toErrorCode(err: unknown): MfaErrorCode {
 export async function startEnrollmentAction(): Promise<ActionResult> {
   try {
     const userId = await getSessionUserIdOrThrow();
-    await startEnrollment(userId);
+    const { qrDataUrl, secret } = await startEnrollment(userId);
     await recordAuditEvent({
       action: 'auth:mfa.startEnrollment',
       actor_user_id: userId,
@@ -56,7 +57,7 @@ export async function startEnrollmentAction(): Promise<ActionResult> {
       target_id: userId,
     });
     revalidatePath('/setting/mfa');
-    return { ok: true };
+    return { ok: true, qrDataUrl, secret };
   } catch (err) {
     return { ok: false, error: toErrorCode(err) };
   }

@@ -167,12 +167,15 @@
     "errorUnknown": "An unexpected error occurred.",
     "toggleEnableButton": "Enable MFA",
     "toggleEnabledLabel": "MFA Enabled",
+    "toggleDisabledLabel": "MFA Disabled",
     "toggleDisableButton": "Disable MFA"
   },
   "Setting": {
     "title": "Account settings",
     "mfaTitle": "Two-factor authentication",
     "mfaBody": "Enable a second factor for credentials sign-in.",
+    "mfaStatusEnabled": "Enabled",
+    "mfaStatusDisabled": "Disabled",
     "accountsTitle": "Connected accounts",
     "accountsBody": "Manage which providers can sign you into this account."
   },

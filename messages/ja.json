@@ -167,12 +167,15 @@
     "errorUnknown": "予期しないエラーが発生しました。",
     "toggleEnableButton": "MFA を有効化",
     "toggleEnabledLabel": "MFA 有効",
+    "toggleDisabledLabel": "MFA 無効",
     "toggleDisableButton": "MFA を無効化"
   },
   "Setting": {
     "title": "アカウント設定",
     "mfaTitle": "2要素認証",
     "mfaBody": "認証情報サインインに 2 つ目の認証要素を有効化します。",
+    "mfaStatusEnabled": "有効",
+    "mfaStatusDisabled": "無効",
     "accountsTitle": "連携アカウント",
     "accountsBody": "このアカウントへサインインできるプロバイダーを管理します。"
   },

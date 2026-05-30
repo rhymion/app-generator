@@ -69,6 +69,13 @@ export default function MfaClient({ initial }: { initial: EnrollmentStatus }) {
         setError(res.error);
         return;
       }
+      // Use the QR data returned directly to avoid the useState-doesn't-reinitialize
+      // race where router.refresh() updates `initial` prop but the component
+      // state never re-syncs because useState runs its initializer only once.
+      if ('qrDataUrl' in res && res.qrDataUrl) {
+        setState({ kind: 'pending', qrDataUrl: res.qrDataUrl, secret: res.secret });
+        return;
+      }
       router.refresh();
     });
   }
