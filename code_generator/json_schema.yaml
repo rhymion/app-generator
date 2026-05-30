@@ -50,6 +50,9 @@ definitions:
       mfa_enabled:
         type: boolean
         default: false
+        x-custom-component:
+          target:
+            - upsert
 
   role:
     type: object
@@ -118,11 +121,7 @@ definitions:
         - image
         - password
         - api_key
-    x-custom-components:
-      - name: SettingsHub
-        path: "@/components/setting/SettingsHub"
-        target:
-          - list
+        - mfa_enabled
     x-relationships:
       roles:
         type: many-to-many
