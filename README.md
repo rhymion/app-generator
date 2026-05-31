@@ -81,10 +81,9 @@ phased plan.
 are implemented in `lib/mfa/`. Self-service enrollment and disable are
 available at `/setting/mfa`.
 
-**Known limitation:** After clicking **Enable MFA**, the QR code screen
-may not appear immediately due to a client-side state sync issue. If the
-QR code does not appear, refresh the browser — the pending enrollment
-session is preserved server-side and the QR code will be shown on reload.
+**Known limitations:**
+- Recovery codes can be generated and stored, but there is currently no UI
+  to enter a recovery code at login when the authenticator app is unavailable.
 
 ### Approval Flow
 
