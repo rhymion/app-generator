@@ -74,10 +74,8 @@ export async function seedTestDatabase() {
   return { user };
 }
 
-{% set all_entities = [] %}
-{% for level in deletion_levels %}{% for entity in level %}{% if all_entities.append(entity) %}{% endif %}{% endfor %}{% endfor %}
 const ALL_ENTITIES = [
-{% for entity in all_entities | sort %}
+{% for entity in test_entity_names %}
   '{{ entity }}',
 {% endfor %}
 ];

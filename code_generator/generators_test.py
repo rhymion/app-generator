@@ -1568,6 +1568,7 @@ def spec_context(
     model_name: str,
     definition_key: str,
     generate_config: dict,
+    test_entity_count: int | None = None,
 ) -> dict:
     parent_def = schema['definitions'].get(model_name)
     if not parent_def or not parent_def.get('properties'):
@@ -2010,18 +2011,11 @@ def spec_context(
             }
 
     # Count records pre-created by db:seed + db:grantAllPermissions.
-    # role: 1 Administrator role; permission: 1 per base entity; user: 1 test user.
-    def _count_base_entities_spec(s: dict) -> int:
-        return sum(
-            1 for k, d in s['definitions'].items()
-            if not k.endswith('_detail') and not k.endswith('_input')
-            and d.get('type') == 'object'
-            and 'id' in (d.get('properties') or {})
-        )
+    # role: 1 Administrator role; permission: 1 per test entity (ALL_ENTITIES); user: 1 test user.
     if parent == 'role':
         seed_count = 1
     elif parent == 'permission':
-        seed_count = _count_base_entities_spec(schema)
+        seed_count = test_entity_count if test_entity_count is not None else 0
     elif parent == 'user':
         seed_count = 1
     else:
@@ -2140,6 +2134,7 @@ def api_spec_context(
     model_name: str | None = None,
     definition_key: str | None = None,
     generate_config: dict | None = None,
+    test_entity_count: int | None = None,
 ) -> dict:
     model = model_name or parent
     parent_pascal = to_pascal_case(parent)
@@ -2350,19 +2345,12 @@ def api_spec_context(
     # Count items pre-created by db:seed + db:grantAllPermissions so that
     # generated tests can adjust expected row counts accordingly.
     # - role:       grantAllPermissions creates 1 Administrator role
-    # - permission: grantAllPermissions creates 1 permission per base entity
+    # - permission: grantAllPermissions creates 1 permission per test entity (ALL_ENTITIES)
     # - user:       seedTestDatabase creates 1 test user
-    def _count_base_entities(s: dict) -> int:
-        return sum(
-            1 for k, d in s['definitions'].items()
-            if not k.endswith('_detail') and not k.endswith('_input')
-            and d.get('type') == 'object'
-            and 'id' in (d.get('properties') or {})
-        )
     if parent == 'role':
         seed_count = 1
     elif parent == 'permission':
-        seed_count = _count_base_entities(schema)
+        seed_count = test_entity_count if test_entity_count is not None else 0
     elif parent == 'user':
         seed_count = 1
     else:
@@ -2406,7 +2394,7 @@ def api_spec_context(
 # db-helpers.ts context
 # ---------------------------------------------------------------------------
 
-def db_helpers_context(schema: dict) -> dict:
+def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None) -> dict:
     """Build context for cypress/support/db-helpers.ts.
 
     Determines the correct deletion order for all Prisma models by:
@@ -2416,6 +2404,11 @@ def db_helpers_context(schema: dict) -> dict:
        (all models reference it via creator_id/updater_id even when not in schema).
     4. Grouping into deletion waves so that all dependents of an entity are
        deleted before the entity itself.
+
+    test_entity_names: sorted list of entity names for which test specs are generated.
+    These become ALL_ENTITIES in the template — the permission grant set must exactly
+    mirror the test-spec entity set so non-base entities (e.g. settingX variants of
+    xxxxx_xxxxx) are always included.
     """
     defs = schema['definitions']
 
@@ -2475,4 +2468,7 @@ def db_helpers_context(schema: dict) -> dict:
             assigned.add(name)
             remaining.remove(name)
 
-    return {'deletion_levels': levels}
+    return {
+        'deletion_levels': levels,
+        'test_entity_names': sorted(test_entity_names) if test_entity_names is not None else [],
+    }
