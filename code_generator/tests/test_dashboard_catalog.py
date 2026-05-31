@@ -1,9 +1,15 @@
 """
 Tests for build_dashboard_catalog — catalog generation for dashboardable entities.
 Covers existing kinds (fk, boolean, enum) and the new number/datetime kinds.
+Also tests the dashboard_aggregate_route.ts.jinja2 template (Phase 5).
 """
 import pytest
+from pathlib import Path
+from jinja2 import Environment, FileSystemLoader
 from generators import build_dashboard_catalog
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+TEMPLATES_DIR = REPO_ROOT / 'code_generator' / 'templates'
 
 
 def _schema(entities: dict) -> dict:
@@ -195,3 +201,57 @@ def test_fixture_schema_number_and_datetime_kinds():
     assert 'start_date' in lr_fields
     assert lr_fields['start_date']['kind'] == 'datetime'
     assert lr_fields['start_date']['datetime_format'] == 'date'
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: dashboard_aggregate_route.ts.jinja2 template
+# ---------------------------------------------------------------------------
+
+def _make_env() -> Environment:
+    env = Environment(
+        loader=FileSystemLoader(str(TEMPLATES_DIR)),
+        trim_blocks=True,
+        lstrip_blocks=True,
+        keep_trailing_newline=True,
+    )
+    return env
+
+
+def test_aggregate_route_template_renders():
+    """Template renders without error with an empty context."""
+    env = _make_env()
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'aggregateForWidgetCore' in result
+
+
+def test_aggregate_route_enforces_api_key_auth():
+    """Route must authenticate via API key, not session."""
+    env = _make_env()
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'authenticateApiKey' in result
+    # Must NOT call getServerSession — the API-key path must be used.
+    assert 'getServerSession' not in result
+
+
+def test_aggregate_route_enforces_permission_check():
+    """Route must call requireApiPermission to enforce entity-level authz."""
+    env = _make_env()
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'requireApiPermission' in result
+
+
+def test_aggregate_route_validates_required_fields():
+    """Route must validate entity_name and group_by_field presence."""
+    env = _make_env()
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'entity_name' in result
+    assert 'group_by_field' in result
+    assert '400' in result
+
+
+def test_aggregate_route_returns_json():
+    """Route must return NextResponse.json with the aggregate result."""
+    env = _make_env()
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'NextResponse.json' in result
+    assert 'handleApiError' in result

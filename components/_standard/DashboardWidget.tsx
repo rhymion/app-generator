@@ -6,6 +6,9 @@ import CardHeader from '@mui/material/CardHeader';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import Skeleton from '@mui/material/Skeleton';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
+import DownloadIcon from '@mui/icons-material/Download';
 import DashboardChart, { ChartDatum, ChartType, StackMode } from './DashboardChart';
 import { aggregateForWidget, AggregateOutput, FilterCondition, BucketGranularity } from '@/lib/dashboard/aggregate';
 
@@ -47,6 +50,36 @@ function resolveChartType(raw: unknown): ChartType {
   if (raw === 1) return 'column';
   if (typeof raw === 'string') return raw as ChartType;
   return 'column';
+}
+
+// Download filtered+grouped data as a UTF-8 BOM CSV (Excel-compatible).
+function exportToCSV(output: AggregateOutput, widgetName: string): void {
+  let csvContent: string;
+  if (output.kind === 'single') {
+    const header = 'label,count';
+    const rows = output.data.map(
+      (d) => `"${d.label.replace(/"/g, '""')}",${d.count}`,
+    );
+    csvContent = [header, ...rows].join('\n');
+  } else {
+    const seriesCols = output.series
+      .map((s) => `"${s.label.replace(/"/g, '""')}"`)
+      .join(',');
+    const header = `category,${seriesCols}`;
+    const rows = output.categories.map((cat, i) => {
+      const values = output.series.map((s) => s.data[i] ?? 0).join(',');
+      return `"${cat.replace(/"/g, '""')}",${values}`;
+    });
+    csvContent = [header, ...rows].join('\n');
+  }
+  const bom = '﻿'; // UTF-8 BOM for Excel auto-detect
+  const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${widgetName.replace(/[^a-z0-9]/gi, '_')}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 const EMPTY_OUTPUT: AggregateOutput = { kind: 'single', data: [] };
@@ -130,6 +163,10 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
     return <DashboardChart type={chartType} data={singleData} />;
   }
 
+  const hasData =
+    !loading && !error && !validationError &&
+    (output.kind === 'single' ? output.data.length > 0 : output.categories.length > 0);
+
   return (
     <Card variant="outlined" sx={{ width: '100%' }}>
       <CardHeader
@@ -137,6 +174,15 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
         subheader={`${widget.entity_name} grouped by ${widget.group_by_field}`}
         titleTypographyProps={{ variant: 'subtitle1' }}
         subheaderTypographyProps={{ variant: 'caption' }}
+        action={
+          hasData ? (
+            <Tooltip title="Export CSV">
+              <IconButton size="small" onClick={() => exportToCSV(output, widget.name)} aria-label="export CSV">
+                <DownloadIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          ) : undefined
+        }
       />
       <CardContent>
         {validationError ? (

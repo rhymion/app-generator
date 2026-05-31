@@ -247,6 +247,16 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         print(f'  Dashboard catalog → lib/dashboard/catalog.ts ({len(dashboard_catalog)} entities)')
 
+    # --- Dashboard aggregate REST endpoint (app/api/dashboard/aggregate/route.ts) ---
+    # Emitted when at least one dashboardable entity exists so the endpoint
+    # has entities to query. The route uses API-key auth + requireApiPermission.
+    if dashboard_catalog:
+        _write(
+            out / 'app' / 'api' / 'dashboard' / 'aggregate' / 'route.ts',
+            _render(env, 'dashboard_aggregate_route.ts.jinja2', {}),
+        )
+        print('  Dashboard aggregate route → app/api/dashboard/aggregate/route.ts')
+
     # --- Attachment bridge actions (lib/attachment/actions.ts) ---
     #
     # Emitted whenever at least one base entity owns the `attachable` bridge
