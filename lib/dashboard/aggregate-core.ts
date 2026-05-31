@@ -2,7 +2,7 @@
 // and authorization. Used by both the 'use server' aggregateForWidget wrapper
 // (session auth) and the REST API route (API-key auth).
 import prisma from '@/lib/prisma';
-import { Prisma } from '@/app/generated/prisma/client';
+import { ApiError } from '@/lib/api-auth';
 import { findDashboardEntity, findDashboardField, DashboardField } from './catalog';
 
 // Type definitions live here to avoid circular imports with aggregate.ts.
@@ -113,89 +113,73 @@ function applyLabel(labelMap: Map<string, string>, raw: unknown): string {
   return labelMap.get(String(raw)) ?? String(raw);
 }
 
-function formatBucketLabel(date: Date, bucket: BucketGranularity): string {
-  const iso = new Date(date).toISOString();
+// Returns ISO-based bucket key for app-side grouping (no DB date_trunc).
+function truncateToBucket(date: Date, bucket: BucketGranularity): string {
   switch (bucket) {
-    case 'day': return iso.slice(0, 10);
-    case 'week': return iso.slice(0, 10);
-    case 'month': return iso.slice(0, 7);
+    case 'day':
+      return date.toISOString().slice(0, 10);
+    case 'week': {
+      const d = new Date(date);
+      // Shift to Monday (day 0 = Sunday → offset = (day + 6) % 7)
+      d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+      return d.toISOString().slice(0, 10);
+    }
+    case 'month':
+      return date.toISOString().slice(0, 7);
     case 'quarter': {
       const d = new Date(date);
-      return `${d.getUTCFullYear()} Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
+      const quarterMonth = Math.floor(d.getUTCMonth() / 3) * 3;
+      return `${d.getUTCFullYear()}-${String(quarterMonth + 1).padStart(2, '0')}`;
     }
-    case 'year': return String(new Date(date).getUTCFullYear());
+    case 'year':
+      return date.toISOString().slice(0, 4);
   }
 }
 
-function sameBucket(a: Date | null, b: Date | null): boolean {
-  if (a === null && b === null) return true;
-  if (a === null || b === null) return false;
-  return a.getTime() === b.getTime();
-}
-
-function conditionToSql(condition: FilterCondition): Prisma.Sql {
-  const col = Prisma.raw(`"${condition.field}"`);
-  const v0 = condition.values[0];
-  switch (condition.operator) {
-    case 'equals': case 'eq':
-      return Prisma.sql`${col} = ${v0}`;
-    case 'neq': case 'not':
-      return Prisma.sql`${col} != ${v0}`;
-    case 'gt': case 'after':
-      return Prisma.sql`${col} > ${v0}`;
-    case 'gte': case 'onOrAfter':
-      return Prisma.sql`${col} >= ${v0}`;
-    case 'lt': case 'before':
-      return Prisma.sql`${col} < ${v0}`;
-    case 'lte': case 'onOrBefore':
-      return Prisma.sql`${col} <= ${v0}`;
-    case 'between':
-      return Prisma.sql`${col} BETWEEN ${condition.values[0]} AND ${condition.values[1]}`;
-    case 'in':
-      return Prisma.sql`${col} IN (${Prisma.join(condition.values.map((v) => Prisma.sql`${v}`))})`;
-    case 'contains':
-      return Prisma.sql`lower(${col}::text) LIKE lower(${`%${v0}%`})`;
-    case 'is':
-      return Prisma.sql`${col} = ${v0}`;
-    default:
-      return Prisma.sql`${col} = ${v0}`;
+// Human-readable bucket label from the ISO key produced by truncateToBucket.
+function formatBucketKey(key: string, bucket: BucketGranularity): string {
+  if (bucket === 'quarter') {
+    // key is "YYYY-MM" where MM is the first month of the quarter
+    const [year, mm] = key.split('-');
+    const q = Math.floor((Number(mm) - 1) / 3) + 1;
+    return `${year} Q${q}`;
   }
+  return key;
 }
 
-function buildSqlWhere(conditions: FilterCondition[]): Prisma.Sql {
-  if (conditions.length === 0) return Prisma.sql``;
-  const fragments = conditions.map(conditionToSql);
-  return Prisma.sql`WHERE ${Prisma.join(fragments, ' AND ')}`;
-}
-
+// Fetch all rows and group by timestamp bucket in TypeScript (no raw SQL).
 async function aggregateBucketSingle(
   entityName: string,
-  fieldName: string,
+  field: DashboardField,
   bucket: BucketGranularity,
   conditions: FilterCondition[],
 ): Promise<{ kind: 'single'; data: AggregateBucket[] }> {
-  const table = Prisma.raw(`"${entityName}"`);
-  const col = Prisma.raw(`"${fieldName}"`);
-  const where = buildSqlWhere(conditions);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = (await (prisma as any).$queryRaw(
-    Prisma.sql`
-      SELECT date_trunc(${bucket}, ${col}) AS bucket, COUNT(*) AS count
-      FROM ${table}
-      ${where}
-      GROUP BY 1
-      ORDER BY 1
-    `,
-  )) as Array<{ bucket: Date | null; count: bigint }>;
+  const where = buildConditionsWhere(conditions);
+  const rows = await getModelClient(entityName).findMany({
+    select: { [field.name]: true },
+    where,
+  }) as Array<Record<string, unknown>>;
+
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const val = row[field.name];
+    const key = val instanceof Date ? truncateToBucket(val, bucket)
+      : (typeof val === 'string' && val) ? truncateToBucket(new Date(val), bucket)
+      : '(unspecified)';
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const sorted = [...counts.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
   return {
     kind: 'single',
-    data: rows.map((r) => ({
-      label: r.bucket ? formatBucketLabel(r.bucket, bucket) : '(unspecified)',
-      count: Number(r.count),
+    data: sorted.map(([key, count]) => ({
+      label: key === '(unspecified)' ? key : formatBucketKey(key, bucket),
+      count,
     })),
   };
 }
 
+// Fetch all rows and group by (timestamp bucket × series value) in TypeScript.
 async function aggregateBucketMultiSeries(
   entityName: string,
   catField: DashboardField,
@@ -203,39 +187,42 @@ async function aggregateBucketMultiSeries(
   bucket: BucketGranularity,
   conditions: FilterCondition[],
 ): Promise<{ kind: 'multi'; categories: string[]; series: { label: string; data: number[] }[] }> {
-  const table = Prisma.raw(`"${entityName}"`);
-  const catCol = Prisma.raw(`"${catField.name}"`);
-  const serCol = Prisma.raw(`"${serField.name}"`);
-  const where = buildSqlWhere(conditions);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = (await (prisma as any).$queryRaw(
-    Prisma.sql`
-      SELECT date_trunc(${bucket}, ${catCol}) AS bucket,
-             ${serCol} AS series_val,
-             COUNT(*) AS count
-      FROM ${table}
-      ${where}
-      GROUP BY 1, 2
-      ORDER BY 1, 2
-    `,
-  )) as Array<{ bucket: Date | null; series_val: unknown; count: bigint }>;
+  const where = buildConditionsWhere(conditions);
+  const rows = await getModelClient(entityName).findMany({
+    select: { [catField.name]: true, [serField.name]: true },
+    where,
+  }) as Array<Record<string, unknown>>;
 
-  const rawBuckets: (Date | null)[] = [];
+  // Accumulate (bucketKey, seriesKey) → count
+  const counts = new Map<string, Map<string, number>>();
+  const bucketOrder: string[] = [];
   const rawSerVals: unknown[] = [];
-  for (const r of rows) {
-    if (!rawBuckets.some((b) => sameBucket(b, r.bucket))) rawBuckets.push(r.bucket);
-    if (!rawSerVals.includes(r.series_val)) rawSerVals.push(r.series_val);
+
+  for (const row of rows) {
+    const tsVal = row[catField.name];
+    const bucketKey = tsVal instanceof Date ? truncateToBucket(tsVal, bucket)
+      : (typeof tsVal === 'string' && tsVal) ? truncateToBucket(new Date(tsVal), bucket)
+      : '(unspecified)';
+    const serVal = row[serField.name];
+    const serKey = String(serVal ?? '');
+
+    if (!counts.has(bucketKey)) {
+      counts.set(bucketKey, new Map());
+      bucketOrder.push(bucketKey);
+    }
+    const inner = counts.get(bucketKey)!;
+    inner.set(serKey, (inner.get(serKey) ?? 0) + 1);
+
+    if (!rawSerVals.includes(serVal)) rawSerVals.push(serVal);
   }
 
-  const categories = rawBuckets.map((b) => (b ? formatBucketLabel(b, bucket) : '(unspecified)'));
+  bucketOrder.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+  const categories = bucketOrder.map((k) => k === '(unspecified)' ? k : formatBucketKey(k, bucket));
   const serLabels = await buildLabelMap(serField, rawSerVals);
 
   const series = rawSerVals.map((sv) => ({
     label: applyLabel(serLabels, sv),
-    data: rawBuckets.map((bv) => {
-      const row = rows.find((r) => sameBucket(r.bucket, bv) && r.series_val === sv);
-      return row ? Number(row.count) : 0;
-    }),
+    data: bucketOrder.map((bk) => counts.get(bk)?.get(String(sv ?? '')) ?? 0),
   }));
 
   return { kind: 'multi', categories, series };
@@ -292,10 +279,11 @@ export async function aggregateForWidgetCore(
   groupByBucket?: BucketGranularity,
 ): Promise<AggregateOutput> {
   const entity = findDashboardEntity(entityName);
-  if (!entity) throw new Error(`Entity '${entityName}' is not dashboardable`);
+  if (!entity) throw new ApiError(400, `Entity '${entityName}' is not dashboardable`);
   const field = findDashboardField(entityName, groupByField);
-  if (!field) throw new Error(`Field '${groupByField}' is not groupable on '${entityName}'`);
+  if (!field) throw new ApiError(400, `Unknown group_by_field: ${groupByField}`);
 
+  // Validate all condition fields against the catalog (multi-layer defense).
   const activeConditions: FilterCondition[] =
     (conditions && conditions.length > 0)
       ? conditions
@@ -303,16 +291,22 @@ export async function aggregateForWidgetCore(
         ? [{ field: filter.field, operator: 'equals', values: [filter.value] }]
         : [];
 
+  for (const c of activeConditions) {
+    if (!findDashboardField(entityName, c.field)) {
+      throw new ApiError(400, `Unknown filter field: ${c.field}`);
+    }
+  }
+
   if (groupByBucket) {
     if (field.kind !== 'datetime') {
-      throw new Error(`group_by_bucket requires a datetime field; '${groupByField}' is '${field.kind}'`);
+      throw new ApiError(400, `group_by_bucket requires a datetime field; '${groupByField}' is '${field.kind}'`);
     }
     if (seriesField) {
       const serField = findDashboardField(entityName, seriesField);
-      if (!serField) throw new Error(`Field '${seriesField}' is not groupable on '${entityName}'`);
+      if (!serField) throw new ApiError(400, `Unknown series_field: ${seriesField}`);
       return aggregateBucketMultiSeries(entityName, field, serField, groupByBucket, activeConditions);
     }
-    return aggregateBucketSingle(entityName, field.name, groupByBucket, activeConditions);
+    return aggregateBucketSingle(entityName, field, groupByBucket, activeConditions);
   }
 
   const where: Record<string, unknown> | undefined =
@@ -320,7 +314,7 @@ export async function aggregateForWidgetCore(
 
   if (seriesField) {
     const serField = findDashboardField(entityName, seriesField);
-    if (!serField) throw new Error(`Field '${seriesField}' is not groupable on '${entityName}'`);
+    if (!serField) throw new ApiError(400, `Unknown series_field: ${seriesField}`);
     return aggregateMultiSeries(entityName, field, serField, where);
   }
 

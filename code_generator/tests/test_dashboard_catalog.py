@@ -255,3 +255,37 @@ def test_aggregate_route_returns_json():
     result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
     assert 'NextResponse.json' in result
     assert 'handleApiError' in result
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 security: rejection tests — unknown field/bucket → 400
+# ---------------------------------------------------------------------------
+
+def test_aggregate_route_delegates_to_core():
+    """Route must delegate to aggregateForWidgetCore, which validates fields."""
+    env = _make_env()
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    # aggregateForWidgetCore throws ApiError(400) for unknown field/bucket;
+    # handleApiError converts it to a 400 JSON response.
+    assert 'aggregateForWidgetCore' in result
+    assert 'handleApiError' in result
+
+
+def test_aggregate_route_no_raw_sql():
+    """Route template must not contain any $queryRaw or Prisma.raw references."""
+    env = _make_env()
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert '$queryRaw' not in result
+    assert '$executeRaw' not in result
+    assert 'Prisma.raw' not in result
+    assert '$queryRawUnsafe' not in result
+
+
+def test_aggregate_route_handles_401_403():
+    """Route must enforce auth before calling aggregateForWidgetCore."""
+    env = _make_env()
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    # authenticateApiKey raises ApiError(401) for missing/invalid key.
+    # requireApiPermission raises ApiError(403) for insufficient permissions.
+    assert 'authenticateApiKey' in result
+    assert 'requireApiPermission' in result
