@@ -5,7 +5,9 @@
 export type DashboardField =
   | { name: string; label: string; kind: 'boolean' }
   | { name: string; label: string; kind: 'enum'; enum_values: string[] }
-  | { name: string; label: string; kind: 'fk'; fk_target: string; fk_label_field: string };
+  | { name: string; label: string; kind: 'fk'; fk_target: string; fk_label_field: string }
+  | { name: string; label: string; kind: 'number' }
+  | { name: string; label: string; kind: 'datetime'; datetime_format: 'date' | 'date-time' };
 
 export type DashboardEntity = {
   name: string;
@@ -14,6 +16,38 @@ export type DashboardEntity = {
 };
 
 export const DASHBOARDABLE_ENTITIES: DashboardEntity[] = [
+  {
+    name: 'resource',
+    label: 'Resource',
+    groupable_fields: [
+      { name: 'organization_id', label: 'Organization', kind: 'fk', fk_target: 'organization', fk_label_field: 'name' },
+    ],
+  },
+  {
+    name: 'booking',
+    label: 'Booking',
+    groupable_fields: [
+      { name: 'resource_id', label: 'Resource', kind: 'fk', fk_target: 'resource', fk_label_field: 'name' },
+      { name: 'start_time', label: 'Start Time', kind: 'datetime', datetime_format: 'date-time' },
+      { name: 'end_time', label: 'End Time', kind: 'datetime', datetime_format: 'date-time' },
+    ],
+  },
+  {
+    name: 'product',
+    label: 'Product',
+    groupable_fields: [
+      { name: 'price', label: 'Price', kind: 'number' },
+    ],
+  },
+  {
+    name: 'leave_request',
+    label: 'Leave Request',
+    groupable_fields: [
+      { name: 'user_id', label: 'User', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
+      { name: 'start_date', label: 'Start Date', kind: 'datetime', datetime_format: 'date' },
+      { name: 'end_date', label: 'End Date', kind: 'datetime', datetime_format: 'date' },
+    ],
+  },
 ];
 
 export function findDashboardEntity(name: string): DashboardEntity | undefined {

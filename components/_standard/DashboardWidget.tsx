@@ -7,7 +7,9 @@ import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import Skeleton from '@mui/material/Skeleton';
 import DashboardChart, { ChartDatum, ChartType, StackMode } from './DashboardChart';
-import { aggregateForWidget, AggregateOutput } from '@/lib/dashboard/aggregate';
+import { aggregateForWidget, AggregateOutput, FilterCondition } from '@/lib/dashboard/aggregate';
+
+export type { FilterCondition };
 
 export type WidgetConfig = {
   id: string;
@@ -16,8 +18,11 @@ export type WidgetConfig = {
   entity_name: string;
   chart_type: ChartType;
   group_by_field: string;
+  // Legacy single-field filter (back-compat: treated as 'equals' condition).
   filter_field?: string | null;
   filter_value?: string | null;
+  // New typed multi-condition filter (takes precedence over filter_field/filter_value).
+  conditions?: FilterCondition[] | null;
   stack_mode?: StackMode | null;   // optional; requires series_field when set
   series_field?: string | null;    // required when stack_mode is set
 };
@@ -54,26 +59,40 @@ function reducer(state: State, action: Action): State {
   }
 }
 
+// Stable string key for conditions[] used as useEffect dependency.
+function conditionsKey(conditions: FilterCondition[] | null | undefined): string {
+  return conditions && conditions.length > 0 ? JSON.stringify(conditions) : '';
+}
+
 export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
   const [{ output, error, loading }, dispatch] = useReducer(reducer, { output: EMPTY_OUTPUT, error: null, loading: true });
 
   const validationError = validateConfig(widget);
+  const activeConditions = widget.conditions && widget.conditions.length > 0 ? widget.conditions : null;
+  const condKey = conditionsKey(activeConditions);
 
   useEffect(() => {
     if (validationError) return;
     let cancelled = false;
     dispatch({ type: 'start' });
-    const filter = widget.filter_field && widget.filter_value
+    // conditions[] takes precedence; fall back to legacy filter_field/filter_value.
+    const legacyFilter = !activeConditions && widget.filter_field && widget.filter_value
       ? { field: widget.filter_field, value: widget.filter_value }
       : null;
     const seriesField = widget.stack_mode && widget.series_field ? widget.series_field : undefined;
-    aggregateForWidget(widget.entity_name, widget.group_by_field, filter, seriesField)
+    aggregateForWidget(
+      widget.entity_name,
+      widget.group_by_field,
+      legacyFilter,
+      seriesField,
+      activeConditions ?? undefined,
+    )
       .then((result) => { if (!cancelled) dispatch({ type: 'success', output: result }); })
       .catch((e: unknown) => {
         if (!cancelled) dispatch({ type: 'error', message: e instanceof Error ? e.message : 'Failed to load' });
       });
     return () => { cancelled = true; };
-  }, [widget.entity_name, widget.group_by_field, widget.filter_field, widget.filter_value, widget.stack_mode, widget.series_field, validationError]);
+  }, [widget.entity_name, widget.group_by_field, widget.filter_field, widget.filter_value, widget.stack_mode, widget.series_field, validationError, condKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const chartType = resolveChartType(widget.chart_type);
   const stackMode = (widget.stack_mode ?? undefined) as StackMode | undefined;

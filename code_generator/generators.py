@@ -64,7 +64,9 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
       - a many-to-one FK (each FK value becomes a series, labelled via
         the relationship's labelField on the target);
       - an integer with an `enum` (each enum label is a category);
-      - a boolean (Yes / No).
+      - a boolean (Yes / No);
+      - an integer or number without enum (numeric filter range);
+      - a string with format 'date' or 'date-time' (datetime range filter).
 
     Entities with no groupable field are dropped — there is nothing
     meaningful to chart, and exposing them would surface an empty picker.
@@ -109,6 +111,19 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
                     'label': to_title_case(prop_name),
                     'kind': 'enum',
                     'enum_values': [str(v) for v in prop['enum']],
+                })
+            elif actual in ('integer', 'number') and not isinstance(prop.get('enum'), list):
+                groupable.append({
+                    'name': prop_name,
+                    'label': to_title_case(prop_name),
+                    'kind': 'number',
+                })
+            elif actual == 'string' and prop.get('format') in ('date', 'date-time'):
+                groupable.append({
+                    'name': prop_name,
+                    'label': to_title_case(prop_name),
+                    'kind': 'datetime',
+                    'datetime_format': prop['format'],
                 })
         if not groupable:
             continue

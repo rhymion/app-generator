@@ -6,7 +6,18 @@ import { findDashboardEntity, findDashboardField, DashboardField } from './catal
 
 export type AggregateBucket = { label: string; count: number };
 
+// Legacy single-field filter kept for back-compat callers.
 export type AggregateFilter = { field: string; value: string } | null;
+
+export type FilterCondition = {
+  field: string;
+  operator:
+    | 'equals' | 'in' | 'contains' | 'not'    // string / enum
+    | 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'between'  // number
+    | 'before' | 'after' | 'onOrBefore' | 'onOrAfter'          // datetime
+    | 'is';                                                      // boolean
+  values: (string | number | boolean)[];
+};
 
 // Discriminated union: single-dimension vs category × series matrix
 export type AggregateOutput =
@@ -25,6 +36,52 @@ function getModelClient(name: string): AnyPrismaModel {
   return client;
 }
 
+// Translate a single FilterCondition to a Prisma where clause fragment.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildConditionWhere(condition: FilterCondition): Record<string, any> {
+  const { field, operator, values } = condition;
+  const v0 = values[0];
+  switch (operator) {
+    case 'equals':
+    case 'eq':
+      return { [field]: { equals: v0 } };
+    case 'neq':
+      return { [field]: { not: v0 } };
+    case 'not':
+      return { [field]: { not: v0 } };
+    case 'gt':
+    case 'after':
+      return { [field]: { gt: v0 } };
+    case 'gte':
+    case 'onOrAfter':
+      return { [field]: { gte: v0 } };
+    case 'lt':
+    case 'before':
+      return { [field]: { lt: v0 } };
+    case 'lte':
+    case 'onOrBefore':
+      return { [field]: { lte: v0 } };
+    case 'between':
+      return { [field]: { gte: values[0], lte: values[1] } };
+    case 'in':
+      return { [field]: { in: values } };
+    case 'contains':
+      return { [field]: { contains: v0, mode: 'insensitive' } };
+    case 'is':
+      return { [field]: { equals: v0 } };
+    default:
+      return { [field]: { equals: v0 } };
+  }
+}
+
+// Build combined Prisma where from a conditions array (AND-combined).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildConditionsWhere(conditions: FilterCondition[]): Record<string, any> | undefined {
+  if (!conditions.length) return undefined;
+  if (conditions.length === 1) return buildConditionWhere(conditions[0]);
+  return { AND: conditions.map(buildConditionWhere) };
+}
+
 // Resolve raw field values to display labels; performs async FK lookup when needed.
 async function buildLabelMap(
   field: DashboardField,
@@ -40,6 +97,9 @@ async function buildLabelMap(
         return [String(v), field.enum_values[idx] ?? String(idx)];
       }),
     );
+  }
+  if (field.kind === 'number' || field.kind === 'datetime') {
+    return new Map(rawValues.map((v) => [String(v), String(v)]));
   }
   // FK: batch-fetch labels from the target model
   const ids = rawValues.filter((v): v is string => typeof v === 'string' && v.length > 0);
@@ -107,6 +167,7 @@ export async function aggregateForWidget(
   groupByField: string,
   filter: AggregateFilter = null,
   seriesField?: string,
+  conditions?: FilterCondition[],
 ): Promise<AggregateOutput> {
   await getSessionUserIdOrThrow();
 
@@ -115,7 +176,14 @@ export async function aggregateForWidget(
   const field = findDashboardField(entityName, groupByField);
   if (!field) throw new Error(`Field '${groupByField}' is not groupable on '${entityName}'`);
 
-  const where = filter && filter.field && filter.value ? { [filter.field]: filter.value } : undefined;
+  // Build where clause: conditions[] takes precedence over legacy filter.
+  let where: Record<string, unknown> | undefined;
+  if (conditions && conditions.length > 0) {
+    where = buildConditionsWhere(conditions);
+  } else if (filter && filter.field && filter.value) {
+    // Back-compat: legacy single filter treated as equals condition.
+    where = { [filter.field]: filter.value };
+  }
 
   // 2D aggregation when series_field is specified
   if (seriesField) {
@@ -149,6 +217,16 @@ export async function aggregateForWidget(
         const label = field.enum_values[idx] ?? String(idx);
         return { label, count: r._count.id };
       }),
+    };
+  }
+
+  if (field.kind === 'number' || field.kind === 'datetime') {
+    return {
+      kind: 'single',
+      data: rows.map((r) => ({
+        label: r[groupByField] == null ? '(unspecified)' : String(r[groupByField]),
+        count: r._count.id,
+      })),
     };
   }
 
