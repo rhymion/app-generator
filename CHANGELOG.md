@@ -6,6 +6,17 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Default-deny authorization: new users start with zero permissions.
+  Administrators must explicitly grant access by assigning roles via
+  the Permission management UI. The `Administrator` role (seeded by
+  `seed-tenant.ts`) grants full CRUD on all entities.
+  Role-based access control is enforced at the API layer (`lib/authz.ts`).
+- MFA (Multi-Factor Authentication) via TOTP:
+  - Time-based one-time password (TOTP) with AES-256-GCM encrypted secret storage
+  - 8 recovery codes per enrollment (bcrypt-hashed) for emergency access
+  - Self-service enrollment UI at `/setting/mfa` (enable/disable TOTP, view recovery codes)
+  - Known limitation: QR code may not appear immediately after clicking Enable MFA;
+    refreshing the browser shows the QR code (pending session is preserved server-side)
 - Restructured npm scripts by environment (dev/prod/test).
   Added scripts/run-next-dev.js for PORT-aware dev server startup.
   dev:full now includes docker:up:dev and uses migrate:dev.
