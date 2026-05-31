@@ -466,13 +466,10 @@ definitions:
       delete: true
       invalidate: false
       api: true
-      # Skip generated cypress specs for `user`. The seed flow creates a
-      # TEST_CREDENTIALS user before any spec runs, so the standard
-      # "list is empty after reset" assertions never hold for this entity.
-      # The hardcoded `db:populateUser` task in test_tasks_registry still
-      # gets emitted (via `has_user_account_populate`) so other entities
-      # that need users for FKs keep working.
-      test: false
+      # user_detail.test=true: adds 'user' to ALL_ENTITIES so grantAllEntityPermissions
+      # creates the required user.read/update/delete permissions for API tests.
+      # seed_count=1 (the TEST_CREDENTIALS user) — the generated spec accounts for it.
+      test: true
       fields:
         - name
         - email

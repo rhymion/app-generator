@@ -15,6 +15,21 @@ from helpers.naming import (
 from helpers.schema_helpers import filter_fields, get_parent_relationships, is_optional_fk_to_parent, get_flatten_rels
 from helpers.label_field import build_label_expression, render_prisma_include, resolve_label_paths
 from build_context import _get_entity_options
+from generate_types import extract_entities
+
+
+def _safe_entity_opts(opts: list, schema: dict) -> list:
+    """Return entity options filtered to prefer non-test entities.
+
+    When an entity_select field's test data uses the same entity name as a
+    record created by grantAllEntityPermissions (which creates one permission
+    per ALL_ENTITIES entity for the Administrator role), the uniqueness
+    constraint (name, role_id) causes test failures.  Picking an entity that
+    is not a test entity avoids that conflict.
+    """
+    test_names = {e['parent'] for e in extract_entities(schema) if e['generate_config'].get('test')}
+    safe = [o for o in opts if o['value'] not in test_names]
+    return safe if safe else opts
 
 
 # ---------------------------------------------------------------------------
@@ -1745,10 +1760,14 @@ def spec_context(
         lbl = prim_meta.get('label', to_title_case(prim))
         if prim_meta.get('category') == 'entity_select':
             opts = prim_meta.get('entity_options') or []
+            # first_val: use opts[0] — always visible (present in grantAllEntityPermissions data)
+            # second_val: use first safe (non-test) option to avoid rename conflict in test 3.3
             first_val   = opts[0]['value'] if opts else ''
-            second_val  = opts[1]['value'] if len(opts) > 1 else first_val
             first_label = opts[0]['label'] if opts else ''
-            second_label = opts[1]['label'] if len(opts) > 1 else first_label
+            safe = _safe_entity_opts(opts, schema)
+            safe_excl_first = [o for o in safe if o['value'] != first_val]
+            second_val   = safe_excl_first[0]['value'] if safe_excl_first else (opts[1]['value'] if len(opts) > 1 else first_val)
+            second_label = safe_excl_first[0]['label'] if safe_excl_first else (opts[1]['label'] if len(opts) > 1 else first_label)
             list_id_1 = first_val
             list_id_is_unique = False
             after_create_id = first_val
@@ -1778,10 +1797,14 @@ def spec_context(
         name_meta = next((f for f in fields if f['prop_name'] == 'name'), None)
         if name_meta and name_meta.get('category') == 'entity_select':
             opts = name_meta.get('entity_options') or []
+            # first_val: use opts[0] — always visible (present in grantAllEntityPermissions data)
+            # second_val: use first safe (non-test) option to avoid rename conflict in test 3.3
             first_val   = opts[0]['value'] if opts else ''
-            second_val  = opts[1]['value'] if len(opts) > 1 else first_val
             first_label = opts[0]['label'] if opts else ''
-            second_label = opts[1]['label'] if len(opts) > 1 else first_label
+            safe = _safe_entity_opts(opts, schema)
+            safe_excl_first = [o for o in safe if o['value'] != first_val]
+            second_val   = safe_excl_first[0]['value'] if safe_excl_first else (opts[1]['value'] if len(opts) > 1 else first_val)
+            second_label = safe_excl_first[0]['label'] if safe_excl_first else (opts[1]['label'] if len(opts) > 1 else first_label)
             list_id_1 = first_val
             list_id_is_unique = False
             after_create_id = first_val

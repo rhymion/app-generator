@@ -38,7 +38,8 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.visit('/en/{{ parent }}');
       cy.visit('/en/{{ parent }}');
       // db:seed + db:grantAllPermissions pre-populate {{ seed_count }} {{ parent }} record(s)
-      getDataGridRowCount().should('eq', {{ seed_count }});
+      // Use aria-rowcount to count all rows (getDataGridRowCount only counts virtualised visible rows)
+      getDataGridTotalRowCount().should('eq', {{ seed_count }});
     });
 {% endif %}
 
@@ -46,7 +47,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.task('db:populate{{ pascal }}', 1);
       cy.visit('/en/{{ parent }}');
       cy.contains('{{ list_id_1 }}').scrollIntoView().should('be.visible');
-      getDataGridRowCount().should('eq', {{ seed_count + 1 }});
+      getDataGridTotalRowCount().should('eq', {{ seed_count + 1 }});
     });
 
     it('1.3 shows list with multiple items', () => {
@@ -101,13 +102,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}// Verify on view page
 {% if after_create_id_is_expr %}
 {{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).scrollIntoView().should('be.visible');
-{{ I }}// Click the newest row (last in default id-asc order) to navigate. The
-{{ I }}// dep helper may have left other rows with the same primary FK label
-{{ I }}// (e.g. self-ref `prev` medicine sharing the test patient), which would
-{{ I }}// make a substring `cy.contains` ambiguous.
-{{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
+{{ I }}// Navigate using the scrolled-into-view row (avoids .last() which fails with virtual-scroll)
+{{ I }}cy.contains('.MuiDataGrid-row', deps.{{ primary_dep_var_for_list }}.name).find('a').first().click();
 {% elif not list_id_is_unique %}
-{{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
+{{ I }}// Navigate to the visible row — selectAutocomplete scrolled it into view above
+{{ I }}cy.contains('.MuiDataGrid-row', '{{ after_create_id }}').find('a').first().click();
 {% else %}
 {{ I }}cy.contains('{{ after_create_id }}').click();
 {% endif %}
@@ -348,7 +347,12 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
       cy.task<any[]>('db:populate{{ pascal }}', {{ populate_count_3_3 }}).then((records) => {
-{% if can_list and can_view %}
+{% if can_list and can_view and not list_id_is_unique %}
+        // Use record ID to navigate directly — list_id_1 may not be unique (e.g. entity_select
+        // overlap with seed data from grantAllEntityPermissions), causing the wrong row to be
+        // clicked and leading to a unique-constraint conflict on save.
+        cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
+{% elif can_list and can_view %}
         cy.visit('/en/{{ parent }}');
         cy.contains('{{ list_id_1 }}').click();
         cy.get('a[aria-label="Edit"]').click();
@@ -370,12 +374,18 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}');
         cy.url().should('not.include', '/{{ parent }}/');
-{% if can_list %}
+{% if can_list and list_id_is_unique %}
         cy.contains('{{ list_id_updated }}').scrollIntoView().should('be.visible');
 {% endif %}
 {% if can_view and can_list %}
         // Verify on view page
+{% if not list_id_is_unique %}
+        // Non-unique list_id: navigate by record ID to avoid virtual-scroll
+        // range issues (the renamed value may be beyond the initial viewport).
+        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
+{% else %}
         cy.contains('{{ list_id_updated }}').click();
+{% endif %}
         cy.url().should('include', '/{{ parent }}/view');
 {% if check_field_use_accordion %}
         cy.openAccordion('{{ check_field_label }}');
@@ -409,24 +419,24 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.task('db:populate{{ pascal }}', 2);
       cy.visit('/en/{{ parent }}');
       cy.selectDataGridRows([0]);
-      cy.get('div').find('button[aria-label="Delete Selected"]').click();
+      cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
 {% if list_id_is_unique and seed_count == 0 %}
       cy.contains('{{ list_id_1 }}').should('not.exist');
 {% endif %}
-      getDataGridRowCount().should('eq', {{ seed_count + 1 }});
+      getDataGridTotalRowCount().should('eq', {{ seed_count + 1 }});
     });
 
     it('4.2 deletes multiple items from list view', () => {
       cy.task('db:populate{{ pascal }}', 3);
       cy.visit('/en/{{ parent }}');
       cy.selectDataGridRows([0, 1]);
-      cy.get('div').find('button[aria-label="Delete Selected"]').click();
+      cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
 {% if list_id_is_unique and seed_count == 0 %}
       cy.contains('{{ list_id_1 }}').should('not.exist');
 {% endif %}
-      getDataGridRowCount().should('eq', {{ seed_count + 1 }});
+      getDataGridTotalRowCount().should('eq', {{ seed_count + 1 }});
     });
 
 {% endif %}
@@ -477,6 +487,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
 {{ I }}cy.visit('/en/{{ parent }}/new');
+{{ I }}// Wait for form to fully render before interacting (async autocomplete options can
+{{ I }}// cause a re-render that detaches checkbox elements mid-assertion).
+{{ I }}cy.get('button[aria-label="Save"]').should('be.visible');
 {% for cmd in fail_create_5_1.fill_cmds %}
 {{ cmd }}
 {% endfor %}
