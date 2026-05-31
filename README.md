@@ -81,9 +81,9 @@ phased plan.
 are implemented in `lib/mfa/`. Self-service enrollment and disable are
 available at `/setting/mfa`.
 
-**Known limitations:**
-- Recovery codes can be generated and stored, but there is currently no UI
-  to enter a recovery code at login when the authenticator app is unavailable.
+**Note:** Recovery codes can be entered in the standard MFA code field at login.
+There is no separate recovery-code-only screen; the same code input accepts
+both TOTP codes and recovery codes.
 
 ### Approval Flow
 
