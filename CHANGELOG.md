@@ -5,6 +5,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - TBD
+
 ### Added
 - Default-deny authorization: new users start with zero permissions.
   Administrators must explicitly grant access by assigning roles via
