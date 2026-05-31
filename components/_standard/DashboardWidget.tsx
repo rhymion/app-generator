@@ -6,8 +6,8 @@ import CardHeader from '@mui/material/CardHeader';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import Skeleton from '@mui/material/Skeleton';
-import DashboardChart, { ChartDatum, ChartType } from './DashboardChart';
-import { aggregateForWidget } from '@/lib/dashboard/aggregate';
+import DashboardChart, { ChartDatum, ChartType, StackMode } from './DashboardChart';
+import { aggregateForWidget, AggregateOutput } from '@/lib/dashboard/aggregate';
 
 export type WidgetConfig = {
   id: string;
@@ -18,7 +18,17 @@ export type WidgetConfig = {
   group_by_field: string;
   filter_field?: string | null;
   filter_value?: string | null;
+  stack_mode?: StackMode | null;   // optional; requires series_field when set
+  series_field?: string | null;    // required when stack_mode is set
 };
+
+// Validation: stack_mode requires series_field.
+function validateConfig(config: WidgetConfig): string | null {
+  if (config.stack_mode && !config.series_field) {
+    return `stack_mode '${config.stack_mode}' requires series_field to be set`;
+  }
+  return null;
+}
 
 // Read legacy numeric chart_type from JSON config: 0 → pie, 1 → column
 function resolveChartType(raw: unknown): ChartType {
@@ -28,38 +38,60 @@ function resolveChartType(raw: unknown): ChartType {
   return 'column';
 }
 
-type State = { data: ChartDatum[]; error: string | null; loading: boolean };
+const EMPTY_OUTPUT: AggregateOutput = { kind: 'single', data: [] };
+
+type State = { output: AggregateOutput; error: string | null; loading: boolean };
 type Action =
   | { type: 'start' }
-  | { type: 'success'; data: ChartDatum[] }
+  | { type: 'success'; output: AggregateOutput }
   | { type: 'error'; message: string };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
-    case 'start': return { data: state.data, error: null, loading: true };
-    case 'success': return { data: action.data, error: null, loading: false };
-    case 'error': return { data: [], error: action.message, loading: false };
+    case 'start': return { output: state.output, error: null, loading: true };
+    case 'success': return { output: action.output, error: null, loading: false };
+    case 'error': return { output: EMPTY_OUTPUT, error: action.message, loading: false };
   }
 }
 
 export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
-  const [{ data, error, loading }, dispatch] = useReducer(reducer, { data: [], error: null, loading: true });
+  const [{ output, error, loading }, dispatch] = useReducer(reducer, { output: EMPTY_OUTPUT, error: null, loading: true });
+
+  const validationError = validateConfig(widget);
 
   useEffect(() => {
+    if (validationError) return;
     let cancelled = false;
     dispatch({ type: 'start' });
     const filter = widget.filter_field && widget.filter_value
       ? { field: widget.filter_field, value: widget.filter_value }
       : null;
-    aggregateForWidget(widget.entity_name, widget.group_by_field, filter)
-      .then((rows) => { if (!cancelled) dispatch({ type: 'success', data: rows }); })
+    const seriesField = widget.stack_mode && widget.series_field ? widget.series_field : undefined;
+    aggregateForWidget(widget.entity_name, widget.group_by_field, filter, seriesField)
+      .then((result) => { if (!cancelled) dispatch({ type: 'success', output: result }); })
       .catch((e: unknown) => {
         if (!cancelled) dispatch({ type: 'error', message: e instanceof Error ? e.message : 'Failed to load' });
       });
     return () => { cancelled = true; };
-  }, [widget.entity_name, widget.group_by_field, widget.filter_field, widget.filter_value]);
+  }, [widget.entity_name, widget.group_by_field, widget.filter_field, widget.filter_value, widget.stack_mode, widget.series_field, validationError]);
 
   const chartType = resolveChartType(widget.chart_type);
+  const stackMode = (widget.stack_mode ?? undefined) as StackMode | undefined;
+
+  function renderChart() {
+    if (output.kind === 'multi' && stackMode && (chartType === 'column' || chartType === 'bar')) {
+      return (
+        <DashboardChart
+          type={chartType}
+          multiSeries={output}
+          stackMode={stackMode}
+        />
+      );
+    }
+    // Single-series fallback (also used when series_field not set)
+    const singleData: ChartDatum[] = output.kind === 'single' ? output.data : [];
+    return <DashboardChart type={chartType} data={singleData} />;
+  }
 
   return (
     <Card variant="outlined" sx={{ width: '100%' }}>
@@ -70,12 +102,14 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
         subheaderTypographyProps={{ variant: 'caption' }}
       />
       <CardContent>
-        {loading ? (
+        {validationError ? (
+          <Typography color="error" variant="caption">{validationError}</Typography>
+        ) : loading ? (
           <Skeleton variant="rectangular" height={240} />
         ) : error ? (
           <Typography color="error" variant="caption">{error}</Typography>
         ) : (
-          <DashboardChart type={chartType} data={data} />
+          renderChart()
         )}
       </CardContent>
     </Card>
