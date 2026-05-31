@@ -496,6 +496,14 @@ def get_field_metas(
                 'required': prop_name in required_fields,
                 'entity_options': entity_options,
             })
+        elif prop_type == 'string' and prop.get('enum'):
+            metas.append({
+                **base,
+                'label': to_title_case(prop_name),
+                'category': 'string_enum',
+                'required': prop_name in required_fields,
+                'enum_values': prop.get('enum'),
+            })
         else:
             metas.append({
                 **base,

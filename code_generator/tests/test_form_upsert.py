@@ -582,3 +582,68 @@ class TestSelectorOTOOptional:
         ctx = self._ctx()
         assert "initialUserAccounts" in ctx["rel_opt_setups"]
         assert "searchUserAccountOptions" in ctx["rel_opt_setups"]
+
+
+# ---------------------------------------------------------------------------
+# String enum fields (e.g. chart_type: 'pie' | 'column' | 'bar' | 'line')
+# ---------------------------------------------------------------------------
+
+class TestStringEnumField:
+    """
+    A string field with an enum list must be rendered as an Autocomplete select,
+    not a plain TextField. The state is string, formData.set sends the raw value.
+    """
+
+    def _schema(self) -> dict:
+        return {
+            "definitions": {
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name", "chart_type"],
+                    "properties": {
+                        "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                        "name": {"type": "string"},
+                        "chart_type": {
+                            "type": "string",
+                            "enum": ["pie", "column", "bar", "line"],
+                            "default": "column",
+                        },
+                    },
+                },
+                "widget_detail": {
+                    "x-generate": {"list": True, "view": True, "new": True, "edit": True,
+                                   "delete": True, "api": False, "test": False},
+                    "allOf": [{"$ref": "#/definitions/widget"}],
+                },
+            }
+        }
+
+    def _ctx(self) -> dict:
+        entity = _entity("widget")
+        return _build_upsert_ctx(entity, self._schema())
+
+    def test_string_enum_state_is_string(self):
+        ctx = self._ctx()
+        assert "useState<string>" in ctx["all_states"]
+        assert "chartType" in ctx["all_states"]
+
+    def test_string_enum_autocomplete_options_generated(self):
+        ctx = self._ctx()
+        assert "chartTypeOptions" in ctx["enum_opt_setups"]
+        assert "'pie'" in ctx["enum_opt_setups"]
+        assert "'column'" in ctx["enum_opt_setups"]
+        assert "'bar'" in ctx["enum_opt_setups"]
+        assert "'line'" in ctx["enum_opt_setups"]
+
+    def test_string_enum_renders_autocomplete(self):
+        ctx = self._ctx()
+        assert "Autocomplete" in ctx["all_parent_fields_jsx"]
+        assert "chartTypeOptions" in ctx["all_parent_fields_jsx"]
+
+    def test_string_enum_in_form_data_sets(self):
+        ctx = self._ctx()
+        assert "chart_type" in ctx["parent_form_data_sets"]
+
+    def test_string_enum_triggers_autocomplete_import(self):
+        ctx = self._ctx()
+        assert ctx["has_many_to_one"] is True

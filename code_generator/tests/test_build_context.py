@@ -355,6 +355,22 @@ class TestCategorizeFormFields:
         assert "creator_id" not in all_fields
         assert "name" in all_fields
 
+    def test_string_with_enum_is_string_enum(self):
+        cats = self._categorize({
+            "chart_type": {
+                "type": "string",
+                "enum": ["pie", "column", "bar", "line"],
+                "default": "column",
+            }
+        })
+        assert "chart_type" in cats["enum_string"]
+        assert "chart_type" not in cats["text"]
+
+    def test_string_without_enum_is_text(self):
+        cats = self._categorize({"status": {"type": "string"}})
+        assert "status" in cats["text"]
+        assert "status" not in cats.get("enum_string", [])
+
     def test_fk_field_excluded_when_in_parent_rels(self):
         """FK fields (handled as Autocomplete via parent_rels) must not appear in text/number."""
         from helpers.schema_helpers import get_parent_relationships
