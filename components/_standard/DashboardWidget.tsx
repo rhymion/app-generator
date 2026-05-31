@@ -7,7 +7,7 @@ import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import Skeleton from '@mui/material/Skeleton';
 import DashboardChart, { ChartDatum, ChartType, StackMode } from './DashboardChart';
-import { aggregateForWidget, AggregateOutput, FilterCondition } from '@/lib/dashboard/aggregate';
+import { aggregateForWidget, AggregateOutput, FilterCondition, BucketGranularity } from '@/lib/dashboard/aggregate';
 
 export type { FilterCondition };
 
@@ -23,14 +23,20 @@ export type WidgetConfig = {
   filter_value?: string | null;
   // New typed multi-condition filter (takes precedence over filter_field/filter_value).
   conditions?: FilterCondition[] | null;
-  stack_mode?: StackMode | null;   // optional; requires series_field when set
-  series_field?: string | null;    // required when stack_mode is set
+  stack_mode?: StackMode | null;       // optional; requires series_field when set
+  series_field?: string | null;        // required when stack_mode is set
+  // Phase 4: timestamp bucketing — group_by_field must be datetime when set.
+  // Also enables the 'line' chart type.
+  group_by_bucket?: BucketGranularity | null;
 };
 
-// Validation: stack_mode requires series_field.
+// Validation: config consistency checks.
 function validateConfig(config: WidgetConfig): string | null {
   if (config.stack_mode && !config.series_field) {
     return `stack_mode '${config.stack_mode}' requires series_field to be set`;
+  }
+  if (config.chart_type === 'line' && !config.group_by_bucket) {
+    return `chart_type 'line' requires group_by_bucket to be set`;
   }
   return null;
 }
@@ -79,35 +85,47 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
     const legacyFilter = !activeConditions && widget.filter_field && widget.filter_value
       ? { field: widget.filter_field, value: widget.filter_value }
       : null;
-    const seriesField = widget.stack_mode && widget.series_field ? widget.series_field : undefined;
+    // series_field applies for stack_mode (bar/column) or group_by_bucket (line)
+    const seriesField =
+      (widget.group_by_bucket || widget.stack_mode) && widget.series_field
+        ? widget.series_field
+        : undefined;
+    const groupByBucket = widget.group_by_bucket ?? undefined;
     aggregateForWidget(
       widget.entity_name,
       widget.group_by_field,
       legacyFilter,
       seriesField,
       activeConditions ?? undefined,
+      groupByBucket,
     )
       .then((result) => { if (!cancelled) dispatch({ type: 'success', output: result }); })
       .catch((e: unknown) => {
         if (!cancelled) dispatch({ type: 'error', message: e instanceof Error ? e.message : 'Failed to load' });
       });
     return () => { cancelled = true; };
-  }, [widget.entity_name, widget.group_by_field, widget.filter_field, widget.filter_value, widget.stack_mode, widget.series_field, validationError, condKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [widget.entity_name, widget.group_by_field, widget.filter_field, widget.filter_value, widget.stack_mode, widget.series_field, widget.group_by_bucket, validationError, condKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const chartType = resolveChartType(widget.chart_type);
   const stackMode = (widget.stack_mode ?? undefined) as StackMode | undefined;
 
   function renderChart() {
-    if (output.kind === 'multi' && stackMode && (chartType === 'column' || chartType === 'bar')) {
-      return (
-        <DashboardChart
-          type={chartType}
-          multiSeries={output}
-          stackMode={stackMode}
-        />
-      );
+    if (output.kind === 'multi') {
+      if (chartType === 'line') {
+        // Time series multi-series line chart (group_by_bucket + series_field)
+        return <DashboardChart type="line" multiSeries={output} />;
+      }
+      if (stackMode && (chartType === 'column' || chartType === 'bar')) {
+        return (
+          <DashboardChart
+            type={chartType}
+            multiSeries={output}
+            stackMode={stackMode}
+          />
+        );
+      }
     }
-    // Single-series fallback (also used when series_field not set)
+    // Single-series fallback (also covers line without series_field)
     const singleData: ChartDatum[] = output.kind === 'single' ? output.data : [];
     return <DashboardChart type={chartType} data={singleData} />;
   }

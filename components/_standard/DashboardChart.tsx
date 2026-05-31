@@ -6,10 +6,11 @@ import { LineChart } from '@mui/x-charts/LineChart';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 
-// column = vertical bar; bar = horizontal bar; line = placeholder for Phase 4 time series
+// column = vertical bar; bar = horizontal bar; line = time series (Phase 4)
 export type ChartType = 'pie' | 'column' | 'bar' | 'line';
 export type ChartDatum = { label: string; count: number };
 export type StackMode = 'grouped' | 'stacked' | 'standardized';
+export type MultiSeriesData = { categories: string[]; series: { label: string; data: number[] }[] };
 
 type SingleSeriesProps = {
   type: ChartType;
@@ -19,15 +20,25 @@ type SingleSeriesProps = {
   height?: number;
 };
 
-type MultiSeriesProps = {
+// bar / column multi-series with stack_mode
+type MultiSeriesBarColumnProps = {
   type: 'column' | 'bar';
   data?: undefined;
-  multiSeries: { categories: string[]; series: { label: string; data: number[] }[] };
+  multiSeries: MultiSeriesData;
   stackMode: StackMode;
   height?: number;
 };
 
-type Props = SingleSeriesProps | MultiSeriesProps;
+// line chart multi-series (time series from group_by_bucket + series_field)
+type MultiSeriesLineProps = {
+  type: 'line';
+  data?: undefined;
+  multiSeries: MultiSeriesData;
+  stackMode?: undefined;
+  height?: number;
+};
+
+type Props = SingleSeriesProps | MultiSeriesBarColumnProps | MultiSeriesLineProps;
 
 // Normalize each category bucket to 100% for standardized stacking.
 function toPercent(
@@ -44,7 +55,7 @@ function toPercent(
 }
 
 export default function DashboardChart({ type, data, multiSeries, stackMode, height = 240 }: Props) {
-  // Multi-series path (column or bar with stack_mode)
+  // Multi-series path
   if (multiSeries) {
     const isEmpty = multiSeries.series.length === 0 || multiSeries.categories.length === 0;
     if (isEmpty) {
@@ -52,6 +63,17 @@ export default function DashboardChart({ type, data, multiSeries, stackMode, hei
         <Box sx={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Typography variant="caption" color="textSecondary">No data</Typography>
         </Box>
+      );
+    }
+
+    // Line chart: multi-series time series (group_by_bucket + series_field)
+    if (type === 'line') {
+      return (
+        <LineChart
+          height={height}
+          xAxis={[{ scaleType: 'point', data: multiSeries.categories }]}
+          series={multiSeries.series.map((s) => ({ label: s.label, data: s.data }))}
+        />
       );
     }
 
@@ -120,12 +142,12 @@ export default function DashboardChart({ type, data, multiSeries, stackMode, hei
   }
 
   if (type === 'line') {
-    // Placeholder: activated in Phase 4 for time series
+    // Single-series time series (group_by_bucket without series_field)
     return (
       <LineChart
         height={height}
-        xAxis={[{ scaleType: 'band', data: singleData.map((d) => d.label) }]}
-        series={[{ data: singleData.map((d) => d.count) }]}
+        xAxis={[{ scaleType: 'point', data: singleData.map((d) => d.label) }]}
+        series={[{ label: 'Count', data: singleData.map((d) => d.count) }]}
       />
     );
   }
