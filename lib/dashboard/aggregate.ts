@@ -315,12 +315,20 @@ export async function aggregateForWidget(
   const field = findDashboardField(entityName, groupByField);
   if (!field) throw new Error(`Field '${groupByField}' is not groupable on '${entityName}'`);
 
+  // Build active conditions first — shared by all paths.
+  // conditions[] takes precedence over legacy filter_field/filter_value.
+  const activeConditions: FilterCondition[] =
+    (conditions && conditions.length > 0)
+      ? conditions
+      : (filter && filter.field && filter.value)
+        ? [{ field: filter.field, operator: 'equals', values: [filter.value] }]
+        : [];
+
   // Phase 4: timestamp bucket path — uses $queryRaw with date_trunc.
   if (groupByBucket) {
     if (field.kind !== 'datetime') {
       throw new Error(`group_by_bucket requires a datetime field; '${groupByField}' is '${field.kind}'`);
     }
-    const activeConditions = conditions ?? [];
     if (seriesField) {
       const serField = findDashboardField(entityName, seriesField);
       if (!serField) throw new Error(`Field '${seriesField}' is not groupable on '${entityName}'`);
@@ -329,14 +337,9 @@ export async function aggregateForWidget(
     return aggregateBucketSingle(entityName, field.name, groupByBucket, activeConditions);
   }
 
-  // Build where clause: conditions[] takes precedence over legacy filter.
-  let where: Record<string, unknown> | undefined;
-  if (conditions && conditions.length > 0) {
-    where = buildConditionsWhere(conditions);
-  } else if (filter && filter.field && filter.value) {
-    // Back-compat: legacy single filter treated as equals condition.
-    where = { [filter.field]: filter.value };
-  }
+  // Build Prisma where from active conditions (standard non-bucket path).
+  const where: Record<string, unknown> | undefined =
+    activeConditions.length > 0 ? buildConditionsWhere(activeConditions) : undefined;
 
   // 2D aggregation when series_field is specified
   if (seriesField) {
