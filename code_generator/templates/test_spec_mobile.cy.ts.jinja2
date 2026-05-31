@@ -112,6 +112,7 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
 
   describe('Delete from card list', () => {
     it('4.1 deletes a single item via the card checkbox + toolbar', () => {
+{% if seed_count == 0 %}
       cy.task('db:populate{{ pascal }}', 2);
       cy.visit('/en/{{ parent }}');
       // Select the first card via its Checkbox (aria-label="Select <title>").
@@ -120,8 +121,23 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
       cy.get('button[aria-label="Delete Selected"]').should('not.be.disabled').click();
       // Confirmation Dialog — the Delete button carries aria-label="Delete".
       cy.get('div[role="dialog"]').find('button[aria-label="Delete"]').click();
-      // 2 populated + {{ seed_count }} seed − 1 deleted = {{ seed_count + 1 }} remaining.
-      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', {{ seed_count + 1 }});
+      // 2 populated − 1 deleted = 1 remaining.
+      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', 1);
+{% else %}
+      // Use task return value to target a known-populated record by name,
+      // avoiding seed items (e.g. the logged-in admin) that cannot be self-deleted.
+      cy.task<any[]>('db:populate{{ pascal }}', 2).then((records) => {
+        cy.visit('/en/{{ parent }}');
+        const name = records[0].name as string;
+        cy.get(`input[type="checkbox"][aria-label="Select ${name}"]`).first().check();
+        // Toolbar delete only enables once at least one card is selected.
+        cy.get('button[aria-label="Delete Selected"]').should('not.be.disabled').click();
+        // Confirmation Dialog — the Delete button carries aria-label="Delete".
+        cy.get('div[role="dialog"]').find('button[aria-label="Delete"]').click();
+        // 2 populated + {{ seed_count }} seed − 1 deleted = {{ seed_count + 1 }} remaining.
+        cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', {{ seed_count + 1 }});
+      });
+{% endif %}
     });
 
 {% if seed_count == 0 %}

@@ -416,27 +416,59 @@ describe('Testing {{ title }} pages and their behavior', () => {
   describe('Delete', () => {
 {% if can_list %}
     it('4.1 deletes a single item from list view', () => {
+{% if seed_count == 0 %}
       cy.task('db:populate{{ pascal }}', 2);
       cy.visit('/en/{{ parent }}');
       cy.selectDataGridRows([0]);
       cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
-{% if list_id_is_unique and seed_count == 0 %}
+{% if list_id_is_unique %}
       cy.contains('{{ list_id_1 }}').should('not.exist');
 {% endif %}
-      getDataGridTotalRowCount().should('eq', {{ seed_count + 1 }});
+      getDataGridTotalRowCount().should('eq', 1);
+{% else %}
+      // Use task return value to target a known-populated record by name,
+      // avoiding seed rows (e.g. the logged-in admin) that cannot be self-deleted.
+      cy.task<any[]>('db:populate{{ pascal }}', 2).then((records) => {
+        cy.visit('/en/{{ parent }}');
+        const name = records[0].name as string;
+        cy.contains('[role="row"]', name).find('input[type="checkbox"]').check();
+        cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
+        cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
+        getDataGridTotalRowCount().should('eq', {{ seed_count + 1 }});
+      });
+{% endif %}
     });
 
     it('4.2 deletes multiple items from list view', () => {
+{% if seed_count == 0 %}
       cy.task('db:populate{{ pascal }}', 3);
       cy.visit('/en/{{ parent }}');
       cy.selectDataGridRows([0, 1]);
       cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
-{% if list_id_is_unique and seed_count == 0 %}
+{% if list_id_is_unique %}
       cy.contains('{{ list_id_1 }}').should('not.exist');
 {% endif %}
-      getDataGridTotalRowCount().should('eq', {{ seed_count + 1 }});
+      getDataGridTotalRowCount().should('eq', 1);
+{% else %}
+      // Use task return value to target known-populated records by name,
+      // avoiding seed rows (e.g. the logged-in admin) that cannot be self-deleted.
+      cy.task<any[]>('db:populate{{ pascal }}', 3).then((records) => {
+        cy.visit('/en/{{ parent }}');
+        const firstName = records[0].name as string;
+        const secondName = records[1].name as string;
+        if (firstName !== secondName) {
+          cy.contains('[role="row"]', firstName).find('input[type="checkbox"]').check();
+          cy.contains('[role="row"]', secondName).find('input[type="checkbox"]').check();
+        } else {
+          cy.selectDataGridRows([0, 1]);
+        }
+        cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
+        cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
+        getDataGridTotalRowCount().should('eq', {{ seed_count + 1 }});
+      });
+{% endif %}
     });
 
 {% endif %}
