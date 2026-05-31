@@ -6,7 +6,7 @@ import CardHeader from '@mui/material/CardHeader';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import Skeleton from '@mui/material/Skeleton';
-import DashboardChart, { ChartDatum } from './DashboardChart';
+import DashboardChart, { ChartDatum, ChartType } from './DashboardChart';
 import { aggregateForWidget } from '@/lib/dashboard/aggregate';
 
 export type WidgetConfig = {
@@ -14,11 +14,19 @@ export type WidgetConfig = {
   name: string;
   order: number;
   entity_name: string;
-  chart_type: number;
+  chart_type: ChartType;
   group_by_field: string;
   filter_field?: string | null;
   filter_value?: string | null;
 };
+
+// Read legacy numeric chart_type from JSON config: 0 → pie, 1 → column
+function resolveChartType(raw: unknown): ChartType {
+  if (raw === 0) return 'pie';
+  if (raw === 1) return 'column';
+  if (typeof raw === 'string') return raw as ChartType;
+  return 'column';
+}
 
 type State = { data: ChartDatum[]; error: string | null; loading: boolean };
 type Action =
@@ -51,7 +59,7 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
     return () => { cancelled = true; };
   }, [widget.entity_name, widget.group_by_field, widget.filter_field, widget.filter_value]);
 
-  const chartType = widget.chart_type === 0 ? 'pie' : 'bar';
+  const chartType = resolveChartType(widget.chart_type);
 
   return (
     <Card variant="outlined" sx={{ width: '100%' }}>

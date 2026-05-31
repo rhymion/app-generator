@@ -2,10 +2,12 @@
 
 import { PieChart } from '@mui/x-charts/PieChart';
 import { BarChart } from '@mui/x-charts/BarChart';
+import { LineChart } from '@mui/x-charts/LineChart';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 
-export type ChartType = 'pie' | 'bar';
+// column = vertical bar; bar = horizontal bar; line = placeholder for Phase 4 time series
+export type ChartType = 'pie' | 'column' | 'bar' | 'line';
 export type ChartDatum = { label: string; count: number };
 
 type Props = {
@@ -37,6 +39,30 @@ export default function DashboardChart({ type, data, height = 240 }: Props) {
     );
   }
 
+  if (type === 'bar') {
+    // Horizontal bar chart
+    return (
+      <BarChart
+        height={height}
+        layout="horizontal"
+        yAxis={[{ scaleType: 'band', data: data.map((d) => d.label) }]}
+        series={[{ data: data.map((d) => d.count) }]}
+      />
+    );
+  }
+
+  if (type === 'line') {
+    // Placeholder: activated in Phase 4 for time series
+    return (
+      <LineChart
+        height={height}
+        xAxis={[{ scaleType: 'band', data: data.map((d) => d.label) }]}
+        series={[{ data: data.map((d) => d.count) }]}
+      />
+    );
+  }
+
+  // column (vertical bar) — default
   return (
     <BarChart
       height={height}
