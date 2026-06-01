@@ -275,6 +275,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- Cypress test generation ---
     test_entities = [e for e in entities if e['generate_config'].get('test')]
+    _test_entity_count = len(test_entities)
     if test_entities:
         print('\nGenerating Cypress tests...')
         cypress_support = out / 'cypress' / 'support'
@@ -296,7 +297,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                    _render(env, 'test_helper.ts.jinja2', helper_ctx))
 
             # e2e spec (desktop)
-            spec_ctx = spec_context(parent, children, schema, model, def_key, gen_cfg)
+            spec_ctx = spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)
             _write(cypress_e2e / f'{parent}.cy.ts',
                    _render(env, 'test_spec.cy.ts.jinja2', spec_ctx))
 
@@ -311,7 +312,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
             # api spec (only if api: true)
             if gen_cfg.get('api'):
-                api_ctx = api_spec_context(parent, children, schema, model, def_key, gen_cfg)
+                api_ctx = api_spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)
                 _write(cypress_e2e / 'api' / f'{parent}.cy.ts',
                        _render(env, 'test_api_spec.cy.ts.jinja2', api_ctx))
 
@@ -329,7 +330,8 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- db-helpers.ts (always generated, not gated on test_entities) ---
     print('\nGenerating db-helpers.ts...')
-    db_ctx = db_helpers_context(schema)
+    _test_entity_names = sorted(e['parent'] for e in test_entities)
+    db_ctx = db_helpers_context(schema, test_entity_names=_test_entity_names)
     _write(out / 'cypress' / 'support' / 'db-helpers.ts',
            _render(env, 'test_db_helpers.ts.jinja2', db_ctx))
 

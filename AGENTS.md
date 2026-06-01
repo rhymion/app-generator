@@ -79,9 +79,11 @@ Gate:
 2. `npm run test:e2e:build`
 3. `npm run check:generated`
 4. `npm run test:e2e:cy:api`
-5. `npm run lint`
-6. `npm audit --omit=dev --audit-level=high`
-7. `pip-audit -r requirements.txt`
+5. `npm run test:e2e:cy:ui`
+6. `npm run test:vitest`
+7. `npm run lint`
+8. `npm audit --omit=dev --audit-level=high`
+9. `pip-audit -r requirements.txt`
 
 ### add-component
 
@@ -123,13 +125,13 @@ Gate: none. Cite findings with `file:line` references.
 
 ## Gate matrix
 
-| Task type        | pytest | build | check:generated | component test | e2e API | eslint | npm audit | pip-audit |
-|------------------|:------:|:-----:|:---------------:|:--------------:|:-------:|:------:|:---------:|:---------:|
-| generate-schema  | -      | ✓     | ✓               | -              | ✓       | ✓      | ✓         | -         |
-| update-generator | ✓      | ✓     | ✓               | -              | ✓       | ✓      | ✓         | ✓         |
-| add-component    | -      | ✓     | -               | ✓              | ✓       | ✓      | ✓         | -         |
-| update-code      | -      | ✓     | -               | -              | ✓       | ✓      | ✓         | -         |
-| investigate      | -      | -     | -               | -              | -       | -      | -         | -         |
+| Task type        | pytest | build | check:generated | component test | e2e API | e2e UI | vitest | eslint | npm audit | pip-audit |
+|------------------|:------:|:-----:|:---------------:|:--------------:|:-------:|:------:|:------:|:------:|:---------:|:---------:|
+| generate-schema  | -      | ✓     | ✓               | -              | ✓       | -      | -      | ✓      | ✓         | -         |
+| update-generator | ✓      | ✓     | ✓               | -              | ✓       | ✓      | ✓      | ✓      | ✓         | ✓         |
+| add-component    | -      | ✓     | -               | ✓              | ✓       | -      | -      | ✓      | ✓         | -         |
+| update-code      | -      | ✓     | -               | -              | ✓       | -      | -      | ✓      | ✓         | -         |
+| investigate      | -      | -     | -               | -              | -       | -      | -      | -      | -         | -         |
 
 Gate commands:
 - **pytest**: `npm run test:pytest`
@@ -137,6 +139,8 @@ Gate commands:
 - **check:generated**: `npm run check:generated` (run after generate-code; see below)
 - **component test**: `npm run test`
 - **e2e API**: `npm run test:e2e:cy:api`
+- **e2e UI**: `npm run test:e2e:cy:ui` (non-API Cypress specs: desktop + mobile)
+- **vitest**: `npm run test:vitest` (component/unit tests, non-watch)
 - **eslint**: `npm run lint`
 - **npm audit**: `npm audit --omit=dev --audit-level=high`
 - **pip-audit**: `pip-audit -r requirements.txt`

@@ -180,8 +180,8 @@ export const getModelPermissions = cache(async (
   });
 
   if (rows.length === 0) {
-    // Default: grant all if no explicit permissions are defined for this model
-    const full = { ...FULL_FLAGS, general: { ...FULL_FLAGS }, creator: null, assignee: null };
+    // Default: deny all if no explicit permissions
+    const full = { ...EMPTY_FLAGS, general: { ...EMPTY_FLAGS }, creator: null, assignee: null };
     const result = { permissions: full, userId: resolvedUserId };
     if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
     return result;

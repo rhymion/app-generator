@@ -33,6 +33,11 @@ export default defineConfig({
           await seedTestDatabase();
           return null;
         },
+        async 'db:grantAllPermissions'() {
+          const { grantAllEntityPermissions } = require('./cypress/support/db-helpers');
+          await grantAllEntityPermissions();
+          return null;
+        },
         async 'db:createLimitedApiUser'(modelName: string) {
           const { createLimitedApiUser } = require('./cypress/support/db-helpers');
           return await createLimitedApiUser(modelName);

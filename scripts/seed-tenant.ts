@@ -74,7 +74,11 @@ async function main() {
     data: { users: { connect: { id: admin.id } } },
   });
 
-  const entities = ['user', 'role', 'organization', 'permission', 'setting'];
+  const entities = [
+    'user', 'role', 'organization', 'permission', 'setting',
+    'approval_request', 'approval_flow', 'approvable', 'comment', 'commentable',
+    'dashboard', 'dashboard_widget', 'attachment', 'attachable', 'audit_log', 'tenant',
+  ];
   await Promise.all(entities.map(entity =>
     prisma.permission.upsert({
       where: { name_role_id: { name: entity, role_id: adminRole!.id } },
