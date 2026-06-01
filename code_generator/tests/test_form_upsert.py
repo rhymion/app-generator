@@ -647,3 +647,92 @@ class TestStringEnumField:
     def test_string_enum_triggers_autocomplete_import(self):
         ctx = self._ctx()
         assert ctx["has_many_to_one"] is True
+
+
+# ---------------------------------------------------------------------------
+# Child-grid createNew: integer enum schema default propagation
+# ---------------------------------------------------------------------------
+
+class TestChildGridCreateNewIntegerDefault:
+    """
+    When a child-grid row has an integer/number field with a schema 'default',
+    createNew{Child}() must use that default, not always 0.
+
+    Regression guard for chart_type integer enum: default=1 (column) must not
+    silently revert to 0 (pie) in the generated createNewWidgets() function.
+    """
+
+    def _schema(self) -> dict:
+        return {
+            "definitions": {
+                "dashboard": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": {
+                        "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                        "name": {"type": "string"},
+                    },
+                },
+                "dashboard_detail": {
+                    "x-generate": {"list": True, "view": True, "new": True, "edit": True,
+                                   "delete": True, "api": False, "test": False},
+                    "allOf": [{"$ref": "#/definitions/dashboard"}],
+                },
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "chart_type", "dashboard_id"],
+                    "properties": {
+                        "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                        "chart_type": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 3,
+                            "enum": [0, 1, 2, 3],
+                            "default": 1,
+                        },
+                        "nullable_score": {
+                            "type": ["integer", "null"],
+                            "minimum": 0,
+                            "maximum": 100,
+                            "default": 50,
+                        },
+                        "dashboard_id": {
+                            "type": "string",
+                            "pattern": "^c[a-z0-9]{24,}$",
+                            "x-relationship": {
+                                "type": "many-to-one",
+                                "target": "dashboard",
+                                "labelField": "name",
+                            },
+                        },
+                    },
+                },
+                "widget_detail": {
+                    "x-generate": {"list": True, "view": True, "new": True, "edit": True,
+                                   "delete": True, "api": False, "test": False},
+                    "allOf": [{"$ref": "#/definitions/widget"}],
+                },
+            }
+        }
+
+    def _ctx(self) -> dict:
+        entity = _entity("dashboard", children=[
+            _child_entry("widget", "widgets"),
+        ])
+        return _build_upsert_ctx(entity, self._schema())
+
+    def test_createNew_uses_integer_schema_default(self):
+        """Non-nullable integer field with default:1 → createNew uses 1, not 0."""
+        ctx = self._ctx()
+        setup = ctx["child_grid_setup"]
+        assert "chart_type: 1," in setup, (
+            f"Expected 'chart_type: 1,' in child_grid_setup but got:\n{setup}"
+        )
+
+    def test_createNew_nullable_integer_uses_null(self):
+        """Nullable integer field → createNew uses null regardless of schema default."""
+        ctx = self._ctx()
+        setup = ctx["child_grid_setup"]
+        assert "nullable_score: null," in setup, (
+            f"Expected 'nullable_score: null,' in child_grid_setup but got:\n{setup}"
+        )

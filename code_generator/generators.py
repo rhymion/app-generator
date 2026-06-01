@@ -2132,7 +2132,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             if actual == 'string':
                 return "''"
             if actual in ('integer', 'number'):
-                return 'null' if nullable else '0'
+                if nullable:
+                    return 'null'
+                schema_default = defn.get('default')
+                return str(schema_default) if schema_default is not None else '0'
             return 'null'
 
         create_body = '\n'.join(
