@@ -114,13 +114,20 @@ def test_string_with_datetime_format_produces_datetime_kind():
 
 
 def test_plain_string_field_excluded():
-    """Plain strings without date format should not appear as groupable fields."""
+    """Plain strings without date format should not appear as groupable fields.
+    The entity still appears in the catalog because audit FK fields (creator_id/updater_id)
+    are always appended for every dashboardable entity.
+    """
     schema = _schema({
         'resource': _entity({'name': {'type': 'string'}}),
     })
     catalog = build_dashboard_catalog(schema)
-    # Entity has no groupable fields → dropped from catalog.
-    assert len(catalog) == 0
+    # Entity is present due to audit FK fields always being added.
+    assert len(catalog) == 1
+    field_names = [f['name'] for f in catalog[0]['groupable_fields']]
+    assert 'name' not in field_names
+    assert 'creator_id' in field_names
+    assert 'updater_id' in field_names
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +153,9 @@ def test_detail_and_input_variants_excluded():
 
 
 def test_system_fields_excluded():
-    """id, created_at, updated_at, creator_id, updater_id should never appear."""
+    """id, created_at, updated_at are excluded from groupable fields.
+    creator_id/updater_id appear as audit FK entries (explicitly appended, not from schema props).
+    """
     schema = _schema({
         'task': _entity({
             'created_at': {'type': 'string', 'format': 'date-time'},
@@ -161,6 +170,12 @@ def test_system_fields_excluded():
     assert 'created_at' not in field_names
     assert 'updated_at' not in field_names
     assert 'is_done' in field_names
+    # Audit FK fields appear exactly once (appended explicitly, not from schema props).
+    assert field_names.count('creator_id') == 1
+    assert field_names.count('updater_id') == 1
+    fk_fields = {f['name']: f for f in catalog[0]['groupable_fields']}
+    assert fk_fields['creator_id']['kind'] == 'fk'
+    assert fk_fields['creator_id']['fk_target'] == 'user'
 
 
 # ---------------------------------------------------------------------------

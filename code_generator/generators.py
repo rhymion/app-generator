@@ -81,7 +81,7 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
             continue
         groupable = []
         for prop_name, prop in (defn.get('properties') or {}).items():
-            if prop_name in ('id', 'created_at', 'updated_at', 'creator_id', 'updater_id'):
+            if prop_name in ('id', 'created_at', 'updated_at'):
                 continue
             rel = prop.get('x-relationship') or {}
             if rel.get('type') == 'many-to-one' and rel.get('target'):
@@ -125,6 +125,12 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
                     'kind': 'datetime',
                     'datetime_format': prop['format'],
                 })
+        # creator_id/updater_id are Prisma-only audit fields (not in json_schema.yaml),
+        # so they must be appended explicitly for all dashboardable entities.
+        groupable.extend([
+            {'name': 'creator_id', 'label': 'Creator', 'kind': 'fk', 'fk_target': 'user', 'fk_label_field': 'name'},
+            {'name': 'updater_id', 'label': 'Updater', 'kind': 'fk', 'fk_target': 'user', 'fk_label_field': 'name'},
+        ])
         if not groupable:
             continue
         catalog.append({
