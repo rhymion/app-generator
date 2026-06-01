@@ -19,37 +19,60 @@ export type WidgetConfig = {
   name: string;
   order: number;
   entity_name: string;
-  chart_type: ChartType;
+  // chart_type: integer enum (0=pie,1=column,2=bar,3=line); string accepted for backward compat.
+  chart_type: number | string;
   group_by_field: string;
   // Legacy single-field filter (back-compat: treated as 'equals' condition).
   filter_field?: string | null;
   filter_value?: string | null;
   // New typed multi-condition filter (takes precedence over filter_field/filter_value).
   conditions?: FilterCondition[] | null;
-  stack_mode?: StackMode | null;       // optional; requires series_field when set
+  // stack_mode: integer enum (0=grouped,1=stacked,2=standardized); string accepted for backward compat.
+  stack_mode?: number | string | null;
   series_field?: string | null;        // required when stack_mode is set
-  // Phase 4: timestamp bucketing — group_by_field must be datetime when set.
-  // Also enables the 'line' chart type.
-  group_by_bucket?: BucketGranularity | null;
+  // group_by_bucket: integer enum (0=day,1=week,2=month,3=quarter,4=year); string accepted for backward compat.
+  group_by_bucket?: number | string | null;
 };
+
+// Integer → string label lookup tables for backward-compat normalization.
+const CHART_TYPE_LABELS: ChartType[] = ['pie', 'column', 'bar', 'line'];
+const STACK_MODE_LABELS: StackMode[] = ['grouped', 'stacked', 'standardized'];
+const BUCKET_LABELS: BucketGranularity[] = ['day', 'week', 'month', 'quarter', 'year'];
+
+// Resolve integer or legacy string chart_type → ChartType string label.
+function normalizeChartType(raw: unknown): ChartType {
+  if (typeof raw === 'number' && raw >= 0 && raw < CHART_TYPE_LABELS.length) return CHART_TYPE_LABELS[raw];
+  if (typeof raw === 'string' && (CHART_TYPE_LABELS as string[]).includes(raw)) return raw as ChartType;
+  return 'column';
+}
+
+// Resolve integer or legacy string stack_mode → StackMode string label (or undefined if null/unset).
+function normalizeStackMode(raw: number | string | null | undefined): StackMode | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw === 'number' && raw >= 0 && raw < STACK_MODE_LABELS.length) return STACK_MODE_LABELS[raw];
+  if (typeof raw === 'string' && (STACK_MODE_LABELS as string[]).includes(raw)) return raw as StackMode;
+  return undefined;
+}
+
+// Resolve integer or legacy string group_by_bucket → BucketGranularity (or undefined if null/unset).
+function normalizeBucketGranularity(raw: number | string | null | undefined): BucketGranularity | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw === 'number' && raw >= 0 && raw < BUCKET_LABELS.length) return BUCKET_LABELS[raw];
+  if (typeof raw === 'string' && (BUCKET_LABELS as string[]).includes(raw)) return raw as BucketGranularity;
+  return undefined;
+}
 
 // Validation: config consistency checks.
 function validateConfig(config: WidgetConfig): string | null {
-  if (config.stack_mode && !config.series_field) {
-    return `stack_mode '${config.stack_mode}' requires series_field to be set`;
+  const chartType = normalizeChartType(config.chart_type);
+  const stackMode = normalizeStackMode(config.stack_mode);
+  if (stackMode != null && !config.series_field) {
+    return `stack_mode '${stackMode}' requires series_field to be set`;
   }
-  if (config.chart_type === 'line' && !config.group_by_bucket) {
+  if (chartType === 'line' && config.group_by_bucket == null) {
     return `chart_type 'line' requires group_by_bucket to be set`;
   }
   return null;
-}
-
-// Read legacy numeric chart_type from JSON config: 0 → pie, 1 → column
-function resolveChartType(raw: unknown): ChartType {
-  if (raw === 0) return 'pie';
-  if (raw === 1) return 'column';
-  if (typeof raw === 'string') return raw as ChartType;
-  return 'column';
 }
 
 // Download filtered+grouped data as a UTF-8 BOM CSV (Excel-compatible).
@@ -120,10 +143,10 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
       : null;
     // series_field applies for stack_mode (bar/column) or group_by_bucket (line)
     const seriesField =
-      (widget.group_by_bucket || widget.stack_mode) && widget.series_field
+      (widget.group_by_bucket != null || widget.stack_mode != null) && widget.series_field
         ? widget.series_field
         : undefined;
-    const groupByBucket = widget.group_by_bucket ?? undefined;
+    const groupByBucket = normalizeBucketGranularity(widget.group_by_bucket);
     aggregateForWidget(
       widget.entity_name,
       widget.group_by_field,
@@ -139,8 +162,8 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
     return () => { cancelled = true; };
   }, [widget.entity_name, widget.group_by_field, widget.filter_field, widget.filter_value, widget.stack_mode, widget.series_field, widget.group_by_bucket, validationError, condKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const chartType = resolveChartType(widget.chart_type);
-  const stackMode = (widget.stack_mode ?? undefined) as StackMode | undefined;
+  const chartType = normalizeChartType(widget.chart_type);
+  const stackMode = normalizeStackMode(widget.stack_mode);
 
   function renderChart() {
     if (output.kind === 'multi') {

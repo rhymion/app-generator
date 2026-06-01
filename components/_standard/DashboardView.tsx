@@ -10,13 +10,14 @@ type WidgetConfigInput = {
   name: string;
   order?: number;
   entity_name: string;
-  chart_type: string;
+  chart_type: number | string;
   group_by_field: string;
   filter_field?: string | null;
   filter_value?: string | null;
   conditions?: unknown[] | null;
-  stack_mode?: string | null;
+  stack_mode?: number | string | null;
   series_field?: string | null;
+  group_by_bucket?: number | string | null;
   [key: string]: unknown;
 };
 

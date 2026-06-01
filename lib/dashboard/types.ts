@@ -17,13 +17,13 @@ export type DashboardWidget = {
   dashboard_id: string;
   name: string;
   entity_name: string;
-  chart_type: string;
+  chart_type: number;
+  stack_mode: number | null;
+  series_field: string | null;
+  group_by_bucket: number | null;
   group_by_field: string;
   filter_field: string | null;
   filter_value: string | null;
-  stack_mode: string | null;
-  series_field: string | null;
-  group_by_bucket: string | null;
   order: number;
   dashboard?: Dashboard | null;
 };

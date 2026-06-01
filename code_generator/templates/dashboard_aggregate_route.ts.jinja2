@@ -3,8 +3,17 @@ import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/
 import { aggregateForWidgetCore } from '@/lib/dashboard/aggregate-core';
 import type { AggregateFilter, FilterCondition, BucketGranularity } from '@/lib/dashboard/aggregate-core';
 
+// group_by_bucket integer enum: 0=day,1=week,2=month,3=quarter,4=year (also accepts string labels).
+const BUCKET_LABELS: BucketGranularity[] = ['day', 'week', 'month', 'quarter', 'year'];
+function resolveBucket(raw: BucketGranularity | number | undefined): BucketGranularity | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw === 'number' && raw >= 0 && raw < BUCKET_LABELS.length) return BUCKET_LABELS[raw];
+  return raw as BucketGranularity;
+}
+
 // POST /api/dashboard/aggregate
 // Body: { entity_name, group_by_field, filter?, conditions?, series_field?, group_by_bucket? }
+// group_by_bucket accepts integer enum (0-4) or string label ('day'-'year').
 // Returns AggregateOutput (single-series or multi-series).
 // Enforces API-key auth and read permission on the target entity.
 export async function POST(request: NextRequest) {
@@ -16,7 +25,7 @@ export async function POST(request: NextRequest) {
       filter?: AggregateFilter;
       conditions?: FilterCondition[];
       series_field?: string;
-      group_by_bucket?: BucketGranularity;
+      group_by_bucket?: BucketGranularity | number;
     };
     const { entity_name, group_by_field, filter, conditions, series_field, group_by_bucket } = body;
     if (!entity_name || !group_by_field) {
@@ -32,7 +41,7 @@ export async function POST(request: NextRequest) {
       filter ?? null,
       series_field,
       conditions,
-      group_by_bucket,
+      resolveBucket(group_by_bucket),
     );
     return NextResponse.json(result);
   } catch (error) {
