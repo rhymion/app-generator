@@ -82,31 +82,28 @@ export default function MfaClient({ initial }: { initial: EnrollmentStatus }) {
 
   async function onVerify() {
     setError(null);
-    startTransition(async () => {
-      const res = await completeEnrollmentAction(code);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      // The plaintext recovery codes are short-lived in component state.
-      // They never hit localStorage or the URL.
-      const codes = 'recoveryCodes' in res ? res.recoveryCodes : [];
-      setCode('');
-      setState({ kind: 'recovery-display', codes });
-    });
+    const res = await completeEnrollmentAction(code);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    // The plaintext recovery codes are short-lived in component state.
+    // They never hit localStorage or the URL.
+    const codes = 'recoveryCodes' in res ? res.recoveryCodes : [];
+    setCode('');
+    setState({ kind: 'recovery-display', codes });
   }
 
   async function onDisable() {
     setError(null);
-    startTransition(async () => {
-      const res = await disableMfaAction(code);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      setCode('');
-      router.refresh();
-    });
+    const res = await disableMfaAction(code);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setCode('');
+    setState({ kind: 'disabled' });
+    router.refresh();
   }
 
   async function onCancelPending() {
