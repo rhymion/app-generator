@@ -47,8 +47,8 @@ export default defineConfig({
           return await seedMfaTestUser();
         },
         async 'generateTotp'(secret: string) {
-          const { totp } = require('otplib');
-          return totp.generate(secret);
+          const otplib = require('otplib');
+          return otplib.generateSync({ secret });
         },
         ...getGeneratedTasks(),
       });

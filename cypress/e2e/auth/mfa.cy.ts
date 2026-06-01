@@ -22,6 +22,7 @@ function doMfaLogin(email: string, password: string, totpSecret: string) {
     cy.get('[data-testid="mfa_code"]').type(code as string);
     cy.get('button[type="submit"]').click();
   });
+  cy.contains('Sign Out').should('be.visible');
 }
 
 describe('MFA (TOTP + Recovery Code)', () => {
