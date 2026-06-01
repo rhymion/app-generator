@@ -42,6 +42,14 @@ export default defineConfig({
           const { createLimitedApiUser } = require('./cypress/support/db-helpers');
           return await createLimitedApiUser(modelName);
         },
+        async 'db:seedMfaUser'() {
+          const { seedMfaTestUser } = require('./cypress/support/mfa-helpers');
+          return await seedMfaTestUser();
+        },
+        async 'generateTotp'(secret: string) {
+          const { totp } = require('otplib');
+          return totp.generate(secret);
+        },
         ...getGeneratedTasks(),
       });
 
