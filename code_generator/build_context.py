@@ -818,6 +818,12 @@ def build_context(entity: dict, schema: dict) -> dict:
         if k not in _EXCLUDE_ID_TS and k != 'id' and k not in auto_create_oto_fk_props
     )
 
+    # Analytics config (app-level x-analytics, default: disabled)
+    _analytics_cfg = schema.get('x-analytics') or {}
+    analytics_enabled  = bool(_analytics_cfg.get('enabled', False))
+    analytics_endpoint = _analytics_cfg.get('endpoint', '')
+    analytics_topology = _analytics_cfg.get('topology', 'embedded')
+
     # Chart config
     xdisplay    = (model_def or {}).get('x-display') or {}
     chart_cfg   = xdisplay.get('chart') if isinstance(xdisplay, dict) else None
@@ -1221,6 +1227,10 @@ def build_context(entity: dict, schema: dict) -> dict:
         # Field categories (FormUpsert / FormView)
         field_categories=field_categories,
         entity_select_options=_get_entity_options(schema),
+        # Analytics (app-level)
+        analytics_enabled=analytics_enabled,
+        analytics_endpoint=analytics_endpoint,
+        analytics_topology=analytics_topology,
         # Chart
         chart_cfg=chart_cfg,
         has_chart=has_chart,

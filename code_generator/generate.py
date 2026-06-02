@@ -238,6 +238,21 @@ def generate(schema_path: str, output_dir: str) -> None:
         if can_view:
             _write(app_dir / 'view' / '[id]' / 'page.tsx', _render(env, 'page_view.tsx.jinja2', ctx))
 
+    # --- Analytics provider scaffold (app/providers/analytics-provider.tsx) ---
+    _analytics_cfg = schema.get('x-analytics') or {}
+    _analytics_enabled = bool(_analytics_cfg.get('enabled', False))
+    if _analytics_enabled:
+        _analytics_ctx = {
+            'analytics_enabled': True,
+            'analytics_endpoint': _analytics_cfg.get('endpoint', ''),
+            'analytics_topology': _analytics_cfg.get('topology', 'embedded'),
+        }
+        _write(
+            out / 'app' / 'providers' / 'analytics-provider.tsx',
+            _render(env, 'analytics_provider.tsx.jinja2', _analytics_ctx),
+        )
+        print('  Analytics provider → app/providers/analytics-provider.tsx')
+
     # --- Dashboard catalog (lib/dashboard/catalog.ts) ---
     dashboard_catalog = build_dashboard_catalog(schema)
     if True:

@@ -1,0 +1,19 @@
+# PostHog self-host placeholder — Phase 1 (no-op analytics)
+#
+# See docs/analytics-local-setup.md for prerequisites (Docker required on WSL2).
+# See https://posthog.com/docs/self-host for the official compose configuration.
+#
+# This file is a placeholder. Replace its contents with the official PostHog
+# docker-compose.yml before running `docker compose -f docker-compose.posthog.yml up`.
+#
+# Phase 2 will update this file with a tested self-host configuration.
+
+version: "3"
+
+services:
+  # placeholder — replace with official PostHog self-host compose
+  posthog:
+    image: posthog/posthog:latest
+    # See https://posthog.com/docs/self-host for required env vars and service dependencies
+    ports:
+      - "8000:8000"

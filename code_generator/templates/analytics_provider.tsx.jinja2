@@ -1,0 +1,14 @@
+// generated — do not edit
+// Analytics provider scaffold (Phase 1: no-op)
+// Phase 2+ will replace no-op methods with real PostHog calls
+'use client';
+
+import React from 'react';
+
+export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
+}
+
+export const analytics = {
+  capture: (_event: string, _props?: Record<string, unknown>) => {},
+};
