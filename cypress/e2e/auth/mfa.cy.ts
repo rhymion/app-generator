@@ -46,7 +46,7 @@ describe('MFA (TOTP + Recovery Code)', () => {
     // Capture the plaintext secret shown in the UI, generate a live TOTP from it.
     cy.contains('Manual entry secret:').next().invoke('text').then((secret) => {
       cy.task('generateTotp', secret.trim()).then((code) => {
-        cy.get('input[autocomplete="one-time-code"]').type(code as string);
+        cy.get('input[autocomplete="one-time-code"]:visible').first().type(code as string);
         cy.contains('Verify and enable').click();
       });
     });
@@ -64,7 +64,7 @@ describe('MFA (TOTP + Recovery Code)', () => {
     cy.visit(MFA_SETTINGS_URL);
 
     cy.contains('Enable MFA').click();
-    cy.get('input[autocomplete="one-time-code"]').type('000000');
+    cy.get('input[autocomplete="one-time-code"]:visible').first().type('000000');
     cy.contains('Verify and enable').click();
 
     cy.contains('Invalid code. Please try again.').should('be.visible');
@@ -82,7 +82,7 @@ describe('MFA (TOTP + Recovery Code)', () => {
       cy.contains('Two-factor authentication is enabled on this account.').should('be.visible');
 
       cy.task('generateTotp', secret).then((code) => {
-        cy.get('input[autocomplete="one-time-code"]').type(code as string);
+        cy.get('input[autocomplete="one-time-code"]:visible').first().type(code as string);
         cy.contains('Disable MFA').click();
       });
 
@@ -98,7 +98,7 @@ describe('MFA (TOTP + Recovery Code)', () => {
       doMfaLogin(email, password, secret);
       cy.visit(MFA_SETTINGS_URL);
 
-      cy.get('input[autocomplete="one-time-code"]').type('000000');
+      cy.get('input[autocomplete="one-time-code"]:visible').first().type('000000');
       cy.contains('Disable MFA').click();
 
       cy.contains('Invalid code. Please try again.').should('be.visible');
