@@ -403,9 +403,21 @@ Batch Processing Protocol:
 - Phase 2 batch one should cover one representative generated entity before broad rollout.
 - Failed QC stops rollout until root cause is fixed and reviewed.
 
-## 9. Risks and Open Questions
+## 9. Risks and Open Questions (Policy Decisions Recorded)
 
-Risks:
+### Resolved Policy Decisions (2026-06-02)
+
+| Policy | Decision |
+|--------|----------|
+| Consent scope | All users. Show opt-in to every user; honour opt-out; send nothing before consent. |
+| Identity attachment | Both login user (distinct_id) and tenant (group). IDs only; no PII content. |
+| Data retention | 30 days. |
+| Query string handling | Always drop. Never include query strings in route or page_view payloads. |
+| PostHog Cloud region | US. |
+| Session recording / heatmaps / surveys / feature flags / autocapture | All disabled. Click tracking uses manual delegated capture with metadata allowlist only. |
+| Policy constants | All of the above values must be implemented as central policy constants/config module (not scattered hardcoded values), to allow future x-analytics config integration. |
+
+### Remaining Risks
 
 - Client-side batching may add memory overhead or lose events during abrupt navigation.
 - Offline or server-failure retry logic can create duplicate events unless bounded.
@@ -413,15 +425,6 @@ Risks:
 - Self-hosted PostHog carries infrastructure and data-loss risk; PostHog states self-host users manage their own infrastructure and assume operational risk.
 - Broad delegated listeners can accidentally collect more than intended if the sanitizer is bypassed.
 - Validation error handling can leak content if full error messages are sent instead of normalized error types.
-
-Open questions for Shogun:
-
-- Who sees the analytics consent or opt-in prompt: admin only, all users, or deployment owner only?
-- Should analytics identify logged-in users, tenant IDs, both, or neither in Phase 1?
-- What retention period should PostHog use for generated app analytics?
-- Should query strings always be dropped, or should an allowlist of safe query keys be supported?
-- Which PostHog Cloud region is the default for production: US or EU?
-- Should session recording, heatmaps, surveys, and feature flags remain disabled by policy unless a separate command approves them?
 
 References:
 
