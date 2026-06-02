@@ -19,46 +19,37 @@ export type WidgetConfig = {
   name: string;
   order: number;
   entity_name: string;
-  // chart_type: integer enum (0=pie,1=column,2=bar,3=line); string accepted for backward compat.
-  chart_type: number | string;
+  chart_type: number;
   group_by_field: string;
   // Legacy single-field filter (back-compat: treated as 'equals' condition).
   filter_field?: string | null;
   filter_value?: string | null;
   // New typed multi-condition filter (takes precedence over filter_field/filter_value).
   conditions?: FilterCondition[] | null;
-  // stack_mode: integer enum (0=grouped,1=stacked,2=standardized); string accepted for backward compat.
-  stack_mode?: number | string | null;
+  stack_mode?: number | null;
   series_field?: string | null;        // required when stack_mode is set
-  // group_by_bucket: integer enum (0=day,1=week,2=month,3=quarter,4=year); string accepted for backward compat.
-  group_by_bucket?: number | string | null;
+  group_by_bucket?: number | null;
 };
 
-// Integer → string label lookup tables for backward-compat normalization.
+// Integer → string label lookup tables (integer enum from DB → label for chart rendering).
 const CHART_TYPE_LABELS: ChartType[] = ['pie', 'column', 'bar', 'line'];
 const STACK_MODE_LABELS: StackMode[] = ['grouped', 'stacked', 'standardized'];
 const BUCKET_LABELS: BucketGranularity[] = ['day', 'week', 'month', 'quarter', 'year'];
 
-// Resolve integer or legacy string chart_type → ChartType string label.
-function normalizeChartType(raw: unknown): ChartType {
-  if (typeof raw === 'number' && raw >= 0 && raw < CHART_TYPE_LABELS.length) return CHART_TYPE_LABELS[raw];
-  if (typeof raw === 'string' && (CHART_TYPE_LABELS as string[]).includes(raw)) return raw as ChartType;
+function normalizeChartType(raw: number): ChartType {
+  if (raw >= 0 && raw < CHART_TYPE_LABELS.length) return CHART_TYPE_LABELS[raw];
   return 'column';
 }
 
-// Resolve integer or legacy string stack_mode → StackMode string label (or undefined if null/unset).
-function normalizeStackMode(raw: number | string | null | undefined): StackMode | undefined {
+function normalizeStackMode(raw: number | null | undefined): StackMode | undefined {
   if (raw == null) return undefined;
-  if (typeof raw === 'number' && raw >= 0 && raw < STACK_MODE_LABELS.length) return STACK_MODE_LABELS[raw];
-  if (typeof raw === 'string' && (STACK_MODE_LABELS as string[]).includes(raw)) return raw as StackMode;
+  if (raw >= 0 && raw < STACK_MODE_LABELS.length) return STACK_MODE_LABELS[raw];
   return undefined;
 }
 
-// Resolve integer or legacy string group_by_bucket → BucketGranularity (or undefined if null/unset).
-function normalizeBucketGranularity(raw: number | string | null | undefined): BucketGranularity | undefined {
+function normalizeBucketGranularity(raw: number | null | undefined): BucketGranularity | undefined {
   if (raw == null) return undefined;
-  if (typeof raw === 'number' && raw >= 0 && raw < BUCKET_LABELS.length) return BUCKET_LABELS[raw];
-  if (typeof raw === 'string' && (BUCKET_LABELS as string[]).includes(raw)) return raw as BucketGranularity;
+  if (raw >= 0 && raw < BUCKET_LABELS.length) return BUCKET_LABELS[raw];
   return undefined;
 }
 
