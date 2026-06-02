@@ -1,5 +1,52 @@
+{% if one_to_one_rels | selectattr('target', 'equalto', 'approvable') | list %}
+import type { PrismaClient } from '@/app/generated/prisma/client';
+import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
+
+type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+export async function afterCreate(
+  _tx: unknown,
+  created: Record<string, unknown>,
+  _data: Record<string, unknown>,
+): Promise<void> {
+  const approvableId = created.approvable_id as string | undefined;
+  if (!approvableId) return;
+
+  const creatorId = created.creator_id as string | undefined ?? null;
+  const tx = _tx as Tx;
+
+  const flows = await tx.approval_flow.findMany({
+    where: { entity_name: '{{ model }}' },
+    select: { id: true, requestor_role_id: true },
+  });
+
+  for (const flow of flows) {
+    if (flow.requestor_role_id) {
+      if (!creatorId) continue;
+      const user = await tx.user.findUnique({
+        where: { id: creatorId },
+        select: { roles: { where: { id: flow.requestor_role_id }, select: { id: true } } },
+      });
+      if (!user || user.roles.length === 0) continue;
+    }
+
+    const approvalRequest = await tx.approval_request.create({
+      data: {
+        approvable_id: approvableId,
+        approval_flow_id: flow.id,
+      },
+    });
+
+    await notifyApprovalRequestCreated(_tx, approvalRequest.id, {
+      approvableId,
+      excludeUserId: creatorId,
+    });
+  }
+}
+{% else %}
 export async function afterCreate(
   _tx: unknown,
   _created: Record<string, unknown>,
   _data: Record<string, unknown>,
 ): Promise<void> {}
+{% endif %}
