@@ -237,3 +237,24 @@ class TestAnalyticsPhase2:
         assert 'autocapture: false' in content, "autocapture must be disabled"
         assert 'capture_pageview: false' in content, "capture_pageview must be disabled"
         assert 'disable_session_recording: true' in content, "session recording must be disabled"
+
+    def test_heatmaps_and_surveys_disabled(self):
+        """PostHog init must disable heatmaps and surveys."""
+        content = _render_provider(analytics_enabled=True)
+        assert 'heatmaps: false' in content, "heatmaps must be disabled"
+        assert 'surveys: false' in content, "surveys must be disabled"
+
+    def test_click_handler_defined_when_enabled(self):
+        """Enabled provider must contain a delegated click listener on document.body."""
+        content = _render_provider(analytics_enabled=True)
+        assert 'addEventListener' in content, "Enabled provider must add event listener"
+        assert 'click' in content, "Click event must be captured"
+        assert 'aria-label' in content or 'aria_label' in content, "Click props must include aria-label"
+        assert 'element_id' in content, "Click props must include element_id"
+        assert 'innerText' not in content, "Click props must NOT include innerText"
+        assert 'textContent' not in content, "Click props must NOT include textContent"
+
+    def test_click_handler_not_in_disabled_provider(self):
+        """Disabled provider must not contain click tracking."""
+        content = _render_provider(analytics_enabled=False)
+        assert 'addEventListener' not in content, "Disabled provider must not add event listeners"

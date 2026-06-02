@@ -12,6 +12,8 @@ if (typeof window !== 'undefined') {
     autocapture: false,
     capture_pageview: false,
     disable_session_recording: true,
+    heatmaps: false,
+    surveys: false,
     loaded: (ph) => {
       if (process.env.NODE_ENV === 'development') ph.debug();
     },
@@ -31,10 +33,38 @@ function PageViewTracker() {
   return null;
 }
 
+function ClickTracker() {
+  useEffect(() => {
+    function handleClick(event: MouseEvent) {
+      const target = event.target as HTMLElement;
+      if (!target) return;
+
+      const safeProps: Record<string, string | null> = {
+        element_id: target.id || null,
+        role: target.getAttribute('role') || target.tagName.toLowerCase(),
+        aria_label: target.getAttribute('aria-label') || null,
+        route: window.location.pathname,
+      };
+
+      const props = Object.fromEntries(
+        Object.entries(safeProps).filter(([, v]) => v !== null)
+      ) as Record<string, string>;
+
+      posthog.capture('click', props);
+    }
+
+    document.body.addEventListener('click', handleClick);
+    return () => document.body.removeEventListener('click', handleClick);
+  }, []);
+
+  return null;
+}
+
 export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
   return (
     <PostHogProvider client={posthog}>
       <PageViewTracker />
+      <ClickTracker />
       {children}
     </PostHogProvider>
   );
