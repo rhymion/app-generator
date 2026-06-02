@@ -84,6 +84,9 @@
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   },
+  "overrides": {
+    "postcss": ">=8.5.10"
+  },
   "devDependencies": {
     "@fontsource/noto-sans-jp": "^5.2.9",
     "@marp-team/marp-cli": "^4.2.3",

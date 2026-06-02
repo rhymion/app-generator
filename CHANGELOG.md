@@ -5,6 +5,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+<!-- Security tracking: upstream-pending vulnerabilities -->
+<!-- D1: prisma -> @hono/node-server (CVSS 5.3) - awaiting upstream fix -->
+<!-- D3: cypress -> qs DoS (CVSS 5.3) - awaiting upstream fix in cypress -->
+
 ### Added
 - Restructured npm scripts by environment (dev/prod/test).
   Added scripts/run-next-dev.js for PORT-aware dev server startup.
