@@ -72,28 +72,42 @@ class TestAnalyticsContextParsing:
         ctx = build_context(_entity(), schema)
         assert ctx["analytics_enabled"] is True
 
-    def test_analytics_endpoint_defaults_to_empty(self):
-        """When endpoint is not specified, analytics_endpoint defaults to empty string."""
+    def test_analytics_posthog_host_defaults_to_empty(self):
+        """When posthog_host is not specified, analytics_posthog_host defaults to empty string."""
         ctx = build_context(_entity(), _base_schema())
-        assert ctx["analytics_endpoint"] == ""
+        assert ctx["analytics_posthog_host"] == ""
 
     def test_analytics_topology_defaults_to_embedded(self):
         """When topology is not specified, analytics_topology defaults to 'embedded'."""
         ctx = build_context(_entity(), _base_schema())
         assert ctx["analytics_topology"] == "embedded"
 
-    def test_analytics_endpoint_and_topology_parsed(self):
-        """Endpoint and topology values from x-analytics are read correctly."""
+    def test_analytics_ingest_endpoint_defaults_to_empty(self):
+        """When ingest_endpoint is not specified, analytics_ingest_endpoint defaults to empty string."""
+        ctx = build_context(_entity(), _base_schema())
+        assert ctx["analytics_ingest_endpoint"] == ""
+
+    def test_analytics_posthog_host_and_topology_parsed(self):
+        """posthog_host and topology values from x-analytics are read correctly."""
         schema = _base_schema({
             "x-analytics": {
                 "enabled": True,
-                "endpoint": "https://posthog.example.com",
+                "posthog_host": "https://posthog.example.com",
                 "topology": "separated",
+                "ingest_endpoint": "https://analytics.example.com/api/v1/events",
             }
         })
         ctx = build_context(_entity(), schema)
-        assert ctx["analytics_endpoint"] == "https://posthog.example.com"
+        assert ctx["analytics_posthog_host"] == "https://posthog.example.com"
         assert ctx["analytics_topology"] == "separated"
+        assert ctx["analytics_ingest_endpoint"] == "https://analytics.example.com/api/v1/events"
+
+    def test_analytics_no_endpoint_field(self):
+        """Context must NOT expose the old 'analytics_endpoint' key — use posthog_host instead."""
+        ctx = build_context(_entity(), _base_schema())
+        assert "analytics_endpoint" not in ctx, (
+            "Deprecated 'analytics_endpoint' key must not appear in context; use 'analytics_posthog_host'"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -136,4 +150,35 @@ class TestAnalyticsDisabledProducesNoPosthogImport:
         for pattern in import_patterns:
             assert pattern not in content, (
                 f"Phase 1 no-op provider must not import or initialize PostHog SDK: found '{pattern}'"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Backward-compat: analytics absent == analytics disabled (identical behavior)
+# ---------------------------------------------------------------------------
+
+class TestAnalyticsBackwardCompat:
+
+    def test_analytics_absent_produces_no_analytics_context(self):
+        """When x-analytics is absent, analytics_enabled must be False (no PostHog activation)."""
+        ctx = build_context(_entity(), _base_schema())
+        assert ctx["analytics_enabled"] is False, (
+            "analytics_enabled must be False when x-analytics is absent"
+        )
+        assert ctx["analytics_posthog_host"] == "", (
+            "analytics_posthog_host must be empty when x-analytics is absent"
+        )
+
+    def test_analytics_disabled_identical_to_absent(self):
+        """x-analytics.enabled=false must produce same analytics context as absent."""
+        ctx_absent = build_context(_entity(), _base_schema())
+        ctx_disabled = build_context(
+            _entity(),
+            _base_schema({"x-analytics": {"enabled": False}}),
+        )
+        analytics_keys = [k for k in ctx_absent if k.startswith("analytics_")]
+        for key in analytics_keys:
+            assert ctx_absent[key] == ctx_disabled[key], (
+                f"Key '{key}' differs between absent and disabled: "
+                f"{ctx_absent[key]!r} vs {ctx_disabled[key]!r}"
             )

@@ -820,9 +820,10 @@ def build_context(entity: dict, schema: dict) -> dict:
 
     # Analytics config (app-level x-analytics, default: disabled)
     _analytics_cfg = schema.get('x-analytics') or {}
-    analytics_enabled  = bool(_analytics_cfg.get('enabled', False))
-    analytics_endpoint = _analytics_cfg.get('endpoint', '')
-    analytics_topology = _analytics_cfg.get('topology', 'embedded')
+    analytics_enabled         = bool(_analytics_cfg.get('enabled', False))
+    analytics_posthog_host    = _analytics_cfg.get('posthog_host', '')    # empty = PostHog Cloud default
+    analytics_topology        = _analytics_cfg.get('topology', 'embedded') # "embedded" or "separated"
+    analytics_ingest_endpoint = _analytics_cfg.get('ingest_endpoint', '') # for separated topology
 
     # Chart config
     xdisplay    = (model_def or {}).get('x-display') or {}
@@ -1229,8 +1230,9 @@ def build_context(entity: dict, schema: dict) -> dict:
         entity_select_options=_get_entity_options(schema),
         # Analytics (app-level)
         analytics_enabled=analytics_enabled,
-        analytics_endpoint=analytics_endpoint,
+        analytics_posthog_host=analytics_posthog_host,
         analytics_topology=analytics_topology,
+        analytics_ingest_endpoint=analytics_ingest_endpoint,
         # Chart
         chart_cfg=chart_cfg,
         has_chart=has_chart,

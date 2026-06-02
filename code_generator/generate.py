@@ -244,8 +244,9 @@ def generate(schema_path: str, output_dir: str) -> None:
     if _analytics_enabled:
         _analytics_ctx = {
             'analytics_enabled': True,
-            'analytics_endpoint': _analytics_cfg.get('endpoint', ''),
+            'analytics_posthog_host': _analytics_cfg.get('posthog_host', ''),
             'analytics_topology': _analytics_cfg.get('topology', 'embedded'),
+            'analytics_ingest_endpoint': _analytics_cfg.get('ingest_endpoint', ''),
         }
         _write(
             out / 'app' / 'providers' / 'analytics-provider.tsx',
