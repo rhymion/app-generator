@@ -131,6 +131,10 @@ Gate: none. Cite findings with `file:line` references.
 | update-code      | -      | ✓     | -               | -              | ✓       | ✓      | ✓         | -         |
 | investigate      | -      | -     | -               | -              | -       | -      | -         | -         |
 
+**Required gates** (mandatory for all code-change tasks): `generate-code` (implicit in `build`), `build`, `lint`, `pytest` (update-generator only), `api-e2e`
+
+**Non-API e2e** (Cypress UI — `npm run test:e2e:cy` without `:api` suffix): **optional**. Run when UI behaviour is in scope; not a blocking gate.
+
 Gate commands:
 - **pytest**: `npm run test:pytest`
 - **build**: `npm run test:e2e:build` (docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build)
