@@ -1,10 +1,59 @@
 // generated — do not edit
-// Analytics provider scaffold (Phase 1: no-op)
-// Phase 2+ will replace no-op methods with real PostHog calls
+{% if analytics_enabled %}
 'use client';
+import posthog from 'posthog-js';
+import { PostHogProvider } from 'posthog-js/react';
+import { usePathname } from 'next/navigation';
+import { useEffect } from 'react';
 
-import React from 'react';
+if (typeof window !== 'undefined') {
+  posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY!, {
+    api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com',
+    autocapture: false,
+    capture_pageview: false,
+    disable_session_recording: true,
+    loaded: (ph) => {
+      if (process.env.NODE_ENV === 'development') ph.debug();
+    },
+  });
+}
 
+function PageViewTracker() {
+  const pathname = usePathname();
+  useEffect(() => {
+    if (pathname) {
+      posthog.capture('page_view', {
+        route: pathname,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }, [pathname]);
+  return null;
+}
+
+export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
+  return (
+    <PostHogProvider client={posthog}>
+      <PageViewTracker />
+      {children}
+    </PostHogProvider>
+  );
+}
+
+const _ALLOWED_CLICK_PROPS = ['element_id', 'role', 'aria_label', 'route'] as const;
+
+export const analytics = {
+  capture: (event: string, props?: Record<string, unknown>) => {
+    const safeProps = props
+      ? Object.fromEntries(
+          Object.entries(props).filter(([k]) => (_ALLOWED_CLICK_PROPS as readonly string[]).includes(k))
+        )
+      : {};
+    posthog.capture(event, safeProps);
+  },
+};
+{% else %}
+// analytics disabled
 export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
@@ -12,3 +61,4 @@ export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
 export const analytics = {
   capture: (_event: string, _props?: Record<string, unknown>) => {},
 };
+{% endif %}

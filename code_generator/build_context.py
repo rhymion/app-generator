@@ -17,6 +17,7 @@ from helpers.schema_helpers import (
     get_detail_ref_rels, get_flatten_rels,
 )
 import copy
+from analytics_policy import QUERY_STRING_POLICY
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -1233,6 +1234,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         analytics_posthog_host=analytics_posthog_host,
         analytics_topology=analytics_topology,
         analytics_ingest_endpoint=analytics_ingest_endpoint,
+        analytics_query_string_policy=QUERY_STRING_POLICY,
         # Chart
         chart_cfg=chart_cfg,
         has_chart=has_chart,

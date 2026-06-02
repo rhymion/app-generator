@@ -241,18 +241,18 @@ def generate(schema_path: str, output_dir: str) -> None:
     # --- Analytics provider scaffold (app/providers/analytics-provider.tsx) ---
     _analytics_cfg = schema.get('x-analytics') or {}
     _analytics_enabled = bool(_analytics_cfg.get('enabled', False))
-    if _analytics_enabled:
-        _analytics_ctx = {
-            'analytics_enabled': True,
-            'analytics_posthog_host': _analytics_cfg.get('posthog_host', ''),
-            'analytics_topology': _analytics_cfg.get('topology', 'embedded'),
-            'analytics_ingest_endpoint': _analytics_cfg.get('ingest_endpoint', ''),
-        }
-        _write(
-            out / 'app' / 'providers' / 'analytics-provider.tsx',
-            _render(env, 'analytics_provider.tsx.jinja2', _analytics_ctx),
-        )
-        print('  Analytics provider → app/providers/analytics-provider.tsx')
+    _analytics_ctx = {
+        'analytics_enabled': _analytics_enabled,
+        'analytics_posthog_host': _analytics_cfg.get('posthog_host', ''),
+        'analytics_topology': _analytics_cfg.get('topology', 'embedded'),
+        'analytics_ingest_endpoint': _analytics_cfg.get('ingest_endpoint', ''),
+    }
+    _write(
+        out / 'app' / 'providers' / 'analytics-provider.tsx',
+        _render(env, 'analytics_provider.tsx.jinja2', _analytics_ctx),
+    )
+    _analytics_status = 'enabled' if _analytics_enabled else 'disabled'
+    print(f'  Analytics provider → app/providers/analytics-provider.tsx ({_analytics_status})')
 
     # --- Dashboard catalog (lib/dashboard/catalog.ts) ---
     dashboard_catalog = build_dashboard_catalog(schema)

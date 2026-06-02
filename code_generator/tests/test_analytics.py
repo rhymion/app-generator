@@ -1,13 +1,26 @@
 """
-Tests for analytics Phase 1: x-analytics schema parsing and backward compatibility.
-
-Ensures that when x-analytics is absent or disabled, generated context
-contains no analytics activation and no PostHog SDK references appear.
+Tests for analytics: x-analytics schema parsing, backward compatibility,
+Phase 2 PostHog provider rendering, and click sanitizer allowlist.
 """
 from pathlib import Path
 
 import pytest
+from jinja2 import Environment, FileSystemLoader
 from build_context import build_context
+
+_TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+
+
+def _render_provider(analytics_enabled: bool, posthog_host: str = '') -> str:
+    """Render analytics_provider.tsx.jinja2 with the given enabled flag."""
+    env = Environment(loader=FileSystemLoader(str(_TEMPLATES_DIR)))
+    tpl = env.get_template('analytics_provider.tsx.jinja2')
+    return tpl.render(
+        analytics_enabled=analytics_enabled,
+        analytics_posthog_host=posthog_host,
+        analytics_topology='embedded',
+        analytics_ingest_endpoint='',
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -132,13 +145,10 @@ class TestAnalyticsDisabledProducesNoPosthogImport:
         )
 
     def test_noop_provider_template_has_no_sdk_import(self):
-        """The analytics_provider.tsx.jinja2 template must not import the PostHog SDK."""
-        template_path = (
-            Path(__file__).parent.parent / "templates" / "analytics_provider.tsx.jinja2"
-        )
-        assert template_path.exists(), "analytics_provider.tsx.jinja2 template must exist"
-        content = template_path.read_text()
-        # Check for actual SDK import patterns, not just the word in comments
+        """When analytics is disabled, the rendered provider must not import the PostHog SDK."""
+        assert (_TEMPLATES_DIR / "analytics_provider.tsx.jinja2").exists(), \
+            "analytics_provider.tsx.jinja2 template must exist"
+        content = _render_provider(analytics_enabled=False)
         import_patterns = [
             "import posthog",
             "from 'posthog-js'",
@@ -149,7 +159,7 @@ class TestAnalyticsDisabledProducesNoPosthogImport:
         ]
         for pattern in import_patterns:
             assert pattern not in content, (
-                f"Phase 1 no-op provider must not import or initialize PostHog SDK: found '{pattern}'"
+                f"Disabled analytics provider must not import or initialize PostHog SDK: found '{pattern}'"
             )
 
 
@@ -182,3 +192,48 @@ class TestAnalyticsBackwardCompat:
                 f"Key '{key}' differs between absent and disabled: "
                 f"{ctx_absent[key]!r} vs {ctx_disabled[key]!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: PostHog SDK rendering and click sanitizer
+# ---------------------------------------------------------------------------
+
+class TestAnalyticsPhase2:
+
+    def test_analytics_disabled_no_posthog_import(self):
+        """When disabled, rendered analytics_provider.tsx must not reference posthog-js."""
+        content = _render_provider(analytics_enabled=False)
+        for pattern in ('posthog-js', 'posthog.init(', 'posthog.capture(', 'PostHogProvider'):
+            assert pattern not in content, (
+                f"Disabled provider must not reference PostHog SDK: found '{pattern}'"
+            )
+
+    def test_analytics_enabled_includes_posthog_sdk(self):
+        """When enabled, rendered analytics_provider.tsx must initialize PostHog."""
+        content = _render_provider(analytics_enabled=True)
+        assert "posthog.init(" in content, "Enabled provider must initialize PostHog SDK"
+        assert "posthog.capture('page_view'" in content, "Enabled provider must emit page_view"
+        assert "PostHogProvider" in content, "Enabled provider must wrap with PostHogProvider"
+
+    def test_click_sanitizer_excludes_text_content(self):
+        """analytics.capture must strip non-allowlisted fields from click payloads."""
+        content = _render_provider(analytics_enabled=True)
+        assert "'element_id'" in content, "Click allowlist must include 'element_id'"
+        assert "'aria_label'" in content, "Click allowlist must include 'aria_label'"
+        assert "'route'" in content, "Click allowlist must include 'route'"
+        assert "'text'" not in content, "Click allowlist must NOT include 'text'"
+        assert "'value'" not in content, "Click allowlist must NOT include 'value'"
+        assert "'text_content'" not in content, "Click allowlist must NOT include 'text_content'"
+
+    def test_page_view_drops_query_string(self):
+        """page_view event must not reference useSearchParams or query string fields."""
+        content = _render_provider(analytics_enabled=True)
+        assert 'useSearchParams' not in content, "page_view must not capture query params"
+        assert 'searchParams' not in content, "page_view must not capture search params"
+
+    def test_posthog_destructive_features_disabled(self):
+        """PostHog init must disable session recording, autocapture, and capture_pageview."""
+        content = _render_provider(analytics_enabled=True)
+        assert 'autocapture: false' in content, "autocapture must be disabled"
+        assert 'capture_pageview: false' in content, "capture_pageview must be disabled"
+        assert 'disable_session_recording: true' in content, "session recording must be disabled"
