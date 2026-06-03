@@ -1679,7 +1679,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         fk     = _tf(p)
         req    = p in (model_def.get('required') or [])
         mn     = prop.get('minimum', 0)
-        mx     = prop.get('maximum', 1000000)
+        mx     = prop.get('maximum', 2147483647)  # JS max safe int / float
         is_float = _get_actual_type(prop) == 'number'
         step_str = '\n        step={0.01}' if is_float else ''
         num_jsxs.append(
@@ -2708,7 +2708,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 )
                 _full_prop = _target_props.get(_fname, {})
                 _mn = _full_prop.get('minimum', 0)
-                _mx = _full_prop.get('maximum', 1000000)
+                _mx = _full_prop.get('maximum', 2147483647)
                 _is_float = _ftype == 'number'
                 _step_str = '\n          step={0.01}' if _is_float else ''
                 _accordion_fields_jsx.append(
