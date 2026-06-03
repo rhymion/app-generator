@@ -4,7 +4,7 @@
 import posthog from 'posthog-js';
 import { PostHogProvider } from 'posthog-js/react';
 import { usePathname } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect{% if analytics_event_key_count %}, useRef{% endif %} } from 'react';
 
 if (typeof window !== 'undefined') {
   posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY!, {
@@ -20,14 +20,55 @@ if (typeof window !== 'undefined') {
   });
 }
 
+// Central allowlist: only these properties are permitted per event
+const allowedPropertiesByEvent: Record<string, Set<string>> = {
+  page_view:        new Set(['route']),
+  click:            new Set(['element_id', 'role', 'aria_label', 'route']),
+  key_special:      new Set(['key_name', 'route', 'element_role']),
+  key_count:        new Set(['count', 'route', 'interval_ms']),
+  form_submit:      new Set(['form_id', 'success', 'route']),
+  form_field_blur:  new Set(['field_id', 'route']),
+  validation_error: new Set(['field_id', 'error_type', 'route']),
+};
+
+const _MAX_STRING_LENGTH = 200;
+
+const _VALID_ERROR_TYPES = new Set([
+  'required', 'format', 'range', 'length', 'relation', 'custom', 'unknown',
+]);
+
+function sanitizeEvent(
+  eventName: string,
+  props: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const allowed = allowedPropertiesByEvent[eventName];
+  if (!allowed) return null;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(props)) {
+    if (!allowed.has(k)) continue;
+    if (v === null || typeof v === 'boolean' || typeof v === 'number') {
+      out[k] = v;
+    } else if (typeof v === 'string') {
+      out[k] = v.slice(0, _MAX_STRING_LENGTH);
+    }
+  }
+  if ('error_type' in out && !_VALID_ERROR_TYPES.has(out['error_type'] as string)) {
+    out['error_type'] = 'unknown';
+  }
+  return out;
+}
+
+function captureSafe(eventName: string, props: Record<string, unknown>): void {
+  const sanitized = sanitizeEvent(eventName, props);
+  if (sanitized === null) return;
+  posthog.capture(eventName, sanitized);
+}
+
 function PageViewTracker() {
   const pathname = usePathname();
   useEffect(() => {
     if (pathname) {
-      posthog.capture('page_view', {
-        route: pathname,
-        timestamp: new Date().toISOString(),
-      });
+      captureSafe('page_view', { route: pathname });
     }
   }, [pathname]);
   return null;
@@ -50,7 +91,7 @@ function ClickTracker() {
         Object.entries(safeProps).filter(([, v]) => v !== null)
       ) as Record<string, string>;
 
-      posthog.capture('click', props);
+      captureSafe('click', props);
     }
 
     document.body.addEventListener('click', handleClick);
@@ -60,26 +101,148 @@ function ClickTracker() {
   return null;
 }
 
+{% if analytics_event_key_special %}
+const _ALLOWED_SPECIAL_KEYS = new Set([
+  'Tab', 'Enter', 'Escape',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+  'Backspace', 'Delete',
+]);
+
+function KeySpecialTracker() {
+  useEffect(() => {
+    function handleKeydown(event: KeyboardEvent) {
+      if (!_ALLOWED_SPECIAL_KEYS.has(event.key)) return;
+      const target = event.target as HTMLElement | null;
+      captureSafe('key_special', {
+        key_name: event.key,
+        route: window.location.pathname,
+        element_role: target?.getAttribute('role') ?? target?.tagName?.toLowerCase() ?? '',
+      });
+    }
+    document.addEventListener('keydown', handleKeydown);
+    return () => document.removeEventListener('keydown', handleKeydown);
+  }, []);
+  return null;
+}
+{% endif %}
+{% if analytics_event_key_count %}
+const _KEY_COUNT_INTERVAL_MS = 5000;
+
+function KeyCountTracker() {
+  const countRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    function flush() {
+      if (countRef.current > 0) {
+        captureSafe('key_count', {
+          count: countRef.current,
+          route: window.location.pathname,
+          interval_ms: _KEY_COUNT_INTERVAL_MS,
+        });
+        countRef.current = 0;
+      }
+      timerRef.current = null;
+    }
+
+    function handleKeydown() {
+      countRef.current += 1;
+      if (!timerRef.current) {
+        timerRef.current = setTimeout(flush, _KEY_COUNT_INTERVAL_MS);
+      }
+    }
+
+    document.addEventListener('keydown', handleKeydown);
+    return () => {
+      document.removeEventListener('keydown', handleKeydown);
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+  return null;
+}
+{% endif %}
+{% if analytics_event_form_submit or analytics_event_form_field_blur or analytics_event_validation_error %}
+function FormLifecycleTracker() {
+  useEffect(() => {
+    function handleLifecycle(event: Event) {
+      const e = event as CustomEvent<Record<string, unknown>>;
+      const detail = e.detail ?? {};
+      const kind = detail['kind'] as string | undefined;
+      if (!kind) return;
+      {% if analytics_event_form_submit %}
+      if (kind === 'form_submit') {
+        captureSafe('form_submit', {
+          form_id: detail['form_id'],
+          success: detail['success'],
+          route: window.location.pathname,
+        });
+        return;
+      }
+      {% endif %}
+      {% if analytics_event_validation_error %}
+      if (kind === 'validation_error') {
+        captureSafe('validation_error', {
+          field_id: detail['field_id'],
+          error_type: detail['error_type'],
+          route: window.location.pathname,
+        });
+        return;
+      }
+      {% endif %}
+      {% if analytics_event_form_field_blur %}
+      if (kind === 'form_field_blur') {
+        captureSafe('form_field_blur', {
+          field_id: detail['field_id'],
+          route: window.location.pathname,
+        });
+        return;
+      }
+      {% endif %}
+    }
+    document.addEventListener('analytics:lifecycle', handleLifecycle);
+    return () => document.removeEventListener('analytics:lifecycle', handleLifecycle);
+  }, []);
+{% if analytics_event_form_field_blur %}
+  useEffect(() => {
+    const handleFocusOut = (e: FocusEvent) => {
+      const target = e.target as HTMLElement;
+      const fieldId = target.getAttribute('data-analytics-field-id');
+      if (!fieldId) return;
+
+      const form = target.closest('[data-analytics-form-id]');
+      const formId = form?.getAttribute('data-analytics-form-id') ?? undefined;
+
+      captureSafe('form_field_blur', {
+        field_id: fieldId,
+        form_id: formId,
+        route: window.location.pathname,
+      });
+    };
+
+    document.addEventListener('focusout', handleFocusOut);
+    return () => document.removeEventListener('focusout', handleFocusOut);
+  }, []);
+{% endif %}
+  return null;
+}
+{% endif %}
+
 export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
   return (
     <PostHogProvider client={posthog}>
       <PageViewTracker />
       <ClickTracker />
+      {% if analytics_event_key_special %}<KeySpecialTracker />{% endif %}
+      {% if analytics_event_key_count %}<KeyCountTracker />{% endif %}
+      {% if analytics_event_form_submit or analytics_event_form_field_blur or analytics_event_validation_error %}<FormLifecycleTracker />{% endif %}
       {children}
     </PostHogProvider>
   );
 }
 
-const _ALLOWED_CLICK_PROPS = ['element_id', 'role', 'aria_label', 'route'] as const;
-
 export const analytics = {
   capture: (event: string, props?: Record<string, unknown>) => {
-    const safeProps = props
-      ? Object.fromEntries(
-          Object.entries(props).filter(([k]) => (_ALLOWED_CLICK_PROPS as readonly string[]).includes(k))
-        )
-      : {};
-    posthog.capture(event, safeProps);
+    captureSafe(event, props ?? {});
   },
 };
 {% else %}
