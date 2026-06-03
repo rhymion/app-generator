@@ -241,11 +241,17 @@ def generate(schema_path: str, output_dir: str) -> None:
     # --- Analytics provider scaffold (app/providers/analytics-provider.tsx) ---
     _analytics_cfg = schema.get('x-analytics') or {}
     _analytics_enabled = bool(_analytics_cfg.get('enabled', False))
+    _analytics_events_cfg = _analytics_cfg.get('events') or {}
     _analytics_ctx = {
         'analytics_enabled': _analytics_enabled,
         'analytics_posthog_host': _analytics_cfg.get('posthog_host', ''),
         'analytics_topology': _analytics_cfg.get('topology', 'embedded'),
         'analytics_ingest_endpoint': _analytics_cfg.get('ingest_endpoint', ''),
+        'analytics_event_key_special': bool(_analytics_events_cfg.get('key_special', False)),
+        'analytics_event_key_count': bool(_analytics_events_cfg.get('key_count', False)),
+        'analytics_event_form_submit': bool(_analytics_events_cfg.get('form_submit', False)),
+        'analytics_event_form_field_blur': bool(_analytics_events_cfg.get('form_field_blur', False)),
+        'analytics_event_validation_error': bool(_analytics_events_cfg.get('validation_error', False)),
     }
     _write(
         out / 'app' / 'providers' / 'analytics-provider.tsx',

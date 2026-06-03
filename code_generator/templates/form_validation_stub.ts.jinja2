@@ -1,3 +1,12 @@
 export function validateForm(_values: Record<string, unknown>): string | null {
   return null;
 }
+
+export type SafeValidationIssue = {
+  field_id: string;
+  error_type: 'required' | 'format' | 'range' | 'length' | 'relation' | 'custom' | 'unknown';
+};
+
+export async function validate(_values: Record<string, unknown>): Promise<SafeValidationIssue[]> {
+  return [];
+}

@@ -59,7 +59,7 @@ import AccordionDetails from '@mui/material/AccordionDetails';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import Typography from '@mui/material/Typography';
 {% endif %}
-import { validateForm } from './form_validation';
+import { validateForm{% if analytics_enabled %}, validateFormIssues{% endif %} } from './form_validation';
 
 export default function FormUpsert({{ form_upsert_params }}) {
   const router = useRouter();
@@ -74,6 +74,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
   const [validationError, setValidationError] = useState<string | null>(null);
   const canDelete = permissions ? permissions.delete : true;
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
+{% if analytics_enabled %}
+  const analyticsFormId = isEdit ? '{{ parent }}.edit' : '{{ parent }}.new';
+{% endif %}
 {% if all_states %}
 
 {{ all_states }}
@@ -105,6 +108,12 @@ export default function FormUpsert({{ form_upsert_params }}) {
     const validationMessage = getValidationError();
     setValidationError(validationMessage);
     if (validationMessage) {
+{% if analytics_enabled %}
+      getValidationIssues();
+      window.dispatchEvent(new CustomEvent('analytics:lifecycle', {
+        detail: { kind: 'form_submit', form_id: analyticsFormId, success: false },
+      }));
+{% endif %}
       return;
     }
 
@@ -124,13 +133,26 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {{ child_form_data_handling }}
 {% endif %}
 
-    try {
-      startTransition(async () => {
+    startTransition(async () => {
+      try {
         await upsert{{ parent_pascal }}(formData);
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    }
+      } catch (err) {
+        if ((err as { digest?: string })?.digest?.startsWith('NEXT_REDIRECT')) {
+{% if analytics_enabled %}
+          window.dispatchEvent(new CustomEvent('analytics:lifecycle', {
+            detail: { kind: 'form_submit', form_id: analyticsFormId, success: true },
+          }));
+{% endif %}
+          throw err;
+        }
+{% if analytics_enabled %}
+        window.dispatchEvent(new CustomEvent('analytics:lifecycle', {
+          detail: { kind: 'form_submit', form_id: analyticsFormId, success: false },
+        }));
+{% endif %}
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      }
+    });
   };
 {% if can_delete %}
 
@@ -188,6 +210,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
         deleteEntityLabel={te('{{ parent_camel }}')}
         submitButtonLabel={tc('save')}
         error={error}
+{% if analytics_enabled %}
+        analyticsFormId={analyticsFormId}
+{% endif %}
       />
 {% if comment_children_jsx %}
 {{ comment_children_jsx }}

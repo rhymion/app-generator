@@ -35,6 +35,7 @@ interface EntityAutocompleteProps {
   /** Open the dropdown as soon as the input is focused. Defaults to false for form fields;
    *  the DataGrid cell editor sets it true so a single click after edit-mode reveals options. */
   openOnFocus?: boolean;
+  analyticsFieldId?: string;
 }
 
 export default function EntityAutocomplete({
@@ -49,6 +50,7 @@ export default function EntityAutocomplete({
   sx,
   debounceMs = 250,
   openOnFocus = false,
+  analyticsFieldId,
 }: EntityAutocompleteProps) {
   const [inputValue, setInputValue] = useState('');
   const [searchResults, setSearchResults] = useState<EntityOption[]>([]);
@@ -141,6 +143,10 @@ export default function EntityAutocomplete({
                   {params.InputProps.endAdornment}
                 </>
               ),
+            },
+            htmlInput: {
+              ...params.inputProps,
+              ...(analyticsFieldId ? { 'data-analytics-field-id': analyticsFieldId } : {}),
             },
           }}
         />

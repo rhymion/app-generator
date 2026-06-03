@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from jinja2 import Environment, FileSystemLoader
 from build_context import build_context
+from generators import form_upsert_context
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
@@ -621,3 +622,139 @@ class TestAnalyticsPhase3Runtime:
         capture_safe_body = content[capture_safe_start:next_fn]
         assert 'posthog.capture(' in capture_safe_body, \
             "posthog.capture must be inside the captureSafe function"
+
+
+# ---------------------------------------------------------------------------
+# Batch 1 fixture helpers
+# ---------------------------------------------------------------------------
+
+def _render_form_upsert(schema: dict, entity: str) -> str:
+    """Render form_upsert.tsx.jinja2 with fully merged context for the given entity."""
+    entity_dict = {
+        "parent": entity,
+        "model": entity,
+        "definition_key": f"{entity}_detail",
+        "children": [],
+        "generate_config": {
+            "list": True, "view": True, "new": True, "edit": True,
+            "delete": True, "api": False, "test": False, "fields": None,
+        },
+    }
+    ctx = build_context(entity_dict, schema)
+    ups_ctx = {**ctx, **form_upsert_context(ctx, schema)}
+    env = Environment(loader=FileSystemLoader(str(_TEMPLATES_DIR)))
+    tpl = env.get_template('form_upsert.tsx.jinja2')
+    return tpl.render(**ups_ctx)
+
+
+def _analytics_schema(enabled: bool = True) -> dict:
+    """Minimal schema fixture with parent1 entity (text/number/datetime/relation fields)."""
+    schema: dict = {
+        "definitions": {
+            "organization": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    "name": {"type": "string"},
+                },
+            },
+            "parent1": {
+                "type": "object",
+                "required": ["id", "name", "organization_id", "price", "due_date"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    "name": {"type": "string", "minLength": 1},
+                    "organization_id": {
+                        "type": "string",
+                        "pattern": "^c[a-z0-9]{24,}$",
+                        "x-relationship": {
+                            "type": "many-to-one",
+                            "target": "organization",
+                            "labelField": "name",
+                        },
+                    },
+                    "description": {"type": ["string", "null"]},
+                    "price": {"type": "integer", "minimum": 0},
+                    "due_date": {"type": "string", "format": "date-time"},
+                },
+            },
+            "parent1_detail": {
+                "x-generate": {
+                    "list": True, "view": True, "new": True,
+                    "edit": True, "delete": True, "api": False,
+                },
+                "allOf": [
+                    {"$ref": "#/definitions/parent1"},
+                    {
+                        "type": "object",
+                        "required": ["organization"],
+                        "properties": {
+                            "organization": {"$ref": "#/definitions/organization"},
+                        },
+                    },
+                ],
+            },
+        },
+    }
+    if enabled:
+        schema["x-analytics"] = {
+            "enabled": True,
+            "events": {
+                "key_special": True,
+                "key_count": True,
+                "form_submit": True,
+                "form_field_blur": True,
+                "validation_error": True,
+            },
+        }
+    return schema
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 Batch 1: analytics-enabled fixture render tests
+# ---------------------------------------------------------------------------
+
+class TestAnalyticsBatch1Fixture:
+    """Verify that analytics-enabled generator output contains required metadata."""
+
+    @pytest.fixture
+    def enabled_schema(self):
+        return _analytics_schema(enabled=True)
+
+    def test_form_upsert_contains_analytics_form_id(self, enabled_schema):
+        """Generated parent1 FormUpsert has analyticsFormId constant and prop."""
+        output = _render_form_upsert(enabled_schema, entity="parent1")
+        assert 'analyticsFormId' in output
+
+    def test_form_fields_contain_analytics_field_id(self, enabled_schema):
+        """Generated fields have data-analytics-field-id or analyticsFieldId for standard field types."""
+        output = _render_form_upsert(enabled_schema, entity="parent1")
+        assert 'analyticsFieldId' in output or 'data-analytics-field-id' in output
+
+    def test_lifecycle_signal_present_in_form(self, enabled_schema):
+        """Generated FormUpsert dispatches analytics:lifecycle form_submit signal."""
+        output = _render_form_upsert(enabled_schema, entity="parent1")
+        assert "analytics:lifecycle" in output
+        assert "form_submit" in output
+
+    def test_disabled_schema_unchanged(self):
+        """x-analytics absent produces output with no analytics attributes (backward compat)."""
+        disabled_out = _render_form_upsert(_analytics_schema(enabled=False), entity="parent1")
+        assert 'analyticsFormId' not in disabled_out
+        assert 'data-analytics-field-id' not in disabled_out
+        assert 'analyticsFieldId' not in disabled_out
+        assert "analytics:lifecycle" not in disabled_out
+
+    def test_analytics_provider_contains_key_listeners(self, enabled_schema):
+        """Enabled analytics provider template includes key_special and key_count listeners."""
+        out_special = _render_provider(analytics_enabled=True, analytics_event_key_special=True)
+        out_count = _render_provider(analytics_enabled=True, analytics_event_key_count=True)
+        assert 'KeySpecialTracker' in out_special or 'key_special' in out_special
+        assert 'KeyCountTracker' in out_count or 'key_count' in out_count
+
+    def test_form_field_blur_listener_in_provider(self, enabled_schema):
+        """Enabled provider contains focusout delegated listener for form_field_blur."""
+        output = _render_provider(analytics_enabled=True, analytics_event_form_field_blur=True)
+        assert 'focusout' in output
+        assert 'data-analytics-field-id' in output

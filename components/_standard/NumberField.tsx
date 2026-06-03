@@ -23,11 +23,13 @@ export default function NumberField({
   label,
   error,
   size = 'medium',
+  analyticsFieldId,
   ...other
 }: BaseNumberField.Root.Props & {
   label?: React.ReactNode;
   size?: 'small' | 'medium';
   error?: boolean;
+  analyticsFieldId?: string;
 }) {
   let id = React.useId();
   if (idProp) {
@@ -64,7 +66,9 @@ export default function NumberField({
             onKeyDown={props.onKeyDown}
             onFocus={props.onFocus}
             slotProps={{
-              input: props,
+              input: analyticsFieldId
+                ? { ...props, 'data-analytics-field-id': analyticsFieldId } as React.InputHTMLAttributes<HTMLInputElement>
+                : props,
             }}
             endAdornment={
               <InputAdornment

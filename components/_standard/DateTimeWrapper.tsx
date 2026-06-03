@@ -7,7 +7,10 @@ import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export default function DateTimeWrapper({label, date_time, show_date = true, show_time = true, readOnly = false, required = false, ...other}: {label: string, date_time: Date | null, show_date?: boolean, show_time?: boolean, readOnly?: boolean, required?: boolean, [key: string]: any}) {
+export default function DateTimeWrapper({label, date_time, show_date = true, show_time = true, readOnly = false, required = false, analyticsFieldId, ...other}: {label: string, date_time: Date | null, show_date?: boolean, show_time?: boolean, readOnly?: boolean, required?: boolean, analyticsFieldId?: string, [key: string]: any}) {
+  const textFieldSlotProps = analyticsFieldId
+    ? { margin: 'normal' as const, required, slotProps: { htmlInput: { 'data-analytics-field-id': analyticsFieldId } } }
+    : { margin: 'normal' as const, required };
     return (
     <div style={{ position: 'relative' }}>
       {required && !readOnly && (
@@ -27,7 +30,7 @@ export default function DateTimeWrapper({label, date_time, show_date = true, sho
           label={label}
           value={date_time ? dayjs(date_time) : null}
           {...(readOnly ? { readOnly: true } : {})}
-          slotProps={{ field: { clearable: true }, textField: { margin: 'normal', required } }}
+          slotProps={{ field: { clearable: true }, textField: textFieldSlotProps }}
           {...other}
         /> )
         }
@@ -38,7 +41,7 @@ export default function DateTimeWrapper({label, date_time, show_date = true, sho
           label={label}
           value={date_time ? dayjs(date_time) : null}
           {...(readOnly ? { readOnly: true } : {})}
-          slotProps={{ field: { clearable: true }, textField: { margin: 'normal', required } }}
+          slotProps={{ field: { clearable: true }, textField: textFieldSlotProps }}
           {...other}
         /> )
         }
@@ -49,7 +52,7 @@ export default function DateTimeWrapper({label, date_time, show_date = true, sho
           label={label}
           value={date_time ? dayjs(date_time) : null}
           {...(readOnly ? { readOnly: true } : {})}
-          slotProps={{ field: { clearable: true }, textField: { margin: 'normal', required } }}
+          slotProps={{ field: { clearable: true }, textField: textFieldSlotProps }}
           {...other}
         />
          )

@@ -1546,6 +1546,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     cats = ctx['field_categories']
     EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'}
 
+    analytics_enabled = ctx.get('analytics_enabled', False)
+
     # Set when any autocomplete option / FormView label uses formatLabelValue —
     # the generated component must then `import { formatLabelValue } from '@/lib/_format';`.
     uses_format_label_value = False
@@ -1636,12 +1638,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         req     = p in (model_def.get('required') or [])
         min_len = prop.get('minLength')
         max_len = prop.get('maxLength')
-        slot_str = ''
-        if min_len is not None or max_len is not None:
-            constraints = []
-            if min_len is not None: constraints.append(f'minLength: {min_len}')
-            if max_len is not None: constraints.append(f'maxLength: {max_len}')
-            slot_str = f"\n        slotProps={{ {{ htmlInput: {{ {', '.join(constraints)} }} }} }}"
+        html_input_parts = []
+        if min_len is not None: html_input_parts.append(f'minLength: {min_len}')
+        if max_len is not None: html_input_parts.append(f'maxLength: {max_len}')
+        if analytics_enabled: html_input_parts.append(f"'data-analytics-field-id': '{p}'")
+        slot_str = (f"\n        slotProps={{ {{ htmlInput: {{ {', '.join(html_input_parts)} }} }} }}"
+                    if html_input_parts else '')
         multiline = 'true' if p == 'description' else 'false'
         rows = '4' if p == 'description' else 'undefined'
         text_jsxs.append(
@@ -1666,6 +1668,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         search_var    = f'{state_name}SearchAction'
         initial_var   = f'{state_name}InitialOptions'
         current_var   = f'{state_name}CurrentOption'
+        analytics_attr = f'\n          analyticsFieldId="{prop_name}"\n' if analytics_enabled else '\n'
         return (
             f"      <Box sx={{{{ display: 'flex', alignItems: 'flex-start', gap: 1 }}}}>\n"
             f"        <EntityAutocomplete\n"
@@ -1676,7 +1679,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"          initialOptions={{{initial_var}}}\n"
             f"          currentOption={{{current_var}}}\n"
             f"          label={{tf('{label_fk}')}}\n"
-            f"          required={{{'true' if required else 'false'}}}\n"
+            f"          required={{{'true' if required else 'false'}}}{analytics_attr}"
             f"        />\n"
             f"        {{{state_name} && (\n"
             f"          <Tooltip title=\"View\">\n"
@@ -1708,6 +1711,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         mx     = prop.get('maximum', 1000000)
         is_float = _get_actual_type(prop) == 'number'
         step_str = '\n        step={0.01}' if is_float else ''
+        analytics_num_attr = f'\n        analyticsFieldId="{p}"' if analytics_enabled else ''
         num_jsxs.append(
             f"      <NumberField\n"
             f"        label={{tf('{fk}')}}\n"
@@ -1715,7 +1719,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        defaultValue={{src.{p} || undefined}}\n"
             f"        {'required' if req else ''}\n"
             f"        min={{{mn}}}\n"
-            f"        max={{{mx}}}{step_str}\n"
+            f"        max={{{mx}}}{step_str}{analytics_num_attr}\n"
             f"      />"
         )
 
@@ -1730,12 +1734,13 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         fmt     = prop.get('format')
         show_date_str = '\n        show_date={false}' if fmt == 'time' else ''
         show_time_str = '\n        show_time={false}' if fmt == 'date' else ''
+        analytics_dt_attr = f'\n        analyticsFieldId="{p}"' if analytics_enabled else ''
         dt_jsxs.append(
             f"      <DateTimeWrapper\n"
             f"        label={{tf('{fk}')}} {show_date_str}{show_time_str}\n"
             f"        date_time={{{sn} ? {sn}.toDate() : null}}\n"
             f"        {'required' if req else ''}\n"
-            f"        onChange={{(newValue: dayjs.Dayjs | null) => set{setter}(newValue)}}\n"
+            f"        onChange={{(newValue: dayjs.Dayjs | null) => set{setter}(newValue)}}{analytics_dt_attr}\n"
             f"      />"
         )
 
@@ -1744,7 +1749,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     for p in image_props:
         sn     = safe_var_name(p)
         setter = _setter(sn)
-        img_jsxs.append(f"      <ImageUpload\n        value={{{sn}}}\n        onChange={{set{setter}}}\n      />")
+        analytics_img_attr = f'\n        analyticsFieldId="{p}"' if analytics_enabled else ''
+        img_jsxs.append(f"      <ImageUpload\n        value={{{sn}}}\n        onChange={{set{setter}}}{analytics_img_attr}\n      />")
 
     # Boolean fields
     bool_jsxs = []
@@ -1752,9 +1758,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         fk     = _tf(p)
         sn     = safe_var_name(p)
         setter = _setter(sn)
+        checkbox_analytics = (f" inputProps={{ {{'data-analytics-field-id': '{p}'}} }}"
+                              if analytics_enabled else '')
         bool_jsxs.append(
             f"      <FormControlLabel\n"
-            f"        control={{<Checkbox checked={{{sn}}} onChange={{(e) => set{setter}(e.target.checked)}} />}}\n"
+            f"        control={{<Checkbox checked={{{sn}}} onChange={{(e) => set{setter}(e.target.checked)}}{checkbox_analytics} />}}\n"
             f"        label={{tf('{fk}')}}\n"
             f"      />"
         )
@@ -1790,6 +1798,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
+        enum_analytics_slot = (
+            f"\n            slotProps={{{{ htmlInput: {{ ...params.inputProps, 'data-analytics-field-id': '{p}' }} }}}}"
+            if analytics_enabled else ''
+        )
         enum_int_jsxs.append(
             f"      <Autocomplete\n"
             f"        options={{{opts_var}}}\n"
@@ -1800,7 +1812,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"            {{...params}}\n"
             f"            label={{tf('{fk}')}}\n"
             f"            margin=\"normal\"\n"
-            f"            {'required' if req else ''}\n"
+            f"            {'required' if req else ''}{enum_analytics_slot}\n"
             f"          />\n"
             f"        )}}\n"
             f"      />"
@@ -1820,6 +1832,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         opts = ', '.join(f"{{ value: '{v}', label: '{v}' }}" for v in enum_vals)
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
+        enum_str_analytics_slot = (
+            f"\n            slotProps={{{{ htmlInput: {{ ...params.inputProps, 'data-analytics-field-id': '{p}' }} }}}}"
+            if analytics_enabled else ''
+        )
         enum_str_jsxs.append(
             f"      <Autocomplete\n"
             f"        options={{{opts_var}}}\n"
@@ -1830,7 +1846,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"            {{...params}}\n"
             f"            label={{tf('{fk}')}}\n"
             f"            margin=\"normal\"\n"
-            f"            {'required' if req else ''}\n"
+            f"            {'required' if req else ''}{enum_str_analytics_slot}\n"
             f"          />\n"
             f"        )}}\n"
             f"      />"
@@ -2518,6 +2534,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in entity_select_props)
     val_entries = '\n'.join(validation_entry_lines)
     validation_call = f"  const getValidationError = () => validateForm({{\n{val_entries}\n  }});"
+    if analytics_enabled:
+        validation_call += f"\n  const getValidationIssues = () => validateFormIssues({{\n{val_entries}\n  }});"
 
     # Comment children JSX
     comment_jsx_parts = []

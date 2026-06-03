@@ -15,6 +15,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useTranslations } from 'next-intl';
 
 interface FormWithChildGridProps {
+  analyticsFormId?: string;
   title: string;
   isEdit: boolean;
   formFields: ReactNode;
@@ -27,6 +28,7 @@ interface FormWithChildGridProps {
 }
 
 export default function FormWithChildGrid({
+  analyticsFormId,
   title,
   isEdit,
   formFields,
@@ -69,7 +71,7 @@ export default function FormWithChildGrid({
           {error}
         </div>
       )}
-      <form onSubmit={onSubmit}>
+      <form data-analytics-form-id={analyticsFormId ?? undefined} onSubmit={onSubmit}>
         {formFields}
         <Tooltip title={submitButtonLabel}>
           <IconButton type="submit" color="primary" aria-label={submitButtonLabel} sx={{ mt: 2, mr: 2 }}>

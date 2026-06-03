@@ -27,3 +27,28 @@ export function validateForm(values: Record<string, unknown>): string | null {
   }
   return null;
 }
+{% if analytics_enabled %}
+
+export type SafeValidationIssue = {
+  field_id: string;
+  error_type: 'required' | 'format' | 'range' | 'length' | 'relation' | 'custom' | 'unknown';
+};
+
+const FORM_ID_NEW = '{{ parent }}.new';
+const FORM_ID_EDIT = '{{ parent }}.edit';
+
+export function validateFormIssues(values: Record<string, unknown>): SafeValidationIssue[] {
+  const form_id = values.isEdit ? FORM_ID_EDIT : FORM_ID_NEW;
+  const issues: SafeValidationIssue[] = [];
+  for (const field of REQUIRED_FIELDS) {
+    if (isMissingValue(values[field.key])) {
+      const issue: SafeValidationIssue = { field_id: field.key, error_type: 'required' };
+      dispatchEvent(new CustomEvent('analytics:lifecycle', {
+        detail: { kind: 'validation_error', form_id, field_id: issue.field_id, error_type: issue.error_type },
+      }));
+      issues.push(issue);
+    }
+  }
+  return issues;
+}
+{% endif %}

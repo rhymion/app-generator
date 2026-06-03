@@ -825,6 +825,13 @@ def build_context(entity: dict, schema: dict) -> dict:
     analytics_posthog_host    = _analytics_cfg.get('posthog_host', '')    # empty = PostHog Cloud default
     analytics_topology        = _analytics_cfg.get('topology', 'embedded') # "embedded" or "separated"
     analytics_ingest_endpoint = _analytics_cfg.get('ingest_endpoint', '') # for separated topology
+    # Per-event flags (absent = safe default False)
+    _analytics_events_cfg = _analytics_cfg.get('events') or {}
+    analytics_event_key_special     = bool(_analytics_events_cfg.get('key_special', False))
+    analytics_event_key_count       = bool(_analytics_events_cfg.get('key_count', False))
+    analytics_event_form_submit     = bool(_analytics_events_cfg.get('form_submit', False))
+    analytics_event_form_field_blur = bool(_analytics_events_cfg.get('form_field_blur', False))
+    analytics_event_validation_error = bool(_analytics_events_cfg.get('validation_error', False))
 
     # Chart config
     xdisplay    = (model_def or {}).get('x-display') or {}
@@ -1235,6 +1242,11 @@ def build_context(entity: dict, schema: dict) -> dict:
         analytics_topology=analytics_topology,
         analytics_ingest_endpoint=analytics_ingest_endpoint,
         analytics_query_string_policy=QUERY_STRING_POLICY,
+        analytics_event_key_special=analytics_event_key_special,
+        analytics_event_key_count=analytics_event_key_count,
+        analytics_event_form_submit=analytics_event_form_submit,
+        analytics_event_form_field_blur=analytics_event_form_field_blur,
+        analytics_event_validation_error=analytics_event_validation_error,
         # Chart
         chart_cfg=chart_cfg,
         has_chart=has_chart,
