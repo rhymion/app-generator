@@ -16,6 +16,7 @@ from helpers.schema_helpers import (
     is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
     get_detail_ref_rels, get_flatten_rels,
 )
+from helpers.label_field import build_label_expression, render_prisma_include
 import copy
 
 # ---------------------------------------------------------------------------
@@ -977,10 +978,57 @@ def build_context(entity: dict, schema: dict) -> dict:
             if not child_rels:
                 child_include_entries.append(f"{prop}: true")
             else:
-                child_includes = ', '.join(
-                    f"{r['prop_name'].removesuffix('_id')}: true" for r in child_rels
-                )
-                child_include_entries.append(f"{prop}: {{ include: {{ {child_includes} }} }}")
+                # Base include map from the child's own parent relationships
+                child_include_map: dict = {r['prop_name'].removesuffix('_id'): True for r in child_rels}
+
+                # If the parent declared a label_field on this child that walks
+                # deeper relations (e.g. 'buyer.user.name'), merge the built
+                # prisma include so nested relations are fetched server-side.
+                rel_info = c.get('relationship') or {}
+                label_field = rel_info.get('label_field') or rel_info.get('labelField')
+                target = rel_info.get('target')
+                if target and label_field and label_field != 'name':
+                    try:
+                        built = build_label_expression('item', label_field, target, schema)
+                        nested = built.get('prisma_include') or {}
+                    except ValueError:
+                        nested = {}
+
+                    # Merge nested includes into the child's include map
+                    def _merge_into_child(ci: dict, src: dict):
+                        for k, v in src.items():
+                            if v is True:
+                                ci[k] = True
+                            else:
+                                include_val = v.get('include') if isinstance(v, dict) and 'include' in v else v
+                                existing = ci.get(k)
+                                if existing is True or existing is None:
+                                    ci[k] = {'include': include_val}
+                                elif isinstance(existing, dict) and 'include' in existing:
+                                    # merge inner include dicts
+                                    inner = existing['include']
+                                    for kk, vv in (include_val.items() if isinstance(include_val, dict) else []):
+                                        if kk not in inner:
+                                            inner[kk] = vv
+                                        else:
+                                            # prefer richer nested dicts when possible
+                                            if isinstance(inner[kk], dict) and isinstance(vv, dict):
+                                                inner[kk].setdefault('include', {}).update(vv.get('include', vv))
+
+                    if nested:
+                        _merge_into_child(child_include_map, nested)
+
+                # Render the merged include map into source string
+                parts: list[str] = []
+                for k, v in child_include_map.items():
+                    if v is True:
+                        parts.append(f"{k}: true")
+                    elif isinstance(v, dict) and 'include' in v:
+                        parts.append(f"{k}: {{ include: {{ {render_prisma_include(v['include'])} }} }}")
+                    else:
+                        parts.append(f"{k}: true")
+
+                child_include_entries.append(f"{prop}: {{ include: {{ {', '.join(parts)} }} }}")
 
     # Include entries for auto-create one-to-one rels with their nested children
     one_to_one_include_entries = []
