@@ -471,3 +471,212 @@ definitions:
       commentable_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
+
+  listing:
+    type: object
+    required:
+      - id
+      - name
+      - address
+      - status
+      - price
+      - bed
+      - bath
+      - area
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 200
+        - address:
+            width: 200
+        - status:
+            width: 120
+        - price:
+            width: 100
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+      address:
+        type: string
+        minLength: 1
+      image:
+        type:
+          - string
+          - "null"
+        format: uri
+      status:
+        type: integer
+        minimum: 0
+        maximum: 3
+        enum:
+          - Active
+          - Pending
+          - Draft
+          - Sold
+      price:
+        type: integer
+        minimum: 0
+      bed:
+        type: number
+        minimum: 0
+      bath:
+        type: number
+        minimum: 0
+      area:
+        type: integer
+        minimum: 0
+
+  listing_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-custom-components:
+      - name: Activity
+        path: "@/components/listing/Activity"
+        target:
+          - view
+    x-relationships:
+      buyers:
+        type: one-to-many
+        target: listing_buyer_relation
+        labelField: buyer.user.name
+    allOf:
+      - $ref: "#/definitions/listing"
+      - type: object
+        properties:
+          buyers:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/listing_buyer_relation"
+
+  buyer:
+    type: object
+    required:
+      - id
+      - user_id
+      - phone
+    x-display:
+      table:
+        - user:
+            primary: true
+            width: 200
+        - phone:
+            width: 150
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      user_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: one-to-one
+          target: user
+          labelField: name
+      phone:
+        type: string
+        minLength: 1
+
+  buyer_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-relationships:
+      listings:
+        type: one-to-many
+        target: listing_buyer_relation
+        labelField: listing.name
+    allOf:
+      - $ref: "#/definitions/buyer"
+      - type: object
+        properties:
+          listings:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/listing_buyer_relation"
+
+  listing_buyer_relation:
+    type: object
+    required:
+      - id
+      - listing_id
+      - buyer_id
+      - commentable_id
+    x-display:
+      table:
+        - listing:
+            primary: true
+            width: 200
+        - buyer:
+            width: 200
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      listing_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: listing
+          labelField: name
+      buyer_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: buyer
+          labelField: user.name
+      commentable_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: one-to-one_bridge
+          target: commentable
+          labelField: id
+
+  listing_buyer_relation_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-custom-components:
+      - name: BuyerActivity
+        path: "@/components/listing_buyer_relation/BuyerActivity"
+        target:
+          - view
+    allOf:
+      - $ref: "#/definitions/listing_buyer_relation"
+      - type: object
+        required:
+          - listing
+          - buyer
+        properties:
+          listing:
+            $ref: "#/definitions/listing"
+          buyer:
+            $ref: "#/definitions/buyer"

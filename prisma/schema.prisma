@@ -93,6 +93,12 @@ model user {
   updated_dashboards        dashboard[]         @relation("DashboardUpdater")
   created_tenants           tenant[]            @relation("TenantCreator")
   updated_tenants           tenant[]            @relation("TenantUpdater")
+  created_listings           listing[]            @relation("ListingCreator")
+  updated_listings           listing[]            @relation("ListingUpdater")
+  created_buyers           buyer[]            @relation("BuyerCreator")
+  updated_buyers           buyer[]            @relation("BuyerUpdater")
+  created_listing_buyer_relations listing_buyer_relation[]            @relation("ListingBuyerRelationCreator")
+  updated_listing_buyer_relations listing_buyer_relation[]            @relation("ListingBuyerRelationUpdater")
 
   @@index([api_key])
   @@index([creator_id])
@@ -208,6 +214,7 @@ model approval_history {
 model commentable {
   id        String    @id @default(cuid())
   comments  comment[]
+  listing_buyer_relation listing_buyer_relation?
 }
 
 model comment {
@@ -362,4 +369,52 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+model listing {
+  id           String   @id @default(cuid())
+  name          String
+  address       String
+  image         String?
+  status        Int
+  price         Int
+  bed           Int
+  bath          Int
+  area          Int
+  buyers        listing_buyer_relation[]
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user        @relation("ListingCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user        @relation("ListingUpdater", fields: [updater_id], references: [id])
+}
+
+model buyer {
+  id           String   @id @default(cuid())
+  name           String
+  phone          String
+  listings       listing_buyer_relation[]
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user        @relation("BuyerCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user        @relation("BuyerUpdater", fields: [updater_id], references: [id])
+}
+
+model listing_buyer_relation {
+  id           String   @id @default(cuid())
+  listing_id    String
+  listing      listing  @relation(fields: [listing_id], references: [id], onDelete: Cascade)
+  buyer_id    String
+  buyer      buyer  @relation(fields: [buyer_id], references: [id], onDelete: Cascade)
+  commentable_id String      @unique
+  commentable    commentable @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user        @relation("ListingBuyerRelationCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user        @relation("ListingBuyerRelationUpdater", fields: [updater_id], references: [id])
 }
