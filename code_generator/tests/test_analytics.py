@@ -234,11 +234,12 @@ class TestAnalyticsPhase2:
         assert 'searchParams' not in content, "page_view must not capture search params"
 
     def test_posthog_destructive_features_disabled(self):
-        """PostHog init must disable session recording, autocapture, and capture_pageview."""
+        """PostHog init must disable session recording, autocapture, capture_pageview, and feature flags."""
         content = _render_provider(analytics_enabled=True)
         assert 'autocapture: false' in content, "autocapture must be disabled"
         assert 'capture_pageview: false' in content, "capture_pageview must be disabled"
         assert 'disable_session_recording: true' in content, "session recording must be disabled"
+        assert 'advanced_disable_feature_flags: true' in content, "feature flags must be disabled"
 
     def test_heatmaps_and_surveys_disabled(self):
         """PostHog init must disable heatmaps and surveys."""
@@ -758,3 +759,375 @@ class TestAnalyticsBatch1Fixture:
         output = _render_provider(analytics_enabled=True, analytics_event_form_field_blur=True)
         assert 'focusout' in output
         assert 'data-analytics-field-id' in output
+
+    def test_entity_select_field_contains_analytics_field_id(self):
+        """EntitySelect (x-entity-select) fields get data-analytics-field-id when analytics enabled."""
+        schema = _analytics_schema(enabled=True)
+        schema["definitions"]["parent1"]["properties"]["target_entity"] = {
+            "type": "string",
+            "x-entity-select": True,
+        }
+        output = _render_form_upsert(schema, entity="parent1")
+        assert "data-analytics-field-id': 'target_entity'" in output or \
+               'data-analytics-field-id": "target_entity"' in output or \
+               "data-analytics-field-id': \"target_entity\"" in output or \
+               "'data-analytics-field-id': 'target_entity'" in output
+
+    def test_entity_select_field_no_analytics_when_disabled(self):
+        """EntitySelect fields produce no analytics attributes when analytics disabled."""
+        schema = _analytics_schema(enabled=False)
+        schema["definitions"]["parent1"]["properties"]["target_entity"] = {
+            "type": "string",
+            "x-entity-select": True,
+        }
+        output = _render_form_upsert(schema, entity="parent1")
+        assert 'data-analytics-field-id' not in output
+
+
+# ---------------------------------------------------------------------------
+# Full-coverage schema helper (all 10 field types)
+# ---------------------------------------------------------------------------
+
+def _full_coverage_schema(enabled: bool = True) -> dict:
+    """Schema with one entity covering all supported field wrapper types."""
+    schema: dict = {
+        "definitions": {
+            "organization": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    "name": {"type": "string"},
+                },
+            },
+            "resource": {
+                "type": "object",
+                "required": ["id", "notes", "qty", "start_at", "org_id"],
+                "properties": {
+                    "id":          {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    # text (plain string — renders as TextField, multiline=false)
+                    "notes":       {"type": "string", "minLength": 1},
+                    # multiline text (name "description" triggers multiline=true in generator)
+                    "description": {"type": ["string", "null"]},
+                    # relation (many-to-one → EntityAutocomplete)
+                    "org_id": {
+                        "type": "string",
+                        "pattern": "^c[a-z0-9]{24,}$",
+                        "x-relationship": {
+                            "type": "many-to-one",
+                            "target": "organization",
+                            "labelField": "name",
+                        },
+                    },
+                    # number integer (→ NumberField)
+                    "qty":         {"type": "integer", "minimum": 0},
+                    # number float (→ NumberField with step)
+                    "weight":      {"type": "number", "minimum": 0.0},
+                    # datetime (→ DateTimeWrapper)
+                    "start_at":    {"type": "string", "format": "date-time"},
+                    # image (→ ImageUpload)
+                    "photo":       {"type": "string", "format": "uri"},
+                    # boolean (→ Checkbox)
+                    "is_active":   {"type": "boolean"},
+                    # enum integer (→ Autocomplete with integer options)
+                    "status_code": {"type": "integer", "enum": [0, 1, 2]},
+                    # enum string (→ Autocomplete with string options)
+                    "priority":    {"type": "string", "enum": ["low", "medium", "high"]},
+                    # entity_select (→ Autocomplete with static entity list)
+                    "entity_type": {"type": "string", "x-entity-select": True},
+                },
+            },
+            "resource_detail": {
+                "x-generate": {
+                    "list": True, "view": True, "new": True,
+                    "edit": True, "delete": True, "api": False,
+                },
+                "allOf": [
+                    {"$ref": "#/definitions/resource"},
+                    {
+                        "type": "object",
+                        "required": ["organization"],
+                        "properties": {
+                            "organization": {"$ref": "#/definitions/organization"},
+                        },
+                    },
+                ],
+            },
+        },
+    }
+    if enabled:
+        schema["x-analytics"] = {
+            "enabled": True,
+            "events": {
+                "key_special": True,
+                "key_count": True,
+                "form_submit": True,
+                "form_field_blur": True,
+                "validation_error": True,
+            },
+        }
+    return schema
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Full-coverage fixture tests — all field types
+# ---------------------------------------------------------------------------
+
+class TestAnalyticsPhase3FullCoverage:
+    """
+    Verify that every supported field wrapper type carries the correct
+    analytics attribute when analytics is enabled, and that no attribute
+    appears when analytics is disabled.
+    """
+
+    @pytest.fixture
+    def enabled_output(self):
+        return _render_form_upsert(_full_coverage_schema(enabled=True), entity="resource")
+
+    @pytest.fixture
+    def disabled_output(self):
+        return _render_form_upsert(_full_coverage_schema(enabled=False), entity="resource")
+
+    # ------------------------------------------------------------------
+    # Enabled: each field type carries its analytics attribute
+    # ------------------------------------------------------------------
+
+    def test_text_field_has_analytics_field_id(self, enabled_output):
+        """TextField (plain string) renders data-analytics-field-id via slotProps.htmlInput."""
+        assert "'data-analytics-field-id': 'notes'" in enabled_output, \
+            "TextField 'notes' must have data-analytics-field-id in slotProps.htmlInput"
+
+    def test_multiline_text_field_has_analytics_field_id(self, enabled_output):
+        """TextField (description — multiline) renders data-analytics-field-id via slotProps.htmlInput."""
+        assert "'data-analytics-field-id': 'description'" in enabled_output, \
+            "TextField 'description' (multiline) must have data-analytics-field-id"
+
+    def test_relation_field_has_analytics_field_id(self, enabled_output):
+        """EntityAutocomplete (many-to-one) renders analyticsFieldId prop."""
+        assert 'analyticsFieldId="org_id"' in enabled_output, \
+            "EntityAutocomplete 'org_id' must have analyticsFieldId prop"
+
+    def test_number_integer_field_has_analytics_field_id(self, enabled_output):
+        """NumberField (integer) renders analyticsFieldId prop."""
+        assert 'analyticsFieldId="qty"' in enabled_output, \
+            "NumberField 'qty' (integer) must have analyticsFieldId prop"
+
+    def test_number_float_field_has_analytics_field_id(self, enabled_output):
+        """NumberField (float/number) renders analyticsFieldId prop."""
+        assert 'analyticsFieldId="weight"' in enabled_output, \
+            "NumberField 'weight' (float) must have analyticsFieldId prop"
+
+    def test_datetime_field_has_analytics_field_id(self, enabled_output):
+        """DateTimeWrapper renders analyticsFieldId prop."""
+        assert 'analyticsFieldId="start_at"' in enabled_output, \
+            "DateTimeWrapper 'start_at' must have analyticsFieldId prop"
+
+    def test_image_field_has_analytics_field_id(self, enabled_output):
+        """ImageUpload renders analyticsFieldId prop."""
+        assert 'analyticsFieldId="photo"' in enabled_output, \
+            "ImageUpload 'photo' must have analyticsFieldId prop"
+
+    def test_boolean_field_has_analytics_field_id(self, enabled_output):
+        """Checkbox (boolean) renders data-analytics-field-id via inputProps."""
+        assert "'data-analytics-field-id': 'is_active'" in enabled_output, \
+            "Checkbox 'is_active' must have data-analytics-field-id in inputProps"
+
+    def test_enum_integer_field_has_analytics_field_id(self, enabled_output):
+        """Enum integer Autocomplete renders data-analytics-field-id via slotProps.htmlInput."""
+        assert "'data-analytics-field-id': 'status_code'" in enabled_output, \
+            "Enum integer 'status_code' must have data-analytics-field-id in slotProps.htmlInput"
+
+    def test_enum_string_field_has_analytics_field_id(self, enabled_output):
+        """Enum string Autocomplete renders data-analytics-field-id via slotProps.htmlInput."""
+        assert "'data-analytics-field-id': 'priority'" in enabled_output, \
+            "Enum string 'priority' must have data-analytics-field-id in slotProps.htmlInput"
+
+    def test_entity_select_field_has_analytics_field_id(self, enabled_output):
+        """EntitySelect (x-entity-select) renders data-analytics-field-id via slotProps.htmlInput."""
+        assert "'data-analytics-field-id': 'entity_type'" in enabled_output, \
+            "EntitySelect 'entity_type' must have data-analytics-field-id in slotProps.htmlInput"
+
+    # ------------------------------------------------------------------
+    # Disabled: no analytics attributes in output
+    # ------------------------------------------------------------------
+
+    def test_disabled_schema_has_no_analytics_attributes(self, disabled_output):
+        """When x-analytics is absent, all field wrappers must produce no analytics attributes."""
+        assert 'analyticsFieldId' not in disabled_output, \
+            "Disabled schema must not render analyticsFieldId on any field"
+        assert 'data-analytics-field-id' not in disabled_output, \
+            "Disabled schema must not render data-analytics-field-id on any field"
+
+    def test_disabled_schema_has_no_lifecycle_signal(self, disabled_output):
+        """When x-analytics is absent, no analytics:lifecycle signal is dispatched."""
+        assert 'analytics:lifecycle' not in disabled_output, \
+            "Disabled schema must not dispatch analytics:lifecycle event"
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Smoke tests — disabled / local host / cloud host configurations
+# ---------------------------------------------------------------------------
+
+class TestAnalyticsPhase4SmokeTests:
+    """
+    Smoke tests for the three analytics runtime configurations:
+    1. disabled analytics (enabled=False)
+    2. local host (enabled=True, posthog_host='http://localhost:8000')
+    3. cloud host (enabled=True, default empty host → us.i.posthog.com fallback)
+
+    These tests verify template structure and §9 resolved policy constants without
+    live PostHog connections. No template changes are required; pure render verification.
+    """
+
+    # ------------------------------------------------------------------
+    # Configuration 1: disabled analytics
+    # ------------------------------------------------------------------
+
+    def test_disabled_config_no_posthog_import(self):
+        """Disabled config: rendered provider must not import or initialize PostHog SDK."""
+        content = _render_provider(analytics_enabled=False)
+        for pattern in ("from 'posthog-js'", 'from "posthog-js"',
+                        'posthog.init(', 'posthog.capture(', 'PostHogProvider'):
+            assert pattern not in content, (
+                f"Disabled provider must not contain '{pattern}'"
+            )
+
+    def test_disabled_config_no_capture_safe(self):
+        """Disabled config: captureSafe must not appear (no analytics infrastructure)."""
+        content = _render_provider(analytics_enabled=False)
+        assert 'captureSafe' not in content, \
+            "Disabled provider must not define captureSafe"
+
+    def test_disabled_config_no_policy_constants(self):
+        """Disabled config: §9 policy constants must not appear (PostHog not initialized)."""
+        content = _render_provider(analytics_enabled=False)
+        for constant in ('disable_session_recording', 'autocapture', 'capture_pageview',
+                         'heatmaps', 'surveys', 'advanced_disable_feature_flags'):
+            assert constant not in content, (
+                f"Disabled provider must not contain policy constant '{constant}'"
+            )
+
+    def test_disabled_config_context_from_schema(self):
+        """Disabled config: schema with enabled=false must produce analytics_enabled=False context."""
+        schema = _base_schema({"x-analytics": {"enabled": False}})
+        ctx = build_context(_entity(), schema)
+        assert ctx["analytics_enabled"] is False
+        assert ctx["analytics_posthog_host"] == ""
+
+    # ------------------------------------------------------------------
+    # Configuration 2: local host (http://localhost:8000)
+    # ------------------------------------------------------------------
+
+    def test_local_host_config_is_enabled(self):
+        """Local host config: provider must initialize PostHog SDK."""
+        content = _render_provider(analytics_enabled=True, posthog_host='http://localhost:8000')
+        assert 'posthog.init(' in content, \
+            "Local host provider must initialize PostHog SDK"
+
+    def test_local_host_config_host_env_var_referenced(self):
+        """Local host config: rendered provider must reference NEXT_PUBLIC_POSTHOG_HOST env var."""
+        content = _render_provider(analytics_enabled=True, posthog_host='http://localhost:8000')
+        assert 'NEXT_PUBLIC_POSTHOG_HOST' in content, \
+            "Local host provider must reference NEXT_PUBLIC_POSTHOG_HOST env var"
+
+    def test_local_host_config_fallback_url_present(self):
+        """Local host config: default fallback us.i.posthog.com must be in rendered provider."""
+        content = _render_provider(analytics_enabled=True, posthog_host='http://localhost:8000')
+        assert 'us.i.posthog.com' in content, \
+            "Local host provider must contain the cloud fallback URL"
+
+    def test_local_host_config_policy_constants_present(self):
+        """Local host config: all §9 resolved policy constants must be present."""
+        content = _render_provider(analytics_enabled=True, posthog_host='http://localhost:8000')
+        assert 'disable_session_recording: true' in content, \
+            "Local host provider must disable session recording"
+        assert 'autocapture: false' in content, \
+            "Local host provider must disable autocapture"
+        assert 'capture_pageview: false' in content, \
+            "Local host provider must disable automatic pageview capture"
+        assert 'heatmaps: false' in content, \
+            "Local host provider must disable heatmaps"
+        assert 'surveys: false' in content, \
+            "Local host provider must disable surveys"
+        assert 'advanced_disable_feature_flags: true' in content, \
+            "Local host provider must disable feature flags"
+
+    def test_local_host_config_capture_safe_contract(self):
+        """Local host config: posthog.capture must appear exactly once, inside captureSafe."""
+        content = _render_provider(analytics_enabled=True, posthog_host='http://localhost:8000')
+        assert content.count('posthog.capture(') == 1, \
+            "posthog.capture must appear exactly once (inside captureSafe) for local host config"
+        assert 'captureSafe' in content, \
+            "Local host provider must define captureSafe"
+
+    def test_local_host_config_no_query_params(self):
+        """Local host config: §9 policy — query strings must not be captured."""
+        content = _render_provider(analytics_enabled=True, posthog_host='http://localhost:8000')
+        assert 'useSearchParams' not in content, \
+            "Local host provider must not capture query params via useSearchParams"
+        assert 'searchParams' not in content, \
+            "Local host provider must not capture searchParams"
+
+    def test_local_host_config_context_from_schema(self):
+        """Local host config: schema posthog_host must be parsed correctly."""
+        schema = _base_schema({
+            "x-analytics": {"enabled": True, "posthog_host": "http://localhost:8000"}
+        })
+        ctx = build_context(_entity(), schema)
+        assert ctx["analytics_enabled"] is True
+        assert ctx["analytics_posthog_host"] == "http://localhost:8000"
+
+    # ------------------------------------------------------------------
+    # Configuration 3: cloud host (default, empty posthog_host)
+    # ------------------------------------------------------------------
+
+    def test_cloud_host_config_is_enabled(self):
+        """Cloud host config: provider must initialize PostHog SDK."""
+        content = _render_provider(analytics_enabled=True, posthog_host='')
+        assert 'posthog.init(' in content, \
+            "Cloud host provider must initialize PostHog SDK"
+
+    def test_cloud_host_config_default_url_present(self):
+        """Cloud host config: us.i.posthog.com fallback must be present as default."""
+        content = _render_provider(analytics_enabled=True, posthog_host='')
+        assert 'us.i.posthog.com' in content, \
+            "Cloud host provider must include the default PostHog Cloud URL"
+
+    def test_cloud_host_config_policy_constants_present(self):
+        """Cloud host config: all §9 resolved policy constants must be present."""
+        content = _render_provider(analytics_enabled=True, posthog_host='')
+        assert 'disable_session_recording: true' in content, \
+            "Cloud host provider must disable session recording"
+        assert 'autocapture: false' in content, \
+            "Cloud host provider must disable autocapture"
+        assert 'capture_pageview: false' in content, \
+            "Cloud host provider must disable automatic pageview capture"
+        assert 'heatmaps: false' in content, \
+            "Cloud host provider must disable heatmaps"
+        assert 'surveys: false' in content, \
+            "Cloud host provider must disable surveys"
+        assert 'advanced_disable_feature_flags: true' in content, \
+            "Cloud host provider must disable feature flags"
+
+    def test_cloud_host_config_capture_safe_contract(self):
+        """Cloud host config: posthog.capture must appear exactly once, inside captureSafe."""
+        content = _render_provider(analytics_enabled=True, posthog_host='')
+        assert content.count('posthog.capture(') == 1, \
+            "posthog.capture must appear exactly once (inside captureSafe) for cloud host config"
+        assert 'captureSafe' in content, \
+            "Cloud host provider must define captureSafe"
+
+    def test_cloud_host_config_no_query_params(self):
+        """Cloud host config: §9 policy — query strings must not be captured."""
+        content = _render_provider(analytics_enabled=True, posthog_host='')
+        assert 'useSearchParams' not in content, \
+            "Cloud host provider must not capture query params via useSearchParams"
+        assert 'searchParams' not in content, \
+            "Cloud host provider must not capture searchParams"
+
+    def test_cloud_host_config_context_from_schema(self):
+        """Cloud host config: schema with no posthog_host must produce empty analytics_posthog_host."""
+        schema = _base_schema({"x-analytics": {"enabled": True}})
+        ctx = build_context(_entity(), schema)
+        assert ctx["analytics_enabled"] is True
+        assert ctx["analytics_posthog_host"] == ""

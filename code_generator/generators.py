@@ -1904,6 +1904,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             for o in entity_select_options
         )
         entity_select_opt_setups.append(f"  const {opts_var} = [{opts_items}];")
+        entity_select_analytics_slot = (
+            f"\n            slotProps={{{{ htmlInput: {{ ...params.inputProps, 'data-analytics-field-id': '{p}' }} }}}}"
+            if analytics_enabled else ''
+        )
         entity_select_jsxs.append(
             f"      <Autocomplete\n"
             f"        options={{{opts_var}}}\n"
@@ -1914,7 +1918,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"            {{...params}}\n"
             f"            label={{tf('{fk}')}}\n"
             f"            margin=\"normal\"\n"
-            f"            {'required' if req else ''}\n"
+            f"            {'required' if req else ''}{entity_select_analytics_slot}\n"
             f"          />\n"
             f"        )}}\n"
             f"      />"
