@@ -756,3 +756,103 @@ def test_merge_into_child_inner_dict_merge():
 
     assert ci["buyer"] == {"include": {"user": True, "org": True}}
     assert ci["main"] is True  # unrelated key untouched
+
+
+# ---------------------------------------------------------------------------
+# Virtual column detection tests
+# ---------------------------------------------------------------------------
+
+class TestVirtualColumns:
+    """Virtual columns: fields in x-display.table but absent from properties."""
+
+    def _make_schema(self, extra_props=None, table_cols=None):
+        props = {"id": {"type": "string"}, "name": {"type": "string"}}
+        props.update(extra_props or {})
+        schema = {
+            "definitions": {
+                "parent1": {
+                    "type": "object",
+                    "properties": props,
+                },
+            }
+        }
+        if table_cols is not None:
+            schema["definitions"]["parent1"]["x-display"] = {"table": table_cols}
+        return schema
+
+    def test_no_virtual_columns_when_all_props_present(self):
+        """No virtual columns when all x-display.table fields exist in properties."""
+        schema = self._make_schema(table_cols=[{"name": {"width": 150}}])
+        entity = {
+            "parent": "parent1", "model": "parent1",
+            "definition_key": "parent1", "generate_config": {},
+        }
+        ctx = build_context(entity, schema)
+        assert ctx["virtual_columns"] == []
+
+    def test_relation_field_not_virtual(self):
+        """A field whose _id counterpart exists in properties is a relation, not virtual."""
+        schema = self._make_schema(
+            extra_props={"role_id": {"type": "string"}},
+            table_cols=[{"name": {"width": 150}}, {"role": {"width": 200}}],
+        )
+        entity = {
+            "parent": "parent1", "model": "parent1",
+            "definition_key": "parent1", "generate_config": {},
+        }
+        ctx = build_context(entity, schema)
+        assert ctx["virtual_columns"] == []
+
+    def test_virtual_column_detected_when_no_property_or_fk(self):
+        """Fields in table with no matching property or {field}_id are virtual."""
+        schema = self._make_schema(
+            table_cols=[{"name": {"width": 150}}, {"extra_info": {"width": 200}}],
+        )
+        entity = {
+            "parent": "parent1", "model": "parent1",
+            "definition_key": "parent1", "generate_config": {},
+        }
+        ctx = build_context(entity, schema)
+        assert len(ctx["virtual_columns"]) == 1
+        vc = ctx["virtual_columns"][0]
+        assert vc["field_name"] == "extra_info"
+        assert vc["field_pascal"] == "ExtraInfo"
+
+    def test_non_virtual_entities_unaffected(self):
+        """Entities without x-display.table have empty virtual_columns."""
+        schema = self._make_schema()  # no x-display
+        entity = {
+            "parent": "parent1", "model": "parent1",
+            "definition_key": "parent1", "generate_config": {},
+        }
+        ctx = build_context(entity, schema)
+        assert ctx["virtual_columns"] == []
+
+
+# ---------------------------------------------------------------------------
+# _write_stub — non-overwrite behaviour
+# ---------------------------------------------------------------------------
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from generate import _write_stub
+from pathlib import Path
+
+
+class TestVirtualResolverNonOverwrite:
+    """generate.py _write_stub は既存ファイルを上書きしない。"""
+
+    def test_write_stub_does_not_overwrite_existing(self, tmp_path):
+        resolver_path = tmp_path / "resolver_test.ts"
+        resolver_path.write_text("export function resolveTest() { return 'custom'; }")
+        original = resolver_path.read_text()
+        _write_stub(resolver_path, "export function resolveTest() { return ''; }")
+        assert resolver_path.read_text() == original
+
+    def test_write_stub_creates_new_file_when_absent(self, tmp_path):
+        resolver_path = tmp_path / "resolver_new.ts"
+        content = "export function resolveNew() { return ''; }"
+        _write_stub(resolver_path, content)
+        assert resolver_path.exists()
+        assert resolver_path.read_text() == content

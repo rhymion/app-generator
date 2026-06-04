@@ -27,6 +27,7 @@ from helpers.schema_helpers import (
 class FieldInfo:
     name: str
     ts_type: str
+    optional: bool = False
 
 
 @dataclass
@@ -135,6 +136,23 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
 
     parent_fields = [FieldInfo(k, get_ts_type(v)) for k, v in filtered_props.items()]
     parent_fields.append(FieldInfo('creator_id', 'string | null'))  # enforce id as string for permissions
+
+    # Virtual columns: fields in x-display.table absent from both properties and relation
+    # names ({field}_id in properties). Fields derived from FK relations are handled by
+    # the existing relation system and must NOT be duplicated as virtual columns.
+    xdisplay_ctx = model_def.get('x-display', {})
+    _xdt: list | None = None
+    if isinstance(xdisplay_ctx, list):
+        _xdt = xdisplay_ctx
+    elif isinstance(xdisplay_ctx, dict) and isinstance(xdisplay_ctx.get('table'), list):
+        _xdt = xdisplay_ctx['table']
+    if _xdt:
+        for _item in _xdt:
+            _fn = list(_item.keys())[0]
+            _is_prop = _fn in filtered_props
+            _is_rel  = f'{_fn}_id' in filtered_props
+            if not _is_prop and not _is_rel:
+                parent_fields.append(FieldInfo(_fn, 'string', optional=True))
 
     # Compute all OTO rels early so we can split and use for FK-name exclusions
     oto_rels_early = get_one_to_one_rels({**model_def, 'properties': filtered_props}, schema)

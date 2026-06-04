@@ -18,6 +18,7 @@ from helpers.schema_helpers import (
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 import copy
+import warnings
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -827,6 +828,28 @@ def build_context(entity: dict, schema: dict) -> dict:
         xdisplay_table_raw = xdisplay['table']
     has_chart = bool(chart_cfg)
 
+    # Detect virtual columns: fields in x-display.table that are absent from both
+    # model properties AND relation display names ({field}_id in properties).
+    # Fields derived from a FK relation (e.g. role←role_id) are handled by the
+    # existing relation system and must NOT be treated as virtual columns.
+    _model_props_for_virtual = (model_def or {}).get('properties') or {}
+    virtual_columns: list[dict] = []
+    if xdisplay_table_raw:
+        for _vitem in xdisplay_table_raw:
+            _vfn = list(_vitem.keys())[0]
+            _is_prop = _vfn in _model_props_for_virtual
+            _is_rel  = f'{_vfn}_id' in _model_props_for_virtual
+            if not _is_prop and not _is_rel:
+                warnings.warn(
+                    f"Virtual column '{_vfn}' on '{def_key}': in x-display.table but not in properties. "
+                    "Treating as virtual — resolver expected at lib/{entity}/resolver_{field}.ts"
+                )
+                virtual_columns.append({
+                    'field_name': _vfn,
+                    'field_pascal': to_pascal_case(_vfn),
+                    'field_key': to_camel_case(_vfn),
+                })
+
     # Detail def for custom components (entity-level: list of components, plural key).
     # Each item: {name, path?, target?}. Default target is ['list'] (backward compat).
     detail_def = schema['definitions'].get(def_key, {})
@@ -1165,6 +1188,10 @@ def build_context(entity: dict, schema: dict) -> dict:
     )
     # Note: reverse_oto_rels are NOT in relationship_mapping because they are not included in
     # the list query. They are fetched only in the detail query and auto-spread via { ...entity }.
+    virtual_mapping = '\n'.join(
+        f"    {vc['field_name']}: resolve{vc['field_pascal']}({parent_camel}),"
+        for vc in virtual_columns
+    )
     child_mappings = '\n'.join(
         f"    {c['property_name']}: {parent_camel}.{c['property_name']},"
         for c in children_raw
@@ -1270,6 +1297,9 @@ def build_context(entity: dict, schema: dict) -> dict:
         has_chart=has_chart,
         xdisplay=xdisplay,
         xdisplay_table=xdisplay_table_raw,
+        # Virtual columns: fields in x-display.table but not in properties.
+        virtual_columns=virtual_columns,
+        virtual_mapping=virtual_mapping,
         # One-to-one outbound FK rels
         one_to_one_rels=auto_create_oto_rels,      # auto-create OTO only (for types/service templates)
         selector_oto_rels=selector_oto_rels,        # selector OTO (autocomplete UI, filtered getters)

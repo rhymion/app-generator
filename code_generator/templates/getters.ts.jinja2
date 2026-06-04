@@ -11,6 +11,9 @@ import {
 {% if should_filter_by_org %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
+{% for vc in virtual_columns %}
+import { resolve{{ vc.field_pascal }} } from '@/lib/{{ parent }}/resolver_{{ vc.field_name }}';
+{% endfor %}
 
 // Allow-lists for sort/filter — anything not in here is silently dropped at
 // request time so external input cannot pick arbitrary columns.
@@ -142,6 +145,9 @@ export async function get{{ parent_pascal }}Page(
 {% if relationship_mapping %}
 {{ relationship_mapping }}
 {% endif %}
+{% if virtual_mapping %}
+{{ virtual_mapping }}
+{% endif %}
   }));
   return { rows, total, page, pageSize };
 }
@@ -234,6 +240,9 @@ export async function search{{ parent_pascal }}Options(
 {{ parent_mapping }}
 {% if relationship_mapping %}
 {{ relationship_mapping }}
+{% endif %}
+{% if virtual_mapping %}
+{{ virtual_mapping }}
 {% endif %}
   }));
 }
