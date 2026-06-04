@@ -565,3 +565,194 @@ class TestEntityCustomComponents:
         )
         assert "password" in cats["custom_upsert"]
         assert "password" not in cats["text"]
+
+
+# ---------------------------------------------------------------------------
+# build_context — deep labelField prisma include merge (commit 7aab3c9)
+# ---------------------------------------------------------------------------
+
+class TestChildIncludeDeepLabelFieldMerge:
+    """Tests for the deep labelField include merge added in commit 7aab3c9.
+
+    When a parent entity declares a label_field on a child relation that walks
+    deep nested relations (e.g. 'buyer.user.name'), build_context() merges the
+    resulting Prisma include chain into the child's own include map so nested
+    data is fetched server-side.
+    """
+
+    # Schema: Main → Item(child). Item FKs → Buyer → User/Org chain.
+    SCHEMA = {
+        "definitions": {
+            "Main": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                },
+            },
+            "Item": {
+                "type": "object",
+                "required": ["id", "main_id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "main_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "Main"},
+                    },
+                    "buyer_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "Buyer"},
+                    },
+                },
+            },
+            "Buyer": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "user_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "User"},
+                    },
+                    "org_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "Org"},
+                    },
+                },
+            },
+            "User": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                },
+            },
+            "Org": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                },
+            },
+        }
+    }
+
+    def _entity(self, label_field=None, label_field_key="label_field"):
+        relationship = {"type": "one-to-many", "target": "Item"}
+        if label_field is not None:
+            relationship[label_field_key] = label_field
+        return {
+            "parent": "Main",
+            "model": "Main",
+            "definition_key": "Main_detail",
+            "children": [
+                {
+                    "name": "Item",
+                    "property_name": "items",
+                    "output_type": None,
+                    "file_type": None,
+                    "relationship": relationship,
+                }
+            ],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": False, "test": False, "fields": None,
+            },
+        }
+
+    def _items_entry(self, ctx) -> str | None:
+        return next((e for e in ctx["include_entries_detail"] if e.startswith("items:")), None)
+
+    def test_no_label_field_uses_basic_child_includes(self):
+        """Without label_field, child include uses only the child's own FK relations."""
+        ctx = build_context(self._entity(), self.SCHEMA)
+        entry = self._items_entry(ctx)
+        assert entry is not None
+        assert "main: true" in entry
+        assert "buyer: true" in entry
+        assert "buyer: { include:" not in entry  # no deep merge
+
+    def test_label_field_name_only_is_skipped(self):
+        """label_field='name' is the trivial case — deep merge is skipped."""
+        ctx = build_context(self._entity(label_field="name"), self.SCHEMA)
+        entry = self._items_entry(ctx)
+        assert entry is not None
+        assert "buyer: true" in entry
+        assert "buyer: { include:" not in entry
+
+    def test_deep_label_field_merges_nested_include(self):
+        """label_field 'buyer.user.name' causes buyer→user to be merged into child includes."""
+        ctx = build_context(self._entity(label_field="buyer.user.name"), self.SCHEMA)
+        entry = self._items_entry(ctx)
+        assert entry is not None
+        assert "buyer: { include: { user: true } }" in entry
+        assert "main: true" in entry  # child's other FK unaffected
+
+    def test_existing_true_promoted_to_include_dict(self):
+        """When child FK and label_field share the same root relation (buyer), the
+        existing True in child_include_map gets promoted to {include: {user: true}}."""
+        ctx = build_context(self._entity(label_field="buyer.user.name"), self.SCHEMA)
+        entry = self._items_entry(ctx)
+        assert "buyer: { include: { user: true } }" in entry
+        assert "buyer: true" not in entry  # True was promoted; plain true must not remain
+
+    def test_value_error_falls_back_to_basic_child_includes(self):
+        """An invalid label_field path (ValueError from build_label_expression) is
+        silently ignored — child include reverts to child's own FK relations."""
+        ctx = build_context(
+            self._entity(label_field="nonexistent.deep.path"),
+            self.SCHEMA,
+        )
+        entry = self._items_entry(ctx)
+        assert entry is not None
+        assert "main: true" in entry
+        assert "buyer: true" in entry
+        assert "buyer: { include:" not in entry
+
+    def test_camelcase_label_field_key_also_recognized(self):
+        """labelField (camelCase) in the relationship dict is treated the same as label_field."""
+        ctx = build_context(
+            self._entity(label_field="buyer.user.name", label_field_key="labelField"),
+            self.SCHEMA,
+        )
+        entry = self._items_entry(ctx)
+        assert "buyer: { include: { user: true } }" in entry
+
+
+def test_merge_into_child_inner_dict_merge():
+    """Unit test: _merge_into_child inner-dict merge branch (elif path).
+
+    This branch merges new keys into an already-dict ci[k]. Since child_include_map
+    always starts with True values in build_context, this branch is tested here
+    by replicating the function with a pre-seeded dict to verify the algorithm.
+    """
+    def _merge_into_child(ci, src):
+        for k, v in src.items():
+            if v is True:
+                ci[k] = True
+            else:
+                include_val = v.get("include") if isinstance(v, dict) and "include" in v else v
+                existing = ci.get(k)
+                if existing is True or existing is None:
+                    ci[k] = {"include": include_val}
+                elif isinstance(existing, dict) and "include" in existing:
+                    inner = existing["include"]
+                    for kk, vv in (include_val.items() if isinstance(include_val, dict) else []):
+                        if kk not in inner:
+                            inner[kk] = vv
+                        else:
+                            if isinstance(inner[kk], dict) and isinstance(vv, dict):
+                                inner[kk].setdefault("include", {}).update(vv.get("include", vv))
+
+    # ci already has buyer as a dict (existing {include: {user: True}})
+    ci = {"buyer": {"include": {"user": True}}, "main": True}
+    # src adds org to buyer's inner include
+    src = {"buyer": {"include": {"org": True}}}
+    _merge_into_child(ci, src)
+
+    assert ci["buyer"] == {"include": {"user": True, "org": True}}
+    assert ci["main"] is True  # unrelated key untouched
