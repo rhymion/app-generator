@@ -842,7 +842,7 @@ def build_context(entity: dict, schema: dict) -> dict:
             if not _is_prop and not _is_rel:
                 warnings.warn(
                     f"Virtual column '{_vfn}' on '{def_key}': in x-display.table but not in properties. "
-                    "Treating as virtual — resolver expected at lib/{entity}/resolver_{field}.ts"
+                    "Treating as virtual — resolver expected at lib/{entity}/virtual_resolvers.ts"
                 )
                 virtual_columns.append({
                     'field_name': _vfn,
@@ -1189,7 +1189,7 @@ def build_context(entity: dict, schema: dict) -> dict:
     # Note: reverse_oto_rels are NOT in relationship_mapping because they are not included in
     # the list query. They are fetched only in the detail query and auto-spread via { ...entity }.
     virtual_mapping = '\n'.join(
-        f"    {vc['field_name']}: resolve{vc['field_pascal']}({parent_camel}),"
+        f"    {vc['field_name']}: virtualData.get(String({parent_camel}.id ?? ''))?.{vc['field_name']} ?? '',"
         for vc in virtual_columns
     )
     child_mappings = '\n'.join(

@@ -159,16 +159,15 @@ def generate(schema_path: str, output_dir: str) -> None:
         # --- getters.ts ---
         _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', ctx))
 
-        # --- virtual column resolver stubs ---
+        # --- virtual column resolver stub (per-entity, async/bulk) ---
         parent_pascal = to_pascal_case(parent)
-        for vc in ctx.get('virtual_columns', []):
+        if ctx.get('virtual_columns'):
             _write_stub(
-                lib_dir / f"resolver_{vc['field_name']}.ts",
+                lib_dir / 'virtual_resolvers.ts',
                 _render(env, 'virtual_resolver.ts.jinja2', {
                     'parent': parent,
                     'parent_pascal': parent_pascal,
-                    'field_name': vc['field_name'],
-                    'field_pascal': vc['field_pascal'],
+                    'virtual_columns': ctx['virtual_columns'],
                 }),
             )
 

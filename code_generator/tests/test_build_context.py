@@ -844,15 +844,15 @@ class TestVirtualResolverNonOverwrite:
     """generate.py _write_stub は既存ファイルを上書きしない。"""
 
     def test_write_stub_does_not_overwrite_existing(self, tmp_path):
-        resolver_path = tmp_path / "resolver_test.ts"
-        resolver_path.write_text("export function resolveTest() { return 'custom'; }")
+        resolver_path = tmp_path / "virtual_resolvers.ts"
+        resolver_path.write_text("export async function resolveVirtualColumns() { return new Map([['1', { additional_info: 'custom' }]]); }")
         original = resolver_path.read_text()
-        _write_stub(resolver_path, "export function resolveTest() { return ''; }")
+        _write_stub(resolver_path, "export async function resolveVirtualColumns(rows) { return new Map(); }")
         assert resolver_path.read_text() == original
 
     def test_write_stub_creates_new_file_when_absent(self, tmp_path):
-        resolver_path = tmp_path / "resolver_new.ts"
-        content = "export function resolveNew() { return ''; }"
+        resolver_path = tmp_path / "virtual_resolvers.ts"
+        content = "export async function resolveVirtualColumns(rows) { return new Map(); }"
         _write_stub(resolver_path, content)
         assert resolver_path.exists()
         assert resolver_path.read_text() == content
