@@ -159,6 +159,18 @@ def generate(schema_path: str, output_dir: str) -> None:
         # --- getters.ts ---
         _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', ctx))
 
+        # --- virtual column resolver stub (per-entity, async/bulk) ---
+        parent_pascal = to_pascal_case(parent)
+        if ctx.get('virtual_columns'):
+            _write_stub(
+                lib_dir / 'virtual_resolvers.ts',
+                _render(env, 'virtual_resolver.ts.jinja2', {
+                    'parent': parent,
+                    'parent_pascal': parent_pascal,
+                    'virtual_columns': ctx['virtual_columns'],
+                }),
+            )
+
         # --- service.ts + service_validation stub ---
         if can_new or can_edit or can_delete:
             svc_ctx = {**ctx, **service_context(ctx, schema)}

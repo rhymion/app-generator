@@ -19,6 +19,8 @@ definitions:
         - name:
             primary: true
             width: 150
+        - additional_info:
+            width: 250
     properties:
       id:
         type: string

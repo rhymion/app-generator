@@ -11,6 +11,9 @@ import {
 {% if should_filter_by_org %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
+{% if virtual_columns %}
+import { resolveVirtualColumns } from '@/lib/{{ parent }}/virtual_resolvers';
+{% endif %}
 
 // Allow-lists for sort/filter — anything not in here is silently dropped at
 // request time so external input cannot pick arbitrary columns.
@@ -137,10 +140,22 @@ export async function get{{ parent_pascal }}Page(
     prisma.{{ model }}.count({ where }),
   ]);
 
+{% if virtual_columns %}
+  let virtualData: Map<string, Record<string, string>>;
+  try {
+    virtualData = await resolveVirtualColumns(rowsRaw as unknown as ReadonlyArray<Record<string, unknown>>);
+  } catch (e) {
+    console.warn('virtual resolver error:', e);
+    virtualData = new Map();
+  }
+{% endif %}
   const rows = rowsRaw.map(({{ parent_camel }}) => ({
 {{ parent_mapping }}
 {% if relationship_mapping %}
 {{ relationship_mapping }}
+{% endif %}
+{% if virtual_mapping %}
+{{ virtual_mapping }}
 {% endif %}
   }));
   return { rows, total, page, pageSize };
@@ -230,10 +245,22 @@ export async function search{{ parent_pascal }}Options(
     include: { {{ include_props_list }} },
 {% endif %}
   });
+{% if virtual_columns %}
+  let virtualData: Map<string, Record<string, string>>;
+  try {
+    virtualData = await resolveVirtualColumns(rowsRaw as unknown as ReadonlyArray<Record<string, unknown>>);
+  } catch (e) {
+    console.warn('virtual resolver error:', e);
+    virtualData = new Map();
+  }
+{% endif %}
   return rowsRaw.map(({{ parent_camel }}) => ({
 {{ parent_mapping }}
 {% if relationship_mapping %}
 {{ relationship_mapping }}
+{% endif %}
+{% if virtual_mapping %}
+{{ virtual_mapping }}
 {% endif %}
   }));
 }

@@ -16,7 +16,9 @@ from helpers.schema_helpers import (
     is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
     get_detail_ref_rels, get_flatten_rels,
 )
+from helpers.label_field import build_label_expression, render_prisma_include
 import copy
+import warnings
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -826,6 +828,28 @@ def build_context(entity: dict, schema: dict) -> dict:
         xdisplay_table_raw = xdisplay['table']
     has_chart = bool(chart_cfg)
 
+    # Detect virtual columns: fields in x-display.table that are absent from both
+    # model properties AND relation display names ({field}_id in properties).
+    # Fields derived from a FK relation (e.g. role←role_id) are handled by the
+    # existing relation system and must NOT be treated as virtual columns.
+    _model_props_for_virtual = (model_def or {}).get('properties') or {}
+    virtual_columns: list[dict] = []
+    if xdisplay_table_raw:
+        for _vitem in xdisplay_table_raw:
+            _vfn = list(_vitem.keys())[0]
+            _is_prop = _vfn in _model_props_for_virtual
+            _is_rel  = f'{_vfn}_id' in _model_props_for_virtual
+            if not _is_prop and not _is_rel:
+                warnings.warn(
+                    f"Virtual column '{_vfn}' on '{def_key}': in x-display.table but not in properties. "
+                    "Treating as virtual — resolver expected at lib/{entity}/virtual_resolvers.ts"
+                )
+                virtual_columns.append({
+                    'field_name': _vfn,
+                    'field_pascal': to_pascal_case(_vfn),
+                    'field_key': to_camel_case(_vfn),
+                })
+
     # Detail def for custom components (entity-level: list of components, plural key).
     # Each item: {name, path?, target?}. Default target is ['list'] (backward compat).
     detail_def = schema['definitions'].get(def_key, {})
@@ -977,10 +1001,57 @@ def build_context(entity: dict, schema: dict) -> dict:
             if not child_rels:
                 child_include_entries.append(f"{prop}: true")
             else:
-                child_includes = ', '.join(
-                    f"{r['prop_name'].removesuffix('_id')}: true" for r in child_rels
-                )
-                child_include_entries.append(f"{prop}: {{ include: {{ {child_includes} }} }}")
+                # Base include map from the child's own parent relationships
+                child_include_map: dict = {r['prop_name'].removesuffix('_id'): True for r in child_rels}
+
+                # If the parent declared a label_field on this child that walks
+                # deeper relations (e.g. 'buyer.user.name'), merge the built
+                # prisma include so nested relations are fetched server-side.
+                rel_info = c.get('relationship') or {}
+                label_field = rel_info.get('label_field') or rel_info.get('labelField')
+                target = rel_info.get('target')
+                if target and label_field and label_field != 'name':
+                    try:
+                        built = build_label_expression('item', label_field, target, schema)
+                        nested = built.get('prisma_include') or {}
+                    except ValueError:
+                        nested = {}
+
+                    # Merge nested includes into the child's include map
+                    def _merge_into_child(ci: dict, src: dict):
+                        for k, v in src.items():
+                            if v is True:
+                                ci[k] = True
+                            else:
+                                include_val = v.get('include') if isinstance(v, dict) and 'include' in v else v
+                                existing = ci.get(k)
+                                if existing is True or existing is None:
+                                    ci[k] = {'include': include_val}
+                                elif isinstance(existing, dict) and 'include' in existing:
+                                    # merge inner include dicts
+                                    inner = existing['include']
+                                    for kk, vv in (include_val.items() if isinstance(include_val, dict) else []):
+                                        if kk not in inner:
+                                            inner[kk] = vv
+                                        else:
+                                            # prefer richer nested dicts when possible
+                                            if isinstance(inner[kk], dict) and isinstance(vv, dict):
+                                                inner[kk].setdefault('include', {}).update(vv.get('include', vv))
+
+                    if nested:
+                        _merge_into_child(child_include_map, nested)
+
+                # Render the merged include map into source string
+                parts: list[str] = []
+                for k, v in child_include_map.items():
+                    if v is True:
+                        parts.append(f"{k}: true")
+                    elif isinstance(v, dict) and 'include' in v:
+                        parts.append(f"{k}: {{ include: {{ {render_prisma_include(v['include'])} }} }}")
+                    else:
+                        parts.append(f"{k}: true")
+
+                child_include_entries.append(f"{prop}: {{ include: {{ {', '.join(parts)} }} }}")
 
     # Include entries for auto-create one-to-one rels with their nested children
     one_to_one_include_entries = []
@@ -1117,6 +1188,10 @@ def build_context(entity: dict, schema: dict) -> dict:
     )
     # Note: reverse_oto_rels are NOT in relationship_mapping because they are not included in
     # the list query. They are fetched only in the detail query and auto-spread via { ...entity }.
+    virtual_mapping = '\n'.join(
+        f"    {vc['field_name']}: virtualData.get(String({parent_camel}.id ?? ''))?.{vc['field_name']} ?? '',"
+        for vc in virtual_columns
+    )
     child_mappings = '\n'.join(
         f"    {c['property_name']}: {parent_camel}.{c['property_name']},"
         for c in children_raw
@@ -1222,6 +1297,9 @@ def build_context(entity: dict, schema: dict) -> dict:
         has_chart=has_chart,
         xdisplay=xdisplay,
         xdisplay_table=xdisplay_table_raw,
+        # Virtual columns: fields in x-display.table but not in properties.
+        virtual_columns=virtual_columns,
+        virtual_mapping=virtual_mapping,
         # One-to-one outbound FK rels
         one_to_one_rels=auto_create_oto_rels,      # auto-create OTO only (for types/service templates)
         selector_oto_rels=selector_oto_rels,        # selector OTO (autocomplete UI, filtered getters)

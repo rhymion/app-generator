@@ -16,7 +16,7 @@ export type {{ t.name | pascal_case }} = {
 {% endfor %}
 export type {{ parent | pascal_case }} = {
 {% for field in parent_fields %}
-  {{ field.name }}: {{ field.ts_type }};
+  {{ field.name }}{% if field.optional %}?{% endif %}: {{ field.ts_type }};
 {% endfor %}
 {% for rel in parent_rels %}
   {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
