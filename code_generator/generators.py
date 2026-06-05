@@ -1134,20 +1134,11 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             else:
                 value_expr = f"({rel_value_expr}) || src.{p} || ''"
             text_jsxs.append(
-                f"      <TextField\n        label={{tf('{label_fk}')}}\n"
+                f"      <AppFieldRelation\n"
+                f"        label={{tf('{label_fk}')}}\n"
                 f"        value={{{value_expr}}}\n"
-                f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n"
-                f"        slotProps={{{{ input: {{ endAdornment: {fk_id_expr} ? (\n"
-                f"          <InputAdornment position=\"end\">\n"
-                f"            <Tooltip title=\"View\">\n"
-                f"              <Link href={{`/{target}/view/${{{fk_id_expr}}}`}} aria-label=\"View {target_pascal}\">\n"
-                f"                <IconButton component=\"span\" size=\"small\" tabIndex={{-1}}>\n"
-                f"                  <OpenInNewIcon fontSize=\"small\" />\n"
-                f"                </IconButton>\n"
-                f"              </Link>\n"
-                f"            </Tooltip>\n"
-                f"          </InputAdornment>\n"
-                f"        ) : null }} }}}}\n"
+                f"        href={{{fk_id_expr} ? `/{target}/view/${{{fk_id_expr}}}` : null}}\n"
+                f"        readOnly\n"
                 f"      />"
             )
         else:
@@ -1243,20 +1234,11 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         value_expr = f"src.{prop}?.{label_f}?.toString() || ''"
         fk_id_expr = f"src.{prop}?.id"
         reverse_oto_jsxs.append(
-            f"      <TextField\n        label={{tf('{label_fk}')}}\n"
+            f"      <AppFieldRelation\n"
+            f"        label={{tf('{label_fk}')}}\n"
             f"        value={{{value_expr}}}\n"
-            f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n"
-            f"        slotProps={{{{ input: {{ endAdornment: {fk_id_expr} ? (\n"
-            f"          <InputAdornment position=\"end\">\n"
-            f"            <Tooltip title=\"View\">\n"
-            f"              <Link href={{`/{target}/view/${{{fk_id_expr}}}`}} aria-label=\"View {target_pascal}\">\n"
-            f"                <IconButton component=\"span\" size=\"small\" tabIndex={{-1}}>\n"
-            f"                  <OpenInNewIcon fontSize=\"small\" />\n"
-            f"                </IconButton>\n"
-            f"              </Link>\n"
-            f"            </Tooltip>\n"
-            f"          </InputAdornment>\n"
-            f"        ) : null }} }}}}\n"
+            f"        href={{{fk_id_expr} ? `/{target}/view/${{{fk_id_expr}}}` : null}}\n"
+            f"        readOnly\n"
             f"      />"
         )
     reverse_oto_fields = '\n'.join(reverse_oto_jsxs)
@@ -1318,20 +1300,11 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 _val_expr = f"(src.{_prop} as any)?.{_rel_name}?.{_fk_label}?.toString() || ''"
                 _inner.append(
                     f"        {{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}}\n"
-                    f"        <TextField\n          label={{tf('{_rel_camel}')}}\n"
+                    f"        <AppFieldRelation\n"
+                    f"          label={{tf('{_rel_camel}')}}\n"
                     f"          value={{{_val_expr}}}\n"
-                    f"          fullWidth\n          margin=\"normal\"\n          aria-readonly\n"
-                    f"          slotProps={{{{ input: {{ endAdornment: {_id_expr} ? (\n"
-                    f"            <InputAdornment position=\"end\">\n"
-                    f"              <Tooltip title=\"View\">\n"
-                    f"                <Link href={{`/{_fk_target}/view/${{{_id_expr}}}`}} aria-label=\"View {_fk_target_pascal}\">\n"
-                    f"                  <IconButton component=\"span\" size=\"small\" tabIndex={{-1}}>\n"
-                    f"                    <OpenInNewIcon fontSize=\"small\" />\n"
-                    f"                  </IconButton>\n"
-                    f"                </Link>\n"
-                    f"              </Tooltip>\n"
-                    f"            </InputAdornment>\n"
-                    f"          ) : null }} }}}}\n"
+                    f"          href={{{_id_expr} ? `/{_fk_target}/view/${{{_id_expr}}}` : null}}\n"
+                    f"          readOnly\n"
                     f"        />"
                 )
             elif _field.get('format') in ('date', 'date-time', 'time'):
@@ -1349,9 +1322,10 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 )
             elif _field.get('prop_type') == 'boolean':
                 _inner.append(
-                    f"        <FormControlLabel\n"
-                    f"          control={{<Checkbox checked={{Boolean(src.{_prop}?.{_fname})}} readOnly />}}\n"
+                    f"        <AppFieldBoolean\n"
                     f"          label={{tf('{_fcamel}')}}\n"
+                    f"          checked={{Boolean(src.{_prop}?.{_fname})}}\n"
+                    f"          readOnly\n"
                     f"        />"
                 )
             elif _field.get('prop_type') in ('integer', 'number') and _field.get('enum'):
@@ -1360,26 +1334,21 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 _state = safe_var_name(f'{_prop}_{_fname}')
                 flatten_enum_opt_setups.append(f"  const {_state}Options = [{_opts}];")
                 _inner.append(
-                    f"        <TextField\n          label={{tf('{_fcamel}')}}\n"
+                    f"        <AppFieldText\n          label={{tf('{_fcamel}')}}\n"
                     f"          value={{{_state}Options.find(o => o.value === src.{_prop}?.{_fname})?.label ?? ''}}\n"
-                    f"          fullWidth\n          margin=\"normal\"\n          aria-readonly\n        />"
+                    f"          readOnly\n        />"
                 )
             else:
                 _inner.append(
-                    f"        <TextField\n          label={{tf('{_fcamel}')}}\n"
+                    f"        <AppFieldText\n          label={{tf('{_fcamel}')}}\n"
                     f"          value={{src.{_prop}?.{_fname}?.toString() ?? ''}}\n"
-                    f"          fullWidth\n          margin=\"normal\"\n          aria-readonly\n        />"
+                    f"          readOnly\n        />"
                 )
 
         flatten_sections_list.append(
-            f"      <Accordion>\n"
-            f"        <AccordionSummary expandIcon={{<ExpandMoreIcon />}}>\n"
-            f"          <Typography>{{te('{_prop_camel}')}}</Typography>\n"
-            f"        </AccordionSummary>\n"
-            f"        <AccordionDetails>\n"
+            f"      <AppSection label={{te('{_prop_camel}')}}>\n"
             + ('\n'.join(_inner) + '\n' if _inner else '')
-            + "        </AccordionDetails>\n"
-            + "      </Accordion>"
+            + "      </AppSection>"
         )
 
     needs_accordion = bool(flatten_rels_raw)
@@ -1639,27 +1608,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         initial_var   = f'{state_name}InitialOptions'
         current_var   = f'{state_name}CurrentOption'
         return (
-            f"      <Box sx={{{{ display: 'flex', alignItems: 'flex-start', gap: 1 }}}}>\n"
-            f"        <EntityAutocomplete\n"
-            f"          sx={{{{ flex: 1 }}}}\n"
-            f"          value={{{state_name}}}\n"
-            f"          onChange={{(id) => set{setter}(id)}}\n"
-            f"          searchAction={{{search_var}}}\n"
-            f"          initialOptions={{{initial_var}}}\n"
-            f"          currentOption={{{current_var}}}\n"
-            f"          label={{tf('{label_fk}')}}\n"
-            f"          required={{{'true' if required else 'false'}}}\n"
-            f"        />\n"
-            f"        {{{state_name} && (\n"
-            f"          <Tooltip title=\"View\">\n"
-            f"            <Link href={{`/{target}/view/${{{state_name}}}`}} aria-label=\"View {target_pascal}\">\n"
-            f"              <IconButton component=\"span\" size=\"small\" tabIndex={{-1}} sx={{{{ mt: 2 }}}}>\n"
-            f"                <OpenInNewIcon fontSize=\"small\" />\n"
-            f"              </IconButton>\n"
-            f"            </Link>\n"
-            f"          </Tooltip>\n"
-            f"        )}}\n"
-            f"      </Box>"
+            f"      <AppFieldRelation\n"
+            f"        label={{tf('{label_fk}')}}\n"
+            f"        value={{{state_name}}}\n"
+            f"        onChange={{(id) => set{setter}(id)}}\n"
+            f"        searchAction={{{search_var}}}\n"
+            f"        initialOptions={{{initial_var}}}\n"
+            f"        currentOption={{{current_var}}}\n"
+            f"        href={{{state_name} ? `/{target}/view/${{{state_name}}}` : null}}\n"
+            f"        required={{{'true' if required else 'false'}}}\n"
+            f"      />"
         )
 
     # Relationship fields (Autocomplete) — many-to-one and selector OTO
@@ -2647,9 +2605,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"    formData.set('{_form_key}', {_sn}.toString());"
                 )
                 _accordion_fields_jsx.append(
-                    f"        <FormControlLabel\n"
-                    f"          control={{<Checkbox checked={{{_sn}}} onChange={{(e) => set{_fsetter}(e.target.checked)}} />}}\n"
+                    f"        <AppFieldBoolean\n"
                     f"          label={{tf('{_fk_label}')}}\n"
+                    f"          checked={{{_sn}}}\n"
+                    f"          onChange={{(e) => set{_fsetter}(e.target.checked)}}\n"
                     f"        />"
                 )
                 # booleans always have a value — excluded from filled/mandatory checks
@@ -2753,14 +2712,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
         if _accordion_fields_jsx:
             flatten_edit_section_parts.append(
-                f"      <Accordion>\n"
-                f"        <AccordionSummary expandIcon={{<ExpandMoreIcon />}}>\n"
-                f"          <Typography>{{te('{_rel_camel}')}}</Typography>\n"
-                f"        </AccordionSummary>\n"
-                f"        <AccordionDetails>\n"
+                f"      <AppSection label={{te('{_rel_camel}')}}>\n"
                 + '\n'.join(_accordion_fields_jsx) + '\n'
-                + f"        </AccordionDetails>\n"
-                + f"      </Accordion>"
+                + f"      </AppSection>"
             )
 
         if _rel_fds_lines:
