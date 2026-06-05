@@ -29,6 +29,7 @@ import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}
 import type { FormUpsertProps } from '@/lib/{{ parent }}/types';
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
+import { AppFieldText, AppFieldBoolean, AppValidationError } from '@/components/ui';
 {% if has_comment_children %}
 import CommentListWrapper from '@/components/_standard/CommentListWrapper';
 {% endif %}
@@ -171,7 +172,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% if flatten_edit_sections %}
 {{ flatten_edit_sections }}
 {% endif %}
-      {validationError && <p style={{ '{{' }} color: 'red' {{ '}}' }}>{validationError}</p>}
+      <AppValidationError message={validationError} />
       {isEdit && <AuditInfo src={src} />}
     </>
   );

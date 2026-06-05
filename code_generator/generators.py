@@ -1109,9 +1109,9 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 for o in entity_select_options
             )
             text_jsxs.append(
-                f"      <TextField\n        label={{tf('{fk}')}}\n"
+                f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
                 f"        value={{[{opts_items}].find((o) => o.value === src.{p})?.label ?? src.{p} ?? ''}}\n"
-                f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n      />"
+                f"        readOnly\n      />"
             )
         elif rel:
             label_f       = rel.get('label_field', 'name')
@@ -1152,9 +1152,9 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             )
         else:
             text_jsxs.append(
-                f"      <TextField\n        label={{tf('{fk}')}}\n"
+                f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
                 f"        value={{src.{p} || ''}}\n"
-                f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n      />"
+                f"        readOnly\n      />"
             )
 
     # DateTime fields
@@ -1180,7 +1180,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     # Boolean fields
     bool_jsxs = [
-        f"      <FormControlLabel\n        control={{<Checkbox checked={{Boolean(src.{p})}} readOnly />}}\n        label={{tf('{_tf(p)}')}}\n      />"
+        f"      <AppFieldBoolean\n        label={{tf('{_tf(p)}')}}\n        checked={{Boolean(src.{p})}}\n        readOnly\n      />"
         for p in boolean_flds
     ]
 
@@ -1208,9 +1208,9 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         enum_opt_setups.append(f"  const {state_name}Options = [{opts}];")
         fk = _tf(p)
         enum_int_jsxs.append(
-            f"      <TextField\n        label={{tf('{fk}')}}\n"
+            f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
             f"        value={{{state_name}Options.find(o => o.value === src.{p})?.label ?? ''}}\n"
-            f"        fullWidth\n        margin=\"normal\"\n        aria-readonly\n      />"
+            f"        readOnly\n      />"
         )
 
     # Custom view fields
@@ -1619,12 +1619,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         multiline = 'true' if p == 'description' else 'false'
         rows = '4' if p == 'description' else 'undefined'
         text_jsxs.append(
-            f"      <TextField\n"
+            f"      <AppFieldText\n"
             f"        label={{tf('{fk}')}}\n"
             f"        inputRef={{{p}Ref}}\n"
             f"        defaultValue={{src.{p} || ''}}\n"
-            f"        fullWidth\n"
-            f"        margin=\"normal\"\n"
             f"        {'required' if req else ''}{slot_str}\n"
             f"        multiline={{{multiline}}}\n"
             f"        rows={{{rows}}}\n"
@@ -1727,9 +1725,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         sn     = safe_var_name(p)
         setter = _setter(sn)
         bool_jsxs.append(
-            f"      <FormControlLabel\n"
-            f"        control={{<Checkbox checked={{{sn}}} onChange={{(e) => set{setter}(e.target.checked)}} />}}\n"
+            f"      <AppFieldBoolean\n"
             f"        label={{tf('{fk}')}}\n"
+            f"        checked={{{sn}}}\n"
+            f"        onChange={{(e) => set{setter}(e.target.checked)}}\n"
             f"      />"
         )
 
