@@ -150,6 +150,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% if child_grid_components %}
 {{ child_grid_components }}
 {% endif %}
+{% if indep_list_readonly_jsx %}
+{{ indep_list_readonly_jsx }}
+{% endif %}
 {% if flatten_edit_sections %}
 {{ flatten_edit_sections }}
 {% endif %}

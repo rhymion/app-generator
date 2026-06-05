@@ -122,6 +122,44 @@ class TestMandatoryFKListChild:
         ctx = self._ctx()
         assert "userStory" not in ctx["child_form_data_handling"]
 
+    def test_independent_mandatory_child_shows_readonly_list_wrapper(self):
+        """Independent mandatory-FK child is shown read-only via ListWrapper in FormUpsert."""
+        ctx = self._ctx()
+        assert "ListWrapper" in ctx["child_imports"]
+        assert "indep_list_readonly_jsx" in ctx
+        assert "userStories" in ctx["indep_list_readonly_jsx"]
+
+    def test_independent_mandatory_child_readonly_is_edit_guarded(self):
+        """Read-only list must be wrapped in isEdit so new-entity form shows nothing."""
+        ctx = self._ctx()
+        assert "isEdit" in ctx["indep_list_readonly_jsx"]
+
+    def test_independent_mandatory_child_readonly_uses_text_item_type(self):
+        """Read-only list uses itemType text (plain display, no add/delete)."""
+        ctx = self._ctx()
+        assert 'itemType="text"' in ctx["indep_list_readonly_jsx"]
+
+    def test_independent_mandatory_child_readonly_not_editable(self):
+        """Read-only list must not contain EditableListWrapper."""
+        ctx = self._ctx()
+        assert "EditableListWrapper" not in ctx["indep_list_readonly_jsx"]
+
+    def test_indep_list_no_raw_div(self):
+        """indep_list_readonly_jsx must use ListWrapper directly without raw <div> wrapper."""
+        ctx = self._ctx()
+        assert "<div>" not in ctx["indep_list_readonly_jsx"]
+        assert "</div>" not in ctx["indep_list_readonly_jsx"]
+        assert "ListWrapper" in ctx["indep_list_readonly_jsx"]
+
+    def test_independent_mandatory_child_not_in_editable_grid_components(self):
+        """Read-only list child must NOT appear in child_grid_components."""
+        ctx = self._ctx()
+        assert "userStories" not in ctx["child_grid_components"]
+
+    def test_has_indep_list_children_flag_true(self):
+        ctx = self._ctx()
+        assert ctx["has_indep_list_children"] is True
+
 
 # ---------------------------------------------------------------------------
 # Non-independent mandatory FK list child → text list with full CRUD
@@ -181,6 +219,12 @@ class TestNonIndependentEmbeddedListChild:
     def test_embedded_list_child_not_autocomplete(self):
         ctx = self._ctx()
         assert 'itemType="autocomplete"' not in ctx["child_grid_components"]
+
+    def test_non_independent_child_has_no_indep_list_readonly_jsx(self):
+        """Non-independent children should not trigger the read-only ListWrapper path."""
+        ctx = self._ctx()
+        assert ctx["has_indep_list_children"] is False
+        assert ctx["indep_list_readonly_jsx"] == ""
 
 
 # ---------------------------------------------------------------------------

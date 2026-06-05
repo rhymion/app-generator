@@ -1857,6 +1857,17 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # Includes non-independent mandatory-FK list children (no own page; full CRUD via text list).
     # Includes m2m and optional-FK list children (use_connect=True; autocomplete add/delete).
     non_comment_ch = ctx['non_comment_ch']
+
+    # Independent mandatory-FK list children are excluded from non_comment_ch (embedded_ch)
+    # but per spec must still be shown read-only in FormUpsert (isEdit-guarded, no add/delete).
+    children_data_all = ctx.get('children_data', [])
+    indep_list_ch = [
+        c for c in children_data_all
+        if c.get('output_type') == 'list'
+        and c.get('is_independent')
+        and not c.get('use_connect')
+    ]
+    has_indep_list_children = bool(indep_list_ch)
     has_commentable_fu   = ctx.get('has_commentable', False)
     commentable_rel_name_fu = ctx.get('commentable_rel_name', 'commentable')
     if has_commentable_fu:
@@ -1928,6 +1939,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         child_imports_parts.append(dg_import)
     if col_fn_names:
         child_imports_parts.append(f"import {{ {', '.join(col_fn_names)} }} from '../{parent}/column_def';")
+    if has_indep_list_children:
+        child_imports_parts.append("import ListWrapper from '@/components/_standard/ListWrapper';")
     child_imports = '\n'.join(child_imports_parts)
 
     # Child variables (useRef)
@@ -2370,6 +2383,52 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     child_grid_components = '\n'.join(child_grid_components_parts)
 
+    # Read-only JSX for independent mandatory-FK list children (isEdit-guarded, no add/delete)
+    indep_list_readonly_parts = []
+    for c in indep_list_ch:
+        prop = c['property_name']
+        child_camel = to_camel_case(prop)
+        ft = c.get('file_type')
+        rel = c.get('relationship') or {}
+        if ft:
+            indep_list_readonly_parts.append(
+                f"      {{isEdit && (\n"
+                f"        <ListWrapper\n"
+                f"          items={{src.{prop}.map(f => ({{\n"
+                f"            id: f.id,\n"
+                f"            value: f.path,\n"
+                f"            label: f.name,\n"
+                f"          }}))}}\n"
+                f"          itemType=\"file\"\n"
+                f"          fileVariant=\"{ft}\"\n"
+                f"          showTitle={{true}}\n"
+                f"          title={{tf('{child_camel}')}}\n"
+                f"        />\n"
+                f"      )}}"
+            )
+        else:
+            _lf = rel.get('label_field', 'name')
+            _target = rel.get('target', c.get('name', ''))
+            _built = build_label_expression('f', _lf, _target, schema)
+            _view_val = _built['expression']
+            if _built['has_format']:
+                uses_format_label_value = True
+            indep_list_readonly_parts.append(
+                f"      {{isEdit && (\n"
+                f"        <ListWrapper\n"
+                f"          items={{src.{prop}.map(f => ({{\n"
+                f"            id: f.id,\n"
+                f"            value: {_view_val},\n"
+                f"            label: {_view_val},\n"
+                f"          }}))}}\n"
+                f"          itemType=\"text\"\n"
+                f"          showTitle={{true}}\n"
+                f"          title={{tf('{child_camel}')}}\n"
+                f"        />\n"
+                f"      )}}"
+            )
+    indep_list_readonly_jsx = '\n'.join(indep_list_readonly_parts)
+
     # FormUpsert params signature.
     # Each selection target / selector OTO target now contributes:
     #   - initial{Xxx}s   : Xxx[] (limited initial set fetched server-side)
@@ -2756,6 +2815,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'child_form_data_handling': child_form_data_handling,
         'child_validation_code':    _child_validation_code_merged,
         'child_grid_components':    child_grid_components,
+        'has_indep_list_children':  has_indep_list_children,
+        'indep_list_readonly_jsx':  indep_list_readonly_jsx,
         'form_upsert_params':       form_upsert_params,
         'enum_ns_hooks':            _all_enum_ns_hooks,
         'enum_opt_setups':          _all_enum_opt_setups,
