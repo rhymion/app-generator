@@ -44,6 +44,32 @@ from generators_test import (
     db_helpers_context,
 )
 from validation_context import build_validation_context
+import analytics_policy as _policy
+
+
+# ---------------------------------------------------------------------------
+# Analytics provider context helper
+# ---------------------------------------------------------------------------
+
+def _build_analytics_provider_ctx(schema: dict) -> dict:
+    """Build the template context for analytics_provider.tsx.jinja2 from a schema dict."""
+    _analytics_cfg = schema.get('x-analytics') or {}
+    _analytics_enabled = bool(_analytics_cfg.get('enabled', False))
+    _analytics_events_cfg = _analytics_cfg.get('events') or {}
+    return {
+        'analytics_enabled': _analytics_enabled,
+        'analytics_posthog_host': _analytics_cfg.get('posthog_host', ''),
+        'analytics_topology': _analytics_cfg.get('topology', 'embedded'),
+        'analytics_ingest_endpoint': _analytics_cfg.get('ingest_endpoint', ''),
+        'analytics_event_key_special': bool(_analytics_events_cfg.get('key_special', False)),
+        'analytics_event_key_count': bool(_analytics_events_cfg.get('key_count', False)),
+        'analytics_event_form_submit': bool(_analytics_events_cfg.get('form_submit', False)),
+        'analytics_event_form_field_blur': bool(_analytics_events_cfg.get('form_field_blur', False)),
+        'analytics_event_validation_error': bool(_analytics_events_cfg.get('validation_error', False)),
+        'analytics_consent_scope': _policy.CONSENT_SCOPE if _analytics_enabled else '',
+        'analytics_identity_attach_user': _policy.IDENTITY_ATTACH_USER if _analytics_enabled else False,
+        'analytics_identity_attach_tenant': _policy.IDENTITY_ATTACH_TENANT if _analytics_enabled else False,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -239,20 +265,8 @@ def generate(schema_path: str, output_dir: str) -> None:
             _write(app_dir / 'view' / '[id]' / 'page.tsx', _render(env, 'page_view.tsx.jinja2', ctx))
 
     # --- Analytics provider scaffold (app/providers/analytics-provider.tsx) ---
-    _analytics_cfg = schema.get('x-analytics') or {}
-    _analytics_enabled = bool(_analytics_cfg.get('enabled', False))
-    _analytics_events_cfg = _analytics_cfg.get('events') or {}
-    _analytics_ctx = {
-        'analytics_enabled': _analytics_enabled,
-        'analytics_posthog_host': _analytics_cfg.get('posthog_host', ''),
-        'analytics_topology': _analytics_cfg.get('topology', 'embedded'),
-        'analytics_ingest_endpoint': _analytics_cfg.get('ingest_endpoint', ''),
-        'analytics_event_key_special': bool(_analytics_events_cfg.get('key_special', False)),
-        'analytics_event_key_count': bool(_analytics_events_cfg.get('key_count', False)),
-        'analytics_event_form_submit': bool(_analytics_events_cfg.get('form_submit', False)),
-        'analytics_event_form_field_blur': bool(_analytics_events_cfg.get('form_field_blur', False)),
-        'analytics_event_validation_error': bool(_analytics_events_cfg.get('validation_error', False)),
-    }
+    _analytics_ctx = _build_analytics_provider_ctx(schema)
+    _analytics_enabled = _analytics_ctx['analytics_enabled']
     _write(
         out / 'app' / 'providers' / 'analytics-provider.tsx',
         _render(env, 'analytics_provider.tsx.jinja2', _analytics_ctx),

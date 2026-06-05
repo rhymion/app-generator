@@ -180,6 +180,12 @@
     "accountsTitle": "Connected accounts",
     "accountsBody": "Manage which providers can sign you into this account."
   },
+  "Analytics": {
+    "consentTitle": "Analytics Consent",
+    "consentDescription": "We use analytics to improve your experience. You can change this preference at any time.",
+    "consentAccept": "Accept",
+    "consentDecline": "Decline"
+  },
   "LinkedAccounts": {
     "title": "Connected accounts",
     "intro": "These providers can sign you into this account. You can connect another OAuth provider with the same email, or detach one as long as you keep at least one way to sign in.",

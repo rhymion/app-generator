@@ -180,6 +180,12 @@
     "accountsTitle": "連携アカウント",
     "accountsBody": "このアカウントへサインインできるプロバイダーを管理します。"
   },
+  "Analytics": {
+    "consentTitle": "アナリティクスの同意",
+    "consentDescription": "サービス向上のためにアナリティクスを使用します。この設定はいつでも変更できます。",
+    "consentAccept": "同意する",
+    "consentDecline": "拒否する"
+  },
   "LinkedAccounts": {
     "title": "連携アカウント",
     "intro": "ここに表示されているプロバイダーで本アカウントにサインインできます。同じメールアドレスの別 OAuth プロバイダーを連携できます。少なくとも 1 つのサインイン方法を残す限り、連携を解除することもできます。",

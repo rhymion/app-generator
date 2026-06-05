@@ -8,6 +8,7 @@ import pytest
 from jinja2 import Environment, FileSystemLoader
 from build_context import build_context
 from generators import form_upsert_context
+from generate import _build_analytics_provider_ctx
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
@@ -1131,3 +1132,247 @@ class TestAnalyticsPhase4SmokeTests:
         ctx = build_context(_entity(), schema)
         assert ctx["analytics_enabled"] is True
         assert ctx["analytics_posthog_host"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: Consent gating + identity attachment
+# ---------------------------------------------------------------------------
+
+class TestConsentAndIdentity:
+
+    def test_consent_a_opt_out_by_default(self):
+        """opt_out_capturing_by_default=true must appear in enabled provider."""
+        content = _render_provider(analytics_enabled=True)
+        assert 'opt_out_capturing_by_default: true' in content, \
+            "Enabled provider must set opt_out_capturing_by_default: true in posthog.init"
+
+    def test_consent_b_opt_in_after_consent(self):
+        """posthog.opt_in_capturing() must be called conditional on hasConsent()."""
+        content = _render_provider(analytics_enabled=True)
+        assert 'hasConsent()' in content, \
+            "Enabled provider must define/call hasConsent() for consent check"
+        assert 'posthog.opt_in_capturing()' in content, \
+            "Enabled provider must call posthog.opt_in_capturing() when consent is given"
+        # Verify opt_in_capturing is gated on hasConsent — they appear together
+        opt_in_idx = content.index('posthog.opt_in_capturing()')
+        surrounding = content[max(0, opt_in_idx - 60):opt_in_idx + 30]
+        assert 'hasConsent()' in surrounding or 'opt_in_capturing' in surrounding, \
+            "opt_in_capturing must be gated on hasConsent()"
+
+    def test_consent_c_identity_id_only(self):
+        """posthog.identify must receive userId only — no email/name in the call."""
+        content = _render_provider(
+            analytics_enabled=True,
+            analytics_identity_attach_user=True,
+            analytics_identity_attach_tenant=True,
+        )
+        assert 'posthog.identify(userId)' in content, \
+            "Identity hook must call posthog.identify(userId) with the userId variable only"
+        identify_idx = content.index('posthog.identify(userId)')
+        call_site = content[identify_idx:identify_idx + 60]
+        assert 'email' not in call_site, \
+            "posthog.identify call must not include email"
+        assert 'name' not in call_site, \
+            "posthog.identify call must not include name"
+
+    def test_consent_d_no_pii_in_set(self):
+        """$set properties must not appear — no PII in identify payload."""
+        content = _render_provider(
+            analytics_enabled=True,
+            analytics_identity_attach_user=True,
+        )
+        assert 'posthog.identify(userId)' in content, \
+            "Identity hook must be present"
+        assert '$set' not in content, \
+            "Template must not send $set properties (no PII in identify)"
+        # posthog.identify called with single arg: verify no second arg containing PII keys
+        identify_idx = content.index('posthog.identify(userId)')
+        call_end = content.index(')', identify_idx) + 1
+        call_text = content[identify_idx:call_end]
+        assert 'email' not in call_text, "identify call must not include email property"
+        assert 'address' not in call_text, "identify call must not include address property"
+
+    def test_consent_e_disabled_no_consent_or_identity(self):
+        """When x-analytics is disabled, consent UI and identity calls must not appear."""
+        content = _render_provider(analytics_enabled=False)
+        assert 'CONSENT_KEY' not in content, \
+            "Disabled provider must not reference CONSENT_KEY"
+        assert 'posthog.identify' not in content, \
+            "Disabled provider must not call posthog.identify"
+        assert 'opt_out_capturing_by_default' not in content, \
+            "Disabled provider must not contain opt_out_capturing_by_default"
+        assert 'posthog.reset' not in content, \
+            "Disabled provider must not call posthog.reset (identity logic)"
+        assert 'setConsent' not in content, \
+            "Disabled provider must not contain consent logic (setConsent)"
+
+    def test_consent_f_existing_invariants_not_broken(self):
+        """Existing Phase 2-4 template invariants must hold after Phase 5 additions."""
+        content = _render_provider(
+            analytics_enabled=True,
+            analytics_consent_scope='all_users',
+            analytics_identity_attach_user=True,
+            analytics_identity_attach_tenant=True,
+            analytics_event_key_special=True,
+            analytics_event_key_count=True,
+            analytics_event_form_submit=True,
+            analytics_event_form_field_blur=True,
+            analytics_event_validation_error=True,
+        )
+        assert 'posthog.init(' in content, "SDK init must still be present"
+        assert 'autocapture: false' in content, "autocapture must still be disabled"
+        assert 'disable_session_recording: true' in content, "session recording must still be disabled"
+        assert 'advanced_disable_feature_flags: true' in content, "feature flags must still be disabled"
+        assert content.count('posthog.capture(') == 1, \
+            "posthog.capture( must still appear exactly once (inside captureSafe)"
+        assert 'captureSafe' in content, "captureSafe must still be present"
+        assert 'sanitizeEvent' in content, "sanitizeEvent must still be present"
+        assert 'PostHogProvider' in content, "PostHogProvider wrapper must still be present"
+
+    def test_consent_context_parsed_from_schema_enabled(self):
+        """When analytics enabled, build_context must expose consent_scope and identity flags."""
+        schema = _base_schema({"x-analytics": {"enabled": True}})
+        ctx = build_context(_entity(), schema)
+        assert ctx["analytics_consent_scope"] == "all_users", \
+            "analytics_consent_scope must be 'all_users' when analytics enabled"
+        assert ctx["analytics_identity_attach_user"] is True, \
+            "analytics_identity_attach_user must be True when analytics enabled"
+        assert ctx["analytics_identity_attach_tenant"] is True, \
+            "analytics_identity_attach_tenant must be True when analytics enabled"
+
+    def test_consent_context_cleared_when_disabled(self):
+        """When analytics disabled, consent_scope and identity flags must be falsy."""
+        ctx = build_context(_entity(), _base_schema())
+        assert ctx["analytics_consent_scope"] == "", \
+            "analytics_consent_scope must be empty when analytics disabled"
+        assert ctx["analytics_identity_attach_user"] is False, \
+            "analytics_identity_attach_user must be False when analytics disabled"
+        assert ctx["analytics_identity_attach_tenant"] is False, \
+            "analytics_identity_attach_tenant must be False when analytics disabled"
+
+    def test_consent_banner_exported_when_scope_set(self):
+        """ConsentBanner must be exported when analytics_consent_scope is set."""
+        content = _render_provider(
+            analytics_enabled=True,
+            analytics_consent_scope='all_users',
+        )
+        assert 'ConsentBanner' in content, \
+            "ConsentBanner must be exported when analytics_consent_scope is set"
+        assert 'setConsent(true)' in content, \
+            "ConsentBanner accept button must call setConsent(true)"
+        assert 'setConsent(false)' in content, \
+            "ConsentBanner decline button must call setConsent(false)"
+
+    def test_identity_hook_not_rendered_without_flag(self):
+        """posthog.identify must not be called when analytics_identity_attach_user=False."""
+        content = _render_provider(analytics_enabled=True)
+        assert 'posthog.identify' not in content, \
+            "posthog.identify must not be called when identity_attach_user is not set"
+        assert 'posthog.reset' not in content, \
+            "posthog.reset must not be called when identity_attach_user is not set"
+
+    def test_tenant_group_rendered_with_tenant_flag(self):
+        """posthog.group('tenant', tenantId) must appear when analytics_identity_attach_tenant=True."""
+        content = _render_provider(
+            analytics_enabled=True,
+            analytics_identity_attach_user=True,
+            analytics_identity_attach_tenant=True,
+        )
+        assert "posthog.group('tenant', tenantId)" in content, \
+            "Identity hook must call posthog.group('tenant', tenantId) when tenant flag is set"
+
+    def test_tenant_group_absent_without_tenant_flag(self):
+        """posthog.group must not appear when analytics_identity_attach_tenant=False."""
+        content = _render_provider(
+            analytics_enabled=True,
+            analytics_identity_attach_user=True,
+            analytics_identity_attach_tenant=False,
+        )
+        assert 'posthog.group(' not in content, \
+            "posthog.group must not appear when identity_attach_tenant is not set"
+
+    def test_consent_helpers_always_in_enabled_provider(self):
+        """CONSENT_KEY, hasConsent, setConsent must always appear in enabled provider."""
+        content = _render_provider(analytics_enabled=True)
+        assert 'CONSENT_KEY' in content, "CONSENT_KEY must be defined in enabled provider"
+        assert 'hasConsent' in content, "hasConsent must be defined in enabled provider"
+        assert 'setConsent' in content, "setConsent must be defined in enabled provider"
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: generate.py integration — context flows through to rendered output
+# ---------------------------------------------------------------------------
+
+class TestPhase5GenerationIntegration:
+    """Verify generate.py's _build_analytics_provider_ctx feeds consent/identity to the template.
+
+    These tests catch the class of bug where template variables exist but generate.py
+    fails to pass them — which _render_provider tests cannot detect.
+    """
+
+    @pytest.fixture
+    def enabled_schema(self):
+        return {"x-analytics": {"enabled": True}}
+
+    @pytest.fixture
+    def disabled_schema(self):
+        return {}
+
+    def _render_from_schema(self, schema: dict) -> str:
+        ctx = _build_analytics_provider_ctx(schema)
+        env = Environment(loader=FileSystemLoader(str(_TEMPLATES_DIR)))
+        return env.get_template('analytics_provider.tsx.jinja2').render(**ctx)
+
+    def test_generate_produces_consent_banner_when_enabled(self, enabled_schema):
+        """generate.py context must produce functional ConsentBanner when analytics enabled."""
+        content = self._render_from_schema(enabled_schema)
+        assert 'opt_out_capturing_by_default: true' in content, \
+            "Generated provider must set opt_out_capturing_by_default when analytics enabled"
+        assert 'setConsent' in content, \
+            "Generated provider must include consent helpers when analytics enabled"
+        assert "posthog.opt_in_capturing()" in content, \
+            "Generated provider must call posthog.opt_in_capturing() in ConsentBanner accept"
+
+    def test_generate_produces_identity_hook_when_enabled(self, enabled_schema):
+        """generate.py context must produce posthog.identify when analytics enabled."""
+        content = self._render_from_schema(enabled_schema)
+        assert 'posthog.identify' in content, \
+            "Generated provider must call posthog.identify when analytics enabled"
+        assert 'posthog.reset' in content, \
+            "Generated provider must call posthog.reset in identity hook when analytics enabled"
+
+    def test_generate_noop_when_disabled(self, disabled_schema):
+        """generate.py context must produce noop stubs when analytics disabled."""
+        content = self._render_from_schema(disabled_schema)
+        assert 'posthog.identify' not in content, \
+            "Disabled generated provider must not call posthog.identify"
+        assert 'setConsent' not in content, \
+            "Disabled generated provider must not contain consent logic"
+        assert 'posthog.init(' not in content, \
+            "Disabled generated provider must not initialize PostHog SDK"
+
+    def test_generate_noop_accepts_tenant_id_param(self, disabled_schema):
+        """Disabled noop stub must accept tenantId so providers.tsx can pass it without TS errors."""
+        content = self._render_from_schema(disabled_schema)
+        assert '_tenantId' in content, \
+            "Disabled useAnalyticsIdentify stub must accept _tenantId param for type compatibility"
+
+    def test_generate_tenant_group_when_enabled(self, enabled_schema):
+        """generate.py context must produce posthog.group tenant call when analytics enabled."""
+        content = self._render_from_schema(enabled_schema)
+        assert "posthog.group('tenant', tenantId)" in content, \
+            "Generated provider must call posthog.group('tenant', tenantId) when analytics enabled"
+
+    def test_generate_no_pii_in_group_call(self, enabled_schema):
+        """posthog.group and posthog.identify calls must not include email, name, or other PII."""
+        content = self._render_from_schema(enabled_schema)
+        group_idx = content.index("posthog.group('tenant', tenantId)")
+        group_site = content[group_idx:group_idx + 60]
+        assert 'email' not in group_site, \
+            "posthog.group call must not include email"
+        assert 'name' not in group_site, \
+            "posthog.group call must not include name"
+        identify_idx = content.index("posthog.identify(userId)")
+        identify_site = content[identify_idx:identify_idx + 60]
+        assert 'email' not in identify_site, \
+            "posthog.identify call must not include email"

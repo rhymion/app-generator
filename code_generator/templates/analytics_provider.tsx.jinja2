@@ -4,7 +4,16 @@
 import posthog from 'posthog-js';
 import { PostHogProvider } from 'posthog-js/react';
 import { usePathname } from 'next/navigation';
-import { useEffect{% if analytics_event_key_count %}, useRef{% endif %} } from 'react';
+import { useEffect{% if analytics_event_key_count %}, useRef{% endif %}{% if analytics_consent_scope %}, useState{% endif %} } from 'react';
+{% if analytics_consent_scope %}
+import { useTranslations } from 'next-intl';
+{% endif %}
+
+const CONSENT_KEY = 'analytics_consent';
+const hasConsent = () => typeof localStorage !== 'undefined' && localStorage.getItem(CONSENT_KEY) === 'true';
+const setConsent = (v: boolean) => {
+  if (typeof localStorage !== 'undefined') localStorage.setItem(CONSENT_KEY, String(v));
+};
 
 if (typeof window !== 'undefined') {
   posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY!, {
@@ -15,10 +24,12 @@ if (typeof window !== 'undefined') {
     advanced_disable_feature_flags: true,
     heatmaps: false,
     surveys: false,
+    opt_out_capturing_by_default: true,
     loaded: (ph) => {
       if (process.env.NODE_ENV === 'development') ph.debug();
     },
   });
+  if (hasConsent()) posthog.opt_in_capturing();
 }
 
 // Central allowlist: only these properties are permitted per event
@@ -228,6 +239,57 @@ function FormLifecycleTracker() {
 }
 {% endif %}
 
+{% if analytics_identity_attach_user %}
+export function useAnalyticsIdentify(
+  userId: string | null | undefined,
+{% if analytics_identity_attach_tenant %}  tenantId?: string | null,
+{% endif %}) {
+  useEffect(() => {
+    if (!hasConsent() || !userId) {
+      posthog.reset();
+      return;
+    }
+    posthog.identify(userId);
+{% if analytics_identity_attach_tenant %}    if (tenantId) posthog.group('tenant', tenantId);
+{% endif %}  }, [userId{% if analytics_identity_attach_tenant %}, tenantId{% endif %}]);
+}
+{% else %}
+export function useAnalyticsIdentify(_userId?: string | null): void {}
+{% endif %}
+
+{% if analytics_consent_scope %}
+export function ConsentBanner() {
+  const t = useTranslations('Analytics');
+  const [decided, setDecided] = useState(
+    () => typeof localStorage !== 'undefined' && localStorage.getItem(CONSENT_KEY) !== null,
+  );
+  if (decided) return null;
+  return (
+    <div
+      style={%raw%}{{
+        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
+        padding: '1rem', background: '#1e1e1e', color: '#fff',
+        display: 'flex', gap: '1rem', alignItems: 'center',
+      }}{%endraw%}
+    >
+      <span>{t('consentDescription')}</span>
+      <button
+        onClick={%raw%}{() => { setConsent(true); posthog.opt_in_capturing(); setDecided(true); }}{%endraw%}
+      >
+        {t('consentAccept')}
+      </button>
+      <button
+        onClick={%raw%}{() => { setConsent(false); setDecided(true); }}{%endraw%}
+      >
+        {t('consentDecline')}
+      </button>
+    </div>
+  );
+}
+{% else %}
+export function ConsentBanner(): null { return null; }
+{% endif %}
+
 export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
   return (
     <PostHogProvider client={posthog}>
@@ -237,6 +299,7 @@ export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
       {% if analytics_event_key_count %}<KeyCountTracker />{% endif %}
       {% if analytics_event_form_submit or analytics_event_form_field_blur or analytics_event_validation_error %}<FormLifecycleTracker />{% endif %}
       {children}
+      {% if analytics_consent_scope %}<ConsentBanner />{% endif %}
     </PostHogProvider>
   );
 }
@@ -251,6 +314,10 @@ export const analytics = {
 export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
+
+export function useAnalyticsIdentify(_userId?: string | null, _tenantId?: string | null): void {}
+
+export function ConsentBanner(): null { return null; }
 
 export const analytics = {
   capture: (_event: string, _props?: Record<string, unknown>) => {},

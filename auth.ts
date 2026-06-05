@@ -330,12 +330,16 @@ export const authConfig: NextAuthConfig = {
     // whichever branch fired.
     async session({ session, user, token }) {
       const id = (user?.id ?? (token as { id?: string } | undefined)?.id) ?? "";
-      return { ...session, user: { ...session.user, id } };
+      const tenantId = (token as { tenantId?: string } | undefined)?.tenantId ?? null;
+      return { ...session, user: { ...session.user, id, tenantId } };
     },
     // Only fires for JWT-strategy sessions (credentials). Carries the id
     // from authorize() into the token so the session callback can echo it.
     async jwt({ token, user }) {
       if (user?.id) token.id = user.id;
+      if ((user as { tenant_id?: string } | undefined)?.tenant_id) {
+        token.tenantId = (user as { tenant_id?: string }).tenant_id;
+      }
       return token;
     },
   },
@@ -398,6 +402,7 @@ declare module "next-auth" {
   interface Session {
     user: {
       id: string;
+      tenantId?: string | null;
       name?: string | null;
       email?: string | null;
       image?: string | null;
@@ -408,5 +413,6 @@ declare module "next-auth" {
 declare module "@auth/core/jwt" {
   interface JWT {
     id: string;
+    tenantId?: string;
   }
 }

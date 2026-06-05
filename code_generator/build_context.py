@@ -17,7 +17,7 @@ from helpers.schema_helpers import (
     get_detail_ref_rels, get_flatten_rels,
 )
 import copy
-from analytics_policy import QUERY_STRING_POLICY
+from analytics_policy import QUERY_STRING_POLICY, CONSENT_SCOPE, IDENTITY_ATTACH_USER, IDENTITY_ATTACH_TENANT
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -832,6 +832,9 @@ def build_context(entity: dict, schema: dict) -> dict:
     analytics_event_form_submit     = bool(_analytics_events_cfg.get('form_submit', False))
     analytics_event_form_field_blur = bool(_analytics_events_cfg.get('form_field_blur', False))
     analytics_event_validation_error = bool(_analytics_events_cfg.get('validation_error', False))
+    analytics_consent_scope        = CONSENT_SCOPE if analytics_enabled else ''
+    analytics_identity_attach_user   = analytics_enabled and bool(IDENTITY_ATTACH_USER)
+    analytics_identity_attach_tenant = analytics_enabled and bool(IDENTITY_ATTACH_TENANT)
 
     # Chart config
     xdisplay    = (model_def or {}).get('x-display') or {}
@@ -1247,6 +1250,9 @@ def build_context(entity: dict, schema: dict) -> dict:
         analytics_event_form_submit=analytics_event_form_submit,
         analytics_event_form_field_blur=analytics_event_form_field_blur,
         analytics_event_validation_error=analytics_event_validation_error,
+        analytics_consent_scope=analytics_consent_scope,
+        analytics_identity_attach_user=analytics_identity_attach_user,
+        analytics_identity_attach_tenant=analytics_identity_attach_tenant,
         # Chart
         chart_cfg=chart_cfg,
         has_chart=has_chart,
