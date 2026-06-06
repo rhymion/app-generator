@@ -485,6 +485,7 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
     date_time     = []
     number        = []
     enum_integer  = []
+    enum_string   = []
     image         = []
     boolean       = []
     entity_select = []
@@ -510,6 +511,8 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
             image.append(p)
         elif actual == 'string' and defn.get('x-entity-select'):
             entity_select.append(p)
+        elif actual == 'string' and isinstance(defn.get('enum'), list):
+            enum_string.append(p)
         else:
             text.append(p)
 
@@ -518,6 +521,7 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         'date_time': date_time,
         'number': number,
         'enum_integer': enum_integer,
+        'enum_string': enum_string,
         'image': image,
         'boolean': boolean,
         'entity_select': entity_select,

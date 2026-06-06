@@ -5,6 +5,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [1.2.0] - 2026-06-04
 
+<!-- Security tracking: upstream-pending vulnerabilities -->
+<!-- D1: prisma -> @hono/node-server (CVSS 5.3) - awaiting upstream fix -->
+<!-- D3: cypress -> qs DoS (CVSS 5.3) - awaiting upstream fix in cypress -->
+
 ### Added
 - Virtual display columns: fields that do not exist in `properties` under `x-display.table` can now be declared as display-only columns (virtual columns).
   Value supply is handled by a per-entity async bulk resolver in `lib/{entity}/virtual_resolvers.ts` (`resolveVirtualColumns(rows)`), and generate-code does not overwrite existing files.

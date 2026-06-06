@@ -38,22 +38,22 @@ describe('DashboardWidget', () => {
   });
 
   it('renders widget name in card header', async () => {
-    mockAggregate.mockResolvedValue([]);
+    mockAggregate.mockResolvedValue({ kind: 'single', data: [] });
     render(<DashboardWidget widget={widget} />);
     expect(screen.getByText('Status Chart')).toBeInTheDocument();
   });
 
   it('renders entity/group subheader', async () => {
-    mockAggregate.mockResolvedValue([]);
+    mockAggregate.mockResolvedValue({ kind: 'single', data: [] });
     render(<DashboardWidget widget={widget} />);
     expect(screen.getByText('task grouped by status')).toBeInTheDocument();
   });
 
   it('renders chart after data loads', async () => {
-    mockAggregate.mockResolvedValue([
+    mockAggregate.mockResolvedValue({ kind: 'single', data: [
       { label: 'Open', count: 5 },
       { label: 'Closed', count: 3 },
-    ]);
+    ] });
     render(<DashboardWidget widget={widget} />);
     await waitFor(() => {
       expect(screen.getByTestId('dashboard-chart')).toBeInTheDocument();
@@ -62,17 +62,17 @@ describe('DashboardWidget', () => {
   });
 
   it('converts chart_type=0 to "pie"', async () => {
-    mockAggregate.mockResolvedValue([{ label: 'A', count: 1 }]);
+    mockAggregate.mockResolvedValue({ kind: 'single', data: [{ label: 'A', count: 1 }] });
     render(<DashboardWidget widget={{ ...widget, chart_type: 0 }} />);
     await waitFor(() => screen.getByTestId('dashboard-chart'));
     expect(screen.getByTestId('dashboard-chart')).toHaveAttribute('data-type', 'pie');
   });
 
   it('converts chart_type=1 to "bar"', async () => {
-    mockAggregate.mockResolvedValue([{ label: 'A', count: 1 }]);
+    mockAggregate.mockResolvedValue({ kind: 'single', data: [{ label: 'A', count: 1 }] });
     render(<DashboardWidget widget={{ ...widget, chart_type: 1 }} />);
     await waitFor(() => screen.getByTestId('dashboard-chart'));
-    expect(screen.getByTestId('dashboard-chart')).toHaveAttribute('data-type', 'bar');
+    expect(screen.getByTestId('dashboard-chart')).toHaveAttribute('data-type', 'column');
   });
 
   it('shows error message when aggregateForWidget rejects', async () => {
@@ -84,23 +84,26 @@ describe('DashboardWidget', () => {
   });
 
   it('passes filter to aggregateForWidget when filter_field and filter_value provided', async () => {
-    mockAggregate.mockResolvedValue([]);
+    mockAggregate.mockResolvedValue({ kind: 'single', data: [] });
     const filteredWidget = { ...widget, filter_field: 'priority', filter_value: 'high' };
     render(<DashboardWidget widget={filteredWidget} />);
     await waitFor(() => {
       expect(mockAggregate).toHaveBeenCalledWith(
         'task',
         'status',
-        { field: 'priority', value: 'high' }
+        { field: 'priority', value: 'high' },
+        undefined,
+        undefined,
+        undefined
       );
     });
   });
 
   it('passes null filter when filter_field is absent', async () => {
-    mockAggregate.mockResolvedValue([]);
+    mockAggregate.mockResolvedValue({ kind: 'single', data: [] });
     render(<DashboardWidget widget={widget} />);
     await waitFor(() => {
-      expect(mockAggregate).toHaveBeenCalledWith('task', 'status', null);
+      expect(mockAggregate).toHaveBeenCalledWith('task', 'status', null, undefined, undefined, undefined);
     });
   });
 });

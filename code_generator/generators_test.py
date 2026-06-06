@@ -511,6 +511,14 @@ def get_field_metas(
                 'required': prop_name in required_fields,
                 'entity_options': entity_options,
             })
+        elif prop_type == 'string' and prop.get('enum'):
+            metas.append({
+                **base,
+                'label': to_title_case(prop_name),
+                'category': 'string_enum',
+                'required': prop_name in required_fields,
+                'enum_values': prop.get('enum'),
+            })
         else:
             metas.append({
                 **base,
@@ -605,6 +613,10 @@ def prisma_value(field: dict, index: str, entity_title: str) -> str:
         # Integer enum: store integer index 0 (first option)
         return '0'
 
+    elif cat == 'string_enum':
+        first = next((v for v in (field.get('enum_values') or []) if v is not None), None)
+        return f"'{first}'" if first is not None else 'null'
+
     elif cat == 'number':
         val = f'{index} * 100'
         mn = field.get('min')
@@ -646,8 +658,10 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
         options = field.get('entity_options') or []
         return options[0]['label'] if options else ''
 
-    elif cat == 'enum':
-        return field['enum_values'][0]
+    elif cat in ('enum', 'string_enum'):
+        values = field.get('enum_values') or []
+        first = next((v for v in values if v is not None), None)
+        return str(first) if first is not None else ''
 
     elif cat == 'number':
         val = 100
@@ -698,8 +712,9 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
             return options[1]['label']
         return options[0]['label'] if options else ''
 
-    elif cat == 'enum':
-        return field['enum_values'][1] if len(field['enum_values']) > 1 else field['enum_values'][0]
+    elif cat in ('enum', 'string_enum'):
+        values = [v for v in (field.get('enum_values') or []) if v is not None]
+        return str(values[1]) if len(values) > 1 else (str(values[0]) if values else '')
 
     elif cat == 'number':
         val = 200
@@ -749,6 +764,10 @@ def api_value(field: dict, entity_title: str) -> str:
 
     elif cat == 'enum':
         return '0'
+
+    elif cat == 'string_enum':
+        first = next((v for v in (field.get('enum_values') or []) if v is not None), None)
+        return f"'{first}'" if first is not None else "''"
 
     elif cat == 'number':
         val = 100

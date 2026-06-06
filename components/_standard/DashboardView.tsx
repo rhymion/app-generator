@@ -5,11 +5,27 @@ import Typography from '@mui/material/Typography';
 import DashboardWidget, { WidgetConfig } from './DashboardWidget';
 import type { ModelPermissions } from '@/lib/authz';
 
+type WidgetConfigInput = {
+  id: string;
+  name: string;
+  order?: number;
+  entity_name: string;
+  chart_type: number;
+  group_by_field: string;
+  filter_field?: string | null;
+  filter_value?: string | null;
+  conditions?: unknown[] | null;
+  stack_mode?: number | null;
+  series_field?: string | null;
+  group_by_bucket?: number | null;
+  [key: string]: unknown;
+};
+
 type Props = {
   src: {
     id?: string;
     name?: string;
-    widgets?: WidgetConfig[] | null;
+    widgets?: WidgetConfigInput[] | null;
   };
   permissions?: ModelPermissions;
   currentUserRoleIds?: string[];
@@ -38,7 +54,7 @@ export default function DashboardView({ src }: Props) {
         gap: 2,
       }}
     >
-      {widgets.map((w) => <DashboardWidget key={w.id} widget={w} />)}
+      {widgets.map((w) => <DashboardWidget key={w.id} widget={w as WidgetConfig} />)}
     </Box>
   );
 }

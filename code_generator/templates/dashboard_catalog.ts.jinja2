@@ -5,7 +5,9 @@
 export type DashboardField =
   | { name: string; label: string; kind: 'boolean' }
   | { name: string; label: string; kind: 'enum'; enum_values: string[] }
-  | { name: string; label: string; kind: 'fk'; fk_target: string; fk_label_field: string };
+  | { name: string; label: string; kind: 'fk'; fk_target: string; fk_label_field: string }
+  | { name: string; label: string; kind: 'number' }
+  | { name: string; label: string; kind: 'datetime'; datetime_format: 'date' | 'date-time' };
 
 export type DashboardEntity = {
   name: string;
@@ -24,6 +26,10 @@ export const DASHBOARDABLE_ENTITIES: DashboardEntity[] = [
       { name: '{{ f.name }}', label: '{{ f.label }}', kind: 'fk', fk_target: '{{ f.fk_target }}', fk_label_field: '{{ f.fk_label_field }}' },
 {% elif f.kind == 'enum' %}
       { name: '{{ f.name }}', label: '{{ f.label }}', kind: 'enum', enum_values: [{% for v in f.enum_values %}'{{ v }}'{% if not loop.last %}, {% endif %}{% endfor %}] },
+{% elif f.kind == 'number' %}
+      { name: '{{ f.name }}', label: '{{ f.label }}', kind: 'number' },
+{% elif f.kind == 'datetime' %}
+      { name: '{{ f.name }}', label: '{{ f.label }}', kind: 'datetime', datetime_format: '{{ f.datetime_format }}' },
 {% else %}
       { name: '{{ f.name }}', label: '{{ f.label }}', kind: 'boolean' },
 {% endif %}

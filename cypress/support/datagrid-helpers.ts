@@ -32,6 +32,7 @@ export function editDataGridCell(
   value: string | number,
   submit: boolean = false
 ) {
+  getDataGridCell(rowIndex, field).scrollIntoView();
   getDataGridCell(rowIndex, field).dblclick();
   getDataGridCell(rowIndex, field).find('input').should('be.visible').type('{selectall}' + String(value));
   if (submit) {
@@ -51,6 +52,7 @@ export function toggleDataGridCheckbox(
   field: string,
   checked: boolean = true
 ) {
+  getDataGridCell(rowIndex, field).scrollIntoView();
   getDataGridCell(rowIndex, field).dblclick();
   const checkbox = getDataGridCell(rowIndex, field).find('input[type="checkbox"]');
   if (checked) {

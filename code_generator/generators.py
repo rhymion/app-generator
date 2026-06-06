@@ -64,7 +64,9 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
       - a many-to-one FK (each FK value becomes a series, labelled via
         the relationship's labelField on the target);
       - an integer with an `enum` (each enum label is a category);
-      - a boolean (Yes / No).
+      - a boolean (Yes / No);
+      - an integer or number without enum (numeric filter range);
+      - a string with format 'date' or 'date-time' (datetime range filter).
 
     Entities with no groupable field are dropped — there is nothing
     meaningful to chart, and exposing them would surface an empty picker.
@@ -79,7 +81,7 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
             continue
         groupable = []
         for prop_name, prop in (defn.get('properties') or {}).items():
-            if prop_name in ('id', 'created_at', 'updated_at', 'creator_id', 'updater_id'):
+            if prop_name in ('id', 'created_at', 'updated_at'):
                 continue
             rel = prop.get('x-relationship') or {}
             if rel.get('type') == 'many-to-one' and rel.get('target'):
@@ -110,6 +112,25 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
                     'kind': 'enum',
                     'enum_values': [str(v) for v in prop['enum']],
                 })
+            elif actual in ('integer', 'number') and not isinstance(prop.get('enum'), list):
+                groupable.append({
+                    'name': prop_name,
+                    'label': to_title_case(prop_name),
+                    'kind': 'number',
+                })
+            elif actual == 'string' and prop.get('format') in ('date', 'date-time'):
+                groupable.append({
+                    'name': prop_name,
+                    'label': to_title_case(prop_name),
+                    'kind': 'datetime',
+                    'datetime_format': prop['format'],
+                })
+        # creator_id/updater_id are Prisma-only audit fields (not in json_schema.yaml),
+        # so they must be appended explicitly for all dashboardable entities.
+        groupable.extend([
+            {'name': 'creator_id', 'label': 'Creator', 'kind': 'fk', 'fk_target': 'user', 'fk_label_field': 'name'},
+            {'name': 'updater_id', 'label': 'Updater', 'kind': 'fk', 'fk_target': 'user', 'fk_label_field': 'name'},
+        ])
         if not groupable:
             continue
         catalog.append({
@@ -1535,6 +1556,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     image_props          = cats['image']
     boolean_props        = cats['boolean']
     enum_int_props       = cats['enum_integer']
+    enum_str_props       = cats.get('enum_string', [])
     custom_upsert_props  = cats['custom_upsert']
     entity_select_props  = cats.get('entity_select', [])
 
@@ -1574,6 +1596,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<number | null>(src.{p} ?? null);"
         for p in enum_int_props
     )
+    enum_str_states = '\n'.join(
+        f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
+        for p in enum_str_props
+    )
     # Many-to-one: FK prop is in src type → initialize from src.{prop_name}
     # Selector OTO: FK prop is excluded from src type, but relation object is present → use src.{relation_name}?.id
     rel_states_lines = [
@@ -1596,7 +1622,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string | null>(src.{p} || null);"
         for p in entity_select_props
     )
-    all_states = '\n'.join(filter(None, [dt_states, img_states, bool_states, enum_states, rel_states, custom_states, entity_select_states]))
+    all_states = '\n'.join(filter(None, [dt_states, img_states, bool_states, enum_states, enum_str_states, rel_states, custom_states, entity_select_states]))
 
     # ---- Form fields (JSX) ----
     def _tf(p):
@@ -1780,6 +1806,36 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      />"
         )
 
+    # Enum string fields (string discriminator with fixed enum values)
+    enum_str_jsxs = []
+    for p in enum_str_props:
+        prop      = filtered_props[p]
+        fk        = _tf(p)
+        sn        = safe_var_name(p)
+        setter    = _setter(sn)
+        opts_var  = f'{sn}Options'
+        enum_vals = prop.get('enum', [])
+        req       = p in (model_def.get('required') or [])
+
+        opts = ', '.join(f"{{ value: '{v}', label: '{v}' }}" for v in enum_vals)
+        enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
+
+        enum_str_jsxs.append(
+            f"      <Autocomplete\n"
+            f"        options={{{opts_var}}}\n"
+            f"        value={{{opts_var}.find((o) => o.value === {sn}) ?? null}}\n"
+            f"        onChange={{(_, newValue) => set{setter}(newValue?.value ?? '')}}\n"
+            f"        renderInput={{(params) => (\n"
+            f"          <TextField\n"
+            f"            {{...params}}\n"
+            f"            label={{tf('{fk}')}}\n"
+            f"            margin=\"normal\"\n"
+            f"            {'required' if req else ''}\n"
+            f"          />\n"
+            f"        )}}\n"
+            f"      />"
+        )
+
     # For each many-to-one (and selector OTO) relation, emit:
     #   - {prop}InitialOptions  : useMemo over the limited initial set (initial{Target}s)
     #   - {prop}SearchAction    : useCallback that delegates to search{Target}Options and
@@ -1862,6 +1918,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         '\n'.join(rel_jsxs),
         '\n'.join(num_jsxs),
         '\n'.join(enum_int_jsxs),
+        '\n'.join(enum_str_jsxs),
         '\n'.join(bool_jsxs),
         '\n'.join(dt_jsxs),
         '\n'.join(img_jsxs),
@@ -1885,14 +1942,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     img_ds   = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in image_props)
     rel_ds   = '\n'.join(f"    formData.set('{r['prop_name']}', {safe_var_name(r['prop_name'])} || '');" for r in list(parent_rels_raw) + list(selector_oto_rels))
     bool_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}.toString());" for p in boolean_props)
-    enum_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} !== null ? String({safe_var_name(p)}) : '');" for p in enum_int_props)
+    enum_ds      = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} !== null ? String({safe_var_name(p)}) : '');" for p in enum_int_props)
+    enum_str_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in enum_str_props)
     def _custom_form_data_line(p: str) -> str:
         defn = filtered_props.get(p, {})
         if _get_actual_type(defn) == 'boolean':
             return f"    formData.set('{p}', {safe_var_name(p)}.toString());"
         return f"    formData.set('{p}', {safe_var_name(p)});"
     cust_ds  = '\n'.join(_custom_form_data_line(p) for p in custom_upsert_props)
-    parent_form_data_sets = '\n'.join(filter(None, [text_ds, entity_select_ds, rel_ds, num_ds, enum_ds, bool_ds, dt_ds, img_ds, cust_ds]))
+    parent_form_data_sets = '\n'.join(filter(None, [text_ds, entity_select_ds, rel_ds, num_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, cust_ds]))
 
     # ---- Children analysis ----
     # Use the pre-filtered embedded_ch from build_context (passed as non_comment_ch in ctx).
@@ -2080,7 +2138,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             if actual == 'string':
                 return "''"
             if actual in ('integer', 'number'):
-                return 'null' if nullable else '0'
+                if nullable:
+                    return 'null'
+                schema_default = defn.get('default')
+                return str(schema_default) if schema_default is not None else '0'
             return 'null'
 
         create_body = '\n'.join(
@@ -2452,6 +2513,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     validation_entry_lines.extend(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in selector_oto_rels)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in boolean_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in enum_int_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in enum_str_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in custom_upsert_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in entity_select_props)
     val_entries = '\n'.join(validation_entry_lines)
@@ -2814,7 +2876,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'custom_upsert_imports':    custom_upsert_imports,
         'has_children':             has_children,
         'has_comment_children':     has_comment_children,
-        'has_many_to_one':          has_many_to_one or bool(enum_int_props) or bool(entity_select_props) or flatten_needs_autocomplete,
+        'has_many_to_one':          has_many_to_one or bool(enum_int_props) or bool(enum_str_props) or bool(entity_select_props) or flatten_needs_autocomplete,
         'has_entity_autocomplete':  bool(parent_rels_raw) or bool(selector_oto_rels),
         'has_child_entity_autocomplete': bool(child_entity_rel_opt),
         'has_datetime_props':       bool(date_time_props) or flatten_needs_datetime,
