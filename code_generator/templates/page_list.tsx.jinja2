@@ -14,14 +14,7 @@ import { DEFAULT_PAGE_SIZE{% if needs_formatting %}, type PageOpts{% endif %} } 
 {% if list_uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
-{% if has_chart %}
-import Link from '@mui/material/Link';
-import Button from '@mui/material/Button';
-import Box from '@mui/material/Box';
-import BarChartIcon from '@mui/icons-material/BarChart';
-{% elif entity_custom_components %}
-import Box from '@mui/material/Box';
-{% endif %}
+import AppListToolbar from '@/components/ui/layout/AppListToolbar';
 {% for comp in entity_custom_components %}
 import {{ comp.name }} from '{{ comp.path if comp.path else "@/components/" + parent + "/" + comp.name }}';
 {% endfor %}
@@ -104,19 +97,17 @@ async function {{ parent_pascal }}ListContent({
 {% endif %}
   return (
     <>
-      <h1>{t('{{ parent_camel }}')}</h1>
-{% if has_chart or entity_custom_components %}
-      <Box sx={{ '{{' }} display: 'flex', gap: 1, mb: 1 {{ '}}' }}>
+      <AppListToolbar
+        title={t('{{ parent_camel }}')}
 {% if has_chart %}
-        <Button component={Link} href="/{{ parent }}/chart" variant="outlined" startIcon={<BarChartIcon />}>
-          {tc('chart')}
-        </Button>
+        chartHref="/{{ parent }}/chart"
+        chartLabel={tc('chart')}
 {% endif %}
+      >
 {% for comp in entity_custom_components %}
         <{{ comp.name }} permissions={userPermissions} />
 {% endfor %}
-      </Box>
-{% endif %}
+      </AppListToolbar>
       <{{ list_component }}
         entityLabel={t('{{ parent_camel }}')}
         initialRows={{ '{' }}{% if needs_formatting %}formatted{{ parent_pascal }}s{% else %}{{ parent_camel }}Page.rows{% endif %}{{ '}' }}

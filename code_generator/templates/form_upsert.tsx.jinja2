@@ -7,14 +7,6 @@ import { useTranslations } from 'next-intl';
 import TextField from '@mui/material/TextField';
 {% if has_many_to_one %}
 import Autocomplete from '@mui/material/Autocomplete';
-import Box from '@mui/material/Box';
-import IconButton from '@mui/material/IconButton';
-import Tooltip from '@mui/material/Tooltip';
-import Link from '@mui/material/Link';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-{% endif %}
-{% if has_entity_autocomplete %}
-import EntityAutocomplete from '@/components/_standard/EntityAutocomplete';
 {% endif %}
 {% if has_child_entity_autocomplete %}
 import type { EntityAutocompleteCellConfig } from '@/components/_standard/EntityAutocompleteCellEditor';
@@ -29,6 +21,7 @@ import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}
 import type { FormUpsertProps } from '@/lib/{{ parent }}/types';
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
+import { AppFieldText, AppFieldBoolean, AppValidationError{% if has_entity_autocomplete %}, AppFieldRelation{% endif %}{% if has_flatten_accordion_upsert %}, AppSection{% endif %} } from '@/components/ui';
 {% if has_comment_children %}
 import CommentListWrapper from '@/components/_standard/CommentListWrapper';
 {% endif %}
@@ -45,19 +38,8 @@ import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
 {% if has_image_props %}
 import ImageUpload from '@/components/_standard/ImageUpload';
 {% endif %}
-{% if has_boolean_props %}
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Checkbox from '@mui/material/Checkbox';
-{% endif %}
 {% if custom_upsert_imports %}
 {{ custom_upsert_imports }}
-{% endif %}
-{% if has_flatten_accordion_upsert %}
-import Accordion from '@mui/material/Accordion';
-import AccordionSummary from '@mui/material/AccordionSummary';
-import AccordionDetails from '@mui/material/AccordionDetails';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import Typography from '@mui/material/Typography';
 {% endif %}
 import { validateForm } from './form_validation';
 
@@ -168,10 +150,13 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% if child_grid_components %}
 {{ child_grid_components }}
 {% endif %}
+{% if indep_list_readonly_jsx %}
+{{ indep_list_readonly_jsx }}
+{% endif %}
 {% if flatten_edit_sections %}
 {{ flatten_edit_sections }}
 {% endif %}
-      {validationError && <p style={{ '{{' }} color: 'red' {{ '}}' }}>{validationError}</p>}
+      <AppValidationError message={validationError} />
       {isEdit && <AuditInfo src={src} />}
     </>
   );

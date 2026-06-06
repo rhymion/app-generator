@@ -7,25 +7,15 @@ import { useRouter } from 'next/navigation';
 {% if has_grid_children or children_raw %}
 import { GridColDef } from '@mui/x-data-grid';
 {% endif %}
-import IconButton from '@mui/material/IconButton';
-import Tooltip from '@mui/material/Tooltip';
-import TextField from '@mui/material/TextField';
 import type { FormViewProps } from '@/lib/{{ parent }}/types';
-import Link from '@mui/material/Link';
 {% if has_grid_children %}
 import FieldsViewGrid from '@/components/_standard/FieldsViewGrid';
 {% if col_fn_names %}
 import { {{ col_fn_names | join(', ') }} } from '../{{ parent }}/column_def';
 {% endif %}
 {% endif %}
-import EditIcon from '@mui/icons-material/Edit';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 {% if needs_datetime_wrapper %}
 import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
-{% endif %}
-{% if has_rel_links %}
-import InputAdornment from '@mui/material/InputAdornment';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 {% endif %}
 {% if needs_image_display %}
 import ImageDisplay from '@/components/_standard/ImageDisplay';
@@ -40,9 +30,8 @@ import ListWrapper from '@/components/_standard/ListWrapper';
 import CommentListWrapper from '@/components/_standard/CommentListWrapper';
 import { add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment } from '@/lib/{{ parent }}/actions';
 {% endif %}
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Checkbox from '@mui/material/Checkbox';
 import AuditInfo from '@/components/_standard/AuditInfo';
+import { AppDetailShell, AppDetailHeader, AppFieldText, AppFieldBoolean{% if has_rel_links %}, AppFieldRelation{% endif %}{% if needs_accordion %}, AppSection{% endif %} } from '@/components/ui';
 {% if custom_view_imports %}
 {{ custom_view_imports }}
 {% endif %}
@@ -51,13 +40,6 @@ import {{ comp.name }} from '{{ comp.path if comp.path else "./" + comp.name }}'
 {% endfor %}
 {% if use_dayjs %}
 import dayjs from 'dayjs';
-{% endif %}
-{% if needs_accordion %}
-import Accordion from '@mui/material/Accordion';
-import AccordionSummary from '@mui/material/AccordionSummary';
-import AccordionDetails from '@mui/material/AccordionDetails';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import Typography from '@mui/material/Typography';
 {% endif %}
 
 export default function FormView({ src, permissions{% if entity_view_components %}, currentUserRoleIds, currentUserId{% endif %} }: FormViewProps) {
@@ -74,28 +56,12 @@ export default function FormView({ src, permissions{% if entity_view_components 
 {{ column_variables }}
 {% endif %}
   return (
-    <div>
-      <div className="flex justify-between items-center mb-4">
-        <h1>{te('{{ parent_camel }}')}</h1>
-        <div>
-        {canEdit && (
-          <Tooltip title="Edit">
-            <Link href={`/{{ parent }}/edit/${src.id}`} sx={{ '{{' }} mx: 1 {{ '}}' }} aria-label="Edit">
-              <IconButton component="span" color="primary" tabIndex={-1}>
-                <EditIcon />
-              </IconButton>
-            </Link>
-          </Tooltip>
-        )}
-          <Tooltip title="Back to List">
-            <Link href="/{{ parent }}" aria-label="Back to List">
-              <IconButton component="span" tabIndex={-1}>
-                <ArrowBackIcon />
-              </IconButton>
-            </Link>
-          </Tooltip>
-        </div>
-      </div>
+    <AppDetailShell>
+      <AppDetailHeader
+        title={te('{{ parent_camel }}')}
+        editHref={canEdit ? `/{{ parent }}/edit/${src.id}` : undefined}
+        backHref="/{{ parent }}"
+      />
 {{ all_parent_fields }}
 {% if reverse_oto_fields %}
 {{ reverse_oto_fields }}
@@ -110,6 +76,6 @@ export default function FormView({ src, permissions{% if entity_view_components 
 {% for comp in entity_view_components %}
       <{{ comp.name }} src={src} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />
 {% endfor %}
-    </div>
+    </AppDetailShell>
   );
 }
