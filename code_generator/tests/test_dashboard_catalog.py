@@ -182,17 +182,16 @@ def test_system_fields_excluded():
 # Fixture schema integration — uses the actual json_schema.yaml
 # ---------------------------------------------------------------------------
 
-def test_fixture_schema_number_and_datetime_kinds():
+def test_sample_entities_number_and_datetime_kinds():
     """product.price → number kind; booking.start_time → datetime kind."""
-    import yaml
-    from pathlib import Path
-
-    schema_path = Path(__file__).parent.parent / 'json_schema.yaml'
-    if not schema_path.exists():
-        pytest.skip('json_schema.yaml not found')
-
-    with open(schema_path) as f:
-        schema = yaml.safe_load(f)
+    schema = _schema({
+        'product': _entity({'price': {'type': 'integer'}}),
+        'booking': _entity({
+            'start_time': {'type': 'string', 'format': 'date-time'},
+            'end_time': {'type': 'string', 'format': 'date-time'},
+        }),
+        'leave_request': _entity({'start_date': {'type': 'string', 'format': 'date'}}),
+    })
 
     catalog = build_dashboard_catalog(schema)
     by_name = {e['name']: e for e in catalog}
@@ -203,7 +202,7 @@ def test_fixture_schema_number_and_datetime_kinds():
     assert 'price' in product_fields
     assert product_fields['price']['kind'] == 'number'
 
-    # booking.start_time and end_time should be datetime kind
+    # booking.start_time should be datetime kind
     assert 'booking' in by_name, 'booking entity not in catalog'
     booking_fields = {f['name']: f for f in by_name['booking']['groupable_fields']}
     assert 'start_time' in booking_fields
