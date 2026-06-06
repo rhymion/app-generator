@@ -257,12 +257,15 @@ model dashboard_widget {
   id             String    @id @default(cuid())
   dashboard_id   String
   dashboard      dashboard @relation(fields: [dashboard_id], references: [id], onDelete: Cascade)
-  name           String
-  entity_name    String
-  chart_type     Int       @default(0)
-  group_by_field String
-  filter_field   String?
-  filter_value   String?
+  name            String
+  entity_name     String
+  chart_type      Int
+  group_by_field  String
+  stack_mode      Int?
+  series_field    String?
+  group_by_bucket Int?
+  filter_field    String?
+  filter_value    String?
   order          Int       @default(0)
   created_at     DateTime  @default(now()) @db.Timestamptz(0)
   updated_at     DateTime  @updatedAt @db.Timestamptz(0)
