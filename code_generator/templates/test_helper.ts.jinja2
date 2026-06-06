@@ -1,5 +1,5 @@
 // AUTO-GENERATED - DO NOT EDIT
-import { prisma } from '../db-helpers';
+import { prisma, ALL_ENTITIES } from '../db-helpers';
 import { TEST_CREDENTIALS } from '../test-credentials';
 {% if needs_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
@@ -421,6 +421,9 @@ export async function populate{{ pascal }}Data(length: number) {
         {{ ua_dep.prop_name }}: deps.{{ ua_dep.dep_var_name }}.id,
 {% endif %}
 {% endfor %}
+{% for ef in extra_prisma_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,
       },
@@ -523,6 +526,9 @@ export async function populate{{ pascal }}FullData(length: number) {
         {{ ua_dep.prop_name }}: deps.{{ ua_dep.dep_var_name }}.id,
 {% endif %}
 {% endfor %}
+{% for ef in extra_prisma_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,
       },
@@ -621,6 +627,32 @@ export async function setup{{ pascal }}ApprovalFlow() {
   const approverRole = await prisma.role.create({
     data: { name: 'Test {{ title }} Approver Role', creator_id: testUser.id, updater_id: testUser.id },
   });
+  // noRoleUser needs entity permission to access {{ model_name }} but must NOT hold
+  // requestorRole/approverRole (so the role-gated approval flow is skipped for them).
+  const basicRole = await prisma.role.create({
+    data: { name: 'Test {{ title }} Basic Role', creator_id: testUser.id, updater_id: testUser.id },
+  });
+
+  // Grant all entity permissions to each role so approval-flow users can access
+  // the entity form and all FK-dependent autocompletes (authz uses default-deny).
+  await Promise.all(
+    [requestorRole, approverRole, basicRole].flatMap(role =>
+      ALL_ENTITIES.map(entity =>
+        prisma.permission.create({
+          data: {
+            name: entity,
+            role_id: role.id,
+            create: true,
+            read: true,
+            update: true,
+            delete: true,
+            creator_id: testUser.id,
+            updater_id: testUser.id,
+          },
+        })
+      )
+    )
+  );
 
   const requestorUser = await prisma.user.create({
     data: {
@@ -654,6 +686,7 @@ export async function setup{{ pascal }}ApprovalFlow() {
       api_key: `test_mk_{{ model_name }}_norole`,
       creator_id: testUser.id,
       updater_id: testUser.id,
+      roles: { connect: [{ id: basicRole.id }] },
     },
   });
 

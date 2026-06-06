@@ -31,7 +31,7 @@
   },
   "Fields": {
     "actions": "Actions",
-    "apiKey": "API Key",
+    "apiKey": "Api Key",
     "approverRole": "Approver Role",
     "avatar": "Avatar",
     "chartType": "Chart Type",

@@ -15,6 +15,21 @@ from helpers.naming import (
 from helpers.schema_helpers import filter_fields, get_parent_relationships, is_optional_fk_to_parent, get_flatten_rels
 from helpers.label_field import build_label_expression, render_prisma_include, resolve_label_paths
 from build_context import _get_entity_options
+from generate_types import extract_entities
+
+
+def _safe_entity_opts(opts: list, schema: dict) -> list:
+    """Return entity options filtered to prefer non-test entities.
+
+    When an entity_select field's test data uses the same entity name as a
+    record created by grantAllEntityPermissions (which creates one permission
+    per ALL_ENTITIES entity for the Administrator role), the uniqueness
+    constraint (name, role_id) causes test failures.  Picking an entity that
+    is not a test entity avoids that conflict.
+    """
+    test_names = {e['parent'] for e in extract_entities(schema) if e['generate_config'].get('test')}
+    safe = [o for o in opts if o['value'] not in test_names]
+    return safe if safe else opts
 
 
 # ---------------------------------------------------------------------------
@@ -1532,6 +1547,23 @@ def helper_context(
 
     flatten_test_rels = _compute_flatten_test_rels(parent, pascal, definition_key, schema)
 
+    # Fields required by Prisma but hidden from the UI via x-generate.fields filter.
+    # These must still be included in prisma.create() populate calls.
+    _visible_prop_names = set(properties.keys())
+    _SYSTEM_PROPS = {'id', 'creator_id', 'updater_id', 'created_at', 'updated_at'}
+    _fields_filter = generate_config.get('fields') or []
+    extra_prisma_fields = []
+    if _fields_filter:
+        _all_parent_props = parent_def.get('properties') or {}
+        for _prop_name in sorted(parent_def.get('required') or []):
+            if _prop_name in _SYSTEM_PROPS or _prop_name in _visible_prop_names:
+                continue
+            _prop = _all_parent_props.get(_prop_name)
+            if not _prop:
+                continue
+            _fake_field = {'category': 'text', 'prop_name': _prop_name, 'label': to_title_case(_prop_name)}
+            extra_prisma_fields.append({'prop_name': _prop_name, 'prisma_val': prisma_value(_fake_field, 'i', title)})
+
     return {
         'pascal': pascal,
         'title': title,
@@ -1549,6 +1581,7 @@ def helper_context(
         'ua_dep_fields_full': ua_dep_fields_full,
         'required_fields_prisma': required_fields_prisma,
         'all_fields_prisma': all_fields_prisma,
+        'extra_prisma_fields': extra_prisma_fields,
         'has_optional': bool(optional_field_metas),
         'datagrid_children': enriched_datagrid_children,
         'comment_children': enriched_comment_children,
@@ -1569,6 +1602,7 @@ def spec_context(
     model_name: str,
     definition_key: str,
     generate_config: dict,
+    test_entity_count: int | None = None,
 ) -> dict:
     parent_def = schema['definitions'].get(model_name)
     if not parent_def or not parent_def.get('properties'):
@@ -1745,10 +1779,14 @@ def spec_context(
         lbl = prim_meta.get('label', to_title_case(prim))
         if prim_meta.get('category') == 'entity_select':
             opts = prim_meta.get('entity_options') or []
+            # first_val: use opts[0] — always visible (present in grantAllEntityPermissions data)
+            # second_val: use first safe (non-test) option to avoid rename conflict in test 3.3
             first_val   = opts[0]['value'] if opts else ''
-            second_val  = opts[1]['value'] if len(opts) > 1 else first_val
             first_label = opts[0]['label'] if opts else ''
-            second_label = opts[1]['label'] if len(opts) > 1 else first_label
+            safe = _safe_entity_opts(opts, schema)
+            safe_excl_first = [o for o in safe if o['value'] != first_val]
+            second_val   = safe_excl_first[0]['value'] if safe_excl_first else (opts[1]['value'] if len(opts) > 1 else first_val)
+            second_label = safe_excl_first[0]['label'] if safe_excl_first else (opts[1]['label'] if len(opts) > 1 else first_label)
             list_id_1 = first_val
             list_id_is_unique = False
             after_create_id = first_val
@@ -1778,10 +1816,14 @@ def spec_context(
         name_meta = next((f for f in fields if f['prop_name'] == 'name'), None)
         if name_meta and name_meta.get('category') == 'entity_select':
             opts = name_meta.get('entity_options') or []
+            # first_val: use opts[0] — always visible (present in grantAllEntityPermissions data)
+            # second_val: use first safe (non-test) option to avoid rename conflict in test 3.3
             first_val   = opts[0]['value'] if opts else ''
-            second_val  = opts[1]['value'] if len(opts) > 1 else first_val
             first_label = opts[0]['label'] if opts else ''
-            second_label = opts[1]['label'] if len(opts) > 1 else first_label
+            safe = _safe_entity_opts(opts, schema)
+            safe_excl_first = [o for o in safe if o['value'] != first_val]
+            second_val   = safe_excl_first[0]['value'] if safe_excl_first else (opts[1]['value'] if len(opts) > 1 else first_val)
+            second_label = safe_excl_first[0]['label'] if safe_excl_first else (opts[1]['label'] if len(opts) > 1 else first_label)
             list_id_1 = first_val
             list_id_is_unique = False
             after_create_id = first_val
@@ -2010,6 +2052,17 @@ def spec_context(
                 'field_prop_name': child_field_to_clear['prop_name'],
             }
 
+    # Count records pre-created by db:seed + db:grantAllPermissions.
+    # role: 1 Administrator role; permission: 1 per test entity (ALL_ENTITIES); user: 1 test user.
+    if parent == 'role':
+        seed_count = 1
+    elif parent == 'permission':
+        seed_count = test_entity_count if test_entity_count is not None else 0
+    elif parent == 'user':
+        seed_count = 1
+    else:
+        seed_count = 0
+
     return {
         'parent': parent,
         'pascal': pascal,
@@ -2062,6 +2115,7 @@ def spec_context(
         'check_field_inner_label': check_field_inner_label,
         'has_approvable': any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model_name, schema)),
         'flatten_test_rels': _compute_flatten_test_rels(parent, pascal, definition_key, schema),
+        'seed_count': seed_count,
     }
 
 
@@ -2122,6 +2176,7 @@ def api_spec_context(
     model_name: str | None = None,
     definition_key: str | None = None,
     generate_config: dict | None = None,
+    test_entity_count: int | None = None,
 ) -> dict:
     model = model_name or parent
     parent_pascal = to_pascal_case(parent)
@@ -2329,6 +2384,20 @@ def api_spec_context(
 
     has_approvable = any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model, schema))
 
+    # Count items pre-created by db:seed + db:grantAllPermissions so that
+    # generated tests can adjust expected row counts accordingly.
+    # - role:       grantAllPermissions creates 1 Administrator role
+    # - permission: grantAllPermissions creates 1 permission per test entity (ALL_ENTITIES)
+    # - user:       seedTestDatabase creates 1 test user
+    if parent == 'role':
+        seed_count = 1
+    elif parent == 'permission':
+        seed_count = test_entity_count if test_entity_count is not None else 0
+    elif parent == 'user':
+        seed_count = 1
+    else:
+        seed_count = 0
+
     return {
         'parent': parent,
         'pascal': parent_pascal,
@@ -2343,6 +2412,7 @@ def api_spec_context(
         'can_new': gen_cfg.get('new', True) is not False,
         'can_edit': gen_cfg.get('edit', True) is not False,
         'can_delete': gen_cfg.get('delete', True) is not False,
+        'seed_count': seed_count,
         'I': I,
         'I7': I,  # same indentation level as I for section 7
         'assert_create': assert_create,
@@ -2366,7 +2436,7 @@ def api_spec_context(
 # db-helpers.ts context
 # ---------------------------------------------------------------------------
 
-def db_helpers_context(schema: dict) -> dict:
+def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None) -> dict:
     """Build context for cypress/support/db-helpers.ts.
 
     Determines the correct deletion order for all Prisma models by:
@@ -2376,6 +2446,11 @@ def db_helpers_context(schema: dict) -> dict:
        (all models reference it via creator_id/updater_id even when not in schema).
     4. Grouping into deletion waves so that all dependents of an entity are
        deleted before the entity itself.
+
+    test_entity_names: sorted list of entity names for which test specs are generated.
+    These become ALL_ENTITIES in the template — the permission grant set must exactly
+    mirror the test-spec entity set so non-base entities (e.g. settingX variants of
+    xxxxx_xxxxx) are always included.
     """
     defs = schema['definitions']
 
@@ -2435,4 +2510,7 @@ def db_helpers_context(schema: dict) -> dict:
             assigned.add(name)
             remaining.remove(name)
 
-    return {'deletion_levels': levels}
+    return {
+        'deletion_levels': levels,
+        'test_entity_names': sorted(test_entity_names) if test_entity_names is not None else [],
+    }

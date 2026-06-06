@@ -78,11 +78,12 @@ phased plan.
 
 **What works:** TOTP authentication logic, encrypted secret storage
 (AES-256-GCM), and recovery codes (8 per enrollment, bcrypt-hashed)
-are implemented in `lib/mfa/`.
+are implemented in `lib/mfa/`. Self-service enrollment and disable are
+available at `/setting/mfa`.
 
-**What's missing:** The MFA enrollment UI (`/setting/mfa`) has a state
-transition defect — the QR code screen may not appear after clicking
-enable. Users cannot reliably enable MFA through the application interface.
+**Note:** Recovery codes can be entered in the standard MFA code field at login.
+There is no separate recovery-code-only screen; the same code input accepts
+both TOTP codes and recovery codes.
 
 ### Approval Flow
 
@@ -253,6 +254,8 @@ File and image upload via a polymorphic bridge, backed by Vercel Blob. Any entit
 **Organization-scoped filtering** is applied at the query layer: every list query applies an automatic `organization_id` filter, scoping data to the authenticated user's organization. Tenant-level isolation (cross-tenant data separation) is not yet implemented — see the Roadmap section.
 
 **Role-based access control** is defined per-model in the schema. The `authz.ts` module enforces per-model CRUD permissions on every request.
+
+**Default-deny**: new users start with zero permissions. An Administrator must explicitly assign roles to grant access. The `Administrator` role (seeded by `seed-tenant.ts`) grants full CRUD on all entities. See [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) for the permission model and test classification rules.
 
 See [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenancy-and-permissions.md).
 

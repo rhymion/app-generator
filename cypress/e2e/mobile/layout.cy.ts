@@ -15,9 +15,11 @@ const MOBILE = { width: 375, height: 667 };       // iPhone SE
 const DESKTOP = { width: 1280, height: 720 };
 
 describe('Mobile-responsive shell', () => {
+  // Category 1: normal-flow — grant full permissions so CRUD pages (e.g. /role) are accessible.
   beforeEach(() => {
     cy.task('db:reset');
     cy.task('db:seed');
+    cy.task('db:grantAllPermissions');
     Cypress.session.clearAllSavedSessions();
     cy.clearCookies();
     cy.clearLocalStorage();
