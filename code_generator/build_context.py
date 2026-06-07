@@ -550,6 +550,42 @@ def _get_entity_options(schema: dict) -> list[dict]:
 # Main builder
 # ---------------------------------------------------------------------------
 
+def canonicalize_bridges(entity_schema: dict, all_defs: dict) -> dict:
+    """Normalize x-bridge array (new form) into synthetic x-relationship annotations.
+
+    Converts each x-bridge entry into a field-level x-relationship annotation on the
+    via field, so the existing one_to_one_rel detection path picks it up unchanged.
+    Old-form (x-relationship: {type: one-to-one_bridge}) on the field is untouched.
+
+    Bridge IR: {role, target, via_field, kind}
+    Returns a modified shallow copy of entity_schema, or entity_schema unchanged if
+    no x-bridge is present.
+    """
+    x_bridge = entity_schema.get('x-bridge')
+    if not x_bridge:
+        return entity_schema
+
+    props = dict(entity_schema.get('properties', {}))
+    _KIND_MAP = {
+        'one_to_one_bridge': 'one-to-one_bridge',
+        'one-to-one_bridge': 'one-to-one_bridge',
+    }
+    for entry in x_bridge:
+        via_field = entry.get('via')
+        target = entry.get('target')
+        kind = entry.get('kind', 'one_to_one_bridge')
+        rel_type = _KIND_MAP.get(kind, kind)  # normalize to internal hyphen format
+
+        if not via_field or not target or via_field not in props:
+            continue  # validation.py reports missing required fields
+
+        # Old-form field-level annotation takes precedence
+        if not props[via_field].get('x-relationship'):
+            props[via_field] = {**props[via_field], 'x-relationship': {'type': rel_type, 'target': target}}
+
+    return {**entity_schema, 'properties': props}
+
+
 def build_context(entity: dict, schema: dict) -> dict:
     parent      = entity['parent']
     model       = entity['model']
@@ -560,7 +596,10 @@ def build_context(entity: dict, schema: dict) -> dict:
     parent_pascal = to_pascal_case(parent)
     parent_camel  = to_camel_case(parent)
 
-    model_def      = schema['definitions'].get(model, {})
+    model_def      = canonicalize_bridges(
+        schema['definitions'].get(model, {}),
+        schema.get('definitions', {}),
+    )
     filtered_props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
 
     # Config flags

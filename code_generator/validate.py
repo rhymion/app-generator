@@ -317,6 +317,64 @@ def validate_schema(schema: dict) -> None:
                 )
 
     # -----------------------------------------------------------------------
+    # 6. x-bridge array validation
+    # -----------------------------------------------------------------------
+    _VALID_BRIDGE_KINDS = frozenset({'one_to_one_bridge', 'one-to-one_bridge'})
+
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        x_bridge = defn.get('x-bridge')
+        if x_bridge is None:
+            continue
+        if not isinstance(x_bridge, list):
+            errors.append(
+                f"Definition '{def_key}': x-bridge must be a list of bridge entries; "
+                f"got {type(x_bridge).__name__}."
+            )
+            continue
+
+        props = defn.get('properties', {})
+        for i, entry in enumerate(x_bridge):
+            if not isinstance(entry, dict):
+                errors.append(
+                    f"Definition '{def_key}', x-bridge[{i}]: each entry must be a mapping."
+                )
+                continue
+
+            for required_key in ('role', 'target', 'via', 'kind'):
+                if required_key not in entry:
+                    errors.append(
+                        f"Definition '{def_key}', x-bridge[{i}]: "
+                        f"missing required key '{required_key}'."
+                    )
+
+            target = entry.get('target', '')
+            via_field = entry.get('via', '')
+            kind = entry.get('kind', '')
+
+            if target and target not in defs:
+                errors.append(
+                    f"Definition '{def_key}', x-bridge[{i}]: "
+                    f"target entity '{target}' is not defined in the schema. "
+                    f"Add a '{target}' definition or correct the target name."
+                )
+
+            if via_field and via_field not in props:
+                errors.append(
+                    f"Definition '{def_key}', x-bridge[{i}]: "
+                    f"via field '{via_field}' does not exist in '{def_key}' properties. "
+                    f"Add the field or correct the via name."
+                )
+
+            if kind and kind not in _VALID_BRIDGE_KINDS:
+                errors.append(
+                    f"Definition '{def_key}', x-bridge[{i}]: "
+                    f"kind '{kind}' is not a valid bridge kind. "
+                    f"Accepted values: {sorted(_VALID_BRIDGE_KINDS)}."
+                )
+
+    # -----------------------------------------------------------------------
     # Report
     # -----------------------------------------------------------------------
     if errors:
