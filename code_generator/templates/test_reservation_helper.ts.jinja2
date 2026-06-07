@@ -1,0 +1,151 @@
+// AUTO-GENERATED - DO NOT EDIT
+// x-reservation helper for entity: {{ entity }}
+
+import { prisma } from '../db-helpers';
+import { TEST_CREDENTIALS } from '../test-credentials';
+
+async function getTestUser() {
+  const testUser = await prisma.user.findUnique({
+    where: { email: TEST_CREDENTIALS.email },
+  });
+  if (!testUser) throw new Error('Test user not found. Make sure db:seed has run first.');
+  return testUser;
+}
+
+async function createTest{{ pool_fk_pascal }}(testUser: any, suffix: string) {
+  const attachable = await prisma.attachable.create({ data: {} });
+  return prisma.{{ pool_fk_entity }}.create({
+    data: {
+      attachable_id: attachable.id,
+      code: `GEN-PROD-${suffix}`,
+      name: `Gen Product ${suffix}`,
+      price: 0,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+}
+
+async function createTestCustomer(testUser: any) {
+  let record = await prisma.{{ parent_fk_entity }}.findFirst({
+    where: { name: 'Gen {{ pascal }} Customer' },
+    orderBy: { created_at: 'asc' },
+  });
+  if (!record) {
+    record = await prisma.{{ parent_fk_entity }}.create({
+      data: {
+        name: 'Gen {{ pascal }} Customer',
+        email: `gen-{{ entity }}-cust-${Date.now()}@example.com`,
+        password: 'test-password',
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
+  }
+  return record;
+}
+
+async function createPool(
+  testUser: any,
+  {{ criteria_pool_field }}: string,
+  {{ pool_qty_field }}: number,
+{% for f in orderby_sortable %}
+  {{ f.field }}{% if f.is_nullable %}: string | null{% else %}: string{% endif %} = {% if f.is_nullable %}null{% else %}''{% endif %},
+{% endfor %}
+) {
+  return prisma.{{ pool_entity }}.create({
+    data: {
+      {{ criteria_pool_field }},
+      {{ pool_qty_field }},
+      {{ pool_res_field }}: 0,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+{% for f in orderby_sortable %}
+      {{ f.field }}: {{ f.field }}{% if f.is_date %} ? new Date({{ f.field }}) : null{% endif %},
+{% endfor %}
+    },
+  });
+}
+
+/** ① 複数アイテム引当成功: 同一 {{ criteria_pool_field }} で2行 {{ pool_entity }}、十分な在庫 */
+export async function seedReservation{{ pascal }}Multi() {
+  const testUser = await getTestUser();
+  const customer = await createTestCustomer(testUser);
+  const product = await createTest{{ pool_fk_pascal }}(testUser, 'MULTI-1');
+  const inv1 = await createPool(testUser, product.id, 100{% for f in orderby_sortable %}, {{ f.seed_multi_row1 }}{% endfor %});
+  const inv2 = await createPool(testUser, product.id, 100{% for f in orderby_sortable %}, {{ f.seed_multi_row2 }}{% endfor %});
+  return JSON.parse(JSON.stringify({
+    userId: customer.id,
+    product,
+    inventoryRows: [inv1, inv2],
+  }));
+}
+
+/** ② 在庫不足 rollback: 必要数量を満たせない {{ pool_entity }} */
+export async function seedReservation{{ pascal }}Insufficient() {
+  const testUser = await getTestUser();
+  const customer = await createTestCustomer(testUser);
+  const product = await createTest{{ pool_fk_pascal }}(testUser, 'INSUF-1');
+  const inventory = await createPool(testUser, product.id, 2);
+  return JSON.parse(JSON.stringify({
+    userId: customer.id,
+    product,
+    inventory,
+    overQty: 5,
+  }));
+}
+
+/** ③ criteria 遵守: 一致 {{ criteria_pool_field }} と不一致 {{ criteria_pool_field }} の {{ pool_entity }} を混在 */
+export async function seedReservation{{ pascal }}Criteria() {
+  const testUser = await getTestUser();
+  const customer = await createTestCustomer(testUser);
+  const productMatch = await createTest{{ pool_fk_pascal }}(testUser, 'CRIT-MATCH');
+  const productNoMatch = await createTest{{ pool_fk_pascal }}(testUser, 'CRIT-NOMATCH');
+  const invMatch = await createPool(testUser, productMatch.id, 50);
+  const invNoMatch = await createPool(testUser, productNoMatch.id, 50);
+  return JSON.parse(JSON.stringify({
+    userId: customer.id,
+    productMatch,
+    productNoMatch,
+    invMatch,
+    invNoMatch,
+  }));
+}
+
+/** ④ orderBy 遵守: 同一 {{ criteria_pool_field }} で異なる orderBy フィールド値を持つ3行 {{ pool_entity }} */
+export async function seedReservation{{ pascal }}OrderBy() {
+  const testUser = await getTestUser();
+  const customer = await createTestCustomer(testUser);
+  const product = await createTest{{ pool_fk_pascal }}(testUser, 'ORDERBY-1');
+  const inv1 = await createPool(testUser, product.id, 100{% for f in orderby_sortable %}, {{ f.seed_orderby_row1 }}{% endfor %});
+  const inv2 = await createPool(testUser, product.id, 100{% for f in orderby_sortable %}, {{ f.seed_orderby_row2 }}{% endfor %});
+  const inv3 = await createPool(testUser, product.id, 100{% for f in orderby_sortable %}, {{ f.seed_orderby_row3 }}{% endfor %});
+  return JSON.parse(JSON.stringify({
+    userId: customer.id,
+    product,
+    inventoryRows: [inv1, inv2, inv3],
+  }));
+}
+
+/** Count {{ alloc_entity }} rows for a given {{ entity }} */
+export async function count{{ pascal }}Allocations(parentId: string) {
+  return prisma.{{ alloc_entity }}.count({
+    where: { {{ parent_field }}: parentId },
+  });
+}
+
+/** Get {{ pool_entity }} by id (includes {{ pool_res_field }}) */
+export async function get{{ pascal }}PoolState(poolId: string) {
+  const row = await prisma.{{ pool_entity }}.findUnique({ where: { id: poolId } });
+  return row ? JSON.parse(JSON.stringify(row)) : null;
+}
+
+/** Get {{ alloc_entity }} rows for a given {{ parent_field }}, with {{ pool_entity }} included */
+export async function get{{ pascal }}AllocationsOrdered(parentId: string) {
+  const rows = await prisma.{{ alloc_entity }}.findMany({
+    where: { {{ parent_field }}: parentId },
+    include: { {{ pool_entity }}: true },
+    orderBy: [{% for f in orderby_fields %}{ {{ pool_entity }}: { {{ f.field }}: '{{ f.prisma_direction }}' } }{% if not loop.last %}, {% endif %}{% endfor %}],
+  });
+  return JSON.parse(JSON.stringify(rows));
+}

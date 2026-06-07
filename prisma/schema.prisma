@@ -66,29 +66,58 @@ model user {
   mfa_recovery_codes        mfa_recovery_code[]
   accounts                  Account[]
   sessions                  Session[]
-  created_at DateTime @default(now()) @db.Timestamptz(0)
-  updated_at DateTime @updatedAt @db.Timestamptz(0)
-  creator_id String
-  creator    user  @relation("UserCreator", fields: [creator_id], references: [id])
-  updater_id String
-  updater    user  @relation("UserUpdater", fields: [updater_id], references: [id])
-
-  roles         role[]         @relation("UserRoles")
-  organizations organization[] @relation("UserOrganizations")
-
-  created_users  user[]  @relation("UserCreator")
-  updated_users  user[]  @relation("UserUpdater")
-  created_roles          role[]          @relation("RoleCreator")
-  updated_roles          role[]          @relation("RoleUpdater")
-  created_organizations  organization[]  @relation("OrganizationCreator")
-  updated_organizations  organization[]  @relation("OrganizationUpdater")
-  created_permissions    permission[]    @relation("PermissionCreator")
-  updated_permissions    permission[]    @relation("PermissionUpdater")
-  created_approval_flows  approval_flow[] @relation("ApprovalFlowCreator")
-  updated_approval_flows  approval_flow[] @relation("ApprovalFlowUpdater")
-  created_approval_historys  approval_history[] @relation("ApprovalHistoryCreator")
-  created_approvables     approvable[]    @relation("ApprovableCreator")
-  created_comments          comment[]        @relation("CommentCreator")
+  created_at                DateTime            @default(now()) @db.Timestamptz(0)
+  updated_at                DateTime            @updatedAt @db.Timestamptz(0)
+  creator_id                String
+  creator                   user                @relation("UserCreator", fields: [creator_id], references: [id])
+  updater_id                String
+  updater                   user                @relation("UserUpdater", fields: [updater_id], references: [id])
+  roles                     role[]              @relation("UserRoles")
+  shift_templates           shift_template[]    @relation("ShiftTemplateUser")
+  shifts                    shift[]             @relation("ShiftUser")
+  organizations             organization[]      @relation("UserOrganizations")
+  purchase_orders           purchase_order[]    @relation("Buyer")
+  created_db_tables         db_table[]          @relation("DbTableCreator")
+  updated_db_tables         db_table[]          @relation("DbTableUpdater")
+  created_xxxxx_xxxxxs      xxxxx_xxxxx[]       @relation("XxxxxXxxxxCreator")
+  updated_xxxxx_xxxxxs      xxxxx_xxxxx[]       @relation("XxxxxXxxxxUpdater")
+  created_parent1s          parent1[]           @relation("Parent1Creator")
+  updated_parent1s          parent1[]           @relation("Parent1Updater")
+  created_parent_onlys      parent_only[]       @relation("ParentOnlyCreator")
+  updated_parent_onlys      parent_only[]       @relation("ParentOnlyUpdater")
+  created_permissions       permission[]        @relation("PermissionCreator")
+  updated_permissions       permission[]        @relation("PermissionUpdater")
+  created_procedures        procedure[]         @relation("ProcedureCreator")
+  updated_procedures        procedure[]         @relation("ProcedureUpdater")
+  assigned_procedures       procedure[]         @relation("ProcedureAssignee")
+  created_roles             role[]              @relation("RoleCreator")
+  updated_roles             role[]              @relation("RoleUpdater")
+  created_organizations     organization[]      @relation("OrganizationCreator")
+  updated_organizations     organization[]      @relation("OrganizationUpdater")
+  created_users             user[]              @relation("UserCreator")
+  updated_users             user[]              @relation("UserUpdater")
+  created_resources         resource[]          @relation("ResourceCreator")
+  updated_resources         resource[]          @relation("ResourceUpdater")
+  created_bookings          booking[]           @relation("BookingCreator")
+  updated_bookings          booking[]           @relation("BookingUpdater")
+  created_shift_templates   shift_template[]    @relation("ShiftTemplateCreator")
+  updated_shift_templates   shift_template[]    @relation("ShiftTemplateUpdater")
+  created_shifts            shift[]             @relation("ShiftCreator")
+  updated_shifts            shift[]             @relation("ShiftUpdater")
+  created_products          product[]           @relation("ProductCreator")
+  updated_products          product[]           @relation("ProductUpdater")
+  created_inventories       inventory[]         @relation("InventoryCreator")
+  updated_inventories       inventory[]         @relation("InventoryUpdater")
+  created_purchase_orders   purchase_order[]    @relation("PurchaseOrderCreator")
+  updated_purchase_orders   purchase_order[]    @relation("PurchaseOrderUpdater")
+  created_comments          comment[]           @relation("CommentCreator")
+  leave_requests            leave_request[]     @relation("LeaveRequestUser")
+  created_leave_requests    leave_request[]     @relation("LeaveRequestCreator")
+  updated_leave_requests    leave_request[]     @relation("LeaveRequestUpdater")
+  created_approval_flows    approval_flow[]     @relation("ApprovalFlowCreator")
+  updated_approval_flows    approval_flow[]     @relation("ApprovalFlowUpdater")
+  created_approval_historys approval_history[]  @relation("ApprovalHistoryCreator")
+  created_approvables       approvable[]        @relation("ApprovableCreator")
   created_dashboards        dashboard[]         @relation("DashboardCreator")
   updated_dashboards        dashboard[]         @relation("DashboardUpdater")
   created_tenants           tenant[]            @relation("TenantCreator")
@@ -100,43 +129,45 @@ model user {
 }
 
 model role {
-  id          String  @id @default(cuid())
-  name        String
-  description String?
-  created_at  DateTime @default(now()) @db.Timestamptz(0)
-  updated_at  DateTime @updatedAt @db.Timestamptz(0)
-  creator_id  String
-  creator     user @relation("RoleCreator", fields: [creator_id], references: [id])
-  updater_id  String
-  updater     user @relation("RoleUpdater", fields: [updater_id], references: [id])
-
-  users user[] @relation("UserRoles")
-  permissions   permission[]
+  id                       String          @id @default(cuid())
+  name                     String
+  description              String?
+  created_at               DateTime        @default(now()) @db.Timestamptz(0)
+  updated_at               DateTime        @updatedAt @db.Timestamptz(0)
+  creator_id               String
+  creator                  user            @relation("RoleCreator", fields: [creator_id], references: [id])
+  updater_id               String
+  updater                  user            @relation("RoleUpdater", fields: [updater_id], references: [id])
+  users                    user[]          @relation("UserRoles")
+  permissions              permission[]
   requestor_approval_flows approval_flow[] @relation("ApprovalFlowRequestorRole")
   approver_approval_flows  approval_flow[] @relation("ApprovalFlowApproverRole")
+
   @@index([creator_id])
 }
 
 model organization {
-  id          String  @id @default(cuid())
+  id          String     @id @default(cuid())
   name        String
   description String?
-  created_at  DateTime @default(now()) @db.Timestamptz(0)
-  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  created_at  DateTime   @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime   @updatedAt @db.Timestamptz(0)
   creator_id  String
-  creator     user @relation("OrganizationCreator", fields: [creator_id], references: [id])
+  creator     user       @relation("OrganizationCreator", fields: [creator_id], references: [id])
   updater_id  String
-  updater     user @relation("OrganizationUpdater", fields: [updater_id], references: [id])
+  updater     user       @relation("OrganizationUpdater", fields: [updater_id], references: [id])
+  users       user[]     @relation("UserOrganizations")
+  parent1s    parent1[]
+  resources   resource[]
 
-  users user[] @relation("UserOrganizations")
   @@index([creator_id])
 }
 
 model permission {
-  id         String  @id @default(cuid())
+  id         String   @id @default(cuid())
   name       String
   role_id    String?
-  role       role?   @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  role       role?    @relation(fields: [role_id], references: [id], onDelete: Cascade)
   create     Boolean
   read       Boolean
   update     Boolean
@@ -144,70 +175,75 @@ model permission {
   created_at DateTime @default(now()) @db.Timestamptz(0)
   updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
-  creator    user @relation("PermissionCreator", fields: [creator_id], references: [id])
+  creator    user     @relation("PermissionCreator", fields: [creator_id], references: [id])
   updater_id String
-  updater    user @relation("PermissionUpdater", fields: [updater_id], references: [id])
+  updater    user     @relation("PermissionUpdater", fields: [updater_id], references: [id])
 
   @@unique([name, role_id])
   @@index([creator_id])
 }
 
 model approvable {
-  id               String   @id @default(cuid())
-  creator_id       String?
-  creator          user? @relation("ApprovableCreator", fields: [creator_id], references: [id])
+  id                String             @id @default(cuid())
+  creator_id        String?
+  creator           user?              @relation("ApprovableCreator", fields: [creator_id], references: [id])
   approval_requests approval_request[]
+  leave_request     leave_request?
+
   @@index([creator_id])
 }
 
 model approval_flow {
-  id               String   @id @default(cuid())
-  entity_name      String
+  id                String             @id @default(cuid())
+  entity_name       String
   requestor_role_id String?
-  requestor_role   role?    @relation("ApprovalFlowRequestorRole", fields: [requestor_role_id], references: [id])
-  approver_role_id String
-  approver_role    role     @relation("ApprovalFlowApproverRole", fields: [approver_role_id], references: [id])
+  requestor_role    role?              @relation("ApprovalFlowRequestorRole", fields: [requestor_role_id], references: [id])
+  approver_role_id  String
+  approver_role     role               @relation("ApprovalFlowApproverRole", fields: [approver_role_id], references: [id])
   approval_requests approval_request[]
-  preceded_by      approval_flow[] @relation("ApprovalFlowOrder")
-  followed_by      approval_flow[] @relation("ApprovalFlowOrder")
-  created_at       DateTime @default(now()) @db.Timestamptz(0)
-  updated_at       DateTime @updatedAt @db.Timestamptz(0)
-  creator_id       String
-  creator          user @relation("ApprovalFlowCreator", fields: [creator_id], references: [id])
-  updater_id       String
-  updater          user @relation("ApprovalFlowUpdater", fields: [updater_id], references: [id])
+  preceded_by       approval_flow[]    @relation("ApprovalFlowOrder")
+  followed_by       approval_flow[]    @relation("ApprovalFlowOrder")
+  created_at        DateTime           @default(now()) @db.Timestamptz(0)
+  updated_at        DateTime           @updatedAt @db.Timestamptz(0)
+  creator_id        String
+  creator           user               @relation("ApprovalFlowCreator", fields: [creator_id], references: [id])
+  updater_id        String
+  updater           user               @relation("ApprovalFlowUpdater", fields: [updater_id], references: [id])
+
   @@index([creator_id])
 }
 
 model approval_request {
-  id               String   @id @default(cuid())
-  approvable_id    String
-  approvable       approvable @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
-  approval_flow_id String
-  approval_flow    approval_flow @relation(fields: [approval_flow_id], references: [id])
-  status           Int      @default(0)
+  id                 String             @id @default(cuid())
+  approvable_id      String
+  approvable         approvable         @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
+  approval_flow_id   String
+  approval_flow      approval_flow      @relation(fields: [approval_flow_id], references: [id])
+  status             Int                @default(0)
   approval_histories approval_history[]
-  created_at       DateTime @default(now()) @db.Timestamptz(0)
-  updated_at       DateTime @updatedAt @db.Timestamptz(0)
+  created_at         DateTime           @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime           @updatedAt @db.Timestamptz(0)
 }
 
 model approval_history {
-  id               String   @id @default(cuid())
+  id                  String           @id @default(cuid())
   approval_request_id String
-  approval_request approval_request @relation(fields: [approval_request_id], references: [id], onDelete: Cascade)
-  pre_status       Int
-  post_status      Int
-  message          String?
-  created_at       DateTime @default(now()) @db.Timestamptz(0)
-  updated_at       DateTime @updatedAt @db.Timestamptz(0)
-  creator_id       String
-  creator          user @relation("ApprovalHistoryCreator", fields: [creator_id], references: [id])
+  approval_request    approval_request @relation(fields: [approval_request_id], references: [id], onDelete: Cascade)
+  pre_status          Int
+  post_status         Int
+  message             String?
+  created_at          DateTime         @default(now()) @db.Timestamptz(0)
+  updated_at          DateTime         @updatedAt @db.Timestamptz(0)
+  creator_id          String
+  creator             user             @relation("ApprovalHistoryCreator", fields: [creator_id], references: [id])
+
   @@index([creator_id])
 }
 
 model commentable {
-  id        String    @id @default(cuid())
-  comments  comment[]
+  id       String    @id @default(cuid())
+  comments comment[]
+  db_table db_table?
 }
 
 model comment {
@@ -218,13 +254,16 @@ model comment {
   created_at     DateTime    @default(now()) @db.Timestamptz(0)
   updated_at     DateTime    @updatedAt @db.Timestamptz(0)
   creator_id     String
-  creator        user @relation("CommentCreator", fields: [creator_id], references: [id])
+  creator        user        @relation("CommentCreator", fields: [creator_id], references: [id])
+
   @@index([creator_id])
 }
 
 model attachable {
   id          String       @id @default(cuid())
   attachments attachment[]
+  resource    resource?
+  product     product?
 }
 
 model attachment {
@@ -365,4 +404,346 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+model db_table {
+  id             String      @id @default(cuid())
+  name           String      @unique
+  description    String?
+  commentable_id String      @unique
+  commentable    commentable @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user        @relation("DbTableCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user        @relation("DbTableUpdater", fields: [updater_id], references: [id])
+  fields         field[]     @relation("ParentTable")
+  referenced_by  field[]     @relation("ReferenceTable")
+
+  @@index([creator_id])
+}
+
+model field {
+  id           String    @id @default(cuid())
+  name         String
+  type         String
+  db_table_id  String
+  db_table     db_table  @relation("ParentTable", fields: [db_table_id], references: [id], onDelete: Cascade)
+  reference_id String?
+  reference    db_table? @relation("ReferenceTable", fields: [reference_id], references: [id])
+  max_length   Int
+  max          Int?
+  regex        String?
+  required     Boolean   @default(true)
+  created_at   DateTime  @default(now()) @db.Timestamptz(0)
+  updated_at   DateTime  @updatedAt @db.Timestamptz(0)
+}
+
+model xxxxx_xxxxx {
+  id           String        @id @default(cuid())
+  name         String        @unique
+  description  String?
+  team         String?
+  created_at   DateTime      @default(now()) @db.Timestamptz(0)
+  updated_at   DateTime      @updatedAt @db.Timestamptz(0)
+  creator_id   String
+  creator      user          @relation("XxxxxXxxxxCreator", fields: [creator_id], references: [id])
+  updater_id   String
+  updater      user          @relation("XxxxxXxxxxUpdater", fields: [updater_id], references: [id])
+  yyyyy_yyyyys yyyyy_yyyyy[]
+
+  @@index([creator_id])
+}
+
+model yyyyy_yyyyy {
+  id             String      @id @default(cuid())
+  name           String
+  type           String
+  xxxxx_xxxxx_id String
+  xxxxx_xxxxx    xxxxx_xxxxx @relation(fields: [xxxxx_xxxxx_id], references: [id], onDelete: Cascade)
+  max_length     Int?
+  max            Int?
+  regex          String?
+  required       Boolean     @default(true)
+  written_by     String
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+}
+
+model parent1 {
+  id              String           @id @default(cuid())
+  name            String           @unique
+  organization_id String
+  organization    organization     @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  description     String?
+  price           Int
+  due_date        DateTime         @db.Timestamptz(0)
+  image_url       String?
+  created_at      DateTime         @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime         @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user             @relation("Parent1Creator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user             @relation("Parent1Updater", fields: [updater_id], references: [id])
+  parent1_child1s parent1_child1[]
+  parent1_child2s parent1_child2[]
+  parent1_lists   parent1_list[]
+
+  @@index([creator_id])
+  @@index([organization_id])
+}
+
+model parent1_child1 {
+  id         String   @id @default(cuid())
+  order      Int      @default(0)
+  name       String
+  type       String
+  parent1_id String
+  parent1    parent1  @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
+  max_length Int?
+  max        Int?
+  regex      String?
+  required   Boolean  @default(true)
+  written_by String
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+}
+
+model parent1_child2 {
+  id         String    @id @default(cuid())
+  name       String
+  parent1_id String
+  parent1    parent1   @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
+  required   Boolean   @default(true)
+  start_date DateTime? @db.Timestamptz(0)
+  end_date   DateTime  @db.Timestamptz(0)
+  created_at DateTime  @default(now()) @db.Timestamptz(0)
+  updated_at DateTime  @updatedAt @db.Timestamptz(0)
+}
+
+model parent1_list {
+  id         String   @id @default(cuid())
+  name       String
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  parent1_id String
+  parent1    parent1  @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
+}
+
+model parent_only {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  login_time  DateTime? @db.Timestamptz(0)
+  logout_time DateTime? @db.Timestamptz(0)
+  created_at  DateTime  @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime  @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user      @relation("ParentOnlyCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user      @relation("ParentOnlyUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+}
+
+model procedure {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  created_at  DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user        @relation("ProcedureCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user        @relation("ProcedureUpdater", fields: [updater_id], references: [id])
+  assignee_id String?
+  assignee    user?       @relation("ProcedureAssignee", fields: [assignee_id], references: [id])
+  parent_id   String?
+  parent      procedure?  @relation("ParentChild", fields: [parent_id], references: [id])
+  children    procedure[] @relation("ParentChild")
+  preceded_by procedure[] @relation("BeforeAfter")
+  followed_by procedure[] @relation("BeforeAfter")
+
+  @@index([creator_id])
+  @@index([assignee_id])
+}
+
+model resource {
+  id              String       @id @default(cuid())
+  name            String
+  description     String?
+  organization_id String
+  organization    organization @relation(fields: [organization_id], references: [id])
+  attachable_id   String       @unique
+  attachable      attachable   @relation(fields: [attachable_id], references: [id])
+  bookings        booking[]
+  created_at      DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user         @relation("ResourceCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user         @relation("ResourceUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+  @@index([organization_id])
+}
+
+model booking {
+  id          String   @id @default(cuid())
+  name        String
+  resource_id String
+  resource    resource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
+  start_time  DateTime @db.Timestamptz(0)
+  end_time    DateTime @db.Timestamptz(0)
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user     @relation("BookingCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user     @relation("BookingUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+}
+
+model shift_template {
+  id          String   @id @default(cuid())
+  user_id     String
+  user        user     @relation("ShiftTemplateUser", fields: [user_id], references: [id])
+  day_of_week Int
+  start_time  DateTime @db.Timetz(0)
+  end_time    DateTime @db.Timetz(0)
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user     @relation("ShiftTemplateCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user     @relation("ShiftTemplateUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+}
+
+model shift {
+  id         String   @id @default(cuid())
+  user_id    String
+  user       user     @relation("ShiftUser", fields: [user_id], references: [id])
+  start_time DateTime @db.Timestamptz(0)
+  end_time   DateTime @db.Timestamptz(0)
+  status     Int
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("ShiftCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("ShiftUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+}
+
+model product {
+  id                 String              @id @default(cuid())
+  code               String              @unique
+  name               String
+  price              Int
+  barcode            String?
+  attachable_id      String              @unique
+  attachable         attachable          @relation(fields: [attachable_id], references: [id])
+  inventories        inventory[]
+  purchase_per_items purchase_per_item[]
+  created_at         DateTime            @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime            @updatedAt @db.Timestamptz(0)
+  creator_id         String
+  creator            user                @relation("ProductCreator", fields: [creator_id], references: [id])
+  updater_id         String
+  updater            user                @relation("ProductUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+}
+
+model inventory {
+  id                String    @id @default(cuid())
+  product_id        String
+  product           product   @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  quantity          Int
+  reserved_quantity Int       @default(0)
+  location          String?
+  lot_number        String?
+  expiration_date   DateTime?
+  created_at        DateTime  @default(now()) @db.Timestamptz(0)
+  updated_at        DateTime  @updatedAt @db.Timestamptz(0)
+  creator_id        String
+  creator           user      @relation("InventoryCreator", fields: [creator_id], references: [id])
+  updater_id        String
+  updater           user      @relation("InventoryUpdater", fields: [updater_id], references: [id])
+  inventory_allocations inventory_allocation[]
+
+  @@index([creator_id])
+}
+
+model inventory_allocation {
+  id                   String            @id @default(cuid())
+  purchase_order_id    String
+  purchase_order       purchase_order    @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  purchase_per_item_id String
+  purchase_per_item    purchase_per_item @relation(fields: [purchase_per_item_id], references: [id], onDelete: Cascade)
+  inventory_id         String
+  inventory            inventory         @relation(fields: [inventory_id], references: [id])
+  quantity             Int
+  creator_id           String
+  updater_id           String
+  created_at           DateTime          @default(now()) @db.Timestamptz(0)
+  updated_at           DateTime          @updatedAt @db.Timestamptz(0)
+
+  @@index([purchase_order_id])
+  @@index([inventory_id])
+  @@index([creator_id])
+}
+
+model purchase_order {
+  id          String              @id @default(cuid())
+  order_no    String
+  customer_id String
+  customer    user                @relation("Buyer", fields: [customer_id], references: [id])
+  items       purchase_per_item[]
+  created_at  DateTime            @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime            @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user                @relation("PurchaseOrderCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user                @relation("PurchaseOrderUpdater", fields: [updater_id], references: [id])
+  inventory_allocations inventory_allocation[]
+
+  @@index([creator_id])
+}
+
+model purchase_per_item {
+  id                String         @id @default(cuid())
+  purchase_order_id String
+  purchase_order    purchase_order @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  product_id        String
+  product           product        @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  quantity          Int
+  price             Int?
+  created_at        DateTime       @default(now()) @db.Timestamptz(0)
+  updated_at        DateTime       @updatedAt @db.Timestamptz(0)
+  inventory_allocations inventory_allocation[]
+}
+
+model leave_request {
+  id            String     @id @default(cuid())
+  user_id       String
+  user          user       @relation("LeaveRequestUser", fields: [user_id], references: [id])
+  start_date    DateTime   @db.Timestamptz(0)
+  end_date      DateTime   @db.Timestamptz(0)
+  reason        String
+  approvable_id String     @unique
+  approvable    approvable @relation(fields: [approvable_id], references: [id])
+  created_at    DateTime   @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime   @updatedAt @db.Timestamptz(0)
+  creator_id    String
+  creator       user       @relation("LeaveRequestCreator", fields: [creator_id], references: [id])
+  updater_id    String
+  updater       user       @relation("LeaveRequestUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
 }

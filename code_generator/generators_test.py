@@ -2149,10 +2149,13 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
         )
         definition_key = entity.get('definition_key', f'{parent}_detail')
         flatten_test_rels = _compute_flatten_test_rels(parent, pascal, definition_key, schema)
+        _xres = (schema.get('definitions', {}).get(parent) or {}).get('x-reservation', {})
+        has_reservation = bool(_xres and _xres.get('mode') == 'count')
         enriched_entities.append({
             'parent': parent,
             'pascal': pascal,
             'helper_path': f'./{parent}/helper',
+            'reservation_helper_path': f'./{parent}/reservation_gen_helper',
             'datagrid_children': [
                 {'pascal': to_pascal_case(c['child']['name'])}
                 for c in datagrid_children
@@ -2162,6 +2165,7 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
                 for c in comment_children_registry
             ],
             'has_approvable': has_approvable,
+            'has_reservation': has_reservation,
             'flatten_test_rels': flatten_test_rels,
         })
     if user_in_entities:
@@ -2514,3 +2518,146 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
         'deletion_levels': levels,
         'test_entity_names': sorted(test_entity_names) if test_entity_names is not None else [],
     }
+
+
+# ---------------------------------------------------------------------------
+# x-reservation context builders (Phase 1: count mode)
+# ---------------------------------------------------------------------------
+
+def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
+    """Extract base reservation context from x-reservation config. Returns None if not count mode."""
+    defs = schema.get('definitions', {})
+    entity_def = defs.get(entity, {})
+    x_res = entity_def.get('x-reservation', {})
+    if not x_res or x_res.get('mode') != 'count' or not x_res.get('lines'):
+        return None
+
+    pool_cfg    = x_res.get('pool', {})
+    request_cfg = x_res.get('request', {})
+    result_cfg  = x_res.get('result', {})
+    policy_cfg  = x_res.get('policy', {})
+
+    pool_entity = pool_cfg.get('entity', '')
+    pool_def    = defs.get(pool_entity, {})
+    pool_props  = pool_def.get('properties', {})
+
+    # criteria (first entry only for Phase 1)
+    criteria = request_cfg.get('criteria', {})
+    criteria_pool_field = next(iter(criteria.keys()), 'id')
+    criteria_item_field = next(iter(criteria.values()), 'id')
+
+    # FK target for the pool criteria field (e.g. product_id → product)
+    pool_criteria_prop = pool_props.get(criteria_pool_field, {})
+    pool_fk_entity = (pool_criteria_prop.get('x-relationship') or {}).get('target', '')
+
+    # orderBy fields
+    orderby_raw = policy_cfg.get('orderBy', [])
+    orderby_fields = []
+    for ob in orderby_raw:
+        for field, direction in ob.items():
+            prop      = pool_props.get(field, {})
+            prop_type = prop.get('type', '')
+            is_nullable = isinstance(prop_type, list) and 'null' in prop_type
+            is_date     = prop.get('format') == 'date'
+            null_last   = 'nulls_last' in direction
+            # Prisma orderBy direction (strip nulls_last/nulls_first suffix)
+            prisma_direction = 'asc' if direction.startswith('asc') else 'desc'
+            orderby_fields.append({
+                'field': field,
+                'direction': direction,
+                'is_date': is_date,
+                'is_nullable': is_nullable,
+                'null_last': null_last,
+                'prisma_direction': prisma_direction,
+            })
+
+    # Sortable fields (for seed helper parameters): exclude 'id' (auto-assigned)
+    orderby_sortable = [f for f in orderby_fields if f['field'] != 'id']
+
+    # Compute seed values for sortable fields across test scenarios
+    def _seed_val(f: dict, scenario: str) -> str:
+        if f['field'] == 'lot_number':
+            vals = {'multi_row1': "'LOT-A'", 'multi_row2': "'LOT-B'",
+                    'orderby_row1': "'LOT-A'", 'orderby_row2': "'LOT-B'", 'orderby_row3': "'LOT-C'"}
+            return vals.get(scenario, 'null' if f['is_nullable'] else "''")
+        if f['is_date']:
+            if 'null' in scenario:
+                return 'null'
+            date_vals = {'multi_row1': "'2027-01-01'", 'multi_row2': "'2027-06-01'",
+                         'orderby_row1': "'2027-01-01'", 'orderby_row2': "'2027-06-01'",
+                         'orderby_row3': 'null' if f['is_nullable'] else "'2027-12-01'"}
+            return date_vals.get(scenario, 'null' if f['is_nullable'] else "'2027-01-01'")
+        if f['is_nullable']:
+            return 'null'
+        return "''"
+
+    for f in orderby_sortable:
+        f['seed_multi_row1']    = _seed_val(f, 'multi_row1')
+        f['seed_multi_row2']    = _seed_val(f, 'multi_row2')
+        f['seed_orderby_row1']  = _seed_val(f, 'orderby_row1')
+        f['seed_orderby_row2']  = _seed_val(f, 'orderby_row2')
+        f['seed_orderby_row3']  = _seed_val(f, 'orderby_row3')
+
+    # Parent entity fields
+    entity_props     = entity_def.get('properties', {})
+    parent_req_fields = [f for f in (entity_def.get('required') or []) if f not in ('id',)]
+    parent_fk_field  = None
+    parent_fk_entity = None
+    parent_str_field = None
+    for field in parent_req_fields:
+        prop = entity_props.get(field, {})
+        rel  = prop.get('x-relationship', {})
+        if rel and not parent_fk_field:
+            parent_fk_field  = field
+            parent_fk_entity = rel.get('target', 'user')
+        elif not rel and not parent_str_field:
+            parent_str_field = field
+
+    # lines entity from children list
+    lines_prop   = x_res.get('lines', '')
+    lines_entity = next((c['name'] for c in children if c.get('property_name') == lines_prop), None)
+
+    # orderBy description for spec comment
+    orderby_desc = ' → '.join(
+        f"{f['field']} {f['direction']}" for f in orderby_fields
+    )
+
+    return {
+        'entity':             entity,
+        'pascal':             to_pascal_case(entity),
+        'api_path':           f'/api/{entity}',
+        'pool_entity':        pool_entity,
+        'pool_fk_entity':     pool_fk_entity,
+        'pool_fk_pascal':     to_pascal_case(pool_fk_entity),
+        'pool_qty_field':     pool_cfg.get('quantityField', 'quantity'),
+        'pool_res_field':     pool_cfg.get('reservedField', 'reserved_quantity'),
+        'alloc_entity':       result_cfg.get('allocationEntity', ''),
+        'parent_field':       result_cfg.get('parentField', ''),
+        'line_field':         result_cfg.get('lineField', ''),
+        'pool_field':         result_cfg.get('poolField', ''),
+        'alloc_qty_field':    result_cfg.get('quantityField', 'quantity'),
+        'lines_entity':       lines_entity,
+        'lines_prop':         lines_prop,
+        'req_qty_field':      request_cfg.get('quantityField', 'quantity'),
+        'criteria_pool_field': criteria_pool_field,
+        'criteria_item_field': criteria_item_field,
+        'pool_fk_entity':     pool_fk_entity,
+        'parent_fk_field':    parent_fk_field,
+        'parent_fk_entity':   parent_fk_entity or 'user',
+        'parent_str_field':   parent_str_field,
+        'orderby_fields':     orderby_fields,
+        'orderby_sortable':   orderby_sortable,
+        'orderby_desc':       orderby_desc,
+    }
+
+
+def reservation_helper_context(entity: str, schema: dict, children: list) -> dict:
+    """Build Jinja2 context for test_reservation_helper.ts.jinja2."""
+    ctx = _reservation_base(entity, schema, children)
+    return ctx or {}
+
+
+def reservation_spec_context(entity: str, schema: dict, children: list) -> dict:
+    """Build Jinja2 context for test_reservation_spec.cy.ts.jinja2."""
+    ctx = _reservation_base(entity, schema, children)
+    return ctx or {}

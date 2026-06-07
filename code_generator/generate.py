@@ -42,6 +42,8 @@ from generators_test import (
     tasks_registry_context,
     api_spec_context,
     db_helpers_context,
+    reservation_helper_context,
+    reservation_spec_context,
 )
 from validation_context import build_validation_context
 
@@ -337,6 +339,15 @@ def generate(schema_path: str, output_dir: str) -> None:
                 api_ctx = api_spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)
                 _write(cypress_e2e / 'api' / f'{parent}.cy.ts',
                        _render(env, 'test_api_spec.cy.ts.jinja2', api_ctx))
+
+            # reservation spec + helper (only for entities with x-reservation count mode)
+            res_ctx = reservation_spec_context(parent, schema, children)
+            if res_ctx:
+                res_helper_ctx = reservation_helper_context(parent, schema, children)
+                _write(cypress_support / parent / 'reservation_gen_helper.ts',
+                       _render(env, 'test_reservation_helper.ts.jinja2', res_helper_ctx))
+                _write(cypress_e2e / 'api' / f'{parent}_reservation_gen.cy.ts',
+                       _render(env, 'test_reservation_spec.cy.ts.jinja2', res_ctx))
 
             registry_infos.append({
                 'parent': parent,
