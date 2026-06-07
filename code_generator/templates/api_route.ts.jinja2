@@ -5,7 +5,11 @@ import { get{{ parent_pascal }}Page } from '@/lib/{{ parent }}/getters';
 import { parsePageOpts } from '@/lib/_pagination';
 {% endif %}
 {% if can_create %}
+{% if reservation_config %}
+import { add{{ parent_pascal }}, InsufficientInventoryError } from '@/lib/{{ parent }}/service';
+{% else %}
 import { add{{ parent_pascal }} } from '@/lib/{{ parent }}/service';
+{% endif %}
 {% endif %}
 {% if can_list %}
 export async function GET(request: NextRequest) {
@@ -30,6 +34,11 @@ export async function POST(request: NextRequest) {
     const result = await add{{ parent_pascal }}({{ service_args_for_create }});
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
+{% if reservation_config %}
+    if (error instanceof InsufficientInventoryError) {
+      return NextResponse.json({ error: (error as Error).message }, { status: 409 });
+    }
+{% endif %}
     return handleApiError(error);
   }
 }

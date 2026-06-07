@@ -820,6 +820,28 @@ def build_context(entity: dict, schema: dict) -> dict:
         if k not in _EXCLUDE_ID_TS and k != 'id' and k not in auto_create_oto_fk_props
     )
 
+    # x-reservation (entity-level reservation config, Phase 1 = count mode only)
+    _xres = model_def.get('x-reservation')
+    reservation_config = None
+    if _xres and isinstance(_xres, dict) and _xres.get('mode') == 'count':
+        _lines_prop = _xres.get('lines')
+        _lines_entity = None
+        if _lines_prop:
+            for _ch in children_raw:
+                if _ch.get('property_name') == _lines_prop:
+                    _lines_entity = _ch['name']
+                    break
+        reservation_config = {
+            'mode': 'count',
+            'transaction_strategy': (_xres.get('transaction') or {}).get('strategy', 'conditional_update'),
+            'lines': _lines_prop,
+            'lines_entity': _lines_entity,
+            'pool': _xres.get('pool') or {},
+            'request': _xres.get('request') or {},
+            'policy': _xres.get('policy') or {},
+            'result': _xres.get('result') or {},
+        }
+
     # Chart config
     xdisplay    = (model_def or {}).get('x-display') or {}
     chart_cfg   = xdisplay.get('chart') if isinstance(xdisplay, dict) else None
@@ -1296,6 +1318,8 @@ def build_context(entity: dict, schema: dict) -> dict:
         # Field categories (FormUpsert / FormView)
         field_categories=field_categories,
         entity_select_options=_get_entity_options(schema),
+        # Reservation
+        reservation_config=reservation_config,
         # Chart
         chart_cfg=chart_cfg,
         has_chart=has_chart,

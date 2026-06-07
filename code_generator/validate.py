@@ -274,6 +274,57 @@ def validate_schema(schema: dict) -> None:
                 )
 
     # -----------------------------------------------------------------------
+    # 5. x-reservation entity-level validation
+    # -----------------------------------------------------------------------
+    _VALID_COUNT_MODES = ('count',)
+    _VALID_ITEM_MODES  = ('item',)
+
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        xres = defn.get('x-reservation')
+        if not xres:
+            continue
+        if not isinstance(xres, dict):
+            errors.append(
+                f"Definition '{def_key}': x-reservation must be a mapping, got {type(xres).__name__}."
+            )
+            continue
+        mode = xres.get('mode')
+        if mode not in ('count', 'item'):
+            errors.append(
+                f"Definition '{def_key}': x-reservation.mode must be 'count' or 'item', got {mode!r}."
+            )
+            continue
+        if mode == 'count':
+            pool = xres.get('pool') or {}
+            req  = xres.get('request') or {}
+            for required_pool_key in ('entity', 'quantityField'):
+                if not pool.get(required_pool_key):
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.pool.{required_pool_key} is required "
+                        f"for count mode."
+                    )
+            if not req.get('quantityField'):
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.request.quantityField is required "
+                    f"for count mode."
+                )
+            pool_entity = pool.get('entity')
+            if pool_entity and pool_entity not in defs:
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.pool.entity '{pool_entity}' is not "
+                    f"defined in the schema."
+                )
+            result = xres.get('result') or {}
+            alloc_entity = result.get('allocationEntity')
+            if alloc_entity and alloc_entity not in defs:
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.result.allocationEntity '{alloc_entity}' "
+                    f"is not defined in the schema."
+                )
+
+    # -----------------------------------------------------------------------
     # Report
     # -----------------------------------------------------------------------
     if errors:

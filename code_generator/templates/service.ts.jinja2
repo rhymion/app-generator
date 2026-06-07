@@ -21,6 +21,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% if flatten_nested_creates %}
 {{ flatten_nested_creates }}
 {% endif %}
+{% if reservation_allocation_code %}
+{{ reservation_allocation_code }}
+{% endif %}
 {% if one_to_one_spread %}
     await afterCreate(tx, { ...created, {{ one_to_one_spread }} } as Record<string, unknown>, {
 {% else %}
@@ -60,6 +63,9 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
   let _prevAssigneeId: string | null = null;
 {% endif %}
   await prisma.$transaction(async (tx) => {
+{% if reservation_mutation_guard_update %}
+{{ reservation_mutation_guard_update }}
+{% endif %}
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
@@ -112,6 +118,9 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% if can_delete %}
 {% if is_audited %}
 export async function delete{{ parent_pascal }}(actorId: string | null, ids: string[]): Promise<void> {
+{% if reservation_mutation_guard_delete %}
+{{ reservation_mutation_guard_delete }}
+{% endif %}
   await prisma.$transaction(async (tx) => {
     await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
     for (const id of ids) {
@@ -127,6 +136,9 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
 }
 {% else %}
 export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
+{% if reservation_mutation_guard_delete %}
+{{ reservation_mutation_guard_delete }}
+{% endif %}
   await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
 }
 {% endif %}
