@@ -22,18 +22,42 @@ export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
 
-  // Level 1: approval_request, comment, organization, permission
+  // Level 1: approval_request, attachment, booking, dashboard_widget, field, inventory, leave_request, parent1_child1, parent1_child2, parent1_list, parent_only, permission, procedure, purchase_per_item, reaction, shift, shift_template, yyyyy_yyyyy
   await prisma.approval_request.deleteMany();
-  await prisma.comment.deleteMany();
+  await prisma.attachment.deleteMany();
+  await prisma.booking.deleteMany();
+  await prisma.dashboard_widget.deleteMany();
+  await prisma.field.deleteMany();
+  await prisma.inventory.deleteMany();
+  await prisma.leave_request.deleteMany();
+  await prisma.parent1_child1.deleteMany();
+  await prisma.parent1_child2.deleteMany();
+  await prisma.parent1_list.deleteMany();
+  await prisma.parent_only.deleteMany();
   await prisma.permission.deleteMany();
+  await prisma.procedure.deleteMany();
+  await prisma.purchase_per_item.deleteMany();
+  await prisma.reaction.deleteMany();
+  await prisma.shift.deleteMany();
+  await prisma.shift_template.deleteMany();
+  await prisma.yyyyy_yyyyy.deleteMany();
 
-  // Level 2: approvable, approval_flow, commentable
+  // Level 2: approvable, approval_flow, comment, dashboard, db_table, parent1, product, purchase_order, resource, xxxxx_xxxxx
   await prisma.approvable.deleteMany();
   await prisma.approval_flow.deleteMany();
+  await prisma.comment.deleteMany();
+  await prisma.dashboard.deleteMany();
+  await prisma.db_table.deleteMany();
+  await prisma.parent1.deleteMany();
+  await prisma.product.deleteMany();
+  await prisma.purchase_order.deleteMany();
+  await prisma.resource.deleteMany();
+  await prisma.xxxxx_xxxxx.deleteMany();
+
+  // Level 3: attachable, commentable, organization, role
+  await prisma.attachable.deleteMany();
   await prisma.commentable.deleteMany();
   await prisma.organization.deleteMany();
-
-  // Level 3: role
   await prisma.role.deleteMany();
 
   // Level 4: user
@@ -84,16 +108,33 @@ export async function seedTestDatabase() {
   return { user };
 }
 
-const ALL_ENTITIES = [
-  'approvable',
+export const ALL_ENTITIES = [
   'approval_flow',
-  'approval_request',
-  'comment',
-  'commentable',
+  'booking',
+  'dashboard',
+  'db_table',
+  'inventory',
+  'leave_request',
   'organization',
+  'parent_only',
   'permission',
+  'procedure',
+  'product',
+  'purchase_order',
+  'resource',
   'role',
+  'setting1',
+  'setting2',
+  'setting3',
+  'setting4',
+  'setting5',
+  'setting6',
+  'setting7',
+  'setting8',
+  'shift',
+  'shift_template',
   'user',
+  'xxxxx_xxxxx',
 ];
 
 /**
