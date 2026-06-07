@@ -103,6 +103,11 @@ def extract_entities(schema: dict) -> list[dict]:
                 model_name = ref_target
                 break
 
+        # Skip x-internal entities — no pages, no embedding, custom API only
+        x_internal = defn.get('x-internal') or (model_name and defs.get(model_name, {}).get('x-internal'))
+        if x_internal:
+            continue
+
         # Find x-generate: on this def, on the base model (for _detail keys), or on base model directly
         x_generate = (
             defn.get('x-generate')
@@ -208,6 +213,56 @@ def generate_types_for_schema(schema_path: str, output_dir: str) -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(output)
         print(f'  Wrote {out_path}')
+
+
+def extract_named_constants(schema: dict) -> list[dict]:
+    """Extract named constants from x-internal entities with integer enum fields.
+
+    Returns a list of {const_name, entity_name, prop_name, items: [{value, label}]}.
+    Naming: {PARENT}_{ENTITY}_TYPES where PARENT is the first non-user FK target,
+    or {ENTITY}_TYPES when no suitable parent FK is found.
+    """
+    defs = schema.get('definitions', {})
+    constants = []
+
+    for entity_name, defn in defs.items():
+        if entity_name.endswith('_detail') or entity_name.endswith('_input'):
+            continue
+        x_internal = defn.get('x-internal')
+        if not x_internal:
+            continue
+
+        props = defn.get('properties', {})
+
+        # Derive parent prefix from the first non-user many-to-one FK
+        parent_name = None
+        for prop_name, prop_def in props.items():
+            rel = prop_def.get('x-relationship', {})
+            if rel.get('type') == 'many-to-one' and rel.get('target') not in ('user',):
+                parent_name = rel['target']
+                break
+
+        for prop_name, prop_def in props.items():
+            if prop_def.get('type') != 'integer':
+                continue
+            enum_vals = prop_def.get('enum')
+            if not isinstance(enum_vals, list):
+                continue
+
+            if parent_name:
+                const_name = f"{parent_name.upper()}_{entity_name.upper()}_TYPES"
+            else:
+                const_name = f"{entity_name.upper()}_TYPES"
+
+            items = [{'value': i, 'label': str(v)} for i, v in enumerate(enum_vals)]
+            constants.append({
+                'const_name': const_name,
+                'entity_name': entity_name,
+                'prop_name': prop_name,
+                'items': items,
+            })
+
+    return constants
 
 
 if __name__ == '__main__':

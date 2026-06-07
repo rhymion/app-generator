@@ -50,6 +50,47 @@ export default defineConfig({
           const otplib = require('otplib');
           return otplib.generateSync({ secret });
         },
+        async 'db:createTestComment'() {
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
+          const { createId } = require('@paralleldrive/cuid2');
+          const testUser = await prisma.user.findUnique({
+            where: { email: TEST_CREDENTIALS.email },
+          });
+          if (!testUser) throw new Error('Test user not found. Run db:seed first.');
+          const commentable = await prisma.commentable.create({ data: {} });
+          const comment = await prisma.comment.create({
+            data: {
+              message: 'Test comment for reaction e2e',
+              commentable_id: commentable.id,
+              creator_id: testUser.id,
+            },
+          });
+          return JSON.parse(JSON.stringify({ commentId: comment.id, userId: testUser.id }));
+        },
+        async 'db:createSecondUser'() {
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { createId } = require('@paralleldrive/cuid2');
+          const user2Id = createId();
+          const user2ApiKey = 'test_mk_user2_00000000000000000000000000000000000000000000000000000000000';
+          await prisma.user.create({
+            data: {
+              id: user2Id,
+              creator_id: user2Id,
+              updater_id: user2Id,
+              email: 'testuser2_reaction@example.com',
+              name: 'Test User 2',
+              password: 'not_needed',
+              api_key: user2ApiKey,
+            },
+          });
+          return user2ApiKey;
+        },
+        async 'db:deleteTestComment'(commentId: string) {
+          const { prisma } = require('./cypress/support/db-helpers');
+          await prisma.comment.delete({ where: { id: commentId } });
+          return null;
+        },
         ...getGeneratedTasks(),
       });
 

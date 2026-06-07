@@ -5,6 +5,8 @@ import { redirect } from 'next/navigation';
 {% endif %}import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 {% if comment_actions_code %}import { notify } from '@/lib/_notifier';
+{% endif %}{% if has_commentable %}import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
+import type { CommentReactionSummary } from './types';
 {% endif %}
 {% if service_imports %}
 import { {{ service_imports }} } from './service';
@@ -40,3 +42,53 @@ export async function remove{{ parent_pascal }}(ids: string[]) {
 }
 {% endif %}
 {{ comment_actions_code }}
+{% if has_commentable %}
+
+export async function toggle{{ parent_pascal }}CommentReaction(
+  commentId: string,
+  type: number
+): Promise<CommentReactionSummary> {
+  const userId = await getSessionUserIdOrThrow();
+  const validTypes: number[] = COMMENT_REACTION_TYPES.map((t) => t.value);
+  if (!validTypes.includes(type)) {
+    throw new Error(`Invalid reaction type: ${type}`);
+  }
+  // D7=B: require read permission on the parent entity that owns the comment
+  const comment = await prisma.comment.findUnique({
+    where: { id: commentId },
+    select: { commentable_id: true },
+  });
+  if (!comment) throw new Error('Comment not found');
+  const parentRow = await prisma.{{ model }}.findFirst({
+    where: { commentable_id: comment.commentable_id },
+    select: { id: true, creator_id: true{% if has_assignee_id %}, assignee_id: true{% endif %} },
+  });
+  await requirePermission('{{ parent }}', 'read', parentRow ?? undefined);
+
+  const existing = await prisma.reaction.findUnique({
+    where: { comment_id_user_id_type: { comment_id: commentId, user_id: userId, type } },
+  });
+  let active: boolean;
+  if (existing) {
+    await prisma.reaction.delete({ where: { id: existing.id } });
+    active = false;
+  } else {
+    await prisma.reaction.create({ data: { comment_id: commentId, user_id: userId, type } });
+    active = true;
+  }
+
+  const rawCounts = await prisma.reaction.groupBy({
+    by: ['type'],
+    where: { comment_id: commentId },
+    _count: { type: true },
+  });
+  const counts = rawCounts.map((r) => ({ type: r.type, count: r._count.type }));
+  const myReactions = await prisma.reaction.findMany({
+    where: { comment_id: commentId, user_id: userId },
+    select: { type: true },
+  });
+  const myTypes = myReactions.map((r) => r.type);
+
+  return { commentId, type, active, counts, myTypes };
+}
+{% endif %}

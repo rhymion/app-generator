@@ -996,7 +996,9 @@ def build_context(entity: dict, schema: dict) -> dict:
         cdef     = schema['definitions'].get(cn, {})
         if out_type == 'comments':
             child_include_entries.append(
-                f"{prop}: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }} }}, orderBy: {{ created_at: 'asc' }} }}"
+                f"{prop}: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }},"
+                f" reactions: {{ select: {{ type: true, user_id: true }} }} }},"
+                f" orderBy: {{ created_at: 'asc' }} }}"
             )
         elif not cdef.get('properties'):
             child_include_entries.append(f"{prop}: true")
@@ -1098,7 +1100,8 @@ def build_context(entity: dict, schema: dict) -> dict:
                     # comment children always carry creator + orderBy (no FK rels defined in schema)
                     if c.get('child_name') == 'comment':
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }},"
+                            f" reactions: {{ select: {{ type: true, user_id: true }} }} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:
@@ -1107,7 +1110,8 @@ def build_context(entity: dict, schema: dict) -> dict:
                     # comment child has no FK rels in schema — emit include + orderBy directly
                     if c.get('child_name') == 'comment':
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }},"
+                            f" reactions: {{ select: {{ type: true, user_id: true }} }} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:
@@ -1221,6 +1225,21 @@ def build_context(entity: dict, schema: dict) -> dict:
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
 
+    # Named constants for x-internal entities (e.g. COMMENT_REACTION_TYPES)
+    from generate_types import extract_named_constants
+    _all_named_constants = extract_named_constants(schema)
+
+    # Batched groupBy context for getCommentReactions — consumed by service/132b templates
+    reaction_batch_query = (
+        {
+            "fn_name": "getCommentReactions",
+            "input": "commentIds: string[]",
+            "return_type": "Promise<CommentReactionSummary[]>",
+            "strategy": "batched_group_by",
+        }
+        if comment_children else None
+    )
+
     return dict(
         # Naming
         parent=parent,
@@ -1331,4 +1350,8 @@ def build_context(entity: dict, schema: dict) -> dict:
         is_date_field=_is_date_field,
         get_actual_type=_get_actual_type,
         is_nullable=_is_nullable,
+        # Named constants (x-internal integer enum entities → TS export consts)
+        named_constants=_all_named_constants,
+        # Batched groupBy context for getCommentReactions (used by service/132b templates)
+        reaction_batch_query=reaction_batch_query,
     )

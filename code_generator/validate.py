@@ -274,6 +274,49 @@ def validate_schema(schema: dict) -> None:
                 )
 
     # -----------------------------------------------------------------------
+    # 5. x-internal entity validation
+    # -----------------------------------------------------------------------
+    _REQUIRED_INTERNAL_KEYS = ('page', 'embed', 'api')
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        x_internal = defn.get('x-internal')
+        if x_internal is None:
+            continue
+        if not isinstance(x_internal, dict):
+            errors.append(
+                f"Definition '{def_key}': x-internal must be a mapping with "
+                f"keys page, embed, api."
+            )
+            continue
+        for key in _REQUIRED_INTERNAL_KEYS:
+            if key not in x_internal:
+                errors.append(
+                    f"Definition '{def_key}': x-internal is missing required key '{key}'. "
+                    f"Expected keys: page, embed, api."
+                )
+
+        # Enum bounds: maximum - minimum + 1 must equal len(enum labels)
+        for prop_name, prop_def in defn.get('properties', {}).items():
+            if prop_def.get('type') != 'integer':
+                continue
+            enum_vals = prop_def.get('enum')
+            if not isinstance(enum_vals, list):
+                continue
+            minimum = prop_def.get('minimum')
+            maximum = prop_def.get('maximum')
+            if minimum is None or maximum is None:
+                continue
+            expected_count = maximum - minimum + 1
+            if len(enum_vals) != expected_count:
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"integer enum labels count ({len(enum_vals)}) does not match "
+                    f"minimum/maximum range ({minimum}..{maximum} = {expected_count} values). "
+                    f"Adjust enum labels or minimum/maximum to match."
+                )
+
+    # -----------------------------------------------------------------------
     # Report
     # -----------------------------------------------------------------------
     if errors:

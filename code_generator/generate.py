@@ -19,7 +19,7 @@ import yaml
 from jinja2 import Environment, FileSystemLoader
 
 from helpers.naming import to_pascal_case, to_camel_case
-from generate_types import extract_entities
+from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
 from build_context import build_context
 from generators import (
@@ -284,6 +284,25 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'attachment_actions.ts.jinja2', {'owners': attachable_owners}),
         )
         print(f'  Attachment bridge actions → lib/attachment/actions.ts ({len(attachable_owners)} owners)')
+
+    # --- Named constants (lib/reaction_constants.ts) ---
+    named_constants = extract_named_constants(schema)
+    if named_constants:
+        _write(
+            out / 'lib' / 'reaction_constants.ts',
+            _render(env, 'reaction_constants.ts.jinja2', {'named_constants': named_constants}),
+        )
+        print(f'  Named constants → lib/reaction_constants.ts ({len(named_constants)} constant(s))')
+
+    # --- Comment reactions API route (app/api/comment/[commentId]/reactions/toggle/route.ts) ---
+    # Emitted whenever x-internal integer enum entities exist (i.e., reactions are enabled).
+    # D3=A: toggle endpoint is POST /api/comment/[commentId]/reactions/toggle
+    if named_constants:
+        _write(
+            out / 'app' / 'api' / 'comment' / '[commentId]' / 'reactions' / 'toggle' / 'route.ts',
+            _render(env, 'comment_reactions_api_route.ts.jinja2', {}),
+        )
+        print('  Comment reactions API route → app/api/comment/[commentId]/reactions/toggle/route.ts')
 
     # --- docs/generated/index.md + app/[locale]/docs/page.mdx ---
     print('\nGenerating documentation index...')
