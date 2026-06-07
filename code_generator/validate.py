@@ -276,9 +276,6 @@ def validate_schema(schema: dict) -> None:
     # -----------------------------------------------------------------------
     # 5. x-reservation entity-level validation
     # -----------------------------------------------------------------------
-    _VALID_COUNT_MODES = ('count',)
-    _VALID_ITEM_MODES  = ('item',)
-
     for def_key, defn in defs.items():
         if not _SNAKE_CASE.match(def_key):
             continue
@@ -296,10 +293,27 @@ def validate_schema(schema: dict) -> None:
                 f"Definition '{def_key}': x-reservation.mode must be 'count' or 'item', got {mode!r}."
             )
             continue
+
+        pool   = xres.get('pool') or {}
+        result = xres.get('result') or {}
+        lines  = xres.get('lines')
+
+        # pool.entity is required for all modes
+        pool_entity = pool.get('entity')
+        if not pool_entity:
+            errors.append(
+                f"Definition '{def_key}': x-reservation.pool.entity is required."
+            )
+        elif pool_entity not in defs:
+            errors.append(
+                f"Definition '{def_key}': x-reservation.pool.entity '{pool_entity}' is not "
+                f"defined in the schema."
+            )
+
         if mode == 'count':
-            pool = xres.get('pool') or {}
-            req  = xres.get('request') or {}
-            for required_pool_key in ('entity', 'quantityField'):
+            req = xres.get('request') or {}
+            # Required pool fields for count mode
+            for required_pool_key in ('quantityField', 'reservedField'):
                 if not pool.get(required_pool_key):
                     errors.append(
                         f"Definition '{def_key}': x-reservation.pool.{required_pool_key} is required "
@@ -310,19 +324,77 @@ def validate_schema(schema: dict) -> None:
                     f"Definition '{def_key}': x-reservation.request.quantityField is required "
                     f"for count mode."
                 )
-            pool_entity = pool.get('entity')
-            if pool_entity and pool_entity not in defs:
-                errors.append(
-                    f"Definition '{def_key}': x-reservation.pool.entity '{pool_entity}' is not "
-                    f"defined in the schema."
-                )
-            result = xres.get('result') or {}
+            # Required result fields for count mode
             alloc_entity = result.get('allocationEntity')
-            if alloc_entity and alloc_entity not in defs:
+            if not alloc_entity:
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.result.allocationEntity is required "
+                    f"for count mode."
+                )
+            elif alloc_entity not in defs:
                 errors.append(
                     f"Definition '{def_key}': x-reservation.result.allocationEntity '{alloc_entity}' "
                     f"is not defined in the schema."
                 )
+            if not result.get('parentField'):
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.result.parentField is required "
+                    f"for count mode."
+                )
+            # Mode × lines matrix (count)
+            if lines:
+                # (D) count + lines specified → result.lineField required
+                if not result.get('lineField'):
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.result.lineField is required "
+                        f"for count mode with 'lines'."
+                    )
+            else:
+                # (C) count + lines omitted → request.quantityField must exist on the entity
+                req_qty_field = req.get('quantityField')
+                entity_props  = defn.get('properties', {})
+                if req_qty_field and req_qty_field not in entity_props:
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.request.quantityField "
+                        f"'{req_qty_field}' does not exist on entity '{def_key}' properties "
+                        f"(count mode without lines: the quantity must be a field on the "
+                        f"request entity itself)."
+                    )
+
+        elif mode == 'item':
+            # Mode × lines matrix (item)
+            if lines:
+                # (B) item + lines specified → reject (Phase 2 reserved)
+                errors.append(
+                    f"Definition '{def_key}': x-reservation: item mode with 'lines' is "
+                    f"reserved for Phase 2."
+                )
+            else:
+                # (A) item + lines omitted → result.allocatedField required
+                if not result.get('allocatedField'):
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.result.allocatedField is "
+                        f"required for item mode without lines."
+                    )
+
+        # lines dict format: validate entity/field existence
+        if isinstance(lines, dict):
+            lines_entity_name = lines.get('entity')
+            lines_field_name  = lines.get('field')
+            if lines_entity_name:
+                if lines_entity_name not in defs:
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.lines.entity "
+                        f"'{lines_entity_name}' is not defined in the schema."
+                    )
+                elif lines_field_name:
+                    lines_entity_props = defs[lines_entity_name].get('properties', {})
+                    if lines_field_name not in lines_entity_props:
+                        errors.append(
+                            f"Definition '{def_key}': x-reservation.lines.field "
+                            f"'{lines_field_name}' does not exist on entity "
+                            f"'{lines_entity_name}'."
+                        )
 
     # -----------------------------------------------------------------------
     # Report

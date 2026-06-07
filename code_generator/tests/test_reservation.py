@@ -323,6 +323,14 @@ class TestValidateReservation:
                     "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
                     "name": {"type": "string"},
                     "quantity": {"type": "integer"},
+                    "reserved_qty": {"type": "integer"},
+                },
+            },
+            "inventory_allocation": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
                 },
             },
         }
@@ -331,15 +339,28 @@ class TestValidateReservation:
         return {"definitions": defs}
 
     def test_valid_count_mode_passes(self):
+        # (C) count + lines omitted: request.quantityField on entity, no lineField required
         schema = self._base_schema({
             "po": {
                 "type": "object",
                 "required": ["id", "name"],
-                "properties": {"id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"}, "name": {"type": "string"}},
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    "name": {"type": "string"},
+                    "quantity": {"type": "integer"},
+                },
                 "x-reservation": {
                     "mode": "count",
-                    "pool": {"entity": "inventory", "quantityField": "quantity"},
+                    "pool": {
+                        "entity": "inventory",
+                        "quantityField": "quantity",
+                        "reservedField": "reserved_qty",
+                    },
                     "request": {"quantityField": "quantity"},
+                    "result": {
+                        "allocationEntity": "inventory_allocation",
+                        "parentField": "po_id",
+                    },
                 },
             }
         })
@@ -420,4 +441,267 @@ class TestValidateReservation:
             }
         })
         with pytest.raises(SchemaValidationError, match="missing_allocation.*not defined"):
+            validate_schema(schema)
+
+
+# ---------------------------------------------------------------------------
+# 7. Mode × lines assumption matrix validation (count/item × lines/no-lines)
+# ---------------------------------------------------------------------------
+
+class TestValidateReservationMatrix:
+    """Validates the mode × lines assumption matrix (A/B/C/D cells)."""
+
+    def _base_schema(self, extra_entity: dict = None) -> dict:
+        defs = {
+            "inventory": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    "quantity": {"type": "integer"},
+                    "reserved_qty": {"type": "integer"},
+                },
+            },
+            "inventory_allocation": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"}},
+            },
+        }
+        if extra_entity:
+            defs.update(extra_entity)
+        return {"definitions": defs}
+
+    # -----------------------------------------------------------------------
+    # Normal cases
+    # -----------------------------------------------------------------------
+
+    def test_count_no_lines_passes(self):
+        # (C) count + lines omitted: request.quantityField on entity, lineField optional
+        schema = self._base_schema({
+            "booking": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "quantity": {"type": "integer"},
+                },
+                "x-reservation": {
+                    "mode": "count",
+                    "pool": {
+                        "entity": "inventory",
+                        "quantityField": "quantity",
+                        "reservedField": "reserved_qty",
+                    },
+                    "request": {"quantityField": "quantity"},
+                    "result": {
+                        "allocationEntity": "inventory_allocation",
+                        "parentField": "booking_id",
+                    },
+                },
+            }
+        })
+        validate_schema(schema)  # must not raise
+
+    def test_count_with_lines_passes(self):
+        # (D) count + lines specified: result.lineField required and present
+        schema = self._base_schema({
+            "po": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}},
+                "x-reservation": {
+                    "mode": "count",
+                    "lines": "items",
+                    "pool": {
+                        "entity": "inventory",
+                        "quantityField": "quantity",
+                        "reservedField": "reserved_qty",
+                    },
+                    "request": {"quantityField": "quantity"},
+                    "result": {
+                        "allocationEntity": "inventory_allocation",
+                        "parentField": "po_id",
+                        "lineField": "line_id",
+                    },
+                },
+            }
+        })
+        validate_schema(schema)  # must not raise
+
+    def test_item_no_lines_passes(self):
+        # (A) item + lines omitted: result.allocatedField required and present
+        schema = self._base_schema({
+            "room_res": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "room_id": {"type": ["string", "null"]},
+                },
+                "x-reservation": {
+                    "mode": "item",
+                    "pool": {"entity": "inventory"},
+                    "result": {"allocatedField": "room_id"},
+                },
+            }
+        })
+        validate_schema(schema)  # must not raise
+
+    # -----------------------------------------------------------------------
+    # Error cases — required fields
+    # -----------------------------------------------------------------------
+
+    def test_count_mode_missing_reserved_field_raises(self):
+        schema = self._base_schema({
+            "po": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}, "quantity": {"type": "integer"}},
+                "x-reservation": {
+                    "mode": "count",
+                    "pool": {"entity": "inventory", "quantityField": "quantity"},
+                    "request": {"quantityField": "quantity"},
+                    "result": {
+                        "allocationEntity": "inventory_allocation",
+                        "parentField": "po_id",
+                    },
+                },
+            }
+        })
+        with pytest.raises(SchemaValidationError, match="reservedField is required"):
+            validate_schema(schema)
+
+    def test_count_mode_missing_alloc_entity_raises(self):
+        schema = self._base_schema({
+            "po": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}, "quantity": {"type": "integer"}},
+                "x-reservation": {
+                    "mode": "count",
+                    "pool": {
+                        "entity": "inventory",
+                        "quantityField": "quantity",
+                        "reservedField": "reserved_qty",
+                    },
+                    "request": {"quantityField": "quantity"},
+                    "result": {"parentField": "po_id"},
+                },
+            }
+        })
+        with pytest.raises(SchemaValidationError, match="allocationEntity is required"):
+            validate_schema(schema)
+
+    def test_count_mode_missing_parent_field_raises(self):
+        schema = self._base_schema({
+            "po": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}, "quantity": {"type": "integer"}},
+                "x-reservation": {
+                    "mode": "count",
+                    "pool": {
+                        "entity": "inventory",
+                        "quantityField": "quantity",
+                        "reservedField": "reserved_qty",
+                    },
+                    "request": {"quantityField": "quantity"},
+                    "result": {"allocationEntity": "inventory_allocation"},
+                },
+            }
+        })
+        with pytest.raises(SchemaValidationError, match="parentField is required"):
+            validate_schema(schema)
+
+    # -----------------------------------------------------------------------
+    # Error cases — mode × lines matrix
+    # -----------------------------------------------------------------------
+
+    def test_item_with_lines_raises(self):
+        # (B) item + lines specified → Phase 2 reserved
+        schema = self._base_schema({
+            "room_res": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}, "room_id": {"type": ["string", "null"]}},
+                "x-reservation": {
+                    "mode": "item",
+                    "lines": "items",
+                    "pool": {"entity": "inventory"},
+                    "result": {"allocatedField": "room_id"},
+                },
+            }
+        })
+        with pytest.raises(SchemaValidationError, match="item mode with 'lines' is reserved for Phase 2"):
+            validate_schema(schema)
+
+    def test_item_no_lines_missing_allocated_field_raises(self):
+        # (A) item + lines omitted but result.allocatedField missing
+        schema = self._base_schema({
+            "room_res": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}},
+                "x-reservation": {
+                    "mode": "item",
+                    "pool": {"entity": "inventory"},
+                    "result": {},
+                },
+            }
+        })
+        with pytest.raises(SchemaValidationError, match="allocatedField is required"):
+            validate_schema(schema)
+
+    def test_count_with_lines_missing_line_field_raises(self):
+        # (D) count + lines specified but result.lineField missing
+        schema = self._base_schema({
+            "po": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}},
+                "x-reservation": {
+                    "mode": "count",
+                    "lines": "items",
+                    "pool": {
+                        "entity": "inventory",
+                        "quantityField": "quantity",
+                        "reservedField": "reserved_qty",
+                    },
+                    "request": {"quantityField": "quantity"},
+                    "result": {
+                        "allocationEntity": "inventory_allocation",
+                        "parentField": "po_id",
+                    },
+                },
+            }
+        })
+        with pytest.raises(SchemaValidationError, match="lineField is required"):
+            validate_schema(schema)
+
+    def test_lines_dict_entity_not_in_schema_raises(self):
+        # lines specified as dict with nonexistent entity
+        schema = self._base_schema({
+            "po": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}},
+                "x-reservation": {
+                    "mode": "count",
+                    "lines": {"entity": "nonexistent_lines_entity", "field": "order_id"},
+                    "pool": {
+                        "entity": "inventory",
+                        "quantityField": "quantity",
+                        "reservedField": "reserved_qty",
+                    },
+                    "request": {"quantityField": "quantity"},
+                    "result": {
+                        "allocationEntity": "inventory_allocation",
+                        "parentField": "po_id",
+                        "lineField": "line_id",
+                    },
+                },
+            }
+        })
+        with pytest.raises(SchemaValidationError, match="nonexistent_lines_entity.*not defined"):
             validate_schema(schema)
