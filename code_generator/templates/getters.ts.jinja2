@@ -71,6 +71,24 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     return null;
   }
 
+{% if named_constants and has_commentable %}
+  const _commentable = {{ parent_camel }}.{{ commentable_rel_name }} ? {
+    ...{{ parent_camel }}.{{ commentable_rel_name }},
+    comments: {{ parent_camel }}.{{ commentable_rel_name }}.comments.map((c) => {
+      const { reactions, ...rest } = c;
+      const reactionCounts = reactions.reduce<Array<{ type: number; count: number }>>(
+        (acc, r) => {
+          const entry = acc.find((e) => e.type === r.type);
+          if (entry) entry.count += 1;
+          else acc.push({ type: r.type, count: 1 });
+          return acc;
+        },
+        [],
+      );
+      return { ...rest, reactionCounts, myReactionTypes: [] as number[] };
+    }),
+  } : {{ parent_camel }}.{{ commentable_rel_name }};
+{% endif %}
   return {
     ...{{ parent_camel }},
 {% for rel in reverse_oto_rels if rel.relation_name != rel.prop_name %}
@@ -79,6 +97,9 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 {% for rel in flatten_rels if rel.relation_name != rel.prop_name %}
     {{ rel.prop_name }}: {{ parent_camel }}.{{ rel.relation_name }},
 {% endfor %}
+{% if named_constants and has_commentable %}
+    {{ commentable_rel_name }}: _commentable,
+{% endif %}
   };
 }
 
