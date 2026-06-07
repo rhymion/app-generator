@@ -209,6 +209,18 @@ x-reservation:
     quantityField: quantity
 ```
 
+### Mode x lines assumption matrix
+
+The `lines` field changes only the allocation granularity. It does not change
+the semantics of `criteria`, `policy`, or `transaction`.
+
+| mode | lines | behavior |
+|------|-------|----------|
+| item | omitted | Canonical case. The request entity itself is the allocation unit. Implicit `quantity=1`. The resolved target is written to `result.allocatedField` on the request entity, for example `room_reservation.room_id`. |
+| item | specified | Phase 2 only. The validator must reject this combination with a clear error such as `reserved for Phase 2`. |
+| count | omitted | The request entity's own `quantityField` is the request quantity. The allocation record may omit `lineField` and store only `parentField`. |
+| count | specified | Phase 1 case, such as `purchase_order + items`. `result.lineField` is required. |
+
 ### Item mode
 
 Item mode is for specific rows whose status changes: hotel rooms, rental units,
