@@ -290,23 +290,231 @@ class TestFieldNames:
 
 
 # ---------------------------------------------------------------------------
-# 5. Item mode produces no Phase 1 reservation config
+# 5a. Item mode WITH lines → still Phase 3 (reservation_config=None)
 # ---------------------------------------------------------------------------
 
-class TestItemModeSkipped:
-    def test_item_mode_gives_none_config(self):
+class TestItemModeWithLines:
+    """item+lines is reserved for Phase 3 — generator returns None config."""
+
+    def test_item_mode_with_lines_gives_none_config(self):
+        # _po_def_with_reservation(mode="item") includes lines:"lines"
         schema = _make_schema({"room_reservation": _po_def_with_reservation(mode="item")})
         entity = _entity_spec("room_reservation", schema)
         ctx = build_context(entity, schema)
         assert ctx["reservation_config"] is None
 
-    def test_item_mode_no_allocation_code(self):
+    def test_item_mode_with_lines_no_allocation_code(self):
         schema = _make_schema({"room_reservation": _po_def_with_reservation(mode="item")})
         entity = _entity_spec("room_reservation", schema)
         ctx = build_context(entity, schema)
         svc = service_context(ctx, schema)
         assert svc["has_reservation"] is False
         assert svc["reservation_allocation_code"] == ""
+
+
+# ---------------------------------------------------------------------------
+# 5b. Item mode WITHOUT lines → Phase 2 implemented
+# ---------------------------------------------------------------------------
+
+def _item_mode_no_lines_def(with_date_range: bool = False) -> dict:
+    """Item mode schema (no lines) for hotel-style room reservation."""
+    xres: dict = {
+        "mode": "item",
+        "pool": {
+            "entity": "room",
+            "statusField": "status",
+            "availableStatus": "available",
+            "reservedStatus": "reserved",
+        },
+        "policy": {
+            "orderBy": [{"floor": "asc"}, {"id": "asc"}],
+        },
+        "result": {
+            "allocatedField": "room_id",
+        },
+    }
+    if with_date_range:
+        xres["request"] = {
+            "criteria": {"room_type_id": "room_type_id"},
+            "dateRange": {"start": "check_in", "end": "check_out"},
+        }
+    else:
+        xres["request"] = {"criteria": {"room_type_id": "room_type_id"}}
+    return {
+        "type": "object",
+        "required": ["id", "guest_name", "room_type_id", "check_in", "check_out"],
+        "x-reservation": xres,
+        "properties": {
+            "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+            "guest_name": {"type": "string"},
+            "room_type_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "room_type", "labelField": "name"},
+            },
+            "room_id": {"type": ["string", "null"]},
+            "check_in": {"type": "string", "format": "date"},
+            "check_out": {"type": "string", "format": "date"},
+        },
+    }
+
+
+def _room_schema(extra_defs: dict = None) -> dict:
+    base = {
+        "definitions": {
+            "room_type": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                },
+            },
+            "room": {
+                "type": "object",
+                "required": ["id", "room_no", "status"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "room_no": {"type": "string"},
+                    "floor": {"type": "integer"},
+                    "room_type_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "room_type", "labelField": "name"},
+                    },
+                    "status": {"type": "string"},
+                },
+            },
+        }
+    }
+    if extra_defs:
+        base["definitions"].update(extra_defs)
+    return base
+
+
+class TestItemModePhase2:
+    """Item mode without lines: Phase 2 — reservation_config is populated."""
+
+    def _ctx(self, with_date_range: bool = False):
+        schema = _room_schema({"room_reservation": _item_mode_no_lines_def(with_date_range)})
+        entity = _entity_spec("room_reservation", schema)
+        return build_context(entity, schema)
+
+    def test_item_mode_config_not_none(self):
+        assert self._ctx()["reservation_config"] is not None
+
+    def test_mode_is_item(self):
+        assert self._ctx()["reservation_config"]["mode"] == "item"
+
+    def test_status_field(self):
+        assert self._ctx()["reservation_config"]["statusField"] == "status"
+
+    def test_available_status(self):
+        assert self._ctx()["reservation_config"]["availableStatus"] == "available"
+
+    def test_reserved_status(self):
+        assert self._ctx()["reservation_config"]["reservedStatus"] == "reserved"
+
+    def test_allocated_field(self):
+        assert self._ctx()["reservation_config"]["allocatedField"] == "room_id"
+
+    def test_has_lines_false(self):
+        assert self._ctx()["reservation_config"]["hasLines"] is False
+
+    def test_no_date_range_when_absent(self):
+        assert "dateRange" not in self._ctx()["reservation_config"]
+
+    def test_date_range_when_present(self):
+        ctx = self._ctx(with_date_range=True)
+        dr = ctx["reservation_config"]["dateRange"]
+        assert dr["startField"] == "check_in"
+        assert dr["endField"] == "check_out"
+
+    def test_reservation_alias_equals_config(self):
+        ctx = self._ctx()
+        assert ctx["reservation"] is ctx["reservation_config"]
+
+    def test_has_reservation_false_for_item_mode(self):
+        """has_reservation flag stays False for item mode (count mode flag)."""
+        ctx = self._ctx()
+        svc = service_context(ctx)
+        assert svc["has_reservation"] is False
+
+    def test_has_item_reservation_true(self):
+        ctx = self._ctx()
+        svc = service_context(ctx)
+        assert svc["has_item_reservation"] is True
+
+    def test_no_count_allocation_code_in_item_mode(self):
+        ctx = self._ctx()
+        svc = service_context(ctx)
+        assert svc["reservation_allocation_code"] == ""
+
+    def test_prisma_import_in_utility_code(self):
+        ctx = self._ctx()
+        svc = service_context(ctx)
+        assert "import { Prisma } from '@prisma/client'" in svc["utility_code"]
+
+    def test_pool_entity_in_transaction_client_type(self):
+        ctx = self._ctx()
+        svc = service_context(ctx)
+        assert "| 'room'" in svc["utility_code"]
+
+
+# ---------------------------------------------------------------------------
+# 5c. Count mode without lines (④A)
+# ---------------------------------------------------------------------------
+
+class TestCountModeNoLines:
+    """count mode without lines: hasLines=False + selfQuantityField."""
+
+    def _def(self) -> dict:
+        return {
+            "type": "object",
+            "required": ["id", "quantity"],
+            "properties": {
+                "id": {"type": "string"},
+                "quantity": {"type": "integer"},
+            },
+            "x-reservation": {
+                "mode": "count",
+                "pool": {
+                    "entity": "inventory",
+                    "quantityField": "quantity",
+                    "reservedField": "reserved_quantity",
+                },
+                "request": {"quantityField": "quantity"},
+                "result": {
+                    "allocationEntity": "inventory_allocation",
+                    "parentField": "order_id",
+                },
+            },
+        }
+
+    def _ctx(self):
+        schema = _make_schema({"simple_order": self._def()})
+        entity = _entity_spec("simple_order", schema)
+        return build_context(entity, schema)
+
+    def test_has_lines_false(self):
+        assert self._ctx()["reservation_config"]["hasLines"] is False
+
+    def test_self_quantity_field(self):
+        assert self._ctx()["reservation_config"]["selfQuantityField"] == "quantity"
+
+    def test_has_reservation_true(self):
+        ctx = self._ctx()
+        svc = service_context(ctx, _make_schema({"simple_order": self._def()}))
+        assert svc["has_reservation"] is True
+
+    def test_allocation_code_non_empty(self):
+        ctx = self._ctx()
+        svc = service_context(ctx, _make_schema({"simple_order": self._def()}))
+        assert svc["reservation_allocation_code"] != ""
+
+    def test_allocation_code_uses_created_as_line(self):
+        ctx = self._ctx()
+        svc = service_context(ctx, _make_schema({"simple_order": self._def()}))
+        # ④A: wraps `created` as a single line array
+        assert '_reservationLines = [' in svc["reservation_allocation_code"]
 
 
 # ---------------------------------------------------------------------------

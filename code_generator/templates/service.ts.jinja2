@@ -143,3 +143,58 @@ export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
 }
 {% endif %}
 {% endif %}
+{% if reservation_config and reservation_config.mode == 'item' %}
+
+// Reservation: item mode — find an available {{ reservation_config.pool.entity }}, then link it to {{ model }}.
+// Isolation: serializable transaction (avoids raw SQL while preventing concurrent double-booking).
+export const reserve{{ parent_pascal }} = async (
+  requestId: string,
+{% if reservation_config.dateRange %}
+  dateRange: { {{ reservation_config.dateRange.startField }}: Date; {{ reservation_config.dateRange.endField }}: Date },
+{% endif %}
+  criteria: Record<string, unknown> = {}
+): Promise<{ success: boolean; {{ reservation_config.allocatedField }}: string }> => {
+  return await prisma.$transaction(async (tx) => {
+    const candidate = await (tx as unknown as typeof prisma).{{ reservation_config.pool.entity }}.findFirst({
+      where: {
+        {{ reservation_config.statusField }}: '{{ reservation_config.availableStatus }}',
+        ...criteria,
+      },
+{% if reservation_config.policy.orderBy %}
+      orderBy: [
+{% for order_item in reservation_config.policy.orderBy %}
+{% for field_name, direction in order_item.items() %}
+{% if '_nulls_' in direction %}
+        { {{ field_name }}: { sort: '{{ direction.split('_nulls_')[0] }}', nulls: '{{ direction.split('_nulls_')[1] }}' } },
+{% else %}
+        { {{ field_name }}: '{{ direction }}' },
+{% endif %}
+{% endfor %}
+{% endfor %}
+      ],
+{% endif %}
+    });
+    if (!candidate) {
+      throw new Error('No available {{ reservation_config.pool.entity }} for reservation');
+    }
+{% if reservation_config.dateRange %}
+    await assertNoDuplicateReservation(
+      tx as unknown as Pick<typeof prisma, '{{ model }}'>,
+      candidate.id,
+      dateRange
+    );
+{% endif %}
+    await (tx as unknown as typeof prisma).{{ reservation_config.pool.entity }}.update({
+      where: { id: candidate.id },
+      data: { {{ reservation_config.statusField }}: '{{ reservation_config.reservedStatus }}' },
+    });
+    await tx.{{ model }}.update({
+      where: { id: requestId },
+      data: { {{ reservation_config.allocatedField }}: candidate.id },
+    });
+    return { success: true, {{ reservation_config.allocatedField }}: candidate.id };
+  }, {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  });
+};
+{% endif %}

@@ -751,14 +751,24 @@ def _build_reservation_allocation_code(rc: dict, model: str) -> str:
             f"          }});\n"
         )
 
+    has_lines = rc.get('hasLines', True)
+    self_qty_field = rc.get('selfQuantityField', req_qty_field)
+
     lines = [
-        f"    // Reservation: count mode — allocate {pool_entity} for each {lines_prop} line",
+        f"    // Reservation: count mode — allocate {pool_entity} for each {lines_prop or 'request'} line",
     ]
     if lines_entity:
         lines.append(
             f"    const _reservationLines = await tx.{lines_entity}.findMany({{\n"
             f"      where: {{ {model}_id: created.id }},\n"
             f"    }});"
+        )
+        iter_var = '_reservationLines'
+    elif not has_lines:
+        # ④A: count mode without lines — treat the request entity itself as the single line
+        lines.append(
+            f"    const _reservationLines = [{{ ...created, {req_qty_field}: "
+            f"(created as Record<string, unknown>).{self_qty_field} as number }}];"
         )
         iter_var = '_reservationLines'
     else:
@@ -827,6 +837,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     is_audited              = ctx.get('is_audited', False)
     reservation_config      = ctx.get('reservation_config')
     has_reservation         = bool(reservation_config and reservation_config.get('mode') == 'count')
+    has_item_reservation    = bool(reservation_config and reservation_config.get('mode') == 'item')
+    has_item_daterange      = has_item_reservation and bool(reservation_config.get('dateRange'))
 
     has_non_comment_ch = bool(non_comment_ch)
 
@@ -1119,16 +1131,26 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         reservation_mutation_guard_update = _build_reservation_mutation_guard_update(reservation_config, model)
         reservation_mutation_guard_delete = _build_reservation_mutation_guard_delete(reservation_config, model)
 
+    # item mode: assertNoDuplicateReservation added to service_validation import when dateRange present
+    _validation_extras = ''
+    if has_item_daterange:
+        _validation_extras = ', assertNoDuplicateReservation'
+    _pool_entity_pick = (
+        f" | '{reservation_config['pool']['entity']}'" if has_item_reservation and reservation_config else ''
+    )
+
     utility_code = (
         f"import prisma from '@/lib/prisma';\n"
-        f"import {{ normalizeValue,{' normalizeChildRefs,' if has_non_comment_ch else ''}"
+        + (f"import {{ Prisma }} from '@prisma/client';\n" if has_item_reservation else '')
+        + f"import {{ normalizeValue,{' normalizeChildRefs,' if has_non_comment_ch else ''}"
         f"{' assertNotStale,' if can_update else ''} type NormalizedSnapshot }} from '@/lib/normalize';"
-        + (f"\nimport {{ validateOnAdd, validateOnUpdate }} from './service_validation';" if (can_create or can_update) else '')
+        + (f"\nimport {{ validateOnAdd, validateOnUpdate{_validation_extras} }} from './service_validation';" if (can_create or can_update) else '')
+        + (f"\nimport {{ assertNoDuplicateReservation }} from './service_validation';" if has_item_daterange and not (can_create or can_update) else '')
         + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '')
         + (f"\nimport {{ notify }} from '@/lib/_notifier';" if has_assignee_id else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + insufficient_inventory_error_class +
-        f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'>;\n\n"
+        f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"
         f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
         f"  const safeSnapshot = (snapshot ?? {{}}) as Record<string, unknown>;\n"
         f"  return {{\n"
@@ -1156,6 +1178,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'flatten_nested_creates':             flatten_nested_creates,
         'reservation_allocation_code':        reservation_allocation_code,
         'has_reservation':                    has_reservation,
+        'has_item_reservation':               has_item_reservation,
         'reservation_mutation_guard_update':  reservation_mutation_guard_update,
         'reservation_mutation_guard_delete':  reservation_mutation_guard_delete,
     }
