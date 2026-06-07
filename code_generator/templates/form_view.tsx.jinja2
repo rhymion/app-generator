@@ -28,7 +28,10 @@ import ListWrapper from '@/components/_standard/ListWrapper';
 {% endif %}
 {% if has_comment_children %}
 import CommentListWrapper from '@/components/_standard/CommentListWrapper';
-import { add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment } from '@/lib/{{ parent }}/actions';
+import { add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment{% if named_constants %}, toggle{{ parent_pascal }}CommentReaction{% endif %} } from '@/lib/{{ parent }}/actions';
+{% if named_constants %}
+import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
+{% endif %}
 {% endif %}
 import AuditInfo from '@/components/_standard/AuditInfo';
 import { AppDetailShell, AppDetailHeader, AppFieldText, AppFieldBoolean{% if has_rel_links %}, AppFieldRelation{% endif %}{% if needs_accordion %}, AppSection{% endif %} } from '@/components/ui';

@@ -1765,6 +1765,13 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     col_fn_names         = [f"use{to_pascal_case(c['property_name'])}Columns" for c in grid_children]
 
     child_view_grids = []
+    _view_has_reactions = bool(ctx.get('named_constants'))
+    _parent_pascal_view = to_pascal_case(ctx.get('parent', ''))
+    _view_reaction_props = (
+        f"        reactionTypes={{[...COMMENT_REACTION_TYPES]}}\n"
+        f"        onToggleReaction={{toggle{_parent_pascal_view}CommentReaction}}\n"
+        if _view_has_reactions else ""
+    )
     # Bridge-based comment section (commentable one-to-one)
     if has_commentable:
         child_view_grids.append(
@@ -1773,6 +1780,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             f"        showTitle={{true}}\n"
             f"        title={{tf('comments')}}\n"
             f"        permissions={{{{ create: false, delete: false }}}}\n"
+            f"{_view_reaction_props}"
             f"      />"
         )
     for child in children_raw:
@@ -1786,6 +1794,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 f"        showTitle={{true}}\n"
                 f"        title={{tf('{child_camel}')}}\n"
                 f"        permissions={{{{ create: false, delete: false }}}}\n"
+                f"{_view_reaction_props}"
                 f"      />"
             )
         elif ot == 'list':
@@ -2898,6 +2907,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # Comment children JSX
     comment_jsx_parts = []
     comment_add_id_expr = 'src.id'  # default: old pattern uses parent entity id
+    has_reactions = bool(ctx.get('named_constants'))
+    _reaction_props = (
+        f"          reactionTypes={{[...COMMENT_REACTION_TYPES]}}\n"
+        f"          onToggleReaction={{toggle{parent_pascal}CommentReaction}}\n"
+        if has_reactions else ""
+    )
     for c in comment_children:
         if c.get('bridge'):
             prop = c['property_name']
@@ -2913,6 +2928,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"          onCreateComment={{handleCreateComment}}\n"
                 f"          onUpdateComment={{handleUpdateComment}}\n"
                 f"          onDeleteComment={{handleDeleteComment}}\n"
+                f"{_reaction_props}"
                 f"        />\n"
                 f"      )}}"
             )
@@ -2930,6 +2946,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"          onCreateComment={{handleCreateComment}}\n"
                 f"          onUpdateComment={{handleUpdateComment}}\n"
                 f"          onDeleteComment={{handleDeleteComment}}\n"
+                f"{_reaction_props}"
                 f"        />\n"
                 f"      )}}"
             )
