@@ -279,6 +279,7 @@ export default function DataGridClient<T extends BaseEntity>({
           onRowSelectionModelChange={setSelectedRowIds}
           pageSizeOptions={[10, 20, 50]}
           checkboxSelection
+          disableVirtualization={typeof window !== 'undefined' && !!(window as unknown as { Cypress?: unknown }).Cypress}
           sx={{ border: 0 }}
         />
       </Paper>

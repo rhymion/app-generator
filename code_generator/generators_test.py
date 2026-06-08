@@ -1564,6 +1564,54 @@ def helper_context(
             _fake_field = {'category': 'text', 'prop_name': _prop_name, 'label': to_title_case(_prop_name)}
             extra_prisma_fields.append({'prop_name': _prop_name, 'prisma_val': prisma_value(_fake_field, 'i', title)})
 
+    # Detect count-mode reservation WITH lines: populateDependencies must seed the pool entity
+    # so that create tests (2.1, 2.2) can allocate inventory without hitting InsufficientInventoryError.
+    reservation_lines_pool_seed = None
+    _xres_h = parent_def.get('x-reservation')
+    if (_xres_h and isinstance(_xres_h, dict)
+            and _xres_h.get('mode') == 'count'
+            and _xres_h.get('lines')):
+        _pool_cfg_h = _xres_h.get('pool', {})
+        _request_cfg_h = _xres_h.get('request', {})
+        _pool_entity_h = _pool_cfg_h.get('entity')
+        _pool_qty_h = _pool_cfg_h.get('quantityField', 'quantity')
+        _criteria_h = _request_cfg_h.get('criteria', {})
+        _crit_pool_field_h = next(iter(_criteria_h.keys()), None)
+        if _pool_entity_h and _crit_pool_field_h:
+            _pool_def_h = schema.get('definitions', {}).get(_pool_entity_h, {})
+            _pool_crit_prop_h = _pool_def_h.get('properties', {}).get(_crit_pool_field_h, {})
+            _pool_fk_target_h = (_pool_crit_prop_h.get('x-relationship') or {}).get('target', '')
+            _pool_fk_dep_var_h = next(
+                (d['var_name'] for d in enriched_deps if d['target'] == _pool_fk_target_h),
+                None
+            )
+            if _pool_fk_dep_var_h:
+                reservation_lines_pool_seed = {
+                    'pool_entity': _pool_entity_h,
+                    'pool_qty_field': _pool_qty_h,
+                    'criteria_pool_field': _crit_pool_field_h,
+                    'pool_fk_dep_var': _pool_fk_dep_var_h,
+                }
+
+    # Detect count-mode reservation WITHOUT lines: populateDependencies must seed the pool entity
+    # even when the entity has no FK deps (e.g. supply_request → supply_pool).
+    reservation_nolines_pool_seed = None
+    if (_xres_h and isinstance(_xres_h, dict)
+            and _xres_h.get('mode') == 'count'
+            and not _xres_h.get('lines')):
+        _pool_cfg_nolines = _xres_h.get('pool', {})
+        _pool_entity_nolines = _pool_cfg_nolines.get('entity')
+        _pool_qty_nolines = _pool_cfg_nolines.get('quantityField', 'quantity')
+        if _pool_entity_nolines:
+            _pool_def_nolines = schema.get('definitions', {}).get(_pool_entity_nolines, {})
+            _pool_has_name_nolines = 'name' in (_pool_def_nolines.get('properties') or {})
+            reservation_nolines_pool_seed = {
+                'pool_entity': _pool_entity_nolines,
+                'pool_qty_field': _pool_qty_nolines,
+                'has_name': _pool_has_name_nolines,
+                'pool_title': to_title_case(_pool_entity_nolines),
+            }
+
     return {
         'pascal': pascal,
         'title': title,
@@ -1592,6 +1640,8 @@ def helper_context(
         # If any dep label expression resolves a date/time field, the helper
         # must import formatLabelValue so the rendered name matches the UI.
         'needs_format_label_value': any(d.get('label_has_format') for d in enriched_deps),
+        'reservation_lines_pool_seed': reservation_lines_pool_seed,
+        'reservation_nolines_pool_seed': reservation_nolines_pool_seed,
     }
 
 
@@ -1674,6 +1724,18 @@ def spec_context(
     )
     has_deps = bool(deps) or bool(all_ua_spec) or has_child_fk_deps
 
+    # Count-mode reservation WITHOUT lines: Create tests must call populateDependencies
+    # to seed the pool entity even when the entity has no FK deps.
+    _xres_spec = parent_def.get('x-reservation')
+    _has_nolines_reservation = (
+        bool(_xres_spec)
+        and isinstance(_xres_spec, dict)
+        and _xres_spec.get('mode') == 'count'
+        and not _xres_spec.get('lines')
+        and bool((_xres_spec.get('pool') or {}).get('entity'))
+    )
+    needs_pool_for_create = _has_nolines_reservation and not has_deps
+
     required_field_metas = [f for f in fields if f['required']]
     optional_field_metas = [f for f in fields if not f['required']]
     non_autocomplete_required = [f for f in required_field_metas if f['category'] != 'autocomplete']
@@ -1690,7 +1752,7 @@ def spec_context(
     can_view   = generate_config.get('view', True)
 
     # Indentation for .then((deps) => {}) wrapper in sections 2 and 5
-    I = '        ' if has_deps else '      '
+    I = '        ' if (has_deps or needs_pool_for_create) else '      '
 
     # Pre-compute fill/assert command lists (indent already baked in), with fk_dep_vars.
     # flatten_m2o_fk_props: FK props on this model whose related-entity Detail
@@ -2074,6 +2136,7 @@ def spec_context(
         'can_delete': can_delete,
         'can_view': can_view,
         'has_deps': has_deps,
+        'needs_pool_for_create': needs_pool_for_create,
         'has_optional': bool(optional_field_metas),
         'has_children': bool(child_metas),
         'has_datagrid_children': bool(datagrid_children),
@@ -2388,6 +2451,16 @@ def api_spec_context(
 
     has_approvable = any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model, schema))
 
+    # Detect count-mode reservation without lines: POST tests must seed the pool entity first.
+    _xres_def = model_def.get('x-reservation')
+    _reservation_count_pool_pascal = None
+    if (_xres_def and isinstance(_xres_def, dict)
+            and _xres_def.get('mode') == 'count'
+            and not _xres_def.get('lines')):
+        _pool_entity = (_xres_def.get('pool') or {}).get('entity')
+        if _pool_entity:
+            _reservation_count_pool_pascal = to_pascal_case(_pool_entity)
+
     # Count items pre-created by db:seed + db:grantAllPermissions so that
     # generated tests can adjust expected row counts accordingly.
     # - role:       grantAllPermissions creates 1 Administrator role
@@ -2433,6 +2506,7 @@ def api_spec_context(
         'bulk_put_body_valid':    _put_body_impl('              '),   # 14 spaces
         'bulk_put_body_valid_fk': _put_body_impl('                '), # 16 spaces
         'has_approvable': has_approvable,
+        'reservation_count_pool_pascal': _reservation_count_pool_pascal,
     }
 
 

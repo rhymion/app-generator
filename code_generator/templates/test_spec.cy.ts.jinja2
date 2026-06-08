@@ -63,7 +63,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 
   describe('Create', () => {
     it('2.1 creates with minimal data (required fields only)', () => {
-{% if has_deps %}
+{% if has_deps or needs_pool_for_create %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
 {% if can_list %}
@@ -115,13 +115,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ cmd }}
 {% endfor %}
 {% endif %}
-{% if has_deps %}
+{% if has_deps or needs_pool_for_create %}
       });
 {% endif %}
     });
 
     it('2.2 creates with full data (all fields and children)', () => {
-{% if has_deps %}
+{% if has_deps or needs_pool_for_create %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
 {% for child in list_children_data %}
@@ -193,7 +193,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ cmd }}
 {% endfor %}
 {% endif %}
-{% if has_deps %}
+{% if has_deps or needs_pool_for_create %}
       });
 {% endif %}
     });

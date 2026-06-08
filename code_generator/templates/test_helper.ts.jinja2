@@ -186,7 +186,7 @@ export async function populate{{ pascal }}Dependencies() {
 }
 {% else %}
 export async function populate{{ pascal }}Dependencies() {
-{% if not deps %}
+{% if not deps and not reservation_nolines_pool_seed %}
   return {};
 {% else %}
   const testUser = await getTestUser();
@@ -318,6 +318,28 @@ export async function populate{{ pascal }}Dependencies() {
 {% endif %}
 {% endif %}
 {% endfor %}
+{% if reservation_lines_pool_seed %}
+  await prisma.{{ reservation_lines_pool_seed.pool_entity }}.create({
+    data: {
+      {{ reservation_lines_pool_seed.criteria_pool_field }}: {{ reservation_lines_pool_seed.pool_fk_dep_var }}.id,
+      {{ reservation_lines_pool_seed.pool_qty_field }}: 100,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+{% endif %}
+{% if reservation_nolines_pool_seed %}
+  await prisma.{{ reservation_nolines_pool_seed.pool_entity }}.create({
+    data: {
+{% if reservation_nolines_pool_seed.has_name %}
+      name: 'Test {{ reservation_nolines_pool_seed.pool_title }}',
+{% endif %}
+      {{ reservation_nolines_pool_seed.pool_qty_field }}: 100,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+{% endif %}
   return { {{ deps_return }} };
 {% endif %}
 }
