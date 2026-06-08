@@ -1522,6 +1522,27 @@ def helper_context(
     if primary_fk_dep is not None:
         primary_fk_dep = {**primary_fk_dep, 'is_user_account': primary_fk_dep['target'] == 'user'}
 
+    # When the primary display FK is optional (nullable), it won't appear in
+    # required_fields_prisma, so populateData creates records without it and
+    # item.room is null → the formatted field is '' → DataGrid shows the entity's
+    # own ID instead of the display value. Force-inject it so the template emits
+    # `room_id: roomItem.id` and the list view shows the correct display value.
+    if primary_fk_dep is not None and not primary_fk_dep.get('is_user_account'):
+        _pfk_var = primary_fk_dep['var_name']
+        _pfk_prop = next(
+            (fk['prop_name'] for fk in entity_fk_deps if fk['dep_var_name'] == _pfk_var),
+            None,
+        )
+        if _pfk_prop:
+            _already_required = any(f['prop_name'] == _pfk_prop for f in required_fields_prisma)
+            if not _already_required:
+                _pfk_field = next(
+                    (f for f in all_fields_prisma if f['prop_name'] == _pfk_prop),
+                    None,
+                )
+                if _pfk_field:
+                    required_fields_prisma.append(_pfk_field)
+
     # populateData needs deps when there are required FK fields not covered by per-iteration creation.
     primary_fk_dep_var = primary_fk_dep['var_name'] if primary_fk_dep else None
     primary_fk_is_ua = primary_fk_dep is not None and primary_fk_dep.get('is_user_account', False)
@@ -2412,6 +2433,16 @@ def api_spec_context(
                     out.append(f"{indent}{field['prop_name']}: deps.{dep['dep_var_name']}.id,")
             else:
                 out.append(f"{indent}{field['prop_name']}: {api_value(field, title)},")
+        # When the primary display FK is optional, the loop above skips it, but
+        # assert_create references getRes.body.<field>.id — include it so the
+        # assertion can resolve. Skipped only if it's the explicit skip_field.
+        if primary_is_fk and not primary_fk_is_ua:
+            _pfk_prop = f'{primary_field_name}_id'
+            _already_in = any(ln.strip().startswith(f'{_pfk_prop}:') for ln in out)
+            if not _already_in and skip_field != _pfk_prop:
+                _pfk_dep = next((d for d in entity_fk_deps if d['prop_name'] == _pfk_prop), None)
+                if _pfk_dep:
+                    out.append(f"{indent}{_pfk_prop}: deps.{primary_dep_var}.id,")
         for ua in ua_fk_fields_for_api:
             if ua['prop_name'] != skip_field:
                 out.append(f"{indent}{ua['prop_name']}: deps.{ua['var_name']}.id,")
