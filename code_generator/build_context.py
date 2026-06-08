@@ -833,6 +833,9 @@ def build_context(entity: dict, schema: dict) -> dict:
                     if _ch.get('property_name') == _lines_prop:
                         _lines_entity = _ch['name']
                         break
+            _xres_result = _xres.get('result') or {}
+            # allocationAudit defaults to True; set False when alloc entity has no creator/updater fields.
+            _alloc_has_creator = _xres_result.get('allocationAudit', True)
             reservation_config = {
                 'mode': 'count',
                 'transaction_strategy': (_xres.get('transaction') or {}).get('strategy', 'conditional_update'),
@@ -841,7 +844,8 @@ def build_context(entity: dict, schema: dict) -> dict:
                 'pool': _xres.get('pool') or {},
                 'request': _xres.get('request') or {},
                 'policy': _xres.get('policy') or {},
-                'result': _xres.get('result') or {},
+                'result': _xres_result,
+                'alloc_has_creator': _alloc_has_creator,
                 'hasLines': bool(_lines_prop),
             }
             if not reservation_config['hasLines']:
@@ -855,6 +859,8 @@ def build_context(entity: dict, schema: dict) -> dict:
             _result = _xres.get('result') or {}
             _request = _xres.get('request') or {}
             _dateRange_raw = _request.get('dateRange')
+            _avail = _pool.get('availableStatus', 'available')
+            _resrv = _pool.get('reservedStatus', 'reserved')
             reservation_config = {
                 'mode': 'item',
                 'pool': _pool,
@@ -862,8 +868,10 @@ def build_context(entity: dict, schema: dict) -> dict:
                 'result': _result,
                 'request': _request,
                 'statusField': _pool.get('statusField', 'status'),
-                'availableStatus': _pool.get('availableStatus', 'available'),
-                'reservedStatus': _pool.get('reservedStatus', 'reserved'),
+                'availableStatus': _avail,
+                'reservedStatus': _resrv,
+                'available_status_ts': str(_avail) if isinstance(_avail, int) else f"'{_avail}'",
+                'reserved_status_ts': str(_resrv) if isinstance(_resrv, int) else f"'{_resrv}'",
                 'allocatedField': _result.get('allocatedField', ''),
                 'criteria': _request.get('criteria') or {},
                 'hasLines': False,

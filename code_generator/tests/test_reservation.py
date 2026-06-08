@@ -323,8 +323,8 @@ def _item_mode_no_lines_def(with_date_range: bool = False) -> dict:
         "pool": {
             "entity": "room",
             "statusField": "status",
-            "availableStatus": "available",
-            "reservedStatus": "reserved",
+            "availableStatus": 0,
+            "reservedStatus": 2,
         },
         "policy": {
             "orderBy": [{"floor": "asc"}, {"id": "asc"}],
@@ -380,7 +380,7 @@ def _room_schema(extra_defs: dict = None) -> dict:
                         "type": "string",
                         "x-relationship": {"type": "many-to-one", "target": "room_type", "labelField": "name"},
                     },
-                    "status": {"type": "string"},
+                    "status": {"type": "integer", "minimum": 0, "maximum": 2},
                 },
             },
         }
@@ -408,10 +408,16 @@ class TestItemModePhase2:
         assert self._ctx()["reservation_config"]["statusField"] == "status"
 
     def test_available_status(self):
-        assert self._ctx()["reservation_config"]["availableStatus"] == "available"
+        assert self._ctx()["reservation_config"]["availableStatus"] == 0
 
     def test_reserved_status(self):
-        assert self._ctx()["reservation_config"]["reservedStatus"] == "reserved"
+        assert self._ctx()["reservation_config"]["reservedStatus"] == 2
+
+    def test_available_status_ts_integer(self):
+        assert self._ctx()["reservation_config"]["available_status_ts"] == "0"
+
+    def test_reserved_status_ts_integer(self):
+        assert self._ctx()["reservation_config"]["reserved_status_ts"] == "2"
 
     def test_allocated_field(self):
         assert self._ctx()["reservation_config"]["allocatedField"] == "room_id"
@@ -451,12 +457,24 @@ class TestItemModePhase2:
     def test_prisma_import_in_utility_code(self):
         ctx = self._ctx()
         svc = service_context(ctx)
-        assert "import { Prisma } from '@prisma/client'" in svc["utility_code"]
+        assert "import { Prisma } from '@/app/generated/prisma/client'" in svc["utility_code"]
 
     def test_pool_entity_in_transaction_client_type(self):
         ctx = self._ctx()
         svc = service_context(ctx)
         assert "| 'room'" in svc["utility_code"]
+
+    def test_insufficient_inventory_error_exported_for_item_mode(self):
+        """InsufficientInventoryError must be exported so api_route.ts can import it."""
+        ctx = self._ctx()
+        svc = service_context(ctx)
+        assert "export class InsufficientInventoryError" in svc["utility_code"]
+
+    def test_reservation_mutation_error_not_exported_for_item_mode(self):
+        """ReservationMutationError is count-mode-only and must NOT be in item mode service."""
+        ctx = self._ctx()
+        svc = service_context(ctx)
+        assert "export class ReservationMutationError" not in svc["utility_code"]
 
 
 # ---------------------------------------------------------------------------
@@ -513,8 +531,8 @@ class TestCountModeNoLines:
     def test_allocation_code_uses_created_as_line(self):
         ctx = self._ctx()
         svc = service_context(ctx, _make_schema({"simple_order": self._def()}))
-        # ④A: wraps `created` as a single line array
-        assert '_reservationLines = [' in svc["reservation_allocation_code"]
+        # ④A: count mode without lines — allocates directly from created.quantity
+        assert 'let _remaining = ' in svc["reservation_allocation_code"]
 
 
 # ---------------------------------------------------------------------------

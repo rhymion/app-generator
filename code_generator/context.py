@@ -134,7 +134,20 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     merged_def = {**model_def, 'properties': filtered_props}
     rels_raw = get_parent_relationships(merged_def)
 
-    parent_fields = [FieldInfo(k, get_ts_type(v)) for k, v in filtered_props.items()]
+    required_set = set(model_def.get('required') or [])
+    parent_fields = []
+    for k, v in filtered_props.items():
+        ts_type = get_ts_type(v)
+        # Fields not in required and without a JSON schema default are nullable in Prisma
+        # (generated as optional columns with no DB default). Reflect this in TypeScript
+        # if null isn't already declared. Fields with a 'default' key keep their Prisma
+        # @default and remain non-nullable.
+        if (k not in required_set
+                and 'default' not in v
+                and 'null' not in ts_type
+                and ts_type not in ('any', 'any[]')):
+            ts_type = ts_type + ' | null'
+        parent_fields.append(FieldInfo(k, ts_type))
     parent_fields.append(FieldInfo('creator_id', 'string | null'))  # enforce id as string for permissions
 
     # Virtual columns: fields in x-display.table absent from both properties and relation

@@ -157,7 +157,7 @@ export const reserve{{ parent_pascal }} = async (
   return await prisma.$transaction(async (tx) => {
     const candidate = await (tx as unknown as typeof prisma).{{ reservation_config.pool.entity }}.findFirst({
       where: {
-        {{ reservation_config.statusField }}: '{{ reservation_config.availableStatus }}',
+        {{ reservation_config.statusField }}: {{ reservation_config.available_status_ts }},
         ...criteria,
       },
 {% if reservation_config.policy.orderBy %}
@@ -175,7 +175,7 @@ export const reserve{{ parent_pascal }} = async (
 {% endif %}
     });
     if (!candidate) {
-      throw new Error('No available {{ reservation_config.pool.entity }} for reservation');
+      throw new InsufficientInventoryError('No available {{ reservation_config.pool.entity }} for reservation');
     }
 {% if reservation_config.dateRange %}
     await assertNoDuplicateReservation(
@@ -186,7 +186,7 @@ export const reserve{{ parent_pascal }} = async (
 {% endif %}
     await (tx as unknown as typeof prisma).{{ reservation_config.pool.entity }}.update({
       where: { id: candidate.id },
-      data: { {{ reservation_config.statusField }}: '{{ reservation_config.reservedStatus }}' },
+      data: { {{ reservation_config.statusField }}: {{ reservation_config.reserved_status_ts }} },
     });
     await tx.{{ model }}.update({
       where: { id: requestId },
