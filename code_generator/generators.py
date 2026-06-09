@@ -2086,11 +2086,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"  }})));"
                 )
             else:
+                _list_rel = c.get('relationship') or {}
+                _list_lf = _list_rel.get('label_field', 'name')
+                _list_target = _list_rel.get('target', child_name)
+                _list_built = build_label_expression('f', _list_lf, _list_target, schema)
+                if _list_built['has_format']:
+                    uses_format_label_value = True
+                _list_expr = _list_built['expression']
                 child_grid_setup_parts.append(
                     f"  const [localInitial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                     f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
-                    f"    value: f.name,\n"
-                    f"    label: f.name,\n"
+                    f"    value: {_list_expr},\n"
+                    f"    label: {_list_expr},\n"
                     f"    originalId: f.id,{order_line}\n"
                     f"  }})));"
                 )

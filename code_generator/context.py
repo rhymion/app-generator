@@ -346,6 +346,11 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         already_declared = is_independent or child_name in declared_child_types or child_name == model
         if not already_declared:
             declared_child_types.add(child_name)
+            # When this child's type is declared inline, its FK targets are
+            # referenced as types inside this file — they must be imported.
+            for rel in child_rels:
+                if rel.target != model and rel.target not in import_targets:
+                    import_targets.append(rel.target)
 
         children.append(ChildContext(
             name=child_name,
