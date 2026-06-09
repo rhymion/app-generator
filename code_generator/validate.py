@@ -397,6 +397,189 @@ def validate_schema(schema: dict) -> None:
                         )
 
     # -----------------------------------------------------------------------
+    # 6. x-display list primary field — required + non-nullable + labelField
+    # -----------------------------------------------------------------------
+    def _is_optional_field(field_name: str, field_props: dict, req_set: set) -> bool:
+        """True when field is absent from required list OR has 'null' in type union."""
+        if field_name not in req_set:
+            return True
+        fdef = field_props.get(field_name, {})
+        t = fdef.get('type')
+        return isinstance(t, list) and 'null' in t
+
+    for entity in entities:
+        model     = entity['model']
+        model_def = defs.get(model, {})
+        props     = model_def.get('properties', {})
+        req_set   = set(model_def.get('required') or [])
+
+        xdisplay = model_def.get('x-display') or {}
+        if isinstance(xdisplay, list):
+            table = xdisplay
+        elif isinstance(xdisplay, dict):
+            table = xdisplay.get('table') or []
+        else:
+            continue
+
+        # Locate the primary display field (first entry with primary: true)
+        primary_field: str | None = None
+        for item in table:
+            if not isinstance(item, dict):
+                continue
+            for field_name, cfg in item.items():
+                if isinstance(cfg, dict) and cfg.get('primary'):
+                    primary_field = field_name
+                    break
+            if primary_field:
+                break
+
+        # Validate ALL table columns that carry labelField in their column config.
+        # primary: true is NOT required — any FK column with a table-level labelField
+        # must have a required (non-nullable) FK so the list view never renders blank.
+        for _item in table:
+            if not isinstance(_item, dict):
+                continue
+            for _col_name, _col_cfg in _item.items():
+                if not isinstance(_col_cfg, dict):
+                    continue
+                _lf_raw = _col_cfg.get('labelField')
+                if not _lf_raw:
+                    continue
+
+                _col_fk = f'{_col_name}_id'
+                if _col_fk not in props:
+                    continue
+
+                if _is_optional_field(_col_fk, props, req_set):
+                    errors.append(
+                        f"Entity '{model}': list column '{_col_name}' has labelField "
+                        f"but '{_col_fk}' is optional or nullable — "
+                        f"the list view column would render null/empty on rows "
+                        f"where the FK is unset."
+                    )
+                    continue
+
+                # Validate the labelField path on the FK's target entity.
+                # Table-level labelField format: "{fk_prop}.{rest}" where the first
+                # segment is the FK field name on this entity; strip it to get the
+                # path relative to the target.
+                _col_fk_rel = (props[_col_fk].get('x-relationship') or {})
+                _col_target = _col_fk_rel.get('target')
+                if not _col_target or _col_target not in defs:
+                    continue
+
+                if isinstance(_lf_raw, str):
+                    _col_lf_paths = [_lf_raw] if _lf_raw else []
+                elif isinstance(_lf_raw, list):
+                    _col_lf_paths = [p for p in _lf_raw if isinstance(p, str) and p]
+                else:
+                    _col_lf_paths = []
+
+                for _lf_path in _col_lf_paths:
+                    _segs = _lf_path.split('.')
+                    # Strip leading FK-field prefix (e.g. "room_id.room_no" → ["room_no"])
+                    _path_segs = _segs[1:] if _segs[0] == _col_fk else _segs
+                    if not _path_segs:
+                        continue
+
+                    _cursor = _col_target
+                    for _i, _seg in enumerate(_path_segs):
+                        _cursor_def   = defs.get(_cursor, {})
+                        _cursor_props = _cursor_def.get('properties', {}) or {}
+                        _cursor_req   = set(_cursor_def.get('required') or [])
+                        _is_last      = (_i == len(_path_segs) - 1)
+                        if _is_last:
+                            if _seg not in _cursor_props:
+                                break  # unknown segment — caught by section 2c
+                            if _is_optional_field(_seg, _cursor_props, _cursor_req):
+                                errors.append(
+                                    f"Entity '{model}': list column '{_col_name}' "
+                                    f"labelField path '{_lf_path}': final field '{_seg}' "
+                                    f"on '{_cursor}' must be required (non-nullable)."
+                                )
+                        else:
+                            _rel_fk     = f'{_seg}_id'
+                            _rel_target = (
+                                (_cursor_props.get(_rel_fk) or {})
+                                .get('x-relationship', {})
+                                .get('target')
+                            )
+                            if not _rel_target or _rel_target not in defs:
+                                break
+                            _cursor = _rel_target
+
+        if primary_field is None:
+            continue
+
+        fk_prop = f'{primary_field}_id'
+
+        if fk_prop in props:
+            # Primary field is a FK (e.g. primary='room_type' → fk_prop='room_type_id')
+            if _is_optional_field(fk_prop, props, req_set):
+                errors.append(
+                    f"Entity '{model}': list primary field '{primary_field}' must be "
+                    f"required (non-nullable). '{fk_prop}' is optional or nullable — "
+                    f"the list view primary column would render null/empty on rows "
+                    f"where the FK is unset."
+                )
+                continue
+
+            # Check labelField paths on the FK's x-relationship
+            fk_rel     = (props[fk_prop].get('x-relationship') or {})
+            target     = fk_rel.get('target')
+            lf_raw     = fk_rel.get('labelField')
+
+            if not target or target not in defs or not lf_raw:
+                continue
+
+            # Normalise labelField to a list (supports str and list[str])
+            if isinstance(lf_raw, str):
+                lf_paths = [lf_raw] if lf_raw else []
+            elif isinstance(lf_raw, list):
+                lf_paths = [p for p in lf_raw if isinstance(p, str) and p]
+            else:
+                lf_paths = []
+
+            for lf_path in lf_paths:
+                segments = lf_path.split('.')
+                cursor   = target
+
+                for i, seg in enumerate(segments):
+                    cursor_def   = defs.get(cursor, {})
+                    cursor_props = cursor_def.get('properties', {}) or {}
+                    cursor_req   = set(cursor_def.get('required') or [])
+                    is_last      = (i == len(segments) - 1)
+
+                    if is_last:
+                        if seg not in cursor_props:
+                            break  # path error already caught by section 2c
+                        if _is_optional_field(seg, cursor_props, cursor_req):
+                            errors.append(
+                                f"Entity '{model}': list primary field '{primary_field}' "
+                                f"labelField path '{lf_path}': final field '{seg}' on "
+                                f"'{cursor}' must be required (non-nullable)."
+                            )
+                    else:
+                        # Intermediate segment: resolve via {seg}_id FK
+                        rel_fk     = f'{seg}_id'
+                        rel_target = (
+                            (cursor_props.get(rel_fk) or {})
+                            .get('x-relationship', {})
+                            .get('target')
+                        )
+                        if not rel_target or rel_target not in defs:
+                            break
+                        cursor = rel_target
+
+        elif primary_field in props:
+            # Primary field is a plain scalar (e.g. primary='name')
+            if _is_optional_field(primary_field, props, req_set):
+                errors.append(
+                    f"Entity '{model}': list primary field '{primary_field}' must be "
+                    f"required (non-nullable)."
+                )
+
+    # -----------------------------------------------------------------------
     # Report
     # -----------------------------------------------------------------------
     if errors:
