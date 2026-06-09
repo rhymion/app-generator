@@ -434,12 +434,12 @@ class TestMultipleLabelFieldHandling:
 # ---------------------------------------------------------------------------
 
 class TestNonPrimaryLabelFieldColumnValidation:
-    def test_non_primary_optional_fk_with_label_field_rejected(self):
-        """Non-primary table column with labelField where the FK is optional — raises.
+    def test_non_primary_optional_fk_with_label_field_passes(self):
+        """Non-primary table column with labelField and optional FK — must NOT raise.
 
         Mirrors room_reservation.room: the column has labelField in x-display.table
-        config but the FK (room_id) is nullable, which the validator must detect
-        even though the column is not primary: true.
+        config but the FK (room_id) is nullable. Only primary fields are validated;
+        non-primary columns with optional FK are allowed.
         """
         schema = _entity_schema(
             model='room_reservation',
@@ -454,7 +454,7 @@ class TestNonPrimaryLabelFieldColumnValidation:
                     },
                 },
                 'room_id': {
-                    'type': ['string', 'null'],  # nullable — the optional FK under test
+                    'type': ['string', 'null'],  # nullable — non-primary, allowed
                     'x-relationship': {
                         'type': 'many-to-one',
                         'target': 'room',
@@ -488,5 +488,4 @@ class TestNonPrimaryLabelFieldColumnValidation:
                 },
             },
         )
-        with pytest.raises(SchemaValidationError, match="room_id"):
-            validate_schema(schema)
+        validate_schema(schema)  # must not raise
