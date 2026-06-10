@@ -1,10 +1,13 @@
 {{ utility_code }}
 {% if can_create %}
-export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string }> {
+export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string }> {
   const result = await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
 {{ validation_data_obj }}
     });
+{% if bridge_child_pre_create_code %}
+{{ bridge_child_pre_create_code }}
+{% endif %}
 {% if one_to_one_pre_creates %}
 {{ one_to_one_pre_creates }}
 {% endif %}
@@ -12,6 +15,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
       data: {
         creator_id: actorId,
         updater_id: actorId,
+{% if bridge_child_fk_data_line %}
+{{ bridge_child_fk_data_line }}
+{% endif %}
 {{ parent_data_obj }}
 {% if child_nested_create %}
 {{ child_nested_create }}
@@ -113,7 +119,13 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% if is_audited %}
 export async function delete{{ parent_pascal }}(actorId: string | null, ids: string[]): Promise<void> {
   await prisma.$transaction(async (tx) => {
+{% if bridge_cleanup_rels %}
+    const _bridgeRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
+{% endif %}
     await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+{% if bridge_post_delete_cleanups %}
+{{ bridge_post_delete_cleanups | replace('await prisma.', '    await tx.') }}
+{% endif %}
     for (const id of ids) {
       await recordAuditEvent({
         action: '{{ parent }}:delete',
@@ -127,7 +139,13 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
 }
 {% else %}
 export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
+{% if bridge_cleanup_rels %}
+  const _bridgeRows = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
   await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+{{ bridge_post_delete_cleanups }}
+{% else %}
+  await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+{% endif %}
 }
 {% endif %}
 {% endif %}

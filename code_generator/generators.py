@@ -1545,6 +1545,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     number_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in number_props)
     parent_refs = '\n'.join(filter(None, [text_refs, number_refs]))
 
+    bridge_child_ir = ctx.get('bridge_child_ir')
+    if bridge_child_ir:
+        _bridge_refs = (
+            "  const selectedParentTypeRef = useRef<HTMLInputElement>(null);\n"
+            "  const selectedParentIdRef = useRef<HTMLInputElement>(null);"
+        )
+        parent_refs = '\n'.join(filter(None, [parent_refs, _bridge_refs]))
+
     def _setter(var_name: str) -> str:
         return to_pascal_case_from_var(var_name)
 
@@ -1890,6 +1898,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         '\n'.join(img_jsxs),
         '\n'.join(custom_jsxs),
     ]))
+    if bridge_child_ir:
+        _targets_str = ' | '.join(bridge_child_ir.get('parent_targets', []))
+        _bridge_jsx = (
+            f"      {{/* bridge-parent-selector: {_targets_str} */}}\n"
+            f"      <AppFieldText label=\"Parent type ({_targets_str})\" inputRef={{selectedParentTypeRef}} defaultValue={{''}} required />\n"
+            f"      <AppFieldText label=\"Parent ID\" inputRef={{selectedParentIdRef}} defaultValue={{''}} required />"
+        )
+        all_parent_fields_jsx = '\n'.join(filter(None, [_bridge_jsx, all_parent_fields_jsx]))
 
     # ---- FormData sets ----
     text_ds  = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in text_props)
@@ -2885,6 +2901,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     all_states_merged = '\n'.join(filter(None, [all_states, _flatten_states_str]))
     _flatten_fds_str = '\n'.join(flatten_edit_form_data_sets_blocks)
     parent_form_data_sets_merged = '\n'.join(filter(None, [parent_form_data_sets, _flatten_fds_str]))
+    if bridge_child_ir:
+        _bridge_fds = (
+            "    formData.set('selectedParentType', selectedParentTypeRef.current?.value || '');\n"
+            "    formData.set('selectedParentId', selectedParentIdRef.current?.value || '');"
+        )
+        parent_form_data_sets_merged = '\n'.join(filter(None, [parent_form_data_sets_merged, _bridge_fds]))
     _all_enum_ns_hooks = '\n'.join(enum_ns_hooks + flatten_enum_ns_hooks_upsert)
     _all_enum_opt_setups = '\n'.join(enum_opt_setups + entity_select_opt_setups + flatten_enum_opt_setups_upsert)
     _flatten_validation_code = '\n\n'.join(flatten_validation_parts)
