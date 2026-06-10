@@ -17,6 +17,9 @@ from helpers.schema_helpers import (
     get_detail_ref_rels, get_flatten_rels,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
+from helpers.bridge_direction import (
+    collect_parent_bridge_fk_props, get_new_form_bridge,
+)
 import copy
 import warnings
 
@@ -551,20 +554,28 @@ def _get_entity_options(schema: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def canonicalize_bridges(entity_schema: dict, all_defs: dict) -> dict:
-    """Normalize x-bridge array (new form) into synthetic x-relationship annotations.
+    """Normalize x-bridge into synthetic x-relationship annotations.
 
-    Converts each x-bridge entry into a field-level x-relationship annotation on the
-    via field, so the existing one_to_one_rel detection path picks it up unchanged.
-    Old-form (x-relationship: {type: one-to-one_bridge}) on the field is untouched.
+    Two forms are supported:
+    - Old array form (list of {role, target, via, kind}): converts each entry
+      into a field-level x-relationship annotation on the `via` field, so the
+      existing one_to_one_rel detection path picks it up unchanged.
+    - New object form (dict with name/child/parentCardinality/parents): FK is on
+      the parent side; nothing to inject here — parent FK injection is handled
+      in build_context() via collect_parent_bridge_fk_props().
 
-    Bridge IR: {role, target, via_field, kind}
-    Returns a modified shallow copy of entity_schema, or entity_schema unchanged if
-    no x-bridge is present.
+    Returns a modified shallow copy of entity_schema, or entity_schema unchanged
+    if no x-bridge is present.
     """
     x_bridge = entity_schema.get('x-bridge')
     if not x_bridge:
         return entity_schema
 
+    # New object form — FK-on-parent; parent FK injection done in build_context()
+    if isinstance(x_bridge, dict):
+        return entity_schema
+
+    # Old array form: inject x-relationship annotations onto via fields
     props = dict(entity_schema.get('properties', {}))
     _KIND_MAP = {
         'one_to_one_bridge': 'one-to-one_bridge',
@@ -600,6 +611,15 @@ def build_context(entity: dict, schema: dict) -> dict:
         schema['definitions'].get(model, {}),
         schema.get('definitions', {}),
     )
+    # Inject parent-side bridge FK props synthesized from new-form x-bridge declarations
+    # on child entities that list this model as a parent. These FKs look like
+    # one-to-one_bridge relations so the existing OTO machinery handles auto-create/include.
+    _parent_bridge_fks = collect_parent_bridge_fk_props(model, schema)
+    if _parent_bridge_fks:
+        model_def = {
+            **model_def,
+            'properties': {**model_def.get('properties', {}), **_parent_bridge_fks},
+        }
     filtered_props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
 
     # Config flags
@@ -622,6 +642,82 @@ def build_context(entity: dict, schema: dict) -> dict:
     auto_create_oto_rels = [r for r in one_to_one_rels if not r['is_selector']]
     selector_oto_rels    = [r for r in one_to_one_rels if r['is_selector']]
     oto_prop_names = {r['prop_name'] for r in one_to_one_rels}
+
+    # Bridge child IR: new-form x-bridge on this entity (as child), with parent targets.
+    # Used by child forms to render parent-entity autocomplete and by service to
+    # resolve parent → <child>able_id.
+    bridge_child_ir = get_new_form_bridge(schema.get('definitions', {}).get(model, {}))
+
+    # Bridge child service context: extended vars for service template
+    # (parent resolution code and FK data line).
+    bridge_child_params_str = ''
+    bridge_child_pre_create_code = ''
+    bridge_child_fk_data_line = ''
+    if bridge_child_ir:
+        _bc_bridge_name = bridge_child_ir['name']
+        _bc_fk_col = f'{_bc_bridge_name}_id'
+        _bc_parent_targets = bridge_child_ir['parent_targets']
+        bridge_child_params_str = 'selectedParentType: string, selectedParentId: string'
+        bridge_child_fk_data_line = f'        {_bc_fk_col}: _resolvedBridgeFk,'
+        _res_lines = ['    let _resolvedBridgeFk: string;']
+        for _bi, _pt in enumerate(_bc_parent_targets):
+            _pt_pascal = to_pascal_case(_pt)
+            _kw = 'if' if _bi == 0 else '    } else if'
+            _res_lines.extend([
+                f"    {_kw} (selectedParentType === '{_pt}') {{",
+                f"      const _bp = await tx.{_pt}.findUnique({{ where: {{ id: selectedParentId }}, select: {{ {_bc_fk_col}: true }} }});",
+                f"      if (!_bp) throw new Error('{_pt_pascal} does not exist');",
+                f"      _resolvedBridgeFk = _bp.{_bc_fk_col};",
+            ])
+        _res_lines.extend([
+            '    } else {',
+            "      throw new Error('Invalid bridge parent type: ' + selectedParentType);",
+            '    }',
+        ])
+        bridge_child_pre_create_code = '\n'.join(_res_lines)
+
+    # Collect bridge targets from new-form x-bridge declarations in the schema.
+    # Used to limit bridge_cleanup_rels to FK-on-parent bridge relations only
+    # (B5: prevents accidentally deleting non-bridge auto-create OTO rows).
+    _new_form_bridge_targets: set[str] = set()
+    for _ename, _edef in schema.get('definitions', {}).items():
+        if _ename.endswith('_detail') or not isinstance(_edef, dict):
+            continue
+        _bridge_ir = get_new_form_bridge(_edef)
+        if _bridge_ir:
+            _new_form_bridge_targets.add(_bridge_ir['name'])
+    # Also include old-form bridge targets (commentable, approvable, attachable) which
+    # are referenced via one-to-one_bridge x-relationship directly on fields.
+    # These are auto-created by the parent entity and must also be cleaned up on delete.
+    _bridge_cleanup_targets = _new_form_bridge_targets | {
+        r['target'] for r in auto_create_oto_rels
+        if r.get('relation_type') == 'one-to-one_bridge'
+    }
+
+    # Bridge cleanup relations: FK-on-parent bridge relations auto-created by this entity.
+    # Parent delete must explicitly delete these bridge rows; onDelete: Cascade only flows
+    # bridge → child (not parent → bridge).
+    bridge_cleanup_rels = [
+        {
+            'relation_name': r['relation_name'],
+            'prop_name': r['prop_name'],
+            'target': r['target'],
+        }
+        for r in auto_create_oto_rels
+        if r['target'] in _bridge_cleanup_targets
+    ]
+    # Pre-computed strings for service delete template
+    if bridge_cleanup_rels:
+        _bc_select = ', '.join(f'{r["prop_name"]}: true' for r in bridge_cleanup_rels)
+        bridge_pre_delete_select = f'{{ {_bc_select} }}'
+        bridge_post_delete_cleanups = '\n'.join(
+            f'  await prisma.{r["target"]}.deleteMany({{ where: {{ id: {{ in: _bridgeRows'
+            f'.map((r) => r.{r["prop_name"]}).filter(Boolean) }} }} }});'
+            for r in bridge_cleanup_rels
+        )
+    else:
+        bridge_pre_delete_select = None
+        bridge_post_delete_cleanups = ''
     parent_rels_raw = [r for r in _all_parent_rels_raw if r['prop_name'] not in oto_prop_names]
     # relationship_targets: deduplicated by target for import / type purposes
     seen: dict[str, dict] = {}
@@ -775,6 +871,14 @@ def build_context(entity: dict, schema: dict) -> dict:
 
     # Form data gets (for actions / API POST)
     form_data_gets = _build_form_data_gets(parent_prop_infos)
+    if bridge_child_ir:
+        _sep = ', ' if parent_params else ''
+        parent_params = parent_params + _sep + 'selectedParentType, selectedParentId'
+        _bc_fds = (
+            "  const selectedParentType = data.get('selectedParentType') as string;\n"
+            "  const selectedParentId = data.get('selectedParentId') as string;"
+        )
+        form_data_gets = (form_data_gets + '\n' + _bc_fds) if form_data_gets else _bc_fds
 
     # Children (full analysis)
     children_data    = _build_child_data(children_raw, model, schema, parent_rels_raw)
@@ -832,6 +936,9 @@ def build_context(entity: dict, schema: dict) -> dict:
 
     # Selection targets (page_new, page_edit)
     selection_targets = _get_selection_targets(children_raw, parent_rels_raw, schema, model)
+    # Extend with bridge parent targets so child forms load parent entity autocomplete options
+    if bridge_child_ir:
+        selection_targets = _dedupe_ordered([*selection_targets, *bridge_child_ir.get('parent_targets', [])])
 
     # Field categorisation (for FormUpsert / FormView)
     # Use all_oto_fk_props to exclude BOTH auto-create and selector OTO FK props from plain field treatment
@@ -1436,6 +1543,14 @@ def build_context(entity: dict, schema: dict) -> dict:
         one_to_one_pre_creates=one_to_one_pre_creates,
         one_to_one_spread=one_to_one_spread,
         one_to_one_include=one_to_one_include,
+        # FK-on-parent bridge IR
+        bridge_child_ir=bridge_child_ir,              # new-form x-bridge on this entity (as child)
+        bridge_child_params_str=bridge_child_params_str,      # extra service params for child parent selection
+        bridge_child_pre_create_code=bridge_child_pre_create_code,  # parent resolution code before create
+        bridge_child_fk_data_line=bridge_child_fk_data_line,  # FK line for create data object
+        bridge_cleanup_rels=bridge_cleanup_rels,       # bridges this entity owns (for parent delete cleanup)
+        bridge_pre_delete_select=bridge_pre_delete_select,   # select clause string for parent delete
+        bridge_post_delete_cleanups=bridge_post_delete_cleanups, # cleanup delete statements for template
         # Page list / view / edit custom components (entity-level, plural).
         entity_custom_components=entity_custom_components,
         entity_view_components=entity_view_components,

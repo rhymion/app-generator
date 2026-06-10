@@ -19,6 +19,8 @@ import yaml
 from jinja2 import Environment, FileSystemLoader
 
 from helpers.naming import to_pascal_case, to_camel_case
+from helpers.bridge_direction import get_new_form_bridge
+from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit_child_bridge_fk
 from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
 from build_context import build_context
@@ -64,6 +66,56 @@ def _make_env() -> Environment:
     env.filters['pascal_case'] = to_pascal_case
     env.filters['camel_case'] = to_camel_case
     return env
+
+
+# ---------------------------------------------------------------------------
+# Bridge Prisma schema emission
+# ---------------------------------------------------------------------------
+
+def build_bridge_prisma_additions(schema: dict) -> str:
+    """Generate Prisma model additions for all new-form FK-on-parent bridge models.
+
+    Scans the schema for new-form x-bridge object declarations and emits:
+      - Bridge model block (id + back-relations only, no parent FK cols)
+      - Parent FK field comment lines showing what to add to each parent model
+      - Child FK field comment lines showing what to add to the child model
+
+    Returns a Prisma-compatible string block suitable for appending to schema.prisma.
+    The comment lines document the expected parent/child FK additions; the bridge
+    model blocks are the only rows that need to be physically written as new Prisma
+    models (parent/child FK columns are already present from manual schema or prior
+    generation passes).
+    """
+    defs = schema.get('definitions', {})
+    bridges: dict[str, dict] = {}
+
+    for entity_name, entity_def in defs.items():
+        if entity_name.endswith('_detail') or not isinstance(entity_def, dict):
+            continue
+        bridge = get_new_form_bridge(entity_def)
+        if bridge:
+            bridges[bridge['name']] = bridge
+
+    if not bridges:
+        return ''
+
+    blocks: list[str] = []
+    for bridge_name, bridge in sorted(bridges.items()):
+        child = bridge['child']
+        parent_targets = bridge['parent_targets']
+
+        blocks.append(emit_bridge_model(bridge_name, child, parent_targets))
+
+        for parent in parent_targets:
+            scalar, relation = emit_parent_bridge_fk(bridge_name, parent)
+            blocks.append(f'// [parent:{parent}] {scalar.strip()}')
+            blocks.append(f'// [parent:{parent}] {relation.strip()}')
+
+        child_scalar, child_relation = emit_child_bridge_fk(bridge_name)
+        blocks.append(f'// [child:{child}] {child_scalar.strip()}')
+        blocks.append(f'// [child:{child}] {child_relation.strip()}')
+
+    return '\n\n'.join(blocks)
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +176,12 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     env = _make_env()
     out = Path(output_dir)
+
+    # --- Bridge Prisma schema emission ---
+    bridge_additions = build_bridge_prisma_additions(schema)
+    if bridge_additions:
+        _write(out / 'prisma' / 'bridge_additions.prisma', bridge_additions)
+        print(f'  Bridge Prisma additions → prisma/bridge_additions.prisma')
 
     print(f'Found {len(entities)} entities in {schema_path}')
 

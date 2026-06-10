@@ -548,62 +548,78 @@ def validate_schema(schema: dict) -> None:
                 )
 
     # -----------------------------------------------------------------------
-    # 6. x-bridge array validation
+    # 6. x-bridge validation (new object form — clean break, array form rejected)
     # -----------------------------------------------------------------------
-    _VALID_BRIDGE_KINDS = frozenset({'one_to_one_bridge', 'one-to-one_bridge'})
-
     for def_key, defn in defs.items():
         if not _SNAKE_CASE.match(def_key):
             continue
         x_bridge = defn.get('x-bridge')
         if x_bridge is None:
             continue
-        if not isinstance(x_bridge, list):
+        # Clean break: old array form with role/via/kind is no longer supported.
+        if isinstance(x_bridge, list):
             errors.append(
-                f"Definition '{def_key}': x-bridge must be a list of bridge entries; "
+                f"Definition '{def_key}': x-bridge must be an object (new form); "
+                f"got a list. The old array form with role/via/kind is no longer "
+                f"supported. Migrate to: {{name: <bridge_model>, child: {def_key}, "
+                f"parentCardinality: exactlyOne, "
+                f"parents: [{{role: ..., target: ..., labelField: ...}}]}}."
+            )
+            continue
+        if not isinstance(x_bridge, dict):
+            errors.append(
+                f"Definition '{def_key}': x-bridge must be an object mapping; "
                 f"got {type(x_bridge).__name__}."
             )
             continue
-
-        props = defn.get('properties', {})
-        for i, entry in enumerate(x_bridge):
-            if not isinstance(entry, dict):
+        # Validate required keys in object form
+        for required_key in ('name', 'child', 'parents'):
+            if required_key not in x_bridge:
                 errors.append(
-                    f"Definition '{def_key}', x-bridge[{i}]: each entry must be a mapping."
+                    f"Definition '{def_key}': x-bridge missing required key "
+                    f"'{required_key}'. Required: name (bridge model name), "
+                    f"child (child entity name), parents (list of parent entries)."
                 )
-                continue
-
-            for required_key in ('role', 'target', 'via', 'kind'):
-                if required_key not in entry:
+        bridge_name = x_bridge.get('name', '')
+        child_name  = x_bridge.get('child', '')
+        parents     = x_bridge.get('parents', [])
+        # bridge model must exist in definitions
+        if bridge_name and bridge_name not in defs:
+            errors.append(
+                f"Definition '{def_key}': x-bridge name '{bridge_name}' not found "
+                f"in definitions. Add a '{bridge_name}' bridge model definition."
+            )
+        # child must match the entity declaring x-bridge
+        if child_name and child_name != def_key:
+            errors.append(
+                f"Definition '{def_key}': x-bridge child '{child_name}' must match "
+                f"the declaring entity name '{def_key}'."
+            )
+        if not isinstance(parents, list):
+            errors.append(
+                f"Definition '{def_key}': x-bridge parents must be a list; "
+                f"got {type(parents).__name__}."
+            )
+        else:
+            for i, p_entry in enumerate(parents):
+                if not isinstance(p_entry, dict):
                     errors.append(
-                        f"Definition '{def_key}', x-bridge[{i}]: "
-                        f"missing required key '{required_key}'."
+                        f"Definition '{def_key}': x-bridge parents[{i}] must be "
+                        f"a mapping; got {type(p_entry).__name__}."
                     )
-
-            target = entry.get('target', '')
-            via_field = entry.get('via', '')
-            kind = entry.get('kind', '')
-
-            if target and target not in defs:
-                errors.append(
-                    f"Definition '{def_key}', x-bridge[{i}]: "
-                    f"target entity '{target}' is not defined in the schema. "
-                    f"Add a '{target}' definition or correct the target name."
-                )
-
-            if via_field and via_field not in props:
-                errors.append(
-                    f"Definition '{def_key}', x-bridge[{i}]: "
-                    f"via field '{via_field}' does not exist in '{def_key}' properties. "
-                    f"Add the field or correct the via name."
-                )
-
-            if kind and kind not in _VALID_BRIDGE_KINDS:
-                errors.append(
-                    f"Definition '{def_key}', x-bridge[{i}]: "
-                    f"kind '{kind}' is not a valid bridge kind. "
-                    f"Accepted values: {sorted(_VALID_BRIDGE_KINDS)}."
-                )
+                    continue
+                for req_key in ('role', 'target'):
+                    if req_key not in p_entry:
+                        errors.append(
+                            f"Definition '{def_key}': x-bridge parents[{i}] "
+                            f"missing required key '{req_key}'."
+                        )
+                p_target = p_entry.get('target', '')
+                if p_target and p_target not in defs:
+                    errors.append(
+                        f"Definition '{def_key}': x-bridge parents[{i}] target "
+                        f"'{p_target}' not found in definitions."
+                    )
 
     # -----------------------------------------------------------------------
     # Report
