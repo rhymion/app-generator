@@ -18,7 +18,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   - `mode: item` — row-level lock via a per-entity `inventory_allocation` bridge table
   - Schema validation enforced at `validate.py` with pytest coverage
   - E2E Cypress test generator templates for reservation flows
-- **Integer enums** — `x-enum` fields with integer values emit integer-typed Prisma enums; dashboard fields (`chart_type`, `stack_mode`, `group_by_bucket`) migrated to integer enum
+- **Integer enums** — `type: integer` fields with `enum` (string label array, values correspond to array indices) emit integer `Int` columns in Prisma (e.g., `status Int @default(0)`); dashboard fields (`chart_type`, `stack_mode`, `group_by_bucket`) migrated to integer enum
 - **Wrapper component architecture** — per-entity generated components now use shared wrappers from `components/_standard/` (statically provided; not overwritten by `generate-code` re-runs):
   - Phase 1: `page_list` wrapper + `components/ui` scaffold
   - Phase 2: `FormUpsert` / `FormView` field wrappers

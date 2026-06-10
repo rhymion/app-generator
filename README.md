@@ -17,7 +17,6 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - **Generated Cypress tests** — UI and API test suites generated alongside application code
 - **Dashboard charts** (`x-display.dashboard: true`) — column, bar, line, and pie chart rendering with stacking modes, timestamp bucketing, typed multi-condition filters, CSV/Excel export, and a REST aggregate endpoint (`/api/{entity}/aggregate`) generated per entity
 - **Inventory reservation** (`x-reservation`) — opt-in capacity/inventory reservation; `count` mode reserves a numeric counter column, `item` mode locks rows via an `inventory_allocation` bridge table
-- **Integer enums** — schema `x-enum` fields emit integer-typed Prisma enums with correct TypeScript discriminators
 - **Wrapper component architecture** — generated per-entity components use shared wrappers in `components/_standard/` (statically provided; not overwritten by re-runs)
 
 ### Relationships
@@ -446,10 +445,10 @@ All architectural documentation lives in `docs/knowledge/`:
 | Streaming Suspense / Skeleton screens | ✅ Implemented |
 | Dashboard charts (x-display.dashboard) | ✅ Implemented |
 | Inventory reservation (x-reservation) | ✅ Implemented |
-| Integer enums (x-enum) | ✅ Implemented |
+| Integer enums | ✅ Implemented |
 | Wrapper component architecture | ✅ Implemented |
 
-> **Backward compatibility (v1.2 → v1.3)**: Non-breaking. Existing schemas work unchanged. `x-reservation`, integer `x-enum`, and `x-display.dashboard` are opt-in; no action required unless you want to use the new features.
+> **Backward compatibility (v1.2 → v1.3)**: Non-breaking. Existing schemas work unchanged. `x-reservation` and `x-display.dashboard` are opt-in; no action required unless you want to use the new features.
 
 ### In Progress
 
