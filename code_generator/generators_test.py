@@ -1522,6 +1522,27 @@ def helper_context(
     if primary_fk_dep is not None:
         primary_fk_dep = {**primary_fk_dep, 'is_user_account': primary_fk_dep['target'] == 'user'}
 
+    # When the primary display FK is optional (nullable), it won't appear in
+    # required_fields_prisma, so populateData creates records without it and
+    # item.room is null → the formatted field is '' → DataGrid shows the entity's
+    # own ID instead of the display value. Force-inject it so the template emits
+    # `room_id: roomItem.id` and the list view shows the correct display value.
+    if primary_fk_dep is not None and not primary_fk_dep.get('is_user_account'):
+        _pfk_var = primary_fk_dep['var_name']
+        _pfk_prop = next(
+            (fk['prop_name'] for fk in entity_fk_deps if fk['dep_var_name'] == _pfk_var),
+            None,
+        )
+        if _pfk_prop:
+            _already_required = any(f['prop_name'] == _pfk_prop for f in required_fields_prisma)
+            if not _already_required:
+                _pfk_field = next(
+                    (f for f in all_fields_prisma if f['prop_name'] == _pfk_prop),
+                    None,
+                )
+                if _pfk_field:
+                    required_fields_prisma.append(_pfk_field)
+
     # populateData needs deps when there are required FK fields not covered by per-iteration creation.
     primary_fk_dep_var = primary_fk_dep['var_name'] if primary_fk_dep else None
     primary_fk_is_ua = primary_fk_dep is not None and primary_fk_dep.get('is_user_account', False)
@@ -1564,6 +1585,54 @@ def helper_context(
             _fake_field = {'category': 'text', 'prop_name': _prop_name, 'label': to_title_case(_prop_name)}
             extra_prisma_fields.append({'prop_name': _prop_name, 'prisma_val': prisma_value(_fake_field, 'i', title)})
 
+    # Detect count-mode reservation WITH lines: populateDependencies must seed the pool entity
+    # so that create tests (2.1, 2.2) can allocate inventory without hitting InsufficientInventoryError.
+    reservation_lines_pool_seed = None
+    _xres_h = parent_def.get('x-reservation')
+    if (_xres_h and isinstance(_xres_h, dict)
+            and _xres_h.get('mode') == 'count'
+            and _xres_h.get('lines')):
+        _pool_cfg_h = _xres_h.get('pool', {})
+        _request_cfg_h = _xres_h.get('request', {})
+        _pool_entity_h = _pool_cfg_h.get('entity')
+        _pool_qty_h = _pool_cfg_h.get('quantityField', 'quantity')
+        _criteria_h = _request_cfg_h.get('criteria', {})
+        _crit_pool_field_h = next(iter(_criteria_h.keys()), None)
+        if _pool_entity_h and _crit_pool_field_h:
+            _pool_def_h = schema.get('definitions', {}).get(_pool_entity_h, {})
+            _pool_crit_prop_h = _pool_def_h.get('properties', {}).get(_crit_pool_field_h, {})
+            _pool_fk_target_h = (_pool_crit_prop_h.get('x-relationship') or {}).get('target', '')
+            _pool_fk_dep_var_h = next(
+                (d['var_name'] for d in enriched_deps if d['target'] == _pool_fk_target_h),
+                None
+            )
+            if _pool_fk_dep_var_h:
+                reservation_lines_pool_seed = {
+                    'pool_entity': _pool_entity_h,
+                    'pool_qty_field': _pool_qty_h,
+                    'criteria_pool_field': _crit_pool_field_h,
+                    'pool_fk_dep_var': _pool_fk_dep_var_h,
+                }
+
+    # Detect count-mode reservation WITHOUT lines: populateDependencies must seed the pool entity
+    # even when the entity has no FK deps (e.g. supply_request → supply_pool).
+    reservation_nolines_pool_seed = None
+    if (_xres_h and isinstance(_xres_h, dict)
+            and _xres_h.get('mode') == 'count'
+            and not _xres_h.get('lines')):
+        _pool_cfg_nolines = _xres_h.get('pool', {})
+        _pool_entity_nolines = _pool_cfg_nolines.get('entity')
+        _pool_qty_nolines = _pool_cfg_nolines.get('quantityField', 'quantity')
+        if _pool_entity_nolines:
+            _pool_def_nolines = schema.get('definitions', {}).get(_pool_entity_nolines, {})
+            _pool_has_name_nolines = 'name' in (_pool_def_nolines.get('properties') or {})
+            reservation_nolines_pool_seed = {
+                'pool_entity': _pool_entity_nolines,
+                'pool_qty_field': _pool_qty_nolines,
+                'has_name': _pool_has_name_nolines,
+                'pool_title': to_title_case(_pool_entity_nolines),
+            }
+
     return {
         'pascal': pascal,
         'title': title,
@@ -1592,6 +1661,8 @@ def helper_context(
         # If any dep label expression resolves a date/time field, the helper
         # must import formatLabelValue so the rendered name matches the UI.
         'needs_format_label_value': any(d.get('label_has_format') for d in enriched_deps),
+        'reservation_lines_pool_seed': reservation_lines_pool_seed,
+        'reservation_nolines_pool_seed': reservation_nolines_pool_seed,
     }
 
 
@@ -1674,6 +1745,18 @@ def spec_context(
     )
     has_deps = bool(deps) or bool(all_ua_spec) or has_child_fk_deps
 
+    # Count-mode reservation WITHOUT lines: Create tests must call populateDependencies
+    # to seed the pool entity even when the entity has no FK deps.
+    _xres_spec = parent_def.get('x-reservation')
+    _has_nolines_reservation = (
+        bool(_xres_spec)
+        and isinstance(_xres_spec, dict)
+        and _xres_spec.get('mode') == 'count'
+        and not _xres_spec.get('lines')
+        and bool((_xres_spec.get('pool') or {}).get('entity'))
+    )
+    needs_pool_for_create = _has_nolines_reservation and not has_deps
+
     required_field_metas = [f for f in fields if f['required']]
     optional_field_metas = [f for f in fields if not f['required']]
     non_autocomplete_required = [f for f in required_field_metas if f['category'] != 'autocomplete']
@@ -1690,7 +1773,7 @@ def spec_context(
     can_view   = generate_config.get('view', True)
 
     # Indentation for .then((deps) => {}) wrapper in sections 2 and 5
-    I = '        ' if has_deps else '      '
+    I = '        ' if (has_deps or needs_pool_for_create) else '      '
 
     # Pre-compute fill/assert command lists (indent already baked in), with fk_dep_vars.
     # flatten_m2o_fk_props: FK props on this model whose related-entity Detail
@@ -2074,6 +2157,7 @@ def spec_context(
         'can_delete': can_delete,
         'can_view': can_view,
         'has_deps': has_deps,
+        'needs_pool_for_create': needs_pool_for_create,
         'has_optional': bool(optional_field_metas),
         'has_children': bool(child_metas),
         'has_datagrid_children': bool(datagrid_children),
@@ -2149,10 +2233,13 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
         )
         definition_key = entity.get('definition_key', f'{parent}_detail')
         flatten_test_rels = _compute_flatten_test_rels(parent, pascal, definition_key, schema)
+        _xres = (schema.get('definitions', {}).get(parent) or {}).get('x-reservation', {})
+        has_reservation = bool(_xres and _xres.get('mode') == 'count')
         enriched_entities.append({
             'parent': parent,
             'pascal': pascal,
             'helper_path': f'./{parent}/helper',
+            'reservation_helper_path': f'./{parent}/reservation_gen_helper',
             'datagrid_children': [
                 {'pascal': to_pascal_case(c['child']['name'])}
                 for c in datagrid_children
@@ -2162,6 +2249,7 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
                 for c in comment_children_registry
             ],
             'has_approvable': has_approvable,
+            'has_reservation': has_reservation,
             'flatten_test_rels': flatten_test_rels,
         })
     if user_in_entities:
@@ -2345,6 +2433,16 @@ def api_spec_context(
                     out.append(f"{indent}{field['prop_name']}: deps.{dep['dep_var_name']}.id,")
             else:
                 out.append(f"{indent}{field['prop_name']}: {api_value(field, title)},")
+        # When the primary display FK is optional, the loop above skips it, but
+        # assert_create references getRes.body.<field>.id — include it so the
+        # assertion can resolve. Skipped only if it's the explicit skip_field.
+        if primary_is_fk and not primary_fk_is_ua:
+            _pfk_prop = f'{primary_field_name}_id'
+            _already_in = any(ln.strip().startswith(f'{_pfk_prop}:') for ln in out)
+            if not _already_in and skip_field != _pfk_prop:
+                _pfk_dep = next((d for d in entity_fk_deps if d['prop_name'] == _pfk_prop), None)
+                if _pfk_dep:
+                    out.append(f"{indent}{_pfk_prop}: deps.{primary_dep_var}.id,")
         for ua in ua_fk_fields_for_api:
             if ua['prop_name'] != skip_field:
                 out.append(f"{indent}{ua['prop_name']}: deps.{ua['var_name']}.id,")
@@ -2383,6 +2481,16 @@ def api_spec_context(
         return out
 
     has_approvable = any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model, schema))
+
+    # Detect count-mode reservation without lines: POST tests must seed the pool entity first.
+    _xres_def = model_def.get('x-reservation')
+    _reservation_count_pool_pascal = None
+    if (_xres_def and isinstance(_xres_def, dict)
+            and _xres_def.get('mode') == 'count'
+            and not _xres_def.get('lines')):
+        _pool_entity = (_xres_def.get('pool') or {}).get('entity')
+        if _pool_entity:
+            _reservation_count_pool_pascal = to_pascal_case(_pool_entity)
 
     # Count items pre-created by db:seed + db:grantAllPermissions so that
     # generated tests can adjust expected row counts accordingly.
@@ -2429,6 +2537,7 @@ def api_spec_context(
         'bulk_put_body_valid':    _put_body_impl('              '),   # 14 spaces
         'bulk_put_body_valid_fk': _put_body_impl('                '), # 16 spaces
         'has_approvable': has_approvable,
+        'reservation_count_pool_pascal': _reservation_count_pool_pascal,
     }
 
 
@@ -2514,3 +2623,146 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
         'deletion_levels': levels,
         'test_entity_names': sorted(test_entity_names) if test_entity_names is not None else [],
     }
+
+
+# ---------------------------------------------------------------------------
+# x-reservation context builders (Phase 1: count mode)
+# ---------------------------------------------------------------------------
+
+def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
+    """Extract base reservation context from x-reservation config. Returns None if not count mode."""
+    defs = schema.get('definitions', {})
+    entity_def = defs.get(entity, {})
+    x_res = entity_def.get('x-reservation', {})
+    if not x_res or x_res.get('mode') != 'count' or not x_res.get('lines'):
+        return None
+
+    pool_cfg    = x_res.get('pool', {})
+    request_cfg = x_res.get('request', {})
+    result_cfg  = x_res.get('result', {})
+    policy_cfg  = x_res.get('policy', {})
+
+    pool_entity = pool_cfg.get('entity', '')
+    pool_def    = defs.get(pool_entity, {})
+    pool_props  = pool_def.get('properties', {})
+
+    # criteria (first entry only for Phase 1)
+    criteria = request_cfg.get('criteria', {})
+    criteria_pool_field = next(iter(criteria.keys()), 'id')
+    criteria_item_field = next(iter(criteria.values()), 'id')
+
+    # FK target for the pool criteria field (e.g. product_id → product)
+    pool_criteria_prop = pool_props.get(criteria_pool_field, {})
+    pool_fk_entity = (pool_criteria_prop.get('x-relationship') or {}).get('target', '')
+
+    # orderBy fields
+    orderby_raw = policy_cfg.get('orderBy', [])
+    orderby_fields = []
+    for ob in orderby_raw:
+        for field, direction in ob.items():
+            prop      = pool_props.get(field, {})
+            prop_type = prop.get('type', '')
+            is_nullable = isinstance(prop_type, list) and 'null' in prop_type
+            is_date     = prop.get('format') == 'date'
+            null_last   = 'nulls_last' in direction
+            # Prisma orderBy direction (strip nulls_last/nulls_first suffix)
+            prisma_direction = 'asc' if direction.startswith('asc') else 'desc'
+            orderby_fields.append({
+                'field': field,
+                'direction': direction,
+                'is_date': is_date,
+                'is_nullable': is_nullable,
+                'null_last': null_last,
+                'prisma_direction': prisma_direction,
+            })
+
+    # Sortable fields (for seed helper parameters): exclude 'id' (auto-assigned)
+    orderby_sortable = [f for f in orderby_fields if f['field'] != 'id']
+
+    # Compute seed values for sortable fields across test scenarios
+    def _seed_val(f: dict, scenario: str) -> str:
+        if f['field'] == 'lot_number':
+            vals = {'multi_row1': "'LOT-A'", 'multi_row2': "'LOT-B'",
+                    'orderby_row1': "'LOT-A'", 'orderby_row2': "'LOT-B'", 'orderby_row3': "'LOT-C'"}
+            return vals.get(scenario, 'null' if f['is_nullable'] else "''")
+        if f['is_date']:
+            if 'null' in scenario:
+                return 'null'
+            date_vals = {'multi_row1': "'2027-01-01'", 'multi_row2': "'2027-06-01'",
+                         'orderby_row1': "'2027-01-01'", 'orderby_row2': "'2027-06-01'",
+                         'orderby_row3': 'null' if f['is_nullable'] else "'2027-12-01'"}
+            return date_vals.get(scenario, 'null' if f['is_nullable'] else "'2027-01-01'")
+        if f['is_nullable']:
+            return 'null'
+        return "''"
+
+    for f in orderby_sortable:
+        f['seed_multi_row1']    = _seed_val(f, 'multi_row1')
+        f['seed_multi_row2']    = _seed_val(f, 'multi_row2')
+        f['seed_orderby_row1']  = _seed_val(f, 'orderby_row1')
+        f['seed_orderby_row2']  = _seed_val(f, 'orderby_row2')
+        f['seed_orderby_row3']  = _seed_val(f, 'orderby_row3')
+
+    # Parent entity fields
+    entity_props     = entity_def.get('properties', {})
+    parent_req_fields = [f for f in (entity_def.get('required') or []) if f not in ('id',)]
+    parent_fk_field  = None
+    parent_fk_entity = None
+    parent_str_field = None
+    for field in parent_req_fields:
+        prop = entity_props.get(field, {})
+        rel  = prop.get('x-relationship', {})
+        if rel and not parent_fk_field:
+            parent_fk_field  = field
+            parent_fk_entity = rel.get('target', 'user')
+        elif not rel and not parent_str_field:
+            parent_str_field = field
+
+    # lines entity from children list
+    lines_prop   = x_res.get('lines', '')
+    lines_entity = next((c['name'] for c in children if c.get('property_name') == lines_prop), None)
+
+    # orderBy description for spec comment
+    orderby_desc = ' → '.join(
+        f"{f['field']} {f['direction']}" for f in orderby_fields
+    )
+
+    return {
+        'entity':             entity,
+        'pascal':             to_pascal_case(entity),
+        'api_path':           f'/api/{entity}',
+        'pool_entity':        pool_entity,
+        'pool_fk_entity':     pool_fk_entity,
+        'pool_fk_pascal':     to_pascal_case(pool_fk_entity),
+        'pool_qty_field':     pool_cfg.get('quantityField', 'quantity'),
+        'pool_res_field':     pool_cfg.get('reservedField', 'reserved_quantity'),
+        'alloc_entity':       result_cfg.get('allocationEntity', ''),
+        'parent_field':       result_cfg.get('parentField', ''),
+        'line_field':         result_cfg.get('lineField', ''),
+        'pool_field':         result_cfg.get('poolField', ''),
+        'alloc_qty_field':    result_cfg.get('quantityField', 'quantity'),
+        'lines_entity':       lines_entity,
+        'lines_prop':         lines_prop,
+        'req_qty_field':      request_cfg.get('quantityField', 'quantity'),
+        'criteria_pool_field': criteria_pool_field,
+        'criteria_item_field': criteria_item_field,
+        'pool_fk_entity':     pool_fk_entity,
+        'parent_fk_field':    parent_fk_field,
+        'parent_fk_entity':   parent_fk_entity or 'user',
+        'parent_str_field':   parent_str_field,
+        'orderby_fields':     orderby_fields,
+        'orderby_sortable':   orderby_sortable,
+        'orderby_desc':       orderby_desc,
+    }
+
+
+def reservation_helper_context(entity: str, schema: dict, children: list) -> dict:
+    """Build Jinja2 context for test_reservation_helper.ts.jinja2."""
+    ctx = _reservation_base(entity, schema, children)
+    return ctx or {}
+
+
+def reservation_spec_context(entity: str, schema: dict, children: list) -> dict:
+    """Build Jinja2 context for test_reservation_spec.cy.ts.jinja2."""
+    ctx = _reservation_base(entity, schema, children)
+    return ctx or {}

@@ -65,6 +65,9 @@ describe('API: {{ title }}', () => {
 
   describe('POST {{ api_path }}', () => {
     it('3.1 creates with required fields, verified by GET', () => {
+{% if reservation_count_pool_pascal %}
+      cy.task('db:populate{{ reservation_count_pool_pascal }}', 1);
+{% endif %}
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
@@ -195,6 +198,9 @@ describe('API: {{ title }}', () => {
 
   describe('POST {{ api_path }}/bulk', () => {
     it('8.1 bulk creates — all succeed, summary reflects counts', () => {
+{% if reservation_count_pool_pascal %}
+      cy.task('db:populate{{ reservation_count_pool_pascal }}', 1);
+{% endif %}
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
@@ -223,6 +229,9 @@ describe('API: {{ title }}', () => {
     });
 
     it('8.2 bulk creates — partial failure when a required field is missing', () => {
+{% if reservation_count_pool_pascal %}
+      cy.task('db:populate{{ reservation_count_pool_pascal }}', 1);
+{% endif %}
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}

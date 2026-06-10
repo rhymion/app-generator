@@ -63,6 +63,13 @@ export default function FormView({ src, permissions{% if entity_view_components 
         backHref="/{{ parent }}"
       />
 {{ all_parent_fields }}
+{% if reservation_config and reservation_config.mode == 'item' and reservation_config.allocatedField %}
+      <AppFieldText
+        label={tf('{{ reservation_config.allocatedField }}')}
+        value={String((src as Record<string, unknown>).{{ reservation_config.allocatedField }} ?? '')}
+        readOnly
+      />
+{% endif %}
 {% if reverse_oto_fields %}
 {{ reverse_oto_fields }}
 {% endif %}

@@ -820,6 +820,68 @@ def build_context(entity: dict, schema: dict) -> dict:
         if k not in _EXCLUDE_ID_TS and k != 'id' and k not in auto_create_oto_fk_props
     )
 
+    # x-reservation (entity-level reservation config, Phase 1 = count mode, Phase 2 = item mode)
+    _xres = model_def.get('x-reservation')
+    reservation_config = None
+    if _xres and isinstance(_xres, dict):
+        _xres_mode = _xres.get('mode')
+        if _xres_mode == 'count':
+            _lines_prop = _xres.get('lines')
+            _lines_entity = None
+            if _lines_prop:
+                for _ch in children_raw:
+                    if _ch.get('property_name') == _lines_prop:
+                        _lines_entity = _ch['name']
+                        break
+            _xres_result = _xres.get('result') or {}
+            # allocationAudit defaults to True; set False when alloc entity has no creator/updater fields.
+            _alloc_has_creator = _xres_result.get('allocationAudit', True)
+            reservation_config = {
+                'mode': 'count',
+                'transaction_strategy': (_xres.get('transaction') or {}).get('strategy', 'conditional_update'),
+                'lines': _lines_prop,
+                'lines_entity': _lines_entity,
+                'pool': _xres.get('pool') or {},
+                'request': _xres.get('request') or {},
+                'policy': _xres.get('policy') or {},
+                'result': _xres_result,
+                'alloc_has_creator': _alloc_has_creator,
+                'hasLines': bool(_lines_prop),
+            }
+            if not reservation_config['hasLines']:
+                # ④A: count mode without lines — entity's own quantityField is the request quantity
+                reservation_config['selfQuantityField'] = (
+                    (_xres.get('request') or {}).get('quantityField', 'quantity')
+                )
+        elif _xres_mode == 'item' and not _xres.get('lines'):
+            # Phase 2: item mode without lines (item+lines → Phase 3)
+            _pool = _xres.get('pool') or {}
+            _result = _xres.get('result') or {}
+            _request = _xres.get('request') or {}
+            _dateRange_raw = _request.get('dateRange')
+            _avail = _pool.get('availableStatus', 'available')
+            _resrv = _pool.get('reservedStatus', 'reserved')
+            reservation_config = {
+                'mode': 'item',
+                'pool': _pool,
+                'policy': _xres.get('policy') or {},
+                'result': _result,
+                'request': _request,
+                'statusField': _pool.get('statusField', 'status'),
+                'availableStatus': _avail,
+                'reservedStatus': _resrv,
+                'available_status_ts': str(_avail) if isinstance(_avail, int) else f"'{_avail}'",
+                'reserved_status_ts': str(_resrv) if isinstance(_resrv, int) else f"'{_resrv}'",
+                'allocatedField': _result.get('allocatedField', ''),
+                'criteria': _request.get('criteria') or {},
+                'hasLines': False,
+            }
+            if _dateRange_raw:
+                reservation_config['dateRange'] = {
+                    'startField': _dateRange_raw.get('start', 'start'),
+                    'endField': _dateRange_raw.get('end', 'end'),
+                }
+
     # Chart config
     xdisplay    = (model_def or {}).get('x-display') or {}
     chart_cfg   = xdisplay.get('chart') if isinstance(xdisplay, dict) else None
@@ -1296,6 +1358,9 @@ def build_context(entity: dict, schema: dict) -> dict:
         # Field categories (FormUpsert / FormView)
         field_categories=field_categories,
         entity_select_options=_get_entity_options(schema),
+        # Reservation
+        reservation_config=reservation_config,
+        reservation=reservation_config,
         # Chart
         chart_cfg=chart_cfg,
         has_chart=has_chart,

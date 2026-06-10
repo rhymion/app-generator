@@ -1,0 +1,134 @@
+// AUTO-GENERATED - DO NOT EDIT
+// x-reservation API e2e tests for entity: {{ entity }}
+import { TEST_API_KEY } from '../../support/test-credentials';
+
+const API_BASE = '/api/{{ entity }}';
+
+describe('{{ pascal }} Reservation (generated)', () => {
+  beforeEach(() => {
+    cy.task('db:reset');
+    cy.task('db:seed');
+    cy.task('db:grantAllPermissions');
+  });
+
+  // ---------------------------------------------------------------------------
+  // ① 複数アイテム引当成功
+  // ---------------------------------------------------------------------------
+  it('①: 複数アイテム引当 — {{ alloc_entity }} が明細ごとに生成され {{ pool_res_field }} が減少する', () => {
+    cy.task<any>('db:seedReservation{{ pascal }}Multi').then((seed: any) => {
+      cy.request({
+        method: 'POST',
+        url: API_BASE,
+        headers: { 'X-API-Key': TEST_API_KEY },
+        body: {
+          {{ parent_str_field }}: 'GEN-TEST-①',
+          {{ parent_fk_field }}: seed.userId,
+          {{ lines_prop }}: [
+            { {{ criteria_item_field }}: seed.product.id, {{ req_qty_field }}: 5, price: null },
+            { {{ criteria_item_field }}: seed.product.id, {{ req_qty_field }}: 3, price: null },
+          ],
+        },
+      }).then((res: any) => {
+        expect(res.status).to.eq(201);
+        const orderId = res.body.id;
+
+        cy.task<number>('db:count{{ pascal }}Allocations', orderId).then((count: number) => {
+          expect(count).to.eq(2);
+        });
+
+        cy.task<any>('db:get{{ pascal }}PoolState', seed.inventoryRows[0].id).then((inv: any) => {
+          expect(inv.{{ pool_res_field }}).to.be.gt(0);
+        });
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // ② 在庫不足 rollback
+  // ---------------------------------------------------------------------------
+  it('②: 在庫不足 — 409 を返し {{ alloc_entity }} が残らない', () => {
+    cy.task<any>('db:seedReservation{{ pascal }}Insufficient').then((seed: any) => {
+      cy.request({
+        method: 'POST',
+        url: API_BASE,
+        headers: { 'X-API-Key': TEST_API_KEY },
+        body: {
+          {{ parent_str_field }}: 'GEN-TEST-②',
+          {{ parent_fk_field }}: seed.userId,
+          {{ lines_prop }}: [
+            { {{ criteria_item_field }}: seed.product.id, {{ req_qty_field }}: seed.overQty, price: null },
+          ],
+        },
+        failOnStatusCode: false,
+      }).then((res: any) => {
+        expect(res.status).to.eq(409);
+
+        cy.task<any>('db:get{{ pascal }}PoolState', seed.inventory.id).then((inv: any) => {
+          expect(inv.{{ pool_qty_field }}).to.eq(2);
+          expect(inv.{{ pool_res_field }}).to.eq(0);
+        });
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // ③ request.criteria 遵守
+  // ---------------------------------------------------------------------------
+  it('③: criteria 遵守 — 一致 {{ criteria_pool_field }} の {{ pool_entity }} のみ引当され不一致は untouched', () => {
+    cy.task<any>('db:seedReservation{{ pascal }}Criteria').then((seed: any) => {
+      cy.request({
+        method: 'POST',
+        url: API_BASE,
+        headers: { 'X-API-Key': TEST_API_KEY },
+        body: {
+          {{ parent_str_field }}: 'GEN-TEST-③',
+          {{ parent_fk_field }}: seed.userId,
+          {{ lines_prop }}: [
+            { {{ criteria_item_field }}: seed.productMatch.id, {{ req_qty_field }}: 10, price: null },
+          ],
+        },
+      }).then((res: any) => {
+        expect(res.status).to.eq(201);
+        const orderId = res.body.id;
+
+        cy.task<any>('db:get{{ pascal }}AllocationsOrdered', orderId).then((allocs: any[]) => {
+          expect(allocs).to.have.length(1);
+          expect(allocs[0].{{ pool_field }}).to.eq(seed.invMatch.id);
+        });
+
+        cy.task<any>('db:get{{ pascal }}PoolState', seed.invNoMatch.id).then((inv: any) => {
+          expect(inv.{{ pool_res_field }}).to.eq(0);
+        });
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // ④ policy.orderBy 遵守
+  // ---------------------------------------------------------------------------
+  it('④: orderBy 遵守 — policy 順で最初の {{ pool_entity }} から引当される', () => {
+    cy.task<any>('db:seedReservation{{ pascal }}OrderBy').then((seed: any) => {
+      cy.request({
+        method: 'POST',
+        url: API_BASE,
+        headers: { 'X-API-Key': TEST_API_KEY },
+        body: {
+          {{ parent_str_field }}: 'GEN-TEST-④',
+          {{ parent_fk_field }}: seed.userId,
+          {{ lines_prop }}: [
+            { {{ criteria_item_field }}: seed.product.id, {{ req_qty_field }}: 50, price: null },
+          ],
+        },
+      }).then((res: any) => {
+        expect(res.status).to.eq(201);
+        const orderId = res.body.id;
+
+        cy.task<any>('db:get{{ pascal }}AllocationsOrdered', orderId).then((allocs: any[]) => {
+          expect(allocs).to.have.length(1);
+          // policy: {{ orderby_desc }} → 最初の row (inv1) から引当
+          expect(allocs[0].{{ pool_field }}).to.eq(seed.inventoryRows[0].id);
+        });
+      });
+    });
+  });
+});

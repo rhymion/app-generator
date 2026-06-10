@@ -51,6 +51,14 @@ export default defineConfig({
           return otplib.generateSync({ secret });
         },
         ...getGeneratedTasks(),
+        async 'db:seedReservationInventory'(params: { quantity: number }) {
+          const { seedReservationInventory } = require('./cypress/support/purchase_order/reservation_helper');
+          return await seedReservationInventory(params.quantity);
+        },
+        async 'db:getInventoryAllocation'(params: { purchase_order_id: string }) {
+          const { getInventoryAllocation } = require('./cypress/support/purchase_order/reservation_helper');
+          return await getInventoryAllocation(params.purchase_order_id);
+        },
       });
 
       return config;

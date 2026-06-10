@@ -52,6 +52,36 @@ export function getGeneratedTasks() {
       return await populate{{ entity.pascal }}WithRejectedApproval(params.creatorId, params.approvalFlowIds);
     },
 {% endif %}
+{% if entity.has_reservation %}
+    async 'db:seedReservation{{ entity.pascal }}Multi'() {
+      const { seedReservation{{ entity.pascal }}Multi } = require('{{ entity.reservation_helper_path }}');
+      return await seedReservation{{ entity.pascal }}Multi();
+    },
+    async 'db:seedReservation{{ entity.pascal }}Insufficient'() {
+      const { seedReservation{{ entity.pascal }}Insufficient } = require('{{ entity.reservation_helper_path }}');
+      return await seedReservation{{ entity.pascal }}Insufficient();
+    },
+    async 'db:seedReservation{{ entity.pascal }}Criteria'() {
+      const { seedReservation{{ entity.pascal }}Criteria } = require('{{ entity.reservation_helper_path }}');
+      return await seedReservation{{ entity.pascal }}Criteria();
+    },
+    async 'db:seedReservation{{ entity.pascal }}OrderBy'() {
+      const { seedReservation{{ entity.pascal }}OrderBy } = require('{{ entity.reservation_helper_path }}');
+      return await seedReservation{{ entity.pascal }}OrderBy();
+    },
+    async 'db:count{{ entity.pascal }}Allocations'(parentId: string) {
+      const { count{{ entity.pascal }}Allocations } = require('{{ entity.reservation_helper_path }}');
+      return await count{{ entity.pascal }}Allocations(parentId);
+    },
+    async 'db:get{{ entity.pascal }}PoolState'(poolId: string) {
+      const { get{{ entity.pascal }}PoolState } = require('{{ entity.reservation_helper_path }}');
+      return await get{{ entity.pascal }}PoolState(poolId);
+    },
+    async 'db:get{{ entity.pascal }}AllocationsOrdered'(parentId: string) {
+      const { get{{ entity.pascal }}AllocationsOrdered } = require('{{ entity.reservation_helper_path }}');
+      return await get{{ entity.pascal }}AllocationsOrdered(parentId);
+    },
+{% endif %}
 {% endfor %}
 {% if has_user_account_populate %}
     async 'db:populateUser'(length: number) {

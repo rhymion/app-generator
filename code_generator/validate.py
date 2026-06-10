@@ -274,6 +274,237 @@ def validate_schema(schema: dict) -> None:
                 )
 
     # -----------------------------------------------------------------------
+    # 5. x-reservation entity-level validation
+    # -----------------------------------------------------------------------
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        xres = defn.get('x-reservation')
+        if not xres:
+            continue
+        if not isinstance(xres, dict):
+            errors.append(
+                f"Definition '{def_key}': x-reservation must be a mapping, got {type(xres).__name__}."
+            )
+            continue
+        mode = xres.get('mode')
+        if mode not in ('count', 'item'):
+            errors.append(
+                f"Definition '{def_key}': x-reservation.mode must be 'count' or 'item', got {mode!r}."
+            )
+            continue
+
+        pool   = xres.get('pool') or {}
+        result = xres.get('result') or {}
+        lines  = xres.get('lines')
+
+        # pool.entity is required for all modes
+        pool_entity = pool.get('entity')
+        if not pool_entity:
+            errors.append(
+                f"Definition '{def_key}': x-reservation.pool.entity is required."
+            )
+        elif pool_entity not in defs:
+            errors.append(
+                f"Definition '{def_key}': x-reservation.pool.entity '{pool_entity}' is not "
+                f"defined in the schema."
+            )
+
+        if mode == 'count':
+            req = xres.get('request') or {}
+            # Required pool fields for count mode
+            for required_pool_key in ('quantityField', 'reservedField'):
+                if not pool.get(required_pool_key):
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.pool.{required_pool_key} is required "
+                        f"for count mode."
+                    )
+            if not req.get('quantityField'):
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.request.quantityField is required "
+                    f"for count mode."
+                )
+            # Required result fields for count mode
+            alloc_entity = result.get('allocationEntity')
+            if not alloc_entity:
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.result.allocationEntity is required "
+                    f"for count mode."
+                )
+            elif alloc_entity not in defs:
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.result.allocationEntity '{alloc_entity}' "
+                    f"is not defined in the schema."
+                )
+            if not result.get('parentField'):
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.result.parentField is required "
+                    f"for count mode."
+                )
+            # Mode × lines matrix (count)
+            if lines:
+                # (D) count + lines specified → result.lineField required
+                if not result.get('lineField'):
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.result.lineField is required "
+                        f"for count mode with 'lines'."
+                    )
+            else:
+                # (C) count + lines omitted → request.quantityField must exist on the entity
+                req_qty_field = req.get('quantityField')
+                entity_props  = defn.get('properties', {})
+                if req_qty_field and req_qty_field not in entity_props:
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.request.quantityField "
+                        f"'{req_qty_field}' does not exist on entity '{def_key}' properties "
+                        f"(count mode without lines: the quantity must be a field on the "
+                        f"request entity itself)."
+                    )
+
+        elif mode == 'item':
+            # Mode × lines matrix (item)
+            if lines:
+                # (B) item + lines specified → reject (Phase 2 reserved)
+                errors.append(
+                    f"Definition '{def_key}': x-reservation: item mode with 'lines' is "
+                    f"reserved for Phase 2."
+                )
+            else:
+                # (A) item + lines omitted → result.allocatedField required
+                if not result.get('allocatedField'):
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.result.allocatedField is "
+                        f"required for item mode without lines."
+                    )
+
+        # lines dict format: validate entity/field existence
+        if isinstance(lines, dict):
+            lines_entity_name = lines.get('entity')
+            lines_field_name  = lines.get('field')
+            if lines_entity_name:
+                if lines_entity_name not in defs:
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.lines.entity "
+                        f"'{lines_entity_name}' is not defined in the schema."
+                    )
+                elif lines_field_name:
+                    lines_entity_props = defs[lines_entity_name].get('properties', {})
+                    if lines_field_name not in lines_entity_props:
+                        errors.append(
+                            f"Definition '{def_key}': x-reservation.lines.field "
+                            f"'{lines_field_name}' does not exist on entity "
+                            f"'{lines_entity_name}'."
+                        )
+
+    # -----------------------------------------------------------------------
+    # 6. x-display list primary field — required + non-nullable + labelField
+    # -----------------------------------------------------------------------
+    def _is_optional_field(field_name: str, field_props: dict, req_set: set) -> bool:
+        """True when field is absent from required list OR has 'null' in type union."""
+        if field_name not in req_set:
+            return True
+        fdef = field_props.get(field_name, {})
+        t = fdef.get('type')
+        return isinstance(t, list) and 'null' in t
+
+    for entity in entities:
+        model     = entity['model']
+        model_def = defs.get(model, {})
+        props     = model_def.get('properties', {})
+        req_set   = set(model_def.get('required') or [])
+
+        xdisplay = model_def.get('x-display') or {}
+        if isinstance(xdisplay, list):
+            table = xdisplay
+        elif isinstance(xdisplay, dict):
+            table = xdisplay.get('table') or []
+        else:
+            continue
+
+        # Locate the primary display field (first entry with primary: true)
+        primary_field: str | None = None
+        for item in table:
+            if not isinstance(item, dict):
+                continue
+            for field_name, cfg in item.items():
+                if isinstance(cfg, dict) and cfg.get('primary'):
+                    primary_field = field_name
+                    break
+            if primary_field:
+                break
+
+        if primary_field is None:
+            continue
+
+        fk_prop = f'{primary_field}_id'
+
+        if fk_prop in props:
+            # Primary field is a FK (e.g. primary='room_type' → fk_prop='room_type_id')
+            if _is_optional_field(fk_prop, props, req_set):
+                errors.append(
+                    f"Entity '{model}': list primary field '{primary_field}' must be "
+                    f"required (non-nullable). '{fk_prop}' is optional or nullable — "
+                    f"the list view primary column would render null/empty on rows "
+                    f"where the FK is unset."
+                )
+                continue
+
+            # Check labelField paths on the FK's x-relationship
+            fk_rel     = (props[fk_prop].get('x-relationship') or {})
+            target     = fk_rel.get('target')
+            lf_raw     = fk_rel.get('labelField')
+
+            if not target or target not in defs or not lf_raw:
+                continue
+
+            # Normalise labelField to a list (supports str and list[str])
+            if isinstance(lf_raw, str):
+                lf_paths = [lf_raw] if lf_raw else []
+            elif isinstance(lf_raw, list):
+                lf_paths = [p for p in lf_raw if isinstance(p, str) and p]
+            else:
+                lf_paths = []
+
+            for lf_path in lf_paths:
+                segments = lf_path.split('.')
+                cursor   = target
+
+                for i, seg in enumerate(segments):
+                    cursor_def   = defs.get(cursor, {})
+                    cursor_props = cursor_def.get('properties', {}) or {}
+                    cursor_req   = set(cursor_def.get('required') or [])
+                    is_last      = (i == len(segments) - 1)
+
+                    if is_last:
+                        if seg not in cursor_props:
+                            break  # path error already caught by section 2c
+                        if _is_optional_field(seg, cursor_props, cursor_req):
+                            errors.append(
+                                f"Entity '{model}': list primary field '{primary_field}' "
+                                f"labelField path '{lf_path}': final field '{seg}' on "
+                                f"'{cursor}' must be required (non-nullable)."
+                            )
+                    else:
+                        # Intermediate segment: resolve via {seg}_id FK
+                        rel_fk     = f'{seg}_id'
+                        rel_target = (
+                            (cursor_props.get(rel_fk) or {})
+                            .get('x-relationship', {})
+                            .get('target')
+                        )
+                        if not rel_target or rel_target not in defs:
+                            break
+                        cursor = rel_target
+
+        elif primary_field in props:
+            # Primary field is a plain scalar (e.g. primary='name')
+            if _is_optional_field(primary_field, props, req_set):
+                errors.append(
+                    f"Entity '{model}': list primary field '{primary_field}' must be "
+                    f"required (non-nullable)."
+                )
+
+    # -----------------------------------------------------------------------
     # Report
     # -----------------------------------------------------------------------
     if errors:

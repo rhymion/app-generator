@@ -76,3 +76,61 @@ export async function validateOnAdd(tx: TransactionClient, data: Record<string, 
 export async function validateOnUpdate(tx: TransactionClient, id: string, data: Record<string, unknown>): Promise<void> {
   await validateSchemaRules(tx, data, id);
 }
+{% if reservation_config and reservation_config.mode == 'item' and reservation_config.dateRange %}
+
+// --- reservation overlap validation (generated, cmd_139 Phase 2) ---
+interface DateRange {
+  {{ reservation_config.dateRange.startField }}: Date | string;
+  {{ reservation_config.dateRange.endField }}: Date | string;
+}
+
+function hasOverlap(a: DateRange, b: DateRange): boolean {
+  const aStart = new Date(a.{{ reservation_config.dateRange.startField }} as string).getTime();
+  const aEnd   = new Date(a.{{ reservation_config.dateRange.endField }} as string).getTime();
+  const bStart = new Date(b.{{ reservation_config.dateRange.startField }} as string).getTime();
+  const bEnd   = new Date(b.{{ reservation_config.dateRange.endField }} as string).getTime();
+  return aStart < bEnd && bStart < aEnd;
+}
+
+async function checkDateRangeOverlap(
+  tx: TransactionClient,
+  allocatedItemId: string,
+  {{ reservation_config.dateRange.startField }}: Date | string,
+  {{ reservation_config.dateRange.endField }}: Date | string,
+  excludeId?: string
+): Promise<boolean> {
+  const existing = await tx.{{ model }}.findMany({
+    where: {
+      {{ reservation_config.allocatedField }}: allocatedItemId,
+      ...(excludeId ? { NOT: { id: excludeId } } : {}),
+    },
+    select: {
+      {{ reservation_config.dateRange.startField }}: true,
+      {{ reservation_config.dateRange.endField }}: true,
+    },
+  });
+  const target: DateRange = {
+    {{ reservation_config.dateRange.startField }},
+    {{ reservation_config.dateRange.endField }},
+  };
+  return existing.some((e) => hasOverlap(e as unknown as DateRange, target));
+}
+
+export async function assertNoDuplicateReservation(
+  tx: TransactionClient,
+  allocatedItemId: string,
+  dateRange: DateRange,
+  excludeId?: string
+): Promise<void> {
+  const overlaps = await checkDateRangeOverlap(
+    tx,
+    allocatedItemId,
+    dateRange.{{ reservation_config.dateRange.startField }},
+    dateRange.{{ reservation_config.dateRange.endField }},
+    excludeId
+  );
+  if (overlaps) {
+    throw new Error('Reservation overlaps with an existing booking');
+  }
+}
+{% endif %}

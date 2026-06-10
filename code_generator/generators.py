@@ -444,6 +444,8 @@ def actions_context(ctx: dict) -> dict:
     child_form_data_extractions = ctx['child_form_data_extractions']
     item_context_select = ctx['item_context_select']
     has_children  = bool(non_comment_ch)
+    reservation_config = ctx.get('reservation_config')
+    has_reservation = bool(reservation_config and reservation_config.get('mode') == 'count')
 
     sep = ', ' if (parent_params and child_args) else ''
     full_child_args = f'{sep}{child_args}' if child_args else ''
@@ -529,6 +531,46 @@ def actions_context(ctx: dict) -> dict:
         if can_create and can_update:
             create_call = f'await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});'
             update_call = f'await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
+            if has_reservation:
+                return (
+                    f"  const id = data.get('id') as string | null;\n"
+                    f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                    f"  if (id) {{\n"
+                    f"    const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
+                    f"    await requirePermission('{parent}', 'update', existing);\n"
+                    f"  }} else {{\n"
+                    f"    await requirePermission('{parent}', 'create');\n"
+                    f"  }}\n"
+                    f"{form_data_gets}\n"
+                    + (f"{child_form_data_extractions}\n" if has_ch else "")
+                    + _flatten_block +
+                    f"  const actorId = await getSessionUserIdOrThrow();\n\n"
+                    f"  let _serviceError: string | null = null;\n"
+                    f"  if (id) {{\n"
+                    f"    try {{\n"
+                    f"      {update_call}\n"
+                    f"    }} catch (e) {{\n"
+                    f"      if (e instanceof ReservationMutationError) {{\n"
+                    f"        _serviceError = (e as Error).message;\n"
+                    f"      }} else {{\n"
+                    f"        throw e;\n"
+                    f"      }}\n"
+                    f"    }}\n"
+                    f"  }} else {{\n"
+                    f"    try {{\n"
+                    f"      {create_call}\n"
+                    f"    }} catch (e) {{\n"
+                    f"      if (e instanceof InsufficientInventoryError) {{\n"
+                    f"        _serviceError = (e as Error).message;\n"
+                    f"      }} else {{\n"
+                    f"        throw e;\n"
+                    f"      }}\n"
+                    f"    }}\n"
+                    f"  }}\n"
+                    f"  if (_serviceError) {{\n"
+                    f"    return {{ error: _serviceError }};\n"
+                    f"  }}"
+                )
             return (
                 f"  const id = data.get('id') as string | null;\n"
                 f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
@@ -575,7 +617,8 @@ def actions_context(ctx: dict) -> dict:
         f'update{parent_pascal}' if can_update else '',
         f'delete{parent_pascal}' if can_delete else '',
     ]
-    service_imports = ', '.join(f for f in service_fns if f)
+    error_imports = ', InsufficientInventoryError, ReservationMutationError' if has_reservation else ''
+    service_imports = ', '.join(f for f in service_fns if f) + error_imports
 
     return {
         'service_imports': service_imports,
@@ -586,6 +629,288 @@ def actions_context(ctx: dict) -> dict:
 # ---------------------------------------------------------------------------
 # service.ts
 # ---------------------------------------------------------------------------
+
+def _build_reservation_mutation_guard_update(rc: dict, model: str) -> str:
+    """Generate TypeScript update guard that rejects criteria changes after allocation."""
+    res          = rc.get('result') or {}
+    alloc_entity = res.get('allocationEntity') or ''
+    parent_field = res.get('parentField') or f'{model}_id'
+    lines_entity = rc.get('lines_entity') or ''
+    lines_prop   = rc.get('lines') or 'items'
+    lines_var    = to_camel_case(lines_prop)
+
+    req          = rc.get('request') or {}
+    criteria     = req.get('criteria') or {}
+    qty_field    = req.get('quantityField', 'quantity')
+
+    header = (
+        f"    // Reservation mutation guard: reject criteria changes after allocation\n"
+        f"    const _allocationCount = await tx.{alloc_entity}.count({{\n"
+        f"      where: {{ {parent_field}: id }},\n"
+        f"    }});\n"
+        f"    if (_allocationCount > 0) {{\n"
+    )
+
+    if not lines_entity:
+        # count mode without lines: compare parent entity quantity directly
+        return (
+            header +
+            f"      const _existing = await tx.{model}.findUnique({{\n"
+            f"        where: {{ id }},\n"
+            f"        select: {{ {qty_field}: true }},\n"
+            f"      }});\n"
+            f"      if (_existing && _existing.{qty_field} !== {qty_field}) {{\n"
+            f"        throw new ReservationMutationError('Cannot modify reservation criteria after allocation.');\n"
+            f"      }}\n"
+            f"    }}"
+        )
+
+    # count mode with lines: compare line items
+    # select fields: all criteria keys + quantity field (deduplicated)
+    select_fields_set = list(dict.fromkeys(list(criteria.keys()) + [qty_field]))
+    select_fields_str = ', '.join(f'{f}: true' for f in select_fields_set)
+
+    # per-row comparison: criteria keys + quantity field
+    check_parts = [f'ex.{f} !== incoming.{f}' for f in select_fields_set]
+    criteria_check = ' || '.join(check_parts)
+
+    return (
+        header +
+        f"      const _existingLines = await tx.{lines_entity}.findMany({{\n"
+        f"        where: {{ {model}_id: id }},\n"
+        f"        select: {{ id: true, {select_fields_str} }},\n"
+        f"      }});\n"
+        f"      const _existingMap = new Map(_existingLines.map(i => [i.id, i]));\n"
+        f"      const _existingIds = new Set(_existingLines.map(i => i.id));\n"
+        f"      const _incomingWithId = {lines_var}Items.filter(i => i.id);\n"
+        f"      const _incomingIds = new Set(_incomingWithId.map(i => i.id as string));\n"
+        f"      const _mutated =\n"
+        f"        {lines_var}Items.some(i => !i.id) ||\n"
+        f"        [..._existingIds].some(eid => !_incomingIds.has(eid)) ||\n"
+        f"        _incomingWithId.some(incoming => {{\n"
+        f"          const ex = _existingMap.get(incoming.id as string);\n"
+        f"          return ex !== undefined && ({criteria_check});\n"
+        f"        }});\n"
+        f"      if (_mutated) {{\n"
+        f"        throw new ReservationMutationError('Cannot modify reservation criteria after allocation.');\n"
+        f"      }}\n"
+        f"    }}"
+    )
+
+
+def _build_reservation_mutation_guard_delete(rc: dict, model: str) -> str:
+    """Generate TypeScript delete guard that rejects delete when allocation exists."""
+    res          = rc.get('result') or {}
+    alloc_entity = res.get('allocationEntity') or ''
+    parent_field = res.get('parentField') or f'{model}_id'
+
+    return (
+        f"  // Reservation mutation guard: reject delete when allocation exists\n"
+        f"  const _allocationCount = await prisma.{alloc_entity}.count({{\n"
+        f"    where: {{ {parent_field}: {{ in: ids }} }},\n"
+        f"  }});\n"
+        f"  if (_allocationCount > 0) {{\n"
+        f"    throw new ReservationMutationError('Cannot delete {model} with existing reservation allocation.');\n"
+        f"  }}"
+    )
+
+
+def _build_reservation_allocation_code(rc: dict, model: str) -> str:
+    """Generate the TypeScript allocation phase for count mode reservation."""
+    pool        = rc.get('pool') or {}
+    req         = rc.get('request') or {}
+    pol         = rc.get('policy') or {}
+    res         = rc.get('result') or {}
+
+    pool_entity     = pool.get('entity', 'inventory')
+    pool_qty_field  = pool.get('quantityField', 'quantity')
+    pool_res_field  = pool.get('reservedField', 'reserved_quantity')
+    lines_prop      = rc.get('lines')  # None when no lines configured
+    lines_entity    = rc.get('lines_entity') or ''
+    req_qty_field   = req.get('quantityField', 'quantity')
+    criteria        = req.get('criteria') or {}
+    policy_order    = pol.get('orderBy') or []
+    alloc_entity    = res.get('allocationEntity') or ''
+    parent_field    = res.get('parentField') or f'{model}_id'
+    # line_field is only meaningful when a lines entity exists
+    line_field      = res.get('lineField') or (f'{lines_entity}_id' if lines_entity else None)
+    pool_field      = res.get('poolField') or f'{pool_entity}_id'
+    alloc_qty       = res.get('quantityField') or 'quantity'
+
+    # Criteria where clause entries (each line has criteria fields)
+    criteria_lines = [f'          {k}: _line.{v},' for k, v in criteria.items()]
+    criteria_str   = '\n'.join(criteria_lines) if criteria_lines else ''
+
+    # orderBy entries
+    def _order_entry(field: str, direction: str) -> str:
+        if direction == 'asc_nulls_last':
+            return f"{{ {field}: {{ sort: 'asc', nulls: 'last' }} }}"
+        if direction == 'desc_nulls_first':
+            return f"{{ {field}: {{ sort: 'desc', nulls: 'first' }} }}"
+        return f"{{ {field}: '{direction}' }}"
+
+    order_parts: list[str] = []
+    for item in policy_order:
+        for field, direction in item.items():
+            order_parts.append(_order_entry(field, str(direction)))
+    order_str = ', '.join(order_parts)
+
+    # Allocation row creation (optional)
+    alloc_block = ''
+    if alloc_entity:
+        alloc_block = (
+            f"          await tx.{alloc_entity}.create({{\n"
+            f"            data: {{\n"
+            f"              {parent_field}: created.id,\n"
+            f"              {line_field}: _line.id,\n"
+            f"              {pool_field}: _candidate.id,\n"
+            f"              {alloc_qty}: _claim,\n"
+            f"              creator_id: actorId,\n"
+            f"              updater_id: actorId,\n"
+            f"            }},\n"
+            f"          }});\n"
+        )
+
+    has_lines = rc.get('hasLines', True)
+    self_qty_field = rc.get('selfQuantityField', req_qty_field)
+
+    lines = [
+        f"    // Reservation: count mode — allocate {pool_entity} for each {lines_prop or 'request'} line",
+    ]
+    if lines_entity:
+        lines.append(
+            f"    const _reservationLines = await tx.{lines_entity}.findMany({{\n"
+            f"      where: {{ {model}_id: created.id }},\n"
+            f"    }});"
+        )
+        iter_var = '_reservationLines'
+    elif not has_lines:
+        # ④A: count mode without lines — treat the request entity itself as the single line
+        lines.append(
+            f"    const _reservationLines = [{{ ...created, {req_qty_field}: "
+            f"(created as Record<string, unknown>).{self_qty_field} as number }}];"
+        )
+        iter_var = '_reservationLines'
+    else:
+        iter_var = f'(created as Record<string, unknown>).{lines_prop} as Record<string, unknown>[]'
+
+    where_clause = f"          {pool_qty_field}: {{ gt: 0 }},"
+    if criteria_str:
+        where_clause = criteria_str + '\n' + f"          {pool_qty_field}: {{ gt: 0 }},"
+
+    alloc_has_creator = rc.get('alloc_has_creator', True)
+
+    # Allocation row creation (optional); line_field omitted when no lines entity;
+    # creator_id/updater_id omitted when allocation entity has no such fields.
+    alloc_block = ''
+    if alloc_entity:
+        alloc_data_entries = [f"              {parent_field}: created.id,"]
+        if line_field:
+            alloc_data_entries.append(f"              {line_field}: _line.id,")
+        alloc_data_entries += [
+            f"              {pool_field}: _candidate.id,",
+            f"              {alloc_qty}: _claim,",
+        ]
+        if alloc_has_creator:
+            alloc_data_entries += [
+                f"              creator_id: actorId,",
+                f"              updater_id: actorId,",
+            ]
+        alloc_block = (
+            f"          await tx.{alloc_entity}.create({{\n"
+            f"            data: {{\n"
+            + '\n'.join(alloc_data_entries) + '\n'
+            + f"            }},\n"
+            + f"          }});\n"
+        )
+
+    # ---- NO-LINES branch: count mode without a line entity ----
+    # Allocates directly from created.{req_qty_field} without iterating lines.
+    if not lines_entity:
+        lines = [
+            f"    // Reservation: count mode — allocate {pool_entity}",
+            f"    {{",
+            f"      let _remaining = (created as Record<string, unknown>).{req_qty_field} as number;",
+            f"      const _candidates = await tx.{pool_entity}.findMany({{",
+            f"        where: {{",
+            f"{where_clause}",
+            f"        }},",
+        ]
+        if order_str:
+            lines.append(f"        orderBy: [{order_str}],")
+        lines += [
+            f"      }});",
+            f"      for (const _candidate of _candidates) {{",
+            f"        if (_remaining <= 0) break;",
+            f"        const _claim = Math.min(_remaining, _candidate.{pool_qty_field});",
+            f"        const _claimResult = await tx.{pool_entity}.updateMany({{",
+            f"          where: {{ id: _candidate.id, {pool_qty_field}: {{ gte: _claim }} }},",
+            f"          data: {{",
+            f"            {pool_qty_field}: {{ decrement: _claim }},",
+            f"            {pool_res_field}: {{ increment: _claim }},",
+            f"          }},",
+            f"        }});",
+            f"        if (_claimResult.count > 0) {{",
+            f"          _remaining -= _claim;",
+        ]
+        if alloc_block:
+            lines.append(alloc_block.rstrip('\n'))
+        lines += [
+            f"        }}",
+            f"      }}",
+            f"      if (_remaining > 0) {{",
+            f"        throw new InsufficientInventoryError(",
+            f"          `Insufficient inventory for request ${{created.id}}`",
+            f"        );",
+            f"      }}",
+            f"    }}",
+        ]
+        return '\n'.join(lines)
+
+    # ---- WITH-LINES branch: count mode with a line entity ----
+    lines = [
+        f"    // Reservation: count mode — allocate {pool_entity} for each {lines_prop} line",
+        f"    const _reservationLines = await tx.{lines_entity}.findMany({{\n"
+        f"      where: {{ {model}_id: created.id }},\n"
+        f"    }});",
+        f"    for (const _line of _reservationLines) {{",
+        f"      let _remaining = (_line as Record<string, unknown>).{req_qty_field} as number;",
+        f"      const _candidates = await tx.{pool_entity}.findMany({{",
+        f"        where: {{",
+        f"{where_clause}",
+        f"        }},",
+    ]
+    if order_str:
+        lines.append(f"        orderBy: [{order_str}],")
+    lines += [
+        f"      }});",
+        f"      for (const _candidate of _candidates) {{",
+        f"        if (_remaining <= 0) break;",
+        f"        const _claim = Math.min(_remaining, _candidate.{pool_qty_field});",
+        f"        const _claimResult = await tx.{pool_entity}.updateMany({{",
+        f"          where: {{ id: _candidate.id, {pool_qty_field}: {{ gte: _claim }} }},",
+        f"          data: {{",
+        f"            {pool_qty_field}: {{ decrement: _claim }},",
+        f"            {pool_res_field}: {{ increment: _claim }},",
+        f"          }},",
+        f"        }});",
+        f"        if (_claimResult.count > 0) {{",
+        f"          _remaining -= _claim;",
+    ]
+    if alloc_block:
+        lines.append(alloc_block.rstrip('\n'))
+    lines += [
+        f"        }}",
+        f"      }}",
+        f"      if (_remaining > 0) {{",
+        f"        throw new InsufficientInventoryError(",
+        f"          `Insufficient inventory for product ${{(_line as Record<string, unknown>).product_id}}`",
+        f"        );",
+        f"      }}",
+        f"    }}",
+    ]
+    return '\n'.join(lines)
+
 
 def service_context(ctx: dict, schema: dict | None = None) -> dict:
     parent                  = ctx['parent']
@@ -604,6 +929,10 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     child_params_for_update = ctx['child_params_for_update']
     has_assignee_id         = ctx.get('has_assignee_id', False)
     is_audited              = ctx.get('is_audited', False)
+    reservation_config      = ctx.get('reservation_config')
+    has_reservation         = bool(reservation_config and reservation_config.get('mode') == 'count')
+    has_item_reservation    = bool(reservation_config and reservation_config.get('mode') == 'item')
+    has_item_daterange      = has_item_reservation and bool(reservation_config.get('dateRange'))
 
     has_non_comment_ch = bool(non_comment_ch)
 
@@ -869,15 +1198,62 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     flatten_nested_updates = '\n'.join(flatten_nested_update_lines)
     flatten_nested_creates = '\n'.join(flatten_nested_create_lines)
 
+    # Reservation count mode: build allocation code block
+    reservation_allocation_code = ''
+    if has_reservation and reservation_config is not None:
+        reservation_allocation_code = _build_reservation_allocation_code(reservation_config, model)
+
+    _insufficient_inventory_error_class_def = (
+        "\n\nexport class InsufficientInventoryError extends Error {\n"
+        "  constructor(message: string) {\n"
+        "    super(message);\n"
+        "    this.name = 'InsufficientInventoryError';\n"
+        "  }\n"
+        "}"
+    )
+    _reservation_mutation_error_class_def = (
+        "\n\nexport class ReservationMutationError extends Error {\n"
+        "  constructor(message: string) {\n"
+        "    super(message);\n"
+        "    this.name = 'ReservationMutationError';\n"
+        "  }\n"
+        "}"
+    )
+    if has_reservation:
+        insufficient_inventory_error_class = (
+            _insufficient_inventory_error_class_def + _reservation_mutation_error_class_def
+        )
+    elif has_item_reservation:
+        insufficient_inventory_error_class = _insufficient_inventory_error_class_def
+    else:
+        insufficient_inventory_error_class = ''
+
+    reservation_mutation_guard_update = ''
+    reservation_mutation_guard_delete = ''
+    if has_reservation and reservation_config is not None:
+        reservation_mutation_guard_update = _build_reservation_mutation_guard_update(reservation_config, model)
+        reservation_mutation_guard_delete = _build_reservation_mutation_guard_delete(reservation_config, model)
+
+    # item mode: assertNoDuplicateReservation added to service_validation import when dateRange present
+    _validation_extras = ''
+    if has_item_daterange:
+        _validation_extras = ', assertNoDuplicateReservation'
+    _pool_entity_pick = (
+        f" | '{reservation_config['pool']['entity']}'" if has_item_reservation and reservation_config else ''
+    )
+
     utility_code = (
         f"import prisma from '@/lib/prisma';\n"
-        f"import {{ normalizeValue,{' normalizeChildRefs,' if has_non_comment_ch else ''}"
+        + (f"import {{ Prisma }} from '@/app/generated/prisma/client';\n" if has_item_reservation else '')
+        + f"import {{ normalizeValue,{' normalizeChildRefs,' if has_non_comment_ch else ''}"
         f"{' assertNotStale,' if can_update else ''} type NormalizedSnapshot }} from '@/lib/normalize';"
-        + (f"\nimport {{ validateOnAdd, validateOnUpdate }} from './service_validation';" if (can_create or can_update) else '')
+        + (f"\nimport {{ validateOnAdd, validateOnUpdate{_validation_extras} }} from './service_validation';" if (can_create or can_update) else '')
+        + (f"\nimport {{ assertNoDuplicateReservation }} from './service_validation';" if has_item_daterange and not (can_create or can_update) else '')
         + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '')
         + (f"\nimport {{ notify }} from '@/lib/_notifier';" if has_assignee_id else '')
-        + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '') +
-        f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'>;\n\n"
+        + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
+        + insufficient_inventory_error_class +
+        f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"
         f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
         f"  const safeSnapshot = (snapshot ?? {{}}) as Record<string, unknown>;\n"
         f"  return {{\n"
@@ -897,12 +1273,17 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     )
 
     return {
-        'utility_code':             utility_code,
-        'child_params_for_add':     child_params_for_add,
-        'child_params_for_update':  child_params_for_update,
-        'flatten_update_params':    flatten_update_params,
-        'flatten_nested_updates':   flatten_nested_updates,
-        'flatten_nested_creates':   flatten_nested_creates,
+        'utility_code':                       utility_code,
+        'child_params_for_add':               child_params_for_add,
+        'child_params_for_update':            child_params_for_update,
+        'flatten_update_params':              flatten_update_params,
+        'flatten_nested_updates':             flatten_nested_updates,
+        'flatten_nested_creates':             flatten_nested_creates,
+        'reservation_allocation_code':        reservation_allocation_code,
+        'has_reservation':                    has_reservation,
+        'has_item_reservation':               has_item_reservation,
+        'reservation_mutation_guard_update':  reservation_mutation_guard_update,
+        'reservation_mutation_guard_delete':  reservation_mutation_guard_delete,
     }
 
 
