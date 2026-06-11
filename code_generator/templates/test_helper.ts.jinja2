@@ -43,7 +43,9 @@ async function _create{{ pascal }}BaseDeps() {
         {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
 {% endfor %}
         creator_id: testUser.id,
+{% if dep.has_updater_id %}
         updater_id: testUser.id,
+{% endif %}
 {% if dep.has_user_accounts %}
         users: {
           connect: [testUser.id].map((id) => ({ id })),
@@ -71,7 +73,9 @@ async function _create{{ pascal }}BaseDeps() {
       {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
 {% endfor %}
       creator_id: testUser.id,
+{% if dep.has_updater_id %}
       updater_id: testUser.id,
+{% endif %}
 {% if dep.has_user_accounts %}
       users: {
         connect: [testUser.id].map((id) => ({ id })),
@@ -110,7 +114,9 @@ async function _create{{ pascal }}BaseDeps() {
         {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
 {% endfor %}
         creator_id: testUser.id,
+{% if dep.has_updater_id %}
         updater_id: testUser.id,
+{% endif %}
       },
 {% if dep.prisma_include_str %}
       include: { {{ dep.prisma_include_str }} },
@@ -133,7 +139,9 @@ async function _create{{ pascal }}BaseDeps() {
       {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
 {% endfor %}
       creator_id: testUser.id,
+{% if dep.has_updater_id %}
       updater_id: testUser.id,
+{% endif %}
     },
 {% if dep.prisma_include_str %}
     include: { {{ dep.prisma_include_str }} },
@@ -170,7 +178,9 @@ export async function populate{{ pascal }}Dependencies() {
       {{ fk.prop_name }}: baseDeps.{{ fk.dep_var_name }}.id,
 {% endfor %}
       creator_id: testUser.id,
+{% if dep.has_updater_id %}
       updater_id: testUser.id,
+{% endif %}
     },
 {% if dep.prisma_include_str %}
     include: { {{ dep.prisma_include_str }} },
@@ -214,7 +224,9 @@ export async function populate{{ pascal }}Dependencies() {
         {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
 {% endfor %}
         creator_id: testUser.id,
+{% if dep.has_updater_id %}
         updater_id: testUser.id,
+{% endif %}
 {% if dep.has_user_accounts %}
         users: {
           connect: [testUser.id].map((id) => ({ id })),
@@ -242,7 +254,9 @@ export async function populate{{ pascal }}Dependencies() {
       {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
 {% endfor %}
       creator_id: testUser.id,
+{% if dep.has_updater_id %}
       updater_id: testUser.id,
+{% endif %}
 {% if dep.has_user_accounts %}
       users: {
         connect: [testUser.id].map((id) => ({ id })),
@@ -281,7 +295,9 @@ export async function populate{{ pascal }}Dependencies() {
         {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
 {% endfor %}
         creator_id: testUser.id,
+{% if dep.has_updater_id %}
         updater_id: testUser.id,
+{% endif %}
       },
 {% if dep.prisma_include_str %}
       include: { {{ dep.prisma_include_str }} },
@@ -304,7 +320,9 @@ export async function populate{{ pascal }}Dependencies() {
       {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
 {% endfor %}
       creator_id: testUser.id,
+{% if dep.has_updater_id %}
       updater_id: testUser.id,
+{% endif %}
     },
 {% if dep.prisma_include_str %}
     include: { {{ dep.prisma_include_str }} },

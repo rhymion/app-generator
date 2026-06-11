@@ -871,6 +871,7 @@ def build_context(entity: dict, schema: dict) -> dict:
 
     # Form data gets (for actions / API POST)
     form_data_gets = _build_form_data_gets(parent_prop_infos)
+    parent_params_no_bridge = parent_params  # pre-bridge version for updateXxx calls
     if bridge_child_ir:
         _sep = ', ' if parent_params else ''
         parent_params = parent_params + _sep + 'selectedParentType, selectedParentId'
@@ -1367,6 +1368,12 @@ def build_context(entity: dict, schema: dict) -> dict:
     service_args_for_create = f"actorId, {parent_service_args}" + (
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
+    if bridge_child_ir:
+        service_args_for_create += ", selectedParentType, selectedParentId"
+        all_body_fields_create = (
+            (all_body_fields_create + ", " if all_body_fields_create else "")
+            + "selectedParentType, selectedParentId"
+        )
     service_args_for_update = f"actorId, id, {parent_service_args}" + (
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
@@ -1419,6 +1426,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         # Props
         parent_prop_infos=parent_prop_infos,
         parent_params=parent_params,
+        parent_params_no_bridge=parent_params_no_bridge,
         parent_params_with_types=parent_params_with_types,
         parent_data_obj=parent_data_obj,
         parent_data_obj_update=parent_data_obj_update,

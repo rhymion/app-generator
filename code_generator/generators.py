@@ -438,6 +438,7 @@ def actions_context(ctx: dict) -> dict:
     can_update    = ctx['can_update']
     can_delete    = ctx['can_delete']
     parent_params = ctx['parent_params']
+    parent_params_no_bridge = ctx.get('parent_params_no_bridge', parent_params)
     non_comment_ch = ctx['non_comment_ch']
     child_args    = ctx['child_args_for_call']
     form_data_gets = ctx['form_data_gets']
@@ -447,6 +448,8 @@ def actions_context(ctx: dict) -> dict:
 
     sep = ', ' if (parent_params and child_args) else ''
     full_child_args = f'{sep}{child_args}' if child_args else ''
+    sep_no_bridge = ', ' if (parent_params_no_bridge and child_args) else ''
+    full_child_args_no_bridge = f'{sep_no_bridge}{child_args}' if child_args else ''
 
     # Flatten rel extraction code and update args
     flatten_rels_raw = ctx.get('flatten_rels', [])
@@ -528,7 +531,7 @@ def actions_context(ctx: dict) -> dict:
         _flatten_block = (f"{flatten_extractions_code}\n" if flatten_extractions_code else "")
         if can_create and can_update:
             create_call = f'await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});'
-            update_call = f'await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
+            update_call = f'await update{parent_pascal}(actorId, id, {parent_params_no_bridge}{full_child_args_no_bridge}{flatten_args_str}, srcSnapshotRaw);'
             return (
                 f"  const id = data.get('id') as string | null;\n"
                 f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
@@ -559,7 +562,7 @@ def actions_context(ctx: dict) -> dict:
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _flatten_block +
                 f"\n  const actorId = await getSessionUserIdOrThrow();\n"
-                f"  await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
+                f"  await update{parent_pascal}(actorId, id, {parent_params_no_bridge}{full_child_args_no_bridge}{flatten_args_str}, srcSnapshotRaw);"
             )
         else:  # create only
             return (

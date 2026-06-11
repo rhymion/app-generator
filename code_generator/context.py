@@ -374,11 +374,22 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             and is_optional_fk_to_parent(schema['definitions'].get(c['name'], {}), model))
     ]
     child_rel_targets = _dedupe_ordered(r['target'] for r in child_rels_early)
+    # For bridge-child entities (new-form x-bridge), include bridge parent targets in FormUpsertProps
+    x_bridge = model_def.get('x-bridge')
+    bridge_parent_targets = (
+        [p.get('target') for p in (x_bridge.get('parents') or []) if p.get('target')]
+        if isinstance(x_bridge, dict)
+        else []
+    )
+    for _bpt in bridge_parent_targets:
+        if _bpt != model and _bpt not in import_targets:
+            import_targets.append(_bpt)
     all_option_targets = _dedupe_ordered([
         *m2m_targets,
         *optional_fk_list_targets,
         *[r.target for r in parent_rels],
         *child_rel_targets,
+        *bridge_parent_targets,
     ])
 
     # Auto-create OTO rels with nested children (for types + display)

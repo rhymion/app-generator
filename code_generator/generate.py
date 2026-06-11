@@ -10,6 +10,7 @@ This is a drop-in replacement for:
     npx tsx code_generator/generate.ts <schema.yaml> .
 
 """
+import re
 import sys
 import os
 from pathlib import Path
@@ -69,30 +70,28 @@ def _make_env() -> Environment:
 # Bridge Prisma schema emission
 # ---------------------------------------------------------------------------
 
-def build_bridge_prisma_additions(schema: dict) -> str:
-    """Generate Prisma model additions for all new-form FK-on-parent bridge models.
-
-    Scans the schema for new-form x-bridge object declarations and emits:
-      - Bridge model block (id + back-relations only, no parent FK cols)
-      - Parent FK field comment lines showing what to add to each parent model
-      - Child FK field comment lines showing what to add to the child model
-
-    Returns a Prisma-compatible string block suitable for appending to schema.prisma.
-    The comment lines document the expected parent/child FK additions; the bridge
-    model blocks are the only rows that need to be physically written as new Prisma
-    models (parent/child FK columns are already present from manual schema or prior
-    generation passes).
-    """
+def _collect_bridges(schema: dict) -> dict[str, dict]:
+    """Collect all new-form x-bridge object declarations from the schema."""
     defs = schema.get('definitions', {})
     bridges: dict[str, dict] = {}
-
     for entity_name, entity_def in defs.items():
         if entity_name.endswith('_detail') or not isinstance(entity_def, dict):
             continue
         bridge = get_new_form_bridge(entity_def)
         if bridge:
             bridges[bridge['name']] = bridge
+    return bridges
 
+
+def build_bridge_prisma_additions(schema: dict) -> str:
+    """Generate Prisma model additions for all new-form FK-on-parent bridge models.
+
+    Returns a Prisma-compatible string block with bridge model blocks and FK comment
+    lines documenting required parent/child additions. Used as reference documentation
+    (bridge_additions.prisma). The actual injection into schema.prisma is done by
+    inject_bridge_into_schema().
+    """
+    bridges = _collect_bridges(schema)
     if not bridges:
         return ''
 
@@ -113,6 +112,68 @@ def build_bridge_prisma_additions(schema: dict) -> str:
         blocks.append(f'// [child:{child}] {child_relation.strip()}')
 
     return '\n\n'.join(blocks)
+
+
+def _inject_into_model_block(content: str, model_name: str,
+                              scalar_line: str, relation_line: str,
+                              fk_field_name: str) -> str:
+    """Inject FK scalar+relation lines into a Prisma model block (idempotent)."""
+    pat = re.compile(
+        rf'^(model {re.escape(model_name)} \{{)(.*?)(^\}})',
+        re.MULTILINE | re.DOTALL,
+    )
+    m = pat.search(content)
+    if not m:
+        return content
+
+    body = m.group(2)
+    if re.search(rf'^\s+{re.escape(fk_field_name)}\b', body, re.MULTILINE):
+        return content  # field already present — idempotent
+
+    lines = body.split('\n')
+    insert_before = len(lines)
+    for i, line in enumerate(lines):
+        if line.strip().startswith('@@'):
+            insert_before = i
+            break
+
+    new_body = '\n'.join(lines[:insert_before] + [scalar_line, relation_line, ''] + lines[insert_before:])
+    return content[:m.start(2)] + new_body + content[m.end(2):]
+
+
+def inject_bridge_into_schema(schema_prisma_path: Path, bridges: dict) -> None:
+    """Inject bridge models and parent/child FK fields into schema.prisma (idempotent).
+
+    For each bridge:
+      1. Injects parent FK scalar + relation into each parent model
+      2. Injects child FK scalar + relation into the child model
+      3. Appends the bridge model block at the end if not already present
+    """
+    content = schema_prisma_path.read_text()
+    modified = content
+
+    for bridge_name, bridge in sorted(bridges.items()):
+        child = bridge['child']
+        parent_targets = bridge['parent_targets']
+
+        for parent_name in parent_targets:
+            scalar, relation = emit_parent_bridge_fk(bridge_name, parent_name)
+            modified = _inject_into_model_block(
+                modified, parent_name, scalar, relation, f'{bridge_name}_id'
+            )
+
+        child_scalar, child_relation = emit_child_bridge_fk(bridge_name)
+        modified = _inject_into_model_block(
+            modified, child, child_scalar, child_relation, f'{bridge_name}_id'
+        )
+
+        if f'model {bridge_name} {{' not in modified:
+            bridge_block = emit_bridge_model(bridge_name, child, parent_targets)
+            modified = modified.rstrip('\n') + f'\n\n{bridge_block}\n'
+
+    if modified != content:
+        schema_prisma_path.write_text(modified)
+        print(f'  Injected bridge models/FKs → prisma/schema.prisma')
 
 
 # ---------------------------------------------------------------------------
@@ -162,10 +223,12 @@ def generate(schema_path: str, output_dir: str) -> None:
     out = Path(output_dir)
 
     # --- Bridge Prisma schema emission ---
-    bridge_additions = build_bridge_prisma_additions(schema)
-    if bridge_additions:
+    bridges = _collect_bridges(schema)
+    if bridges:
+        inject_bridge_into_schema(out / 'prisma' / 'schema.prisma', bridges)
+        bridge_additions = build_bridge_prisma_additions(schema)
         _write(out / 'prisma' / 'bridge_additions.prisma', bridge_additions)
-        print(f'  Bridge Prisma additions → prisma/bridge_additions.prisma')
+        print(f'  Bridge Prisma additions (reference) → prisma/bridge_additions.prisma')
 
     print(f'Found {len(entities)} entities in {schema_path}')
 
