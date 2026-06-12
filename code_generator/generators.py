@@ -377,7 +377,10 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                 rel_info = rel_label_map[field_name]
                 add_formatting(field_name, _label_expr_for_rel(field_name, rel_info))
 
+            _PRISMA_DATETIME = frozenset({'created_at', 'updated_at'})
             fmt = model_props[field_name].get('format') if field_name in model_props else None
+            if fmt is None and field_name in _PRISMA_DATETIME:
+                fmt = 'date-time'
             format_attr = f", format: '{fmt}'" if fmt in ('date-time', 'date', 'time') else ''
             fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr} }}")
 
@@ -412,6 +415,18 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
     force_cards   = gen_cfg.get('listDisplay') == 'cards'
     list_component = 'CardListClient' if force_cards else 'ResponsiveListClient'
 
+    # Bridge child (Stage 3): append parent_label column to explicit display_fields_code.
+    # Only for entities with xdisplay_table (ensures tf() is available via needs_tf=True).
+    _bridge_child_ir_pl = ctx.get('bridge_child_ir')
+    _bridge_parent_opts_pl = ctx.get('bridge_parent_options', [])
+    needs_tf = bool(xdisplay_table)
+    if _bridge_child_ir_pl and _bridge_parent_opts_pl and xdisplay_table:
+        _bp_cols = ",\n".join([
+            "          { field: 'parent_type', headerName: tf('parentType'), width: 120 }",
+            "          { field: 'parent_label', headerName: tf('parentLabel'), width: 200 }",
+        ])
+        display_fields_code = (display_fields_code + ',\n' + _bp_cols) if display_fields_code else _bp_cols
+
     return {
         'list_component':     list_component,
         'display_fields_code': display_fields_code,
@@ -420,7 +435,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
         'formatting_entries': '\n'.join(formatting_entries),
         'enum_ns_list':       enum_ns_list,
         'src_var':            src_var,
-        'needs_tf':           bool(xdisplay_table),
+        'needs_tf':           needs_tf,
         'needs_tc':           has_chart,
         'list_uses_format_label_value': list_uses_format_label_value,
     }
@@ -1246,6 +1261,24 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         '\n'.join(custom_jsxs),
     ]))
 
+    # Bridge child (Stage 3): prepend parent info section as read-only fields.
+    _bridge_child_ir_fv = ctx.get('bridge_child_ir')
+    _bridge_parent_opts_fv = ctx.get('bridge_parent_options', [])
+    if _bridge_child_ir_fv and _bridge_parent_opts_fv:
+        _bp_section = (
+            "      <AppFieldText\n"
+            "        label={tf('parentType')}\n"
+            "        value={src.parent_type ?? ''}\n"
+            "        readOnly\n"
+            "      />\n"
+            "      <AppFieldText\n"
+            "        label={tf('parentLabel')}\n"
+            "        value={src.parent_label ?? ''}\n"
+            "        readOnly\n"
+            "      />"
+        )
+        all_parent_fields = '\n'.join(filter(None, [_bp_section, all_parent_fields]))
+
     # Reverse OTO rels (FK in target): display as labeled fields with view links
     reverse_oto_rels = ctx.get('reverse_oto_rels', [])
     reverse_oto_jsxs = []
@@ -1531,15 +1564,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # the generated component must then `import { formatLabelValue } from '@/lib/_format';`.
     uses_format_label_value = False
 
-    text_props           = cats['text']
-    number_props         = cats['number']
-    date_time_props      = cats['date_time']
-    image_props          = cats['image']
-    boolean_props        = cats['boolean']
-    enum_int_props       = cats['enum_integer']
-    enum_str_props       = cats.get('enum_string', [])
-    custom_upsert_props  = cats['custom_upsert']
-    entity_select_props  = cats.get('entity_select', [])
+    # Readonly fields: exclude from editable field lists; render as disabled in edit mode only.
+    readonly_field_names: set[str] = set(ctx.get('readonly_fields') or [])
+
+    text_props           = [p for p in cats['text']           if p not in readonly_field_names]
+    number_props         = [p for p in cats['number']         if p not in readonly_field_names]
+    date_time_props      = [p for p in cats['date_time']      if p not in readonly_field_names]
+    image_props          = [p for p in cats['image']          if p not in readonly_field_names]
+    boolean_props        = [p for p in cats['boolean']        if p not in readonly_field_names]
+    enum_int_props       = [p for p in cats['enum_integer']   if p not in readonly_field_names]
+    enum_str_props       = [p for p in cats.get('enum_string', [])  if p not in readonly_field_names]
+    custom_upsert_props  = [p for p in cats['custom_upsert'] if p not in readonly_field_names]
+    entity_select_props  = [p for p in cats.get('entity_select', []) if p not in readonly_field_names]
 
     rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
 
@@ -1889,6 +1925,22 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         setter = _setter(sn)
         custom_jsxs.append(f"      <{comp} value={{{sn}}} onChange={{set{setter}}} isEdit={{isEdit}} />")
 
+    # Readonly fields: displayed as disabled text fields in edit mode, omitted in new mode.
+    readonly_edit_jsxs = []
+    for _ro_fn in sorted(readonly_field_names):
+        if _ro_fn not in filtered_props:
+            continue
+        _ro_fk = _tf(_ro_fn)
+        readonly_edit_jsxs.append(
+            f"      {{isEdit && (\n"
+            f"        <AppFieldText\n"
+            f"          label={{tf('{_ro_fk}')}}\n"
+            f"          defaultValue={{src.{_ro_fn} !== null && src.{_ro_fn} !== undefined ? String(src.{_ro_fn}) : ''}}\n"
+            f"          disabled\n"
+            f"        />\n"
+            f"      )}}"
+        )
+
     all_parent_fields_jsx = '\n'.join(filter(None, [
         '\n'.join(text_jsxs),
         '\n'.join(entity_select_jsxs),
@@ -1900,13 +1952,22 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         '\n'.join(dt_jsxs),
         '\n'.join(img_jsxs),
         '\n'.join(custom_jsxs),
+        '\n'.join(readonly_edit_jsxs),
     ]))
     if bridge_child_ir:
-        _targets_str = ' | '.join(bridge_child_ir.get('parent_targets', []))
+        # Stage 2: bridge parent UI.
+        # Edit mode: parent info is shown read-only via readonly_fields (bridge FK disabled).
+        # New mode:  hidden inputs carry selectedParentType/Id (populated by parent-embedded create).
+        _bc_bridge_name = bridge_child_ir['name']
+        _bc_fk_prop = f'{_bc_bridge_name}_id'
         _bridge_jsx = (
-            f"      {{/* bridge-parent-selector: {_targets_str} */}}\n"
-            f"      <AppFieldText label=\"Parent type ({_targets_str})\" inputRef={{selectedParentTypeRef}} defaultValue={{''}} required />\n"
-            f"      <AppFieldText label=\"Parent ID\" inputRef={{selectedParentIdRef}} defaultValue={{''}} required />"
+            f"      {{/* bridge-parent: {_bc_bridge_name} — parent switching disabled */}}\n"
+            f"      {{!isEdit && (\n"
+            f"        <>\n"
+            f"          <input type=\"hidden\" ref={{selectedParentTypeRef}} />\n"
+            f"          <input type=\"hidden\" ref={{selectedParentIdRef}} />\n"
+            f"        </>\n"
+            f"      )}}"
         )
         all_parent_fields_jsx = '\n'.join(filter(None, [_bridge_jsx, all_parent_fields_jsx]))
 

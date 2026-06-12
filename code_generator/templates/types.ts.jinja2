@@ -138,7 +138,7 @@ export type {{ parent | pascal_case }}DetailPageProps = Readonly<{
 export type FormViewProps = Readonly<{
   src: {
 {% for field in form_view_fields %}
-    {{ field.name }}: {{ field.ts_type }};
+    {{ field.name }}{% if field.optional %}?{% endif %}: {{ field.ts_type }};
 {% endfor %}
 {% for rel in parent_rels %}
     {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;

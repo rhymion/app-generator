@@ -436,7 +436,7 @@ def test_service_bridge_child_has_resolved_fk_and_branches():
 # ---------------------------------------------------------------------------
 
 def test_form_upsert_bridge_child_has_parent_selector():
-    """Rendered FormUpsert for bridge child includes bridge-parent-selector markers and refs."""
+    """Stage 2: bridge child FormUpsert uses hidden inputs (no visible parent-type text field)."""
     from generators import form_upsert_context
     from jinja2 import Environment, FileSystemLoader
     from pathlib import Path
@@ -452,9 +452,11 @@ def test_form_upsert_bridge_child_has_parent_selector():
     )
     rendered = env.get_template('form_upsert.tsx.jinja2').render(**fu_ctx)
 
-    assert 'bridge-parent-selector' in rendered, (
-        'FormUpsert should contain bridge-parent-selector comment marker'
+    # Stage 2: comment changed from "bridge-parent-selector" to "bridge-parent"
+    assert 'bridge-parent:' in rendered, (
+        'FormUpsert should contain bridge-parent comment marker'
     )
+    # Refs are still generated (needed for hidden inputs in new mode)
     assert 'selectedParentTypeRef' in rendered, (
         'FormUpsert should declare selectedParentTypeRef'
     )
@@ -463,6 +465,10 @@ def test_form_upsert_bridge_child_has_parent_selector():
     )
     assert "selectedParentType" in rendered, (
         'FormUpsert handleSubmit should set selectedParentType in formData'
+    )
+    # Stage 2: no visible text inputs for parent selection in edit mode
+    assert 'Parent type' not in rendered, (
+        'Stage 2: visible parent type text input should be removed'
     )
 
 

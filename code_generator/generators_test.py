@@ -13,6 +13,7 @@ from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
 )
 from helpers.schema_helpers import filter_fields, get_parent_relationships, is_optional_fk_to_parent, get_flatten_rels
+from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import build_label_expression, render_prisma_include, resolve_label_paths
 from build_context import _get_entity_options
 from generate_types import extract_entities
@@ -1859,6 +1860,7 @@ def spec_context(
     # as a flatten Accordion (see prim_is_fk + flatten branch below).
     check_field_use_accordion = False
     check_field_inner_label = None
+    check_field_skip = False
 
     if prim_is_fk:
         primary_rel = next((r for r in relationships if r['prop_name'] == f'{prim}_id'), None)
@@ -1928,6 +1930,21 @@ def spec_context(
             check_field_label = lbl
             check_field_value_1 = first_label
             check_field_updated = second_label
+        elif prim_meta.get('category') == 'enum':
+            # Integer enum primary (e.g. plan.tier = [free, premium, vip])
+            enum_labels = [str(v) for v in (prim_meta.get('enum_values') or [])]
+            list_id_1 = enum_labels[0] if enum_labels else f'Test {lbl} 1'
+            list_id_is_unique = False
+            after_create_id = enum_labels[0] if enum_labels else f'Test {lbl}'
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = (enum_labels[1] if len(enum_labels) > 1 else enum_labels[0]) if enum_labels else list_id_1
+            has_edit_primary = True
+            edit_field_label = lbl
+            edit_update_value = list_id_updated
+            check_field_label = lbl
+            check_field_value_1 = list_id_1
+            check_field_updated = list_id_updated
         else:
             list_id_1 = f'Test {lbl} 1'
             list_id_is_unique = True
@@ -1979,18 +1996,39 @@ def spec_context(
             check_field_value_1 = f'{title} 1'
             check_field_updated = f'Updated {title}'
     else:
-        list_id_1 = f'{title} 1'
-        list_id_is_unique = True
-        after_create_id = f'Test {title}'
-        after_create_id_is_expr = False
-        primary_dep_var_for_list = None
-        list_id_updated = f'Updated {title}'
-        has_edit_primary = True
-        edit_field_label = 'Name'
-        edit_update_value = f'Updated {title}'
-        check_field_label = 'Name'
-        check_field_value_1 = f'{title} 1'
-        check_field_updated = f'Updated {title}'
+        # Check if prim is a virtual column (not in properties, no prim_meta)
+        _props_vc = parent_def.get('properties') or {}
+        _prim_is_virtual = (prim and prim_meta is None and not prim_is_fk
+                            and prim not in _props_vc and f'{prim}_id' not in _props_vc)
+        _is_creator_virtual = prim == 'created_by' or 'creator_id' in _props_vc
+        if _prim_is_virtual and _is_creator_virtual:
+            # Virtual column resolved from creator (testUser.name = 'Test User')
+            list_id_1 = 'Test User'
+            list_id_is_unique = False
+            after_create_id = 'Test User'
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = 'Test User'
+            has_edit_primary = False
+            edit_field_label = None
+            edit_update_value = None
+            check_field_label = to_title_case(prim) if prim else 'Name'
+            check_field_value_1 = 'Test User'
+            check_field_updated = 'Test User'
+            check_field_skip = True  # created_by is list-only virtual; not in FormView
+        else:
+            list_id_1 = f'{title} 1'
+            list_id_is_unique = True
+            after_create_id = f'Test {title}'
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = f'Updated {title}'
+            has_edit_primary = True
+            edit_field_label = 'Name'
+            edit_update_value = f'Updated {title}'
+            check_field_label = 'Name'
+            check_field_value_1 = f'{title} 1'
+            check_field_updated = f'Updated {title}'
 
     # detail_required: which children are required in the parent form
     detail_def = schema['definitions'].get(definition_key, {})
@@ -2025,6 +2063,16 @@ def spec_context(
         is_self_ref_autocomplete = (child_meta['render_type'] == 'editable-list-autocomplete'
                                     and rel_target == model_name)
         dep_var_name = to_camel_case(prop_name) if is_self_ref_autocomplete else None
+        # Compute expected autocomplete label for seed index 1
+        # name fields: seed uses `${entity_title} ${i}` → 'Character 1' for character
+        # other string fields: seed uses `Test ${field_title} ${i}` → 'Test Title 1' for music.title
+        _ac_lf = rel.get('label_field', 'name') or 'name'
+        if not rel_target:
+            _ac_label_1 = ''
+        elif _ac_lf == 'name':
+            _ac_label_1 = f'{to_title_case(rel_target)} 1'
+        else:
+            _ac_label_1 = f'Test {to_title_case(_ac_lf)} 1'
         list_children_data.append({
             'singular_pascal': child_meta['names']['singular_pascal_name'],
             'title': child_meta['names']['title'],
@@ -2034,6 +2082,8 @@ def spec_context(
             'target_pascal': to_pascal_case(rel_target) if rel_target else '',
             'is_external_target': bool(rel_target and rel_target != model_name),
             'dep_var_name': dep_var_name,
+            'label_field': _ac_lf,
+            'autocomplete_seed_label_1': _ac_label_1,
         })
 
     # Comment children data
@@ -2082,7 +2132,7 @@ def spec_context(
         prim_edit_meta = next(
             (f for f in fields if f.get('label') == edit_field_label), None
         )
-        if prim_edit_meta and prim_edit_meta.get('category') in ('entity_select', 'autocomplete'):
+        if prim_edit_meta and prim_edit_meta.get('category') in ('entity_select', 'autocomplete', 'enum'):
             edit_primary_cmd = f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
             use_deps_in_3_3 = prim_edit_meta.get('category') == 'autocomplete' and has_deps
         elif prim_is_fk:
@@ -2242,9 +2292,11 @@ def spec_context(
         'check_field_updated': check_field_updated,
         'check_field_use_accordion': check_field_use_accordion,
         'check_field_inner_label': check_field_inner_label,
+        'check_field_skip': check_field_skip,
         'has_approvable': any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model_name, schema)),
         'flatten_test_rels': _compute_flatten_test_rels(parent, pascal, definition_key, schema),
         'seed_count': seed_count,
+        'bridge_child_ir': get_new_form_bridge(schema.get('definitions', {}).get(model_name, {})),
     }
 
 
@@ -2443,6 +2495,14 @@ def api_spec_context(
                 _opts = primary_meta.get('entity_options') or []
                 _upd = f"'{_opts[1]['value']}'" if len(_opts) > 1 else create_val
                 assert_update = f"expect(getRes.body.{primary_field_name}).to.eq({_upd});"
+            elif primary_meta.get('category') == 'enum':
+                _evals = [v for v in (primary_meta.get('enum_values') or []) if v is not None]
+                _idx = 1 if len(_evals) > 1 else 0
+                assert_update = f"expect(getRes.body.{primary_field_name}).to.eq({_idx});"
+            elif primary_meta.get('category') == 'string_enum':
+                _evals = [v for v in (primary_meta.get('enum_values') or []) if v is not None]
+                _upd = f"'{_evals[1]}'" if len(_evals) > 1 else (f"'{_evals[0]}'" if _evals else "''")
+                assert_update = f"expect(getRes.body.{primary_field_name}).to.eq({_upd});"
             else:
                 update_label = primary_meta.get('label', to_title_case(primary_field_name))
                 assert_update = f"expect(getRes.body.{primary_field_name}).to.eq('Updated {update_label}');"
@@ -2520,6 +2580,15 @@ def api_spec_context(
                 if primary_meta and primary_meta.get('category') == 'entity_select':
                     _opts = primary_meta.get('entity_options') or []
                     _v = f"'{_opts[1]['value']}'" if len(_opts) > 1 else api_value(primary_meta, title)
+                    out.append(f"{indent}{prop}: {_v},")
+                elif primary_meta and primary_meta.get('category') == 'enum':
+                    # Integer enum: use second index (1) as the update integer value
+                    _evals = [v for v in (primary_meta.get('enum_values') or []) if v is not None]
+                    _idx = 1 if len(_evals) > 1 else 0
+                    out.append(f"{indent}{prop}: {_idx},")
+                elif primary_meta and primary_meta.get('category') == 'string_enum':
+                    _evals = [v for v in (primary_meta.get('enum_values') or []) if v is not None]
+                    _v = f"'{_evals[1]}'" if len(_evals) > 1 else (f"'{_evals[0]}'" if _evals else "''")
                     out.append(f"{indent}{prop}: {_v},")
                 else:
                     update_label = primary_meta.get('label', to_title_case(prop)) if primary_meta else to_title_case(prop)
