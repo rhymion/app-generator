@@ -12,9 +12,9 @@ describe('{{ pascal }} Reservation (generated)', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // ① 複数アイテム引当成功
+  // (1) Multi-item allocation success
   // ---------------------------------------------------------------------------
-  it('①: 複数アイテム引当 — {{ alloc_entity }} が明細ごとに生成され {{ pool_res_field }} が減少する', () => {
+  it('(1): multi-item allocation — one {{ alloc_entity }} is created per line and {{ pool_res_field }} decreases', () => {
     cy.task<any>('db:seedReservation{{ pascal }}Multi').then((seed: any) => {
       cy.request({
         method: 'POST',
@@ -44,9 +44,9 @@ describe('{{ pascal }} Reservation (generated)', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // ② 在庫不足 rollback
+  // (2) Insufficient stock rollback
   // ---------------------------------------------------------------------------
-  it('②: 在庫不足 — 409 を返し {{ alloc_entity }} が残らない', () => {
+  it('(2): insufficient stock — returns 409 and no {{ alloc_entity }} remains', () => {
     cy.task<any>('db:seedReservation{{ pascal }}Insufficient').then((seed: any) => {
       cy.request({
         method: 'POST',
@@ -72,9 +72,9 @@ describe('{{ pascal }} Reservation (generated)', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // ③ request.criteria 遵守
+  // (3) request.criteria compliance
   // ---------------------------------------------------------------------------
-  it('③: criteria 遵守 — 一致 {{ criteria_pool_field }} の {{ pool_entity }} のみ引当され不一致は untouched', () => {
+  it('(3): criteria compliance — only {{ pool_entity }} with matching {{ criteria_pool_field }} is allocated; non-matching left untouched', () => {
     cy.task<any>('db:seedReservation{{ pascal }}Criteria').then((seed: any) => {
       cy.request({
         method: 'POST',
@@ -104,9 +104,9 @@ describe('{{ pascal }} Reservation (generated)', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // ④ policy.orderBy 遵守
+  // (4) policy.orderBy compliance
   // ---------------------------------------------------------------------------
-  it('④: orderBy 遵守 — policy 順で最初の {{ pool_entity }} から引当される', () => {
+  it('(4): orderBy compliance — allocates from the first {{ pool_entity }} in policy order', () => {
     cy.task<any>('db:seedReservation{{ pascal }}OrderBy').then((seed: any) => {
       cy.request({
         method: 'POST',
@@ -125,7 +125,7 @@ describe('{{ pascal }} Reservation (generated)', () => {
 
         cy.task<any>('db:get{{ pascal }}AllocationsOrdered', orderId).then((allocs: any[]) => {
           expect(allocs).to.have.length(1);
-          // policy: {{ orderby_desc }} → 最初の row (inv1) から引当
+          // policy: {{ orderby_desc }} → allocate from the first row (inv1)
           expect(allocs[0].{{ pool_field }}).to.eq(seed.inventoryRows[0].id);
         });
       });

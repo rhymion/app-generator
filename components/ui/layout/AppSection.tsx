@@ -7,11 +7,12 @@ import Typography from '@mui/material/Typography';
 interface AppSectionProps {
   label: React.ReactNode;
   children?: React.ReactNode;
+  mt?: number;
 }
 
-export default function AppSection({ label, children }: AppSectionProps) {
+export default function AppSection({ label, children, mt }: AppSectionProps) {
   return (
-    <Accordion>
+    <Accordion sx={mt !== undefined ? { mt } : undefined}>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Typography>{label}</Typography>
       </AccordionSummary>

@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 {% endif %}
 {% if has_grid_children or children_raw %}
-import { GridColDef } from '@mui/x-data-grid';
+import type { GridColDef } from '@/components/ui/data';
 {% endif %}
 import type { FormViewProps } from '@/lib/{{ parent }}/types';
 {% if has_grid_children %}

@@ -67,7 +67,7 @@ async function createPool(
   });
 }
 
-/** ① 複数アイテム引当成功: 同一 {{ criteria_pool_field }} で2行 {{ pool_entity }}、十分な在庫 */
+/** (1) Multi-item allocation success: two {{ pool_entity }} rows with the same {{ criteria_pool_field }} and sufficient stock */
 export async function seedReservation{{ pascal }}Multi() {
   const testUser = await getTestUser();
   const customer = await createTestCustomer(testUser);
@@ -81,7 +81,7 @@ export async function seedReservation{{ pascal }}Multi() {
   }));
 }
 
-/** ② 在庫不足 rollback: 必要数量を満たせない {{ pool_entity }} */
+/** (2) Insufficient stock rollback: {{ pool_entity }} that cannot satisfy the required quantity */
 export async function seedReservation{{ pascal }}Insufficient() {
   const testUser = await getTestUser();
   const customer = await createTestCustomer(testUser);
@@ -95,7 +95,7 @@ export async function seedReservation{{ pascal }}Insufficient() {
   }));
 }
 
-/** ③ criteria 遵守: 一致 {{ criteria_pool_field }} と不一致 {{ criteria_pool_field }} の {{ pool_entity }} を混在 */
+/** (3) criteria compliance: mix of {{ pool_entity }} with matching and non-matching {{ criteria_pool_field }} */
 export async function seedReservation{{ pascal }}Criteria() {
   const testUser = await getTestUser();
   const customer = await createTestCustomer(testUser);
@@ -112,7 +112,7 @@ export async function seedReservation{{ pascal }}Criteria() {
   }));
 }
 
-/** ④ orderBy 遵守: 同一 {{ criteria_pool_field }} で異なる orderBy フィールド値を持つ3行 {{ pool_entity }} */
+/** (4) orderBy compliance: three {{ pool_entity }} rows with the same {{ criteria_pool_field }} but different orderBy field values */
 export async function seedReservation{{ pascal }}OrderBy() {
   const testUser = await getTestUser();
   const customer = await createTestCustomer(testUser);

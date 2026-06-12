@@ -1,5 +1,4 @@
 import TextField from '@mui/material/TextField';
-import type { ComponentProps } from 'react';
 
 interface AppFieldTextProps {
   label: React.ReactNode;
@@ -10,7 +9,8 @@ interface AppFieldTextProps {
   required?: boolean;
   multiline?: boolean;
   rows?: number;
-  slotProps?: ComponentProps<typeof TextField>['slotProps'];
+  minLength?: number;
+  maxLength?: number;
 }
 
 export default function AppFieldText({
@@ -22,7 +22,8 @@ export default function AppFieldText({
   required,
   multiline,
   rows,
-  slotProps,
+  minLength,
+  maxLength,
 }: AppFieldTextProps) {
   if (readOnly) {
     return (
@@ -35,6 +36,15 @@ export default function AppFieldText({
       />
     );
   }
+
+  const hasHtmlInput = minLength !== undefined || maxLength !== undefined;
+  const htmlInput = hasHtmlInput
+    ? {
+        ...(minLength !== undefined ? { minLength } : {}),
+        ...(maxLength !== undefined ? { maxLength } : {}),
+      }
+    : undefined;
+
   return (
     <TextField
       label={label}
@@ -45,7 +55,8 @@ export default function AppFieldText({
       required={required}
       multiline={multiline}
       rows={rows}
-      slotProps={slotProps}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      slotProps={hasHtmlInput ? { htmlInput: htmlInput as any } : undefined}
     />
   );
 }

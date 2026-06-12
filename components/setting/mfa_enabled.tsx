@@ -2,16 +2,16 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import Chip from '@mui/material/Chip';
-import Stack from '@mui/material/Stack';
-import TextField from '@mui/material/TextField';
-import Typography from '@mui/material/Typography';
 import { useTranslations } from 'next-intl';
 import { Link } from '@/i18n/navigation';
 import type { MfaErrorCode } from '@/app/[locale]/setting/mfa/actions';
 import { disableMfaAction } from '@/app/[locale]/setting/mfa/actions';
+import AppBox from '@/components/ui/AppBox';
+import AppButton from '@/components/ui/AppButton';
+import AppChip from '@/components/ui/AppChip';
+import AppStack from '@/components/ui/AppStack';
+import AppFieldInput from '@/components/ui/forms/AppFieldInput';
+import AppText from '@/components/ui/AppText';
 
 const MFA_ERROR_KEYS: Record<MfaErrorCode, string> = {
   INVALID_CODE: 'errorInvalidCode',
@@ -47,24 +47,24 @@ export default function MfaEnabled({value, onChange, isEdit}: {value: boolean, o
 
   if (!mfaEnabled) {
     return (
-      <Box mt={2}>
-        <Button
-          component={Link}
+      <AppBox mt={2}>
+        <AppButton
+          component={Link as React.ElementType}
           href="/setting/mfa"
           variant="outlined"
         >
           {t('toggleEnableButton')}
-        </Button>
-      </Box>
+        </AppButton>
+      </AppBox>
     );
   }
 
   return (
-    <Box mt={2}>
-      <Stack direction="row" alignItems="center" spacing={2} mb={1}>
-        <Chip label={t('toggleEnabledLabel')} color="success" size="small" />
+    <AppBox mt={2}>
+      <AppStack direction="row" alignItems="center" spacing={2} mb={1}>
+        <AppChip label={t('toggleEnabledLabel')} color="success" size="small" />
         {!showDisableForm && (
-          <Button
+          <AppButton
             variant="outlined"
             color="warning"
             size="small"
@@ -72,26 +72,27 @@ export default function MfaEnabled({value, onChange, isEdit}: {value: boolean, o
             disabled={isPending}
           >
             {t('toggleDisableButton')}
-          </Button>
+          </AppButton>
         )}
-      </Stack>
+      </AppStack>
       {showDisableForm && (
-        <Stack spacing={1} mt={1} maxWidth={320}>
-          <TextField
+        <AppStack spacing={1} mt={1} maxWidth={320}>
+          <AppFieldInput
             label={t('disableCodeLabel')}
             value={code}
-            onChange={(e) => setCode(e.target.value)}
+            onChange={(val) => setCode(val)}
             size="small"
             autoComplete="one-time-code"
-            inputProps={{ maxLength: 12 }}
+            inputMode="numeric"
+            maxLength={12}
           />
           {error && (
-            <Typography variant="caption" color="error">
+            <AppText variant="caption" color="error">
               {t(MFA_ERROR_KEYS[error] as Parameters<typeof t>[0])}
-            </Typography>
+            </AppText>
           )}
-          <Stack direction="row" spacing={1}>
-            <Button
+          <AppStack direction="row" spacing={1}>
+            <AppButton
               variant="contained"
               color="warning"
               size="small"
@@ -99,18 +100,18 @@ export default function MfaEnabled({value, onChange, isEdit}: {value: boolean, o
               disabled={isPending || code.length === 0}
             >
               {t('toggleDisableButton')}
-            </Button>
-            <Button
+            </AppButton>
+            <AppButton
               variant="outlined"
               size="small"
               onClick={() => { setShowDisableForm(false); setCode(''); setError(null); }}
               disabled={isPending}
             >
               {t('cancelButton')}
-            </Button>
-          </Stack>
-        </Stack>
+            </AppButton>
+          </AppStack>
+        </AppStack>
       )}
-    </Box>
+    </AppBox>
   );
 }

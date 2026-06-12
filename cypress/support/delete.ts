@@ -1,4 +1,9 @@
 import { expect } from 'vitest';
+// Brings the jest-dom matchers (e.g. toBeInTheDocument) and their type
+// augmentation onto vitest's `expect`. vitest.setup.ts loads this for the
+// vitest run, but this helper is also compiled under cypress/tsconfig.json
+// (types: ["cypress"]), which otherwise wouldn't see the matcher types.
+import '@testing-library/jest-dom/vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 

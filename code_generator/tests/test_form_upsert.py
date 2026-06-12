@@ -681,7 +681,7 @@ class TestStringEnumField:
 
     def test_string_enum_renders_autocomplete(self):
         ctx = self._ctx()
-        assert "Autocomplete" in ctx["all_parent_fields_jsx"]
+        assert "AppFieldSelect" in ctx["all_parent_fields_jsx"]
         assert "chartTypeOptions" in ctx["all_parent_fields_jsx"]
 
     def test_string_enum_in_form_data_sets(self):

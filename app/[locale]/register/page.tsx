@@ -5,12 +5,12 @@ import { useRouter } from "@/i18n/navigation";
 import { Link } from "@/i18n/navigation";
 import { signIn } from "next-auth/react";
 import { useTranslations } from "next-intl";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
-import Paper from "@mui/material/Paper";
-import Alert from "@mui/material/Alert";
+import AppBox from "@/components/ui/AppBox";
+import AppButton from "@/components/ui/AppButton";
+import AppFieldInput from "@/components/ui/forms/AppFieldInput";
+import AppText from "@/components/ui/AppText";
+import AppSurface from "@/components/ui/AppSurface";
+import AppAlert from "@/components/ui/AppAlert";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -60,13 +60,13 @@ export default function RegisterPage() {
   }
 
   return (
-    <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
-      <Paper elevation={3} sx={{ p: 4, width: "100%", maxWidth: 400 }}>
-        <Typography variant="h5" fontWeight="bold" textAlign="center" mb={3}>
+    <AppBox display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+      <AppSurface elevation={3} p={4} width="100%" maxWidth={400}>
+        <AppText variant="h5" fontWeight="bold" textAlign="center" mb={3}>
           {t("registerTitle")}
-        </Typography>
-        <Box component="form" onSubmit={handleSubmit} display="flex" flexDirection="column" gap={2}>
-          <TextField
+        </AppText>
+        <AppBox component="form" onSubmit={handleSubmit} display="flex" flexDirection="column" gap={2}>
+          <AppFieldInput
             id="name"
             name="name"
             type="text"
@@ -74,7 +74,7 @@ export default function RegisterPage() {
             required
             fullWidth
           />
-          <TextField
+          <AppFieldInput
             id="email"
             name="email"
             type="email"
@@ -82,41 +82,33 @@ export default function RegisterPage() {
             required
             fullWidth
           />
-          <TextField
+          <AppFieldInput
             id="password"
             name="password"
             type="password"
             label={t("passwordPlaceholder")}
-            slotProps={{
-              htmlInput: {
-                "data-testid": "password",
-              },
-            }}
+            testId="password"
             required
             fullWidth
           />
-          <TextField
+          <AppFieldInput
             id="confirm_password"
             name="confirm_password"
             type="password"
             label={t("confirmPasswordPlaceholder")}
-            slotProps={{
-              htmlInput: {
-                "data-testid": "confirm-password",
-              },
-            }}
+            testId="confirm-password"
             required
             fullWidth
           />
-          {error && <Alert severity="error">{error}</Alert>}
-          <Button type="submit" variant="contained" fullWidth>
+          {error && <AppAlert severity="error">{error}</AppAlert>}
+          <AppButton type="submit" variant="contained" fullWidth>
             {t("registerButton")}
-          </Button>
-        </Box>
-        <Typography textAlign="center" mt={2} variant="body2">
+          </AppButton>
+        </AppBox>
+        <AppText textAlign="center" mt={2} variant="body2">
           <Link href="/login">{t("haveAccount")}</Link>
-        </Typography>
-      </Paper>
-    </Box>
+        </AppText>
+      </AppSurface>
+    </AppBox>
   );
 }
