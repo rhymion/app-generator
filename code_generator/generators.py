@@ -451,6 +451,10 @@ def actions_context(ctx: dict) -> dict:
     model         = ctx['model']
     parent_pascal = ctx['parent_pascal']
     can_create    = ctx['can_create']
+    # Bridge children disable standalone create (new:false) but ARE creatable from a
+    # parent (cmd_167 §4) — the embedded grid posts selectedParentType/Id. Enable the
+    # create action/service path for them so the parent-context create works.
+    can_create    = can_create or bool(ctx.get('bridge_child_ir'))
     can_update    = ctx['can_update']
     can_delete    = ctx['can_delete']
     parent_params = ctx['parent_params']
@@ -937,6 +941,9 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     model                   = ctx['model']
     parent_pascal           = ctx['parent_pascal']
     can_create              = ctx['can_create']
+    # Bridge children create via parent context despite new:false (cmd_167 §4) —
+    # generate the add<Entity> service so the parent-embedded create path works.
+    can_create              = can_create or bool(ctx.get('bridge_child_ir'))
     can_update              = ctx['can_update']
     can_delete              = ctx['can_delete']
     non_comment_ch          = ctx['non_comment_ch']
@@ -1303,6 +1310,9 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'has_item_reservation':               has_item_reservation,
         'reservation_mutation_guard_update':  reservation_mutation_guard_update,
         'reservation_mutation_guard_delete':  reservation_mutation_guard_delete,
+        # Override ctx so service.ts emits add<Entity> for bridge children too
+        # (parent-context create despite new:false — cmd_167 §4).
+        'can_create':                         can_create,
     }
 
 

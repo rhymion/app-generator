@@ -336,7 +336,9 @@ def generate(schema_path: str, output_dir: str) -> None:
             if can_new or can_edit:
                 val_ctx = {**ctx, **build_validation_context(ctx)}
                 _write(lib_dir / 'service_validation.ts', _render(env, 'service_validation.ts.jinja2', val_ctx))
-            if can_new:
+            if can_new or ctx.get('bridge_child_ir'):
+                # Bridge children create via parent context (cmd_167 §4), so their
+                # service imports afterCreate — emit the write-once stub for them too.
                 _write_stub(
                     lib_dir / 'service_after_create.ts',
                     _render(env, 'service_after_create_stub.ts.jinja2', ctx),
