@@ -3,8 +3,10 @@
 // AUTO-GENERATED - DO NOT EDIT
 // Parent-embedded DataGrid for bridge child `{{ child }}` (cmd_167 §4).
 // Lists the children attached to one parent's bridge row ({{ bridge_fk }}) and
-// reuses the child's own list/create/edit/delete surfaces.
-import { useCallback } from 'react';
+// reuses the child's own list/create/edit/delete surfaces. Fetches on mount and
+// renders client-side (a parent owns few children), with an Add link that carries
+// parent context to the child create form.
+import { useEffect, useState } from 'react';
 import type { SxProps, Theme } from '@mui/material/styles';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -13,7 +15,6 @@ import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { fetch{{ child_pascal }}Page } from '@/lib/{{ child }}/getters';
 import { remove{{ child_pascal }} } from '@/lib/{{ child }}/actions';
 import type { {{ child_pascal }} } from '@/lib/{{ child }}/types';
-import type { PageOpts } from '@/lib/_pagination';
 
 const sectionSx: SxProps<Theme> = { mt: 3 };
 const headerSx: SxProps<Theme> = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 };
@@ -31,11 +32,18 @@ interface {{ child_pascal }}BridgeGridProps {
 }
 
 export default function {{ child_pascal }}BridgeGrid({ bridgeId, parentType, parentId, title }: {{ child_pascal }}BridgeGridProps) {
-  const fetchPage = useCallback(
-    (opts: PageOpts) =>
-      fetch{{ child_pascal }}Page({ ...opts, filter: { ...(opts.filter ?? {}), {{ bridge_fk }}: bridgeId } }),
-    [bridgeId],
-  );
+  // null = not yet loaded. The grid below mounts only once rows resolve, because
+  // the underlying DataGrid seeds its row state once on mount and ignores later
+  // src changes — so it must receive the data on its first render.
+  const [rows, setRows] = useState<{{ child_pascal }}[] | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch{{ child_pascal }}Page({ page: 0, pageSize: 100, filter: { {{ bridge_fk }}: bridgeId } })
+      .then((res) => { if (active) setRows(res.rows); })
+      .catch(() => { if (active) setRows([]); });
+    return () => { active = false; };
+  }, [bridgeId]);
 
   const createHref = `/{{ child }}/new?parentType=${encodeURIComponent(parentType)}&parentId=${encodeURIComponent(parentId)}`;
 
@@ -47,13 +55,15 @@ export default function {{ child_pascal }}BridgeGrid({ bridgeId, parentType, par
           {`+ ${title}`}
         </Button>
       </Box>
-      <ResponsiveListClient<{{ child_pascal }}>
-        fetchPage={fetchPage}
-        basePath="/{{ child }}"
-        removeAction={remove{{ child_pascal }}}
-        entityLabel={title}
-        displayFields={[{{ display_fields }}]}
-      />
+      {rows !== null && (
+        <ResponsiveListClient<{{ child_pascal }}>
+          src={rows}
+          basePath="/{{ child }}"
+          removeAction={remove{{ child_pascal }}}
+          entityLabel={title}
+          displayFields={[{{ display_fields }}]}
+        />
+      )}
     </Box>
   );
 }
