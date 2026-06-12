@@ -11,9 +11,10 @@ Three surfaces are covered:
      regressions (missing imports, malformed `creatorId` chain) fail here
      rather than at `demo:generate` time.
 
-  3. cleanup deletes the file unconditionally. Generate emits it only
-     when at least one owner exists; cleanup must collect the orphan
-     when the schema later drops the last owner.
+  3. cleanup deletes the file via the AUTO-GENERATED marker guard. Generate
+     emits it only when at least one owner exists; cleanup must collect the
+     orphan when the schema later drops the last owner, while preserving a
+     user-forked copy that has had the marker stripped.
 """
 from pathlib import Path
 
@@ -165,13 +166,17 @@ def test_template_with_no_owners_still_renders():
 
 def test_cleanup_deletes_generated_catalogs(tmp_path: Path):
     """The two schema-wide catalogs are emitted by generate.py only when
-    at least one contributing entity exists. cleanup must collect them
-    unconditionally so a schema drop doesn't leave stale code on disk."""
+    at least one contributing entity exists. With no manifest present cleanup
+    falls back to the schema-driven sweep, which collects them via the
+    AUTO-GENERATED marker guard — so a schema drop doesn't leave stale code on
+    disk, while a user-forked copy (marker stripped) would be preserved."""
     out = tmp_path
     (out / 'lib' / 'attachment').mkdir(parents=True)
     (out / 'lib' / 'dashboard').mkdir(parents=True)
-    (out / 'lib' / 'attachment' / 'actions.ts').write_text('// stale\n')
-    (out / 'lib' / 'dashboard' / 'catalog.ts').write_text('// stale\n')
+    # Real generated catalogs carry this marker; the guard keys off it.
+    marker = '// AUTO-GENERATED - DO NOT EDIT\n'
+    (out / 'lib' / 'attachment' / 'actions.ts').write_text(marker + '// stale\n')
+    (out / 'lib' / 'dashboard' / 'catalog.ts').write_text(marker + '// stale\n')
 
     # Minimal schema — one entity so cleanup() has something to iterate.
     schema_path = tmp_path / 'schema.yaml'

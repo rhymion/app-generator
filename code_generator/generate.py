@@ -46,6 +46,7 @@ from generators_test import (
     reservation_spec_context,
 )
 from validation_context import build_validation_context
+from manifest import ManifestRecorder
 
 
 # ---------------------------------------------------------------------------
@@ -74,18 +75,28 @@ def _render(env: Environment, template_name: str, ctx: dict) -> str:
     return tmpl.render(**ctx)
 
 
+# Records every generated file for this run; reset at the top of generate().
+_manifest = ManifestRecorder()
+
+
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+    path.write_text(content, encoding='utf-8')
+    _manifest.record(path, content, 'overwrite')
     print(f'  Wrote {path}')
 
 
 def _write_stub(path: Path, content: str) -> None:
     """Write stub only if file does not already exist (user may have customized)."""
+    # Record the pristine stub content whether or not we (re)write it, so cleanup
+    # can delete the file iff it still matches a pristine stub (i.e. untouched).
+    _manifest.record(path, content, 'stub')
     if path.exists():
         print(f'  Skipped (exists) {path}')
         return
-    _write(path, content)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding='utf-8')
+    print(f'  Wrote {path}')
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +118,9 @@ def generate(schema_path: str, output_dir: str) -> None:
     if not entities:
         print('No entities found in schema', file=sys.stderr)
         return
+
+    global _manifest
+    _manifest = ManifestRecorder()
 
     env = _make_env()
     out = Path(output_dir)
@@ -371,6 +385,12 @@ def generate(schema_path: str, output_dir: str) -> None:
     # --- i18n / config updates ---
     print('\nUpdating i18n and navigation config...')
     update_i18n_and_config(entities, schema, out)
+
+    # --- generation manifest (drives cleanup.py) ---
+    # Written last so it reflects exactly what this run produced. Appended files
+    # touched by update_i18n_and_config above are intentionally not listed.
+    manifest_path = _manifest.write(out, schema_path)
+    print(f'\nWrote manifest: {manifest_path} ({len(_manifest)} files)')
 
     print('\nCode generation complete!')
 

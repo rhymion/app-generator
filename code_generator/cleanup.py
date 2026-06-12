@@ -36,6 +36,7 @@ import yaml
 from generate_types import extract_entities
 from helpers.naming import to_camel_case
 from helpers.schema_helpers import filter_fields
+from manifest import MANIFEST_FILENAME, sha256_file
 
 _SYSTEM_PROPS = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
 
@@ -120,6 +121,51 @@ def _rmdir_tree(path: Path) -> None:
         if child.is_dir():
             _rmdir_tree(child)
     _try_rmdir(path)
+
+
+def _clean_from_manifest(out: Path, keep_stubs: bool = False) -> bool:
+    """Delete files listed in <out>/.generated-manifest.json, hash-guarded.
+
+    Authoritative when present: generate.py records every file it writes (with a
+    content hash), so we remove exactly those — no path re-derivation, no drift.
+    A listed file is deleted ONLY when its current bytes still hash to the
+    recorded value; if the user edited it since generation we keep it. Appended
+    files are never in the manifest, so they are untouched here. Returns True
+    when a manifest was found and processed (callers then skip the legacy
+    schema-derived sweep).
+    """
+    manifest_path = out / MANIFEST_FILENAME
+    if not manifest_path.exists():
+        return False
+
+    print(f'\nDeleting generated files from {manifest_path}...')
+    data = json.loads(manifest_path.read_text(encoding='utf-8'))
+
+    dirs: set[Path] = set()
+    for entry in data.get('files', []):
+        rel = entry['path']
+        path = out / rel
+        for parent in Path(rel).parents:
+            if parent != Path('.'):
+                dirs.add(out / parent)
+        if keep_stubs and entry.get('mode') == 'stub':
+            print(f'  Kept {path} (stub, --keep-stubs)')
+            continue
+        if not path.exists():
+            continue
+        if sha256_file(path) == entry.get('sha256'):
+            path.unlink()
+            print(f'  Deleted {path}')
+        else:
+            print(f'  Kept {path} (modified since generation)')
+
+    # Prune now-empty generated directories, deepest first.
+    for d in sorted(dirs, key=lambda p: len(p.parts), reverse=True):
+        _try_rmdir(d)
+
+    manifest_path.unlink()
+    print(f'  Deleted {manifest_path}')
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +340,26 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_o
 
     print(f'Found {len(entities)} entities in {schema_path}')
 
+    # Manifest-driven deletion is authoritative when present: generate.py records
+    # every file it writes (with a content hash), so cleanup removes exactly those
+    # — no path re-derivation, no drift. The schema-derived sweep is a fallback
+    # for trees generated before manifests existed.
+    if not _clean_from_manifest(out, keep_stubs):
+        _clean_schema_driven(out, entities, test_entities, keep_stubs)
+
+    _clean_appended_files(out, entities, schema)
+
+    if prune_orphans:
+        _prune_orphans(out, entities)
+
+    print('\nCleanup complete!')
+
+
+def _clean_schema_driven(out: Path, entities: list, test_entities: list,
+                         keep_stubs: bool) -> None:
+    """Legacy fallback: delete generated files by re-deriving their paths from
+    the schema. Used only when no .generated-manifest.json is present. This is
+    best-effort and subject to path drift — the manifest path is exact."""
     # -------------------------------------------------------------------------
     # Per-entity file deletion
     # -------------------------------------------------------------------------
@@ -376,6 +442,14 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_o
             _delete(out / 'cypress' / 'e2e' / 'mobile' / f'{parent}.cy.ts')
             if can_api:
                 _delete(out / 'cypress' / 'e2e' / 'api' / f'{parent}.cy.ts')
+            # Reservation API spec + helper. generate.py emits these only for
+            # x-reservation count-mode entities (guarded by reservation_spec_context,
+            # not by can_api); _delete is a no-op when absent, so we attempt them
+            # for every test entity. The `_gen` suffix keeps these generated files
+            # distinct from a hand-written `<parent>_reservation.cy.ts` /
+            # `reservation_helper.ts`, which cleanup must never touch.
+            _delete(out / 'cypress' / 'support' / parent / 'reservation_gen_helper.ts')
+            _delete(out / 'cypress' / 'e2e' / 'api' / f'{parent}_reservation_gen.cy.ts')
 
         # Remove empty entity directories
         _rmdir_tree(lib_dir)
@@ -418,9 +492,13 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_o
     _try_rmdir(out / 'docs' / 'generated')
     _try_rmdir(out / 'app' / '[locale]' / 'docs')
 
-    # -------------------------------------------------------------------------
-    # Appended files — remove generated entries only
-    # -------------------------------------------------------------------------
+
+def _clean_appended_files(out: Path, entities: list, schema: dict) -> None:
+    """Remove only the generator-injected ENTRIES from files that are appended on
+    top of user-owned content: messages/*.json, lib/site-config.ts, and
+    app/[locale]/@sidebar/page.tsx. These files are never deleted outright and are
+    deliberately absent from the manifest, so this runs in both manifest and
+    fallback modes."""
     print('\nCleaning appended files...')
 
     nav_entities = [
@@ -437,11 +515,6 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_o
 
     _clean_site_config(out / 'lib' / 'site-config.ts', nav_hrefs)
     _clean_sidebar(out / 'app' / '[locale]' / '@sidebar' / 'page.tsx', nav_hrefs)
-
-    if prune_orphans:
-        _prune_orphans(out, entities)
-
-    print('\nCleanup complete!')
 
 
 if __name__ == '__main__':

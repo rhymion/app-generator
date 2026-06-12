@@ -70,6 +70,10 @@ __pycache__/
 *.pyc
 .venv/
 
+# code generator manifest — regenerated on every `generate-code`; cleanup reads
+# it but it churns with generated content, so it's kept out of version control.
+.generated-manifest.json
+
 # sample data
 custom/
 memory/
