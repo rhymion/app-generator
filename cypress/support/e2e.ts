@@ -29,5 +29,10 @@ Cypress.on('uncaught:exception', (err) => {
       err.message.includes('There was an error while hydrating')) {
     return false;
   }
+  // A serialised DOM Event (PointerEvent/MouseEvent) leaked into the unhandled-rejection
+  // handler; JSON.stringify produces {"isTrusted":true}. This is not a real app error.
+  if (err.message.includes('"isTrusted":true') || err.message === '{"isTrusted":true}') {
+    return false;
+  }
   return true;
 });
