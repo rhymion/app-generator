@@ -97,6 +97,7 @@ class EntityContext:
     inline_flatten_types: list[dict] = ()      # flatten targets without their own module; [{name, fields}]
     entity_view_components: list[dict] = ()    # custom components rendered in FormView; [{name, path?}]
     entity_edit_components: list[dict] = ()    # custom components rendered in FormUpsert; [{name, path?}]
+    is_bridge_child: bool = False              # entity declares new-form x-bridge (parent-context create)
 
 
 # ---------------------------------------------------------------------------
@@ -506,4 +507,5 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         inline_flatten_types=_inline_flatten_types,
         entity_view_components=entity_view_components,
         entity_edit_components=entity_edit_components,
+        is_bridge_child=isinstance(_x_bridge, dict),
     )
