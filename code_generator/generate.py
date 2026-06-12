@@ -191,12 +191,27 @@ def _write(path: Path, content: str) -> None:
     print(f'  Wrote {path}')
 
 
-def _write_stub(path: Path, content: str) -> None:
-    """Write stub only if file does not already exist (user may have customized)."""
+def _write_stub(path: Path, content: str) -> bool:
+    """Write stub only if file does not already exist (user may have customized).
+
+    Returns True when a new blank stub was created (the user must implement it),
+    False when an existing hand-written file was left untouched.
+    """
     if path.exists():
         print(f'  Skipped (exists) {path}')
-        return
+        return False
     _write(path, content)
+    return True
+
+
+# Collects reminders about write-once stubs the generator just created. These are
+# hand-written extension points the generator cannot fill in; printed as an
+# ACTION REQUIRED summary at the end of generate() and reset at its start.
+_handwritten_notices: list[str] = []
+
+
+def _note_stub_created(path: Path, why: str, action: str) -> None:
+    _handwritten_notices.append(f'  - {path}\n      {why}\n      -> {action}')
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +233,8 @@ def generate(schema_path: str, output_dir: str) -> None:
     if not entities:
         print('No entities found in schema', file=sys.stderr)
         return
+
+    _handwritten_notices.clear()
 
     env = _make_env()
     out = Path(output_dir)
@@ -283,14 +300,24 @@ def generate(schema_path: str, output_dir: str) -> None:
         # --- virtual column resolver stub (per-entity, async/bulk) ---
         parent_pascal = to_pascal_case(parent)
         if ctx.get('virtual_columns'):
-            _write_stub(
-                lib_dir / 'virtual_resolvers.ts',
+            vr_path = lib_dir / 'virtual_resolvers.ts'
+            created = _write_stub(
+                vr_path,
                 _render(env, 'virtual_resolver.ts.jinja2', {
                     'parent': parent,
                     'parent_pascal': parent_pascal,
                     'virtual_columns': ctx['virtual_columns'],
                 }),
             )
+            if created:
+                vcs = ', '.join(vc['field_name'] for vc in ctx['virtual_columns'])
+                _note_stub_created(
+                    vr_path,
+                    f'Entity "{parent}" has virtual column(s) [{vcs}] with no resolver.',
+                    'Implement resolveVirtualColumns() (the blank stub returns empty '
+                    'values) and commit the file to your project SoT so it survives '
+                    'cleanup and a fresh rebuild.',
+                )
 
         # --- service.ts + service_validation stub ---
         if can_new or can_edit or can_delete:
@@ -501,6 +528,19 @@ def generate(schema_path: str, output_dir: str) -> None:
     # --- i18n / config updates ---
     print('\nUpdating i18n and navigation config...')
     update_i18n_and_config(entities, schema, out)
+
+    if _handwritten_notices:
+        bar = '=' * 72
+        print('\n' + bar)
+        print('ACTION REQUIRED - hand-written files the generator cannot fill in')
+        print(bar)
+        print('New write-once stubs were created this run. They are NOT regenerated\n'
+              'or overwritten, and cleanup never deletes them. Implement each one and\n'
+              'commit it to version control so it survives a fresh rebuild:\n')
+        for note in _handwritten_notices:
+            print(note)
+        print('\nSee docs/extension-points.md for the full list of extension points.')
+        print(bar)
 
     print('\nCode generation complete!')
 
