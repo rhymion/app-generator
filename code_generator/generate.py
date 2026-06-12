@@ -366,6 +366,32 @@ def generate(schema_path: str, output_dir: str) -> None:
             fv_ctx = {**ctx, **form_view_context(ctx, schema)}
             _write(components_dir / 'FormView.tsx', _render(env, 'form_view.tsx.jinja2', fv_ctx))
 
+        # --- <Child>BridgeGrid.tsx (parent-embedded DataGrid, cmd_167 §4) ---
+        # Emitted for bridge children (entities with new-form x-bridge); the
+        # component is embedded on each parent's FormView (see form_view_context).
+        _self_bridge = get_new_form_bridge(schema['definitions'].get(model, {}))
+        if _self_bridge:
+            _bg_cols = (schema['definitions'].get(model, {}).get('x-display') or {}).get('table') or []
+            _df_entries = []
+            for _col in _bg_cols:
+                for _fname, _fcfg in _col.items():
+                    _w = (_fcfg or {}).get('width')
+                    _df_entries.append(
+                        "{ field: '%s', headerName: '%s'%s }"
+                        % (_fname, _fname, f', width: {_w}' if _w else '')
+                    )
+            if not _df_entries:
+                _df_entries = ["{ field: 'id', headerName: 'id' }"]
+            _write(
+                components_dir / f'{parent_pascal}BridgeGrid.tsx',
+                _render(env, 'bridge_grid.tsx.jinja2', {
+                    'child': parent,
+                    'child_pascal': parent_pascal,
+                    'bridge_fk': f"{_self_bridge['name']}_id",
+                    'display_fields': ', '.join(_df_entries),
+                }),
+            )
+
         # --- Determine which pages to generate (x-display) ---
         xdisplay        = ctx.get('xdisplay')
         xdisplay_table  = ctx.get('xdisplay_table')
@@ -387,8 +413,12 @@ def generate(schema_path: str, output_dir: str) -> None:
             print(f'  Chart → app/[locale]/{parent}/chart/')
 
         # --- page new ---
-        # AP-2=A: bridge children have no standalone new page; creation is parent-context only.
-        if can_new and not ctx.get('bridge_child_ir'):
+        # AP-2=A: creation is parent-context only. Bridge children set new:false to
+        # suppress the *standalone* create path, but still need a new page driven by
+        # parent context from the URL (?parentType=&parentId=) supplied by the
+        # parent-embedded grid (cmd_167 §4); the form binds the parent implicitly
+        # and never shows a parent picker.
+        if can_new or ctx.get('bridge_child_ir'):
             _write(app_dir / 'new' / 'page.tsx', _render(env, 'page_new.tsx.jinja2', ctx))
 
         # --- page edit ---

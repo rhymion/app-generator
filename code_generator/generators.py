@@ -11,6 +11,7 @@ from helpers.naming import (
     safe_var_name, singularize,
 )
 from helpers.type_mapping import get_ts_type
+from helpers.bridge_direction import collect_parent_bridge_children
 from helpers.schema_helpers import (
     get_parent_relationships,
     get_parent_fk_props,
@@ -1515,6 +1516,28 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     has_rel_links = any(rel_by_prop.get(p) for p in other_flds) or bool(reverse_oto_rels) or has_accordion_rel_links
 
+    # Parent-embedded bridge child DataGrids (cmd_167 §4). For each bridge child
+    # whose x-bridge lists this entity as a parent, embed <Child>BridgeGrid bound
+    # to the parent's bridge row (src.<bridge>_id) and import it.
+    _parent_type = ctx.get('model', ctx.get('parent', ''))
+    _bridge_kids = collect_parent_bridge_children(_parent_type, schema) if schema else []
+    if _bridge_kids:
+        _bridge_imports = []
+        for _bk in _bridge_kids:
+            _ck = _bk['child']
+            _cp = to_pascal_case(_ck)
+            _bridge_imports.append(f"import {_cp}BridgeGrid from '../{_ck}/{_cp}BridgeGrid';")
+            # The bridge FK is auto-created and returned by the getter but is not
+            # part of the public detail type, so read it through a safe cast.
+            child_view_grids.append(
+                f"      <{_cp}BridgeGrid"
+                f" bridgeId={{String((src as Record<string, unknown>).{_bk['parent_fk']} ?? '')}}"
+                f" parentType=\"{_parent_type}\""
+                f" parentId={{src.id}}"
+                f" title={{te('{to_camel_case(_ck)}')}} />"
+            )
+        custom_view_imports = '\n'.join(filter(None, [custom_view_imports, *_bridge_imports]))
+
     return {
         'needs_datetime_wrapper': needs_datetime_wrapper,
         'needs_image_display':    needs_image_display,
@@ -1961,11 +1984,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         _bc_bridge_name = bridge_child_ir['name']
         _bc_fk_prop = f'{_bc_bridge_name}_id'
         _bridge_jsx = (
-            f"      {{/* bridge-parent: {_bc_bridge_name} — parent switching disabled */}}\n"
+            f"      {{/* bridge-parent: {_bc_bridge_name} — set by parent-embedded create, not switchable */}}\n"
             f"      {{!isEdit && (\n"
             f"        <>\n"
-            f"          <input type=\"hidden\" ref={{selectedParentTypeRef}} />\n"
-            f"          <input type=\"hidden\" ref={{selectedParentIdRef}} />\n"
+            f"          <input type=\"hidden\" ref={{selectedParentTypeRef}} defaultValue={{initialParentType ?? ''}} />\n"
+            f"          <input type=\"hidden\" ref={{selectedParentIdRef}} defaultValue={{initialParentId ?? ''}} />\n"
             f"        </>\n"
             f"      )}}"
         )
@@ -2604,12 +2627,17 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     extra_default_props = ', '.join(_initial_props + _search_props)
     entity_edit_components = ctx.get('entity_edit_components') or []
     has_current_user_role_ids = bool(entity_edit_components)
-    if extra_default_props or has_comment_children or has_current_user_role_ids:
+    # Bridge children receive parent context (set on the create form by the
+    # parent-embedded grid via /new?parentType=&parentId=).
+    _is_bridge_child = bool(ctx.get('bridge_child_ir'))
+    _bridge_params = ', initialParentType, initialParentId' if _is_bridge_child else ''
+    if extra_default_props or has_comment_children or has_current_user_role_ids or _is_bridge_child:
         form_upsert_params = (
             f"{{ src, isEdit, permissions"
             + (', currentUserId' if has_comment_children else '')
             + (', currentUserRoleIds' if has_current_user_role_ids else '')
             + (f', {extra_default_props}' if extra_default_props else '')
+            + _bridge_params
             + " }: FormUpsertProps"
         )
     else:

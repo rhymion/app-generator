@@ -1,0 +1,59 @@
+'use client';
+
+// AUTO-GENERATED - DO NOT EDIT
+// Parent-embedded DataGrid for bridge child `{{ child }}` (cmd_167 §4).
+// Lists the children attached to one parent's bridge row ({{ bridge_fk }}) and
+// reuses the child's own list/create/edit/delete surfaces.
+import { useCallback } from 'react';
+import type { SxProps, Theme } from '@mui/material/styles';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import { Link } from '@/i18n/navigation';
+import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
+import { fetch{{ child_pascal }}Page } from '@/lib/{{ child }}/getters';
+import { remove{{ child_pascal }} } from '@/lib/{{ child }}/actions';
+import type { {{ child_pascal }} } from '@/lib/{{ child }}/types';
+import type { PageOpts } from '@/lib/_pagination';
+
+const sectionSx: SxProps<Theme> = { mt: 3 };
+const headerSx: SxProps<Theme> = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 };
+const headingStyle: React.CSSProperties = { margin: 0 };
+
+interface {{ child_pascal }}BridgeGridProps {
+  /** The parent's bridge row id (parent.{{ bridge_fk }}); scopes the list to this parent. */
+  bridgeId: string;
+  /** Concrete parent entity type (e.g. 'work') — passed to the child create form. */
+  parentType: string;
+  /** Concrete parent row id — passed to the child create form. */
+  parentId: string;
+  /** Section heading + entity label (translated by the parent). */
+  title: string;
+}
+
+export default function {{ child_pascal }}BridgeGrid({ bridgeId, parentType, parentId, title }: {{ child_pascal }}BridgeGridProps) {
+  const fetchPage = useCallback(
+    (opts: PageOpts) =>
+      fetch{{ child_pascal }}Page({ ...opts, filter: { ...(opts.filter ?? {}), {{ bridge_fk }}: bridgeId } }),
+    [bridgeId],
+  );
+
+  const createHref = `/{{ child }}/new?parentType=${encodeURIComponent(parentType)}&parentId=${encodeURIComponent(parentId)}`;
+
+  return (
+    <Box sx={sectionSx}>
+      <Box sx={headerSx}>
+        <h2 style={headingStyle}>{title}</h2>
+        <Button component={Link} href={createHref} variant="outlined" size="small">
+          {`+ ${title}`}
+        </Button>
+      </Box>
+      <ResponsiveListClient<{{ child_pascal }}>
+        fetchPage={fetchPage}
+        basePath="/{{ child }}"
+        removeAction={remove{{ child_pascal }}}
+        entityLabel={title}
+        displayFields={[{{ display_fields }}]}
+      />
+    </Box>
+  );
+}

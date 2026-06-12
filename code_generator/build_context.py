@@ -832,6 +832,13 @@ def build_context(entity: dict, schema: dict) -> dict:
             _scalar_props.append(_extra)
     if has_assignee_id and 'assignee_id' not in _scalar_props:
         _scalar_props.append('assignee_id')
+    # Bridge children: expose the entity's own `<bridge>_id` FK as filter/sortable so
+    # a parent-embedded grid (cmd_167 §4) can scope the list to one parent's bridge row.
+    _self_bridge = get_new_form_bridge(schema['definitions'].get(model, {}))
+    if _self_bridge:
+        _self_bridge_fk = f"{_self_bridge['name']}_id"
+        if _self_bridge_fk not in _scalar_props:
+            _scalar_props.append(_self_bridge_fk)
     sortable_fields_quoted = ', '.join(f"'{c}'" for c in _scalar_props)
     filterable_fields_quoted = sortable_fields_quoted
 

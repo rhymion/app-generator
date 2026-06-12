@@ -212,4 +212,9 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   search{{ target | pascal_case }}Options?: (query: string, includeIds: string[]) => Promise<{{ target | pascal_case }}[]>;
 {% endfor %}
   currentUserId?: string | null;
+{% if is_bridge_child %}
+  /** Parent context for create, supplied by the parent-embedded grid (/new?parentType=&parentId=). */
+  initialParentType?: string;
+  initialParentId?: string;
+{% endif %}
 }>;
