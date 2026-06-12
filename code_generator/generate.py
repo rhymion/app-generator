@@ -376,7 +376,8 @@ def generate(schema_path: str, output_dir: str) -> None:
             print(f'  Chart → app/[locale]/{parent}/chart/')
 
         # --- page new ---
-        if can_new:
+        # AP-2=A: bridge children have no standalone new page; creation is parent-context only.
+        if can_new and not ctx.get('bridge_child_ir'):
             _write(app_dir / 'new' / 'page.tsx', _render(env, 'page_new.tsx.jinja2', ctx))
 
         # --- page edit ---

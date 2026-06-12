@@ -204,6 +204,18 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         if k not in _TIMESTAMP_FIELDS and k not in _all_oto_prop_names
     ]
 
+    # Bridge child (Stage 3): add parent_type / parent_label virtual fields.
+    # These are computed inline in getters.ts from the bridge parent include;
+    # they are optional so detail-page returns that don't compute them still type-check.
+    _x_bridge = model_def.get('x-bridge')
+    if isinstance(_x_bridge, dict) and _x_bridge.get('parents'):
+        _bridge_parent_vfields = [
+            FieldInfo('parent_type', 'string | null', optional=True),
+            FieldInfo('parent_label', 'string | null', optional=True),
+        ]
+        parent_fields.extend(_bridge_parent_vfields)
+        form_view_fields.extend(_bridge_parent_vfields)
+
     # Child many-to-one rels — needed early for import target and option calculation.
     # Exclude list children: they are independent entities managed on their own pages,
     # so their FK dropdown options are not needed in this form.

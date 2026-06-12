@@ -11,7 +11,7 @@ import {
 {% if should_filter_by_org %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
-{% if virtual_columns %}
+{% if non_creator_virtual_columns %}
 import { resolveVirtualColumns } from '@/lib/{{ parent }}/virtual_resolvers';
 {% endif %}
 
@@ -100,6 +100,27 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 {% if named_constants and has_commentable %}
     {{ commentable_rel_name }}: _commentable,
 {% endif %}
+{% for dtcol in datetime_display_columns %}
+    {{ dtcol }}: {{ parent_camel }}.{{ dtcol }}
+      ? {{ parent_camel }}.{{ dtcol }}.toISOString().replace('T', ' ').slice(0, 19)
+      : '',
+{% endfor %}
+{% if bridge_child_ir and bridge_parent_options %}
+    parent_type: (() => {
+{% for bpo in bridge_parent_options %}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (({{ parent_camel }}.{{ bridge_child_ir.name }} as any)?.{{ bpo.target }}) return '{{ bpo.target }}';
+{% endfor %}
+      return null;
+    })(),
+    parent_label: (() => {
+{% for bpo in bridge_parent_options %}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (({{ parent_camel }}.{{ bridge_child_ir.name }} as any)?.{{ bpo.target }}) return String(({{ parent_camel }}.{{ bridge_child_ir.name }} as any).{{ bpo.target }}.{{ bpo.label_field }} ?? '');
+{% endfor %}
+      return null;
+    })(),
+{% endif %}
   };
 }
 
@@ -161,7 +182,7 @@ export async function get{{ parent_pascal }}Page(
     prisma.{{ model }}.count({ where }),
   ]);
 
-{% if virtual_columns %}
+{% if non_creator_virtual_columns %}
   let virtualData: Map<string, Record<string, string>>;
   try {
     virtualData = await resolveVirtualColumns(rowsRaw as unknown as ReadonlyArray<Record<string, unknown>>);
@@ -266,7 +287,7 @@ export async function search{{ parent_pascal }}Options(
     include: { {{ include_props_list }} },
 {% endif %}
   });
-{% if virtual_columns %}
+{% if non_creator_virtual_columns %}
   let virtualData: Map<string, Record<string, string>>;
   try {
     virtualData = await resolveVirtualColumns(rowsRaw as unknown as ReadonlyArray<Record<string, unknown>>);

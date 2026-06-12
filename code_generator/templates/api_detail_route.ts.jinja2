@@ -37,6 +37,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await requireApiPermission(actorId, '{{ parent }}', 'update', existing);
     const body = await request.json();
     const { {{ all_body_fields_create }} } = body;
+{% if readonly_fields_api %}
+    // AP-3=B: reject submitted read-only field values that differ from persisted.
+    const _roRow = await prisma.{{ model }}.findUnique({ where: { id }, select: {{ readonly_fields_api_select }} });
+    if (_roRow) {
+{% for f in readonly_fields_api %}
+      if (body.{{ f }} !== undefined && String(body.{{ f }}) !== String(_roRow.{{ f }})) {
+        return NextResponse.json({ error: 'Field {{ f }} is read-only and cannot be changed' }, { status: 400 });
+      }
+{% endfor %}
+    }
+{% endif %}
     await update{{ parent_pascal }}({{ service_args_for_update }}, null);
     return NextResponse.json({ success: true });
   } catch (error) {
