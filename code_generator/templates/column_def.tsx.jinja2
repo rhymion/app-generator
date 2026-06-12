@@ -1,4 +1,4 @@
-import { GridColDef{% if needs_datetime_imports or needs_entity_autocomplete_cell %}, GridRenderEditCellParams{% endif %} } from '@mui/x-data-grid';
+import type { GridColDef{% if needs_datetime_imports or needs_entity_autocomplete_cell %}, GridRenderEditCellParams{% endif %} } from '@/components/ui/data';
 import { useTranslations } from 'next-intl';
 {% if needs_datetime_imports %}
 import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';

@@ -1,14 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import Accordion from '@mui/material/Accordion';
-import AccordionSummary from '@mui/material/AccordionSummary';
-import AccordionDetails from '@mui/material/AccordionDetails';
-import TextField from '@mui/material/TextField';
-import Button from '@mui/material/Button';
-import Typography from '@mui/material/Typography';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { verifyAndHashPassword } from '@/lib/setting/password-actions';
+import AppButton from '@/components/ui/AppButton';
+import AppText from '@/components/ui/AppText';
+import AppFieldInput from '@/components/ui/forms/AppFieldInput';
+import AppSection from '@/components/ui/layout/AppSection';
 
 export default function Password({ onChange }: { value?: string; onChange?: (val: string) => void; isEdit?: boolean }) {
   const [current, setCurrent] = useState('');
@@ -38,46 +35,41 @@ export default function Password({ onChange }: { value?: string; onChange?: (val
   };
 
   return (
-    <Accordion sx={{ mt: 2 }}>
-      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-        <Typography>Change Password</Typography>
-      </AccordionSummary>
-      <AccordionDetails>
-        <TextField
-          label="Current Password"
-          type="password"
-          value={current}
-          onChange={e => setCurrent(e.target.value)}
-          fullWidth
-          margin="normal"
-        />
-        <TextField
-          label="New Password"
-          type="password"
-          value={next}
-          onChange={e => setNext(e.target.value)}
-          fullWidth
-          margin="normal"
-        />
-        <TextField
-          label="Confirm New Password"
-          type="password"
-          value={confirm}
-          onChange={e => setConfirm(e.target.value)}
-          fullWidth
-          margin="normal"
-        />
-        {error && <Typography color="error" variant="body2">{error}</Typography>}
-        {success && <Typography color="success.main" variant="body2">Password verified — click Save to apply</Typography>}
-        <Button
-          variant="contained"
-          onClick={handleChange}
-          disabled={isPending || !current || !next || !confirm}
-          sx={{ mt: 1 }}
-        >
-          Verify Password
-        </Button>
-      </AccordionDetails>
-    </Accordion>
+    <AppSection label="Change Password" mt={2}>
+      <AppFieldInput
+        label="Current Password"
+        type="password"
+        value={current}
+        onChange={(val) => setCurrent(val)}
+        fullWidth
+        margin="normal"
+      />
+      <AppFieldInput
+        label="New Password"
+        type="password"
+        value={next}
+        onChange={(val) => setNext(val)}
+        fullWidth
+        margin="normal"
+      />
+      <AppFieldInput
+        label="Confirm New Password"
+        type="password"
+        value={confirm}
+        onChange={(val) => setConfirm(val)}
+        fullWidth
+        margin="normal"
+      />
+      {error && <AppText color="error" variant="body2">{error}</AppText>}
+      {success && <AppText color="success.main" variant="body2">Password verified — click Save to apply</AppText>}
+      <AppButton
+        variant="contained"
+        onClick={handleChange}
+        disabled={isPending || !current || !next || !confirm}
+        mt={1}
+      >
+        Verify Password
+      </AppButton>
+    </AppSection>
   );
 }

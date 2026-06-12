@@ -2,24 +2,21 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import Alert from '@mui/material/Alert';
-import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import IconButton from '@mui/material/IconButton';
-import List from '@mui/material/List';
-import ListItem from '@mui/material/ListItem';
-import ListItemText from '@mui/material/ListItemText';
-import Paper from '@mui/material/Paper';
-import Stack from '@mui/material/Stack';
-import Tooltip from '@mui/material/Tooltip';
-import Typography from '@mui/material/Typography';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { useTranslations } from 'next-intl';
 
 import {
   connectProviderAction,
   detachAccountAction,
 } from './actions';
+import AppAlert from '@/components/ui/AppAlert';
+import AppBox from '@/components/ui/AppBox';
+import AppButton from '@/components/ui/AppButton';
+import AppSurface from '@/components/ui/AppSurface';
+import AppStack from '@/components/ui/AppStack';
+import AppText from '@/components/ui/AppText';
+import AppTooltip from '@/components/ui/AppTooltip';
+import AppIconButton from '@/components/ui/AppIconButton';
+import { AppList, AppListItem } from '@/components/ui/AppList';
 
 type DetachErrorCode = 'unknown' | 'not_found' | 'last_sign_in_method';
 
@@ -65,70 +62,66 @@ export default function AccountsClient({ accounts, availableProviders, hasPasswo
   }
 
   return (
-    <Box sx={{ maxWidth: 640, mx: 'auto', p: 3 }}>
-      <Typography variant="h5" fontWeight="bold" mb={2}>
+    <AppBox maxWidth={640} mx="auto" p={3}>
+      <AppText variant="h5" fontWeight="bold" mb={2}>
         {t('title')}
-      </Typography>
-      <Typography variant="body2" color="text.secondary" mb={3}>
+      </AppText>
+      <AppText variant="body2" color="text.secondary" mb={3}>
         {t('intro')}
-      </Typography>
+      </AppText>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {error && <AppAlert severity="error" mb={2}>{error}</AppAlert>}
 
-      <Paper variant="outlined" sx={{ mb: 3 }}>
+      <AppSurface variant="outlined" mb={3}>
         {accounts.length === 0 ? (
-          <Box sx={{ p: 3 }}>
-            <Typography variant="body2" color="text.secondary">
+          <AppBox p={3}>
+            <AppText variant="body2" color="text.secondary">
               {t('emptyState')}
-            </Typography>
-          </Box>
+            </AppText>
+          </AppBox>
         ) : (
-          <List disablePadding>
+          <AppList disablePadding>
             {accounts.map((a) => {
               const detachLabel = a.canDetach ? t('detach') : t('cannotDetach');
               return (
-                <ListItem
+                <AppListItem
                   key={a.id}
                   divider
+                  primary={a.provider}
+                  secondary={a.providerAccountId}
+                  primaryTextTransform="capitalize"
                   secondaryAction={
-                    <Tooltip title={detachLabel}>
+                    <AppTooltip title={detachLabel}>
                       <span>
-                        <IconButton
+                        <AppIconButton
+                          iconName="DeleteOutline"
                           edge="end"
-                          aria-label={t('detachAria', { provider: a.provider })}
+                          label={t('detachAria', { provider: a.provider })}
                           onClick={() => onDetach(a.id)}
                           disabled={!a.canDetach || pending}
-                        >
-                          <DeleteOutlineIcon />
-                        </IconButton>
+                        />
                       </span>
-                    </Tooltip>
+                    </AppTooltip>
                   }
-                >
-                  <ListItemText
-                    primary={a.provider}
-                    secondary={a.providerAccountId}
-                    primaryTypographyProps={{ textTransform: 'capitalize' }}
-                  />
-                </ListItem>
+                />
               );
             })}
-          </List>
+          </AppList>
         )}
-      </Paper>
+      </AppSurface>
 
       {!hasPassword && accounts.length === 1 && (
-        <Alert severity="info" sx={{ mb: 3 }}>
+        <AppAlert severity="info" mb={3}>
           {t('passwordlessNotice')}
-        </Alert>
+        </AppAlert>
       )}
 
       {availableProviders.length > 0 && (
         <>
-          <Typography variant="subtitle1" fontWeight="bold" mb={1}>
+          <AppText variant="subtitle1" fontWeight="bold" mb={1}>
             {t('connectMore')}
-          </Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap">
+          </AppText>
+          <AppStack direction="row" spacing={1} flexWrap="wrap">
             {availableProviders.map((p) => (
               <form
                 key={p}
@@ -136,14 +129,14 @@ export default function AccountsClient({ accounts, availableProviders, hasPasswo
                   await connectProviderAction(p);
                 }}
               >
-                <Button type="submit" variant="outlined" disabled={pending}>
+                <AppButton type="submit" variant="outlined" disabled={pending}>
                   {t('connectButton', { provider: p })}
-                </Button>
+                </AppButton>
               </form>
             ))}
-          </Stack>
+          </AppStack>
         </>
       )}
-    </Box>
+    </AppBox>
   );
 }

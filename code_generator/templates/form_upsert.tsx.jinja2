@@ -4,10 +4,6 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import { useTranslations } from 'next-intl';
-import TextField from '@mui/material/TextField';
-{% if has_many_to_one %}
-import Autocomplete from '@mui/material/Autocomplete';
-{% endif %}
 {% if has_child_entity_autocomplete %}
 import type { EntityAutocompleteCellConfig } from '@/components/_standard/EntityAutocompleteCellEditor';
 {% endif %}
@@ -21,7 +17,7 @@ import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}
 import type { FormUpsertProps } from '@/lib/{{ parent }}/types';
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
-import { AppFieldText, AppFieldBoolean, AppValidationError{% if has_entity_autocomplete %}, AppFieldRelation{% endif %}{% if has_flatten_accordion_upsert %}, AppSection{% endif %} } from '@/components/ui';
+import { AppFieldText, AppFieldBoolean, AppValidationError{% if has_entity_autocomplete %}, AppFieldRelation{% endif %}{% if has_flatten_accordion_upsert %}, AppSection{% endif %}{% if has_field_select %}, AppFieldSelect{% endif %} } from '@/components/ui';
 {% if has_comment_children %}
 import CommentListWrapper from '@/components/_standard/CommentListWrapper';
 {% endif %}

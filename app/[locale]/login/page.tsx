@@ -5,14 +5,14 @@ import { useRouter } from "@/i18n/navigation";
 import { useState } from "react";
 import { Link } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Divider from "@mui/material/Divider";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
-import Paper from "@mui/material/Paper";
-import Alert from "@mui/material/Alert";
 import { siteConfig } from "@/lib/site-config";
+import AppBox from "@/components/ui/AppBox";
+import AppButton from "@/components/ui/AppButton";
+import AppDivider from "@/components/ui/AppDivider";
+import AppFieldInput from "@/components/ui/forms/AppFieldInput";
+import AppText from "@/components/ui/AppText";
+import AppSurface from "@/components/ui/AppSurface";
+import AppAlert from "@/components/ui/AppAlert";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -72,15 +72,15 @@ export default function LoginPage() {
   }
 
   return (
-    <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
-      <Paper elevation={3} sx={{ p: 4, width: "100%", maxWidth: 400 }}>
-        <Typography variant="h5" fontWeight="bold" textAlign="center" mb={3}>
+    <AppBox display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+      <AppSurface elevation={3} p={4} width="100%" maxWidth={400}>
+        <AppText variant="h5" fontWeight="bold" textAlign="center" mb={3}>
           {t("signInTitle")}
-        </Typography>
+        </AppText>
 
         {showGoogle && (
-          <Box display="flex" flexDirection="column" gap={2} mb={showCredentials ? 2 : 0}>
-            <Button
+          <AppBox display="flex" flexDirection="column" gap={2} mb={showCredentials ? 2 : 0}>
+            <AppButton
               type="button"
               variant="outlined"
               fullWidth
@@ -88,21 +88,21 @@ export default function LoginPage() {
               aria-label={t("signInWithGoogle")}
             >
               {t("signInWithGoogle")}
-            </Button>
-          </Box>
+            </AppButton>
+          </AppBox>
         )}
 
         {showGoogle && showCredentials && (
-          <Divider sx={{ my: 2 }}>
-            <Typography variant="caption" color="text.secondary">
+          <AppDivider my={2}>
+            <AppText variant="caption" color="text.secondary">
               {t("orDivider")}
-            </Typography>
-          </Divider>
+            </AppText>
+          </AppDivider>
         )}
 
         {showCredentials && (
-          <Box component="form" onSubmit={handleSubmit} display="flex" flexDirection="column" gap={2}>
-            <TextField
+          <AppBox component="form" onSubmit={handleSubmit} display="flex" flexDirection="column" gap={2}>
+            <AppFieldInput
               id="email"
               name="email"
               type="email"
@@ -110,51 +110,43 @@ export default function LoginPage() {
               required
               fullWidth
             />
-            <TextField
+            <AppFieldInput
               id="password"
               name="password"
               type="password"
               label={t("passwordPlaceholder")}
-              slotProps={{
-                htmlInput: {
-                  "data-testid": "password",
-                },
-              }}
+              testId="password"
               required
               fullWidth
             />
             {mfaPrompt && (
-              <TextField
+              <AppFieldInput
                 id="mfa_code"
                 name="mfa_code"
                 type="text"
                 label={t("mfaCodeLabel")}
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                slotProps={{
-                  htmlInput: {
-                    "data-testid": "mfa_code",
-                  },
-                }}
+                testId="mfa_code"
                 helperText={t("mfaHelper")}
                 required
                 fullWidth
                 autoFocus
               />
             )}
-            {error && <Alert severity={mfaPrompt ? "info" : "error"}>{error}</Alert>}
-            <Button type="submit" variant="contained" fullWidth>
+            {error && <AppAlert severity={mfaPrompt ? "info" : "error"}>{error}</AppAlert>}
+            <AppButton type="submit" variant="contained" fullWidth>
               {t("signInButton")}
-            </Button>
-          </Box>
+            </AppButton>
+          </AppBox>
         )}
 
         {showCredentials && (
-          <Typography textAlign="center" mt={2} variant="body2">
+          <AppText textAlign="center" mt={2} variant="body2">
             <Link href="/register">{t("noAccount")}</Link>
-          </Typography>
+          </AppText>
         )}
-      </Paper>
-    </Box>
+      </AppSurface>
+    </AppBox>
   );
 }

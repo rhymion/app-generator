@@ -2,14 +2,6 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import Alert from '@mui/material/Alert';
-import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import Divider from '@mui/material/Divider';
-import Paper from '@mui/material/Paper';
-import Stack from '@mui/material/Stack';
-import TextField from '@mui/material/TextField';
-import Typography from '@mui/material/Typography';
 import { useTranslations } from 'next-intl';
 
 import type { EnrollmentStatus } from '@/lib/mfa/enrollment';
@@ -21,6 +13,14 @@ import {
   regenerateRecoveryCodesAction,
   startEnrollmentAction,
 } from './actions';
+import AppAlert from '@/components/ui/AppAlert';
+import AppBox from '@/components/ui/AppBox';
+import AppButton from '@/components/ui/AppButton';
+import AppDivider from '@/components/ui/AppDivider';
+import AppSurface from '@/components/ui/AppSurface';
+import AppStack from '@/components/ui/AppStack';
+import AppFieldInput from '@/components/ui/forms/AppFieldInput';
+import AppText from '@/components/ui/AppText';
 
 const MFA_ERROR_KEYS: Record<MfaErrorCode, string> = {
   INVALID_CODE: 'errorInvalidCode',
@@ -134,136 +134,140 @@ export default function MfaClient({ initial }: { initial: EnrollmentStatus }) {
   }
 
   return (
-    <Box sx={{ maxWidth: 560, mx: 'auto', p: 3 }}>
-      <Typography variant="h5" fontWeight="bold" mb={2}>
+    <AppBox maxWidth={560} mx="auto" p={3}>
+      <AppText variant="h5" fontWeight="bold" mb={2}>
         {t('title')}
-      </Typography>
+      </AppText>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{t(MFA_ERROR_KEYS[error] ?? 'errorUnknown')}</Alert>}
+      {error && <AppAlert severity="error" mb={2}>{t(MFA_ERROR_KEYS[error] ?? 'errorUnknown')}</AppAlert>}
 
       {state.kind === 'disabled' && (
-        <Paper variant="outlined" sx={{ p: 3 }}>
-          <Typography variant="body1" mb={2}>{t('disabledIntro')}</Typography>
-          <Button variant="contained" onClick={onEnable} disabled={pending}>
+        <AppSurface variant="outlined" p={3}>
+          <AppText variant="body1" mb={2}>{t('disabledIntro')}</AppText>
+          <AppButton variant="contained" onClick={onEnable} disabled={pending}>
             {t('enableButton')}
-          </Button>
-        </Paper>
+          </AppButton>
+        </AppSurface>
       )}
 
       {state.kind === 'pending' && (
-        <Paper variant="outlined" sx={{ p: 3 }}>
-          <Typography variant="body1" mb={2}>{t('pendingIntro')}</Typography>
-          <Box sx={{ textAlign: 'center', mb: 2 }}>
+        <AppSurface variant="outlined" p={3}>
+          <AppText variant="body1" mb={2}>{t('pendingIntro')}</AppText>
+          <AppBox textAlign="center" mb={2}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={state.qrDataUrl} alt={t('qrAlt')} width={240} height={240} />
-          </Box>
-          <Typography variant="body2" mb={1}>{t('manualEntryLabel')}</Typography>
-          <Typography
+          </AppBox>
+          <AppText variant="body2" mb={1}>{t('manualEntryLabel')}</AppText>
+          <AppText
             variant="body2"
             fontFamily="monospace"
-            sx={{ p: 1, bgcolor: 'grey.100', borderRadius: 1, mb: 3, wordBreak: 'break-all' }}
+            p={1}
+            bgcolor="grey.100"
+            borderRadius={1}
+            mb={3}
+            wordBreak="break-all"
           >
             {state.secret}
-          </Typography>
-          <TextField
+          </AppText>
+          <AppFieldInput
             label={t('verifyCodeLabel')}
             value={code}
-            onChange={(e) => setCode(e.target.value)}
+            onChange={(val) => setCode(val)}
             fullWidth
             autoComplete="one-time-code"
             inputMode="numeric"
-            sx={{ mb: 2 }}
+            mb={2}
           />
-          <Stack direction="row" spacing={1}>
-            <Button
+          <AppStack direction="row" spacing={1}>
+            <AppButton
               variant="contained"
               onClick={onVerify}
               disabled={pending || code.length === 0}
             >
               {t('verifyButton')}
-            </Button>
-            <Button variant="outlined" onClick={onCancelPending} disabled={pending}>
+            </AppButton>
+            <AppButton variant="outlined" onClick={onCancelPending} disabled={pending}>
               {t('cancelButton')}
-            </Button>
-          </Stack>
-        </Paper>
+            </AppButton>
+          </AppStack>
+        </AppSurface>
       )}
 
       {state.kind === 'recovery-display' && (
-        <Paper variant="outlined" sx={{ p: 3 }}>
-          <Alert severity="warning" sx={{ mb: 2 }}>
+        <AppSurface variant="outlined" p={3}>
+          <AppAlert severity="warning" mb={2}>
             {state.regenerated ? t('regenerateSuccess') : t('recoveryWarning')}
-          </Alert>
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, fontFamily: 'monospace', mb: 3 }}>
+          </AppAlert>
+          <AppBox display="grid" gridTemplateColumns="1fr 1fr" gap={1} fontFamily="monospace" mb={3}>
             {state.codes.map((c) => (
-              <Box key={c} sx={{ p: 1, bgcolor: 'grey.100', borderRadius: 1, textAlign: 'center' }}>{c}</Box>
+              <AppBox key={c} p={1} bgcolor="grey.100" borderRadius={1} textAlign="center">{c}</AppBox>
             ))}
-          </Box>
-          <Button variant="contained" onClick={onAcknowledgeRecoveryCodes}>
+          </AppBox>
+          <AppButton variant="contained" onClick={onAcknowledgeRecoveryCodes}>
             {t('recoveryAck')}
-          </Button>
-        </Paper>
+          </AppButton>
+        </AppSurface>
       )}
 
       {state.kind === 'enabled' && (
-        <Paper variant="outlined" sx={{ p: 3 }}>
-          <Alert severity="success" sx={{ mb: 2 }}>{t('enabledStatus')}</Alert>
-          <Typography variant="body1" mb={2}>{t('disableIntro')}</Typography>
-          <TextField
+        <AppSurface variant="outlined" p={3}>
+          <AppAlert severity="success" mb={2}>{t('enabledStatus')}</AppAlert>
+          <AppText variant="body1" mb={2}>{t('disableIntro')}</AppText>
+          <AppFieldInput
             label={t('disableCodeLabel')}
             value={code}
-            onChange={(e) => setCode(e.target.value)}
+            onChange={(val) => setCode(val)}
             fullWidth
             autoComplete="one-time-code"
             inputMode="numeric"
-            sx={{ mb: 2 }}
+            mb={2}
           />
-          <Button
+          <AppButton
             variant="contained"
             color="error"
             onClick={onDisable}
             disabled={pending || code.length === 0}
           >
             {t('disableButton')}
-          </Button>
+          </AppButton>
 
-          <Divider sx={{ my: 3 }} />
+          <AppDivider my={3} />
 
-          <Typography variant="body1" mb={2}>{t('regenerateIntro')}</Typography>
+          <AppText variant="body1" mb={2}>{t('regenerateIntro')}</AppText>
           {!regenerateOpen ? (
-            <Button variant="outlined" onClick={() => setRegenerateOpen(true)} disabled={pending}>
+            <AppButton variant="outlined" onClick={() => setRegenerateOpen(true)} disabled={pending}>
               {t('regenerateButton')}
-            </Button>
+            </AppButton>
           ) : (
-            <Stack spacing={2}>
-              <TextField
+            <AppStack spacing={2}>
+              <AppFieldInput
                 label={t('disableCodeLabel')}
                 value={regenerateCode}
-                onChange={(e) => setRegenerateCode(e.target.value)}
+                onChange={(val) => setRegenerateCode(val)}
                 fullWidth
                 autoComplete="one-time-code"
                 inputMode="numeric"
               />
-              <Stack direction="row" spacing={1}>
-                <Button
+              <AppStack direction="row" spacing={1}>
+                <AppButton
                   variant="contained"
                   onClick={onRegenerateCodes}
                   disabled={pending || regenerateCode.length === 0}
                 >
                   {t('regenerateButton')}
-                </Button>
-                <Button
+                </AppButton>
+                <AppButton
                   variant="outlined"
                   onClick={() => { setRegenerateOpen(false); setRegenerateCode(''); setError(null); }}
                   disabled={pending}
                 >
                   {t('cancelButton')}
-                </Button>
-              </Stack>
-            </Stack>
+                </AppButton>
+              </AppStack>
+            </AppStack>
           )}
-        </Paper>
+        </AppSurface>
       )}
-    </Box>
+    </AppBox>
   );
 }

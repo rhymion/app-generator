@@ -1,13 +1,11 @@
-import Box from '@mui/material/Box';
-import TextField from '@mui/material/TextField';
-import InputAdornment from '@mui/material/InputAdornment';
-import IconButton from '@mui/material/IconButton';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import Button from '@mui/material/Button';
 import { getSessionUserIdOrThrow } from '@/lib/authz';
 import { randomBytes } from 'crypto';
 import { useTranslations } from 'next-intl';
 //import { revalidatePath } from 'next/cache';
+import AppBox from '@/components/ui/AppBox';
+import AppButton from '@/components/ui/AppButton';
+import AppFieldInput from '@/components/ui/forms/AppFieldInput';
+import AppInputAction from '@/components/ui/AppInputAction';
 
 export async function generateApiKey(): Promise<string> {
   await getSessionUserIdOrThrow();
@@ -20,40 +18,35 @@ export async function generateApiKey(): Promise<string> {
 export default function ApiKey({value, onChange, isEdit}: {value: string, onChange: (key: string) => void, isEdit: boolean}) {
   const tf = useTranslations('Fields');
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 2, mb: 1 }}>
-    <TextField
+    <AppBox display="flex" alignItems="center" gap={1} mt={2} mb={1}>
+      <AppFieldInput
         label={tf('apiKey')}
         value={value}
         fullWidth
-        slotProps={{
-        input: {
-            readOnly: true,
-            endAdornment: value ? (
-            <InputAdornment position="end">
-                <IconButton
-                size="small"
-                onClick={() => navigator.clipboard.writeText(value)}
-                title="Copy to clipboard"
-                >
-                <ContentCopyIcon fontSize="small" />
-                </IconButton>
-            </InputAdornment>
-            ) : undefined,
-        },
-        }}
-    />
-    {isEdit && (
-        <Button
-        variant="outlined"
-        onClick={async () => {
+        readOnly
+        endAction={value ? (
+          <AppInputAction
+            position="end"
+            iconName="ContentCopy"
+            iconFontSize="small"
+            size="small"
+            title="Copy to clipboard"
+            onClick={() => navigator.clipboard.writeText(value)}
+          />
+        ) : undefined}
+      />
+      {isEdit && (
+        <AppButton
+          variant="outlined"
+          className="whitespace-nowrap"
+          onClick={async () => {
             const key = await generateApiKey();
             onChange(key);
-        }}
-        sx={{ whiteSpace: 'nowrap' }}
+          }}
         >
-        Generate Key
-        </Button>
-    )}
-    </Box>
+          Generate Key
+        </AppButton>
+      )}
+    </AppBox>
   );
 }

@@ -1987,11 +1987,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         min_len = prop.get('minLength')
         max_len = prop.get('maxLength')
         slot_str = ''
-        if min_len is not None or max_len is not None:
-            constraints = []
-            if min_len is not None: constraints.append(f'minLength: {min_len}')
-            if max_len is not None: constraints.append(f'maxLength: {max_len}')
-            slot_str = f"\n        slotProps={{ {{ htmlInput: {{ {', '.join(constraints)} }} }} }}"
+        if min_len is not None: slot_str += f'\n        minLength={{{min_len}}}'
+        if max_len is not None: slot_str += f'\n        maxLength={{{max_len}}}'
         multiline = 'true' if p == 'description' else 'false'
         rows = '4' if p == 'description' else 'undefined'
         text_jsxs.append(
@@ -2129,18 +2126,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
         enum_int_jsxs.append(
-            f"      <Autocomplete\n"
+            f"      <AppFieldSelect\n"
             f"        options={{{opts_var}}}\n"
             f"        value={{{opts_var}.find((o) => o.value === {sn}) ?? null}}\n"
-            f"        onChange={{(_, newValue) => set{setter}(newValue?.value ?? null)}}\n"
-            f"        renderInput={{(params) => (\n"
-            f"          <TextField\n"
-            f"            {{...params}}\n"
-            f"            label={{tf('{fk}')}}\n"
-            f"            margin=\"normal\"\n"
-            f"            {'required' if req else ''}\n"
-            f"          />\n"
-            f"        )}}\n"
+            f"        onChange={{(newValue) => set{setter}(newValue)}}\n"
+            f"        label={{tf('{fk}')}}\n"
+            f"        {'required' if req else ''}\n"
             f"      />"
         )
 
@@ -2159,18 +2150,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
         enum_str_jsxs.append(
-            f"      <Autocomplete\n"
+            f"      <AppFieldSelect\n"
             f"        options={{{opts_var}}}\n"
             f"        value={{{opts_var}.find((o) => o.value === {sn}) ?? null}}\n"
-            f"        onChange={{(_, newValue) => set{setter}(newValue?.value ?? '')}}\n"
-            f"        renderInput={{(params) => (\n"
-            f"          <TextField\n"
-            f"            {{...params}}\n"
-            f"            label={{tf('{fk}')}}\n"
-            f"            margin=\"normal\"\n"
-            f"            {'required' if req else ''}\n"
-            f"          />\n"
-            f"        )}}\n"
+            f"        onChange={{(newValue) => set{setter}(newValue ?? '')}}\n"
+            f"        label={{tf('{fk}')}}\n"
+            f"        {'required' if req else ''}\n"
             f"      />"
         )
 
@@ -2227,18 +2212,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         )
         entity_select_opt_setups.append(f"  const {opts_var} = [{opts_items}];")
         entity_select_jsxs.append(
-            f"      <Autocomplete\n"
+            f"      <AppFieldSelect\n"
             f"        options={{{opts_var}}}\n"
             f"        value={{{opts_var}.find((o) => o.value === {sn}) ?? null}}\n"
-            f"        onChange={{(_, newValue) => set{setter}(newValue?.value ?? null)}}\n"
-            f"        renderInput={{(params) => (\n"
-            f"          <TextField\n"
-            f"            {{...params}}\n"
-            f"            label={{tf('{fk}')}}\n"
-            f"            margin=\"normal\"\n"
-            f"            {'required' if req else ''}\n"
-            f"          />\n"
-            f"        )}}\n"
+            f"        onChange={{(newValue) => set{setter}(newValue)}}\n"
+            f"        label={{tf('{fk}')}}\n"
+            f"        {'required' if req else ''}\n"
             f"      />"
         )
 
@@ -2368,7 +2347,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         for c in non_comment_ch
     )
     if has_grid_ch:
-        child_imports_parts.append("import { GridRowsProp } from '@mui/x-data-grid';")
+        child_imports_parts.append("import type { GridRowsProp } from '@/components/ui/data';")
         dg_import = (
             "import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';\n"
             "import OrderedFieldsDataGrid from '@/components/_standard/OrderedFieldsDataGrid';"
@@ -3139,17 +3118,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     _opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(_enum_vals))
                 flatten_enum_opt_setups_upsert.append(f"  const {_opts_var} = [{_opts}];")
                 _accordion_fields_jsx.append(
-                    f"        <Autocomplete\n"
+                    f"        <AppFieldSelect\n"
                     f"          options={{{_opts_var}}}\n"
                     f"          value={{{_opts_var}.find((o) => o.value === {_sn}) ?? null}}\n"
-                    f"          onChange={{(_, newValue) => set{_fsetter}(newValue?.value ?? null)}}\n"
-                    f"          renderInput={{(params) => (\n"
-                    f"            <TextField\n"
-                    f"              {{...params}}\n"
-                    f"              label={{tf('{_fk_label}')}}\n"
-                    f"              margin=\"normal\"\n"
-                    f"            />\n"
-                    f"          )}}\n"
+                    f"          onChange={{(newValue) => set{_fsetter}(newValue)}}\n"
+                    f"          label={{tf('{_fk_label}')}}\n"
                     f"        />"
                 )
                 _check = f"{_sn} !== null"
@@ -3197,12 +3170,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 _ml  = 'true' if _fname == 'description' else 'false'
                 _rows = '4'   if _fname == 'description' else 'undefined'
                 _accordion_fields_jsx.append(
-                    f"        <TextField\n"
+                    f"        <AppFieldText\n"
                     f"          label={{tf('{_fk_label}')}}\n"
                     f"          inputRef={{{_ref_var}}}\n"
                     f"          defaultValue={{src.{_prop}?.{_fname} || ''}}\n"
-                    f"          fullWidth\n"
-                    f"          margin=\"normal\"\n"
                     f"          multiline={{{_ml}}}\n"
                     f"          rows={{{_rows}}}\n"
                     f"        />"
@@ -3272,6 +3243,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'has_children':             has_children,
         'has_comment_children':     has_comment_children,
         'has_many_to_one':          has_many_to_one or bool(enum_int_props) or bool(enum_str_props) or bool(entity_select_props) or flatten_needs_autocomplete,
+        'has_field_select':         bool(enum_int_props) or bool(enum_str_props) or bool(entity_select_props) or flatten_needs_autocomplete,
         'has_entity_autocomplete':  bool(parent_rels_raw) or bool(selector_oto_rels),
         'has_child_entity_autocomplete': bool(child_entity_rel_opt),
         'has_datetime_props':       bool(date_time_props) or flatten_needs_datetime,

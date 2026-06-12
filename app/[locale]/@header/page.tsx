@@ -5,8 +5,7 @@ import { siteConfig, themeConfig } from "@/lib/site-config";
 import { useTranslations, useLocale } from "next-intl";
 import { Link, useRouter, usePathname } from "@/i18n/navigation";
 import { routing } from "@/i18n/routing";
-import Autocomplete from "@mui/material/Autocomplete";
-import TextField from "@mui/material/TextField";
+import { AppAutocomplete } from "@/components/ui";
 import NotificationBell from "@/components/_standard/NotificationBell";
 
 // Endonym (the language's own name) for any BCP-47 tag — adding a new locale
@@ -65,32 +64,16 @@ export default function HeaderPage() {
 
       {/* Locale switcher */}
       <div className="shrink-0">
-        <Autocomplete
+        <AppAutocomplete
           size="small"
           disableClearable
-          options={routing.locales as readonly string[]}
+          options={routing.locales}
           getOptionLabel={getLocaleLabel}
           value={locale}
-          onChange={(_, next) => { if (next && next !== locale) switchLocale(next); }}
+          onChange={(next) => { if (next !== locale) switchLocale(next); }}
           isOptionEqualToValue={(opt, val) => opt === val}
-          sx={{
-            minWidth: 140,
-            "& .MuiOutlinedInput-root": {
-              color: "white",
-              backgroundColor: "rgba(255,255,255,0.1)",
-              "& fieldset": { borderColor: "rgba(255,255,255,0.3)" },
-              "&:hover fieldset": { borderColor: "rgba(255,255,255,0.5)" },
-              "&.Mui-focused fieldset": { borderColor: "rgba(255,255,255,0.7)" },
-            },
-            "& .MuiSvgIcon-root": { color: "white" },
-          }}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              variant="outlined"
-              aria-label={t("language")}
-            />
-          )}
+          inputAriaLabel={t("language")}
+          variant="headerLocale"
         />
       </div>
 
