@@ -14,6 +14,7 @@ from helpers.bridge_direction import (
     bridge_child_from_name,
     get_new_form_bridge,
     collect_parent_bridge_fk_props,
+    collect_parent_bridge_children,
 )
 from helpers.bridge_prisma import (
     emit_bridge_model,
@@ -485,3 +486,33 @@ def test_bridge_cleanup_rels_filter_boolean_present():
     assert '.filter(Boolean)' in cleanups, (
         f'Expected .filter(Boolean) in bridge cleanup code, got:\n{cleanups}'
     )
+
+
+# ---------------------------------------------------------------------------
+# Parent-embedded bridge child discovery (cmd_167 §4 — parent DataGrid)
+# ---------------------------------------------------------------------------
+
+def test_collect_parent_bridge_children_discovers_each_parent():
+    schema = _bridge_schema(parent_names=['work', 'character', 'scene'])
+    for parent in ['work', 'character', 'scene']:
+        kids = collect_parent_bridge_children(parent, schema)
+        assert [k['child'] for k in kids] == ['channel']
+        k = kids[0]
+        assert k['bridge_name'] == 'channelable'
+        assert k['parent_fk'] == 'channelable_id'
+        assert k['role'] == f'{parent}_hub'
+        assert k['label_field'] == 'name'
+
+
+def test_collect_parent_bridge_children_empty_for_non_parent():
+    schema = _bridge_schema(parent_names=['work'])
+    assert collect_parent_bridge_children('character', schema) == []
+
+
+def test_collect_parent_bridge_children_columns_from_x_display():
+    schema = _bridge_schema(parent_names=['work'])
+    schema['definitions']['channel']['x-display'] = {
+        'table': [{'name': {'primary': True}}, {'kind': {}}]
+    }
+    kids = collect_parent_bridge_children('work', schema)
+    assert kids[0]['columns'] == [{'name': {'primary': True}}, {'kind': {}}]
