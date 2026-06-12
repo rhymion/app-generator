@@ -53,7 +53,7 @@ describe('SessionSidebar', () => {
 
   it('renders desktop sidebar when session is present', () => {
     mockUseSession.mockReturnValue({
-      data: { user: { name: 'Alice' }, expires: '' },
+      data: { user: { id: 'u1', name: 'Alice' }, expires: '' },
       status: 'authenticated',
       update: vi.fn(),
     });
@@ -64,7 +64,7 @@ describe('SessionSidebar', () => {
   it('does not render mobile drawer when isOpen=false', () => {
     mockIsOpen = false;
     mockUseSession.mockReturnValue({
-      data: { user: { name: 'Alice' }, expires: '' },
+      data: { user: { id: 'u1', name: 'Alice' }, expires: '' },
       status: 'authenticated',
       update: vi.fn(),
     });
@@ -76,7 +76,7 @@ describe('SessionSidebar', () => {
   it('renders mobile drawer when isOpen=true', () => {
     mockIsOpen = true;
     mockUseSession.mockReturnValue({
-      data: { user: { name: 'Alice' }, expires: '' },
+      data: { user: { id: 'u1', name: 'Alice' }, expires: '' },
       status: 'authenticated',
       update: vi.fn(),
     });
@@ -87,7 +87,7 @@ describe('SessionSidebar', () => {
 
   it('calls close() on pathname change', () => {
     mockUseSession.mockReturnValue({
-      data: { user: { name: 'Alice' }, expires: '' },
+      data: { user: { id: 'u1', name: 'Alice' }, expires: '' },
       status: 'authenticated',
       update: vi.fn(),
     });

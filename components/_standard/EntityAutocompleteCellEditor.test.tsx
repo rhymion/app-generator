@@ -51,9 +51,10 @@ const baseProps = {
   row: {},
   rowNode: {} as never,
   colDef: {} as never,
+  api: {} as never,
   cellMode: 'edit' as const,
   isEditable: true,
-  tabIndex: 0,
+  tabIndex: 0 as const,
   hasFocus: false,
   config,
 };
