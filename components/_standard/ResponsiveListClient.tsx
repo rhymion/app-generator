@@ -91,4 +91,4 @@ export default function ResponsiveListClient<T extends BaseEntity>({
       primaryField={primaryField}
     />
   );
-}
+} 
