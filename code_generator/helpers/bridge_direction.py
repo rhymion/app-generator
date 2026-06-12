@@ -89,3 +89,44 @@ def collect_parent_bridge_fk_props(model: str, schema: dict) -> dict:
             },
         }
     return injected
+
+
+def collect_parent_bridge_children(model: str, schema: dict) -> list[dict]:
+    """Return the bridge children that should be embedded as a DataGrid on `model`.
+
+    Mirror of collect_parent_bridge_fk_props(): scans all entities with new-form
+    x-bridge and returns one descriptor per bridge whose `parents` list contains
+    `model`. Used to render a parent-embedded child DataGrid (cmd_167 §4) — the
+    parent owns CRUD for these children, bound to its `<bridge>_id`.
+
+    Each descriptor:
+        {
+          'child':      'channel',            # child entity name
+          'bridge_name':'channelable',        # bridge model
+          'parent_fk':  'channelable_id',     # FK column on the parent
+          'role':       'work_hub',           # this parent's edge role
+          'label_field':'title',              # this parent's label field
+          'columns':    [ ... x-display.table ... ],   # child grid columns ([] if none)
+        }
+    """
+    defs = schema.get('definitions', {})
+    out: list[dict] = []
+    for entity_name, entity_def in defs.items():
+        if not isinstance(entity_def, dict) or entity_name.endswith('_detail'):
+            continue
+        bridge = get_new_form_bridge(entity_def)
+        if not bridge:
+            continue
+        match = next((p for p in bridge['parents'] if p['target'] == model), None)
+        if not match:
+            continue
+        columns = (entity_def.get('x-display') or {}).get('table') or []
+        out.append({
+            'child':       bridge['child'],
+            'bridge_name': bridge['name'],
+            'parent_fk':   f"{bridge['name']}_id",
+            'role':        match['role'],
+            'label_field': match['label_field'],
+            'columns':     columns,
+        })
+    return out
