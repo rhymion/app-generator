@@ -79,6 +79,29 @@ def _delete_if_boilerplate(path: Path, expected: str) -> None:
         print(f'  Kept {path} (customized)')
 
 
+_GENERATED_MARKER = 'AUTO-GENERATED'
+
+
+def _delete_if_generated(path: Path, marker: str = _GENERATED_MARKER) -> None:
+    """Delete `path` only while it still carries the generator's marker.
+
+    Schema-global files (dashboard catalog/aggregate route, attachment actions)
+    are fully regenerated each run and carry an `AUTO-GENERATED` header, so they
+    are not meant for hand edits. But a user who deliberately forks one will
+    strip that header; the marker check lets us delete the untouched generated
+    file while preserving a customized copy. Unlike _delete_if_boilerplate this
+    works for files whose body is schema-dependent (can't be matched exactly).
+    """
+    if not path.exists():
+        return
+    head = ''.join(path.read_text(encoding='utf-8').splitlines(keepends=True)[:5])
+    if marker in head:
+        path.unlink()
+        print(f'  Deleted {path} (generated)')
+    else:
+        print(f'  Kept {path} (no {marker} marker — treated as customized)')
+
+
 def _try_rmdir(path: Path) -> None:
     """Remove directory if it exists and is empty."""
     try:
@@ -322,8 +345,12 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_o
         if children and (can_view or can_edit):
             _delete(components_dir / 'column_def.tsx')
 
-        # app/[locale]/ pages (try all; _delete is a no-op if absent)
-        _delete(app_dir / 'page.tsx')
+        # app/[locale]/ pages. Mirror generate.py's per-page conditions so we
+        # never delete a hand-authored page the generator does not emit. The
+        # list page.tsx is only written when `list: true`; an entity with
+        # `list: false` (e.g. `setting`) owns its page.tsx manually.
+        if can_list:
+            _delete(app_dir / 'page.tsx')
         _delete(app_dir / 'chart' / 'page.tsx')
         if can_new:
             _delete(app_dir / 'new' / 'page.tsx')
@@ -369,14 +396,23 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_o
     if test_entities:
         _delete(out / 'cypress' / 'support' / 'generated-tasks.ts')
 
-    # Schema-wide auto-generated catalogs. generate.py emits these only when
-    # at least one entity opts in (`x-display.dashboard: true` for the
-    # dashboard catalog, `attachable_id` for the attachment bridge actions);
-    # cleanup deletes them unconditionally so a schema that drops the last
-    # contributing entity doesn't leave a stale file behind.
-    _delete(out / 'lib' / 'dashboard' / 'catalog.ts')
+    # Schema-wide auto-generated files. generate.py emits these only when at
+    # least one entity opts in (`x-display.dashboard: true` for the dashboard
+    # catalog + aggregate route, `attachable_id` for the attachment bridge
+    # actions). They carry an AUTO-GENERATED marker and are rewritten every run,
+    # so cleanup removes them via _delete_if_generated: an untouched generated
+    # file is swept (so dropping the last contributing entity leaves nothing
+    # stale behind), while a user who stripped the marker to fork the file keeps
+    # their copy rather than silently losing it.
+    _delete_if_generated(out / 'lib' / 'dashboard' / 'catalog.ts')
     _try_rmdir(out / 'lib' / 'dashboard')
-    _delete(out / 'lib' / 'attachment' / 'actions.ts')
+    # Dashboard aggregate REST endpoint — emitted alongside the catalog, but it
+    # lives under the schema-wide app/api/dashboard/ tree rather than any
+    # per-entity api dir, so the per-entity loop above never touches it.
+    _delete_if_generated(out / 'app' / 'api' / 'dashboard' / 'aggregate' / 'route.ts')
+    _try_rmdir(out / 'app' / 'api' / 'dashboard' / 'aggregate')
+    _try_rmdir(out / 'app' / 'api' / 'dashboard')
+    _delete_if_generated(out / 'lib' / 'attachment' / 'actions.ts')
     _try_rmdir(out / 'lib' / 'attachment')
 
     _try_rmdir(out / 'docs' / 'generated')
