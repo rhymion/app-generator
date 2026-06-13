@@ -122,6 +122,11 @@ export async function assertNoDuplicateReservation(
   dateRange: DateRange,
   excludeId?: string
 ): Promise<void> {
+  const _start = new Date(dateRange.{{ reservation_config.dateRange.startField }} as string).getTime();
+  const _end = new Date(dateRange.{{ reservation_config.dateRange.endField }} as string).getTime();
+  if (_start >= _end) {
+    throw new Error('Start date must be before end date');
+  }
   const overlaps = await checkDateRangeOverlap(
     tx,
     allocatedItemId,

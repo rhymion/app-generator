@@ -858,13 +858,22 @@ def build_context(entity: dict, schema: dict) -> dict:
             _pool = _xres.get('pool') or {}
             _result = _xres.get('result') or {}
             _request = _xres.get('request') or {}
-            _dateRange_raw = _request.get('dateRange')
+            _policy = _xres.get('policy') or {}
+            # dateRange can be at request level (legacy) or inside request.criteria
+            _criteria_raw = _request.get('criteria') or {}
+            _dateRange_raw = _request.get('dateRange') or _criteria_raw.get('dateRange')
             _avail = _pool.get('availableStatus', 'available')
             _resrv = _pool.get('reservedStatus', 'reserved')
+            _avail_src = _policy.get('availabilitySource')
+            _uses_overlap = _avail_src == 'overlap'
+            # updatePoolStatusOnReserve: overlap mode defaults false, status mode defaults true
+            _update_pool_default = False if _uses_overlap else True
+            _updates_pool = _policy.get('updatePoolStatusOnReserve', _update_pool_default)
+            _exclude_statuses = _policy.get('excludePoolStatuses') or []
             reservation_config = {
                 'mode': 'item',
                 'pool': _pool,
-                'policy': _xres.get('policy') or {},
+                'policy': _policy,
                 'result': _result,
                 'request': _request,
                 'statusField': _pool.get('statusField', 'status'),
@@ -873,8 +882,11 @@ def build_context(entity: dict, schema: dict) -> dict:
                 'available_status_ts': str(_avail) if isinstance(_avail, int) else f"'{_avail}'",
                 'reserved_status_ts': str(_resrv) if isinstance(_resrv, int) else f"'{_resrv}'",
                 'allocatedField': _result.get('allocatedField', ''),
-                'criteria': _request.get('criteria') or {},
+                'criteria': {k: v for k, v in _criteria_raw.items() if k != 'dateRange'},
                 'hasLines': False,
+                'usesOverlapAvailability': _uses_overlap,
+                'updatesPoolStatusOnReserve': _updates_pool,
+                'excludePoolStatuses': _exclude_statuses,
             }
             if _dateRange_raw:
                 reservation_config['dateRange'] = {

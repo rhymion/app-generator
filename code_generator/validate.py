@@ -377,6 +377,36 @@ def validate_schema(schema: dict) -> None:
                         f"required for item mode without lines."
                     )
 
+            # Overlap mode specific validations
+            _item_policy = xres.get('policy') or {}
+            _avail_src = _item_policy.get('availabilitySource')
+            if _avail_src == 'overlap':
+                _req = xres.get('request') or {}
+                _criteria = _req.get('criteria') or {}
+                _has_daterange = (
+                    'dateRange' in _req or 'dateRange' in _criteria
+                )
+                if not _has_daterange:
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.policy.availabilitySource "
+                        f"'overlap' requires x-reservation.request.criteria.dateRange to be set."
+                    )
+                # excludePoolStatuses must be a list of integers
+                _excl = _item_policy.get('excludePoolStatuses')
+                if _excl is not None:
+                    if not isinstance(_excl, list):
+                        errors.append(
+                            f"Definition '{def_key}': x-reservation.policy.excludePoolStatuses "
+                            f"must be a list of integers."
+                        )
+                    else:
+                        for _v in _excl:
+                            if not isinstance(_v, int):
+                                errors.append(
+                                    f"Definition '{def_key}': x-reservation.policy.excludePoolStatuses "
+                                    f"values must be integers, got {_v!r}."
+                                )
+
         # lines dict format: validate entity/field existence
         if isinstance(lines, dict):
             lines_entity_name = lines.get('entity')
