@@ -35,6 +35,7 @@ from generators import (
     form_upsert_context,
     build_dashboard_catalog,
     build_attachable_owners,
+    get_reservation_action_routes,
 )
 from generators_i18n import update_i18n_and_config
 from validate import validate_schema, validate_prisma_indexes, SchemaValidationError
@@ -443,6 +444,30 @@ def generate(schema_path: str, output_dir: str) -> None:
                     lib_dir / 'service_after_create.ts',
                     _render(env, 'service_after_create_stub.ts.jinja2', ctx),
                 )
+
+        # --- reservation_actions.ts + per-action API routes ---
+        _res_cfg = ctx.get('reservation_config')
+        if _res_cfg and _res_cfg.get('has_actions'):
+            _act_routes = get_reservation_action_routes(_res_cfg, ctx['model'])
+            if _act_routes:
+                # Build reservation_actions.ts via template
+                _svc_acts = svc_ctx.get('reservation_actions_code', '') if (can_new or can_edit or can_delete) else ''
+                if _svc_acts:
+                    _ra_ctx = {**ctx, 'reservation_actions_code': _svc_acts}
+                    _write(lib_dir / 'reservation_actions.ts',
+                           _render(env, 'reservation_actions.ts.jinja2', _ra_ctx))
+                    print(f'  reservation_actions.ts → lib/{parent}/')
+                # Per-action API routes
+                api_actions_base = out / 'app' / 'api' / parent / '[id]' / 'actions'
+                for _route in _act_routes:
+                    _write(api_actions_base / _route['act_type'] / 'route.ts', _route['code'])
+                print(f'  Action routes → app/api/{parent}/[id]/actions/{{ship,release,cancel}}/')
+                # UI action buttons component
+                _write(
+                    components_dir / 'ReservationActionButtons.tsx',
+                    _render(env, 'action_buttons.tsx.jinja2', ctx),
+                )
+                print(f'  ReservationActionButtons.tsx → components/{parent}/')
 
         # --- actions.ts ---
         if can_new or can_edit or can_delete:

@@ -1,11 +1,11 @@
 """
-Tests for Stage 1: Generic read-only property (x-readonly / x-readonly-fields).
+Tests for x-readonly / x-readonly-fields support (app-generator-2 port).
 
 Verifies:
   - build_context collects readonly_fields from x-readonly per-field.
   - build_context collects readonly_fields from x-readonly-fields entity-level.
   - Both sources merge correctly (union).
-  - form_upsert_context: readonly fields render disabled in edit mode ({isEdit && ...}).
+  - form_upsert_context: readonly fields render readOnly in edit mode ({isEdit && ...}).
   - form_upsert_context: readonly fields are omitted from normal editable JSX.
   - form_upsert_context: readonly fields are excluded from formData.set calls.
   - api_detail_route template: generates AP-3 check code when readonly_fields_api is set.
@@ -115,20 +115,17 @@ class TestFormUpsertReadonlyFields:
         ctx = build_context(_entity(), schema)
         return form_upsert_context(ctx, schema)
 
-    def test_readonly_field_renders_disabled_block_with_isEdit(self):
+    def test_readonly_field_renders_readonly_block_with_isEdit(self):
         schema = _schema_with_readonly(field_level_ro=["status"])
         upsert = self._build(schema)
         jsx = upsert["all_parent_fields_jsx"]
-        # Must be wrapped in {isEdit && (...)} so it's omitted in new mode
         assert "isEdit" in jsx
-        assert "disabled" in jsx
+        assert "readOnly" in jsx
 
     def test_readonly_field_not_in_normal_enum_jsx(self):
         """Status is an int enum field; when readonly it must NOT appear as an Autocomplete."""
         schema = _schema_with_readonly(field_level_ro=["status"])
         upsert = self._build(schema)
-        # The normal enum renders as <Autocomplete ... options={statusOptions} ...>
-        # A readonly status must not have a statusOptions setup
         all_states = upsert.get("all_states", "")
         enum_opts = upsert.get("enum_opt_setups", "")
         assert "statusOptions" not in all_states
@@ -139,7 +136,6 @@ class TestFormUpsertReadonlyFields:
         schema = _schema_with_readonly(field_level_ro=["status"])
         upsert = self._build(schema)
         fds = upsert.get("parent_form_data_sets", "")
-        # formData.set('status', ...) must NOT be generated
         assert "formData.set('status'" not in fds
 
     def test_non_readonly_field_still_in_form(self):
@@ -148,7 +144,6 @@ class TestFormUpsertReadonlyFields:
         upsert = self._build(schema)
         jsx = upsert["all_parent_fields_jsx"]
         fds = upsert.get("parent_form_data_sets", "")
-        # name should be in the form fields
         assert "nameRef" in upsert.get("parent_refs", "") or "name" in jsx
         assert "formData.set('name'" in fds
 
@@ -159,7 +154,7 @@ class TestFormUpsertReadonlyFields:
         assert "formData.set('note'" not in fds
         jsx = upsert["all_parent_fields_jsx"]
         assert "isEdit" in jsx
-        assert "disabled" in jsx
+        assert "readOnly" in jsx
 
 
 # ---------------------------------------------------------------------------
