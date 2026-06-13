@@ -156,6 +156,11 @@ export const reserve{{ parent_pascal }} = async (
 ): Promise<{ success: boolean; {{ reservation_config.allocatedField }}: string }> => {
   return await prisma.$transaction(async (tx) => {
 {% if reservation_config.usesOverlapAvailability %}
+    const _startMs = new Date(dateRange.{{ reservation_config.dateRange.startField }} as unknown as string).getTime();
+    const _endMs = new Date(dateRange.{{ reservation_config.dateRange.endField }} as unknown as string).getTime();
+    if (_startMs >= _endMs) {
+      throw new Error('Start date must be before end date');
+    }
     const candidates = await (tx as unknown as typeof prisma).{{ reservation_config.pool.entity }}.findMany({
       where: {
         ...criteria,

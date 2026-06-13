@@ -563,6 +563,21 @@ def build_context(entity: dict, schema: dict) -> dict:
     model_def      = schema['definitions'].get(model, {})
     filtered_props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
 
+    # Collect explicit readonly fields: x-readonly per-field OR x-readonly-fields entity-level.
+    _ro_from_entity: set[str] = set(model_def.get('x-readonly-fields') or [])
+    _ro_from_props: set[str] = {
+        fn for fn, fp in filtered_props.items()
+        if isinstance(fp, dict) and fp.get('x-readonly')
+    }
+    readonly_fields: list[str] = sorted(_ro_from_entity | _ro_from_props)
+    # API route: select clause string and field list for AP-3=B readonly reject check.
+    _api_ro_in_props = [f for f in readonly_fields if f in filtered_props]
+    readonly_fields_api: list[str] = _api_ro_in_props
+    readonly_fields_api_select: str | None = (
+        '{ ' + ', '.join(f'{f}: true' for f in _api_ro_in_props) + ' }'
+        if _api_ro_in_props else None
+    )
+
     # Config flags
     can_create = gen_cfg.get('new',    True) is not False
     can_update = gen_cfg.get('edit',   True) is not False
@@ -853,6 +868,31 @@ def build_context(entity: dict, schema: dict) -> dict:
                 reservation_config['selfQuantityField'] = (
                     (_xres.get('request') or {}).get('quantityField', 'quantity')
                 )
+            # Parse x-reservation.actions block (Q3 lifecycle actions)
+            _xres_actions = _xres.get('actions') or {}
+            _reservation_actions = []
+            for _act_name, _act_def in _xres_actions.items():
+                if not isinstance(_act_def, dict):
+                    continue
+                _reservation_actions.append({
+                    'name': _act_name,
+                    'type': _act_def.get('type', ''),
+                    'allocationEntity': (
+                        _act_def.get('allocationEntity')
+                        or _xres_result.get('allocationEntity', '')
+                    ),
+                    'quantityField': _act_def.get('quantityField', 'quantity'),
+                    'remainingField': _act_def.get('remainingField', 'remaining_quantity'),
+                    'statusField': _act_def.get('statusField', 'status'),
+                    'openStatuses': list(_act_def.get('openStatuses') or []),
+                    'doneStatus': _act_def.get('doneStatus', ''),
+                })
+            reservation_config['reservation_actions'] = _reservation_actions
+            reservation_config['has_actions'] = bool(_reservation_actions)
+            if _reservation_actions:
+                reservation_config['actions_remaining_field'] = _reservation_actions[0]['remainingField']
+                reservation_config['actions_status_field'] = _reservation_actions[0]['statusField']
+                reservation_config['actions_initial_status'] = 'reserved'
         elif _xres_mode == 'item' and not _xres.get('lines'):
             # Phase 2: item mode without lines (item+lines → Phase 3)
             _pool = _xres.get('pool') or {}
@@ -1408,4 +1448,8 @@ def build_context(entity: dict, schema: dict) -> dict:
         is_date_field=_is_date_field,
         get_actual_type=_get_actual_type,
         is_nullable=_is_nullable,
+        # Read-only fields: explicit schema annotations (x-readonly / x-readonly-fields).
+        readonly_fields=readonly_fields,
+        readonly_fields_api=readonly_fields_api,
+        readonly_fields_api_select=readonly_fields_api_select,
     )
