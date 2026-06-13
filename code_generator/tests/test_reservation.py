@@ -931,3 +931,184 @@ class TestValidateReservationMatrix:
         })
         with pytest.raises(SchemaValidationError, match="nonexistent_lines_entity.*not defined"):
             validate_schema(schema)
+
+
+# ---------------------------------------------------------------------------
+# 8. Overlap availability mode (Q2)
+# ---------------------------------------------------------------------------
+
+def _overlap_mode_def(include_exclude_statuses: bool = False) -> dict:
+    """Item mode schema with availabilitySource: overlap."""
+    xres: dict = {
+        "mode": "item",
+        "pool": {
+            "entity": "room",
+            "statusField": "status",
+            "availableStatus": 0,
+            "reservedStatus": 2,
+        },
+        "request": {
+            "criteria": {"room_type_id": "room_type_id"},
+            "dateRange": {"start": "check_in", "end": "check_out"},
+        },
+        "policy": {
+            "availabilitySource": "overlap",
+            "updatePoolStatusOnReserve": False,
+            "orderBy": [{"floor": "asc"}, {"id": "asc"}],
+        },
+        "result": {
+            "allocatedField": "room_id",
+        },
+    }
+    if include_exclude_statuses:
+        xres["policy"]["excludePoolStatuses"] = [1]
+    return {
+        "type": "object",
+        "required": ["id", "guest_name", "room_type_id", "check_in", "check_out"],
+        "x-reservation": xres,
+        "properties": {
+            "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+            "guest_name": {"type": "string"},
+            "room_type_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "room_type", "labelField": "name"},
+            },
+            "room_id": {"type": ["string", "null"]},
+            "check_in": {"type": "string", "format": "date"},
+            "check_out": {"type": "string", "format": "date"},
+        },
+    }
+
+
+class TestItemModeOverlapAvailability:
+    """Q2: overlap availability mode — assertNoDuplicateReservation used, status update suppressed."""
+
+    def _ctx(self, include_exclude_statuses: bool = False):
+        schema = _room_schema({"room_reservation": _overlap_mode_def(include_exclude_statuses)})
+        entity = _entity_spec("room_reservation", schema)
+        return build_context(entity, schema)
+
+    def _svc(self, include_exclude_statuses: bool = False):
+        schema = _room_schema({"room_reservation": _overlap_mode_def(include_exclude_statuses)})
+        entity = _entity_spec("room_reservation", schema)
+        ctx = build_context(entity, schema)
+        return service_context(ctx, schema)
+
+    # --- Context parsing ---
+
+    def test_uses_overlap_availability_true(self):
+        assert self._ctx()["reservation_config"]["usesOverlapAvailability"] is True
+
+    def test_updates_pool_status_false(self):
+        assert self._ctx()["reservation_config"]["updatesPoolStatusOnReserve"] is False
+
+    def test_exclude_pool_statuses_empty_by_default(self):
+        assert self._ctx()["reservation_config"]["excludePoolStatuses"] == []
+
+    def test_exclude_pool_statuses_populated(self):
+        assert self._ctx(include_exclude_statuses=True)["reservation_config"]["excludePoolStatuses"] == [1]
+
+    # --- Generated service code ---
+
+    def _service_code(self, include_exclude_statuses: bool = False) -> str:
+        from jinja2 import Environment, FileSystemLoader
+        import os
+        schema = _room_schema({"room_reservation": _overlap_mode_def(include_exclude_statuses)})
+        entity = _entity_spec("room_reservation", schema)
+        ctx = build_context(entity, schema)
+        svc_ctx = service_context(ctx, schema)
+        template_dir = os.path.join(os.path.dirname(__file__), "..", "templates")
+        env = Environment(loader=FileSystemLoader(template_dir), keep_trailing_newline=True)
+        tmpl = env.get_template("service.ts.jinja2")
+        return tmpl.render({**ctx, **svc_ctx})
+
+    def test_status_update_suppressed_in_overlap_mode(self):
+        code = self._service_code()
+        assert "data: { status:" not in code
+
+    def test_assert_no_duplicate_reservation_present(self):
+        code = self._service_code()
+        assert "assertNoDuplicateReservation" in code
+
+    def test_find_many_used_in_overlap_mode(self):
+        code = self._service_code()
+        assert "findMany" in code
+
+    def test_not_in_filter_when_exclude_statuses_set(self):
+        code = self._service_code(include_exclude_statuses=True)
+        assert "notIn" in code
+
+    def test_no_not_in_filter_when_exclude_statuses_empty(self):
+        code = self._service_code(include_exclude_statuses=False)
+        assert "notIn" not in code
+
+    # --- Status mode backward compatibility ---
+
+    def test_status_mode_still_updates_pool_status(self):
+        """Status mode (no availabilitySource) must still emit pool status update."""
+        schema = _room_schema({"room_reservation": _item_mode_no_lines_def(with_date_range=True)})
+        entity = _entity_spec("room_reservation", schema)
+        ctx = build_context(entity, schema)
+        svc_ctx = service_context(ctx, schema)
+        from jinja2 import Environment, FileSystemLoader
+        import os
+        template_dir = os.path.join(os.path.dirname(__file__), "..", "templates")
+        env = Environment(loader=FileSystemLoader(template_dir), keep_trailing_newline=True)
+        tmpl = env.get_template("service.ts.jinja2")
+        code = tmpl.render({**ctx, **svc_ctx})
+        assert "data: { status:" in code
+
+    def test_status_mode_uses_overlap_false(self):
+        schema = _room_schema({"room_reservation": _item_mode_no_lines_def()})
+        entity = _entity_spec("room_reservation", schema)
+        ctx = build_context(entity, schema)
+        assert ctx["reservation_config"]["usesOverlapAvailability"] is False
+
+    def test_status_mode_updates_pool_true(self):
+        schema = _room_schema({"room_reservation": _item_mode_no_lines_def()})
+        entity = _entity_spec("room_reservation", schema)
+        ctx = build_context(entity, schema)
+        assert ctx["reservation_config"]["updatesPoolStatusOnReserve"] is True
+
+    # --- Validation ---
+
+    def test_overlap_without_date_range_raises(self):
+        schema = _room_schema({
+            "room_reservation": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}, "room_id": {"type": ["string", "null"]}},
+                "x-reservation": {
+                    "mode": "item",
+                    "pool": {"entity": "room"},
+                    "request": {"criteria": {"room_type_id": "room_type_id"}},
+                    "policy": {"availabilitySource": "overlap"},
+                    "result": {"allocatedField": "room_id"},
+                },
+            }
+        })
+        with pytest.raises(SchemaValidationError, match="dateRange"):
+            validate_schema(schema)
+
+    def test_exclude_pool_statuses_non_integer_raises(self):
+        schema = _room_schema({
+            "room_reservation": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}, "room_id": {"type": ["string", "null"]}},
+                "x-reservation": {
+                    "mode": "item",
+                    "pool": {"entity": "room"},
+                    "request": {
+                        "criteria": {"room_type_id": "room_type_id", "dateRange": {"start": "check_in", "end": "check_out"}},
+                    },
+                    "policy": {
+                        "availabilitySource": "overlap",
+                        "excludePoolStatuses": ["maintenance"],
+                    },
+                    "result": {"allocatedField": "room_id"},
+                },
+            }
+        })
+        with pytest.raises(SchemaValidationError, match="integers"):
+            validate_schema(schema)
