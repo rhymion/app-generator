@@ -1925,7 +1925,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 f" bridgeId={{String((src as Record<string, unknown>).{_bk['parent_fk']} ?? '')}}"
                 f" parentType=\"{_parent_type}\""
                 f" parentId={{src.id}}"
-                f" title={{te('{to_camel_case(_ck)}')}} />"
+                f" title={{te('{to_camel_case(_ck)}')}} readOnly />"
             )
         custom_view_imports = '\n'.join(filter(None, [custom_view_imports, *_bridge_imports]))
 
@@ -2349,13 +2349,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     ]))
     if bridge_child_ir:
         # Stage 2: bridge parent UI.
-        # Edit mode: parent info is shown read-only via readonly_fields (bridge FK disabled).
+        # Edit mode: parent type and label displayed read-only so the user sees context.
         # New mode:  hidden inputs carry selectedParentType/Id (populated by parent-embedded create).
         _bc_bridge_name = bridge_child_ir['name']
         _bc_fk_prop = f'{_bc_bridge_name}_id'
         _bridge_jsx = (
             f"      {{/* bridge-parent: {_bc_bridge_name} — set by parent-embedded create, not switchable */}}\n"
-            f"      {{!isEdit && (\n"
+            f"      {{isEdit ? (\n"
+            f"        <>\n"
+            f"          <AppFieldText label={{tf('parentType')}} value={{src.parent_type ?? ''}} readOnly />\n"
+            f"          <AppFieldText label={{tf('parentLabel')}} value={{src.parent_label ?? ''}} readOnly />\n"
+            f"        </>\n"
+            f"      ) : (\n"
             f"        <>\n"
             f"          <input type=\"hidden\" ref={{selectedParentTypeRef}} defaultValue={{initialParentType ?? ''}} />\n"
             f"          <input type=\"hidden\" ref={{selectedParentIdRef}} defaultValue={{initialParentId ?? ''}} />\n"
@@ -2481,6 +2486,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         child_imports_parts.append(f"import {{ {', '.join(col_fn_names)} }} from '../{parent}/column_def';")
     if has_indep_list_children:
         child_imports_parts.append("import ListWrapper from '@/components/_standard/ListWrapper';")
+
+    # Bridge child DataGrids on the parent edit page (P1: mutation affordances on edit, not detail).
+    _upsert_parent_type = ctx.get('model', ctx.get('parent', ''))
+    _bridge_kids_upsert = collect_parent_bridge_children(_upsert_parent_type, schema) if schema else []
+    for _bku in _bridge_kids_upsert:
+        _cku = _bku['child']
+        _cpu = to_pascal_case(_cku)
+        child_imports_parts.append(f"import {_cpu}BridgeGrid from '../{_cku}/{_cpu}BridgeGrid';")
+
     child_imports = '\n'.join(child_imports_parts)
 
     # Child variables (useRef)
@@ -2933,6 +2947,24 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     child_grid_components = '\n'.join(child_grid_components_parts)
 
+    # Bridge child DataGrids on the parent edit page: isEdit-guarded, readOnly={false} to show mutation affordances.
+    bridge_edit_grids_parts = []
+    for _bku in _bridge_kids_upsert:
+        _cku = _bku['child']
+        _cpu = to_pascal_case(_cku)
+        _cku_camel = to_camel_case(_cku)
+        bridge_edit_grids_parts.append(
+            f"      {{isEdit && (\n"
+            f"        <{_cpu}BridgeGrid\n"
+            f"          bridgeId={{String((src as Record<string, unknown>).{_bku['parent_fk']} ?? '')}}\n"
+            f"          parentType=\"{_upsert_parent_type}\"\n"
+            f"          parentId={{src.id}}\n"
+            f"          title={{te('{_cku_camel}')}}\n"
+            f"        />\n"
+            f"      )}}"
+        )
+    bridge_edit_grids = '\n'.join(bridge_edit_grids_parts)
+
     # Read-only JSX for independent mandatory-FK list children (isEdit-guarded, no add/delete)
     indep_list_readonly_parts = []
     for c in indep_list_ch:
@@ -3377,6 +3409,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'child_form_data_handling': child_form_data_handling,
         'child_validation_code':    _child_validation_code_merged,
         'child_grid_components':    child_grid_components,
+        'bridge_edit_grids':        bridge_edit_grids,
         'has_indep_list_children':  has_indep_list_children,
         'indep_list_readonly_jsx':  indep_list_readonly_jsx,
         'form_upsert_params':       form_upsert_params,

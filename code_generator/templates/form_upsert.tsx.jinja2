@@ -149,6 +149,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% if child_grid_components %}
 {{ child_grid_components }}
 {% endif %}
+{% if bridge_edit_grids %}
+{{ bridge_edit_grids }}
+{% endif %}
 {% if indep_list_readonly_jsx %}
 {{ indep_list_readonly_jsx }}
 {% endif %}

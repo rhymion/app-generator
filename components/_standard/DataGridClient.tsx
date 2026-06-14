@@ -38,6 +38,7 @@ interface DisplayFieldConfig<T> {
   headerName: string;
   width?: number;
   format?: 'date-time' | 'date' | 'time';
+  enumLabels?: Record<number, string>;
 }
 
 interface DataGridClientProps<T extends BaseEntity> {
@@ -59,6 +60,8 @@ interface DataGridClientProps<T extends BaseEntity> {
   displayFields?: DisplayFieldConfig<T>[];
   permissions?: ModelPermissions;
   primaryField?: keyof T;
+  /** When true, edit and create links open in a new tab. Use in parent-embedded bridge grids. */
+  openLinksInNewTab?: boolean;
 }
 
 export default function DataGridClient<T extends BaseEntity>({
@@ -74,6 +77,7 @@ export default function DataGridClient<T extends BaseEntity>({
   displayFields,
   permissions = { create: true, read: true, update: true, delete: true },
   primaryField = 'name' as keyof T,
+  openLinksInNewTab,
 }: DataGridClientProps<T>) {
   const serverMode = typeof fetchPage === 'function';
   const initialItems: T[] = (serverMode ? initialRows : src) ?? [];
@@ -191,6 +195,7 @@ export default function DataGridClient<T extends BaseEntity>({
         const fieldValue = row[fieldConfig.field];
         if (fieldValue === null || fieldValue === undefined) return '';
         if (fieldConfig.format) return formatLabelValue(fieldValue, fieldConfig.format);
+        if (fieldConfig.enumLabels && typeof fieldValue === 'number') return fieldConfig.enumLabels[fieldValue] ?? String(fieldValue);
         if (typeof fieldValue === 'object' && 'name' in (fieldValue as object)) return (fieldValue as unknown as { name: string }).name;
         return String(fieldValue);
       },
@@ -207,7 +212,7 @@ export default function DataGridClient<T extends BaseEntity>({
       filterable: false,
       renderCell: (params) => {
         return (
-          <Link href={`${basePath}/edit/${params.id}`}>
+          <Link href={`${basePath}/edit/${params.id}`} target={openLinksInNewTab ? '_blank' : undefined} rel={openLinksInNewTab ? 'noopener noreferrer' : undefined}>
             <Tooltip title="Edit">
               <IconButton size="small" aria-label="Edit" color="primary">
                 <EditIcon fontSize="small" />
