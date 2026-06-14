@@ -374,14 +374,24 @@ def generate(schema_path: str, output_dir: str) -> None:
         _self_bridge = get_new_form_bridge(schema['definitions'].get(model, {}))
         if _self_bridge:
             _bg_cols = (schema['definitions'].get(model, {}).get('x-display') or {}).get('table') or []
+            _model_props = schema['definitions'].get(model, {}).get('properties', {}) or {}
             _df_entries = []
             for _col in _bg_cols:
                 for _fname, _fcfg in _col.items():
                     _w = (_fcfg or {}).get('width')
-                    _df_entries.append(
-                        "{ field: '%s', headerName: '%s'%s }"
-                        % (_fname, _fname, f', width: {_w}' if _w else '')
-                    )
+                    _prop_def = _model_props.get(_fname, {})
+                    _enum_vals = _prop_def.get('enum') if isinstance(_prop_def.get('enum'), list) and _prop_def.get('type') in ('integer', 'number') else None
+                    if _enum_vals:
+                        _enum_map = ', '.join(f"{i}: '{v}'" for i, v in enumerate(_enum_vals))
+                        _df_entries.append(
+                            "{ field: '%s', headerName: '%s'%s, enumLabels: { %s } }"
+                            % (_fname, _fname, f', width: {_w}' if _w else '', _enum_map)
+                        )
+                    else:
+                        _df_entries.append(
+                            "{ field: '%s', headerName: '%s'%s }"
+                            % (_fname, _fname, f', width: {_w}' if _w else '')
+                        )
             if not _df_entries:
                 _df_entries = ["{ field: 'id', headerName: 'id' }"]
             _write(

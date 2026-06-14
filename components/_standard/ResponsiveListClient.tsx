@@ -17,6 +17,7 @@ interface DisplayFieldConfig<T> {
   headerName: string;
   width?: number;
   format?: 'date-time' | 'date' | 'time';
+  enumLabels?: Record<number, string>;
 }
 
 interface ResponsiveListClientProps<T extends BaseEntity> {
@@ -37,6 +38,8 @@ interface ResponsiveListClientProps<T extends BaseEntity> {
   primaryField?: keyof T;
   /** Pixel width below which to switch to card layout. Defaults to 768. */
   mobileBreakpoint?: number;
+  /** When true, edit links open in a new tab. Used in parent-embedded bridge grids. */
+  openLinksInNewTab?: boolean;
 }
 
 export default function ResponsiveListClient<T extends BaseEntity>({
@@ -53,6 +56,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
   permissions,
   primaryField,
   mobileBreakpoint = 768,
+  openLinksInNewTab,
 }: ResponsiveListClientProps<T>) {
   const isMobile = useMediaQuery(`(max-width: ${mobileBreakpoint}px)`);
 
@@ -89,6 +93,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
       displayFields={displayFields}
       permissions={permissions}
       primaryField={primaryField}
+      openLinksInNewTab={openLinksInNewTab}
     />
   );
 }

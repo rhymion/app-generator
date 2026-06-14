@@ -29,9 +29,11 @@ interface {{ child_pascal }}BridgeGridProps {
   parentId: string;
   /** Section heading + entity label (translated by the parent). */
   title: string;
+  /** When true, suppresses mutation affordances (add/delete). Use on parent detail pages. */
+  readOnly?: boolean;
 }
 
-export default function {{ child_pascal }}BridgeGrid({ bridgeId, parentType, parentId, title }: {{ child_pascal }}BridgeGridProps) {
+export default function {{ child_pascal }}BridgeGrid({ bridgeId, parentType, parentId, title, readOnly }: {{ child_pascal }}BridgeGridProps) {
   // null = not yet loaded. The grid below mounts only once rows resolve, because
   // the underlying DataGrid seeds its row state once on mount and ignores later
   // src changes — so it must receive the data on its first render.
@@ -51,9 +53,11 @@ export default function {{ child_pascal }}BridgeGrid({ bridgeId, parentType, par
     <Box sx={sectionSx}>
       <Box sx={headerSx}>
         <h2 style={headingStyle}>{title}</h2>
-        <Button component={Link} href={createHref} variant="outlined" size="small">
-          {`+ ${title}`}
-        </Button>
+        {!readOnly && (
+          <Button component={Link} href={createHref} variant="outlined" size="small" target="_blank" rel="noopener noreferrer">
+            {`+ ${title}`}
+          </Button>
+        )}
       </Box>
       {rows !== null && (
         <ResponsiveListClient<{{ child_pascal }}>
@@ -62,6 +66,8 @@ export default function {{ child_pascal }}BridgeGrid({ bridgeId, parentType, par
           removeAction={remove{{ child_pascal }}}
           entityLabel={title}
           displayFields={[{{ display_fields }}]}
+          permissions={{ '{{' }} create: false, read: true, update: true, delete: true {{ '}}' }}
+          openLinksInNewTab={!readOnly}
         />
       )}
     </Box>
