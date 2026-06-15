@@ -18,6 +18,7 @@ interface DisplayFieldConfig<T> {
   width?: number;
   format?: 'date-time' | 'date' | 'time';
   enumLabels?: Record<number, string>;
+  uriKind?: 'image' | 'link';
 }
 
 interface ResponsiveListClientProps<T extends BaseEntity> {

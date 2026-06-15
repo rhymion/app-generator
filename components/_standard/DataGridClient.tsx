@@ -39,6 +39,7 @@ interface DisplayFieldConfig<T> {
   width?: number;
   format?: 'date-time' | 'date' | 'time';
   enumLabels?: Record<number, string>;
+  uriKind?: 'image' | 'link';
 }
 
 interface DataGridClientProps<T extends BaseEntity> {
@@ -183,6 +184,23 @@ export default function DataGridClient<T extends BaseEntity>({
           >
             {`${(fieldValue && typeof fieldValue === 'object' && 'name' in fieldValue ? fieldValue.name : String(fieldValue || params.id))}`}
           </Link>;
+        },
+      };
+    }
+
+    if (fieldConfig.uriKind === 'link') {
+      return {
+        field: fieldConfig.field as string,
+        headerName: fieldConfig.headerName,
+        width: fieldConfig.width || 200,
+        renderCell: (params) => {
+          const href = params.row[fieldConfig.field] as string | null | undefined;
+          if (!href) return null;
+          return (
+            <a href={href} target="_blank" rel="noopener noreferrer" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth: '100%' }}>
+              {href}
+            </a>
+          );
         },
       };
     }
