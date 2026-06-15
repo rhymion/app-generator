@@ -109,14 +109,14 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     parent_type: (() => {
 {% for bpo in bridge_parent_options %}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (({{ parent_camel }}.{{ bridge_child_ir.name }} as any)?.{{ bpo.target }}) return '{{ bpo.target }}';
+      if ((({{ parent_camel }} as any).{{ bridge_child_ir.name }})?.{{ bpo.target }}) return '{{ bpo.target }}';
 {% endfor %}
       return null;
     })(),
     parent_label: (() => {
 {% for bpo in bridge_parent_options %}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (({{ parent_camel }}.{{ bridge_child_ir.name }} as any)?.{{ bpo.target }}) return String(({{ parent_camel }}.{{ bridge_child_ir.name }} as any).{{ bpo.target }}.{{ bpo.label_field }} ?? '');
+      if ((({{ parent_camel }} as any).{{ bridge_child_ir.name }})?.{{ bpo.target }}) return String((({{ parent_camel }} as any).{{ bridge_child_ir.name }})?.{{ bpo.target }}.{{ bpo.label_field }} ?? '');
 {% endfor %}
       return null;
     })(),
