@@ -35,6 +35,7 @@ interface DisplayFieldConfig<T> {
   headerName: string;
   width?: number;
   format?: 'date-time' | 'date' | 'time';
+  uriKind?: 'image' | 'link';
 }
 
 interface CardListClientProps<T extends BaseEntity> {
@@ -172,6 +173,20 @@ export default function CardListClient<T extends BaseEntity>({
                     )}
                   </Box>
                   {secondaryFields.map((fieldConfig) => {
+                    if (fieldConfig.uriKind === 'link') {
+                      const href = item[fieldConfig.field] as string | null | undefined;
+                      if (!href) return null;
+                      return (
+                        <Box key={String(fieldConfig.field)} sx={{ mt: 0.5 }}>
+                          <Typography variant="caption" color="text.secondary" component="span">
+                            {fieldConfig.headerName}:{' '}
+                          </Typography>
+                          <a href={href} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.875rem', wordBreak: 'break-all' }}>
+                            {href}
+                          </a>
+                        </Box>
+                      );
+                    }
                     const value = formatValue(item, fieldConfig.field, fieldConfig.format);
                     if (!value) return null;
                     return (

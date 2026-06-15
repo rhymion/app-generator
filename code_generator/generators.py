@@ -356,19 +356,17 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                 enum_ns  = prop.get('x-enum-namespace')
 
                 if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
-                    if enum_ns:
-                        keys = [
-                            (v.lower()[0] + v[1:] if isinstance(v, str) and not v.lstrip('-').isdigit() else str(v))
-                            for v in enum_vals
-                        ]
-                        var_name = f'{to_camel_case(field_name)}Labels'
-                        # avoid duplicates
-                        if not any(e['var_name'] == var_name for e in enum_ns_list):
-                            enum_ns_list.append({'var_name': var_name, 'ns': enum_ns, 'keys': keys})
-                        add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
-                    else:
-                        labels = ', '.join(f"'{v}'" for v in enum_vals)
-                        add_formatting(field_name, f"([{labels}] as const)[item.{field_name} as number] ?? ''")
+                    var_name = f'{to_camel_case(field_name)}Labels'
+                    ns_to_use = enum_ns or 'Fields'
+                    entries = [
+                        (i, f"{field_name}_{v}" if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
+                        if not enum_ns
+                        else (i, v.lower()[0] + v[1:] if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
+                        for i, v in enumerate(enum_vals)
+                    ]
+                    if not any(e['var_name'] == var_name for e in enum_ns_list):
+                        enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries})
+                    add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
 
             if config.get('primary'):
                 primary_field = field_name
@@ -383,7 +381,12 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
             if fmt is None and field_name in _PRISMA_DATETIME:
                 fmt = 'date-time'
             format_attr = f", format: '{fmt}'" if fmt in ('date-time', 'date', 'time') else ''
-            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr} }}")
+            uri_kind_attr = ''
+            if fmt == 'uri' and field_name in model_props:
+                from build_context import get_uri_kind
+                if get_uri_kind(model_props[field_name]) == 'link':
+                    uri_kind_attr = ", uriKind: 'link'"
+            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr}{uri_kind_attr} }}")
 
         display_fields_code = ',\n'.join(fields_code_parts)
 
@@ -396,18 +399,17 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
             enum_vals = prop.get('enum')
             enum_ns = prop.get('x-enum-namespace')
             if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
-                if enum_ns:
-                    keys = [
-                        (v.lower()[0] + v[1:] if isinstance(v, str) and not v.lstrip('-').isdigit() else str(v))
-                        for v in enum_vals
-                    ]
-                    var_name = f'{to_camel_case(field_name)}Labels'
-                    if not any(e['var_name'] == var_name for e in enum_ns_list):
-                        enum_ns_list.append({'var_name': var_name, 'ns': enum_ns, 'keys': keys})
-                    add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
-                else:
-                    labels = ', '.join(f"'{v}'" for v in enum_vals)
-                    add_formatting(field_name, f"([{labels}] as const)[item.{field_name} as number] ?? ''")
+                var_name = f'{to_camel_case(field_name)}Labels'
+                ns_to_use = enum_ns or 'Fields'
+                entries = [
+                    (i, f"{field_name}_{v}" if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
+                    if not enum_ns
+                    else (i, v.lower()[0] + v[1:] if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
+                    for i, v in enumerate(enum_vals)
+                ]
+                if not any(e['var_name'] == var_name for e in enum_ns_list):
+                    enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries})
+                add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
 
     needs_formatting = bool(formatting_entries)
     formatted_var    = f'formatted{parent_pascal}s'
@@ -1115,6 +1117,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     date_time_flds     = []
     image_flds         = []
+    link_flds          = []
     boolean_flds       = []
     enum_integer_flds  = []
     other_flds         = []
@@ -1128,7 +1131,11 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         if actual == 'string' and fmt in ('date', 'date-time', 'time'):
             date_time_flds.append(p)
         elif actual == 'string' and fmt == 'uri':
-            image_flds.append(p)
+            from build_context import get_uri_kind
+            if get_uri_kind(prop) == 'link':
+                link_flds.append(p)
+            else:
+                image_flds.append(p)
         elif actual == 'boolean':
             boolean_flds.append(p)
         elif actual in ('integer', 'number') and isinstance(prop.get('enum'), list):
@@ -1138,6 +1145,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     needs_datetime_wrapper = bool(date_time_flds)
     needs_image_display    = bool(image_flds)
+    needs_link_display     = bool(link_flds)
 
     def _tf(p: str):
         return to_camel_case(p)
@@ -1219,6 +1227,12 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     # Image fields
     img_jsxs = [f"      <ImageDisplay url={{src.{p}}} alt={{tf('{_tf(p)}')}} />" for p in image_flds]
 
+    # Link URI fields
+    link_jsxs = [
+        f"      <AppFieldExternalLink label={{tf('{_tf(p)}')}} href={{src.{p} || null}} />"
+        for p in link_flds
+    ]
+
     # Boolean fields
     bool_jsxs = [
         f"      <AppFieldBoolean\n        label={{tf('{_tf(p)}')}}\n        checked={{Boolean(src.{p})}}\n        readOnly\n      />"
@@ -1245,7 +1259,12 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 for i, v in enumerate(enum_vals)
             )
         else:
-            opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
+            opts = ', '.join(
+                (f"{{ value: {i}, label: tf('{p}_{v}') }}"
+                 if isinstance(v, str) and not str(v).lstrip('-').isdigit()
+                 else f"{{ value: {int(v) if isinstance(v, (int, float)) else i}, label: tf('{p}_{v}') }}")
+                for i, v in enumerate(enum_vals)
+            )
         enum_opt_setups.append(f"  const {state_name}Options = [{opts}];")
         fk = _tf(p)
         enum_int_jsxs.append(
@@ -1269,6 +1288,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         '\n'.join(bool_jsxs),
         '\n'.join(dt_jsxs),
         '\n'.join(img_jsxs),
+        '\n'.join(link_jsxs),
         '\n'.join(custom_jsxs),
     ]))
 
@@ -1551,6 +1571,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     return {
         'needs_datetime_wrapper': needs_datetime_wrapper,
         'needs_image_display':    needs_image_display,
+        'needs_link_display':     needs_link_display,
         'has_rel_links':          has_rel_links,
         'needs_accordion':        needs_accordion,
         'has_comment_children':   has_comment_children,
@@ -1604,6 +1625,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     number_props         = [p for p in cats['number']         if p not in readonly_field_names]
     date_time_props      = [p for p in cats['date_time']      if p not in readonly_field_names]
     image_props          = [p for p in cats['image']          if p not in readonly_field_names]
+    link_uri_props       = [p for p in cats.get('link_uri', []) if p not in readonly_field_names]
     boolean_props        = [p for p in cats['boolean']        if p not in readonly_field_names]
     enum_int_props       = [p for p in cats['enum_integer']   if p not in readonly_field_names]
     enum_str_props       = [p for p in cats.get('enum_string', [])  if p not in readonly_field_names]
@@ -1614,8 +1636,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # ---- States / Refs ----
     text_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in text_props)
+    link_uri_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in link_uri_props)
     number_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in number_props)
-    parent_refs = '\n'.join(filter(None, [text_refs, number_refs]))
+    parent_refs = '\n'.join(filter(None, [text_refs, link_uri_refs, number_refs]))
 
     bridge_child_ir = ctx.get('bridge_child_ir')
     if bridge_child_ir:
@@ -1781,6 +1804,21 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        date_time={{{sn} ? {sn}.toDate() : null}}\n"
             f"        {'required' if req else ''}\n"
             f"        onChange={{(newValue: dayjs.Dayjs | null) => set{setter}(newValue)}}\n"
+            f"      />"
+        )
+
+    # Link URI fields (URL text input, no upload)
+    link_uri_jsxs = []
+    for p in link_uri_props:
+        fk  = _tf(p)
+        req = p in (model_def.get('required') or [])
+        link_uri_jsxs.append(
+            f"      <AppFieldText\n"
+            f"        label={{tf('{fk}')}}\n"
+            f"        inputRef={{{p}Ref}}\n"
+            f"        defaultValue={{src.{p} || ''}}\n"
+            f"        {'required' if req else ''}\n"
+            f"        slotProps={{{{ htmlInput: {{ type: 'url' }} }}}}\n"
             f"      />"
         )
 
@@ -1976,6 +2014,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     all_parent_fields_jsx = '\n'.join(filter(None, [
         '\n'.join(text_jsxs),
+        '\n'.join(link_uri_jsxs),
         '\n'.join(entity_select_jsxs),
         '\n'.join(rel_jsxs),
         '\n'.join(num_jsxs),
@@ -2011,6 +2050,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # ---- FormData sets ----
     text_ds  = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in text_props)
+    link_uri_ds = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in link_uri_props)
     entity_select_ds = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} || '');" for p in entity_select_props)
     num_ds   = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in number_props)
     dt_ds_parts = []
@@ -2034,7 +2074,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             return f"    formData.set('{p}', {safe_var_name(p)}.toString());"
         return f"    formData.set('{p}', {safe_var_name(p)});"
     cust_ds  = '\n'.join(_custom_form_data_line(p) for p in custom_upsert_props)
-    parent_form_data_sets = '\n'.join(filter(None, [text_ds, entity_select_ds, rel_ds, num_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, cust_ds]))
+    parent_form_data_sets = '\n'.join(filter(None, [text_ds, link_uri_ds, entity_select_ds, rel_ds, num_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, cust_ds]))
 
     # ---- Children analysis ----
     # Use the pre-filtered embedded_ch from build_context (passed as non_comment_ch in ctx).
@@ -2688,6 +2728,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # Validation call
     validation_entry_lines = ['    isEdit,', '    id: src.id,']
     validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in text_props)
+    validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in link_uri_props)
     validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in number_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in date_time_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in image_props)

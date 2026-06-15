@@ -388,9 +388,11 @@ def generate(schema_path: str, output_dir: str) -> None:
                             % (_fname, _fname, f', width: {_w}' if _w else '', _enum_map)
                         )
                     else:
+                        from build_context import get_uri_kind
+                        _uri_kind_attr = ", uriKind: 'link'" if get_uri_kind(_prop_def) == 'link' else ''
                         _df_entries.append(
-                            "{ field: '%s', headerName: tf('%s')%s }"
-                            % (_fname, _fname, f', width: {_w}' if _w else '')
+                            "{ field: '%s', headerName: tf('%s')%s%s }"
+                            % (_fname, _fname, f', width: {_w}' if _w else '', _uri_kind_attr)
                         )
             if not _df_entries:
                 _df_entries = ["{ field: 'id', headerName: 'id' }"]

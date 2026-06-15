@@ -3,7 +3,7 @@ Tests for build_context.py — selection targets, embedded_ch filtering,
 use_connect logic, and field categorisation.
 """
 import pytest
-from build_context import build_context, _get_selection_targets, _categorize_form_fields
+from build_context import build_context, _get_selection_targets, _categorize_form_fields, get_uri_kind
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +328,31 @@ class TestCategorizeFormFields:
     def test_uri_format_is_image(self):
         cats = self._categorize({"photo": {"type": "string", "format": "uri"}})
         assert "photo" in cats["image"]
+        assert "photo" not in cats.get("link_uri", [])
+
+    def test_uri_format_explicit_image_kind(self):
+        cats = self._categorize({"photo": {"type": "string", "format": "uri", "x-uri-kind": "image"}})
+        assert "photo" in cats["image"]
+        assert "photo" not in cats.get("link_uri", [])
+
+    def test_uri_format_link_kind(self):
+        cats = self._categorize({"url": {"type": "string", "format": "uri", "x-uri-kind": "link"}})
+        assert "url" in cats["link_uri"]
+        assert "url" not in cats["image"]
+
+    def test_get_uri_kind_default_image(self):
+        assert get_uri_kind({"type": "string", "format": "uri"}) == "image"
+
+    def test_get_uri_kind_explicit_link(self):
+        assert get_uri_kind({"type": "string", "format": "uri", "x-uri-kind": "link"}) == "link"
+
+    def test_get_uri_kind_non_uri_returns_none(self):
+        assert get_uri_kind({"type": "string"}) is None
+
+    def test_get_uri_kind_invalid_raises(self):
+        import pytest
+        with pytest.raises(ValueError, match="x-uri-kind must be"):
+            get_uri_kind({"type": "string", "format": "uri", "x-uri-kind": "foo"})
 
     def test_custom_component_removed_from_other_categories(self):
         cats = self._categorize({

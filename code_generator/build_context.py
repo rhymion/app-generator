@@ -70,6 +70,16 @@ def _is_date_field(defn: dict) -> bool:
     return _get_actual_type(defn) == 'string' and defn.get('format') in ('date', 'date-time', 'time')
 
 
+def get_uri_kind(prop: dict) -> str | None:
+    """Return the uri kind for a format:uri property. Default is 'image'."""
+    if prop.get('format') != 'uri':
+        return None
+    kind = prop.get('x-uri-kind', 'image')
+    if kind not in ('image', 'link'):
+        raise ValueError(f"x-uri-kind must be 'image' or 'link', got: {kind!r}")
+    return kind
+
+
 def _dedupe_ordered(items):
     seen = set()
     result = []
@@ -490,6 +500,7 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
     enum_integer  = []
     enum_string   = []
     image         = []
+    link_uri      = []
     boolean       = []
     entity_select = []
     text          = []
@@ -511,7 +522,10 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         elif actual == 'boolean':
             boolean.append(p)
         elif actual == 'string' and fmt == 'uri':
-            image.append(p)
+            if get_uri_kind(defn) == 'link':
+                link_uri.append(p)
+            else:
+                image.append(p)
         elif actual == 'string' and defn.get('x-entity-select'):
             entity_select.append(p)
         elif actual == 'string' and isinstance(defn.get('enum'), list):
@@ -526,6 +540,7 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         'enum_integer': enum_integer,
         'enum_string': enum_string,
         'image': image,
+        'link_uri': link_uri,
         'boolean': boolean,
         'entity_select': entity_select,
         'text': text,
