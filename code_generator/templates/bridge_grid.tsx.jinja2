@@ -7,6 +7,7 @@
 // renders client-side (a parent owns few children), with an Add link that carries
 // parent context to the child create form.
 import { useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import type { SxProps, Theme } from '@mui/material/styles';
 import Box from '@mui/material/Box';
 import Tooltip from '@mui/material/Tooltip';
@@ -39,6 +40,7 @@ export default function {{ child_pascal }}BridgeGrid({ bridgeId, parentType, par
   // null = not yet loaded. The grid below mounts only once rows resolve, because
   // the underlying DataGrid seeds its row state once on mount and ignores later
   // src changes — so it must receive the data on its first render.
+  const tf = useTranslations('Fields');
   const [rows, setRows] = useState<{{ child_pascal }}[] | null>(null);
 
   useEffect(() => {
