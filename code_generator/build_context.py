@@ -1550,13 +1550,13 @@ def build_context(entity: dict, schema: dict) -> dict:
         _bc_bn_vm = bridge_child_ir['name']
         _eda = '      // eslint-disable-next-line @typescript-eslint/no-explicit-any'
         _type_cases = '\n'.join(
-            f"{_eda}\n      if (({parent_camel}.{_bc_bn_vm} as any)?.{bpo['target']}) return '{bpo['target']}';"
+            f"{_eda}\n      if ((({parent_camel} as any).{_bc_bn_vm})?.{bpo['target']}) return '{bpo['target']}';"
             for bpo in bridge_parent_options
         )
         _label_cases = '\n'.join(
             f"{_eda}\n"
-            f"      if (({parent_camel}.{_bc_bn_vm} as any)?.{bpo['target']})"
-            f" return String(({parent_camel}.{_bc_bn_vm} as any).{bpo['target']}.{bpo['label_field']} ?? '');"
+            f"      if ((({parent_camel} as any).{_bc_bn_vm})?.{bpo['target']})"
+            f" return String((({parent_camel} as any).{_bc_bn_vm})?.{bpo['target']}.{bpo['label_field']} ?? '');"
             for bpo in bridge_parent_options
         )
         _bp_virt_lines = (
