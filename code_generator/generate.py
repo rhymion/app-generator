@@ -382,14 +382,14 @@ def generate(schema_path: str, output_dir: str) -> None:
                     _prop_def = _model_props.get(_fname, {})
                     _enum_vals = _prop_def.get('enum') if isinstance(_prop_def.get('enum'), list) and _prop_def.get('type') in ('integer', 'number') else None
                     if _enum_vals:
-                        _enum_map = ', '.join(f"{i}: '{v}'" for i, v in enumerate(_enum_vals))
+                        _enum_map = ', '.join(f"{i}: tf('{_fname}_{v}')" for i, v in enumerate(_enum_vals))
                         _df_entries.append(
-                            "{ field: '%s', headerName: '%s'%s, enumLabels: { %s } }"
+                            "{ field: '%s', headerName: tf('%s')%s, enumLabels: { %s } }"
                             % (_fname, _fname, f', width: {_w}' if _w else '', _enum_map)
                         )
                     else:
                         _df_entries.append(
-                            "{ field: '%s', headerName: '%s'%s }"
+                            "{ field: '%s', headerName: tf('%s')%s }"
                             % (_fname, _fname, f', width: {_w}' if _w else '')
                         )
             if not _df_entries:
