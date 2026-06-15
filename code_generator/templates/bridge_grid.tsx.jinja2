@@ -9,7 +9,9 @@
 import { useEffect, useState } from 'react';
 import type { SxProps, Theme } from '@mui/material/styles';
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
+import Tooltip from '@mui/material/Tooltip';
+import IconButton from '@mui/material/IconButton';
+import AddIcon from '@mui/icons-material/Add';
 import { Link } from '@/i18n/navigation';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { fetch{{ child_pascal }}Page } from '@/lib/{{ child }}/getters';
@@ -54,9 +56,11 @@ export default function {{ child_pascal }}BridgeGrid({ bridgeId, parentType, par
       <Box sx={headerSx}>
         <h2 style={headingStyle}>{title}</h2>
         {!readOnly && (
-          <Button component={Link} href={createHref} variant="outlined" size="small" target="_blank" rel="noopener noreferrer">
-            {`+ ${title}`}
-          </Button>
+          <Tooltip title={title}>
+            <IconButton component={Link} href={createHref} color="primary" aria-label={title} target="_blank" rel="noopener noreferrer">
+              <AddIcon />
+            </IconButton>
+          </Tooltip>
         )}
       </Box>
       {rows !== null && (
@@ -66,7 +70,7 @@ export default function {{ child_pascal }}BridgeGrid({ bridgeId, parentType, par
           removeAction={remove{{ child_pascal }}}
           entityLabel={title}
           displayFields={[{{ display_fields }}]}
-          permissions={{ '{{' }} create: false, read: true, update: true, delete: true {{ '}}' }}
+          permissions={{ '{{' }} create: false, read: true, update: !readOnly, delete: !readOnly {{ '}}' }}
           openLinksInNewTab={!readOnly}
         />
       )}
