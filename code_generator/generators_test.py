@@ -9,6 +9,16 @@ Builds Jinja2 template contexts for:
 """
 import re
 
+# Messages Fields namespace for enum label translation.
+# Populated by set_messages_fields() before generating test specs.
+_messages_fields: dict = {}
+
+
+def set_messages_fields(fields: dict) -> None:
+    """Register the Fields namespace from messages/en.json for enum label lookup."""
+    global _messages_fields
+    _messages_fields = fields
+
 from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
 )
@@ -753,7 +763,12 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
     elif cat in ('enum', 'string_enum'):
         values = field.get('enum_values') or []
         first = next((v for v in values if v is not None), None)
-        return str(first) if first is not None else ''
+        if first is None:
+            return ''
+        if cat == 'enum' and _messages_fields:
+            key = f'{prop_name}_{first}'
+            return _messages_fields.get(key, str(first))
+        return str(first)
 
     elif cat == 'number':
         val = 100
@@ -806,7 +821,13 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
 
     elif cat in ('enum', 'string_enum'):
         values = [v for v in (field.get('enum_values') or []) if v is not None]
-        return str(values[1]) if len(values) > 1 else (str(values[0]) if values else '')
+        raw = values[1] if len(values) > 1 else (values[0] if values else None)
+        if raw is None:
+            return ''
+        if cat == 'enum' and _messages_fields:
+            key = f'{prop_name}_{raw}'
+            return _messages_fields.get(key, str(raw))
+        return str(raw)
 
     elif cat == 'number':
         val = 200
@@ -2015,7 +2036,12 @@ def spec_context(
             check_field_updated = second_label
         elif prim_meta.get('category') == 'enum':
             # Integer enum primary (e.g. plan.tier = [free, premium, vip])
-            enum_labels = [str(v) for v in (prim_meta.get('enum_values') or [])]
+            raw_vals = [str(v) for v in (prim_meta.get('enum_values') or [])]
+            prim_prop = prim_meta.get('prop_name', prim or '')
+            if _messages_fields:
+                enum_labels = [_messages_fields.get(f'{prim_prop}_{v}', v) for v in raw_vals]
+            else:
+                enum_labels = raw_vals
             list_id_1 = enum_labels[0] if enum_labels else f'Test {lbl} 1'
             list_id_is_unique = False
             after_create_id = enum_labels[0] if enum_labels else f'Test {lbl}'
@@ -2216,7 +2242,15 @@ def spec_context(
             (f for f in fields if f.get('label') == edit_field_label), None
         )
         if prim_edit_meta and prim_edit_meta.get('category') in ('entity_select', 'autocomplete', 'enum'):
-            edit_primary_cmd = f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
+            if prim_edit_meta.get('category') == 'enum':
+                # In edit mode the enum Autocomplete already has a value selected;
+                # clear it first so selectAutocomplete can open the dropdown cleanly.
+                edit_primary_cmd = (
+                    f"        cy.clearAutocomplete('{edit_field_label}');\n"
+                    f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
+                )
+            else:
+                edit_primary_cmd = f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
             use_deps_in_3_3 = prim_edit_meta.get('category') == 'autocomplete' and has_deps
         elif prim_is_fk:
             # User-account primary FKs (and any other primary FK that

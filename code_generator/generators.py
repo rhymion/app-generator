@@ -2249,7 +2249,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 for i, v in enumerate(enum_vals)
             )
         else:
-            opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
+            opts = ', '.join(
+                (f"{{ value: {i}, label: tf('{p}_{v}') }}"
+                 if isinstance(v, str) and not str(v).lstrip('-').isdigit()
+                 else f"{{ value: {int(v) if isinstance(v, (int, float)) else i}, label: tf('{p}_{v}') }}")
+                for i, v in enumerate(enum_vals)
+            )
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
         enum_int_jsxs.append(
@@ -3330,7 +3335,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                         for i, v in enumerate(_enum_vals)
                     )
                 else:
-                    _opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(_enum_vals))
+                    _opts = ', '.join(
+                        (f"{{ value: {i}, label: tf('{_fname}_{v}') }}"
+                         if isinstance(v, str) and not str(v).lstrip('-').isdigit()
+                         else f"{{ value: {int(v) if isinstance(v, (int, float)) else i}, label: tf('{_fname}_{v}') }}")
+                        for i, v in enumerate(_enum_vals)
+                    )
                 flatten_enum_opt_setups_upsert.append(f"  const {_opts_var} = [{_opts}];")
                 _accordion_fields_jsx.append(
                     f"        <AppFieldSelect\n"

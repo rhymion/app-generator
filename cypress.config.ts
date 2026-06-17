@@ -91,6 +91,27 @@ export default defineConfig({
           await prisma.comment.delete({ where: { id: commentId } });
           return null;
         },
+        async 'db:populateOrganizationWithUser'(length: number) {
+          // Creates organizations and enrolls the test user as a member.
+          // Required for searchAssociatedOrganizationOptions which filters by user membership.
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
+          const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+          if (!testUser) throw new Error('Test user not found. Make sure db:seed has run first.');
+          const records = [];
+          for (let i = 1; i <= length; i++) {
+            const record = await prisma.organization.create({
+              data: {
+                name: `Organization ${i}`,
+                creator_id: testUser.id,
+                updater_id: testUser.id,
+                users: { connect: [{ id: testUser.id }] },
+              },
+            });
+            records.push(record);
+          }
+          return JSON.parse(JSON.stringify(records));
+        },
         ...getGeneratedTasks(),
         async 'db:seedReservationInventory'(params: { quantity: number }) {
           const { seedReservationInventory } = require('./cypress/support/purchase_order/reservation_helper');
@@ -104,6 +125,7 @@ export default defineConfig({
 
       return config;
     },
+    retries: { runMode: 1, openMode: 0 },
     scrollBehavior: 'center',
     video: false,
     allowCypressEnv: false,
