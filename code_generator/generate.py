@@ -45,6 +45,7 @@ from generators_test import (
     tasks_registry_context,
     api_spec_context,
     db_helpers_context,
+    set_messages_fields,
 )
 from validation_context import build_validation_context
 
@@ -238,6 +239,13 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     env = _make_env()
     out = Path(output_dir)
+
+    # Load messages/en.json Fields namespace for enum label translation in Cypress tests
+    import json as _json
+    _msg_path = out / 'messages' / 'en.json'
+    if _msg_path.exists():
+        with open(_msg_path) as _mf:
+            set_messages_fields(_json.load(_mf).get('Fields', {}))
 
     # --- Bridge Prisma schema emission ---
     bridges = _collect_bridges(schema)
