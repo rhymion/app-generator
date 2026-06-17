@@ -22,8 +22,8 @@
  * Override here for dark-mode or custom branding.
  */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
 }
 
 @theme inline {
@@ -41,4 +41,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
+  font-family: 'Inter', 'Noto Sans JP', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }

@@ -28,9 +28,9 @@ interface AppButtonProps {
 export default function AppButton({
   children,
   onClick,
-  variant,
+  variant = 'contained',
   color,
-  size,
+  size = 'medium',
   disabled,
   type,
   fullWidth,

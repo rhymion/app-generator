@@ -57,6 +57,10 @@ model user {
   // cascade to users.
   tenant_id                 String              @default("default")
   tenant                    tenant              @relation("UserTenant", fields: [tenant_id], references: [id], onDelete: Restrict)
+  plan_id                   String?
+  plan                      plan?               @relation("UserPlan", fields: [plan_id], references: [id])
+  sub_accounts              sub_account[]       @relation("UserSubAccounts")
+  reactions                 reaction[]          @relation("UserReactions")
   // MFA / TOTP (S5). `mfa_secret` is AES-256-GCM ciphertext produced by
   // lib/mfa/crypto.ts; `mfa_enabled` only flips true after a successful
   // first-code verification. `mfa_recovery_codes` is the back-relation
@@ -92,50 +96,285 @@ model user {
   updated_dashboards        dashboard[]         @relation("DashboardUpdater")
   created_tenants           tenant[]            @relation("TenantCreator")
   updated_tenants           tenant[]            @relation("TenantUpdater")
+  created_works             work[]              @relation("WorkCreator")
+  updated_works             work[]              @relation("WorkUpdater")
+  created_characters        character[]         @relation("CharacterCreator")
+  updated_characters        character[]         @relation("CharacterUpdater")
+  created_scenes            scene[]             @relation("SceneCreator")
+  updated_scenes            scene[]             @relation("SceneUpdater")
+  created_musics            music[]             @relation("MusicCreator")
+  updated_musics            music[]             @relation("MusicUpdater")
+  created_creators          creator[]           @relation("CreatorCreator")
+  updated_creators          creator[]           @relation("CreatorUpdater")
+  created_channels          channel[]           @relation("ChannelCreator")
+  updated_channels          channel[]           @relation("ChannelUpdater")
+  created_fc_links          fc_link[]           @relation("FcLinkCreator")
+  updated_fc_links          fc_link[]           @relation("FcLinkUpdater")
+  created_tip_txs           tip_tx[]            @relation("TipTxCreator")
+  updated_tip_txs           tip_tx[]            @relation("TipTxUpdater")
+  created_plans             plan[]              @relation("PlanCreator")
+  updated_plans             plan[]              @relation("PlanUpdater")
 
   @@index([api_key])
   @@index([creator_id])
   @@index([tenant_id])
 }
 
+model plan {
+  id                      String   @id @default(cuid())
+  tier                    Int
+  reaction_kinds_allowed  Int
+  sub_account_limit       Int
+  can_view_paid_posts     Boolean
+  users                   user[]   @relation("UserPlan")
+  creator_id              String?
+  creator                 user?    @relation("PlanCreator", fields: [creator_id], references: [id])
+  updater_id              String?
+  updater                 user?    @relation("PlanUpdater", fields: [updater_id], references: [id])
+  created_at              DateTime @default(now()) @db.Timestamptz(0)
+  updated_at              DateTime @updatedAt @db.Timestamptz(0)
+
+  @@index([creator_id])
+}
+
+model sub_account {
+  id              String   @id @default(cuid())
+  parent_user_id  String
+  parent_user     user     @relation("UserSubAccounts", fields: [parent_user_id], references: [id], onDelete: Cascade)
+  nickname        String
+  created_at      DateTime @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime @updatedAt @db.Timestamptz(0)
+
+  @@index([parent_user_id])
+}
+
+model work {
+  id                  String      @id @default(cuid())
+  title               String
+  pattern             Int
+  status              Int
+  characters          character[]
+  scenes              scene[]
+  creator_id          String?
+  creator             user?       @relation("WorkCreator", fields: [creator_id], references: [id])
+  updater_id          String?
+  updater             user?       @relation("WorkUpdater", fields: [updater_id], references: [id])
+  created_at          DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at          DateTime    @updatedAt @db.Timestamptz(0)
+
+  channelable_id String       @unique
+  channelable    channelable? @relation("WorkChannelable", fields: [channelable_id], references: [id])
+
+  fc_linkable_id String       @unique
+  fc_linkable    fc_linkable? @relation("WorkFcLinkable", fields: [fc_linkable_id], references: [id])
+
+  @@index([creator_id])
+}
+
+model character {
+  id                  String      @id @default(cuid())
+  name                String
+  work_id             String
+  work                work        @relation(fields: [work_id], references: [id], onDelete: Cascade)
+  official_image      Boolean
+  scenes              scene[]     @relation("SceneCharacters")
+  creators            creator[]   @relation("CreatorCharacters")
+  creator_id          String?
+  creator             user?       @relation("CharacterCreator", fields: [creator_id], references: [id])
+  updater_id          String?
+  updater             user?       @relation("CharacterUpdater", fields: [updater_id], references: [id])
+  created_at          DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at          DateTime    @updatedAt @db.Timestamptz(0)
+
+  channelable_id String       @unique
+  channelable    channelable? @relation("CharacterChannelable", fields: [channelable_id], references: [id])
+
+  fc_linkable_id String       @unique
+  fc_linkable    fc_linkable? @relation("CharacterFcLinkable", fields: [fc_linkable_id], references: [id])
+
+  @@index([work_id])
+  @@index([creator_id])
+}
+
+model scene {
+  id                  String      @id @default(cuid())
+  label               String
+  work_id             String
+  work                work        @relation(fields: [work_id], references: [id], onDelete: Cascade)
+  episode             String
+  timestamp           String
+  characters          character[] @relation("SceneCharacters")
+  music               music[]     @relation("SceneMusics")
+  creators            creator[]   @relation("SceneCredits")
+  creator_id          String?
+  creator             user?       @relation("SceneCreator", fields: [creator_id], references: [id])
+  updater_id          String?
+  updater             user?       @relation("SceneUpdater", fields: [updater_id], references: [id])
+  created_at          DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at          DateTime    @updatedAt @db.Timestamptz(0)
+
+  channelable_id String       @unique
+  channelable    channelable? @relation("SceneChannelable", fields: [channelable_id], references: [id])
+
+  @@index([work_id])
+  @@index([creator_id])
+}
+
+model music {
+  id                  String      @id @default(cuid())
+  title               String
+  kind                Int
+  scenes              scene[]     @relation("SceneMusics")
+  composers           creator[]   @relation("ComposerMusics")
+  credits             creator[]   @relation("CreditedMusics")
+  creator_id          String?
+  creator             user?       @relation("MusicCreator", fields: [creator_id], references: [id])
+  updater_id          String?
+  updater             user?       @relation("MusicUpdater", fields: [updater_id], references: [id])
+  created_at          DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at          DateTime    @updatedAt @db.Timestamptz(0)
+
+  fc_linkable_id String       @unique
+  fc_linkable    fc_linkable? @relation("MusicFcLinkable", fields: [fc_linkable_id], references: [id])
+
+  @@index([creator_id])
+}
+
+model creator {
+  id                  String      @id @default(cuid())
+  name                String
+  role                Int
+  affiliation         Int
+  voiced_characters   character[] @relation("CreatorCharacters")
+  composed_musics     music[]     @relation("ComposerMusics")
+  credited_musics     music[]     @relation("CreditedMusics")
+  credited_scenes     scene[]     @relation("SceneCredits")
+  creator_id          String?
+  creator             user?       @relation("CreatorCreator", fields: [creator_id], references: [id])
+  updater_id          String?
+  updater             user?       @relation("CreatorUpdater", fields: [updater_id], references: [id])
+  created_at          DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at          DateTime    @updatedAt @db.Timestamptz(0)
+
+  @@index([creator_id])
+}
+
+model channel {
+  id                  String       @id @default(cuid())
+  name                String
+  kind                Int
+  organization_id     String
+  organization        organization @relation(fields: [organization_id], references: [id])
+  commentable_id      String       @unique
+  commentable         commentable? @relation("ChannelCommentable", fields: [commentable_id], references: [id])
+  creator_id          String?
+  creator             user?        @relation("ChannelCreator", fields: [creator_id], references: [id])
+  updater_id          String?
+  updater             user?        @relation("ChannelUpdater", fields: [updater_id], references: [id])
+  created_at          DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at          DateTime     @updatedAt @db.Timestamptz(0)
+
+  channelable_id String
+  channelable    channelable @relation(fields: [channelable_id], references: [id], onDelete: Cascade)
+
+  fc_linkable_id String       @unique
+  fc_linkable    fc_linkable? @relation("ChannelFcLinkable", fields: [fc_linkable_id], references: [id])
+
+  @@index([creator_id])
+  @@index([organization_id])
+}
+
+model fc_link {
+  id             String      @id @default(cuid())
+  name           String
+  url            String
+  contract_split_id String?
+  creator_id     String?
+  creator        user?        @relation("FcLinkCreator", fields: [creator_id], references: [id])
+  updater_id     String?
+  updater        user?        @relation("FcLinkUpdater", fields: [updater_id], references: [id])
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+
+  fc_linkable_id String
+  fc_linkable    fc_linkable @relation(fields: [fc_linkable_id], references: [id], onDelete: Cascade)
+
+  @@index([creator_id])
+}
+
+model reaction {
+  id          String   @id @default(cuid())
+  type        Int
+  user_id     String
+  user        user     @relation("UserReactions", fields: [user_id], references: [id], onDelete: Cascade)
+  comment_id  String
+  comment     comment  @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+
+  @@unique([comment_id, user_id, type])
+  @@index([user_id])
+  @@index([comment_id])
+}
+
+model tip_tx {
+  id                String   @id @default(cuid())
+  gross_amount      Int
+  operator_fee      Int
+  payment_fee       Int
+  contract_split_id String
+  status            Int
+  comment_id        String
+  comment           comment @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+  creator_id     String?
+  creator        user?        @relation("TipTxCreator", fields: [creator_id], references: [id])
+  updater_id     String?
+  updater        user?        @relation("TipTxUpdater", fields: [updater_id], references: [id])
+  created_at        DateTime @default(now()) @db.Timestamptz(0)
+  updated_at        DateTime @updatedAt @db.Timestamptz(0)
+
+  @@index([comment_id])
+  @@index([creator_id])
+}
+
 model role {
-  id                       String          @id @default(cuid())
-  name                     String
-  description              String?
-  created_at               DateTime        @default(now()) @db.Timestamptz(0)
-  updated_at               DateTime        @updatedAt @db.Timestamptz(0)
-  creator_id               String
-  creator                  user            @relation("RoleCreator", fields: [creator_id], references: [id])
-  updater_id               String
-  updater                  user            @relation("RoleUpdater", fields: [updater_id], references: [id])
-  users                    user[]          @relation("UserRoles")
-  permissions              permission[]
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user @relation("RoleCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user @relation("RoleUpdater", fields: [updater_id], references: [id])
+
+  users user[] @relation("UserRoles")
+  permissions   permission[]
   requestor_approval_flows approval_flow[] @relation("ApprovalFlowRequestorRole")
   approver_approval_flows  approval_flow[] @relation("ApprovalFlowApproverRole")
-
   @@index([creator_id])
 }
 
 model organization {
-  id          String     @id @default(cuid())
+  id          String  @id @default(cuid())
   name        String
   description String?
-  created_at  DateTime   @default(now()) @db.Timestamptz(0)
-  updated_at  DateTime   @updatedAt @db.Timestamptz(0)
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
   creator_id  String
-  creator     user       @relation("OrganizationCreator", fields: [creator_id], references: [id])
+  creator     user @relation("OrganizationCreator", fields: [creator_id], references: [id])
   updater_id  String
   updater     user       @relation("OrganizationUpdater", fields: [updater_id], references: [id])
   users       user[]     @relation("UserOrganizations")
-
+  channels    channel[]
   @@index([creator_id])
 }
 
 model permission {
-  id         String   @id @default(cuid())
+  id         String  @id @default(cuid())
   name       String
   role_id    String?
-  role       role?    @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  role       role?   @relation(fields: [role_id], references: [id], onDelete: Cascade)
   create     Boolean
   read       Boolean
   update     Boolean
@@ -143,73 +382,72 @@ model permission {
   created_at DateTime @default(now()) @db.Timestamptz(0)
   updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
-  creator    user     @relation("PermissionCreator", fields: [creator_id], references: [id])
+  creator    user @relation("PermissionCreator", fields: [creator_id], references: [id])
   updater_id String
-  updater    user     @relation("PermissionUpdater", fields: [updater_id], references: [id])
+  updater    user @relation("PermissionUpdater", fields: [updater_id], references: [id])
 
   @@unique([name, role_id])
   @@index([creator_id])
 }
 
 model approvable {
-  id                String             @id @default(cuid())
-  creator_id        String?
-  creator           user?              @relation("ApprovableCreator", fields: [creator_id], references: [id])
+  id               String   @id @default(cuid())
+  creator_id       String?
+  creator          user? @relation("ApprovableCreator", fields: [creator_id], references: [id])
   approval_requests approval_request[]
 
   @@index([creator_id])
 }
 
 model approval_flow {
-  id                String             @id @default(cuid())
-  entity_name       String
+  id               String   @id @default(cuid())
+  entity_name      String
   requestor_role_id String?
-  requestor_role    role?              @relation("ApprovalFlowRequestorRole", fields: [requestor_role_id], references: [id])
-  approver_role_id  String
-  approver_role     role               @relation("ApprovalFlowApproverRole", fields: [approver_role_id], references: [id])
+  requestor_role   role?    @relation("ApprovalFlowRequestorRole", fields: [requestor_role_id], references: [id])
+  approver_role_id String
+  approver_role    role     @relation("ApprovalFlowApproverRole", fields: [approver_role_id], references: [id])
   approval_requests approval_request[]
-  preceded_by       approval_flow[]    @relation("ApprovalFlowOrder")
-  followed_by       approval_flow[]    @relation("ApprovalFlowOrder")
-  created_at        DateTime           @default(now()) @db.Timestamptz(0)
-  updated_at        DateTime           @updatedAt @db.Timestamptz(0)
-  creator_id        String
-  creator           user               @relation("ApprovalFlowCreator", fields: [creator_id], references: [id])
-  updater_id        String
-  updater           user               @relation("ApprovalFlowUpdater", fields: [updater_id], references: [id])
-
+  preceded_by      approval_flow[] @relation("ApprovalFlowOrder")
+  followed_by      approval_flow[] @relation("ApprovalFlowOrder")
+  created_at       DateTime @default(now()) @db.Timestamptz(0)
+  updated_at       DateTime @updatedAt @db.Timestamptz(0)
+  creator_id       String
+  creator          user @relation("ApprovalFlowCreator", fields: [creator_id], references: [id])
+  updater_id       String
+  updater          user @relation("ApprovalFlowUpdater", fields: [updater_id], references: [id])
   @@index([creator_id])
 }
 
 model approval_request {
-  id                 String             @id @default(cuid())
-  approvable_id      String
-  approvable         approvable         @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
-  approval_flow_id   String
-  approval_flow      approval_flow      @relation(fields: [approval_flow_id], references: [id])
-  status             Int                @default(0)
+  id               String   @id @default(cuid())
+  approvable_id    String
+  approvable       approvable @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
+  approval_flow_id String
+  approval_flow    approval_flow @relation(fields: [approval_flow_id], references: [id])
+  status           Int      @default(0)
   approval_histories approval_history[]
-  created_at         DateTime           @default(now()) @db.Timestamptz(0)
-  updated_at         DateTime           @updatedAt @db.Timestamptz(0)
+  created_at       DateTime @default(now()) @db.Timestamptz(0)
+  updated_at       DateTime @updatedAt @db.Timestamptz(0)
 }
 
 model approval_history {
-  id                  String           @id @default(cuid())
+  id               String   @id @default(cuid())
   approval_request_id String
-  approval_request    approval_request @relation(fields: [approval_request_id], references: [id], onDelete: Cascade)
-  pre_status          Int
-  post_status         Int
-  message             String?
-  created_at          DateTime         @default(now()) @db.Timestamptz(0)
-  updated_at          DateTime         @updatedAt @db.Timestamptz(0)
-  creator_id          String
-  creator             user             @relation("ApprovalHistoryCreator", fields: [creator_id], references: [id])
-
+  approval_request approval_request @relation(fields: [approval_request_id], references: [id], onDelete: Cascade)
+  pre_status       Int
+  post_status      Int
+  message          String?
+  created_at       DateTime @default(now()) @db.Timestamptz(0)
+  updated_at       DateTime @updatedAt @db.Timestamptz(0)
+  creator_id       String
+  creator          user @relation("ApprovalHistoryCreator", fields: [creator_id], references: [id])
   @@index([creator_id])
 }
 
 model commentable {
-  id       String    @id @default(cuid())
-  comments comment[]
+  id        String    @id @default(cuid())
+  comments  comment[]
+  channel   channel?  @relation("ChannelCommentable")
 }
 
 model comment {
@@ -218,33 +456,17 @@ model comment {
   commentable_id String
   commentable    commentable @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
   reactions      reaction[]
+  tip_txs        tip_tx[]
   created_at     DateTime    @default(now()) @db.Timestamptz(0)
   updated_at     DateTime    @updatedAt @db.Timestamptz(0)
   creator_id     String
-  creator        user        @relation("CommentCreator", fields: [creator_id], references: [id])
-
+  creator        user @relation("CommentCreator", fields: [creator_id], references: [id])
   @@index([creator_id])
-}
-
-model reaction {
-  id         String   @id @default(cuid())
-  comment_id String
-  comment    comment  @relation(fields: [comment_id], references: [id], onDelete: Cascade)
-  user_id    String
-  user       user     @relation("ReactionUser", fields: [user_id], references: [id], onDelete: Cascade)
-  type       Int
-  created_at DateTime @default(now()) @db.Timestamptz(0)
-
-  @@unique([comment_id, user_id, type])
-  @@index([comment_id])
-  @@index([user_id])
 }
 
 model attachable {
   id          String       @id @default(cuid())
   attachments attachment[]
-  resource    resource?
-  product     product?
 }
 
 model attachment {
@@ -277,12 +499,15 @@ model dashboard_widget {
   id             String    @id @default(cuid())
   dashboard_id   String
   dashboard      dashboard @relation(fields: [dashboard_id], references: [id], onDelete: Cascade)
-  name           String
-  entity_name    String
-  chart_type     Int       @default(0)
-  group_by_field String
-  filter_field   String?
-  filter_value   String?
+  name            String
+  entity_name     String
+  chart_type      Int
+  group_by_field  String
+  stack_mode      Int?
+  series_field    String?
+  group_by_bucket Int?
+  filter_field    String?
+  filter_value    String?
   order          Int       @default(0)
   created_at     DateTime  @default(now()) @db.Timestamptz(0)
   updated_at     DateTime  @updatedAt @db.Timestamptz(0)
@@ -384,322 +609,19 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
-model db_table {
-  id             String      @id @default(cuid())
-  name           String      @unique
-  description    String?
-  commentable_id String      @unique
-  commentable    commentable @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
-  created_at     DateTime    @default(now()) @db.Timestamptz(0)
-  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
-  creator_id     String
-  creator        user        @relation("DbTableCreator", fields: [creator_id], references: [id])
-  updater_id     String
-  updater        user        @relation("DbTableUpdater", fields: [updater_id], references: [id])
-  fields         field[]     @relation("ParentTable")
-  referenced_by  field[]     @relation("ReferenceTable")
-
-  @@index([creator_id])
+model channelable {
+  id        String      @id @default(cuid())
+  work      work?    @relation("WorkChannelable")
+  character character?    @relation("CharacterChannelable")
+  scene     scene?    @relation("SceneChannelable")
+  channels  channel[]
 }
 
-model field {
-  id           String    @id @default(cuid())
-  name         String
-  type         String
-  db_table_id  String
-  db_table     db_table  @relation("ParentTable", fields: [db_table_id], references: [id], onDelete: Cascade)
-  reference_id String?
-  reference    db_table? @relation("ReferenceTable", fields: [reference_id], references: [id])
-  max_length   Int
-  max          Int?
-  regex        String?
-  required     Boolean   @default(true)
-  created_at   DateTime  @default(now()) @db.Timestamptz(0)
-  updated_at   DateTime  @updatedAt @db.Timestamptz(0)
-}
-
-model xxxxx_xxxxx {
-  id           String        @id @default(cuid())
-  name         String        @unique
-  description  String?
-  team         String?
-  created_at   DateTime      @default(now()) @db.Timestamptz(0)
-  updated_at   DateTime      @updatedAt @db.Timestamptz(0)
-  creator_id   String
-  creator      user          @relation("XxxxxXxxxxCreator", fields: [creator_id], references: [id])
-  updater_id   String
-  updater      user          @relation("XxxxxXxxxxUpdater", fields: [updater_id], references: [id])
-  yyyyy_yyyyys yyyyy_yyyyy[]
-
-  @@index([creator_id])
-}
-
-model yyyyy_yyyyy {
-  id             String      @id @default(cuid())
-  name           String
-  type           String
-  xxxxx_xxxxx_id String
-  xxxxx_xxxxx    xxxxx_xxxxx @relation(fields: [xxxxx_xxxxx_id], references: [id], onDelete: Cascade)
-  max_length     Int?
-  max            Int?
-  regex          String?
-  required       Boolean     @default(true)
-  written_by     String
-  created_at     DateTime    @default(now()) @db.Timestamptz(0)
-  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
-}
-
-model parent1 {
-  id              String           @id @default(cuid())
-  name            String           @unique
-  organization_id String
-  organization    organization     @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  description     String?
-  price           Int
-  due_date        DateTime         @db.Timestamptz(0)
-  image_url       String?
-  created_at      DateTime         @default(now()) @db.Timestamptz(0)
-  updated_at      DateTime         @updatedAt @db.Timestamptz(0)
-  creator_id      String
-  creator         user             @relation("Parent1Creator", fields: [creator_id], references: [id])
-  updater_id      String
-  updater         user             @relation("Parent1Updater", fields: [updater_id], references: [id])
-  parent1_child1s parent1_child1[]
-  parent1_child2s parent1_child2[]
-  parent1_lists   parent1_list[]
-
-  @@index([creator_id])
-  @@index([organization_id])
-}
-
-model parent1_child1 {
-  id         String   @id @default(cuid())
-  order      Int      @default(0)
-  name       String
-  type       String
-  parent1_id String
-  parent1    parent1  @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
-  max_length Int?
-  max        Int?
-  regex      String?
-  required   Boolean  @default(true)
-  written_by String
-  created_at DateTime @default(now()) @db.Timestamptz(0)
-  updated_at DateTime @updatedAt @db.Timestamptz(0)
-}
-
-model parent1_child2 {
-  id         String    @id @default(cuid())
-  name       String
-  parent1_id String
-  parent1    parent1   @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
-  required   Boolean   @default(true)
-  start_date DateTime? @db.Timestamptz(0)
-  end_date   DateTime  @db.Timestamptz(0)
-  created_at DateTime  @default(now()) @db.Timestamptz(0)
-  updated_at DateTime  @updatedAt @db.Timestamptz(0)
-}
-
-model parent1_list {
-  id         String   @id @default(cuid())
-  name       String
-  created_at DateTime @default(now()) @db.Timestamptz(0)
-  updated_at DateTime @updatedAt @db.Timestamptz(0)
-  parent1_id String
-  parent1    parent1  @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
-}
-
-model parent_only {
-  id          String    @id @default(cuid())
-  name        String    @unique
-  description String?
-  login_time  DateTime? @db.Timestamptz(0)
-  logout_time DateTime? @db.Timestamptz(0)
-  created_at  DateTime  @default(now()) @db.Timestamptz(0)
-  updated_at  DateTime  @updatedAt @db.Timestamptz(0)
-  creator_id  String
-  creator     user      @relation("ParentOnlyCreator", fields: [creator_id], references: [id])
-  updater_id  String
-  updater     user      @relation("ParentOnlyUpdater", fields: [updater_id], references: [id])
-
-  @@index([creator_id])
-}
-
-model procedure {
-  id          String      @id @default(cuid())
-  name        String
-  description String?
-  created_at  DateTime    @default(now()) @db.Timestamptz(0)
-  updated_at  DateTime    @updatedAt @db.Timestamptz(0)
-  creator_id  String
-  creator     user        @relation("ProcedureCreator", fields: [creator_id], references: [id])
-  updater_id  String
-  updater     user        @relation("ProcedureUpdater", fields: [updater_id], references: [id])
-  assignee_id String?
-  assignee    user?       @relation("ProcedureAssignee", fields: [assignee_id], references: [id])
-  parent_id   String?
-  parent      procedure?  @relation("ParentChild", fields: [parent_id], references: [id])
-  children    procedure[] @relation("ParentChild")
-  preceded_by procedure[] @relation("BeforeAfter")
-  followed_by procedure[] @relation("BeforeAfter")
-
-  @@index([creator_id])
-  @@index([assignee_id])
-}
-
-model resource {
-  id              String       @id @default(cuid())
-  name            String
-  description     String?
-  organization_id String
-  organization    organization @relation(fields: [organization_id], references: [id])
-  attachable_id   String       @unique
-  attachable      attachable   @relation(fields: [attachable_id], references: [id])
-  bookings        booking[]
-  created_at      DateTime     @default(now()) @db.Timestamptz(0)
-  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
-  creator_id      String
-  creator         user         @relation("ResourceCreator", fields: [creator_id], references: [id])
-  updater_id      String
-  updater         user         @relation("ResourceUpdater", fields: [updater_id], references: [id])
-
-  @@index([creator_id])
-  @@index([organization_id])
-}
-
-model booking {
-  id          String   @id @default(cuid())
-  name        String
-  resource_id String
-  resource    resource @relation(fields: [resource_id], references: [id], onDelete: Cascade)
-  start_time  DateTime @db.Timestamptz(0)
-  end_time    DateTime @db.Timestamptz(0)
-  created_at  DateTime @default(now()) @db.Timestamptz(0)
-  updated_at  DateTime @updatedAt @db.Timestamptz(0)
-  creator_id  String
-  creator     user     @relation("BookingCreator", fields: [creator_id], references: [id])
-  updater_id  String
-  updater     user     @relation("BookingUpdater", fields: [updater_id], references: [id])
-
-  @@index([creator_id])
-}
-
-model shift_template {
-  id          String   @id @default(cuid())
-  user_id     String
-  user        user     @relation("ShiftTemplateUser", fields: [user_id], references: [id])
-  day_of_week Int
-  start_time  DateTime @db.Timetz(0)
-  end_time    DateTime @db.Timetz(0)
-  created_at  DateTime @default(now()) @db.Timestamptz(0)
-  updated_at  DateTime @updatedAt @db.Timestamptz(0)
-  creator_id  String
-  creator     user     @relation("ShiftTemplateCreator", fields: [creator_id], references: [id])
-  updater_id  String
-  updater     user     @relation("ShiftTemplateUpdater", fields: [updater_id], references: [id])
-
-  @@index([creator_id])
-}
-
-model shift {
-  id         String   @id @default(cuid())
-  user_id    String
-  user       user     @relation("ShiftUser", fields: [user_id], references: [id])
-  start_time DateTime @db.Timestamptz(0)
-  end_time   DateTime @db.Timestamptz(0)
-  status     Int
-  created_at DateTime @default(now()) @db.Timestamptz(0)
-  updated_at DateTime @updatedAt @db.Timestamptz(0)
-  creator_id String
-  creator    user     @relation("ShiftCreator", fields: [creator_id], references: [id])
-  updater_id String
-  updater    user     @relation("ShiftUpdater", fields: [updater_id], references: [id])
-
-  @@index([creator_id])
-}
-
-model product {
-  id                 String              @id @default(cuid())
-  code               String              @unique
-  name               String
-  price              Int
-  barcode            String?
-  attachable_id      String              @unique
-  attachable         attachable          @relation(fields: [attachable_id], references: [id])
-  inventories        inventory[]
-  purchase_per_items purchase_per_item[]
-  created_at         DateTime            @default(now()) @db.Timestamptz(0)
-  updated_at         DateTime            @updatedAt @db.Timestamptz(0)
-  creator_id         String
-  creator            user                @relation("ProductCreator", fields: [creator_id], references: [id])
-  updater_id         String
-  updater            user                @relation("ProductUpdater", fields: [updater_id], references: [id])
-
-  @@index([creator_id])
-}
-
-model inventory {
-  id                String    @id @default(cuid())
-  product_id        String
-  product           product   @relation(fields: [product_id], references: [id], onDelete: Cascade)
-  quantity          Int
-  reserved_quantity Int
-  location          String?
-  lot_number        String?
-  expiration_date   DateTime?
-  created_at        DateTime  @default(now()) @db.Timestamptz(0)
-  updated_at        DateTime  @updatedAt @db.Timestamptz(0)
-  creator_id        String
-  creator           user      @relation("InventoryCreator", fields: [creator_id], references: [id])
-  updater_id        String
-  updater           user      @relation("InventoryUpdater", fields: [updater_id], references: [id])
-
-  @@index([creator_id])
-}
-
-model purchase_order {
-  id          String              @id @default(cuid())
-  order_no    String
-  customer_id String
-  customer    user                @relation("Buyer", fields: [customer_id], references: [id])
-  items       purchase_per_item[]
-  created_at  DateTime            @default(now()) @db.Timestamptz(0)
-  updated_at  DateTime            @updatedAt @db.Timestamptz(0)
-  creator_id  String
-  creator     user                @relation("PurchaseOrderCreator", fields: [creator_id], references: [id])
-  updater_id  String
-  updater     user                @relation("PurchaseOrderUpdater", fields: [updater_id], references: [id])
-
-  @@index([creator_id])
-}
-
-model purchase_per_item {
-  id                String         @id @default(cuid())
-  purchase_order_id String
-  purchase_order    purchase_order @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
-  product_id        String
-  product           product        @relation(fields: [product_id], references: [id], onDelete: Cascade)
-  quantity          Int
-  price             Int?
-  created_at        DateTime       @default(now()) @db.Timestamptz(0)
-  updated_at        DateTime       @updatedAt @db.Timestamptz(0)
-}
-
-model leave_request {
-  id            String     @id @default(cuid())
-  user_id       String
-  user          user       @relation("LeaveRequestUser", fields: [user_id], references: [id])
-  start_date    DateTime   @db.Timestamptz(0)
-  end_date      DateTime   @db.Timestamptz(0)
-  reason        String
-  approvable_id String     @unique
-  approvable    approvable @relation(fields: [approvable_id], references: [id])
-  created_at    DateTime   @default(now()) @db.Timestamptz(0)
-  updated_at    DateTime   @updatedAt @db.Timestamptz(0)
-  creator_id    String
-  creator       user       @relation("LeaveRequestCreator", fields: [creator_id], references: [id])
-  updater_id    String
-  updater       user       @relation("LeaveRequestUpdater", fields: [updater_id], references: [id])
-
-  @@index([creator_id])
+model fc_linkable {
+  id        String      @id @default(cuid())
+  work      work?    @relation("WorkFcLinkable")
+  character character?    @relation("CharacterFcLinkable")
+  music     music?    @relation("MusicFcLinkable")
+  channel   channel?    @relation("ChannelFcLinkable")
+  fc_links  fc_link[]
 }
