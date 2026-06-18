@@ -11,15 +11,27 @@ const navTranslationKeys: Record<string, string> = {
   "/organization": "organization",
   "/permission": "permission",
   "/approval_flow": "approvalFlow",
+  "/dashboard": "dashboard",
+  "/plan": "plan",
+  "/work": "work",
+  "/character": "character",
+  "/scene": "scene",
+  "/music": "music",
+  "/creator": "creator",
+  "/channel": "channel",
+  "/fc_link": "fcLink",
+  "/tip_tx": "tipTx",
 };
 
-export default function Sidebar() {
+export default function Sidebar({ hiddenHrefs = [] }: { hiddenHrefs?: string[] }) {
   const t = useTranslations("Nav");
 
   return (
     <nav id="sidebar-nav" className={`w-48 h-full ${themeConfig.sidebar.panel}`}>
       <ul className="py-2">
-        {siteConfig.navLinks.map((link) => {
+        {siteConfig.navLinks
+          .filter((link) => !hiddenHrefs.includes(link.href))
+          .map((link) => {
           const labelKey = navTranslationKeys[link.href];
           const label = labelKey ? t(labelKey as Parameters<typeof t>[0]) : link.label;
           return (
