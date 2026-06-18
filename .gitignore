@@ -125,6 +125,7 @@ app/\[locale\]/setting/view/
 !app/\[locale\]/extra/**
 !app/\[locale\]/docs/
 !app/\[locale\]/docs/layout.tsx
+app/\[locale\]/docs/page.mdx
 app/\[locale\]/docs/*/
 
 # ── app/api/ ──
