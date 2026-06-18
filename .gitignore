@@ -100,6 +100,7 @@ lib/dashboard/getters.ts
 lib/dashboard/service.ts
 lib/dashboard/types.ts
 !lib/organization/getters_associated.ts
+!lib/approval_request/actions.ts
 !lib/approval_request/order-check.ts
 !lib/setting/password-actions.ts
 
