@@ -79,313 +79,113 @@ export function getGeneratedTasks() {
       const { populateDashboardDashboardWidgetData } = require('./dashboard/helper');
       return await populateDashboardDashboardWidgetData(params.parentId, params.length || 1);
     },
-    async 'db:populateDbTableDependencies'() {
-      const { populateDbTableDependencies } = require('./db_table/helper');
-      return await populateDbTableDependencies();
-    },
-    async 'db:populateDbTable'(length: number) {
-      const { populateDbTableData } = require('./db_table/helper');
-      return await populateDbTableData(length);
-    },
-    async 'db:populateDbTableFull'(length: number) {
-      const { populateDbTableFullData } = require('./db_table/helper');
-      return await populateDbTableFullData(length);
-    },
-    async 'db:populateDbTableField'(params: { parentId: string; length?: number }) {
-      const { populateDbTableFieldData } = require('./db_table/helper');
-      return await populateDbTableFieldData(params.parentId, params.length || 1);
-    },
-    async 'db:populateXxxxxXxxxxDependencies'() {
-      const { populateXxxxxXxxxxDependencies } = require('./xxxxx_xxxxx/helper');
-      return await populateXxxxxXxxxxDependencies();
-    },
-    async 'db:populateXxxxxXxxxx'(length: number) {
-      const { populateXxxxxXxxxxData } = require('./xxxxx_xxxxx/helper');
-      return await populateXxxxxXxxxxData(length);
-    },
-    async 'db:populateXxxxxXxxxxFull'(length: number) {
-      const { populateXxxxxXxxxxFullData } = require('./xxxxx_xxxxx/helper');
-      return await populateXxxxxXxxxxFullData(length);
-    },
-    async 'db:populateXxxxxXxxxxYyyyyYyyyy'(params: { parentId: string; length?: number }) {
-      const { populateXxxxxXxxxxYyyyyYyyyyData } = require('./xxxxx_xxxxx/helper');
-      return await populateXxxxxXxxxxYyyyyYyyyyData(params.parentId, params.length || 1);
-    },
-    async 'db:populateParentOnlyDependencies'() {
-      const { populateParentOnlyDependencies } = require('./parent_only/helper');
-      return await populateParentOnlyDependencies();
-    },
-    async 'db:populateParentOnly'(length: number) {
-      const { populateParentOnlyData } = require('./parent_only/helper');
-      return await populateParentOnlyData(length);
-    },
-    async 'db:populateParentOnlyFull'(length: number) {
-      const { populateParentOnlyFullData } = require('./parent_only/helper');
-      return await populateParentOnlyFullData(length);
-    },
-    async 'db:populateSetting1Dependencies'() {
-      const { populateSetting1Dependencies } = require('./setting1/helper');
-      return await populateSetting1Dependencies();
-    },
-    async 'db:populateSetting1'(length: number) {
-      const { populateSetting1Data } = require('./setting1/helper');
-      return await populateSetting1Data(length);
-    },
-    async 'db:populateSetting1Full'(length: number) {
-      const { populateSetting1FullData } = require('./setting1/helper');
-      return await populateSetting1FullData(length);
-    },
-    async 'db:populateSetting1YyyyyYyyyy'(params: { parentId: string; length?: number }) {
-      const { populateSetting1YyyyyYyyyyData } = require('./setting1/helper');
-      return await populateSetting1YyyyyYyyyyData(params.parentId, params.length || 1);
-    },
-    async 'db:populateSetting2Dependencies'() {
-      const { populateSetting2Dependencies } = require('./setting2/helper');
-      return await populateSetting2Dependencies();
-    },
-    async 'db:populateSetting2'(length: number) {
-      const { populateSetting2Data } = require('./setting2/helper');
-      return await populateSetting2Data(length);
-    },
-    async 'db:populateSetting2Full'(length: number) {
-      const { populateSetting2FullData } = require('./setting2/helper');
-      return await populateSetting2FullData(length);
-    },
-    async 'db:populateSetting3Dependencies'() {
-      const { populateSetting3Dependencies } = require('./setting3/helper');
-      return await populateSetting3Dependencies();
-    },
-    async 'db:populateSetting3'(length: number) {
-      const { populateSetting3Data } = require('./setting3/helper');
-      return await populateSetting3Data(length);
-    },
-    async 'db:populateSetting3Full'(length: number) {
-      const { populateSetting3FullData } = require('./setting3/helper');
-      return await populateSetting3FullData(length);
-    },
-    async 'db:populateSetting4Dependencies'() {
-      const { populateSetting4Dependencies } = require('./setting4/helper');
-      return await populateSetting4Dependencies();
-    },
-    async 'db:populateSetting4'(length: number) {
-      const { populateSetting4Data } = require('./setting4/helper');
-      return await populateSetting4Data(length);
-    },
-    async 'db:populateSetting4Full'(length: number) {
-      const { populateSetting4FullData } = require('./setting4/helper');
-      return await populateSetting4FullData(length);
-    },
-    async 'db:populateSetting5Dependencies'() {
-      const { populateSetting5Dependencies } = require('./setting5/helper');
-      return await populateSetting5Dependencies();
-    },
-    async 'db:populateSetting5'(length: number) {
-      const { populateSetting5Data } = require('./setting5/helper');
-      return await populateSetting5Data(length);
-    },
-    async 'db:populateSetting5Full'(length: number) {
-      const { populateSetting5FullData } = require('./setting5/helper');
-      return await populateSetting5FullData(length);
-    },
-    async 'db:populateSetting5YyyyyYyyyy'(params: { parentId: string; length?: number }) {
-      const { populateSetting5YyyyyYyyyyData } = require('./setting5/helper');
-      return await populateSetting5YyyyyYyyyyData(params.parentId, params.length || 1);
-    },
-    async 'db:populateSetting6Dependencies'() {
-      const { populateSetting6Dependencies } = require('./setting6/helper');
-      return await populateSetting6Dependencies();
-    },
-    async 'db:populateSetting6'(length: number) {
-      const { populateSetting6Data } = require('./setting6/helper');
-      return await populateSetting6Data(length);
-    },
-    async 'db:populateSetting6Full'(length: number) {
-      const { populateSetting6FullData } = require('./setting6/helper');
-      return await populateSetting6FullData(length);
-    },
-    async 'db:populateSetting6YyyyyYyyyy'(params: { parentId: string; length?: number }) {
-      const { populateSetting6YyyyyYyyyyData } = require('./setting6/helper');
-      return await populateSetting6YyyyyYyyyyData(params.parentId, params.length || 1);
-    },
-    async 'db:populateSetting7Dependencies'() {
-      const { populateSetting7Dependencies } = require('./setting7/helper');
-      return await populateSetting7Dependencies();
-    },
-    async 'db:populateSetting7'(length: number) {
-      const { populateSetting7Data } = require('./setting7/helper');
-      return await populateSetting7Data(length);
-    },
-    async 'db:populateSetting7Full'(length: number) {
-      const { populateSetting7FullData } = require('./setting7/helper');
-      return await populateSetting7FullData(length);
-    },
-    async 'db:populateSetting8Dependencies'() {
-      const { populateSetting8Dependencies } = require('./setting8/helper');
-      return await populateSetting8Dependencies();
-    },
-    async 'db:populateSetting8'(length: number) {
-      const { populateSetting8Data } = require('./setting8/helper');
-      return await populateSetting8Data(length);
-    },
-    async 'db:populateSetting8Full'(length: number) {
-      const { populateSetting8FullData } = require('./setting8/helper');
-      return await populateSetting8FullData(length);
-    },
-    async 'db:populateProcedureDependencies'() {
-      const { populateProcedureDependencies } = require('./procedure/helper');
-      return await populateProcedureDependencies();
-    },
-    async 'db:populateProcedure'(length: number) {
-      const { populateProcedureData } = require('./procedure/helper');
-      return await populateProcedureData(length);
-    },
-    async 'db:populateProcedureFull'(length: number) {
-      const { populateProcedureFullData } = require('./procedure/helper');
-      return await populateProcedureFullData(length);
-    },
-    async 'db:populateResourceDependencies'() {
-      const { populateResourceDependencies } = require('./resource/helper');
-      return await populateResourceDependencies();
-    },
-    async 'db:populateResource'(length: number) {
-      const { populateResourceData } = require('./resource/helper');
-      return await populateResourceData(length);
-    },
-    async 'db:populateResourceFull'(length: number) {
-      const { populateResourceFullData } = require('./resource/helper');
-      return await populateResourceFullData(length);
-    },
-    async 'db:populateBookingDependencies'() {
-      const { populateBookingDependencies } = require('./booking/helper');
-      return await populateBookingDependencies();
-    },
-    async 'db:populateBooking'(length: number) {
-      const { populateBookingData } = require('./booking/helper');
-      return await populateBookingData(length);
-    },
-    async 'db:populateBookingFull'(length: number) {
-      const { populateBookingFullData } = require('./booking/helper');
-      return await populateBookingFullData(length);
-    },
-    async 'db:populateShiftTemplateDependencies'() {
-      const { populateShiftTemplateDependencies } = require('./shift_template/helper');
-      return await populateShiftTemplateDependencies();
-    },
-    async 'db:populateShiftTemplate'(length: number) {
-      const { populateShiftTemplateData } = require('./shift_template/helper');
-      return await populateShiftTemplateData(length);
-    },
-    async 'db:populateShiftTemplateFull'(length: number) {
-      const { populateShiftTemplateFullData } = require('./shift_template/helper');
-      return await populateShiftTemplateFullData(length);
-    },
-    async 'db:populateShiftDependencies'() {
-      const { populateShiftDependencies } = require('./shift/helper');
-      return await populateShiftDependencies();
-    },
-    async 'db:populateShift'(length: number) {
-      const { populateShiftData } = require('./shift/helper');
-      return await populateShiftData(length);
-    },
-    async 'db:populateShiftFull'(length: number) {
-      const { populateShiftFullData } = require('./shift/helper');
-      return await populateShiftFullData(length);
-    },
-    async 'db:populateProductDependencies'() {
-      const { populateProductDependencies } = require('./product/helper');
-      return await populateProductDependencies();
-    },
-    async 'db:populateProduct'(length: number) {
-      const { populateProductData } = require('./product/helper');
-      return await populateProductData(length);
-    },
-    async 'db:populateProductFull'(length: number) {
-      const { populateProductFullData } = require('./product/helper');
-      return await populateProductFullData(length);
-    },
-    async 'db:populateInventoryDependencies'() {
-      const { populateInventoryDependencies } = require('./inventory/helper');
-      return await populateInventoryDependencies();
-    },
-    async 'db:populateInventory'(length: number) {
-      const { populateInventoryData } = require('./inventory/helper');
-      return await populateInventoryData(length);
-    },
-    async 'db:populateInventoryFull'(length: number) {
-      const { populateInventoryFullData } = require('./inventory/helper');
-      return await populateInventoryFullData(length);
-    },
-    async 'db:populatePurchaseOrderDependencies'() {
-      const { populatePurchaseOrderDependencies } = require('./purchase_order/helper');
-      return await populatePurchaseOrderDependencies();
-    },
-    async 'db:populatePurchaseOrder'(length: number) {
-      const { populatePurchaseOrderData } = require('./purchase_order/helper');
-      return await populatePurchaseOrderData(length);
-    },
-    async 'db:populatePurchaseOrderFull'(length: number) {
-      const { populatePurchaseOrderFullData } = require('./purchase_order/helper');
-      return await populatePurchaseOrderFullData(length);
-    },
-    async 'db:populatePurchaseOrderPurchasePerItem'(params: { parentId: string; length?: number }) {
-      const { populatePurchaseOrderPurchasePerItemData } = require('./purchase_order/helper');
-      return await populatePurchaseOrderPurchasePerItemData(params.parentId, params.length || 1);
-    },
-    async 'db:seedReservationPurchaseOrderMulti'() {
-      const { seedReservationPurchaseOrderMulti } = require('./purchase_order/reservation_gen_helper');
-      return await seedReservationPurchaseOrderMulti();
-    },
-    async 'db:seedReservationPurchaseOrderInsufficient'() {
-      const { seedReservationPurchaseOrderInsufficient } = require('./purchase_order/reservation_gen_helper');
-      return await seedReservationPurchaseOrderInsufficient();
-    },
-    async 'db:seedReservationPurchaseOrderCriteria'() {
-      const { seedReservationPurchaseOrderCriteria } = require('./purchase_order/reservation_gen_helper');
-      return await seedReservationPurchaseOrderCriteria();
-    },
-    async 'db:seedReservationPurchaseOrderOrderBy'() {
-      const { seedReservationPurchaseOrderOrderBy } = require('./purchase_order/reservation_gen_helper');
-      return await seedReservationPurchaseOrderOrderBy();
-    },
-    async 'db:countPurchaseOrderAllocations'(parentId: string) {
-      const { countPurchaseOrderAllocations } = require('./purchase_order/reservation_gen_helper');
-      return await countPurchaseOrderAllocations(parentId);
-    },
-    async 'db:getPurchaseOrderPoolState'(poolId: string) {
-      const { getPurchaseOrderPoolState } = require('./purchase_order/reservation_gen_helper');
-      return await getPurchaseOrderPoolState(poolId);
-    },
-    async 'db:getPurchaseOrderAllocationsOrdered'(parentId: string) {
-      const { getPurchaseOrderAllocationsOrdered } = require('./purchase_order/reservation_gen_helper');
-      return await getPurchaseOrderAllocationsOrdered(parentId);
-    },
-    async 'db:populateLeaveRequestDependencies'() {
-      const { populateLeaveRequestDependencies } = require('./leave_request/helper');
-      return await populateLeaveRequestDependencies();
-    },
-    async 'db:populateLeaveRequest'(length: number) {
-      const { populateLeaveRequestData } = require('./leave_request/helper');
-      return await populateLeaveRequestData(length);
-    },
-    async 'db:populateLeaveRequestFull'(length: number) {
-      const { populateLeaveRequestFullData } = require('./leave_request/helper');
-      return await populateLeaveRequestFullData(length);
-    },
-    async 'db:setupLeaveRequestApprovalFlow'() {
-      const { setupLeaveRequestApprovalFlow } = require('./leave_request/helper');
-      return await setupLeaveRequestApprovalFlow();
-    },
-    async 'db:setupLeaveRequestOrderedApprovalFlow'() {
-      const { setupLeaveRequestOrderedApprovalFlow } = require('./leave_request/helper');
-      return await setupLeaveRequestOrderedApprovalFlow();
-    },
-    async 'db:populateLeaveRequestWithApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
-      const { populateLeaveRequestWithApproval } = require('./leave_request/helper');
-      return await populateLeaveRequestWithApproval(params.creatorId, params.approvalFlowIds);
-    },
-    async 'db:populateLeaveRequestWithRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
-      const { populateLeaveRequestWithRejectedApproval } = require('./leave_request/helper');
-      return await populateLeaveRequestWithRejectedApproval(params.creatorId, params.approvalFlowIds);
+    async 'db:populatePlanDependencies'() {
+      const { populatePlanDependencies } = require('./plan/helper');
+      return await populatePlanDependencies();
+    },
+    async 'db:populatePlan'(length: number) {
+      const { populatePlanData } = require('./plan/helper');
+      return await populatePlanData(length);
+    },
+    async 'db:populatePlanFull'(length: number) {
+      const { populatePlanFullData } = require('./plan/helper');
+      return await populatePlanFullData(length);
+    },
+    async 'db:populateWorkDependencies'() {
+      const { populateWorkDependencies } = require('./work/helper');
+      return await populateWorkDependencies();
+    },
+    async 'db:populateWork'(length: number) {
+      const { populateWorkData } = require('./work/helper');
+      return await populateWorkData(length);
+    },
+    async 'db:populateWorkFull'(length: number) {
+      const { populateWorkFullData } = require('./work/helper');
+      return await populateWorkFullData(length);
+    },
+    async 'db:populateCharacterDependencies'() {
+      const { populateCharacterDependencies } = require('./character/helper');
+      return await populateCharacterDependencies();
+    },
+    async 'db:populateCharacter'(length: number) {
+      const { populateCharacterData } = require('./character/helper');
+      return await populateCharacterData(length);
+    },
+    async 'db:populateCharacterFull'(length: number) {
+      const { populateCharacterFullData } = require('./character/helper');
+      return await populateCharacterFullData(length);
+    },
+    async 'db:populateSceneDependencies'() {
+      const { populateSceneDependencies } = require('./scene/helper');
+      return await populateSceneDependencies();
+    },
+    async 'db:populateScene'(length: number) {
+      const { populateSceneData } = require('./scene/helper');
+      return await populateSceneData(length);
+    },
+    async 'db:populateSceneFull'(length: number) {
+      const { populateSceneFullData } = require('./scene/helper');
+      return await populateSceneFullData(length);
+    },
+    async 'db:populateMusicDependencies'() {
+      const { populateMusicDependencies } = require('./music/helper');
+      return await populateMusicDependencies();
+    },
+    async 'db:populateMusic'(length: number) {
+      const { populateMusicData } = require('./music/helper');
+      return await populateMusicData(length);
+    },
+    async 'db:populateMusicFull'(length: number) {
+      const { populateMusicFullData } = require('./music/helper');
+      return await populateMusicFullData(length);
+    },
+    async 'db:populateCreatorDependencies'() {
+      const { populateCreatorDependencies } = require('./creator/helper');
+      return await populateCreatorDependencies();
+    },
+    async 'db:populateCreator'(length: number) {
+      const { populateCreatorData } = require('./creator/helper');
+      return await populateCreatorData(length);
+    },
+    async 'db:populateCreatorFull'(length: number) {
+      const { populateCreatorFullData } = require('./creator/helper');
+      return await populateCreatorFullData(length);
+    },
+    async 'db:populateChannelDependencies'() {
+      const { populateChannelDependencies } = require('./channel/helper');
+      return await populateChannelDependencies();
+    },
+    async 'db:populateChannel'(length: number) {
+      const { populateChannelData } = require('./channel/helper');
+      return await populateChannelData(length);
+    },
+    async 'db:populateChannelFull'(length: number) {
+      const { populateChannelFullData } = require('./channel/helper');
+      return await populateChannelFullData(length);
+    },
+    async 'db:populateFcLinkDependencies'() {
+      const { populateFcLinkDependencies } = require('./fc_link/helper');
+      return await populateFcLinkDependencies();
+    },
+    async 'db:populateFcLink'(length: number) {
+      const { populateFcLinkData } = require('./fc_link/helper');
+      return await populateFcLinkData(length);
+    },
+    async 'db:populateFcLinkFull'(length: number) {
+      const { populateFcLinkFullData } = require('./fc_link/helper');
+      return await populateFcLinkFullData(length);
+    },
+    async 'db:populateTipTxDependencies'() {
+      const { populateTipTxDependencies } = require('./tip_tx/helper');
+      return await populateTipTxDependencies();
+    },
+    async 'db:populateTipTx'(length: number) {
+      const { populateTipTxData } = require('./tip_tx/helper');
+      return await populateTipTxData(length);
+    },
+    async 'db:populateTipTxFull'(length: number) {
+      const { populateTipTxFullData } = require('./tip_tx/helper');
+      return await populateTipTxFullData(length);
     },
   };
 }

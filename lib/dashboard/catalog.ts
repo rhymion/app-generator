@@ -16,46 +16,6 @@ export type DashboardEntity = {
 };
 
 export const DASHBOARDABLE_ENTITIES: DashboardEntity[] = [
-  {
-    name: 'resource',
-    label: 'Resource',
-    groupable_fields: [
-      { name: 'organization_id', label: 'Organization', kind: 'fk', fk_target: 'organization', fk_label_field: 'name' },
-      { name: 'creator_id', label: 'Creator', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
-      { name: 'updater_id', label: 'Updater', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
-    ],
-  },
-  {
-    name: 'booking',
-    label: 'Booking',
-    groupable_fields: [
-      { name: 'resource_id', label: 'Resource', kind: 'fk', fk_target: 'resource', fk_label_field: 'name' },
-      { name: 'start_time', label: 'Start Time', kind: 'datetime', datetime_format: 'date-time' },
-      { name: 'end_time', label: 'End Time', kind: 'datetime', datetime_format: 'date-time' },
-      { name: 'creator_id', label: 'Creator', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
-      { name: 'updater_id', label: 'Updater', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
-    ],
-  },
-  {
-    name: 'product',
-    label: 'Product',
-    groupable_fields: [
-      { name: 'price', label: 'Price', kind: 'number' },
-      { name: 'creator_id', label: 'Creator', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
-      { name: 'updater_id', label: 'Updater', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
-    ],
-  },
-  {
-    name: 'leave_request',
-    label: 'Leave Request',
-    groupable_fields: [
-      { name: 'user_id', label: 'User', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
-      { name: 'start_date', label: 'Start Date', kind: 'datetime', datetime_format: 'date' },
-      { name: 'end_date', label: 'End Date', kind: 'datetime', datetime_format: 'date' },
-      { name: 'creator_id', label: 'Creator', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
-      { name: 'updater_id', label: 'Updater', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
-    ],
-  },
 ];
 
 export function findDashboardEntity(name: string): DashboardEntity | undefined {

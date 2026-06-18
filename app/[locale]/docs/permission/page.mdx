@@ -1,0 +1,208 @@
+# Permission
+
+> Auto-generated — run the code generator to update this file. Do not edit manually.
+
+## Overview
+
+<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>Entity</td><td><code>permission</code></td></tr><tr><td>Operations</td><td>List · View · Create · Update · Delete</td></tr><tr><td>API</td><td>Yes — see <a href="#api-reference">API Reference</a> below</td></tr></tbody></table>
+
+## Fields
+
+<table><thead><tr><th>Field</th><th>Type</th><th style={{textAlign:'center'}}>Required</th><th style={{textAlign:'center'}}>Read-only</th><th>Notes</th></tr></thead><tbody><tr><td><code>id</code></td><td><code>string</code></td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}>✓</td><td>CUID</td></tr><tr><td><code>name</code></td><td><code>string</code></td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td>min 1 chars</td></tr><tr><td><code>create</code></td><td><code>boolean</code></td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td></td></tr><tr><td><code>read</code></td><td><code>boolean</code></td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td></td></tr><tr><td><code>update</code></td><td><code>boolean</code></td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td></td></tr><tr><td><code>delete</code></td><td><code>boolean</code></td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td></td></tr><tr><td><code>role_id</code></td><td><code>string | null</code></td><td style={{textAlign:'center'}}></td><td style={{textAlign:'center'}}></td><td>FK → <a href="role">role</a> (label: <code>name</code>), CUID</td></tr></tbody></table>
+
+> **Read-only** fields (`id`, `creator_id`, `created_at`, `updated_at`) are set automatically and cannot be written through the API or UI forms.
+
+## Relationships
+
+<table><thead><tr><th>Field / Property</th><th>Target Entity</th><th>Relationship Type</th></tr></thead><tbody><tr><td><code>role_id</code></td><td><a href="role"><code>role</code></a></td><td>many-to-one</td></tr></tbody></table>
+
+## UI Pages
+
+<table><thead><tr><th>Page</th><th>URL</th><th style={{textAlign:'center'}}>Enabled</th></tr></thead><tbody><tr><td>List</td><td><code>/en/permission</code></td><td style={{textAlign:'center'}}>✓</td></tr><tr><td>New</td><td><code>/en/permission/new</code></td><td style={{textAlign:'center'}}>✓</td></tr><tr><td>Edit</td><td><code>/en/permission/edit/[id]</code></td><td style={{textAlign:'center'}}>✓</td></tr><tr><td>View</td><td><code>/en/permission/view/[id]</code></td><td style={{textAlign:'center'}}>✓</td></tr></tbody></table>
+
+## API Reference
+
+### Authentication
+
+All endpoints require one of:
+
+<table><thead><tr><th>Header</th><th>Format</th><th>Example</th></tr></thead><tbody><tr><td><code>X-API-Key</code></td><td><code>&lt;key&gt;</code></td><td><code>X-API-Key: mk_abc123...</code></td></tr><tr><td><code>Authorization</code></td><td><code>Bearer &lt;key&gt;</code></td><td><code>Authorization: Bearer mk_abc123...</code></td></tr></tbody></table>
+
+API keys are stored in `user.api_key` and start with the `mk_` prefix.
+
+---
+
+### GET /api/permission
+
+List all `Permission` records the authenticated user has permission to read.
+
+**Response `200 OK`**
+
+```json
+[
+  {
+    "id": "clxxxxxxxxxxxxxxxxxxxxxxxx",
+    "name": "...",
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false,
+    "role_id": null
+  }
+]
+```
+
+### POST /api/permission
+
+Create a new `Permission` record.
+
+**Request Body**
+
+```json
+{
+  "name": "...",
+  "create": false,
+  "read": false,
+  "update": false,
+  "delete": false,
+  "role_id": null
+}
+```
+
+
+**Response `201 Created`** — the newly created record object.
+
+### GET /api/permission/[id]
+
+Retrieve a single `Permission` record by its ID.
+
+**Response `200 OK`** — the record object (same shape as a list item).
+
+**Response `404 Not Found`**
+
+```json
+{ "error": "Not found" }
+```
+
+### PUT /api/permission/[id]
+
+Replace an existing `Permission` record. 
+Accepts the same body as `POST /api/permission`.
+
+**Response `200 OK`**
+
+```json
+{ "success": true }
+```
+
+**Response `404 Not Found`**
+
+```json
+{ "error": "Not found" }
+```
+
+### DELETE /api/permission/[id]
+
+Delete a `Permission` record by its ID.
+
+**Response `204 No Content`** — empty body on success.
+
+**Response `404 Not Found`**
+
+```json
+{ "error": "Not found" }
+```
+
+
+### Error Responses
+
+<table><thead><tr><th>Status</th><th>Meaning</th></tr></thead><tbody><tr><td><code>400</code></td><td>Bad request (validation error)</td></tr><tr><td><code>401</code></td><td>Missing or invalid API key</td></tr><tr><td><code>403</code></td><td>Insufficient permission for the operation</td></tr><tr><td><code>404</code></td><td>Record not found</td></tr><tr><td><code>500</code></td><td>Unexpected server error</td></tr></tbody></table>
+
+All error responses return `{ "error": "<message>" }`.
+
+---
+
+## Bulk Operations
+
+Bulk endpoints process each item independently, enabling **partial success**. The outer
+request always returns `207 Multi-Status` as long as authentication passes; individual
+item outcomes are reported in the `results` array.
+
+### Response shape (`207 Multi-Status`)
+
+```json
+{
+  "results": [
+    { "index": 0, "success": true,  "data": { ... } },
+    { "index": 1, "success": false, "error": "Not found: clxxx..." }
+  ],
+  "summary": { "total": 2, "succeeded": 1, "failed": 1 }
+}
+```
+
+> Auth/permission failures at the **request** level (bad key, no permission at all) still
+> return `401` / `403` — not `207`.
+
+### POST /api/permission/bulk
+
+Bulk-create `Permission` records. Each element in the request array is processed with
+the same rules as `POST /api/permission`.
+
+**Request Body** — array of create objects:
+
+```json
+[
+  {
+    "name": "...",
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false,
+    "role_id": null
+  },
+  { "..." : "..." }
+]
+```
+
+**Response `207`** — `data` of each successful item contains `{ "id": "..." }`.
+
+### PUT /api/permission/bulk
+
+Bulk-update `Permission` records. Each element must include `id` in addition to the
+fields accepted by `PUT /api/permission/[id]`.
+
+**Request Body** — array of update objects:
+
+```json
+[
+  { "id": "clxxx...", 
+    "name": "...",
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false,
+    "role_id": null
+  },
+  { "id": "clyyy...", "..." : "..." }
+]
+```
+
+**Response `207`** — `data` of each successful item is `{ "success": true }`.
+Items with an unknown `id` report `"error": "Not found: <id>"`.
+
+### DELETE /api/permission/bulk
+
+Bulk-delete `Permission` records by ID.
+
+**Request Body** — array of id objects:
+
+```json
+[
+  { "id": "clxxx..." },
+  { "id": "clyyy..." }
+]
+```
+
+**Response `207`** — `data` of each successful item is `null`.
+Items with an unknown `id` report `"error": "Not found: <id>"`.
+
