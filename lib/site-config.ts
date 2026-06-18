@@ -64,27 +64,27 @@ export const siteConfig = {
 export const themeConfig = {
   header: {
     /** Outer <header> bar */
-    bar: "bg-gradient-to-r from-indigo-900 via-purple-900 to-indigo-800 text-white shadow-lg",
+    bar: "bg-blue-900 text-white",
     /** App title text */
-    title: "font-bold text-white tracking-tight",
+    title: "font-bold text-white",
     /** Hamburger / close button */
-    menuButton: "hover:bg-white/20 rounded-lg p-1.5 transition-colors",
+    menuButton: "hover:bg-white/20 rounded p-1 transition",
     /** Sign-in / sign-out button */
-    authButton: "bg-white/15 hover:bg-white/25 text-white rounded-lg px-3 py-1.5 text-sm font-medium transition-colors backdrop-blur-sm border border-white/10",
+    authButton: "bg-white/20 hover:bg-white/30 text-white rounded px-3 py-1.5 text-sm font-medium transition",
   },
   sidebar: {
     /** Sidebar panel background */
-    panel: "bg-slate-50 border-r border-slate-200",
+    panel: "bg-gray-100",
     /** Individual nav link */
-    link: "text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 block px-4 py-2.5 no-underline transition-colors rounded-lg mx-2 font-medium text-sm",
+    link: "text-gray-600 hover:bg-gray-200 block px-4 py-2 no-underline transition",
     /** Overlay backdrop (mobile) */
-    backdrop: "bg-black/50 backdrop-blur-sm",
-  },
-  footer: {
-    bar: "bg-slate-900 text-slate-400 border-t border-slate-800",
+    backdrop: "bg-black/40",
   },
   content: {
     /** Main content area background */
-    background: "bg-slate-100",
+    background: "bg-orange-50 dark:bg-slate-800",
+  },
+  footer: {
+    bar: "bg-gray-900 text-white",
   },
 };
