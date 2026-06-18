@@ -1,0 +1,106 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticateApiKey, handleApiError } from '@/lib/api-auth';
+import prisma from '@/lib/prisma';
+import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
+
+export type CommentReactionSummary = {
+  commentId: string;
+  type: number;
+  active: boolean;
+  counts: Array<{ type: number; count: number }>;
+  myTypes: number[];
+};
+
+type Params = { params: Promise<{ commentId: string }> };
+
+// GET /api/comment/[commentId]/reactions/toggle
+// Returns reaction counts and caller's active reaction types for the given comment.
+// D3=A: paired with POST toggle on the same route segment.
+// D4=C (batched): bulk reaction summaries for multiple comments are served by the
+//   server action (toggleXxxCommentReaction / getCommentReactionSummaries). This
+//   API route handles single-comment access for external API clients only.
+// D7=A fallback: auth via API key only. Owner-entity read check (D7=B) is not
+//   implemented here because this route is a global template with no entity-specific
+//   context. D7=B is enforced in the server action layer (actions.ts). See dashboard
+//   🚨要対応 for the pending D7=B API-route re-implementation decision.
+export async function GET(request: NextRequest, { params }: Params) {
+  try {
+    const { commentId } = await params;
+    const { userId } = await authenticateApiKey(request);
+
+    const rawCounts = await prisma.reaction.groupBy({
+      by: ['type'],
+      where: { comment_id: commentId },
+      _count: { type: true },
+    });
+    const counts = rawCounts.map((r) => ({ type: r.type, count: r._count.type }));
+
+    const myReactions = await prisma.reaction.findMany({
+      where: { comment_id: commentId, user_id: userId },
+      select: { type: true },
+    });
+    const myTypes = myReactions.map((r) => r.type);
+
+    return NextResponse.json({ commentId, counts, myTypes });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+// POST /api/comment/[commentId]/reactions/toggle
+// Toggles a reaction type for the authenticated user on the given comment.
+// Body: { type: number }
+// Returns CommentReactionSummary with updated active state and counts.
+// D7=A fallback: auth via API key only (see GET handler comment for rationale).
+export async function POST(request: NextRequest, { params }: Params) {
+  try {
+    const { commentId } = await params;
+    const { userId } = await authenticateApiKey(request);
+
+    const body = await request.json();
+    const { type } = body as { type: number };
+
+    const validTypes: number[] = COMMENT_REACTION_TYPES.map((t) => t.value);
+    if (typeof type !== 'number' || !validTypes.includes(type)) {
+      return NextResponse.json({ error: 'Invalid reaction type' }, { status: 400 });
+    }
+
+    const comment = await prisma.comment.findUnique({
+      where: { id: commentId },
+      select: { id: true },
+    });
+    if (!comment) {
+      return NextResponse.json({ error: 'Comment not found' }, { status: 404 });
+    }
+
+    const existing = await prisma.reaction.findUnique({
+      where: { comment_id_user_id_type: { comment_id: commentId, user_id: userId, type } },
+    });
+    let active: boolean;
+    if (existing) {
+      await prisma.reaction.delete({ where: { id: existing.id } });
+      active = false;
+    } else {
+      await prisma.reaction.create({ data: { comment_id: commentId, user_id: userId, type } });
+      active = true;
+    }
+
+    const rawCounts = await prisma.reaction.groupBy({
+      by: ['type'],
+      where: { comment_id: commentId },
+      _count: { type: true },
+    });
+    const counts = rawCounts.map((r) => ({ type: r.type, count: r._count.type }));
+
+    const myReactions = await prisma.reaction.findMany({
+      where: { comment_id: commentId, user_id: userId },
+      select: { type: true },
+    });
+    const myTypes = myReactions.map((r) => r.type);
+
+    const result: CommentReactionSummary = { commentId, type, active, counts, myTypes };
+    return NextResponse.json(result);
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

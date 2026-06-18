@@ -1,0 +1,70 @@
+# API & UI Reference
+
+> Auto-generated — run the code generator to update this file. Do not edit manually.
+
+This reference documents all generated entities: their UI pages and REST API endpoints.
+
+## Entities
+
+<table><thead><tr><th>Entity</th><th>Operations</th><th style={{textAlign:'center'}}>API</th><th style={{textAlign:'center'}}>Chart</th><th>Detail</th></tr></thead><tbody><tr><td><a href="docs/user">User</a></td><td>List · View · Update · Delete</td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td><a href="docs/user">→</a></td></tr><tr><td><a href="docs/setting">Setting</a></td><td>View · Update</td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td><a href="docs/setting">→</a></td></tr><tr><td><a href="docs/role">Role</a></td><td>List · View · Create · Update · Delete</td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td><a href="docs/role">→</a></td></tr><tr><td><a href="docs/organization">Organization</a></td><td>List · View · Create · Update · Delete</td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td><a href="docs/organization">→</a></td></tr><tr><td><a href="docs/permission">Permission</a></td><td>List · View · Create · Update · Delete</td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td><a href="docs/permission">→</a></td></tr><tr><td><a href="docs/approval_flow">Approval Flow</a></td><td>List · View · Create · Update · Delete</td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td><a href="docs/approval_flow">→</a></td></tr><tr><td><a href="docs/dashboard">Dashboard</a></td><td>List · View · Create · Update · Delete</td><td style={{textAlign:'center'}}>✓</td><td style={{textAlign:'center'}}></td><td><a href="docs/dashboard">→</a></td></tr></tbody></table>
+
+## UI Conventions
+
+All UI pages are served under the locale prefix (default: `/en/`).
+
+<table><thead><tr><th>Pattern</th><th>Description</th></tr></thead><tbody><tr><td><code>/en/&#123;entity&#125;</code></td><td>List page — searchable DataGrid of all records</td></tr><tr><td><code>/en/&#123;entity&#125;/new</code></td><td>Create form</td></tr><tr><td><code>/en/&#123;entity&#125;/edit/[id]</code></td><td>Edit form</td></tr><tr><td><code>/en/&#123;entity&#125;/view/[id]</code></td><td>Read-only detail view</td></tr><tr><td><code>/en/&#123;entity&#125;/chart</code></td><td>Gantt chart (only for chart-enabled entities)</td></tr></tbody></table>
+
+## API Authentication
+
+All API endpoints are located under `/api/` (no locale prefix).
+
+Authenticate by including **one** of the following headers:
+
+```
+X-API-Key: <your-api-key>
+```
+```
+Authorization: Bearer <your-api-key>
+```
+
+API keys are stored in `user.api_key` and prefixed with `mk_`.
+Obtain or regenerate a key from the User edit page.
+
+## API Conventions
+
+### Single-resource endpoints
+
+<table><thead><tr><th>Method</th><th>Path</th><th>Operation</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/api/&#123;entity&#125;</code></td><td>List all records (permission-filtered)</td></tr><tr><td><code>POST</code></td><td><code>/api/&#123;entity&#125;</code></td><td>Create a new record</td></tr><tr><td><code>GET</code></td><td><code>/api/&#123;entity&#125;/[id]</code></td><td>Get a single record</td></tr><tr><td><code>PUT</code></td><td><code>/api/&#123;entity&#125;/[id]</code></td><td>Replace a record</td></tr><tr><td><code>DELETE</code></td><td><code>/api/&#123;entity&#125;/[id]</code></td><td>Delete a record</td></tr></tbody></table>
+
+### Bulk endpoints
+
+Bulk endpoints are generated alongside any entity that has at least one of create / update / delete enabled.
+
+<table><thead><tr><th>Method</th><th>Path</th><th>Operation</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/api/&#123;entity&#125;/bulk</code></td><td>Bulk-create records</td></tr><tr><td><code>PUT</code></td><td><code>/api/&#123;entity&#125;/bulk</code></td><td>Bulk-update records</td></tr><tr><td><code>DELETE</code></td><td><code>/api/&#123;entity&#125;/bulk</code></td><td>Bulk-delete records</td></tr></tbody></table>
+
+Bulk endpoints always return **`207 Multi-Status`** (when auth succeeds) with the shape:
+
+```json
+{
+  "results": [
+    { "index": 0, "success": true,  "data": { ... } },
+    { "index": 1, "success": false, "error": "Not found: clxxx..." }
+  ],
+  "summary": { "total": 2, "succeeded": 1, "failed": 1 }
+}
+```
+
+Each item in the request array is processed independently — one failure does not prevent
+the others from succeeding. See each entity's detail page for the exact request body shape.
+
+**Standard error shape**: `{ "error": "<message>" }`
+
+<table><thead><tr><th>Status</th><th>Meaning</th></tr></thead><tbody><tr><td><code>400</code></td><td>Validation error</td></tr><tr><td><code>401</code></td><td>Missing or invalid API key</td></tr><tr><td><code>403</code></td><td>Insufficient permission</td></tr><tr><td><code>404</code></td><td>Record not found</td></tr><tr><td><code>500</code></td><td>Unexpected server error</td></tr></tbody></table>
+
+## Permissions
+
+Permissions are role-based. Each entity has four permission slots — `create`, `read`, `update`, `delete` — that can be granted at three scopes:
+
+<table><thead><tr><th>Scope</th><th>Meaning</th></tr></thead><tbody><tr><td><strong>General</strong></td><td>Access to all records</td></tr><tr><td><strong>Creator</strong></td><td>Access only to records the user created</td></tr><tr><td><strong>Assignee</strong></td><td>Access only to records assigned to the user</td></tr></tbody></table>
+
+Permissions are managed via the **Role** and **Permission** entities.
