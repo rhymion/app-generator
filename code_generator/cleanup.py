@@ -325,14 +325,15 @@ def _prune_orphans(out: Path, entities: list) -> None:
             if not (children and (can_view or can_edit)):
                 _delete(col_def)
 
-    # cypress/support/<entity>/helper.ts — test helpers for removed entities.
+    # cypress/support/<entity>/*.ts — test helpers for removed entities.
+    # Sweep any AUTO-GENERATED file in an entity sub-dir with no schema match.
     cypress_support = out / 'cypress' / 'support'
     if cypress_support.is_dir():
-        for helper in sorted(cypress_support.glob('*/helper.ts')):
-            parent = helper.parent.name
+        for ts_file in sorted(cypress_support.glob('*/*.ts')):
+            parent = ts_file.parent.name
             if entities_by_parent.get(parent) is None:
-                _delete(helper)
-                _try_rmdir(helper.parent)
+                _delete_if_generated(ts_file)
+                _try_rmdir(ts_file.parent)
 
     # app/[locale]/docs/<entity>/page.mdx — doc pages for removed entities.
     docs_app_root = out / 'app' / '[locale]' / 'docs'

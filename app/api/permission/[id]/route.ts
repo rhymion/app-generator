@@ -1,0 +1,53 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import prisma from '@/lib/prisma';
+import { getPermissionDetail } from '@/lib/permission/getters';
+import { updatePermission, deletePermission } from '@/lib/permission/service';
+
+type Params = { params: Promise<{ id: string }> };
+export async function GET(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const { userId: actorId } = await authenticateApiKey(request);
+    const item = await getPermissionDetail(id);
+    if (!item) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    await requireApiPermission(actorId, 'permission', 'read', item);
+    return NextResponse.json(item);
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+export async function PUT(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const { userId: actorId } = await authenticateApiKey(request);
+    const existing = await prisma.permission.findUnique({ where: { id }, select: { id: true, creator_id: true } });
+    if (!existing) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    await requireApiPermission(actorId, 'permission', 'update', existing);
+    const body = await request.json();
+    const { name, create, read, update, delete: deleteValue, role_id: roleId } = body;
+    await updatePermission(actorId, id, name, create, read, update, deleteValue, roleId ?? null, null);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+export async function DELETE(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const { userId: actorId } = await authenticateApiKey(request);
+    const existing = await prisma.permission.findUnique({ where: { id }, select: { id: true, creator_id: true } });
+    if (!existing) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    await requireApiPermission(actorId, 'permission', 'delete', existing);
+    await deletePermission(actorId, [id]);
+    return new NextResponse(null, { status: 204 });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
