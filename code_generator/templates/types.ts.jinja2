@@ -45,6 +45,12 @@ export type {{ parent | pascal_case }} = {
         created_at: Date | string;
         creator?: { id: string; name: string } | null;
       }[];
+{% elif child.child_name == 'comment' %}
+      created_at?: string | Date | null;
+      updated_at?: string | Date | null;
+      creator?: { id: string; name: string; image?: string | null } | null;
+      reactionCounts: Array<{ type: number; count: number }>;
+      myReactionTypes: number[];
 {% else %}
 {% for rel in child.relationships %}
       {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
@@ -93,6 +99,8 @@ export type {{ child.name | pascal_case }} = {
   created_at?: string | Date | null;
   updated_at?: string | Date | null;
   creator?: { id: string; name: string; image?: string | null } | null;
+  reactionCounts: Array<{ type: number; count: number }>;
+  myReactionTypes: number[];
 {% endif %}
 };
 
@@ -100,6 +108,25 @@ export type {{ child.name | pascal_case }} = {
 {% endfor %}
 {% else %}
 export type {{ parent | pascal_case }}Detail = {{ parent | pascal_case }};
+
+{% endif %}
+{% set _ns = namespace(has_comments=false) %}
+{% for _oto in one_to_one_rels %}
+{% for _ch in _oto.children %}
+{% if _ch.child_name == 'comment' %}{% set _ns.has_comments = true %}{% endif %}
+{% endfor %}
+{% endfor %}
+{% for _ch in children %}
+{% if _ch.output_type == 'comments' %}{% set _ns.has_comments = true %}{% endif %}
+{% endfor %}
+{% if _ns.has_comments %}
+export type CommentReactionSummary = {
+  commentId: string;
+  type: number;
+  active: boolean;
+  counts: Array<{ type: number; count: number }>;
+  myTypes: number[];
+};
 
 {% endif %}
 export type {{ parent | pascal_case }}DetailPageProps = Readonly<{
@@ -111,7 +138,7 @@ export type {{ parent | pascal_case }}DetailPageProps = Readonly<{
 export type FormViewProps = Readonly<{
   src: {
 {% for field in form_view_fields %}
-    {{ field.name }}: {{ field.ts_type }};
+    {{ field.name }}{% if field.optional %}?{% endif %}: {{ field.ts_type }};
 {% endfor %}
 {% for rel in parent_rels %}
     {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
@@ -147,6 +174,8 @@ export type FormViewProps = Readonly<{
         created_at?: string | Date | null;
         updated_at?: string | Date | null;
         creator?: { id: string; name: string; image?: string | null } | null;
+        reactionCounts: Array<{ type: number; count: number }>;
+        myReactionTypes: number[];
 {% else %}
 {% for rel in child.relationships %}
         {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
@@ -183,4 +212,9 @@ export type FormUpsertProps = Readonly<FormViewProps & {
   search{{ target | pascal_case }}Options?: (query: string, includeIds: string[]) => Promise<{{ target | pascal_case }}[]>;
 {% endfor %}
   currentUserId?: string | null;
+{% if is_bridge_child %}
+  /** Parent context for create, supplied by the parent-embedded grid (/new?parentType=&parentId=). */
+  initialParentType?: string;
+  initialParentId?: string;
+{% endif %}
 }>;

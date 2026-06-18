@@ -40,6 +40,23 @@ from manifest import MANIFEST_FILENAME, sha256_file
 
 _SYSTEM_PROPS = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
 
+# Handwritten files that happen to look like generator-shaped paths.
+# prune_orphans() will never delete these, even if no schema entity matches.
+HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
+    # register pages (handwritten auth flow)
+    "app/[locale]/register/page.tsx",
+    "app/[locale]/register/page.test.tsx",
+    # mobile layout test (handwritten e2e)
+    "cypress/e2e/mobile/layout.cy.ts",
+    # setting page (handwritten; coexists with generated edit/view)
+    "app/[locale]/setting/page.tsx",
+    # docs layout (handwritten)
+    "app/[locale]/docs/layout.tsx",
+    # login pages
+    "app/[locale]/login/page.tsx",
+    "app/[locale]/login/page.test.tsx",
+])
+
 # Boilerplate content of service_after_create.ts as emitted by
 # templates/service_after_create_stub.ts.jinja2. Mirror the template output
 # exactly (including trailing newline) so the equality check below stays
@@ -305,6 +322,13 @@ def _prune_orphans(out: Path, entities: list) -> None:
     print('\nPruning orphans...')
     entities_by_parent = {e['parent']: e for e in entities}
 
+    def _is_protected(path: Path) -> bool:
+        rel = str(path.relative_to(out))
+        if rel in HANDWRITTEN_ALLOWLIST:
+            print(f'  PROTECTED (allowlist): {rel}')
+            return True
+        return False
+
     components_root = out / 'components'
     if components_root.is_dir():
         for col_def in sorted(components_root.glob('*/column_def.tsx')):
@@ -312,8 +336,9 @@ def _prune_orphans(out: Path, entities: list) -> None:
             entity = entities_by_parent.get(parent)
             if entity is None:
                 # Whole entity gone from schema — definitely an orphan.
-                _delete(col_def)
-                _try_rmdir(col_def.parent)
+                if not _is_protected(col_def):
+                    _delete(col_def)
+                    _try_rmdir(col_def.parent)
                 continue
             gen_cfg  = entity.get('generate_config', {})
             children = entity.get('children', [])
@@ -323,7 +348,38 @@ def _prune_orphans(out: Path, entities: list) -> None:
             # the entity has children AND at least one read/edit page that
             # consumes the column functions.
             if not (children and (can_view or can_edit)):
-                _delete(col_def)
+                if not _is_protected(col_def):
+                    _delete(col_def)
+
+    # cypress/support/<entity>/*.ts — test helpers for removed entities.
+    # Sweep any AUTO-GENERATED file in an entity sub-dir with no schema match.
+    cypress_support = out / 'cypress' / 'support'
+    if cypress_support.is_dir():
+        for ts_file in sorted(cypress_support.glob('*/*.ts')):
+            parent = ts_file.parent.name
+            if entities_by_parent.get(parent) is None:
+                if not _is_protected(ts_file):
+                    _delete_if_generated(ts_file)
+                    _try_rmdir(ts_file.parent)
+
+    # app/[locale]/docs/<entity>/page.mdx — doc pages for removed entities.
+    docs_app_root = out / 'app' / '[locale]' / 'docs'
+    if docs_app_root.is_dir():
+        for page in sorted(docs_app_root.glob('*/page.mdx')):
+            parent = page.parent.name
+            if entities_by_parent.get(parent) is None:
+                if not _is_protected(page):
+                    _delete(page)
+                    _try_rmdir(page.parent)
+
+    # docs/generated/<entity>.md — generated markdown for removed entities.
+    docs_gen_root = out / 'docs' / 'generated'
+    if docs_gen_root.is_dir():
+        for doc in sorted(docs_gen_root.glob('*.md')):
+            parent = doc.stem
+            if entities_by_parent.get(parent) is None:
+                if not _is_protected(doc):
+                    _delete(doc)
 
 
 def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_orphans: bool = False) -> None:

@@ -57,11 +57,11 @@ async function {{ parent_pascal }}ListContent({
 {% endfor %}
   ]);
 {% for ns in enum_ns_list %}
-  const {{ ns.var_name }} = {
-{% for key in ns.keys %}
-    {{ key }}: {{ ns.var_name }}T('{{ key }}'),
+  const {{ ns.var_name }}: Record<number, string> = {
+{% for idx, key in ns.entries %}
+    {{ idx }}: {{ ns.var_name }}T('{{ key }}'),
 {% endfor %}
-  } as Record<number, string>;
+  };
 {% endfor %}
   const { {{ parent_camel }}Page, userPermissions } = await get{{ parent_pascal }}PagedData({
     page: Number.isFinite(pageNum) ? pageNum : 0,
@@ -80,11 +80,11 @@ async function {{ parent_pascal }}ListContent({
     const raw = await fetch{{ parent_pascal }}Page(opts);
 {% for ns in enum_ns_list %}
     const {{ ns.var_name }}T = await getTranslations('{{ ns.ns }}');
-    const {{ ns.var_name }} = {
-{% for key in ns.keys %}
-      {{ key }}: {{ ns.var_name }}T('{{ key }}'),
+    const {{ ns.var_name }}: Record<number, string> = {
+{% for idx, key in ns.entries %}
+      {{ idx }}: {{ ns.var_name }}T('{{ key }}'),
 {% endfor %}
-    } as Record<number, string>;
+    };
 {% endfor %}
     return {
       ...raw,
@@ -117,6 +117,9 @@ async function {{ parent_pascal }}ListContent({
         fetchPage={ {% if needs_formatting %}fetchFormatted{{ parent_pascal }}Page{% else %}fetch{{ parent_pascal }}Page{% endif %} }
         permissions={userPermissions}
         basePath="/{{ parent }}"
+{% if is_bridge_child %}
+        allowCreate={false}
+{% endif %}
 {% if can_delete %}
         removeAction={remove{{ parent_pascal }}}
 {% endif %}

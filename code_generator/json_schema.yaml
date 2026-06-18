@@ -19,8 +19,6 @@ definitions:
         - name:
             primary: true
             width: 150
-        - additional_info:
-            width: 250
     properties:
       id:
         type: string
@@ -504,10 +502,6 @@ definitions:
             x-outputType: list
             items:
               $ref: "#/definitions/attachment"
-          resource:
-            $ref: "#/definitions/resource"
-          product:
-            $ref: "#/definitions/product"
 
   attachment:
     type: object
@@ -663,3 +657,46 @@ definitions:
             type: array
             items:
               $ref: "#/definitions/dashboard_widget"
+
+  reaction:
+    type: object
+    required:
+      - id
+      - type
+      - user_id
+      - comment_id
+    x-internal:
+      page: false
+      embed: false
+      api: custom
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      type:
+        type: integer
+        minimum: 0
+        maximum: 7
+        enum:
+          - Like
+          - Love
+          - Laugh
+          - Surprised
+          - Sad
+          - Angry
+          - Helpful
+          - Confused
+      user_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: user
+          labelField: name
+      comment_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: comment
+          labelField: id

@@ -1,0 +1,52 @@
+model channelable {
+  id        String      @id @default(cuid())
+  work      work?    @relation("WorkChannelable")
+  character character?    @relation("CharacterChannelable")
+  scene     scene?    @relation("SceneChannelable")
+  channels  channel[]
+}
+
+// [parent:work] channelable_id String       @unique
+
+// [parent:work] channelable    channelable? @relation("WorkChannelable", fields: [channelable_id], references: [id])
+
+// [parent:character] channelable_id String       @unique
+
+// [parent:character] channelable    channelable? @relation("CharacterChannelable", fields: [channelable_id], references: [id])
+
+// [parent:scene] channelable_id String       @unique
+
+// [parent:scene] channelable    channelable? @relation("SceneChannelable", fields: [channelable_id], references: [id])
+
+// [child:channel] channelable_id String
+
+// [child:channel] channelable    channelable @relation(fields: [channelable_id], references: [id], onDelete: Cascade)
+
+model fc_linkable {
+  id        String      @id @default(cuid())
+  work      work?    @relation("WorkFcLinkable")
+  character character?    @relation("CharacterFcLinkable")
+  music     music?    @relation("MusicFcLinkable")
+  channel   channel?    @relation("ChannelFcLinkable")
+  fc_links  fc_link[]
+}
+
+// [parent:work] fc_linkable_id String       @unique
+
+// [parent:work] fc_linkable    fc_linkable? @relation("WorkFcLinkable", fields: [fc_linkable_id], references: [id])
+
+// [parent:character] fc_linkable_id String       @unique
+
+// [parent:character] fc_linkable    fc_linkable? @relation("CharacterFcLinkable", fields: [fc_linkable_id], references: [id])
+
+// [parent:music] fc_linkable_id String       @unique
+
+// [parent:music] fc_linkable    fc_linkable? @relation("MusicFcLinkable", fields: [fc_linkable_id], references: [id])
+
+// [parent:channel] fc_linkable_id String       @unique
+
+// [parent:channel] fc_linkable    fc_linkable? @relation("ChannelFcLinkable", fields: [fc_linkable_id], references: [id])
+
+// [child:fc_link] fc_linkable_id String
+
+// [child:fc_link] fc_linkable    fc_linkable @relation(fields: [fc_linkable_id], references: [id], onDelete: Cascade)

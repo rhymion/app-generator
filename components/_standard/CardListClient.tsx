@@ -35,6 +35,7 @@ interface DisplayFieldConfig<T> {
   headerName: string;
   width?: number;
   format?: 'date-time' | 'date' | 'time';
+  uriKind?: 'image' | 'link';
 }
 
 interface CardListClientProps<T extends BaseEntity> {
@@ -54,6 +55,9 @@ interface CardListClientProps<T extends BaseEntity> {
   permissions?: ModelPermissions;
   /** Which field to display prominently as the card title. Defaults to 'name'. */
   primaryField?: keyof T;
+  /** When false, the "+" create button is hidden even if the user has create permission.
+   * Used for bridge-child entities, which cannot be created standalone (only via a parent). */
+  allowCreate?: boolean;
 }
 
 function formatValue<T>(item: T, field: keyof T, format?: 'date-time' | 'date' | 'time'): string {
@@ -77,6 +81,7 @@ export default function CardListClient<T extends BaseEntity>({
   displayFields,
   permissions = { create: true, read: true, update: true, delete: true },
   primaryField = 'name' as keyof T,
+  allowCreate = true,
 }: CardListClientProps<T>) {
   const [items] = useState<T[]>(initialRows ?? src ?? []);
   const [isPending, startTransition] = useTransition();
@@ -114,7 +119,7 @@ export default function CardListClient<T extends BaseEntity>({
   return (
     <Box>
       <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-        {permissions.create && (
+        {permissions.create && allowCreate && (
           <Link href={`${basePath}/new`}>
             <Tooltip title={`Create New ${entityLabel}`}>
               <IconButton color="primary" aria-label={`Create New ${entityLabel}`}>
@@ -172,6 +177,20 @@ export default function CardListClient<T extends BaseEntity>({
                     )}
                   </Box>
                   {secondaryFields.map((fieldConfig) => {
+                    if (fieldConfig.uriKind === 'link') {
+                      const href = item[fieldConfig.field] as string | null | undefined;
+                      if (!href) return null;
+                      return (
+                        <Box key={String(fieldConfig.field)} sx={{ mt: 0.5 }}>
+                          <Typography variant="caption" color="text.secondary" component="span">
+                            {fieldConfig.headerName}:{' '}
+                          </Typography>
+                          <a href={href} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.875rem', wordBreak: 'break-all' }}>
+                            {href}
+                          </a>
+                        </Box>
+                      );
+                    }
                     const value = formatValue(item, fieldConfig.field, fieldConfig.format);
                     if (!value) return null;
                     return (

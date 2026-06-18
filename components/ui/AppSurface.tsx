@@ -16,9 +16,9 @@ interface AppSurfaceProps {
 
 export default function AppSurface({
   children,
-  elevation,
+  elevation = 1,
   variant,
-  p,
+  p = 3,
   width,
   maxWidth,
   mb,

@@ -38,6 +38,8 @@ interface DisplayFieldConfig<T> {
   headerName: string;
   width?: number;
   format?: 'date-time' | 'date' | 'time';
+  enumLabels?: Record<number, string>;
+  uriKind?: 'image' | 'link';
 }
 
 interface DataGridClientProps<T extends BaseEntity> {
@@ -59,6 +61,11 @@ interface DataGridClientProps<T extends BaseEntity> {
   displayFields?: DisplayFieldConfig<T>[];
   permissions?: ModelPermissions;
   primaryField?: keyof T;
+  /** When true, edit and create links open in a new tab. Use in parent-embedded bridge grids. */
+  openLinksInNewTab?: boolean;
+  /** When false, the "+" create button is hidden even if the user has create permission.
+   * Used for bridge-child entities, which cannot be created standalone (only via a parent). */
+  allowCreate?: boolean;
 }
 
 export default function DataGridClient<T extends BaseEntity>({
@@ -74,6 +81,8 @@ export default function DataGridClient<T extends BaseEntity>({
   displayFields,
   permissions = { create: true, read: true, update: true, delete: true },
   primaryField = 'name' as keyof T,
+  openLinksInNewTab,
+  allowCreate = true,
 }: DataGridClientProps<T>) {
   const serverMode = typeof fetchPage === 'function';
   const initialItems: T[] = (serverMode ? initialRows : src) ?? [];
@@ -183,6 +192,23 @@ export default function DataGridClient<T extends BaseEntity>({
       };
     }
 
+    if (fieldConfig.uriKind === 'link') {
+      return {
+        field: fieldConfig.field as string,
+        headerName: fieldConfig.headerName,
+        width: fieldConfig.width || 200,
+        renderCell: (params) => {
+          const href = params.row[fieldConfig.field] as string | null | undefined;
+          if (!href) return null;
+          return (
+            <a href={href} target="_blank" rel="noopener noreferrer" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth: '100%' }}>
+              {href}
+            </a>
+          );
+        },
+      };
+    }
+
     return {
       field: fieldConfig.field as string,
       headerName: fieldConfig.headerName,
@@ -191,6 +217,7 @@ export default function DataGridClient<T extends BaseEntity>({
         const fieldValue = row[fieldConfig.field];
         if (fieldValue === null || fieldValue === undefined) return '';
         if (fieldConfig.format) return formatLabelValue(fieldValue, fieldConfig.format);
+        if (fieldConfig.enumLabels && typeof fieldValue === 'number') return fieldConfig.enumLabels[fieldValue] ?? String(fieldValue);
         if (typeof fieldValue === 'object' && 'name' in (fieldValue as object)) return (fieldValue as unknown as { name: string }).name;
         return String(fieldValue);
       },
@@ -207,7 +234,7 @@ export default function DataGridClient<T extends BaseEntity>({
       filterable: false,
       renderCell: (params) => {
         return (
-          <Link href={`${basePath}/edit/${params.id}`}>
+          <Link href={`${basePath}/edit/${params.id}`} target={openLinksInNewTab ? '_blank' : undefined} rel={openLinksInNewTab ? 'noopener noreferrer' : undefined}>
             <Tooltip title="Edit">
               <IconButton size="small" aria-label="Edit" color="primary">
                 <EditIcon fontSize="small" />
@@ -222,7 +249,7 @@ export default function DataGridClient<T extends BaseEntity>({
   return (
     <div>
       <div className="flex mb-4">
-        {permissions.create && (
+        {permissions.create && allowCreate && (
         <Link href={`${basePath}/new`}>
           <Tooltip title={`Create New ${entityLabel}`}>
             <IconButton color="primary" aria-label={`Create New ${entityLabel}`}>

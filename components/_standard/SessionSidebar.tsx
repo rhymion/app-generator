@@ -7,7 +7,7 @@ import Sidebar from "../../app/[locale]/@sidebar/page";
 import { useSidebar } from "./SidebarContext";
 import { themeConfig } from "@/lib/site-config";
 
-export default function SessionSidebar() {
+export default function SessionSidebar({ hiddenHrefs = [] }: { hiddenHrefs?: string[] }) {
   const { data: session } = useSession();
   const { isOpen, close } = useSidebar();
   const pathname = usePathname();
@@ -23,7 +23,7 @@ export default function SessionSidebar() {
     <>
       {/* Desktop sidebar – always visible on md+ */}
       <div className="hidden md:flex flex-none">
-        <Sidebar />
+        <Sidebar hiddenHrefs={hiddenHrefs} />
       </div>
 
       {/* Mobile drawer – shown when isOpen */}
@@ -31,7 +31,7 @@ export default function SessionSidebar() {
         <div className="md:hidden fixed inset-0 z-40 flex">
           {/* Drawer panel */}
           <div className={`flex-none w-64 h-full overflow-y-auto shadow-xl mt-14 ${themeConfig.sidebar.panel}`}>
-            <Sidebar />
+            <Sidebar hiddenHrefs={hiddenHrefs} />
           </div>
           {/* Backdrop – click to close */}
           <div

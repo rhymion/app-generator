@@ -13,7 +13,10 @@ import NumberField from '@/components/_standard/NumberField';
 {% if uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
-import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}{% endif %}{% if has_comment_children %}, add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment{% endif %} } from '@/lib/{{ parent }}/actions';
+import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}{% endif %}{% if has_comment_children %}, add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment{% if named_constants %}, toggle{{ parent_pascal }}CommentReaction{% endif %}{% endif %} } from '@/lib/{{ parent }}/actions';
+{% if has_comment_children and named_constants %}
+import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
+{% endif %}
 import type { FormUpsertProps } from '@/lib/{{ parent }}/types';
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
@@ -145,6 +148,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% endif %}
 {% if child_grid_components %}
 {{ child_grid_components }}
+{% endif %}
+{% if bridge_edit_grids %}
+{{ bridge_edit_grids }}
 {% endif %}
 {% if indep_list_readonly_jsx %}
 {{ indep_list_readonly_jsx }}

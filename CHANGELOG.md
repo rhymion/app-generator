@@ -3,6 +3,27 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [1.4.0] - 2026-06-18
+
+### Added
+- **Comment reactions** — reaction buttons on comment threads:
+  - Integer-enum reaction kinds backed by named constants (`reaction_constants.ts`)
+  - Per-comment toggle endpoint generated (`/api/comment/{commentId}/reactions/toggle`)
+  - Batched reaction aggregation (single grouped query) and parent-owner read authorization
+  - `CommentReactionBar` rendered inline within comment threads
+- **Generalized bridge pattern** — the bridge mechanism previously dedicated to comments and attachments is now a reusable, schema-level relationship capability:
+  - Real one-to-one relations via an internal through-table (`<model>able`) — no extra FK columns on the parent, and parent autocomplete is preserved
+  - Internal bridge tables are omitted from the JSON schema output
+  - Parent-label resolution (`labelField` → `x-display` primary → fallback), parent-context-only child creation, read-only parent fields on child forms, and child `DataGrid` lists on parent edit pages
+
+### Changed
+- **Wrapper components (round 2)** — auto-generated code no longer depends on MUI directly. Generated components import shared `App*` wrappers from `components/ui/` instead of `@mui/*`:
+  - Hybrid wrapper API; `sx` confined to wrapper internals; icons referenced by name; public prop types defined independently of MUI
+  - Outcome: MUI imports eliminated from generated output (provider setup excepted)
+- **UI improvements** — consumer-grade default styling for generated apps: refreshed theme tokens (header / sidebar / footer), MUI palette and typography (Inter / Noto Sans JP), rounded surfaces, and responsive list/card layouts
+
+> **Backward compatibility**: Non-breaking from v1.3. Existing schemas work unchanged; comment reactions and the generalized bridge are opt-in. No breaking changes.
+
 ## [1.3.0] - 2026-06-10
 
 ### Added

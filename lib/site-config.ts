@@ -56,6 +56,7 @@ export const siteConfig = {
     { label: "Organization", href: "/organization" },
     { label: "Permission", href: "/permission" },
     { label: "Approval Flow", href: "/approval_flow" },
+    { label: "Dashboard", href: "/dashboard" },
   ] satisfies NavLink[],
 };
 
@@ -81,9 +82,13 @@ export const themeConfig = {
     /** Sidebar panel background */
     panel: "bg-gray-100",
     /** Individual nav link */
-    link: "text-gray-700 hover:bg-gray-200 block px-4 py-2 no-underline transition",
+    link: "text-gray-600 hover:bg-gray-200 block px-4 py-2 no-underline transition",
     /** Overlay backdrop (mobile) */
     backdrop: "bg-black/40",
+  },
+  content: {
+    /** Main content area background */
+    background: "bg-orange-50 dark:bg-slate-800",
   },
   footer: {
     bar: "bg-gray-900 text-white",

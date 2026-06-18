@@ -9,10 +9,21 @@ Builds Jinja2 template contexts for:
 """
 import re
 
+# Messages Fields namespace for enum label translation.
+# Populated by set_messages_fields() before generating test specs.
+_messages_fields: dict = {}
+
+
+def set_messages_fields(fields: dict) -> None:
+    """Register the Fields namespace from messages/en.json for enum label lookup."""
+    global _messages_fields
+    _messages_fields = fields
+
 from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
 )
 from helpers.schema_helpers import filter_fields, get_parent_relationships, is_optional_fk_to_parent, get_flatten_rels
+from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import build_label_expression, render_prisma_include, resolve_label_paths
 from build_context import _get_entity_options
 from generate_types import extract_entities
@@ -194,7 +205,19 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
         k for k, v in props.items()
         if (v.get('x-relationship') or {}).get('type') in ('one-to-one', 'one-to-one_bridge')
     }
-    exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props | oto_props
+    # Also exclude inferred-internal FK fields (required _id → internal-only entity,
+    # no x-relationship). These are handled by get_all_internal_fk_deps instead.
+    _inferred_internal = set()
+    for _pn, _pp in props.items():
+        if not _pn.endswith('_id') or _pp.get('x-relationship') or _pn not in required:
+            continue
+        _it = _pn[:-3]
+        if _it in (schema.get('definitions') or {}):
+            _dtl = (schema.get('definitions') or {}).get(f'{_it}_detail', {})
+            _g = _dtl.get('x-generate') or {}
+            if _g and not any(_g.get(k) for k in ('api', 'test', 'list', 'view', 'new', 'edit', 'delete')):
+                _inferred_internal.add(_pn)
+    exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props | oto_props | _inferred_internal
     _entity_opts = _get_entity_options(schema)
     _first_entity_val = f"'{_entity_opts[0]['value']}'" if _entity_opts else "''"
     result = []
@@ -369,6 +392,20 @@ def get_entity_fk_deps(model_name: str, schema: dict, deps: list[dict]) -> list[
     ]
 
 
+def _entity_has_updater_id(entity_name: str, schema: dict) -> bool:
+    """True if the entity has an updater_id field in the Prisma schema.
+
+    Entities with user-facing pages (detail def with any x-generate flag true,
+    or no x-generate = default all true) have updater_id. Leaf entities like
+    `comment` (no _detail) or internal bridges (all x-generate false) do not.
+    """
+    detail_def = (schema.get('definitions') or {}).get(f'{entity_name}_detail', {})
+    if not detail_def:
+        return False
+    gen = detail_def.get('x-generate') or {}
+    return not gen or any(gen.get(k) for k in ('api', 'test', 'list', 'view', 'new', 'edit'))
+
+
 def get_internal_one_to_one_fks(model_name: str, schema: dict) -> list[dict]:
     """Returns outbound bridge OTO FK fields on model_name.
 
@@ -406,6 +443,71 @@ def get_internal_one_to_one_fks(model_name: str, schema: dict) -> list[dict]:
             create_data = '{}'
         result.append({'prop_name': prop_name, 'target': target, 'var_name': var_name, 'create_data': create_data})
     return result
+
+
+def get_all_internal_fk_deps(model_name: str, schema: dict) -> list[dict]:
+    """Like get_internal_one_to_one_fks but also includes FK-on-parent bridge FKs.
+
+    For bridge-child entities (x-bridge on entity def): adds {bridge_name}_id.
+    For bridge-parent entities (entity appears in another entity's x-bridge.parents): adds {bridge_name}_id.
+    """
+    deps = list(get_internal_one_to_one_fks(model_name, schema))
+    existing_props = {d['prop_name'] for d in deps}
+
+    entity_def = schema.get('definitions', {}).get(model_name, {})
+    # Bridge-child: x-bridge on the entity itself
+    bridge = entity_def.get('x-bridge')
+    if isinstance(bridge, dict) and bridge.get('name'):
+        b_name = bridge['name']
+        b_prop = f'{b_name}_id'
+        if b_prop not in existing_props:
+            deps.append({'prop_name': b_prop, 'target': b_name,
+                         'var_name': to_camel_case(b_name), 'create_data': '{}',
+                         'prisma_include_str': ''})
+            existing_props.add(b_prop)
+
+    # Bridge-parent: entity appears in another entity's x-bridge.parents list
+    for _ename, _edef in schema.get('definitions', {}).items():
+        if not isinstance(_edef, dict):
+            continue
+        _bridge = _edef.get('x-bridge')
+        if not isinstance(_bridge, dict) or not _bridge.get('name'):
+            continue
+        _b_name = _bridge['name']
+        _b_prop = f'{_b_name}_id'
+        _is_parent = any(
+            (p.get('target') if isinstance(p, dict) else None) == model_name
+            for p in (_bridge.get('parents') or [])
+        )
+        if _is_parent and _b_prop not in existing_props:
+            deps.append({'prop_name': _b_prop, 'target': _b_name,
+                         'var_name': to_camel_case(_b_name), 'create_data': '{}',
+                         'prisma_include_str': ''})
+            existing_props.add(_b_prop)
+
+    # Inferred FK: required _id field with no x-relationship whose stripped target
+    # is an internal-only entity (all x-generate flags false in the _detail definition).
+    # Example: comment.commentable_id has no x-relationship annotation but commentable
+    # is internal-only — test helpers must create a real commentable row.
+    for _prop_name, _prop in entity_def.get('properties', {}).items():
+        if not _prop_name.endswith('_id') or _prop_name in existing_props:
+            continue
+        if _prop_name not in set(entity_def.get('required', [])):
+            continue
+        if _prop.get('x-relationship'):
+            continue
+        _inf_target = _prop_name[:-3]
+        if _inf_target not in (schema.get('definitions') or {}):
+            continue
+        _detail = (schema.get('definitions') or {}).get(f'{_inf_target}_detail', {})
+        _gen = _detail.get('x-generate') or {}
+        if _gen and not any(_gen.get(k) for k in ('api', 'test', 'list', 'view', 'new', 'edit', 'delete')):
+            deps.append({'prop_name': _prop_name, 'target': _inf_target,
+                         'var_name': to_camel_case(_inf_target), 'create_data': '{}',
+                         'prisma_include_str': ''})
+            existing_props.add(_prop_name)
+
+    return deps
 
 
 # ---------------------------------------------------------------------------
@@ -661,7 +763,12 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
     elif cat in ('enum', 'string_enum'):
         values = field.get('enum_values') or []
         first = next((v for v in values if v is not None), None)
-        return str(first) if first is not None else ''
+        if first is None:
+            return ''
+        if cat == 'enum' and _messages_fields:
+            key = f'{prop_name}_{first}'
+            return _messages_fields.get(key, str(first))
+        return str(first)
 
     elif cat == 'number':
         val = 100
@@ -714,7 +821,13 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
 
     elif cat in ('enum', 'string_enum'):
         values = [v for v in (field.get('enum_values') or []) if v is not None]
-        return str(values[1]) if len(values) > 1 else (str(values[0]) if values else '')
+        raw = values[1] if len(values) > 1 else (values[0] if values else None)
+        if raw is None:
+            return ''
+        if cat == 'enum' and _messages_fields:
+            key = f'{prop_name}_{raw}'
+            return _messages_fields.get(key, str(raw))
+        return str(raw)
 
     elif cat == 'number':
         val = 200
@@ -752,6 +865,8 @@ def api_value(field: dict, entity_title: str) -> str:
     prop_name = field['prop_name']
 
     if cat == 'text':
+        if field.get('format') == 'uri':
+            return f"'https://example.com/test-{prop_name}'"
         if prop_name == 'name':
             return f"'Test {entity_title}'"
         if field.get('enum_values'):
@@ -1138,11 +1253,26 @@ def helper_context(
     # Detect outbound one-to-one FK fields (e.g. approvable_id on leave_request).
     # These are internal bridge records the service creates automatically — not user-facing.
     # Exclude from fill/assert commands and from prisma data field lists; handle separately.
-    internal_fk_deps = get_internal_one_to_one_fks(model_name, schema)
+    internal_fk_deps = get_all_internal_fk_deps(model_name, schema)
     internal_fk_prop_names = {d['prop_name'] for d in internal_fk_deps}
     fields = [f for f in fields if f['prop_name'] not in internal_fk_prop_names]
     deps = resolve_dependencies(model_name, schema)
     entity_fk_deps = get_entity_fk_deps(model_name, schema, deps)
+
+    # Bridge-child entity: inject first bridge parent as synthetic dep so that
+    # populateXxxDependencies creates and returns a parent record (e.g. work).
+    # This is needed because API tests POST with selectedParentType/selectedParentId,
+    # and the helper must return the parent so the test can reference deps.<parent>.id.
+    _h_bridge = parent_def.get('x-bridge') if parent_def else None
+    if isinstance(_h_bridge, dict) and _h_bridge.get('name') and _h_bridge.get('parents'):
+        _h_bp_list = _h_bridge.get('parents') or []
+        _h_first_bp = _h_bp_list[0] if _h_bp_list else None
+        _h_bp_target = (_h_first_bp.get('target') if isinstance(_h_first_bp, dict) else _h_first_bp) or None
+        if _h_bp_target and not any(d['target'] == _h_bp_target for d in deps):
+            for _td in resolve_dependencies(_h_bp_target, schema):
+                if not any(d['target'] == _td['target'] for d in deps):
+                    deps.append(_td)
+            deps.append({'target': _h_bp_target, 'var_name': to_camel_case(_h_bp_target), 'fk_deps': []})
 
     # Detect required selector one-to-one FK fields (e.g. pre_check.checkup_id).
     # These are reverse-parent FKs (FK in this model, parent in target) that must be created as deps
@@ -1409,11 +1539,13 @@ def helper_context(
             # needs_second only for transitive (non-direct) deps matching primary FK target
             'needs_second': not is_direct and dep['target'] == primary_fk_dep_target,
             # one-to-one FK pre-creates needed when creating this dep record (e.g. commentable_id)
-            'internal_fk_deps': get_internal_one_to_one_fks(dep['target'], schema),
+            'internal_fk_deps': get_all_internal_fk_deps(dep['target'], schema),
             'lookup_field': lookup_field,
             'lookup_value': lookup_value,
             'lookup_value_second': lookup_value_second,
             'lookup_value_unique': lookup_value_unique,
+            # True if dep entity has updater_id (user-visible entities do; leaf/bridge entities may not)
+            'has_updater_id': _entity_has_updater_id(dep['target'], schema),
         })
 
     # Separate self-ref deps (target == model) from non-self deps for _createBaseDeps() split.
@@ -1584,6 +1716,25 @@ def helper_context(
                 continue
             _fake_field = {'category': 'text', 'prop_name': _prop_name, 'label': to_title_case(_prop_name)}
             extra_prisma_fields.append({'prop_name': _prop_name, 'prisma_val': prisma_value(_fake_field, 'i', title)})
+    # Include required URI-format fields skipped by get_field_metas (e.g. fc_link.url).
+    # These are mandatory in Prisma but treated as image/file fields in the UI — populate
+    # helpers need a valid URL string so the insert succeeds.
+    _covered_props = (
+        internal_fk_prop_names
+        | {f['prop_name'] for f in required_fields_prisma}
+        | {f['prop_name'] for f in extra_prisma_fields}
+        | _SYSTEM_PROPS
+    )
+    _all_parent_props_for_uri = parent_def.get('properties') or {}
+    for _prop_name in sorted(parent_def.get('required') or []):
+        if _prop_name in _covered_props:
+            continue
+        _prop = _all_parent_props_for_uri.get(_prop_name)
+        if _prop and _prop.get('format') == 'uri':
+            extra_prisma_fields.append({
+                'prop_name': _prop_name,
+                'prisma_val': f'`https://example.com/{model_name}/${{i}}`',
+            })
 
     # Detect count-mode reservation WITH lines: populateDependencies must seed the pool entity
     # so that create tests (2.1, 2.2) can allocate inventory without hitting InsufficientInventoryError.
@@ -1813,6 +1964,7 @@ def spec_context(
     # as a flatten Accordion (see prim_is_fk + flatten branch below).
     check_field_use_accordion = False
     check_field_inner_label = None
+    check_field_skip = False
 
     if prim_is_fk:
         primary_rel = next((r for r in relationships if r['prop_name'] == f'{prim}_id'), None)
@@ -1882,6 +2034,26 @@ def spec_context(
             check_field_label = lbl
             check_field_value_1 = first_label
             check_field_updated = second_label
+        elif prim_meta.get('category') == 'enum':
+            # Integer enum primary (e.g. plan.tier = [free, premium, vip])
+            raw_vals = [str(v) for v in (prim_meta.get('enum_values') or [])]
+            prim_prop = prim_meta.get('prop_name', prim or '')
+            if _messages_fields:
+                enum_labels = [_messages_fields.get(f'{prim_prop}_{v}', v) for v in raw_vals]
+            else:
+                enum_labels = raw_vals
+            list_id_1 = enum_labels[0] if enum_labels else f'Test {lbl} 1'
+            list_id_is_unique = False
+            after_create_id = enum_labels[0] if enum_labels else f'Test {lbl}'
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = (enum_labels[1] if len(enum_labels) > 1 else enum_labels[0]) if enum_labels else list_id_1
+            has_edit_primary = True
+            edit_field_label = lbl
+            edit_update_value = list_id_updated
+            check_field_label = lbl
+            check_field_value_1 = list_id_1
+            check_field_updated = list_id_updated
         else:
             list_id_1 = f'Test {lbl} 1'
             list_id_is_unique = True
@@ -1933,18 +2105,39 @@ def spec_context(
             check_field_value_1 = f'{title} 1'
             check_field_updated = f'Updated {title}'
     else:
-        list_id_1 = f'{title} 1'
-        list_id_is_unique = True
-        after_create_id = f'Test {title}'
-        after_create_id_is_expr = False
-        primary_dep_var_for_list = None
-        list_id_updated = f'Updated {title}'
-        has_edit_primary = True
-        edit_field_label = 'Name'
-        edit_update_value = f'Updated {title}'
-        check_field_label = 'Name'
-        check_field_value_1 = f'{title} 1'
-        check_field_updated = f'Updated {title}'
+        # Check if prim is a virtual column (not in properties, no prim_meta)
+        _props_vc = parent_def.get('properties') or {}
+        _prim_is_virtual = (prim and prim_meta is None and not prim_is_fk
+                            and prim not in _props_vc and f'{prim}_id' not in _props_vc)
+        _is_creator_virtual = prim == 'created_by' or 'creator_id' in _props_vc
+        if _prim_is_virtual and _is_creator_virtual:
+            # Virtual column resolved from creator (testUser.name = 'Test User')
+            list_id_1 = 'Test User'
+            list_id_is_unique = False
+            after_create_id = 'Test User'
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = 'Test User'
+            has_edit_primary = False
+            edit_field_label = None
+            edit_update_value = None
+            check_field_label = to_title_case(prim) if prim else 'Name'
+            check_field_value_1 = 'Test User'
+            check_field_updated = 'Test User'
+            check_field_skip = True  # created_by is list-only virtual; not in FormView
+        else:
+            list_id_1 = f'{title} 1'
+            list_id_is_unique = True
+            after_create_id = f'Test {title}'
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = f'Updated {title}'
+            has_edit_primary = True
+            edit_field_label = 'Name'
+            edit_update_value = f'Updated {title}'
+            check_field_label = 'Name'
+            check_field_value_1 = f'{title} 1'
+            check_field_updated = f'Updated {title}'
 
     # detail_required: which children are required in the parent form
     detail_def = schema['definitions'].get(definition_key, {})
@@ -1979,6 +2172,16 @@ def spec_context(
         is_self_ref_autocomplete = (child_meta['render_type'] == 'editable-list-autocomplete'
                                     and rel_target == model_name)
         dep_var_name = to_camel_case(prop_name) if is_self_ref_autocomplete else None
+        # Compute expected autocomplete label for seed index 1
+        # name fields: seed uses `${entity_title} ${i}` → 'Character 1' for character
+        # other string fields: seed uses `Test ${field_title} ${i}` → 'Test Title 1' for music.title
+        _ac_lf = rel.get('label_field', 'name') or 'name'
+        if not rel_target:
+            _ac_label_1 = ''
+        elif _ac_lf == 'name':
+            _ac_label_1 = f'{to_title_case(rel_target)} 1'
+        else:
+            _ac_label_1 = f'Test {to_title_case(_ac_lf)} 1'
         list_children_data.append({
             'singular_pascal': child_meta['names']['singular_pascal_name'],
             'title': child_meta['names']['title'],
@@ -1988,6 +2191,8 @@ def spec_context(
             'target_pascal': to_pascal_case(rel_target) if rel_target else '',
             'is_external_target': bool(rel_target and rel_target != model_name),
             'dep_var_name': dep_var_name,
+            'label_field': _ac_lf,
+            'autocomplete_seed_label_1': _ac_label_1,
         })
 
     # Comment children data
@@ -2036,8 +2241,16 @@ def spec_context(
         prim_edit_meta = next(
             (f for f in fields if f.get('label') == edit_field_label), None
         )
-        if prim_edit_meta and prim_edit_meta.get('category') in ('entity_select', 'autocomplete'):
-            edit_primary_cmd = f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
+        if prim_edit_meta and prim_edit_meta.get('category') in ('entity_select', 'autocomplete', 'enum'):
+            if prim_edit_meta.get('category') == 'enum':
+                # In edit mode the enum Autocomplete already has a value selected;
+                # clear it first so selectAutocomplete can open the dropdown cleanly.
+                edit_primary_cmd = (
+                    f"        cy.clearAutocomplete('{edit_field_label}');\n"
+                    f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
+                )
+            else:
+                edit_primary_cmd = f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
             use_deps_in_3_3 = prim_edit_meta.get('category') == 'autocomplete' and has_deps
         elif prim_is_fk:
             # User-account primary FKs (and any other primary FK that
@@ -2197,9 +2410,11 @@ def spec_context(
         'check_field_updated': check_field_updated,
         'check_field_use_accordion': check_field_use_accordion,
         'check_field_inner_label': check_field_inner_label,
+        'check_field_skip': check_field_skip,
         'has_approvable': any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model_name, schema)),
         'flatten_test_rels': _compute_flatten_test_rels(parent, pascal, definition_key, schema),
         'seed_count': seed_count,
+        'bridge_child_ir': get_new_form_bridge(schema.get('definitions', {}).get(model_name, {})),
     }
 
 
@@ -2285,6 +2500,20 @@ def api_spec_context(
     # Exclude outbound one-to-one FK fields (internal bridge records — service creates them automatically).
     _api_internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model, schema)}
     all_field_metas = [f for f in all_field_metas if f['prop_name'] not in _api_internal_fk_prop_names]
+    # Re-add required uri-format fields excluded by get_field_metas (e.g. fc_link.url).
+    # The uri skip in get_field_metas is for UI rendering; API tests must include them.
+    _existing_meta_props = {f['prop_name'] for f in all_field_metas}
+    for _pn, _pp in filtered_props.items():
+        if _pn not in required_fields_list or _pn in _existing_meta_props:
+            continue
+        if _pp.get('format') == 'uri':
+            all_field_metas.append({
+                'prop_name': _pn,
+                'label': to_title_case(_pn),
+                'category': 'text',
+                'required': True,
+                'format': 'uri',
+            })
 
     deps = resolve_dependencies(model, schema)
     entity_fk_deps = get_entity_fk_deps(model, schema, deps)
@@ -2322,7 +2551,17 @@ def api_spec_context(
         and r['prop_name'] not in ('creator_id', 'updater_id')
     ]
 
-    has_deps = bool(entity_fk_deps) or bool(ua_fk_fields_for_api)
+    # Bridge-child entity: detect x-bridge so we can inject selectedParentType/Id
+    # into API test POST bodies. The first bridge parent is used as the dep.
+    _api_model_def_raw = schema['definitions'].get(model, {})
+    _api_bridge_cfg = _api_model_def_raw.get('x-bridge')
+    _api_bridge_first_parent: str | None = None
+    if isinstance(_api_bridge_cfg, dict) and _api_bridge_cfg.get('parents'):
+        _bp = (_api_bridge_cfg.get('parents') or [None])[0]
+        _api_bridge_first_parent = (_bp.get('target') if isinstance(_bp, dict) else _bp) or None
+    _bridge_first_parent_var = to_camel_case(_api_bridge_first_parent) if _api_bridge_first_parent else None
+
+    has_deps = bool(entity_fk_deps) or bool(ua_fk_fields_for_api) or bool(_api_bridge_first_parent)
 
     I = '        ' if has_deps else '      '
 
@@ -2377,6 +2616,14 @@ def api_spec_context(
             if primary_meta.get('category') == 'entity_select':
                 _opts = primary_meta.get('entity_options') or []
                 _upd = f"'{_opts[1]['value']}'" if len(_opts) > 1 else create_val
+                assert_update = f"expect(getRes.body.{primary_field_name}).to.eq({_upd});"
+            elif primary_meta.get('category') == 'enum':
+                _evals = [v for v in (primary_meta.get('enum_values') or []) if v is not None]
+                _idx = 1 if len(_evals) > 1 else 0
+                assert_update = f"expect(getRes.body.{primary_field_name}).to.eq({_idx});"
+            elif primary_meta.get('category') == 'string_enum':
+                _evals = [v for v in (primary_meta.get('enum_values') or []) if v is not None]
+                _upd = f"'{_evals[1]}'" if len(_evals) > 1 else (f"'{_evals[0]}'" if _evals else "''")
                 assert_update = f"expect(getRes.body.{primary_field_name}).to.eq({_upd});"
             else:
                 update_label = primary_meta.get('label', to_title_case(primary_field_name))
@@ -2446,6 +2693,9 @@ def api_spec_context(
         for ua in ua_fk_fields_for_api:
             if ua['prop_name'] != skip_field:
                 out.append(f"{indent}{ua['prop_name']}: deps.{ua['var_name']}.id,")
+        if _api_bridge_first_parent and _bridge_first_parent_var:
+            out.append(f"{indent}selectedParentType: '{_api_bridge_first_parent}',")
+            out.append(f"{indent}selectedParentId: deps.{_bridge_first_parent_var}.id,")
         for c in api_child_metas:
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
@@ -2462,6 +2712,15 @@ def api_spec_context(
                 if primary_meta and primary_meta.get('category') == 'entity_select':
                     _opts = primary_meta.get('entity_options') or []
                     _v = f"'{_opts[1]['value']}'" if len(_opts) > 1 else api_value(primary_meta, title)
+                    out.append(f"{indent}{prop}: {_v},")
+                elif primary_meta and primary_meta.get('category') == 'enum':
+                    # Integer enum: use second index (1) as the update integer value
+                    _evals = [v for v in (primary_meta.get('enum_values') or []) if v is not None]
+                    _idx = 1 if len(_evals) > 1 else 0
+                    out.append(f"{indent}{prop}: {_idx},")
+                elif primary_meta and primary_meta.get('category') == 'string_enum':
+                    _evals = [v for v in (primary_meta.get('enum_values') or []) if v is not None]
+                    _v = f"'{_evals[1]}'" if len(_evals) > 1 else (f"'{_evals[0]}'" if _evals else "''")
                     out.append(f"{indent}{prop}: {_v},")
                 else:
                     update_label = primary_meta.get('label', to_title_case(prop)) if primary_meta else to_title_case(prop)
@@ -2593,6 +2852,22 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
         if name != 'user' and 'user' in base_entities:
             fk_targets.add('user')
         deps[name] = fk_targets
+
+    # --- Add synthetic FK deps from new-form x-bridge (FK-on-parent pattern) ---
+    # Each parent entity of a new-form bridge carries {bridge_name}_id (FK to bridge),
+    # but this FK is synthetic (not in json_schema.yaml properties). Add it to deps
+    # so the deletion order is correct: parents must be deleted before the bridge model.
+    for name, defn in base_entities.items():
+        bridge = defn.get('x-bridge')
+        if not isinstance(bridge, dict) or not bridge.get('name'):
+            continue
+        bridge_name = bridge['name']
+        if bridge_name not in base_entities:
+            continue
+        for parent_entry in (bridge.get('parents') or []):
+            parent_target = parent_entry.get('target') if isinstance(parent_entry, dict) else None
+            if parent_target and parent_target in base_entities and parent_target != name:
+                deps[parent_target].add(bridge_name)
 
     # --- Compute reverse deps: entity -> set of entities that depend on it ---
     reverse_deps: dict[str, set[str]] = {name: set() for name in base_entities}

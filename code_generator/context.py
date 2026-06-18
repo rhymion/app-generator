@@ -97,6 +97,7 @@ class EntityContext:
     inline_flatten_types: list[dict] = ()      # flatten targets without their own module; [{name, fields}]
     entity_view_components: list[dict] = ()    # custom components rendered in FormView; [{name, path?}]
     entity_edit_components: list[dict] = ()    # custom components rendered in FormUpsert; [{name, path?}]
+    is_bridge_child: bool = False              # entity declares new-form x-bridge (parent-context create)
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +204,18 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         for k, v in filtered_props.items()
         if k not in _TIMESTAMP_FIELDS and k not in _all_oto_prop_names
     ]
+
+    # Bridge child (Stage 3): add parent_type / parent_label virtual fields.
+    # These are computed inline in getters.ts from the bridge parent include;
+    # they are optional so detail-page returns that don't compute them still type-check.
+    _x_bridge = model_def.get('x-bridge')
+    if isinstance(_x_bridge, dict) and _x_bridge.get('parents'):
+        _bridge_parent_vfields = [
+            FieldInfo('parent_type', 'string | null', optional=True),
+            FieldInfo('parent_label', 'string | null', optional=True),
+        ]
+        parent_fields.extend(_bridge_parent_vfields)
+        form_view_fields.extend(_bridge_parent_vfields)
 
     # Child many-to-one rels — needed early for import target and option calculation.
     # Exclude list children: they are independent entities managed on their own pages,
@@ -359,6 +372,11 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         already_declared = is_independent or child_name in declared_child_types or child_name == model
         if not already_declared:
             declared_child_types.add(child_name)
+            # When this child's type is declared inline, its FK targets are
+            # referenced as types inside this file — they must be imported.
+            for rel in child_rels:
+                if rel.target != model and rel.target not in import_targets:
+                    import_targets.append(rel.target)
 
         children.append(ChildContext(
             name=child_name,
@@ -382,11 +400,22 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             and is_optional_fk_to_parent(schema['definitions'].get(c['name'], {}), model))
     ]
     child_rel_targets = _dedupe_ordered(r['target'] for r in child_rels_early)
+    # For bridge-child entities (new-form x-bridge), include bridge parent targets in FormUpsertProps
+    x_bridge = model_def.get('x-bridge')
+    bridge_parent_targets = (
+        [p.get('target') for p in (x_bridge.get('parents') or []) if p.get('target')]
+        if isinstance(x_bridge, dict)
+        else []
+    )
+    for _bpt in bridge_parent_targets:
+        if _bpt != model and _bpt not in import_targets:
+            import_targets.append(_bpt)
     all_option_targets = _dedupe_ordered([
         *m2m_targets,
         *optional_fk_list_targets,
         *[r.target for r in parent_rels],
         *child_rel_targets,
+        *bridge_parent_targets,
     ])
 
     # Auto-create OTO rels with nested children (for types + display)
@@ -478,4 +507,5 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         inline_flatten_types=_inline_flatten_types,
         entity_view_components=entity_view_components,
         entity_edit_components=entity_edit_components,
+        is_bridge_child=isinstance(_x_bridge, dict),
     )

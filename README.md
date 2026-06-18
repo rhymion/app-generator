@@ -17,13 +17,14 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - **Generated Cypress tests** — UI and API test suites generated alongside application code
 - **Dashboard charts** (`x-display.dashboard: true`) — column, bar, line, and pie chart rendering with stacking modes, timestamp bucketing, typed multi-condition filters, CSV/Excel export, and a REST aggregate endpoint (`/api/{entity}/aggregate`) generated per entity
 - **Inventory reservation** (`x-reservation`) — opt-in capacity/inventory reservation; `count` mode reserves a numeric counter column, `item` mode locks rows via an `inventory_allocation` bridge table
-- **Wrapper component architecture** — generated per-entity components use shared wrappers in `components/_standard/` (statically provided; not overwritten by re-runs)
+- **Wrapper component architecture** — generated per-entity components use shared wrappers in `components/_standard/` (statically provided; not overwritten by re-runs) and generated components import shared `App*` wrappers from `components/ui/` instead of `@mui/*`, so auto-generated code no longer depends on MUI directly (provider setup excepted)
 
 ### Relationships
 
 - Many-to-one, many-to-many, one-to-one, and self-referential relationships
 - Inline DataGrid children and embedded lists
 - Independent children with their own pages
+- **Generalized bridge pattern** — reusable schema-level bridge for real one-to-one and polymorphic relations via an internal through-table (`<model>able`); no extra FK columns on the parent, parent autocomplete preserved, and internal bridge tables omitted from JSON schema output
 
 ### Authentication & Authorization
 
@@ -36,7 +37,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 ### Built-in Systems
 
-- **Comment threads** — polymorphic bridge pattern for attaching comments to any entity
+- **Comment threads** — polymorphic bridge pattern for attaching comments to any entity, with reaction buttons (toggle endpoint, batched aggregation, parent-owner read authorization)
 - **Attachment management** — file and image upload via polymorphic bridge
 - **Inventory reservation** — schema-level `x-reservation` for capacity and inventory management (count and item modes)
 - **Dashboard charts** — per-entity chart widgets (column, bar, line, pie) generated from schema; stacking modes, time bucketing, typed filters, CSV/Excel export, and REST aggregate endpoints
@@ -231,7 +232,7 @@ See [docs/knowledge/appendix/approval-flow.md](docs/knowledge/appendix/approval-
 
 ### Comment Threads
 
-A polymorphic bridge pattern allows comment threads to be attached to any entity without schema changes to each entity. Comments are displayed inline on view pages.
+A polymorphic bridge pattern allows comment threads to be attached to any entity without schema changes to each entity. Comments are displayed inline on view pages, and each comment supports reaction buttons (a per-comment toggle endpoint with batched aggregation and parent-owner read authorization).
 
 See [docs/knowledge/appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md).
 
@@ -447,8 +448,11 @@ All architectural documentation lives in `docs/knowledge/`:
 | Inventory reservation (x-reservation) | ✅ Implemented |
 | Integer enums | ✅ Implemented |
 | Wrapper component architecture | ✅ Implemented |
+| MUI-free generated code (wrapper round 2) | ✅ Implemented |
+| Comment reactions | ✅ Implemented |
+| Generalized bridge pattern | ✅ Implemented |
 
-> **Backward compatibility (v1.2 → v1.3)**: Non-breaking. Existing schemas work unchanged. `x-reservation` and `x-display.dashboard` are opt-in; no action required unless you want to use the new features.
+> **Backward compatibility (v1.3 → v1.4)**: Non-breaking. Existing schemas work unchanged. Comment reactions and the generalized bridge are opt-in; no action required unless you want to use the new features.
 
 ### In Progress
 
