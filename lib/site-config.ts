@@ -51,21 +51,12 @@ export const siteConfig = {
   /** Links listed in the sidebar navigation */
   navLinks: [
     { label: "Home", href: "/", external: false },
-      { label: "User", href: "/user" },
+    { label: "User", href: "/user" },
     { label: "Role", href: "/role" },
     { label: "Organization", href: "/organization" },
     { label: "Permission", href: "/permission" },
     { label: "Approval Flow", href: "/approval_flow" },
-      { label: "Dashboard", href: "/dashboard" },
-    { label: "Plan", href: "/plan" },
-    { label: "Work", href: "/work" },
-    { label: "Character", href: "/character" },
-    { label: "Scene", href: "/scene" },
-    { label: "Music", href: "/music" },
-    { label: "Creator", href: "/creator" },
-    { label: "Channel", href: "/channel" },
-    { label: "Fc Link", href: "/fc_link" },
-    { label: "Tip Tx", href: "/tip_tx" },
+    { label: "Dashboard", href: "/dashboard" },
   ] satisfies NavLink[],
 };
 
