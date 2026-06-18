@@ -78,7 +78,7 @@ function ListWrapper(
   return (
     <div>
       {showTitle && <h2>{title}</h2>}
-      <Paper sx={{ maxHeight: 400, overflow: 'auto' }}>
+      <Paper sx={{ mb: 2, maxHeight: 400, overflow: 'auto' }}>
         <List>
           {items.length === 0 ? (
             <ListItem>

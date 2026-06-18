@@ -5,7 +5,7 @@ import Providers from "./providers";
 import Header from './@header/page';
 import Footer from './@footer/page';
 import SessionSidebar from '@/components/_standard/SessionSidebar';
-import { siteConfig } from '@/lib/site-config';
+import { siteConfig, themeConfig } from '@/lib/site-config';
 import { routing } from '@/i18n/routing';
 
 export const metadata: Metadata = {
@@ -35,7 +35,7 @@ export default async function LocaleLayout({
           <Header />
           <div className="flex flex-1 relative">
             <SessionSidebar />
-            <main className="flex-1 min-w-0 p-3">
+            <main className={`flex-1 min-w-0 p-4 md:p-6 ${themeConfig.content.background}`}>
               {children}
             </main>
           </div>

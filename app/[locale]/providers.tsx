@@ -5,12 +5,27 @@ import { SidebarProvider } from "@/components/_standard/SidebarContext";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 
+// background.default / background.paper read the CSS tokens defined in
+// app/globals.css (--background / --surface), which switch on
+// prefers-color-scheme. This keeps MUI surfaces (Paper, DataGrid, cards,
+// list/table wrappers) in sync with the Tailwind-driven chrome and main area.
 const theme = createTheme({
-  colorSchemes: { dark: true },
   cssVariables: { colorSchemeSelector: 'media' },
-  palette: {
-    primary: { main: '#6366f1' },
-    secondary: { main: '#8b5cf6' },
+  colorSchemes: {
+    light: {
+      palette: {
+        primary: { main: '#6366f1' },
+        secondary: { main: '#8b5cf6' },
+        background: { default: 'var(--background)', paper: 'var(--surface)' },
+      },
+    },
+    dark: {
+      palette: {
+        primary: { main: '#6366f1' },
+        secondary: { main: '#8b5cf6' },
+        background: { default: 'var(--background)', paper: 'var(--surface)' },
+      },
+    },
   },
   shape: { borderRadius: 10 },
   typography: {
