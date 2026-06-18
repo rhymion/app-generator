@@ -98,4 +98,8 @@ export const themeConfig = {
   footer: {
     bar: "bg-slate-900 text-slate-400 border-t border-slate-800",
   },
+  content: {
+    /** Main content area background */
+    background: "bg-slate-100",
+  },
 };
