@@ -41,6 +41,9 @@ interface ResponsiveListClientProps<T extends BaseEntity> {
   mobileBreakpoint?: number;
   /** When true, edit links open in a new tab. Used in parent-embedded bridge grids. */
   openLinksInNewTab?: boolean;
+  /** When false, the "+" create button is hidden even if the user has create permission.
+   * Used for bridge-child entities, which cannot be created standalone (only via a parent). */
+  allowCreate?: boolean;
 }
 
 export default function ResponsiveListClient<T extends BaseEntity>({
@@ -58,6 +61,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
   primaryField,
   mobileBreakpoint = 768,
   openLinksInNewTab,
+  allowCreate,
 }: ResponsiveListClientProps<T>) {
   const isMobile = useMediaQuery(`(max-width: ${mobileBreakpoint}px)`);
 
@@ -76,6 +80,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
         displayFields={displayFields}
         permissions={permissions}
         primaryField={primaryField}
+        allowCreate={allowCreate}
       />
     );
   }
@@ -95,6 +100,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
       permissions={permissions}
       primaryField={primaryField}
       openLinksInNewTab={openLinksInNewTab}
+      allowCreate={allowCreate}
     />
   );
 }

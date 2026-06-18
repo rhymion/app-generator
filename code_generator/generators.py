@@ -441,6 +441,9 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
         'needs_tf':           needs_tf,
         'needs_tc':           has_chart,
         'list_uses_format_label_value': list_uses_format_label_value,
+        # Bridge children cannot be created standalone (only via a parent context),
+        # so the list view's "+" create button is suppressed for them.
+        'is_bridge_child':    bool(_bridge_child_ir_pl),
     }
 
 

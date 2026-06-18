@@ -117,6 +117,9 @@ async function {{ parent_pascal }}ListContent({
         fetchPage={ {% if needs_formatting %}fetchFormatted{{ parent_pascal }}Page{% else %}fetch{{ parent_pascal }}Page{% endif %} }
         permissions={userPermissions}
         basePath="/{{ parent }}"
+{% if is_bridge_child %}
+        allowCreate={false}
+{% endif %}
 {% if can_delete %}
         removeAction={remove{{ parent_pascal }}}
 {% endif %}

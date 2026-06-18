@@ -63,6 +63,9 @@ interface DataGridClientProps<T extends BaseEntity> {
   primaryField?: keyof T;
   /** When true, edit and create links open in a new tab. Use in parent-embedded bridge grids. */
   openLinksInNewTab?: boolean;
+  /** When false, the "+" create button is hidden even if the user has create permission.
+   * Used for bridge-child entities, which cannot be created standalone (only via a parent). */
+  allowCreate?: boolean;
 }
 
 export default function DataGridClient<T extends BaseEntity>({
@@ -79,6 +82,7 @@ export default function DataGridClient<T extends BaseEntity>({
   permissions = { create: true, read: true, update: true, delete: true },
   primaryField = 'name' as keyof T,
   openLinksInNewTab,
+  allowCreate = true,
 }: DataGridClientProps<T>) {
   const serverMode = typeof fetchPage === 'function';
   const initialItems: T[] = (serverMode ? initialRows : src) ?? [];
@@ -245,7 +249,7 @@ export default function DataGridClient<T extends BaseEntity>({
   return (
     <div>
       <div className="flex mb-4">
-        {permissions.create && (
+        {permissions.create && allowCreate && (
         <Link href={`${basePath}/new`}>
           <Tooltip title={`Create New ${entityLabel}`}>
             <IconButton color="primary" aria-label={`Create New ${entityLabel}`}>
