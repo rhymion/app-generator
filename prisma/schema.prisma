@@ -87,7 +87,6 @@ model user {
   created_users             user[]              @relation("UserCreator")
   updated_users             user[]              @relation("UserUpdater")
   created_comments          comment[]           @relation("CommentCreator")
-  reactions                 reaction[]          @relation("ReactionUser")
   created_approval_flows    approval_flow[]     @relation("ApprovalFlowCreator")
   updated_approval_flows    approval_flow[]     @relation("ApprovalFlowUpdater")
   created_approval_historys approval_history[]  @relation("ApprovalHistoryCreator")
