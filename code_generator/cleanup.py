@@ -325,6 +325,32 @@ def _prune_orphans(out: Path, entities: list) -> None:
             if not (children and (can_view or can_edit)):
                 _delete(col_def)
 
+    # cypress/support/<entity>/helper.ts — test helpers for removed entities.
+    cypress_support = out / 'cypress' / 'support'
+    if cypress_support.is_dir():
+        for helper in sorted(cypress_support.glob('*/helper.ts')):
+            parent = helper.parent.name
+            if entities_by_parent.get(parent) is None:
+                _delete(helper)
+                _try_rmdir(helper.parent)
+
+    # app/[locale]/docs/<entity>/page.mdx — doc pages for removed entities.
+    docs_app_root = out / 'app' / '[locale]' / 'docs'
+    if docs_app_root.is_dir():
+        for page in sorted(docs_app_root.glob('*/page.mdx')):
+            parent = page.parent.name
+            if entities_by_parent.get(parent) is None:
+                _delete(page)
+                _try_rmdir(page.parent)
+
+    # docs/generated/<entity>.md — generated markdown for removed entities.
+    docs_gen_root = out / 'docs' / 'generated'
+    if docs_gen_root.is_dir():
+        for doc in sorted(docs_gen_root.glob('*.md')):
+            parent = doc.stem
+            if entities_by_parent.get(parent) is None:
+                _delete(doc)
+
 
 def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_orphans: bool = False) -> None:
     with open(schema_path) as f:
