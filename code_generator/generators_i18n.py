@@ -50,6 +50,14 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
         model_def = schema['definitions'].get(model, {})
         props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
 
+        # Bridge-child entities (x-bridge) render read-only parent type/label fields
+        # via tf('parentType') / tf('parentLabel'). These are synthetic display fields,
+        # not real properties, so emit their i18n keys explicitly to avoid MISSING_MESSAGE.
+        _mbridge = model_def.get('x-bridge')
+        if isinstance(_mbridge, dict) and _mbridge.get('name'):
+            keys.setdefault('parentType', 'Parent Type')
+            keys.setdefault('parentLabel', 'Parent Label')
+
         for prop_name, prop in props.items():
             if prop_name in _SYSTEM_PROPS:
                 continue
