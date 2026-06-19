@@ -1,0 +1,160 @@
+// AUTO-GENERATED - DO NOT EDIT
+'use client';
+
+import { useState, useEffect, useTransition } from 'react';
+import { useSession } from 'next-auth/react';
+import { useRouter } from '@/i18n/navigation';
+import { Link } from '@/i18n/navigation';
+import AppBox from '@/components/ui/AppBox';
+import AppButton from '@/components/ui/AppButton';
+import AppText from '@/components/ui/AppText';
+import AppChip from '@/components/ui/AppChip';
+import AppAlert from '@/components/ui/AppAlert';
+import AppSurface from '@/components/ui/AppSurface';
+import AppFieldInput from '@/components/ui/forms/AppFieldInput';
+import { searchEntities } from './actions';
+import type { SearchPage } from './actions';
+
+function formatEntityLabel(entityType: string): string {
+  return entityType
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+export default function SearchPage() {
+  const { status } = useSession();
+  const router = useRouter();
+
+  const [query, setQuery] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<SearchPage | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.push('/login');
+    }
+  }, [status, router]);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const q = query.trim();
+    if (q.length < 2) {
+      setError('Enter at least 2 characters to search.');
+      return;
+    }
+    setError(null);
+    setSubmitted(true);
+    startTransition(async () => {
+      try {
+        const data = await searchEntities(q);
+        setResult(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Search failed. Please try again.');
+        setResult(null);
+      }
+    });
+  }
+
+  if (status === 'loading' || status === 'unauthenticated') {
+    return null;
+  }
+
+  return (
+    <AppBox className="w-full max-w-3xl mx-auto px-4 py-6">
+      <AppText variant="h5" fontWeight="bold" mb={3}>
+        Search
+      </AppText>
+
+      <form onSubmit={handleSubmit} className="w-full">
+        <AppBox className="flex flex-col sm:flex-row gap-2 w-full" mb={3}>
+          <AppBox className="flex-1">
+            <AppFieldInput
+              id="search-query"
+              label="Search"
+              value={query}
+              onChange={setQuery}
+              inputMode="search"
+              fullWidth
+              size="medium"
+              autoFocus
+              testId="search-input"
+            />
+          </AppBox>
+          <AppButton
+            type="submit"
+            variant="contained"
+            disabled={isPending}
+            aria-label="Search"
+          >
+            {isPending ? 'Searching…' : 'Search'}
+          </AppButton>
+        </AppBox>
+      </form>
+
+      {error && (
+        <AppAlert severity="error" className="mb-4">
+          {error}
+        </AppAlert>
+      )}
+
+      {isPending && (
+        <AppText color="text.secondary" className="mt-4">
+          Searching…
+        </AppText>
+      )}
+
+      {!isPending && submitted && result && result.results.length === 0 && (
+        <div data-testid="no-results">
+          <AppText color="text.secondary" className="mt-4">
+            No results found for &quot;{query}&quot;.
+          </AppText>
+        </div>
+      )}
+
+      {!isPending && result && result.results.length > 0 && (
+        <div data-testid="search-results">
+        <AppBox className="flex flex-col gap-3">
+          <AppText variant="body2" color="text.secondary" mb={1}>
+            {result.total} result{result.total !== 1 ? 's' : ''}
+          </AppText>
+          {result.results.map((item) => (
+            <AppSurface
+              key={`${item.entity_type}-${item.id}`}
+              elevation={1}
+              p={2}
+              className="w-full"
+            >
+              <AppBox className="flex flex-col gap-1">
+                <AppBox className="flex items-center gap-2 flex-wrap">
+                  <AppChip
+                    label={formatEntityLabel(item.entity_type)}
+                    size="small"
+                    color="primary"
+                  />
+                </AppBox>
+                <AppText variant="body1" className="mt-1 break-words">
+                  {item.snippet}
+                </AppText>
+                <AppBox mt={1}>
+                  <Link href={`/${item.entity_type}/view/${item.id}`}>
+                    <AppText
+                      variant="body2"
+                      color="primary.main"
+                      className="underline cursor-pointer"
+                    >
+                      View details
+                    </AppText>
+                  </Link>
+                </AppBox>
+              </AppBox>
+            </AppSurface>
+          ))}
+        </AppBox>
+        </div>
+      )}
+    </AppBox>
+  );
+}

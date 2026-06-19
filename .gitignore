@@ -161,6 +161,7 @@ components/setting/column_def.tsx
 # ── cypress/e2e/ ──
 cypress/e2e/*.cy.ts
 !cypress/e2e/auth.cy.ts
+!cypress/e2e/search_page.cy.ts
 cypress/e2e/mobile/*.cy.ts
 !cypress/e2e/mobile/layout.cy.ts
 cypress/e2e/api/*.cy.ts

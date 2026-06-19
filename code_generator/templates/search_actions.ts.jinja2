@@ -1,0 +1,33 @@
+// AUTO-GENERATED - DO NOT EDIT
+'use server';
+
+import { getSessionUserIdOrThrow } from '@/lib/authz';
+import { buildSearchQuery } from '@/lib/search/helpers';
+export type { SearchPage } from '@/lib/search/helpers';
+
+/**
+ * Server action: perform a cross-entity text search for the current session user.
+ * Authentication: NextAuth session (cookie-based — no API key required).
+ * Authorization: per-entity org + role filtering applied inside buildSearchQuery.
+ */
+export async function searchEntities(
+  q: string,
+  entityTypes?: string[],
+  page = 0,
+  pageSize = 20,
+) {
+  const userId = await getSessionUserIdOrThrow();
+
+  const trimmed = q.trim();
+  if (trimmed.length < 2) {
+    throw new Error('Query must be at least 2 characters.');
+  }
+
+  return buildSearchQuery({
+    q: trimmed,
+    entityTypes,
+    userId,
+    page,
+    pageSize: Math.min(100, Math.max(1, pageSize)),
+  });
+}

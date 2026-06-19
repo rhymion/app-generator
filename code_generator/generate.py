@@ -612,9 +612,13 @@ def generate(schema_path: str, output_dir: str) -> None:
             out / 'app' / '[locale]' / 'search' / 'page.tsx',
             _render(env, 'search_page.tsx.jinja2', search_ctx),
         )
+        _write(
+            out / 'app' / '[locale]' / 'search' / 'actions.ts',
+            _render(env, 'search_actions.ts.jinja2', search_ctx),
+        )
         entity_names = ', '.join(e['entity_type'] for e in search_entities)
         print(f'  Search routes → lib/search/helpers.ts + app/api/search/route.ts ({entity_names})')
-        print(f'  Search UI page → app/[locale]/search/page.tsx')
+        print(f'  Search UI page → app/[locale]/search/page.tsx + actions.ts')
     else:
         print('  Search: no entities with x-generate.search: true — skipping search route')
 
