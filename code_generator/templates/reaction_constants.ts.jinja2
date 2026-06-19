@@ -1,0 +1,9 @@
+// Auto-generated — do not edit manually.
+{% for c in named_constants %}
+export const {{ c.const_name }} = [
+{% for item in c['items'] %}
+  { value: {{ item.value }}, label: '{{ item.label }}' },
+{% endfor %}
+] as const;
+export type {{ c.const_name | replace('_TYPES', '_TYPE') }} = typeof {{ c.const_name }}[number];
+{% endfor %}

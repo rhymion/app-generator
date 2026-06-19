@@ -10,6 +10,7 @@ This is a drop-in replacement for:
     npx tsx code_generator/generate.ts <schema.yaml> .
 
 """
+import re
 import sys
 import os
 from pathlib import Path
@@ -19,7 +20,9 @@ import yaml
 from jinja2 import Environment, FileSystemLoader
 
 from helpers.naming import to_pascal_case, to_camel_case
-from generate_types import extract_entities
+from helpers.bridge_direction import get_new_form_bridge
+from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit_child_bridge_fk
+from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
 from build_context import build_context
 from generators import (
@@ -44,6 +47,7 @@ from generators_test import (
     db_helpers_context,
     reservation_helper_context,
     reservation_spec_context,
+    set_messages_fields,
 )
 from validation_context import build_validation_context
 from manifest import ManifestRecorder
@@ -64,6 +68,116 @@ def _make_env() -> Environment:
     env.filters['pascal_case'] = to_pascal_case
     env.filters['camel_case'] = to_camel_case
     return env
+
+
+# ---------------------------------------------------------------------------
+# Bridge Prisma schema emission
+# ---------------------------------------------------------------------------
+
+def _collect_bridges(schema: dict) -> dict[str, dict]:
+    """Collect all new-form x-bridge object declarations from the schema."""
+    defs = schema.get('definitions', {})
+    bridges: dict[str, dict] = {}
+    for entity_name, entity_def in defs.items():
+        if entity_name.endswith('_detail') or not isinstance(entity_def, dict):
+            continue
+        bridge = get_new_form_bridge(entity_def)
+        if bridge:
+            bridges[bridge['name']] = bridge
+    return bridges
+
+
+def build_bridge_prisma_additions(schema: dict) -> str:
+    """Generate Prisma model additions for all new-form FK-on-parent bridge models.
+
+    Returns a Prisma-compatible string block with bridge model blocks and FK comment
+    lines documenting required parent/child additions. Used as reference documentation
+    (bridge_additions.prisma). The actual injection into schema.prisma is done by
+    inject_bridge_into_schema().
+    """
+    bridges = _collect_bridges(schema)
+    if not bridges:
+        return ''
+
+    blocks: list[str] = []
+    for bridge_name, bridge in sorted(bridges.items()):
+        child = bridge['child']
+        parent_targets = bridge['parent_targets']
+
+        blocks.append(emit_bridge_model(bridge_name, child, parent_targets))
+
+        for parent in parent_targets:
+            scalar, relation = emit_parent_bridge_fk(bridge_name, parent)
+            blocks.append(f'// [parent:{parent}] {scalar.strip()}')
+            blocks.append(f'// [parent:{parent}] {relation.strip()}')
+
+        child_scalar, child_relation = emit_child_bridge_fk(bridge_name)
+        blocks.append(f'// [child:{child}] {child_scalar.strip()}')
+        blocks.append(f'// [child:{child}] {child_relation.strip()}')
+
+    return '\n\n'.join(blocks)
+
+
+def _inject_into_model_block(content: str, model_name: str,
+                              scalar_line: str, relation_line: str,
+                              fk_field_name: str) -> str:
+    """Inject FK scalar+relation lines into a Prisma model block (idempotent)."""
+    pat = re.compile(
+        rf'^(model {re.escape(model_name)} \{{)(.*?)(^\}})',
+        re.MULTILINE | re.DOTALL,
+    )
+    m = pat.search(content)
+    if not m:
+        return content
+
+    body = m.group(2)
+    if re.search(rf'^\s+{re.escape(fk_field_name)}\b', body, re.MULTILINE):
+        return content  # field already present — idempotent
+
+    lines = body.split('\n')
+    insert_before = len(lines)
+    for i, line in enumerate(lines):
+        if line.strip().startswith('@@'):
+            insert_before = i
+            break
+
+    new_body = '\n'.join(lines[:insert_before] + [scalar_line, relation_line, ''] + lines[insert_before:])
+    return content[:m.start(2)] + new_body + content[m.end(2):]
+
+
+def inject_bridge_into_schema(schema_prisma_path: Path, bridges: dict) -> None:
+    """Inject bridge models and parent/child FK fields into schema.prisma (idempotent).
+
+    For each bridge:
+      1. Injects parent FK scalar + relation into each parent model
+      2. Injects child FK scalar + relation into the child model
+      3. Appends the bridge model block at the end if not already present
+    """
+    content = schema_prisma_path.read_text()
+    modified = content
+
+    for bridge_name, bridge in sorted(bridges.items()):
+        child = bridge['child']
+        parent_targets = bridge['parent_targets']
+
+        for parent_name in parent_targets:
+            scalar, relation = emit_parent_bridge_fk(bridge_name, parent_name)
+            modified = _inject_into_model_block(
+                modified, parent_name, scalar, relation, f'{bridge_name}_id'
+            )
+
+        child_scalar, child_relation = emit_child_bridge_fk(bridge_name)
+        modified = _inject_into_model_block(
+            modified, child, child_scalar, child_relation, f'{bridge_name}_id'
+        )
+
+        if f'model {bridge_name} {{' not in modified:
+            bridge_block = emit_bridge_model(bridge_name, child, parent_targets)
+            modified = modified.rstrip('\n') + f'\n\n{bridge_block}\n'
+
+    if modified != content:
+        schema_prisma_path.write_text(modified)
+        print(f'  Injected bridge models/FKs → prisma/schema.prisma')
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +213,16 @@ def _write_stub(path: Path, content: str) -> None:
     print(f'  Wrote {path}')
 
 
+# Collects reminders about write-once stubs the generator just created. These are
+# hand-written extension points the generator cannot fill in; printed as an
+# ACTION REQUIRED summary at the end of generate() and reset at its start.
+_handwritten_notices: list[str] = []
+
+
+def _note_stub_created(path: Path, why: str, action: str) -> None:
+    _handwritten_notices.append(f'  - {path}\n      {why}\n      -> {action}')
+
+
 # ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
@@ -121,9 +245,25 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     global _manifest
     _manifest = ManifestRecorder()
+    _handwritten_notices.clear()
 
     env = _make_env()
     out = Path(output_dir)
+
+    # Load messages/en.json Fields namespace for enum label translation in Cypress tests
+    import json as _json
+    _msg_path = out / 'messages' / 'en.json'
+    if _msg_path.exists():
+        with open(_msg_path) as _mf:
+            set_messages_fields(_json.load(_mf).get('Fields', {}))
+
+    # --- Bridge Prisma schema emission ---
+    bridges = _collect_bridges(schema)
+    if bridges:
+        inject_bridge_into_schema(out / 'prisma' / 'schema.prisma', bridges)
+        bridge_additions = build_bridge_prisma_additions(schema)
+        _write(out / 'prisma' / 'bridge_additions.prisma', bridge_additions)
+        print(f'  Bridge Prisma additions (reference) → prisma/bridge_additions.prisma')
 
     print(f'Found {len(entities)} entities in {schema_path}')
 
@@ -178,14 +318,24 @@ def generate(schema_path: str, output_dir: str) -> None:
         # --- virtual column resolver stub (per-entity, async/bulk) ---
         parent_pascal = to_pascal_case(parent)
         if ctx.get('virtual_columns'):
-            _write_stub(
-                lib_dir / 'virtual_resolvers.ts',
+            vr_path = lib_dir / 'virtual_resolvers.ts'
+            created = _write_stub(
+                vr_path,
                 _render(env, 'virtual_resolver.ts.jinja2', {
                     'parent': parent,
                     'parent_pascal': parent_pascal,
                     'virtual_columns': ctx['virtual_columns'],
                 }),
             )
+            if created:
+                vcs = ', '.join(vc['field_name'] for vc in ctx['virtual_columns'])
+                _note_stub_created(
+                    vr_path,
+                    f'Entity "{parent}" has virtual column(s) [{vcs}] with no resolver.',
+                    'Implement resolveVirtualColumns() (the blank stub returns empty '
+                    'values) and commit the file to your project SoT so it survives '
+                    'cleanup and a fresh rebuild.',
+                )
 
         # --- service.ts + service_validation stub ---
         if can_new or can_edit or can_delete:
@@ -194,7 +344,9 @@ def generate(schema_path: str, output_dir: str) -> None:
             if can_new or can_edit:
                 val_ctx = {**ctx, **build_validation_context(ctx)}
                 _write(lib_dir / 'service_validation.ts', _render(env, 'service_validation.ts.jinja2', val_ctx))
-            if can_new:
+            if can_new or ctx.get('bridge_child_ir'):
+                # Bridge children create via parent context (cmd_167 §4), so their
+                # service imports afterCreate — emit the write-once stub for them too.
                 _write_stub(
                     lib_dir / 'service_after_create.ts',
                     _render(env, 'service_after_create_stub.ts.jinja2', ctx),
@@ -234,6 +386,44 @@ def generate(schema_path: str, output_dir: str) -> None:
             fv_ctx = {**ctx, **form_view_context(ctx, schema)}
             _write(components_dir / 'FormView.tsx', _render(env, 'form_view.tsx.jinja2', fv_ctx))
 
+        # --- <Child>BridgeGrid.tsx (parent-embedded DataGrid, cmd_167 §4) ---
+        # Emitted for bridge children (entities with new-form x-bridge); the
+        # component is embedded on each parent's FormView (see form_view_context).
+        _self_bridge = get_new_form_bridge(schema['definitions'].get(model, {}))
+        if _self_bridge:
+            _bg_cols = (schema['definitions'].get(model, {}).get('x-display') or {}).get('table') or []
+            _model_props = schema['definitions'].get(model, {}).get('properties', {}) or {}
+            _df_entries = []
+            for _col in _bg_cols:
+                for _fname, _fcfg in _col.items():
+                    _w = (_fcfg or {}).get('width')
+                    _prop_def = _model_props.get(_fname, {})
+                    _enum_vals = _prop_def.get('enum') if isinstance(_prop_def.get('enum'), list) and _prop_def.get('type') in ('integer', 'number') else None
+                    if _enum_vals:
+                        _enum_map = ', '.join(f"{i}: tf('{_fname}_{v}')" for i, v in enumerate(_enum_vals))
+                        _df_entries.append(
+                            "{ field: '%s', headerName: tf('%s')%s, enumLabels: { %s } }"
+                            % (_fname, _fname, f', width: {_w}' if _w else '', _enum_map)
+                        )
+                    else:
+                        from build_context import get_uri_kind
+                        _uri_kind_attr = ", uriKind: 'link'" if get_uri_kind(_prop_def) == 'link' else ''
+                        _df_entries.append(
+                            "{ field: '%s', headerName: tf('%s')%s%s }"
+                            % (_fname, _fname, f', width: {_w}' if _w else '', _uri_kind_attr)
+                        )
+            if not _df_entries:
+                _df_entries = ["{ field: 'id', headerName: 'id' }"]
+            _write(
+                components_dir / f'{parent_pascal}BridgeGrid.tsx',
+                _render(env, 'bridge_grid.tsx.jinja2', {
+                    'child': parent,
+                    'child_pascal': parent_pascal,
+                    'bridge_fk': f"{_self_bridge['name']}_id",
+                    'display_fields': ', '.join(_df_entries),
+                }),
+            )
+
         # --- Determine which pages to generate (x-display) ---
         xdisplay        = ctx.get('xdisplay')
         xdisplay_table  = ctx.get('xdisplay_table')
@@ -255,7 +445,12 @@ def generate(schema_path: str, output_dir: str) -> None:
             print(f'  Chart → app/[locale]/{parent}/chart/')
 
         # --- page new ---
-        if can_new:
+        # AP-2=A: creation is parent-context only. Bridge children set new:false to
+        # suppress the *standalone* create path, but still need a new page driven by
+        # parent context from the URL (?parentType=&parentId=) supplied by the
+        # parent-embedded grid (cmd_167 §4); the form binds the parent implicitly
+        # and never shows a parent picker.
+        if can_new or ctx.get('bridge_child_ir'):
             _write(app_dir / 'new' / 'page.tsx', _render(env, 'page_new.tsx.jinja2', ctx))
 
         # --- page edit ---
@@ -300,6 +495,25 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'attachment_actions.ts.jinja2', {'owners': attachable_owners}),
         )
         print(f'  Attachment bridge actions → lib/attachment/actions.ts ({len(attachable_owners)} owners)')
+
+    # --- Named constants (lib/reaction_constants.ts) ---
+    named_constants = extract_named_constants(schema)
+    if named_constants:
+        _write(
+            out / 'lib' / 'reaction_constants.ts',
+            _render(env, 'reaction_constants.ts.jinja2', {'named_constants': named_constants}),
+        )
+        print(f'  Named constants → lib/reaction_constants.ts ({len(named_constants)} constant(s))')
+
+    # --- Comment reactions API route (app/api/comment/[commentId]/reactions/toggle/route.ts) ---
+    # Emitted whenever x-internal integer enum entities exist (i.e., reactions are enabled).
+    # D3=A: toggle endpoint is POST /api/comment/[commentId]/reactions/toggle
+    if named_constants:
+        _write(
+            out / 'app' / 'api' / 'comment' / '[commentId]' / 'reactions' / 'toggle' / 'route.ts',
+            _render(env, 'comment_reactions_api_route.ts.jinja2', {}),
+        )
+        print('  Comment reactions API route → app/api/comment/[commentId]/reactions/toggle/route.ts')
 
     # --- docs/generated/index.md + app/[locale]/docs/page.mdx ---
     print('\nGenerating documentation index...')
@@ -391,6 +605,19 @@ def generate(schema_path: str, output_dir: str) -> None:
     # touched by update_i18n_and_config above are intentionally not listed.
     manifest_path = _manifest.write(out, schema_path)
     print(f'\nWrote manifest: {manifest_path} ({len(_manifest)} files)')
+
+    if _handwritten_notices:
+        bar = '=' * 72
+        print('\n' + bar)
+        print('ACTION REQUIRED - hand-written files the generator cannot fill in')
+        print(bar)
+        print('New write-once stubs were created this run. They are NOT regenerated\n'
+              'or overwritten, and cleanup never deletes them. Implement each one and\n'
+              'commit it to version control so it survives a fresh rebuild:\n')
+        for note in _handwritten_notices:
+            print(note)
+        print('\nSee docs/extension-points.md for the full list of extension points.')
+        print(bar)
 
     print('\nCode generation complete!')
 

@@ -11,6 +11,7 @@ interface AppFieldTextProps {
   rows?: number;
   minLength?: number;
   maxLength?: number;
+  slotProps?: { htmlInput?: React.InputHTMLAttributes<HTMLInputElement> };
 }
 
 export default function AppFieldText({
@@ -24,6 +25,7 @@ export default function AppFieldText({
   rows,
   minLength,
   maxLength,
+  slotProps: externalSlotProps,
 }: AppFieldTextProps) {
   if (readOnly) {
     return (
@@ -37,9 +39,10 @@ export default function AppFieldText({
     );
   }
 
-  const hasHtmlInput = minLength !== undefined || maxLength !== undefined;
+  const hasHtmlInput = minLength !== undefined || maxLength !== undefined || externalSlotProps?.htmlInput;
   const htmlInput = hasHtmlInput
     ? {
+        ...(externalSlotProps?.htmlInput ?? {}),
         ...(minLength !== undefined ? { minLength } : {}),
         ...(maxLength !== undefined ? { maxLength } : {}),
       }

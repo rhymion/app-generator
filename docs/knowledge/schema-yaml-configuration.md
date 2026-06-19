@@ -739,6 +739,113 @@ model bug {
 
 ---
 
+## 7.6 Polymorphic Bridge Children (`x-bridge`)
+
+Use `x-bridge` when a child entity can belong to **one of several different parent
+types** — e.g. a `channel` that hangs off a `work`, a `character`, *or* a `scene`.
+A plain `x-relationship` FK (§5) only points at a single fixed target, so a
+polymorphic "belongs to exactly one of N parents" relation is modelled through an
+internal **bridge** (join) table instead.
+
+### Naming convention
+
+The bridge model is named `<child>able`: `channel` → `channelable`,
+`bookmark` → `bookmarkable`. The generator derives the child name by stripping the
+`able` suffix.
+
+### Schema declaration
+
+`x-bridge` is declared on the **child base definition** (not the `_detail`):
+
+```yaml
+channel:
+  type: object
+  required: [id, name, kind, visibility]
+  x-bridge:
+    name: channelable          # bridge model name (= <child>able)
+    child: channel             # child entity name
+    parentCardinality: exactlyOne   # each child belongs to exactly one parent
+    parents:
+      - role: work_hub         # unique relation label for this parent edge
+        target: work           # a parent entity
+        labelField: title      # field on the parent used as the bridge label
+      - role: character_hub
+        target: character
+        labelField: name
+      - role: scene_hub
+        target: scene
+        labelField: label
+  x-display:                   # drives parent-grid + child-list columns (see below)
+    table:
+      - name: { primary: true, width: 200 }
+      - kind: { width: 120 }
+      - visibility: { width: 120 }
+  properties:
+    ...
+
+channel_detail:
+  x-generate: { list: true, view: true, new: true, edit: true, delete: true, api: true, test: true }
+  allOf:
+    - $ref: "#/definitions/channel"
+```
+
+| Key | Meaning |
+|-----|---------|
+| `name` | Bridge model name, `<child>able`. |
+| `child` | Child entity name. |
+| `parentCardinality` | `exactlyOne` — every child row resolves to exactly one parent. |
+| `parents[].role` | Unique label for the parent edge (used for Prisma `@relation` names). |
+| `parents[].target` | A parent entity that may own this child. |
+| `parents[].labelField` | Field on that parent shown as the bridge label (label may differ per parent type — see cmd_167 §8). |
+
+Parents do **not** declare the bridge child; the relationship is driven entirely
+from the child's `x-bridge.parents`.
+
+### Generated data model (FK-on-parent, one-to-many through the bridge)
+
+```prisma
+model channelable {
+  id        String     @id @default(cuid())
+  work      work?      @relation("WorkChannelable")
+  character character? @relation("CharacterChannelable")
+  scene     scene?     @relation("SceneChannelable")
+  channels  channel[]            // one bridge → many children
+}
+// each parent:  channelable_id String @unique   (one bridge per parent)
+// each child:   channelable_id String           (FK to bridge; cascade on delete)
+```
+
+So **parent → 1 bridge (`@unique`) → many children**. A parent can own many
+children; each child resolves to exactly one parent via the bridge's single
+non-null parent back-relation. (Two non-null parents on one bridge row is data
+corruption — see cmd_167 §9.2.)
+
+### What is generated today
+
+- **Parent:** a synthetic `<bridge>_id` FK is injected as a one-to-one bridge, so
+  the parent's `service.ts` auto-creates the empty bridge row in its create
+  `$transaction` and the parent getter includes `<bridge>: true`.
+- **Child:** full standalone pages. The child's create form offers a parent
+  picker; `service.ts` accepts `selectedParentType` / `selectedParentId`, resolves
+  the chosen parent's `<bridge>_id`, and stores it on the child.
+
+### Design target — create from the parent (cmd_167 §4)
+
+The intended default is **parent-owned CRUD**: each parent listed in a child's
+`x-bridge.parents` renders an embedded **child DataGrid** (columns from the child's
+`x-display.table`) that creates/edits/deletes children bound to the current parent
+implicitly, while the child's standalone pages remain for list/detail/search. The
+child's parent is **read-only** after creation (no parent switching). The full
+design — including read-only parent metadata and per-parent label strategy — is in
+**`docs/cmd_167_bridge-interface-design.md`**; the parent-DataGrid generation is
+the implementation of that design.
+
+> **Tip:** always give a bridge child an `x-display.table`. It supplies the columns
+> for the parent-embedded grid and the parent-context column on the child's
+> standalone list. Without it the generator falls back to scalar defaults.
+
+---
+
 ## 8. `x-outputType` — Rendering Mode for Children and Related Entities
 
 Controls how a property in a `_detail` definition is displayed in the detail view.

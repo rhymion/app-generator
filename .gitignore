@@ -78,3 +78,100 @@ __pycache__/
 custom/
 memory/
 *.log*
+
+# ==========================================
+# BEGIN GENERATED FILES — entity-name-independent
+# structural patterns + fixed exceptions
+# ==========================================
+
+# ── lib/ ──
+lib/*/*
+!lib/*/service_after_create.ts
+!lib/*/form_validation.ts
+!lib/*/service_validation.ts
+!lib/account-link/**
+!lib/auth/**
+!lib/mfa/**
+!lib/rate-limit/**
+!lib/dashboard/**
+lib/dashboard/actions.ts
+lib/dashboard/catalog.ts
+lib/dashboard/getters.ts
+lib/dashboard/service.ts
+lib/dashboard/types.ts
+!lib/organization/getters_associated.ts
+!lib/approval_request/actions.ts
+!lib/approval_request/order-check.ts
+!lib/setting/password-actions.ts
+
+# ── app/[locale]/ ──
+app/\[locale\]/*/
+!app/\[locale\]/@footer/
+!app/\[locale\]/@footer/**
+!app/\[locale\]/@header/
+!app/\[locale\]/@header/**
+!app/\[locale\]/@sidebar/
+!app/\[locale\]/@sidebar/**
+!app/\[locale\]/_hide/
+!app/\[locale\]/_hide/**
+!app/\[locale\]/login/
+!app/\[locale\]/login/**
+!app/\[locale\]/register/
+!app/\[locale\]/register/**
+!app/\[locale\]/setting/
+!app/\[locale\]/setting/**
+app/\[locale\]/setting/edit/
+app/\[locale\]/setting/view/
+!app/\[locale\]/extra/
+!app/\[locale\]/extra/**
+!app/\[locale\]/docs/
+!app/\[locale\]/docs/layout.tsx
+app/\[locale\]/docs/page.mdx
+app/\[locale\]/docs/*/
+
+# ── app/api/ ──
+app/api/*/
+!app/api/auth/
+!app/api/auth/**
+!app/api/notifications/
+!app/api/notifications/**
+!app/api/test-utils/
+!app/api/test-utils/**
+!app/api/upload/
+!app/api/upload/**
+!app/api/uploads/
+!app/api/uploads/**
+!app/api/approval_request/
+!app/api/approval_request/**
+app/api/approval_request/route.ts
+app/api/approval_request/\[id\]/route.ts
+app/api/approval_request/bulk/route.ts
+
+# ── components/ ──
+components/*/*
+!components/*/form_validation.ts
+!components/_standard/**
+!components/ui/**
+!components/setting/**
+components/setting/FormUpsert.tsx
+components/setting/FormView.tsx
+components/setting/column_def.tsx
+
+# ── cypress/e2e/ ──
+cypress/e2e/*.cy.ts
+!cypress/e2e/auth.cy.ts
+cypress/e2e/mobile/*.cy.ts
+!cypress/e2e/mobile/layout.cy.ts
+cypress/e2e/api/*.cy.ts
+
+# ── cypress/support/ ──
+cypress/support/*/
+!cypress/support/purchase_order/
+!cypress/support/purchase_order/**
+
+# ── docs/generated/ ──
+docs/generated/
+
+# ==========================================
+# END GENERATED FILES
+# ==========================================

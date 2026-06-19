@@ -17,6 +17,8 @@ interface DisplayFieldConfig<T> {
   headerName: string;
   width?: number;
   format?: 'date-time' | 'date' | 'time';
+  enumLabels?: Record<number, string>;
+  uriKind?: 'image' | 'link';
 }
 
 interface ResponsiveListClientProps<T extends BaseEntity> {
@@ -37,6 +39,11 @@ interface ResponsiveListClientProps<T extends BaseEntity> {
   primaryField?: keyof T;
   /** Pixel width below which to switch to card layout. Defaults to 768. */
   mobileBreakpoint?: number;
+  /** When true, edit links open in a new tab. Used in parent-embedded bridge grids. */
+  openLinksInNewTab?: boolean;
+  /** When false, the "+" create button is hidden even if the user has create permission.
+   * Used for bridge-child entities, which cannot be created standalone (only via a parent). */
+  allowCreate?: boolean;
 }
 
 export default function ResponsiveListClient<T extends BaseEntity>({
@@ -53,6 +60,8 @@ export default function ResponsiveListClient<T extends BaseEntity>({
   permissions,
   primaryField,
   mobileBreakpoint = 768,
+  openLinksInNewTab,
+  allowCreate,
 }: ResponsiveListClientProps<T>) {
   const isMobile = useMediaQuery(`(max-width: ${mobileBreakpoint}px)`);
 
@@ -71,6 +80,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
         displayFields={displayFields}
         permissions={permissions}
         primaryField={primaryField}
+        allowCreate={allowCreate}
       />
     );
   }
@@ -89,6 +99,8 @@ export default function ResponsiveListClient<T extends BaseEntity>({
       displayFields={displayFields}
       permissions={permissions}
       primaryField={primaryField}
+      openLinksInNewTab={openLinksInNewTab}
+      allowCreate={allowCreate}
     />
   );
 }

@@ -11,6 +11,7 @@ from helpers.naming import (
     safe_var_name, singularize,
 )
 from helpers.type_mapping import get_ts_type
+from helpers.bridge_direction import collect_parent_bridge_children
 from helpers.schema_helpers import (
     get_parent_relationships,
     get_parent_fk_props,
@@ -355,19 +356,17 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                 enum_ns  = prop.get('x-enum-namespace')
 
                 if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
-                    if enum_ns:
-                        keys = [
-                            (v.lower()[0] + v[1:] if isinstance(v, str) and not v.lstrip('-').isdigit() else str(v))
-                            for v in enum_vals
-                        ]
-                        var_name = f'{to_camel_case(field_name)}Labels'
-                        # avoid duplicates
-                        if not any(e['var_name'] == var_name for e in enum_ns_list):
-                            enum_ns_list.append({'var_name': var_name, 'ns': enum_ns, 'keys': keys})
-                        add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
-                    else:
-                        labels = ', '.join(f"'{v}'" for v in enum_vals)
-                        add_formatting(field_name, f"([{labels}] as const)[item.{field_name} as number] ?? ''")
+                    var_name = f'{to_camel_case(field_name)}Labels'
+                    ns_to_use = enum_ns or 'Fields'
+                    entries = [
+                        (i, f"{field_name}_{v}" if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
+                        if not enum_ns
+                        else (i, v.lower()[0] + v[1:] if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
+                        for i, v in enumerate(enum_vals)
+                    ]
+                    if not any(e['var_name'] == var_name for e in enum_ns_list):
+                        enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries})
+                    add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
 
             if config.get('primary'):
                 primary_field = field_name
@@ -377,9 +376,17 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                 rel_info = rel_label_map[field_name]
                 add_formatting(field_name, _label_expr_for_rel(field_name, rel_info))
 
+            _PRISMA_DATETIME = frozenset({'created_at', 'updated_at'})
             fmt = model_props[field_name].get('format') if field_name in model_props else None
+            if fmt is None and field_name in _PRISMA_DATETIME:
+                fmt = 'date-time'
             format_attr = f", format: '{fmt}'" if fmt in ('date-time', 'date', 'time') else ''
-            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr} }}")
+            uri_kind_attr = ''
+            if fmt == 'uri' and field_name in model_props:
+                from build_context import get_uri_kind
+                if get_uri_kind(model_props[field_name]) == 'link':
+                    uri_kind_attr = ", uriKind: 'link'"
+            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr}{uri_kind_attr} }}")
 
         display_fields_code = ',\n'.join(fields_code_parts)
 
@@ -392,18 +399,17 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
             enum_vals = prop.get('enum')
             enum_ns = prop.get('x-enum-namespace')
             if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
-                if enum_ns:
-                    keys = [
-                        (v.lower()[0] + v[1:] if isinstance(v, str) and not v.lstrip('-').isdigit() else str(v))
-                        for v in enum_vals
-                    ]
-                    var_name = f'{to_camel_case(field_name)}Labels'
-                    if not any(e['var_name'] == var_name for e in enum_ns_list):
-                        enum_ns_list.append({'var_name': var_name, 'ns': enum_ns, 'keys': keys})
-                    add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
-                else:
-                    labels = ', '.join(f"'{v}'" for v in enum_vals)
-                    add_formatting(field_name, f"([{labels}] as const)[item.{field_name} as number] ?? ''")
+                var_name = f'{to_camel_case(field_name)}Labels'
+                ns_to_use = enum_ns or 'Fields'
+                entries = [
+                    (i, f"{field_name}_{v}" if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
+                    if not enum_ns
+                    else (i, v.lower()[0] + v[1:] if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
+                    for i, v in enumerate(enum_vals)
+                ]
+                if not any(e['var_name'] == var_name for e in enum_ns_list):
+                    enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries})
+                add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
 
     needs_formatting = bool(formatting_entries)
     formatted_var    = f'formatted{parent_pascal}s'
@@ -411,6 +417,18 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
 
     force_cards   = gen_cfg.get('listDisplay') == 'cards'
     list_component = 'CardListClient' if force_cards else 'ResponsiveListClient'
+
+    # Bridge child (Stage 3): append parent_label column to explicit display_fields_code.
+    # Only for entities with xdisplay_table (ensures tf() is available via needs_tf=True).
+    _bridge_child_ir_pl = ctx.get('bridge_child_ir')
+    _bridge_parent_opts_pl = ctx.get('bridge_parent_options', [])
+    needs_tf = bool(xdisplay_table)
+    if _bridge_child_ir_pl and _bridge_parent_opts_pl and xdisplay_table:
+        _bp_cols = ",\n".join([
+            "          { field: 'parent_type', headerName: tf('parentType'), width: 120 }",
+            "          { field: 'parent_label', headerName: tf('parentLabel'), width: 200 }",
+        ])
+        display_fields_code = (display_fields_code + ',\n' + _bp_cols) if display_fields_code else _bp_cols
 
     return {
         'list_component':     list_component,
@@ -420,9 +438,12 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
         'formatting_entries': '\n'.join(formatting_entries),
         'enum_ns_list':       enum_ns_list,
         'src_var':            src_var,
-        'needs_tf':           bool(xdisplay_table),
+        'needs_tf':           needs_tf,
         'needs_tc':           has_chart,
         'list_uses_format_label_value': list_uses_format_label_value,
+        # Bridge children cannot be created standalone (only via a parent context),
+        # so the list view's "+" create button is suppressed for them.
+        'is_bridge_child':    bool(_bridge_child_ir_pl),
     }
 
 
@@ -435,9 +456,14 @@ def actions_context(ctx: dict) -> dict:
     model         = ctx['model']
     parent_pascal = ctx['parent_pascal']
     can_create    = ctx['can_create']
+    # Bridge children disable standalone create (new:false) but ARE creatable from a
+    # parent (cmd_167 §4) — the embedded grid posts selectedParentType/Id. Enable the
+    # create action/service path for them so the parent-context create works.
+    can_create    = can_create or bool(ctx.get('bridge_child_ir'))
     can_update    = ctx['can_update']
     can_delete    = ctx['can_delete']
     parent_params = ctx['parent_params']
+    parent_params_no_bridge = ctx.get('parent_params_no_bridge', parent_params)
     non_comment_ch = ctx['non_comment_ch']
     child_args    = ctx['child_args_for_call']
     form_data_gets = ctx['form_data_gets']
@@ -449,6 +475,8 @@ def actions_context(ctx: dict) -> dict:
 
     sep = ', ' if (parent_params and child_args) else ''
     full_child_args = f'{sep}{child_args}' if child_args else ''
+    sep_no_bridge = ', ' if (parent_params_no_bridge and child_args) else ''
+    full_child_args_no_bridge = f'{sep_no_bridge}{child_args}' if child_args else ''
 
     # Flatten rel extraction code and update args
     flatten_rels_raw = ctx.get('flatten_rels', [])
@@ -530,7 +558,7 @@ def actions_context(ctx: dict) -> dict:
         _flatten_block = (f"{flatten_extractions_code}\n" if flatten_extractions_code else "")
         if can_create and can_update:
             create_call = f'await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});'
-            update_call = f'await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
+            update_call = f'await update{parent_pascal}(actorId, id, {parent_params_no_bridge}{full_child_args_no_bridge}{flatten_args_str}, srcSnapshotRaw);'
             if has_reservation:
                 return (
                     f"  const id = data.get('id') as string | null;\n"
@@ -601,7 +629,7 @@ def actions_context(ctx: dict) -> dict:
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _flatten_block +
                 f"\n  const actorId = await getSessionUserIdOrThrow();\n"
-                f"  await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
+                f"  await update{parent_pascal}(actorId, id, {parent_params_no_bridge}{full_child_args_no_bridge}{flatten_args_str}, srcSnapshotRaw);"
             )
         else:  # create only
             return (
@@ -918,6 +946,9 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     model                   = ctx['model']
     parent_pascal           = ctx['parent_pascal']
     can_create              = ctx['can_create']
+    # Bridge children create via parent context despite new:false (cmd_167 §4) —
+    # generate the add<Entity> service so the parent-embedded create path works.
+    can_create              = can_create or bool(ctx.get('bridge_child_ir'))
     can_update              = ctx['can_update']
     can_delete              = ctx['can_delete']
     non_comment_ch          = ctx['non_comment_ch']
@@ -1284,6 +1315,9 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'has_item_reservation':               has_item_reservation,
         'reservation_mutation_guard_update':  reservation_mutation_guard_update,
         'reservation_mutation_guard_delete':  reservation_mutation_guard_delete,
+        # Override ctx so service.ts emits add<Entity> for bridge children too
+        # (parent-context create despite new:false — cmd_167 §4).
+        'can_create':                         can_create,
     }
 
 
@@ -1467,6 +1501,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     date_time_flds     = []
     image_flds         = []
+    link_flds          = []
     boolean_flds       = []
     enum_integer_flds  = []
     other_flds         = []
@@ -1480,7 +1515,11 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         if actual == 'string' and fmt in ('date', 'date-time', 'time'):
             date_time_flds.append(p)
         elif actual == 'string' and fmt == 'uri':
-            image_flds.append(p)
+            from build_context import get_uri_kind
+            if get_uri_kind(prop) == 'link':
+                link_flds.append(p)
+            else:
+                image_flds.append(p)
         elif actual == 'boolean':
             boolean_flds.append(p)
         elif actual in ('integer', 'number') and isinstance(prop.get('enum'), list):
@@ -1490,6 +1529,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     needs_datetime_wrapper = bool(date_time_flds)
     needs_image_display    = bool(image_flds)
+    needs_link_display     = bool(link_flds)
 
     def _tf(p: str):
         return to_camel_case(p)
@@ -1571,6 +1611,12 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     # Image fields
     img_jsxs = [f"      <ImageDisplay url={{src.{p}}} alt={{tf('{_tf(p)}')}} />" for p in image_flds]
 
+    # Link URI fields
+    link_jsxs = [
+        f"      <AppFieldExternalLink label={{tf('{_tf(p)}')}} href={{src.{p} || null}} />"
+        for p in link_flds
+    ]
+
     # Boolean fields
     bool_jsxs = [
         f"      <AppFieldBoolean\n        label={{tf('{_tf(p)}')}}\n        checked={{Boolean(src.{p})}}\n        readOnly\n      />"
@@ -1597,7 +1643,12 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 for i, v in enumerate(enum_vals)
             )
         else:
-            opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
+            opts = ', '.join(
+                (f"{{ value: {i}, label: tf('{p}_{v}') }}"
+                 if isinstance(v, str) and not str(v).lstrip('-').isdigit()
+                 else f"{{ value: {int(v) if isinstance(v, (int, float)) else i}, label: tf('{p}_{v}') }}")
+                for i, v in enumerate(enum_vals)
+            )
         enum_opt_setups.append(f"  const {state_name}Options = [{opts}];")
         fk = _tf(p)
         enum_int_jsxs.append(
@@ -1621,8 +1672,27 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         '\n'.join(bool_jsxs),
         '\n'.join(dt_jsxs),
         '\n'.join(img_jsxs),
+        '\n'.join(link_jsxs),
         '\n'.join(custom_jsxs),
     ]))
+
+    # Bridge child (Stage 3): prepend parent info section as read-only fields.
+    _bridge_child_ir_fv = ctx.get('bridge_child_ir')
+    _bridge_parent_opts_fv = ctx.get('bridge_parent_options', [])
+    if _bridge_child_ir_fv and _bridge_parent_opts_fv:
+        _bp_section = (
+            "      <AppFieldText\n"
+            "        label={tf('parentType')}\n"
+            "        value={src.parent_type ?? ''}\n"
+            "        readOnly\n"
+            "      />\n"
+            "      <AppFieldText\n"
+            "        label={tf('parentLabel')}\n"
+            "        value={src.parent_label ?? ''}\n"
+            "        readOnly\n"
+            "      />"
+        )
+        all_parent_fields = '\n'.join(filter(None, [_bp_section, all_parent_fields]))
 
     # Reverse OTO rels (FK in target): display as labeled fields with view links
     reverse_oto_rels = ctx.get('reverse_oto_rels', [])
@@ -1765,6 +1835,13 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     col_fn_names         = [f"use{to_pascal_case(c['property_name'])}Columns" for c in grid_children]
 
     child_view_grids = []
+    _view_has_reactions = bool(ctx.get('named_constants'))
+    _parent_pascal_view = to_pascal_case(ctx.get('parent', ''))
+    _view_reaction_props = (
+        f"        reactionTypes={{[...COMMENT_REACTION_TYPES]}}\n"
+        f"        onToggleReaction={{toggle{_parent_pascal_view}CommentReaction}}\n"
+        if _view_has_reactions else ""
+    )
     # Bridge-based comment section (commentable one-to-one)
     if has_commentable:
         child_view_grids.append(
@@ -1773,6 +1850,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             f"        showTitle={{true}}\n"
             f"        title={{tf('comments')}}\n"
             f"        permissions={{{{ create: false, delete: false }}}}\n"
+            f"{_view_reaction_props}"
             f"      />"
         )
     for child in children_raw:
@@ -1786,6 +1864,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 f"        showTitle={{true}}\n"
                 f"        title={{tf('{child_camel}')}}\n"
                 f"        permissions={{{{ create: false, delete: false }}}}\n"
+                f"{_view_reaction_props}"
                 f"      />"
             )
         elif ot == 'list':
@@ -1851,9 +1930,32 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     has_rel_links = any(rel_by_prop.get(p) for p in other_flds) or bool(reverse_oto_rels) or has_accordion_rel_links
 
+    # Parent-embedded bridge child DataGrids (cmd_167 §4). For each bridge child
+    # whose x-bridge lists this entity as a parent, embed <Child>BridgeGrid bound
+    # to the parent's bridge row (src.<bridge>_id) and import it.
+    _parent_type = ctx.get('model', ctx.get('parent', ''))
+    _bridge_kids = collect_parent_bridge_children(_parent_type, schema) if schema else []
+    if _bridge_kids:
+        _bridge_imports = []
+        for _bk in _bridge_kids:
+            _ck = _bk['child']
+            _cp = to_pascal_case(_ck)
+            _bridge_imports.append(f"import {_cp}BridgeGrid from '../{_ck}/{_cp}BridgeGrid';")
+            # The bridge FK is auto-created and returned by the getter but is not
+            # part of the public detail type, so read it through a safe cast.
+            child_view_grids.append(
+                f"      <{_cp}BridgeGrid"
+                f" bridgeId={{String((src as Record<string, unknown>).{_bk['parent_fk']} ?? '')}}"
+                f" parentType=\"{_parent_type}\""
+                f" parentId={{src.id}}"
+                f" title={{te('{to_camel_case(_ck)}')}} readOnly />"
+            )
+        custom_view_imports = '\n'.join(filter(None, [custom_view_imports, *_bridge_imports]))
+
     return {
         'needs_datetime_wrapper': needs_datetime_wrapper,
         'needs_image_display':    needs_image_display,
+        'needs_link_display':     needs_link_display,
         'has_rel_links':          has_rel_links,
         'needs_accordion':        needs_accordion,
         'has_comment_children':   has_comment_children,
@@ -1900,22 +2002,35 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # the generated component must then `import { formatLabelValue } from '@/lib/_format';`.
     uses_format_label_value = False
 
-    text_props           = cats['text']
-    number_props         = cats['number']
-    date_time_props      = cats['date_time']
-    image_props          = cats['image']
-    boolean_props        = cats['boolean']
-    enum_int_props       = cats['enum_integer']
-    enum_str_props       = cats.get('enum_string', [])
-    custom_upsert_props  = cats['custom_upsert']
-    entity_select_props  = cats.get('entity_select', [])
+    # Readonly fields: exclude from editable field lists; render as disabled in edit mode only.
+    readonly_field_names: set[str] = set(ctx.get('readonly_fields') or [])
+
+    text_props           = [p for p in cats['text']           if p not in readonly_field_names]
+    number_props         = [p for p in cats['number']         if p not in readonly_field_names]
+    date_time_props      = [p for p in cats['date_time']      if p not in readonly_field_names]
+    image_props          = [p for p in cats['image']          if p not in readonly_field_names]
+    link_uri_props       = [p for p in cats.get('link_uri', []) if p not in readonly_field_names]
+    boolean_props        = [p for p in cats['boolean']        if p not in readonly_field_names]
+    enum_int_props       = [p for p in cats['enum_integer']   if p not in readonly_field_names]
+    enum_str_props       = [p for p in cats.get('enum_string', [])  if p not in readonly_field_names]
+    custom_upsert_props  = [p for p in cats['custom_upsert'] if p not in readonly_field_names]
+    entity_select_props  = [p for p in cats.get('entity_select', []) if p not in readonly_field_names]
 
     rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
 
     # ---- States / Refs ----
     text_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in text_props)
+    link_uri_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in link_uri_props)
     number_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in number_props)
-    parent_refs = '\n'.join(filter(None, [text_refs, number_refs]))
+    parent_refs = '\n'.join(filter(None, [text_refs, link_uri_refs, number_refs]))
+
+    bridge_child_ir = ctx.get('bridge_child_ir')
+    if bridge_child_ir:
+        _bridge_refs = (
+            "  const selectedParentTypeRef = useRef<HTMLInputElement>(null);\n"
+            "  const selectedParentIdRef = useRef<HTMLInputElement>(null);"
+        )
+        parent_refs = '\n'.join(filter(None, [parent_refs, _bridge_refs]))
 
     def _setter(var_name: str) -> str:
         return to_pascal_case_from_var(var_name)
@@ -2073,6 +2188,21 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      />"
         )
 
+    # Link URI fields (URL text input, no upload)
+    link_uri_jsxs = []
+    for p in link_uri_props:
+        fk  = _tf(p)
+        req = p in (model_def.get('required') or [])
+        link_uri_jsxs.append(
+            f"      <AppFieldText\n"
+            f"        label={{tf('{fk}')}}\n"
+            f"        inputRef={{{p}Ref}}\n"
+            f"        defaultValue={{src.{p} || ''}}\n"
+            f"        {'required' if req else ''}\n"
+            f"        slotProps={{{{ htmlInput: {{ type: 'url' }} }}}}\n"
+            f"      />"
+        )
+
     # Image fields
     img_jsxs = []
     for p in image_props:
@@ -2122,7 +2252,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 for i, v in enumerate(enum_vals)
             )
         else:
-            opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
+            opts = ', '.join(
+                (f"{{ value: {i}, label: tf('{p}_{v}') }}"
+                 if isinstance(v, str) and not str(v).lstrip('-').isdigit()
+                 else f"{{ value: {int(v) if isinstance(v, (int, float)) else i}, label: tf('{p}_{v}') }}")
+                for i, v in enumerate(enum_vals)
+            )
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
         enum_int_jsxs.append(
@@ -2229,8 +2364,25 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         setter = _setter(sn)
         custom_jsxs.append(f"      <{comp} value={{{sn}}} onChange={{set{setter}}} isEdit={{isEdit}} />")
 
+    # Readonly fields: displayed as disabled text fields in edit mode, omitted in new mode.
+    readonly_edit_jsxs = []
+    for _ro_fn in sorted(readonly_field_names):
+        if _ro_fn not in filtered_props:
+            continue
+        _ro_fk = _tf(_ro_fn)
+        readonly_edit_jsxs.append(
+            f"      {{isEdit && (\n"
+            f"        <AppFieldText\n"
+            f"          label={{tf('{_ro_fk}')}}\n"
+            f"          defaultValue={{src.{_ro_fn} !== null && src.{_ro_fn} !== undefined ? String(src.{_ro_fn}) : ''}}\n"
+            f"          disabled\n"
+            f"        />\n"
+            f"      )}}"
+        )
+
     all_parent_fields_jsx = '\n'.join(filter(None, [
         '\n'.join(text_jsxs),
+        '\n'.join(link_uri_jsxs),
         '\n'.join(entity_select_jsxs),
         '\n'.join(rel_jsxs),
         '\n'.join(num_jsxs),
@@ -2240,10 +2392,33 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         '\n'.join(dt_jsxs),
         '\n'.join(img_jsxs),
         '\n'.join(custom_jsxs),
+        '\n'.join(readonly_edit_jsxs),
     ]))
+    if bridge_child_ir:
+        # Stage 2: bridge parent UI.
+        # Edit mode: parent type and label displayed read-only so the user sees context.
+        # New mode:  hidden inputs carry selectedParentType/Id (populated by parent-embedded create).
+        _bc_bridge_name = bridge_child_ir['name']
+        _bc_fk_prop = f'{_bc_bridge_name}_id'
+        _bridge_jsx = (
+            f"      {{/* bridge-parent: {_bc_bridge_name} — set by parent-embedded create, not switchable */}}\n"
+            f"      {{isEdit ? (\n"
+            f"        <>\n"
+            f"          <AppFieldText label={{tf('parentType')}} value={{src.parent_type ?? ''}} readOnly />\n"
+            f"          <AppFieldText label={{tf('parentLabel')}} value={{src.parent_label ?? ''}} readOnly />\n"
+            f"        </>\n"
+            f"      ) : (\n"
+            f"        <>\n"
+            f"          <input type=\"hidden\" ref={{selectedParentTypeRef}} defaultValue={{initialParentType ?? ''}} />\n"
+            f"          <input type=\"hidden\" ref={{selectedParentIdRef}} defaultValue={{initialParentId ?? ''}} />\n"
+            f"        </>\n"
+            f"      )}}"
+        )
+        all_parent_fields_jsx = '\n'.join(filter(None, [_bridge_jsx, all_parent_fields_jsx]))
 
     # ---- FormData sets ----
     text_ds  = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in text_props)
+    link_uri_ds = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in link_uri_props)
     entity_select_ds = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} || '');" for p in entity_select_props)
     num_ds   = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in number_props)
     dt_ds_parts = []
@@ -2267,7 +2442,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             return f"    formData.set('{p}', {safe_var_name(p)}.toString());"
         return f"    formData.set('{p}', {safe_var_name(p)});"
     cust_ds  = '\n'.join(_custom_form_data_line(p) for p in custom_upsert_props)
-    parent_form_data_sets = '\n'.join(filter(None, [text_ds, entity_select_ds, rel_ds, num_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, cust_ds]))
+    parent_form_data_sets = '\n'.join(filter(None, [text_ds, link_uri_ds, entity_select_ds, rel_ds, num_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, cust_ds]))
 
     # ---- Children analysis ----
     # Use the pre-filtered embedded_ch from build_context (passed as non_comment_ch in ctx).
@@ -2359,6 +2534,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         child_imports_parts.append(f"import {{ {', '.join(col_fn_names)} }} from '../{parent}/column_def';")
     if has_indep_list_children:
         child_imports_parts.append("import ListWrapper from '@/components/_standard/ListWrapper';")
+
+    # Bridge child DataGrids on the parent edit page (P1: mutation affordances on edit, not detail).
+    _upsert_parent_type = ctx.get('model', ctx.get('parent', ''))
+    _bridge_kids_upsert = collect_parent_bridge_children(_upsert_parent_type, schema) if schema else []
+    for _bku in _bridge_kids_upsert:
+        _cku = _bku['child']
+        _cpu = to_pascal_case(_cku)
+        child_imports_parts.append(f"import {_cpu}BridgeGrid from '../{_cku}/{_cpu}BridgeGrid';")
+
     child_imports = '\n'.join(child_imports_parts)
 
     # Child variables (useRef)
@@ -2437,11 +2621,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"  }})));"
                 )
             else:
+                _list_rel = c.get('relationship') or {}
+                _list_lf = _list_rel.get('label_field', 'name')
+                _list_target = _list_rel.get('target', child_name)
+                _list_built = build_label_expression('f', _list_lf, _list_target, schema)
+                if _list_built['has_format']:
+                    uses_format_label_value = True
+                _list_expr = _list_built['expression']
                 child_grid_setup_parts.append(
                     f"  const [localInitial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                     f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
-                    f"    value: f.name,\n"
-                    f"    label: f.name,\n"
+                    f"    value: {_list_expr},\n"
+                    f"    label: {_list_expr},\n"
                     f"    originalId: f.id,{order_line}\n"
                     f"  }})));"
                 )
@@ -2804,6 +2995,24 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     child_grid_components = '\n'.join(child_grid_components_parts)
 
+    # Bridge child DataGrids on the parent edit page: isEdit-guarded, readOnly={false} to show mutation affordances.
+    bridge_edit_grids_parts = []
+    for _bku in _bridge_kids_upsert:
+        _cku = _bku['child']
+        _cpu = to_pascal_case(_cku)
+        _cku_camel = to_camel_case(_cku)
+        bridge_edit_grids_parts.append(
+            f"      {{isEdit && (\n"
+            f"        <{_cpu}BridgeGrid\n"
+            f"          bridgeId={{String((src as Record<string, unknown>).{_bku['parent_fk']} ?? '')}}\n"
+            f"          parentType=\"{_upsert_parent_type}\"\n"
+            f"          parentId={{src.id}}\n"
+            f"          title={{te('{_cku_camel}')}}\n"
+            f"        />\n"
+            f"      )}}"
+        )
+    bridge_edit_grids = '\n'.join(bridge_edit_grids_parts)
+
     # Read-only JSX for independent mandatory-FK list children (isEdit-guarded, no add/delete)
     indep_list_readonly_parts = []
     for c in indep_list_ch:
@@ -2868,12 +3077,17 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     extra_default_props = ', '.join(_initial_props + _search_props)
     entity_edit_components = ctx.get('entity_edit_components') or []
     has_current_user_role_ids = bool(entity_edit_components)
-    if extra_default_props or has_comment_children or has_current_user_role_ids:
+    # Bridge children receive parent context (set on the create form by the
+    # parent-embedded grid via /new?parentType=&parentId=).
+    _is_bridge_child = bool(ctx.get('bridge_child_ir'))
+    _bridge_params = ', initialParentType, initialParentId' if _is_bridge_child else ''
+    if extra_default_props or has_comment_children or has_current_user_role_ids or _is_bridge_child:
         form_upsert_params = (
             f"{{ src, isEdit, permissions"
             + (', currentUserId' if has_comment_children else '')
             + (', currentUserRoleIds' if has_current_user_role_ids else '')
             + (f', {extra_default_props}' if extra_default_props else '')
+            + _bridge_params
             + " }: FormUpsertProps"
         )
     else:
@@ -2882,6 +3096,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # Validation call
     validation_entry_lines = ['    isEdit,', '    id: src.id,']
     validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in text_props)
+    validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in link_uri_props)
     validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in number_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in date_time_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in image_props)
@@ -2898,6 +3113,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # Comment children JSX
     comment_jsx_parts = []
     comment_add_id_expr = 'src.id'  # default: old pattern uses parent entity id
+    has_reactions = bool(ctx.get('named_constants'))
+    _reaction_props = (
+        f"          reactionTypes={{[...COMMENT_REACTION_TYPES]}}\n"
+        f"          onToggleReaction={{toggle{parent_pascal}CommentReaction}}\n"
+        if has_reactions else ""
+    )
     for c in comment_children:
         if c.get('bridge'):
             prop = c['property_name']
@@ -2913,6 +3134,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"          onCreateComment={{handleCreateComment}}\n"
                 f"          onUpdateComment={{handleUpdateComment}}\n"
                 f"          onDeleteComment={{handleDeleteComment}}\n"
+                f"{_reaction_props}"
                 f"        />\n"
                 f"      )}}"
             )
@@ -2930,6 +3152,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"          onCreateComment={{handleCreateComment}}\n"
                 f"          onUpdateComment={{handleUpdateComment}}\n"
                 f"          onDeleteComment={{handleDeleteComment}}\n"
+                f"{_reaction_props}"
                 f"        />\n"
                 f"      )}}"
             )
@@ -3115,7 +3338,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                         for i, v in enumerate(_enum_vals)
                     )
                 else:
-                    _opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(_enum_vals))
+                    _opts = ', '.join(
+                        (f"{{ value: {i}, label: tf('{_fname}_{v}') }}"
+                         if isinstance(v, str) and not str(v).lstrip('-').isdigit()
+                         else f"{{ value: {int(v) if isinstance(v, (int, float)) else i}, label: tf('{_fname}_{v}') }}")
+                        for i, v in enumerate(_enum_vals)
+                    )
                 flatten_enum_opt_setups_upsert.append(f"  const {_opts_var} = [{_opts}];")
                 _accordion_fields_jsx.append(
                     f"        <AppFieldSelect\n"
@@ -3213,6 +3441,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     all_states_merged = '\n'.join(filter(None, [all_states, _flatten_states_str]))
     _flatten_fds_str = '\n'.join(flatten_edit_form_data_sets_blocks)
     parent_form_data_sets_merged = '\n'.join(filter(None, [parent_form_data_sets, _flatten_fds_str]))
+    if bridge_child_ir:
+        _bridge_fds = (
+            "    formData.set('selectedParentType', selectedParentTypeRef.current?.value || '');\n"
+            "    formData.set('selectedParentId', selectedParentIdRef.current?.value || '');"
+        )
+        parent_form_data_sets_merged = '\n'.join(filter(None, [parent_form_data_sets_merged, _bridge_fds]))
     _all_enum_ns_hooks = '\n'.join(enum_ns_hooks + flatten_enum_ns_hooks_upsert)
     _all_enum_opt_setups = '\n'.join(enum_opt_setups + entity_select_opt_setups + flatten_enum_opt_setups_upsert)
     _flatten_validation_code = '\n\n'.join(flatten_validation_parts)
@@ -3229,6 +3463,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'child_form_data_handling': child_form_data_handling,
         'child_validation_code':    _child_validation_code_merged,
         'child_grid_components':    child_grid_components,
+        'bridge_edit_grids':        bridge_edit_grids,
         'has_indep_list_children':  has_indep_list_children,
         'indep_list_readonly_jsx':  indep_list_readonly_jsx,
         'form_upsert_params':       form_upsert_params,

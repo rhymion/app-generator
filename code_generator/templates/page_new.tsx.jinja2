@@ -13,6 +13,22 @@ import { getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pascal }} } fro
 {% endfor %}
 import { get{{ parent_pascal }}NewPageAccessCheck } from '@/lib/{{ parent }}/getters';
 
+{% if bridge_child_ir %}
+type NewSearchParams = Record<string, string | string[] | undefined>;
+
+export default function Add{{ parent_pascal }}Page({ searchParams }: { searchParams: Promise<NewSearchParams> }) {
+  return (
+    <Suspense fallback={<FormSkeleton />}>
+      <{{ parent_pascal }}NewContent searchParams={searchParams} />
+    </Suspense>
+  );
+}
+
+async function {{ parent_pascal }}NewContent({ searchParams }: { searchParams: Promise<NewSearchParams> }) {
+  const _sp = await searchParams;
+  const _initialParentType = typeof _sp.parentType === 'string' ? _sp.parentType : '';
+  const _initialParentId = typeof _sp.parentId === 'string' ? _sp.parentId : '';
+{% else %}
 export default function Add{{ parent_pascal }}Page() {
   return (
     <Suspense fallback={<FormSkeleton />}>
@@ -22,6 +38,7 @@ export default function Add{{ parent_pascal }}Page() {
 }
 
 async function {{ parent_pascal }}NewContent() {
+{% endif %}
 {% if selection_targets or selector_oto_rels %}
   const [userPermissions, {% for target in selection_targets %}initial{{ target | pascal_case }}s{% if not loop.last or selector_oto_rels %}, {% endif %}{% endfor %}{% for oto in selector_oto_rels %}initialAvailable{{ oto.target | pascal_case }}s{% if not loop.last %}, {% endif %}{% endfor %}] = await Promise.all([
     get{{ parent_pascal }}NewPageAccessCheck(),
@@ -46,5 +63,5 @@ async function {{ parent_pascal }}NewContent() {
     {{ child.property_name }}: [],
 {% endfor %}
   };
-  return <FormUpsert src={src} isEdit={false} permissions={userPermissions}{% for target in selection_targets %} initial{{ target | pascal_case }}s={ initial{{ target | pascal_case }}s } search{{ target | pascal_case }}Options={ {% if target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ target | pascal_case }}Options{% endif %} }{% endfor %}{% for oto in selector_oto_rels %} initial{{ oto.target | pascal_case }}s={ initialAvailable{{ oto.target | pascal_case }}s }{% endfor %} />;
+  return <FormUpsert src={src} isEdit={false} permissions={userPermissions}{% for target in selection_targets %} initial{{ target | pascal_case }}s={ initial{{ target | pascal_case }}s } search{{ target | pascal_case }}Options={ {% if target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ target | pascal_case }}Options{% endif %} }{% endfor %}{% for oto in selector_oto_rels %} initial{{ oto.target | pascal_case }}s={ initialAvailable{{ oto.target | pascal_case }}s }{% endfor %}{% if bridge_child_ir %} initialParentType={_initialParentType} initialParentId={_initialParentId}{% endif %} />;
 }

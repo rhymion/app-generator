@@ -76,8 +76,8 @@ async function main() {
 
   const entities = [
     'user', 'role', 'organization', 'permission', 'setting',
-    'approval_request', 'approval_flow', 'approvable', 'comment', 'commentable',
-    'dashboard', 'dashboard_widget', 'attachment', 'attachable', 'audit_log', 'tenant',
+    'approval_request', 'approval_flow', 
+    'dashboard', 'audit_log', 'tenant',
   ];
   await Promise.all(entities.map(entity =>
     prisma.permission.upsert({

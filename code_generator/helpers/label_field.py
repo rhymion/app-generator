@@ -37,6 +37,18 @@ from typing import Iterable
 _DATE_FORMATS = frozenset({'date', 'date-time', 'time'})
 
 
+def _string_enum_labels(enum_values) -> list[str] | None:
+    """Return string labels from an integer/number field's enum, or None.
+
+    String labels are non-digit strings like ["free","premium","vip"].
+    Pure numeric enums like [0,1,2] return None — those have no display labels.
+    """
+    if not isinstance(enum_values, list) or not enum_values:
+        return None
+    labels = [v for v in enum_values if isinstance(v, str) and not str(v).lstrip('-').isdigit()]
+    return labels if labels else None
+
+
 def _entity_props(entity: str, schema: dict) -> dict:
     """Return the `properties` of an entity, resolving allOf in *_detail."""
     defn = schema.get('definitions', {}).get(entity, {})
@@ -104,6 +116,8 @@ def resolve_label_paths(label_field, target: str, schema: dict) -> list[dict]:
         cursor_entity = target
         relation_chain: list[str] = []
         final_format = None
+        final_is_number = False
+        final_enum_labels = None
 
         for i, seg in enumerate(segments):
             cursor_props = _entity_props(cursor_entity, schema)
@@ -117,7 +131,13 @@ def resolve_label_paths(label_field, target: str, schema: dict) -> list[dict]:
                         f"segment '{seg}' is not a property of '{cursor_entity}'. "
                         f"Available properties: {sorted(cursor_props.keys()) or '(none)'}"
                     )
-                final_format = cursor_props[seg].get('format') if cursor_props[seg].get('format') in _DATE_FORMATS else None
+                final_prop = cursor_props[seg]
+                final_format = final_prop.get('format') if final_prop.get('format') in _DATE_FORMATS else None
+                _ftype = final_prop.get('type')
+                if isinstance(_ftype, list):
+                    _ftype = next((t for t in _ftype if t != 'null'), None)
+                final_is_number = _ftype in ('integer', 'number') and final_format is None
+                final_enum_labels = _string_enum_labels(final_prop.get('enum')) if final_is_number else None
             else:
                 if seg not in cursor_rels:
                     avail = sorted(cursor_rels.keys())
@@ -134,12 +154,20 @@ def resolve_label_paths(label_field, target: str, schema: dict) -> list[dict]:
             'segments': segments,
             'final_field': segments[-1],
             'final_format': final_format,
+            'final_is_number': final_is_number,
+            'final_enum_labels': final_enum_labels,
             'relation_chain': relation_chain,
         })
     return out
 
 
-def _path_expression(item_var: str, segments: list[str], final_format: str | None) -> str:
+def _path_expression(
+    item_var: str,
+    segments: list[str],
+    final_format: str | None,
+    final_is_number: bool = False,
+    enum_labels: list[str] | None = None,
+) -> str:
     """Build a TS expression for a single resolved path.
 
     The first connector after `item_var` is `?.` whenever `item_var` itself
@@ -162,6 +190,16 @@ def _path_expression(item_var: str, segments: list[str], final_format: str | Non
         # The formatter handles null/undefined/'' itself, so no extra ternary
         # is needed.
         return f"formatLabelValue({access}, '{final_format}')"
+
+    if final_is_number:
+        if enum_labels:
+            # Integer enum with string labels: use index-lookup so 0→'free', 1→'premium'.
+            # Array access on undefined/null gives undefined → ?? '' gives empty string.
+            labels_literal = ', '.join(f"'{v}'" for v in enum_labels)
+            return f"([{labels_literal}][{access}] ?? '')"
+        # Plain integer/number: String() converts, but guard null/undefined first
+        # because String(null)='null' and String(undefined)='undefined'.
+        return f"({access} != null ? String({access}) : '')"
 
     # Non-date string — fall back to '' on null/undefined so concat doesn't
     # produce 'undefined'.
@@ -196,7 +234,16 @@ def build_label_expression(
         label_field = fallback_field
 
     resolved = resolve_label_paths(label_field, target, schema)
-    parts = [_path_expression(item_var, r['segments'], r['final_format']) for r in resolved]
+    parts = [
+        _path_expression(
+            item_var,
+            r['segments'],
+            r['final_format'],
+            r.get('final_is_number', False),
+            r.get('final_enum_labels'),
+        )
+        for r in resolved
+    ]
     if len(parts) == 1:
         expression = parts[0]
     else:

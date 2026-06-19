@@ -17,6 +17,8 @@ import SaveIcon from '@mui/icons-material/Save';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
 import type { ModelPermissions } from '@/lib/authz';
+import CommentReactionBar from '@/components/_standard/CommentReactionBar';
+import type { CommentReactionSummary, ReactionType } from '@/components/_standard/CommentReactionBar';
 
 export type CommentItem = {
   id: string;
@@ -28,6 +30,8 @@ export type CommentItem = {
     name: string;
     image?: string | null;
   } | null;
+  reactionCounts?: Array<{ type: number; count: number }>;
+  myReactionTypes?: number[];
 };
 
 interface CommentListWrapperProps {
@@ -40,6 +44,8 @@ interface CommentListWrapperProps {
   onCreateComment?: (message: string) => Promise<void>;
   onUpdateComment?: (id: string, message: string) => Promise<void>;
   onDeleteComment?: (id: string) => Promise<void>;
+  reactionTypes?: ReactionType[];
+  onToggleReaction?: (commentId: string, type: number) => Promise<CommentReactionSummary>;
 }
 
 function getInitials(name: string): string {
@@ -61,9 +67,11 @@ interface CommentItemComponentProps {
   canDelete: boolean;
   onUpdate?: (id: string, message: string) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
+  reactionTypes?: ReactionType[];
+  onToggleReaction?: (commentId: string, type: number) => Promise<CommentReactionSummary>;
 }
 
-function CommentItemComponent({ comment, canDelete, onUpdate, onDelete }: CommentItemComponentProps) {
+function CommentItemComponent({ comment, canDelete, onUpdate, onDelete, reactionTypes, onToggleReaction }: CommentItemComponentProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editMessage, setEditMessage] = useState(comment.message);
   const [isPending, startTransition] = useTransition();
@@ -156,6 +164,15 @@ function CommentItemComponent({ comment, canDelete, onUpdate, onDelete }: Commen
               <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                 {comment.message}
               </Typography>
+              {reactionTypes && reactionTypes.length > 0 && onToggleReaction && (
+                <CommentReactionBar
+                  commentId={comment.id}
+                  counts={comment.reactionCounts ?? []}
+                  myTypes={comment.myReactionTypes ?? []}
+                  onToggle={(type) => onToggleReaction(comment.id, type)}
+                  types={reactionTypes}
+                />
+              )}
               {(canDelete) && (
                 <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5, mt: 0.5 }}>
                   {canDelete && onUpdate && (
@@ -191,6 +208,8 @@ export default function CommentListWrapper({
   onCreateComment,
   onUpdateComment,
   onDeleteComment,
+  reactionTypes,
+  onToggleReaction,
 }: CommentListWrapperProps) {
   const [newMessage, setNewMessage] = useState('');
   const [isPending, startTransition] = useTransition();
@@ -223,6 +242,8 @@ export default function CommentListWrapper({
                   canDelete={permissions.delete && comment.creator?.id === currentUserId}
                   onUpdate={onUpdateComment}
                   onDelete={onDeleteComment}
+                  reactionTypes={reactionTypes}
+                  onToggleReaction={onToggleReaction}
                 />
                 {index < comments.length - 1 && <Divider component="li" />}
               </Fragment>
