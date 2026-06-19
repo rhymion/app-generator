@@ -19,6 +19,44 @@ def set_messages_fields(fields: dict) -> None:
     global _messages_fields
     _messages_fields = fields
 
+
+# Full message namespaces (e.g. DayOfWeek, ShiftStatus) for enum label lookup when
+# a field declares x-enum-namespace. Populated by set_messages_namespaces().
+_messages_ns: dict = {}
+
+
+def set_messages_namespaces(messages: dict) -> None:
+    """Register all message namespaces from messages/en.json for enum label lookup."""
+    global _messages_ns
+    _messages_ns = messages or {}
+
+
+def _enum_ns_key(value) -> str:
+    """Translation key for an enum value within its namespace.
+
+    Must match the key FormUpsert/FormView emit (generators.py): a string label is
+    lower-cased on its first character; numeric values are used verbatim.
+    """
+    s = str(value)
+    if isinstance(value, str) and not s.lstrip('-').isdigit():
+        return s[0].lower() + s[1:]
+    return s
+
+
+def _enum_label(field: dict, value) -> str:
+    """Resolve the displayed label for an enum value, honoring x-enum-namespace.
+
+    When the field declares a namespace, look the value up there (matching the
+    rendered Autocomplete option label); otherwise fall back to the Fields key
+    `<prop>_<value>` and finally the raw value.
+    """
+    ns = field.get('enum_namespace')
+    if ns:
+        return _messages_ns.get(ns, {}).get(_enum_ns_key(value), str(value))
+    if _messages_fields:
+        return _messages_fields.get(f"{field['prop_name']}_{value}", str(value))
+    return str(value)
+
 from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
 )
@@ -588,6 +626,7 @@ def get_field_metas(
                     'category': 'enum',
                     'required': prop_name in required_fields,
                     'enum_values': prop.get('enum'),
+                    'enum_namespace': prop.get('x-enum-namespace'),
                 })
             else:
                 metas.append({
@@ -620,6 +659,7 @@ def get_field_metas(
                 'category': 'string_enum',
                 'required': prop_name in required_fields,
                 'enum_values': prop.get('enum'),
+                'enum_namespace': prop.get('x-enum-namespace'),
             })
         else:
             metas.append({
@@ -765,9 +805,8 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
         first = next((v for v in values if v is not None), None)
         if first is None:
             return ''
-        if cat == 'enum' and _messages_fields:
-            key = f'{prop_name}_{first}'
-            return _messages_fields.get(key, str(first))
+        if cat == 'enum':
+            return _enum_label(field, first)
         return str(first)
 
     elif cat == 'number':
@@ -824,9 +863,8 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
         raw = values[1] if len(values) > 1 else (values[0] if values else None)
         if raw is None:
             return ''
-        if cat == 'enum' and _messages_fields:
-            key = f'{prop_name}_{raw}'
-            return _messages_fields.get(key, str(raw))
+        if cat == 'enum':
+            return _enum_label(field, raw)
         return str(raw)
 
     elif cat == 'number':
