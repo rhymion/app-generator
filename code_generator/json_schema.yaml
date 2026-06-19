@@ -2,6 +2,14 @@ $schema: "http://json-schema.org/draft-07/schema#"
 
 # Support multi-tenancy
 format-version: 1.0
+
+# Generator configuration (DP-3: search opt-in vs all-entity default)
+# search.default_scope: 'opt_in' — only entities with x-generate.search: true are searchable
+# search.default_scope: 'all'    — all entities are searchable; exclude with x-generate.search: false
+x-generator:
+  search:
+    default_scope: opt_in
+
 definitions:
   # ============================================================
   # System entities (required by all apps — see §1.1)
@@ -148,6 +156,12 @@ definitions:
       invalidate: false
       api: true
       test: true
+      search: true
+    x-search:
+      text_fields: [name, description]
+      snippet_field: name
+      org_filter: creator_id
+      has_creator_filter: true
     # Security-sensitive entity: every create/update/delete is recorded in
     # the audit_log table by the generated service layer.
     x-audit: true
@@ -194,6 +208,11 @@ definitions:
       invalidate: false
       api: true
       test: true
+      search: true
+    x-search:
+      text_fields: [name, description]
+      snippet_field: name
+      org_filter: id
     x-relationships:
       users:
         type: many-to-many

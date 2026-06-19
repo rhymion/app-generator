@@ -518,6 +518,106 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         print('  Comment reactions API route → app/api/comment/[commentId]/reactions/toggle/route.ts')
 
+    # --- Search templates (lib/search/helpers.ts + app/api/search/route.ts) ---
+    # DP-3: default_scope from x-generator.search.default_scope.
+    #   'opt_in' (default) — only entities with x-generate.search: true are searchable
+    #   'all'              — all entities searchable; exclude with x-generate.search: false
+    gen_config = schema.get('x-generator', {})
+    search_default_scope = gen_config.get('search', {}).get('default_scope', 'opt_in')
+
+    search_entities = []
+    for entity in entities:
+        model      = entity['model']
+        parent     = entity['parent']
+        def_key    = entity['definition_key']
+        gen_cfg    = entity.get('generate_config', {})
+        detail_def = schema['definitions'].get(def_key, {}) or {}
+        base_def   = schema['definitions'].get(model, {}) or {}
+
+        # Determine if this entity is search-enabled per DP-3 logic
+        # generate_config only contains the standard keys; read 'search' from raw x-generate
+        x_generate_raw = detail_def.get('x-generate') or base_def.get('x-generate') or {}
+        explicit_search = x_generate_raw.get('search')  # True, False, or None
+        if search_default_scope == 'all':
+            is_search = explicit_search is not False
+        else:  # opt_in
+            is_search = explicit_search is True
+
+        if not is_search:
+            continue
+
+        xsearch = detail_def.get('x-search') or {}
+        text_fields   = xsearch.get('text_fields', ['name'])
+        snippet_field = xsearch.get('snippet_field', text_fields[0] if text_fields else 'id')
+        # org_filter: column used for org membership check
+        # 'id' for the organization entity itself; 'organization_id' for normal entities
+        org_filter    = xsearch.get('org_filter', 'organization_id')
+
+        # Build SQL fragments used inside the Jinja2 template
+        # ts_vector_fields_sql: concat of all text fields, COALESCE-wrapped
+        ts_parts = " || ' ' || ".join(f"COALESCE({f}, '')" for f in text_fields)
+
+        # similarity_fields_sql: GREATEST(similarity(f1, q), similarity(f2, q), ...)
+        sim_exprs = ', '.join(f"similarity(COALESCE({f}, ''), ${{q}})" for f in text_fields)
+
+        # similarity_where_sql: each field comparison with > 0.3 threshold
+        # Used in WHERE: (sim_f1 > 0.3 OR sim_f2 > 0.3)
+        sim_where_single = ' OR '.join(
+            f"similarity(COALESCE({f}, ''), ${{q}}) > 0.3" for f in text_fields
+        )
+
+        # Prisma model is lowercase (matches Prisma model definition)
+        prisma_model = model  # e.g. 'organization'
+
+        # Detect creator_id presence for creator-scope fallback.
+        # Explicit x-search.has_creator_filter overrides auto-detection; useful for
+        # entities whose creator_id is generated (not declared in schema properties).
+        all_props = {}
+        for item in (base_def if isinstance(base_def, dict) else {}).get('properties', {}).items():
+            all_props[item[0]] = item[1]
+        if 'has_creator_filter' in xsearch:
+            has_creator_filter = bool(xsearch['has_creator_filter'])
+        else:
+            has_creator_filter = 'creator_id' in all_props and org_filter != 'id'
+
+        search_entities.append({
+            'entity_type':           parent,
+            'model':                 prisma_model,
+            'text_fields':           text_fields,
+            'snippet_field':         snippet_field,
+            'org_filter':            org_filter,
+            'ts_vector_fields_sql':  ts_parts,
+            'similarity_fields_sql': sim_exprs,
+            'similarity_where_sql':  sim_where_single,
+            'has_creator_filter':    has_creator_filter,
+            # Pre-computed TypeScript identifier for the per-entity Prisma.Sql filter var
+            # (avoids Jinja2/TypeScript ${{{...}}} delimiter conflict in templates)
+            'org_filter_ts_var':     f'{parent}OrgFilter',
+            'perms_ts_var':          f'{parent}Perms',
+            'general_read_ts_var':   f'{parent}GeneralRead',
+            'has_access_ts_var':     f'{parent}HasAccess',
+        })
+
+    if search_entities:
+        search_ctx = {'search_entities': search_entities}
+        _write(
+            out / 'lib' / 'search' / 'helpers.ts',
+            _render(env, 'search_helpers.ts.jinja2', search_ctx),
+        )
+        _write(
+            out / 'app' / 'api' / 'search' / 'route.ts',
+            _render(env, 'search_route.ts.jinja2', search_ctx),
+        )
+        _write(
+            out / 'app' / '[locale]' / 'search' / 'page.tsx',
+            _render(env, 'search_page.tsx.jinja2', search_ctx),
+        )
+        entity_names = ', '.join(e['entity_type'] for e in search_entities)
+        print(f'  Search routes → lib/search/helpers.ts + app/api/search/route.ts ({entity_names})')
+        print(f'  Search UI page → app/[locale]/search/page.tsx')
+    else:
+        print('  Search: no entities with x-generate.search: true — skipping search route')
+
     # --- docs/generated/index.md + app/[locale]/docs/page.mdx ---
     print('\nGenerating documentation index...')
     index_ctx = build_doc_index_context(entity_doc_summaries)

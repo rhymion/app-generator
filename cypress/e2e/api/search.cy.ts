@@ -128,7 +128,74 @@ describe('API: GET /api/search', () => {
     });
   });
 
-  // 4. Permission boundary test (CRITICAL) — org isolation
+  // 4. Multi-entity UNION ALL search (Phase 1)
+  describe('Multi-entity search — UNION ALL', () => {
+    it('returns results from multiple entity types in one response', () => {
+      cy.task('db:populateOrganizationWithUser', 1);
+      cy.task('db:populateRoleFull', 1);
+      cy.request({
+        url: `${SEARCH_URL}?q=Role`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        expect(res.body.results).to.have.length.greaterThan(0);
+        const entityTypes: string[] = res.body.results.map(
+          (r: { entity_type: string }) => r.entity_type,
+        );
+        expect(entityTypes).to.include('role');
+      });
+    });
+
+    it('filters results by entityTypes parameter', () => {
+      cy.task('db:populateOrganizationWithUser', 2);
+      cy.task('db:populateRoleFull', 2);
+
+      // Search restricted to organization only
+      cy.request({
+        url: `${SEARCH_URL}?q=Organization&entityTypes=organization`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        expect(res.body.results).to.have.length.greaterThan(0);
+        res.body.results.forEach((r: { entity_type: string }) => {
+          expect(r.entity_type).to.eq('organization');
+        });
+      });
+
+      // Search restricted to role only
+      cy.request({
+        url: `${SEARCH_URL}?q=Role&entityTypes=role`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        expect(res.body.results).to.have.length.greaterThan(0);
+        res.body.results.forEach((r: { entity_type: string }) => {
+          expect(r.entity_type).to.eq('role');
+        });
+      });
+    });
+
+    it('each result has entity_type, id, snippet, and rank fields', () => {
+      cy.task('db:populateOrganizationWithUser', 1);
+      cy.task('db:populateRoleFull', 1);
+      cy.request({
+        url: `${SEARCH_URL}?q=Role`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        res.body.results.forEach(
+          (r: { entity_type: string; id: string; snippet: string; rank: number }) => {
+            expect(r).to.have.property('entity_type').that.is.a('string');
+            expect(r).to.have.property('id').that.is.a('string');
+            expect(r).to.have.property('snippet').that.is.a('string');
+            expect(r).to.have.property('rank').that.is.a('number');
+          },
+        );
+      });
+    });
+  });
+
+  // 5. Permission boundary test (CRITICAL) — org isolation
   // The test user must NOT see organizations they are not a member of.
   describe('Permission boundary — org isolation (CRITICAL)', () => {
     it('does not return organizations the user is not a member of', () => {
