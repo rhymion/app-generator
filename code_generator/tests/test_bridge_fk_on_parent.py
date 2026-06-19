@@ -128,9 +128,9 @@ def test_bridge_direction_channelable_child():
     assert bridge_child_from_name('channelable') == 'channel'
 
 
-def test_bridge_direction_fc_linkable_child():
-    """fc_linkable bridge → child entity is 'fc_link'."""
-    assert bridge_child_from_name('fc_linkable') == 'fc_link'
+def test_bridge_direction_bookmarkable_child():
+    """bookmarkable bridge → child entity is 'bookmark'."""
+    assert bridge_child_from_name('bookmarkable') == 'bookmark'
 
 
 # ---------------------------------------------------------------------------

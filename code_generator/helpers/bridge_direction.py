@@ -6,7 +6,7 @@ Naming convention: `<model>able` bridge name → child entity is `<model>`.
 Examples:
   commentable → child = comment,  parents = [channel, ...]
   channelable → child = channel,  parents = [work, character, scene]
-  fc_linkable → child = fc_link,  parents = [work, character, music, channel]
+  bookmarkable → child = bookmark,  parents = [work, character, music, channel]
 """
 
 

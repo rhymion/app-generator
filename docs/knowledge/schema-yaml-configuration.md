@@ -750,7 +750,7 @@ internal **bridge** (join) table instead.
 ### Naming convention
 
 The bridge model is named `<child>able`: `channel` → `channelable`,
-`fc_link` → `fc_linkable`. The generator derives the child name by stripping the
+`bookmark` → `bookmarkable`. The generator derives the child name by stripping the
 `able` suffix.
 
 ### Schema declaration

@@ -78,7 +78,6 @@ async function main() {
     'user', 'role', 'organization', 'permission', 'setting',
     'approval_request', 'approval_flow', 
     'dashboard', 'audit_log', 'tenant',
-    'channel', 'creator', 'work', 'character', 'scene', 'music', 'fc_link', 'plan', 'tip_tx'
   ];
   await Promise.all(entities.map(entity =>
     prisma.permission.upsert({

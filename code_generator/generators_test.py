@@ -1716,7 +1716,7 @@ def helper_context(
                 continue
             _fake_field = {'category': 'text', 'prop_name': _prop_name, 'label': to_title_case(_prop_name)}
             extra_prisma_fields.append({'prop_name': _prop_name, 'prisma_val': prisma_value(_fake_field, 'i', title)})
-    # Include required URI-format fields skipped by get_field_metas (e.g. fc_link.url).
+    # Include required URI-format fields skipped by get_field_metas (e.g. bookmark.url).
     # These are mandatory in Prisma but treated as image/file fields in the UI — populate
     # helpers need a valid URL string so the insert succeeds.
     _covered_props = (
@@ -2500,7 +2500,7 @@ def api_spec_context(
     # Exclude outbound one-to-one FK fields (internal bridge records — service creates them automatically).
     _api_internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model, schema)}
     all_field_metas = [f for f in all_field_metas if f['prop_name'] not in _api_internal_fk_prop_names]
-    # Re-add required uri-format fields excluded by get_field_metas (e.g. fc_link.url).
+    # Re-add required uri-format fields excluded by get_field_metas (e.g. bookmark.url).
     # The uri skip in get_field_metas is for UI rendering; API tests must include them.
     _existing_meta_props = {f['prop_name'] for f in all_field_metas}
     for _pn, _pp in filtered_props.items():
