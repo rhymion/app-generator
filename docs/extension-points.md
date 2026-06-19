@@ -15,7 +15,7 @@ and how to create it.
 | **Non-generated** (generator never emits it) | **Yes** | **Yes** |
 
 Anything you hand-write must live in version control in the source of truth that
-survives a clean rebuild. In an overlay setup (oshicry: the `prj/` directory that
+survives a clean rebuild. In an overlay setup (e.g. a `prj/` directory that
 `prj:sync` copies over the base), put project-specific hand-written files in the
 overlay (`prj/lib/...`); base/shared files live in the generator repo itself.
 
@@ -38,8 +38,8 @@ contents** (a write-once stub comes back blank).
 
 **When:** the entity has a *virtual column* — a field listed in `x-display.table`
 (or otherwise surfaced) that is **not** a real DB property, so its value has to be
-computed/fetched at read time (e.g. `tip_tx.created_by` resolved from
-`creator_id` → `user.name`).
+computed/fetched at read time (e.g. `order.created_by` resolved from
+`owner_id` → `user.name`).
 
 **What the generator does:** emits a blank stub once whose `resolveVirtualColumns`
 returns empty values for every row. It is never overwritten and `cleanup` never
@@ -74,14 +74,13 @@ generated entity. The generator only builds an entity (its `lib/`, `components/`
 polymorphic `commentable` target), not an entity — there is no generated
 `lib/comment/`.
 
-**Why proj_f has them but proj_c doesn't:** the `comment` definition is identical
-in both, so this is not the generator behaving differently. The difference is the
-application. oshicry (proj_f) surfaces comments as a first-class feature
-(`cry_post` / channel comments, reactions) and so needs to **query and type
-comments directly** — those data-access files are hand-written and committed in
-`prj/lib/comment/`. The app-template (proj_c) reaches comments only through the
-generated owner entities and the `commentable` bridge, so it never needs a
-standalone `lib/comment` data layer and the files simply don't exist there.
+**Why some apps have them and others don't:** the `comment` definition can be
+identical across apps, so this is not the generator behaving differently — it's the
+application. An app that surfaces comments as a first-class feature needs to
+**query and type comments directly**, so those data-access files are hand-written
+and committed in its overlay (`prj/lib/comment/`). An app that reaches comments
+only through the generated owner entities and the `commentable` bridge never needs
+a standalone `lib/comment` data layer, so the files simply don't exist there.
 
 **Rule of thumb:** if your app queries a non-generated base definition directly,
 hand-write its `getters.ts`/`types.ts` and commit them to your SoT.

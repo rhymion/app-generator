@@ -150,14 +150,14 @@ class TestLabelFieldEmbeddedListChild:
 class TestIntegerEnumLabelField:
     """
     When a FK relationship's labelField points to an integer/number field on
-    the target (e.g. plan.tier which is type:integer with enum), the generated
+    the target (e.g. subscription.tier which is type:integer with enum), the generated
     label expression must yield a string — not a raw number.
     """
 
     def _schema_with_integer_enum_label(self) -> dict:
         return {
             "definitions": {
-                "plan": {
+                "subscription": {
                     "type": "object",
                     "required": ["id", "tier"],
                     "properties": {
@@ -175,7 +175,7 @@ class TestIntegerEnumLabelField:
         """Integer field with numeric-only enum — no string labels, must use String()."""
         return {
             "definitions": {
-                "plan": {
+                "subscription": {
                     "type": "object",
                     "required": ["id", "tier"],
                     "properties": {
@@ -192,7 +192,7 @@ class TestIntegerEnumLabelField:
     def test_resolve_label_paths_detects_integer_field(self):
         """resolve_label_paths marks integer final field with final_is_number=True and captures string enum labels."""
         schema = self._schema_with_integer_enum_label()
-        paths = resolve_label_paths("tier", "plan", schema)
+        paths = resolve_label_paths("tier", "subscription", schema)
         assert len(paths) == 1
         assert paths[0]["final_is_number"] is True
         assert paths[0]["final_enum_labels"] == ["free", "premium", "vip"]
@@ -213,7 +213,7 @@ class TestIntegerEnumLabelField:
     def test_build_label_expression_integer_enum_uses_lookup(self):
         """build_label_expression for integer enum labelField uses array lookup, not String()."""
         schema = self._schema_with_integer_enum_label()
-        built = build_label_expression("item", "tier", "plan", schema)
+        built = build_label_expression("item", "tier", "subscription", schema)
         expr = built["expression"]
         # Must use array index lookup with the enum labels
         assert "'free'" in expr and "'premium'" in expr and "'vip'" in expr, (
@@ -230,7 +230,7 @@ class TestIntegerEnumLabelField:
     def test_build_label_expression_integer_enum_null_safety(self):
         """Lookup expression uses ?? '' so undefined/null index yields empty string."""
         schema = self._schema_with_integer_enum_label()
-        built = build_label_expression("item", "tier", "plan", schema)
+        built = build_label_expression("item", "tier", "subscription", schema)
         expr = built["expression"]
         assert "?? ''" in expr, (
             f"Integer enum lookup must include ?? '' null guard: {expr}"
@@ -239,7 +239,7 @@ class TestIntegerEnumLabelField:
     def test_build_label_expression_integer_no_labels_uses_string(self):
         """Integer enum without string labels (numeric-only) falls back to String() guard."""
         schema = self._schema_with_integer_numeric_enum()
-        built = build_label_expression("item", "tier", "plan", schema)
+        built = build_label_expression("item", "tier", "subscription", schema)
         expr = built["expression"]
         assert "String" in expr, (
             f"Integer enum without string labels must use String() conversion: {expr}"
@@ -252,7 +252,7 @@ class TestIntegerEnumLabelField:
         """Nullable integer fields (type: [integer, null]) are also detected."""
         schema = {
             "definitions": {
-                "plan": {
+                "subscription": {
                     "type": "object",
                     "properties": {
                         "tier": {"type": ["integer", "null"], "enum": [0, 1, 2]},
@@ -260,7 +260,7 @@ class TestIntegerEnumLabelField:
                 },
             },
         }
-        paths = resolve_label_paths("tier", "plan", schema)
+        paths = resolve_label_paths("tier", "subscription", schema)
         assert paths[0]["final_is_number"] is True
 
     def test_number_type_also_detected(self):
@@ -289,18 +289,18 @@ class TestTransitiveImport:
     parent's types.ts, that child's FK targets must be added to import_targets
     so types.ts emits the correct `import type { ... }` statements.
 
-    Scenario mirrors the oshicry oshicry case:
-      creator has m2m children voiced_characters (character) and credited_scenes (scene).
-      character has FK to work.
-      scene has FK to work.
-      character and scene are non-independent (no _detail with x-generate).
-      → work must appear in import_targets for creator.
+    Scenario:
+      author has m2m children books (book) and reviews (review).
+      book has FK to publisher.
+      review has FK to publisher.
+      book and review are non-independent (no _detail with x-generate).
+      → publisher must appear in import_targets for author.
     """
 
     def _schema(self) -> dict:
         return {
             "definitions": {
-                "work": {
+                "publisher": {
                     "type": "object",
                     "required": ["id", "title"],
                     "properties": {
@@ -308,24 +308,24 @@ class TestTransitiveImport:
                         "title": {"type": "string"},
                     },
                 },
-                # character: non-independent (no character_detail)
-                "character": {
+                # book: non-independent (no book_detail)
+                "book": {
                     "type": "object",
-                    "required": ["id", "name", "work_id"],
+                    "required": ["id", "name", "publisher_id"],
                     "properties": {
                         "id": {"type": "string"},
                         "name": {"type": "string"},
-                        "work_id": {
+                        "publisher_id": {
                             "type": "string",
                             "x-relationship": {
                                 "type": "many-to-one",
-                                "target": "work",
+                                "target": "publisher",
                                 "labelField": "title",
                             },
                         },
                     },
                 },
-                "creator": {
+                "author": {
                     "type": "object",
                     "required": ["id", "name"],
                     "properties": {
@@ -333,19 +333,19 @@ class TestTransitiveImport:
                         "name": {"type": "string"},
                     },
                 },
-                "creator_detail": {
+                "author_detail": {
                     "x-generate": {
                         "list": True, "view": True, "new": True,
                         "edit": True, "delete": True, "api": False,
                     },
                     "allOf": [
-                        {"$ref": "#/definitions/creator"},
+                        {"$ref": "#/definitions/author"},
                         {
                             "type": "object",
                             "properties": {
-                                "voiced_characters": {
+                                "books": {
                                     "type": "array",
-                                    "items": {"$ref": "#/definitions/character"},
+                                    "items": {"$ref": "#/definitions/book"},
                                     "x-outputType": "list",
                                 },
                             },
@@ -357,39 +357,39 @@ class TestTransitiveImport:
 
     def _ec(self) -> object:
         schema = self._schema()
-        entity = _entity("creator", children=[
-            _child_entry("character", "voiced_characters", output_type="list"),
+        entity = _entity("author", children=[
+            _child_entry("book", "books", output_type="list"),
         ])
         return build_entity_context(entity, schema)
 
     def test_inline_child_fk_target_in_import_targets(self):
-        """work must be in import_targets when character is declared inline."""
+        """publisher must be in import_targets when book is declared inline."""
         ec = self._ec()
-        assert "work" in ec.import_targets, (
-            f"'work' must be in import_targets when character (which has FK to work) "
+        assert "publisher" in ec.import_targets, (
+            f"'publisher' must be in import_targets when book (which has FK to publisher) "
             f"is declared inline. import_targets={ec.import_targets}"
         )
 
     def test_import_targets_does_not_contain_model_itself(self):
-        """creator must not import itself."""
+        """author must not import itself."""
         ec = self._ec()
-        assert "creator" not in ec.import_targets
+        assert "author" not in ec.import_targets
 
     def test_independent_child_fk_target_not_duplicated(self):
-        """When work has its own module and is already in import_targets, no duplicate."""
+        """When publisher has its own module and is already in import_targets, no duplicate."""
         schema = {
             **self._schema(),
             "definitions": {
                 **self._schema()["definitions"],
-                "work_detail": {
+                "publisher_detail": {
                     "x-generate": {"list": True, "view": True},
-                    "allOf": [{"$ref": "#/definitions/work"}],
+                    "allOf": [{"$ref": "#/definitions/publisher"}],
                 },
             },
         }
-        entity = _entity("creator", children=[
-            _child_entry("character", "voiced_characters", output_type="list"),
+        entity = _entity("author", children=[
+            _child_entry("book", "books", output_type="list"),
         ])
         ec = build_entity_context(entity, schema)
-        count = ec.import_targets.count("work")
-        assert count <= 1, f"'work' must not appear more than once in import_targets: {ec.import_targets}"
+        count = ec.import_targets.count("publisher")
+        assert count <= 1, f"'publisher' must not appear more than once in import_targets: {ec.import_targets}"
