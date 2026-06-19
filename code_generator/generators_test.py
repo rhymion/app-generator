@@ -1310,7 +1310,18 @@ def helper_context(
             for _td in resolve_dependencies(_h_bp_target, schema):
                 if not any(d['target'] == _td['target'] for d in deps):
                     deps.append(_td)
-            deps.append({'target': _h_bp_target, 'var_name': to_camel_case(_h_bp_target), 'fk_deps': []})
+            # Wire the parent's own required FKs (e.g. room.room_type_id) to the deps
+            # just created above, and seed its required scalars — otherwise the parent
+            # create in populateXxxDependencies omits mandatory columns.
+            _h_bp_def = schema['definitions'].get(_h_bp_target, {})
+            _h_bp_fk_deps = [
+                {'prop_name': r['prop_name'], 'dep_var_name': to_camel_case(r['target'])}
+                for r in get_parent_relationships(_h_bp_def, schema)
+                if any(d['target'] == r['target'] for d in deps)
+            ]
+            deps.append({'target': _h_bp_target, 'var_name': to_camel_case(_h_bp_target),
+                         'fk_deps': _h_bp_fk_deps, 'title': to_title_case(_h_bp_target),
+                         'extra_required_fields': _get_dep_extra_required_fields(_h_bp_target, schema)})
 
     # Detect required selector one-to-one FK fields (e.g. pre_check.checkup_id).
     # These are reverse-parent FKs (FK in this model, parent in target) that must be created as deps
@@ -3047,6 +3058,10 @@ def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
         'pool_entity':        pool_entity,
         'pool_fk_entity':     pool_fk_entity,
         'pool_fk_pascal':     to_pascal_case(pool_fk_entity),
+        # All one-to-one_bridge FKs on the pool FK entity (e.g. product) — explicit
+        # (attachable) AND injected bridge-parent FKs (noteable). The helper must
+        # create each bridge row and set its <bridge>_id, or the create rejects.
+        'pool_fk_bridge_otos': get_all_internal_fk_deps(pool_fk_entity, schema) if pool_fk_entity else [],
         'pool_qty_field':     pool_cfg.get('quantityField', 'quantity'),
         'pool_res_field':     pool_cfg.get('reservedField', 'reserved_quantity'),
         'alloc_entity':       result_cfg.get('allocationEntity', ''),

@@ -167,8 +167,6 @@ cypress/e2e/api/*.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/
-!cypress/support/purchase_order/
-!cypress/support/purchase_order/**
 
 # ── docs/generated/ ──
 docs/generated/

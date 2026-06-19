@@ -13,10 +13,14 @@ async function getTestUser() {
 }
 
 async function createTest{{ pool_fk_pascal }}(testUser: any, suffix: string) {
-  const attachable = await prisma.attachable.create({ data: {} });
+{% for b in pool_fk_bridge_otos %}
+  const {{ b.var_name }} = await prisma.{{ b.target }}.create({ data: {{ b.create_data }} });
+{% endfor %}
   return prisma.{{ pool_fk_entity }}.create({
     data: {
-      attachable_id: attachable.id,
+{% for b in pool_fk_bridge_otos %}
+      {{ b.prop_name }}: {{ b.var_name }}.id,
+{% endfor %}
       code: `GEN-PROD-${suffix}`,
       name: `Gen Product ${suffix}`,
       price: 0,
