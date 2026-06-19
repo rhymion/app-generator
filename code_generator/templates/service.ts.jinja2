@@ -148,6 +148,9 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
 }
 {% else %}
 export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
+{% if reservation_mutation_guard_delete %}
+{{ reservation_mutation_guard_delete }}
+{% endif %}
 {% if bridge_cleanup_rels %}
   const _bridgeRows = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
   await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
