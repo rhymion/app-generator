@@ -361,6 +361,44 @@ id:
 Prisma counterpart uses `@id @default(cuid())`. The pattern is a CUID format check; the
 generator uses it only to identify the ID field, not for client validation.
 
+### 4.5 `x-internal` Field Classification
+
+Setting `x-internal: true` on a field marks it as internally managed. The generator excludes
+such fields from UI forms and list columns while keeping them in the Prisma model and
+writable by server actions.
+
+**Use cases:**
+- Fields the generator controls internally that users should not edit directly
+- Examples: reaction aggregation counters, system-generated metadata flags
+
+```yaml
+status_count:
+  type: integer
+  x-internal: true   # managed by server action; hidden from forms and list columns
+```
+
+**`x-internal` at the entity level**
+
+When placed on an entity definition (not a field), `x-internal` accepts an object that
+controls which parts of the entity are generated:
+
+```yaml
+approvable:
+  type: object
+  x-internal:
+    page: false    # no standalone list / view / edit pages generated
+    embed: false   # not rendered as an embedded child
+    api: custom    # API handled by a custom route; auto-generated API skipped
+  properties:
+    id:
+      type: string
+      pattern: "^c[a-z0-9]{24,}$"
+```
+
+Entity-level `x-internal` is typically used on bridge or helper records (e.g. `approvable`,
+`commentable`) that support another entity's behaviour but are never navigated to directly.
+See §12.5 for the auto-create one-to-one pattern that relies on this.
+
 ---
 
 ## 5. Many-to-One Relationships (`x-relationship`)
@@ -837,12 +875,90 @@ The intended default is **parent-owned CRUD**: each parent listed in a child's
 implicitly, while the child's standalone pages remain for list/detail/search. The
 child's parent is **read-only** after creation (no parent switching). The full
 design — including read-only parent metadata and per-parent label strategy — is in
-**`docs/cmd_167_bridge-interface-design.md`**; the parent-DataGrid generation is
+**`docs/knowledge/appendix/cmd_167_bridge-interface-design.md`**; the parent-DataGrid generation is
 the implementation of that design.
 
 > **Tip:** always give a bridge child an `x-display.table`. It supplies the columns
 > for the parent-embedded grid and the parent-context column on the child's
 > standalone list. Without it the generator falls back to scalar defaults.
+
+---
+
+## 7.7 Generalized Bridge Pattern (Internal Through-Table)
+
+A complementary bridge pattern that realises a **one-to-one** or **multi-parent** association
+through an internal through-table — without adding columns to either the parent or child.
+This differs from the verbose `x-bridge` format in §7.6 in two ways:
+
+- The declaration uses a **parent-centric array** (not the `name`/`child`/`parents` object form).
+- The through-table is **internal implementation only** — it does not appear in the JSON schema output.
+
+### Concepts
+
+| Aspect | Detail |
+|--------|--------|
+| Through-table | Generator creates `<child>able` (e.g. `channelable`) internally |
+| JSON schema | Not output — internal implementation only |
+| Parent autocomplete | Maintained: parent edit page shows child DataGrid |
+| Extra columns | Not required on parent or child |
+
+### Schema declaration
+
+`x-bridge` is declared on the **child base definition** as a parent-centric array:
+
+```yaml
+channel:
+  type: object
+  required: [id, name]
+  x-bridge:
+    - parent: post
+      role: post_channel      # unique relation label for this parent edge
+    - parent: work
+      role: work_channel
+  properties:
+    id:
+      type: string
+      pattern: "^c[a-z0-9]{24,}$"
+    name:
+      type: string
+
+channel_detail:
+  x-generate: { list: true, view: true, new: true, edit: true, delete: true, api: true, test: true }
+  allOf:
+    - $ref: "#/definitions/channel"
+```
+
+Each entry in the array names one parent and gives the `role` label used to disambiguate
+Prisma `@relation` names when the same parent appears more than once.
+
+### Generated internal table
+
+The generator creates a `channelable` table that is never exposed in the JSON schema:
+
+| Column | Purpose |
+|--------|---------|
+| `id` | Primary key |
+| `channelable_type` | Discriminator for the parent entity type |
+| `channelable_id` | FK to the owning parent record |
+
+The child (`channel`) holds a FK to `channelable`. Parents do **not** declare the bridge
+child — the relationship is driven entirely from the child's `x-bridge` array.
+
+### UI behaviour
+
+- Each parent listed in `x-bridge` renders an embedded **child DataGrid** on the parent's edit page.
+- Columns come from the child's `x-display.table` (add `x-display.table` for best results — see §7.6 tip).
+- The child's standalone list and view pages remain fully generated.
+- The child's parent is **read-only** after creation (no parent switching in edit forms).
+
+### Difference from `commentable` (auto-create)
+
+| Feature | `commentable` (appendix/comment-bridge.md) | Generalized bridge (§7.7) |
+|---------|---------------------------------------------|---------------------------|
+| Declaration | `x-relationship: type: one-to-one` on the FK field | `x-bridge: [...]` array on the child base definition |
+| Through-table | Auto-created in `$transaction`; single parent only | Internal `<child>able`; multiple parents supported |
+| Parents | Single parent | Multiple parents (polymorphic variant) |
+| Child pages | No own pages (`x-generate` all `false`) | Full standalone pages |
 
 ---
 
