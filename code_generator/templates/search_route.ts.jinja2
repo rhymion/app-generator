@@ -1,0 +1,53 @@
+// AUTO-GENERATED - DO NOT EDIT
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticateApiKey, handleApiError } from '@/lib/api-auth';
+import { buildSearchQuery } from '@/lib/search/helpers';
+
+/**
+ * GET /api/search
+ *
+ * Query params:
+ *   q           (required) — search string, min 2 characters
+ *   entityTypes (optional) — comma-separated list, e.g. "organization,comment"
+ *   page        (optional) — 0-based page index (default: 0)
+ *   pageSize    (optional) — items per page (default: 20, max: 100)
+ *
+ * Authentication: API key via X-API-Key header or Authorization: Bearer <key>
+ * Authorization:  per-entity access filtering applied inside buildSearchQuery
+ *
+ * Response 200: { results, total, page, pageSize }
+ * Response 400: q is missing or too short (< 2 chars)
+ * Response 401: missing or invalid API key
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const { userId } = await authenticateApiKey(request);
+
+    const params = request.nextUrl.searchParams;
+    const q = (params.get('q') ?? '').trim();
+
+    if (q.length < 2) {
+      return NextResponse.json(
+        { error: 'Query parameter "q" is required and must be at least 2 characters.' },
+        { status: 400 },
+      );
+    }
+
+    const entityTypesRaw = params.get('entityTypes');
+    const entityTypes = entityTypesRaw
+      ? entityTypesRaw.split(',').map((s) => s.trim()).filter(Boolean)
+      : undefined;
+
+    const page = Math.max(0, parseInt(params.get('page') ?? '0', 10) || 0);
+    const pageSize = Math.min(
+      100,
+      Math.max(1, parseInt(params.get('pageSize') ?? '20', 10) || 20),
+    );
+
+    const result = await buildSearchQuery({ q, entityTypes, userId, page, pageSize });
+
+    return NextResponse.json(result);
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

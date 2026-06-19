@@ -1,0 +1,127 @@
+// AUTO-GENERATED - DO NOT EDIT
+import { Prisma } from '@/app/generated/prisma/client';
+import prisma from '@/lib/prisma';
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+import { getModelPermissions } from '@/lib/authz';
+
+export interface SearchResult {
+  entity_type: string;
+  id: string;
+  snippet: string;
+  rank: number;
+}
+
+export interface SearchPage {
+  results: SearchResult[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface SearchOpts {
+  q: string;
+  entityTypes?: string[];
+  userId: string;
+  page: number;
+  pageSize: number;
+}
+
+/**
+ * Execute a cross-entity full-text + trigram search.
+ *
+ * Security:
+ *   - All user-supplied values (q, userId, org IDs) are bound via Prisma.sql parameters.
+ *   - String concatenation for SQL construction is strictly forbidden.
+ *   - org/creator access filtering is applied per-entity inside the WHERE clause.
+ *
+ * DP-3 (search.default_scope = opt_in): only entities with x-generate.search: true
+ * appear in the UNION. Switch to 'all' in x-generator.search.default_scope to include
+ * all entities by default (exclude with x-generate.search: false).
+ */
+export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
+  const { q, entityTypes, userId, page, pageSize } = opts;
+
+  const associatedOrgs = await getAssociatedOrganizations(userId);
+  const associatedOrgIds = associatedOrgs.map((o) => o.id);
+
+{% for entity in search_entities %}
+  const {{ entity.perms_ts_var }} = await getModelPermissions('{{ entity.entity_type }}', userId);
+  const {{ entity.general_read_ts_var }} = {{ entity.perms_ts_var }}.permissions.read === true;
+{% endfor %}
+
+  const subQueries: Prisma.Sql[] = [];
+
+{% for entity in search_entities %}
+  if (!entityTypes || entityTypes.includes('{{ entity.entity_type }}')) {
+    const {{ entity.has_access_ts_var }} =
+      {{ entity.general_read_ts_var }}
+{% if entity.has_creator_filter %}
+      || true
+{% else %}
+      || associatedOrgIds.length > 0
+{% endif %}
+      ;
+
+    if ({{ entity.has_access_ts_var }}) {
+{% if entity.has_creator_filter %}
+      const {{ entity.org_filter_ts_var }}: Prisma.Sql = associatedOrgIds.length > 0
+        ? Prisma.sql`({{ entity.org_filter }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) }) OR creator_id = ${ userId })`
+        : Prisma.sql`creator_id = ${ userId }`;
+{% else %}
+      if (associatedOrgIds.length > 0) {
+        const {{ entity.org_filter_ts_var }}: Prisma.Sql = Prisma.sql`{{ entity.org_filter }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) })`;
+{% endif %}
+        subQueries.push(Prisma.sql`
+          SELECT
+            '{{ entity.entity_type }}'::text AS entity_type,
+            id::text AS id,
+            {{ entity.snippet_field }}::text AS snippet,
+            (
+              CASE
+                WHEN to_tsvector('simple', COALESCE({{ entity.ts_vector_fields_sql }}, '')) @@
+                     plainto_tsquery('simple', ${ q })
+                THEN 1.0
+                ELSE 0.0
+              END
+              + GREATEST({{ entity.similarity_fields_sql }})
+            )::float8 AS rank
+          FROM "{{ entity.model }}"
+          WHERE
+            (
+              to_tsvector('simple', COALESCE({{ entity.ts_vector_fields_sql }}, '')) @@
+              plainto_tsquery('simple', ${ q })
+              OR ({{ entity.similarity_where_sql }})
+            )
+            AND ${ {{ entity.org_filter_ts_var }} }
+        `);
+{% if not entity.has_creator_filter %}
+      }
+{% endif %}
+    }
+  }
+{% endfor %}
+
+  if (subQueries.length === 0) {
+    return { results: [], total: 0, page, pageSize };
+  }
+
+  const unionSql = Prisma.join(subQueries, ' UNION ALL ');
+
+  const countRows = await prisma.$queryRaw<[{ count: bigint }]>`
+    SELECT COUNT(*)::bigint AS count FROM (${ unionSql }) _search_union
+  `;
+  const total = Number(countRows[0]?.count ?? 0);
+
+  const clampedPage = Math.max(0, Math.floor(page));
+  const clampedSize = Math.min(Math.max(1, Math.floor(pageSize)), 100);
+  const offset = clampedPage * clampedSize;
+
+  const rows = await prisma.$queryRaw<SearchResult[]>`
+    SELECT entity_type, id, snippet, rank
+    FROM (${ unionSql }) _search_union
+    ORDER BY rank DESC
+    LIMIT ${ clampedSize } OFFSET ${ offset }
+  `;
+
+  return { results: rows, total, page: clampedPage, pageSize: clampedSize };
+}

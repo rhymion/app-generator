@@ -1,0 +1,162 @@
+// Handwritten supplemental spec — NOT auto-generated, NOT overwritten by generate-code.
+// Tests: GET /api/search — full-text + trigram search across searchable entities.
+import { TEST_API_KEY } from '../../support/test-credentials';
+
+const SEARCH_URL = '/api/search';
+
+describe('API: GET /api/search', () => {
+  beforeEach(() => {
+    cy.task('db:reset');
+    cy.task('db:seed');
+    cy.task('db:grantAllPermissions');
+  });
+
+  // 1. Unauthenticated → 401
+  describe('Authentication', () => {
+    it('returns 401 when no API key is provided', () => {
+      cy.request({
+        url: `${SEARCH_URL}?q=test`,
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(res.status).to.eq(401);
+      });
+    });
+
+    it('returns 401 when an invalid API key is provided', () => {
+      cy.request({
+        url: `${SEARCH_URL}?q=test`,
+        headers: { 'X-API-Key': 'invalid_key_that_does_not_exist' },
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(res.status).to.eq(401);
+      });
+    });
+  });
+
+  // 2. Input validation → 400
+  describe('Input validation', () => {
+    it('returns 400 when q is missing', () => {
+      cy.request({
+        url: SEARCH_URL,
+        headers: { 'X-API-Key': TEST_API_KEY },
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(res.status).to.eq(400);
+        expect(res.body).to.have.property('error');
+      });
+    });
+
+    it('returns 400 when q is empty string', () => {
+      cy.request({
+        url: `${SEARCH_URL}?q=`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(res.status).to.eq(400);
+        expect(res.body).to.have.property('error');
+      });
+    });
+
+    it('returns 400 when q is a single character (minimum is 2)', () => {
+      cy.request({
+        url: `${SEARCH_URL}?q=a`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(res.status).to.eq(400);
+        expect(res.body).to.have.property('error');
+      });
+    });
+  });
+
+  // 3. Successful search → 200 + results array
+  describe('Successful search', () => {
+    it('returns 200 with results array and pagination fields', () => {
+      cy.task('db:populateOrganizationWithUser', 1);
+      cy.request({
+        url: `${SEARCH_URL}?q=Organization`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        expect(res.body).to.have.property('results').that.is.an('array');
+        expect(res.body).to.have.property('total').that.is.a('number');
+        expect(res.body).to.have.property('page').that.is.a('number');
+        expect(res.body).to.have.property('pageSize').that.is.a('number');
+      });
+    });
+
+    it('returns matching organizations when query matches name', () => {
+      cy.task('db:populateOrganizationWithUser', 2);
+      cy.request({
+        url: `${SEARCH_URL}?q=Organization`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        expect(res.body.results).to.have.length.greaterThan(0);
+        res.body.results.forEach((r: { entity_type: string; id: string; snippet: string; rank: number }) => {
+          expect(r).to.have.property('entity_type', 'organization');
+          expect(r).to.have.property('id').that.is.a('string');
+          expect(r).to.have.property('snippet').that.is.a('string');
+          expect(r).to.have.property('rank').that.is.a('number');
+        });
+      });
+    });
+
+    it('returns empty results array when no matches found (not 404)', () => {
+      cy.task('db:populateOrganizationWithUser', 1);
+      cy.request({
+        url: `${SEARCH_URL}?q=zzz_absolutely_no_match_xyz`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        expect(res.body.results).to.be.an('array');
+        expect(res.body.total).to.eq(0);
+      });
+    });
+
+    it('respects page and pageSize parameters', () => {
+      cy.task('db:populateOrganizationWithUser', 5);
+      cy.request({
+        url: `${SEARCH_URL}?q=Organization&page=0&pageSize=2`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        expect(res.body.results).to.have.length.at.most(2);
+        expect(res.body.pageSize).to.eq(2);
+        expect(res.body.page).to.eq(0);
+      });
+    });
+  });
+
+  // 4. Permission boundary test (CRITICAL) — org isolation
+  // The test user must NOT see organizations they are not a member of.
+  describe('Permission boundary — org isolation (CRITICAL)', () => {
+    it('does not return organizations the user is not a member of', () => {
+      // Create an org where the test user IS a member (should appear in results)
+      cy.task('db:populateOrganizationWithUser', 1).then(() => {
+        // Create an org where the test user is NOT a member (should NOT appear)
+        // db:populateOrganization does NOT add the test user to the org's users list
+        cy.task<{ id: string; name: string }[]>('db:populateOrganization', 1).then((nonMemberOrgs) => {
+          const nonMemberOrgName = nonMemberOrgs[0].name;
+          const nonMemberOrgId = nonMemberOrgs[0].id;
+
+          // Search for "Organization" — matches both, but user should only see the member org
+          cy.request({
+            url: `${SEARCH_URL}?q=Organization`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+
+            const returnedIds: string[] = res.body.results.map((r: { id: string }) => r.id);
+
+            // CRITICAL: the non-member org must NOT appear in results
+            expect(returnedIds).not.to.include(
+              nonMemberOrgId,
+              `org "${nonMemberOrgName}" (id: ${nonMemberOrgId}) appeared in search results but user is NOT a member`,
+            );
+          });
+        });
+      });
+    });
+  });
+});
