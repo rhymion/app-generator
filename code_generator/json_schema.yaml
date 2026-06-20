@@ -8,7 +8,7 @@ format-version: 1.0
 # search.default_scope: 'all'    — all entities are searchable; exclude with x-generate.search: false
 x-generator:
   search:
-    default_scope: opt_in
+    default_scope: all
 
 definitions:
   # ============================================================
@@ -89,6 +89,7 @@ definitions:
       invalidate: false
       api: true
       test: true
+      search: false
       fields:
         - name
         - image
@@ -123,6 +124,7 @@ definitions:
       delete: false
       invalidate: false
       api: true
+      search: false
       fields:
         - name
         - email
@@ -162,6 +164,7 @@ definitions:
       snippet_field: name
       org_filter: creator_id
       has_creator_filter: true
+      bigm_fields: [name, description]
     # Security-sensitive entity: every create/update/delete is recorded in
     # the audit_log table by the generated service layer.
     x-audit: true
@@ -213,6 +216,7 @@ definitions:
       text_fields: [name, description]
       snippet_field: name
       org_filter: id
+      bigm_fields: [name, description]
     x-relationships:
       users:
         type: many-to-many
@@ -280,6 +284,7 @@ definitions:
       invalidate: false
       api: true
       test: true
+      search: false
     # Security-sensitive entity: every create/update/delete is recorded in
     # the audit_log table by the generated service layer.
     x-audit: true
@@ -340,6 +345,7 @@ definitions:
       invalidate: false
       api: true
       test: true
+      search: false
     x-relationships:
       preceded_by:
         type: many-to-many
@@ -661,6 +667,7 @@ definitions:
       invalidate: false
       api: true
       test: true
+      search: false
     x-custom-components:
       - name: DashboardView
         path: "@/components/_standard/DashboardView"

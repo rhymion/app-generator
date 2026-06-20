@@ -546,12 +546,26 @@ def generate(schema_path: str, output_dir: str) -> None:
         if not is_search:
             continue
 
+        # Safety guard: with default_scope=all, every auto-included entity must
+        # explicitly declare x-search.org_filter so tenant isolation is always enforced.
+        if search_default_scope == 'all':
+            xsearch_raw = detail_def.get('x-search') or {}
+            if not xsearch_raw or 'org_filter' not in xsearch_raw:
+                raise ValueError(
+                    f"Entity '{parent}' is included in search (default_scope=all) "
+                    f"but has no x-search.org_filter defined. "
+                    f"Add x-search.org_filter to '{parent}' or set x-generate.search: false "
+                    f"to exclude it from the global search UNION."
+                )
+
         xsearch = detail_def.get('x-search') or {}
         text_fields   = xsearch.get('text_fields', ['name'])
         snippet_field = xsearch.get('snippet_field', text_fields[0] if text_fields else 'id')
         # org_filter: column used for org membership check
         # 'id' for the organization entity itself; 'organization_id' for normal entities
         org_filter    = xsearch.get('org_filter', 'organization_id')
+        # bigm_fields: fields for Japanese 2-gram search (default: same as text_fields)
+        bigm_fields   = xsearch.get('bigm_fields', text_fields)
 
         # Build SQL fragments used inside the Jinja2 template
         # ts_vector_fields_sql: concat of all text fields, COALESCE-wrapped
@@ -564,6 +578,16 @@ def generate(schema_path: str, output_dir: str) -> None:
         # Used in WHERE: (sim_f1 > 0.3 OR sim_f2 > 0.3)
         sim_where_single = ' OR '.join(
             f"similarity(COALESCE({f}, ''), ${{q}}) > 0.3" for f in text_fields
+        )
+
+        # bigm_where_sql: each field comparison using pg_bigm %% operator
+        # Used in WHERE: (f1 %% q OR f2 %% q)
+        bigm_where_single = ' OR '.join(
+            f"{f} %% ${{q}}" for f in bigm_fields
+        )
+        # bigm_similarity_fields_sql: bigm_similarity scores for rank boost
+        bigm_sim_exprs = ', '.join(
+            f"bigm_similarity(COALESCE({f}, ''), ${{q}})" for f in bigm_fields
         )
 
         # Prisma model is lowercase (matches Prisma model definition)
@@ -596,6 +620,8 @@ def generate(schema_path: str, output_dir: str) -> None:
             'perms_ts_var':          f'{parent}Perms',
             'general_read_ts_var':   f'{parent}GeneralRead',
             'has_access_ts_var':     f'{parent}HasAccess',
+            'bigm_where_sql':            bigm_where_single,
+            'bigm_similarity_fields_sql': bigm_sim_exprs,
         })
 
     if search_entities:
