@@ -16,6 +16,7 @@ export interface SearchPage {
   total: number;
   page: number;
   pageSize: number;
+  facets: Record<string, number>;
 }
 
 export interface SearchOpts {
@@ -34,9 +35,9 @@ export interface SearchOpts {
  *   - String concatenation for SQL construction is strictly forbidden.
  *   - org/creator access filtering is applied per-entity inside the WHERE clause.
  *
- * DP-3 (search.default_scope = opt_in): only entities with x-generate.search: true
- * appear in the UNION. Switch to 'all' in x-generator.search.default_scope to include
- * all entities by default (exclude with x-generate.search: false).
+ * DP-3 (search.default_scope = all): all entities without x-generate.search: false
+ * appear in the UNION. Entities must declare x-search.org_filter explicitly when
+ * default_scope=all to ensure tenant isolation (validated at generate time).
  */
 export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
   const { q, entityTypes, userId, page, pageSize } = opts;
@@ -56,6 +57,8 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
     const {{ entity.has_access_ts_var }} =
       {{ entity.general_read_ts_var }}
 {% if entity.has_creator_filter %}
+      // The role entity has no FK to organization; access boundary is enforced by
+      // org_filter (creator_id) and creator_id in the WHERE clause — no extra constraint.
       || true
 {% else %}
       || associatedOrgIds.length > 0
@@ -75,7 +78,17 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
           SELECT
             '{{ entity.entity_type }}'::text AS entity_type,
             id::text AS id,
-            {{ entity.snippet_field }}::text AS snippet,
+            CASE
+              WHEN to_tsvector('simple', COALESCE({{ entity.ts_vector_fields_sql }}, '')) @@
+                   plainto_tsquery('simple', ${ q })
+              THEN ts_headline(
+                'simple',
+                COALESCE({{ entity.snippet_field }}::text, ''),
+                plainto_tsquery('simple', ${ q }),
+                'StartSel=<<<, StopSel=>>>, MaxWords=20, MinWords=10, ShortWord=2, HighlightAll=false'
+              )
+              ELSE LEFT(COALESCE({{ entity.snippet_field }}::text, ''), 150)
+            END AS snippet,
             (
               CASE
                 WHEN to_tsvector('simple', COALESCE({{ entity.ts_vector_fields_sql }}, '')) @@
@@ -84,6 +97,7 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
                 ELSE 0.0
               END
               + GREATEST({{ entity.similarity_fields_sql }})
+              + GREATEST({{ entity.bigm_similarity_fields_sql }}) * 0.5
             )::float8 AS rank
           FROM "{{ entity.model }}"
           WHERE
@@ -91,6 +105,7 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
               to_tsvector('simple', COALESCE({{ entity.ts_vector_fields_sql }}, '')) @@
               plainto_tsquery('simple', ${ q })
               OR ({{ entity.similarity_where_sql }})
+              OR ({{ entity.bigm_where_sql }})
             )
             AND ${ {{ entity.org_filter_ts_var }} }
         `);
@@ -102,7 +117,7 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
 {% endfor %}
 
   if (subQueries.length === 0) {
-    return { results: [], total: 0, page, pageSize };
+    return { results: [], total: 0, page, pageSize, facets: {} };
   }
 
   const unionSql = Prisma.join(subQueries, ' UNION ALL ');
@@ -111,6 +126,16 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
     SELECT COUNT(*)::bigint AS count FROM (${ unionSql }) _search_union
   `;
   const total = Number(countRows[0]?.count ?? 0);
+
+  const facetRows = await prisma.$queryRaw<Array<{ entity_type: string; count: bigint }>>`
+    SELECT entity_type, COUNT(*)::bigint AS count
+    FROM (${ unionSql }) _search_union
+    GROUP BY entity_type
+  `;
+  const facets: Record<string, number> = {};
+  for (const row of facetRows) {
+    facets[row.entity_type] = Number(row.count);
+  }
 
   const clampedPage = Math.max(0, Math.floor(page));
   const clampedSize = Math.min(Math.max(1, Math.floor(pageSize)), 100);
@@ -123,5 +148,5 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
     LIMIT ${ clampedSize } OFFSET ${ offset }
   `;
 
-  return { results: rows, total, page: clampedPage, pageSize: clampedSize };
+  return { results: rows, total, page: clampedPage, pageSize: clampedSize, facets };
 }
