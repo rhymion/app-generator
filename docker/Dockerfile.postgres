@@ -1,9 +1,13 @@
-FROM postgres:16-alpine
-RUN apk add --no-cache git make gcc musl-dev linux-headers postgresql16-dev \
-    && git clone --depth 1 --branch v1.2-20240606 \
-       https://github.com/pgbigm/pg_bigm.git /tmp/pg_bigm \
+FROM postgres:16
+COPY docker/pg_bigm.tar.gz /tmp/pg_bigm.tar.gz
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    make gcc postgresql-server-dev-16 libicu-dev \
+    && tar xzf /tmp/pg_bigm.tar.gz -C /tmp \
+    && mv /tmp/pg_bigm-1.2-20240606 /tmp/pg_bigm \
     && cd /tmp/pg_bigm \
     && make USE_PGXS=1 \
     && make USE_PGXS=1 install \
-    && rm -rf /tmp/pg_bigm \
-    && apk del git make gcc musl-dev linux-headers postgresql16-dev
+    && rm -rf /tmp/pg_bigm /tmp/pg_bigm.tar.gz \
+    && apt-get purge -y make gcc postgresql-server-dev-16 libicu-dev \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*

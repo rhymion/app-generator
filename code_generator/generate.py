@@ -580,10 +580,13 @@ def generate(schema_path: str, output_dir: str) -> None:
             f"similarity(COALESCE({f}, ''), ${{q}}) > 0.3" for f in text_fields
         )
 
-        # bigm_where_sql: each field comparison using pg_bigm %% operator
-        # Used in WHERE: (f1 %% q OR f2 %% q)
+        # bigm_where_sql: each field comparison using bigm_similarity function
+        # pg_bigm's =% operator requires an explicit similarity_limit GUC and causes
+        # type-resolution issues with Prisma.sql parameters, so we use bigm_similarity().
+        # Threshold 0.2 balances: excludes English false positives (e.g. Administrator
+        # vs Organization ≈ 0.14) while including Japanese 2-gram matches (≈ 0.25+).
         bigm_where_single = ' OR '.join(
-            f"{f} %% ${{q}}" for f in bigm_fields
+            f"bigm_similarity(COALESCE({f}, ''), ${{q}}) > 0.2" for f in bigm_fields
         )
         # bigm_similarity_fields_sql: bigm_similarity scores for rank boost
         bigm_sim_exprs = ', '.join(

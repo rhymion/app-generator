@@ -129,7 +129,7 @@ export default function SearchPage() {
       {!isPending && result && result.facets && Object.keys(result.facets).length > 0 && (
         <AppBox className="flex flex-wrap gap-1 mb-2" data-testid="search-facets">
           {Object.entries(result.facets).map(([type, count]) => (
-            <AppChip key={type} label={`${formatEntityLabel(type)} (${count})`} size="small" variant="outlined" />
+            <AppChip key={type} label={`${formatEntityLabel(type)} (${count})`} size="small" />
           ))}
         </AppBox>
       )}
