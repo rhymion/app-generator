@@ -18,8 +18,11 @@ export default defineConfig({
       // Task to reset and seed database before tests
       on('task', {
         async 'db:reset'() {
-          const { resetTestDatabase } = require('./cypress/support/db-helpers');
+          const { resetTestDatabase, prisma } = require('./cypress/support/db-helpers');
           await resetTestDatabase();
+          // Ensure search extensions exist after reset
+          await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+          await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pg_bigm');
           // Phase 1.2: re-seat the bootstrap tenant after the wipe so the
           // NOT NULL user.tenant_id constraint is satisfiable in subsequent
           // seeding. Removed when ticket 3.5 folds this into the generated
@@ -111,6 +114,22 @@ export default defineConfig({
             records.push(record);
           }
           return JSON.parse(JSON.stringify(records));
+        },
+        async 'db:createOrganizationJa'(params: { name: string }) {
+          // Creates a Japanese-named organization enrolled by the test user (for pg_bigm tests).
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
+          const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+          if (!testUser) throw new Error('Test user not found. Make sure db:seed has run first.');
+          const record = await prisma.organization.create({
+            data: {
+              name: params.name,
+              creator_id: testUser.id,
+              updater_id: testUser.id,
+              users: { connect: [{ id: testUser.id }] },
+            },
+          });
+          return JSON.parse(JSON.stringify(record));
         },
         ...getGeneratedTasks(),
         async 'db:seedReservationInventory'(params: { quantity: number }) {

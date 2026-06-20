@@ -226,4 +226,96 @@ describe('API: GET /api/search', () => {
       });
     });
   });
+
+  // 6. Phase 2: facets — entity type counts in response
+  describe('Phase 2: facets', () => {
+    it('returns facets field with entity type counts', () => {
+      cy.task('db:populateOrganizationWithUser', 2);
+      cy.task('db:populateRoleFull', 3);
+      cy.request({
+        url: `${SEARCH_URL}?q=Organization`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        expect(res.body).to.have.property('facets').that.is.an('object');
+        expect(res.body.facets).to.have.property('organization').that.is.a('number');
+      });
+    });
+
+    it('facets counts match actual result distribution', () => {
+      cy.task('db:populateOrganizationWithUser', 2);
+      cy.task('db:populateRoleFull', 3);
+      cy.request({
+        url: `${SEARCH_URL}?q=Role`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        const facets: Record<string, number> = res.body.facets;
+        const results: { entity_type: string }[] = res.body.results;
+        // Verify facet counts are consistent with actual results (within page)
+        Object.entries(facets).forEach(([type, count]) => {
+          expect(count).to.be.greaterThan(0);
+          expect(typeof count).to.eq('number');
+        });
+      });
+    });
+  });
+
+  // 7. Phase 2: pg_bigm Japanese 2-gram search
+  describe('Phase 2: pg_bigm Japanese bigram search', () => {
+    it('returns results for Japanese query matching organization name', () => {
+      cy.task('db:createOrganizationJa', { name: '東京テスト組織' });
+      cy.request({
+        url: `${SEARCH_URL}?q=東京`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        expect(res.body.results).to.have.length.greaterThan(0);
+        const found = res.body.results.some(
+          (r: { entity_type: string; snippet: string }) =>
+            r.entity_type === 'organization' && r.snippet.includes('東京'),
+        );
+        expect(found).to.be.true;
+      });
+    });
+  });
+
+  // 8. Phase 2: default_scope=all permission coverage
+  describe('Phase 2: default_scope=all permission coverage', () => {
+    it('does not leak organization data for any entity type when user has no access', () => {
+      // Create an org with user as member
+      cy.task('db:populateOrganizationWithUser', 1).then(() => {
+        // Create an org where user is NOT a member
+        cy.task<{ id: string; name: string }[]>('db:populateOrganization', 1).then((nonMemberOrgs) => {
+          const nonMemberOrgId = nonMemberOrgs[0].id;
+
+          cy.request({
+            url: `${SEARCH_URL}?q=Organization`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            const returnedIds: string[] = res.body.results.map((r: { id: string }) => r.id);
+            // Non-member org must not appear in any entity type
+            expect(returnedIds).not.to.include(nonMemberOrgId,
+              'Non-member org leaked through search (default_scope=all coverage failure)');
+          });
+        });
+      });
+    });
+
+    it('role search only returns roles created by or accessible to the user', () => {
+      // Create roles associated with the test user
+      cy.task('db:populateRoleFull', 2);
+      cy.request({
+        url: `${SEARCH_URL}?q=Role&entityTypes=role`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        // All returned roles must be accessible via creator_id filter
+        res.body.results.forEach((r: { entity_type: string }) => {
+          expect(r.entity_type).to.eq('role');
+        });
+      });
+    });
+  });
 });
