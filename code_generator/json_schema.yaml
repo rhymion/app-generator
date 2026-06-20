@@ -919,6 +919,8 @@ definitions:
         type:
           - string
           - "null"
+        x-ui:
+          rows: 4
       price:
         type: integer
         minimum: 0

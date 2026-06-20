@@ -2871,10 +2871,22 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
     """
     defs = schema['definitions']
 
+    # Entities used as x-bridge.name targets are internal junction tables whose
+    # Prisma model is declared in a separate file (bridge_additions.prisma) that
+    # is NOT loaded by prisma.config.ts. Excluding them prevents
+    # prisma.<bridge>.deleteMany() calls that would fail at runtime.
+    xbridge_table_names: set[str] = set()
+    for defn in defs.values():
+        bridge_name = (defn.get('x-bridge') or {}).get('name')
+        if bridge_name:
+            xbridge_table_names.add(bridge_name)
+
     # --- Collect base entities ---
     base_entities: dict[str, dict] = {}
     for key, defn in defs.items():
         if key.endswith('_detail') or key.endswith('_input'):
+            continue
+        if key in xbridge_table_names:
             continue
         if defn.get('type') == 'object' and 'id' in defn.get('properties', {}):
             base_entities[key] = defn
