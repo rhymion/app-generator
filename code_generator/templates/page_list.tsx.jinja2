@@ -57,9 +57,9 @@ async function {{ parent_pascal }}ListContent({
 {% endfor %}
   ]);
 {% for ns in enum_ns_list %}
-  const {{ ns.var_name }}: Record<number, string> = {
-{% for idx, key in ns.entries %}
-    {{ idx }}: {{ ns.var_name }}T('{{ key }}'),
+  const {{ ns.var_name }} = {
+{% for key in ns['keys'] %}
+    {{ key }}: {{ ns.var_name }}T('{{ key }}'),
 {% endfor %}
   };
 {% endfor %}
@@ -80,9 +80,9 @@ async function {{ parent_pascal }}ListContent({
     const raw = await fetch{{ parent_pascal }}Page(opts);
 {% for ns in enum_ns_list %}
     const {{ ns.var_name }}T = await getTranslations('{{ ns.ns }}');
-    const {{ ns.var_name }}: Record<number, string> = {
-{% for idx, key in ns.entries %}
-      {{ idx }}: {{ ns.var_name }}T('{{ key }}'),
+    const {{ ns.var_name }} = {
+{% for key in ns['keys'] %}
+      {{ key }}: {{ ns.var_name }}T('{{ key }}'),
 {% endfor %}
     };
 {% endfor %}
