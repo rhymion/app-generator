@@ -1,5 +1,58 @@
+{% if one_to_one_rels | selectattr('target', 'equalto', 'approvable') | list %}
+import type { PrismaClient } from '@/app/generated/prisma/client';
+
+type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+export async function afterCreate(
+  tx: unknown,
+  created: Record<string, unknown>,
+  _data: Record<string, unknown>,
+): Promise<void> {
+  const approvable = created.approvable as { id: string } | null | undefined;
+  if (!approvable?.id) return;
+
+  const creatorId = created.creator_id as string | null | undefined;
+  const db = tx as Tx;
+
+  let creatorRoleIds: string[] = [];
+  if (creatorId) {
+    const creator = await db.user.findUnique({
+      where: { id: creatorId },
+      select: { roles: { select: { id: true } } },
+    });
+    creatorRoleIds = creator?.roles.map((r) => r.id) ?? [];
+  }
+
+  const flows = await db.approval_flow.findMany({
+    where: { entity_name: '{{ model }}' },
+  });
+
+  let hasFlow = false;
+  for (const flow of flows) {
+    if (flow.requestor_role_id && !creatorRoleIds.includes(flow.requestor_role_id)) {
+      continue;
+    }
+    await db.approval_request.create({
+      data: {
+        approvable_id: approvable.id,
+        approval_flow_id: flow.id,
+        status: 0,
+      },
+    });
+    hasFlow = true;
+  }
+
+  if (hasFlow && creatorId) {
+    await db.approvable.update({
+      where: { id: approvable.id },
+      data: { creator_id: creatorId },
+    });
+  }
+}
+{% else %}
 export async function afterCreate(
   _tx: unknown,
   _created: Record<string, unknown>,
   _data: Record<string, unknown>,
 ): Promise<void> {}
+{% endif %}
