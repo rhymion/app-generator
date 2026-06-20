@@ -22,6 +22,18 @@ function formatEntityLabel(entityType: string): string {
     .join(' ');
 }
 
+function renderSnippet(snippet: string) {
+  const parts = snippet.split(/(<<<|>>>)/);
+  let inMark = false;
+  return parts.map((part, i) => {
+    if (part === '<<<') { inMark = true; return null; }
+    if (part === '>>>') { inMark = false; return null; }
+    return inMark
+      ? <mark key={i} className="bg-yellow-200 text-yellow-900">{part}</mark>
+      : <span key={i}>{part}</span>;
+  });
+}
+
 export default function SearchPage() {
   const { status } = useSession();
   const router = useRouter();
@@ -114,6 +126,14 @@ export default function SearchPage() {
         </div>
       )}
 
+      {!isPending && result && result.facets && Object.keys(result.facets).length > 0 && (
+        <AppBox className="flex flex-wrap gap-1 mb-2" data-testid="search-facets">
+          {Object.entries(result.facets).map(([type, count]) => (
+            <AppChip key={type} label={`${formatEntityLabel(type)} (${count})`} size="small" variant="outlined" />
+          ))}
+        </AppBox>
+      )}
+
       {!isPending && result && result.results.length > 0 && (
         <div data-testid="search-results">
         <AppBox className="flex flex-col gap-3">
@@ -136,7 +156,7 @@ export default function SearchPage() {
                   />
                 </AppBox>
                 <AppText variant="body1" className="mt-1 break-words">
-                  {item.snippet}
+                  {renderSnippet(item.snippet)}
                 </AppText>
                 <AppBox mt={1}>
                   <Link href={`/${item.entity_type}/view/${item.id}`}>
