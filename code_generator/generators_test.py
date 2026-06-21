@@ -1413,6 +1413,10 @@ def helper_context(
         for fk in entity_fk_deps:
             if fk.get('dep_var_name') == old_var and fk['prop_name'] == r['prop_name']:
                 fk['dep_var_name'] = new_var
+        for dep in deps:
+            for nested_fk in dep.get('fk_deps', []):
+                if nested_fk.get('dep_var_name') == old_var:
+                    nested_fk['dep_var_name'] = new_var
 
     required_field_metas = [f for f in fields if f['required']]
     optional_field_metas = [f for f in fields if not f['required']]
