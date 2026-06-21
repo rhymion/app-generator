@@ -31,6 +31,9 @@ const navTranslationKeys: Record<string, string> = {
   "/room_type": "roomType",
   "/room": "room",
   "/room_reservation": "roomReservation",
+  "/receiving_purchase_order": "receivingPurchaseOrder",
+  "/receiving_asn": "receivingAsn",
+  "/receiving_receipt": "receivingReceipt",
 };
 
 export default function Sidebar({ hiddenHrefs = [] }: { hiddenHrefs?: string[] }) {

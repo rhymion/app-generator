@@ -76,6 +76,9 @@ export const siteConfig = {
     { label: "Room Type", href: "/room_type" },
     { label: "Room", href: "/room" },
     { label: "Room Reservation", href: "/room_reservation" },
+      { label: "Receiving Purchase Order", href: "/receiving_purchase_order" },
+    { label: "Receiving Asn", href: "/receiving_asn" },
+    { label: "Receiving Receipt", href: "/receiving_receipt" },
   ] satisfies NavLink[],
 };
 

@@ -487,5 +487,53 @@ export function getGeneratedTasks() {
       const { populateRoomReservationFullData } = require('./room_reservation/helper');
       return await populateRoomReservationFullData(length);
     },
+    async 'db:populateReceivingPurchaseOrderDependencies'() {
+      const { populateReceivingPurchaseOrderDependencies } = require('./receiving_purchase_order/helper');
+      return await populateReceivingPurchaseOrderDependencies();
+    },
+    async 'db:populateReceivingPurchaseOrder'(length: number) {
+      const { populateReceivingPurchaseOrderData } = require('./receiving_purchase_order/helper');
+      return await populateReceivingPurchaseOrderData(length);
+    },
+    async 'db:populateReceivingPurchaseOrderFull'(length: number) {
+      const { populateReceivingPurchaseOrderFullData } = require('./receiving_purchase_order/helper');
+      return await populateReceivingPurchaseOrderFullData(length);
+    },
+    async 'db:populateReceivingPurchaseOrderReceivingPurchaseOrderLine'(params: { parentId: string; length?: number }) {
+      const { populateReceivingPurchaseOrderReceivingPurchaseOrderLineData } = require('./receiving_purchase_order/helper');
+      return await populateReceivingPurchaseOrderReceivingPurchaseOrderLineData(params.parentId, params.length || 1);
+    },
+    async 'db:populateReceivingAsnDependencies'() {
+      const { populateReceivingAsnDependencies } = require('./receiving_asn/helper');
+      return await populateReceivingAsnDependencies();
+    },
+    async 'db:populateReceivingAsn'(length: number) {
+      const { populateReceivingAsnData } = require('./receiving_asn/helper');
+      return await populateReceivingAsnData(length);
+    },
+    async 'db:populateReceivingAsnFull'(length: number) {
+      const { populateReceivingAsnFullData } = require('./receiving_asn/helper');
+      return await populateReceivingAsnFullData(length);
+    },
+    async 'db:populateReceivingAsnReceivingAsnLine'(params: { parentId: string; length?: number }) {
+      const { populateReceivingAsnReceivingAsnLineData } = require('./receiving_asn/helper');
+      return await populateReceivingAsnReceivingAsnLineData(params.parentId, params.length || 1);
+    },
+    async 'db:populateReceivingReceiptDependencies'() {
+      const { populateReceivingReceiptDependencies } = require('./receiving_receipt/helper');
+      return await populateReceivingReceiptDependencies();
+    },
+    async 'db:populateReceivingReceipt'(length: number) {
+      const { populateReceivingReceiptData } = require('./receiving_receipt/helper');
+      return await populateReceivingReceiptData(length);
+    },
+    async 'db:populateReceivingReceiptFull'(length: number) {
+      const { populateReceivingReceiptFullData } = require('./receiving_receipt/helper');
+      return await populateReceivingReceiptFullData(length);
+    },
+    async 'db:populateReceivingReceiptReceivingReceiptLine'(params: { parentId: string; length?: number }) {
+      const { populateReceivingReceiptReceivingReceiptLineData } = require('./receiving_receipt/helper');
+      return await populateReceivingReceiptReceivingReceiptLineData(params.parentId, params.length || 1);
+    },
   };
 }

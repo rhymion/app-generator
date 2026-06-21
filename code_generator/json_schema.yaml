@@ -2,6 +2,25 @@ $schema: "http://json-schema.org/draft-07/schema#"
 
 # Support multi-tenancy
 format-version: 1.0
+
+x-receiving:
+  roles:
+    purchase_order: receiving_purchase_order
+    asn: receiving_asn
+    receipt: receiving_receipt
+  policy:
+    allowDirectReceipt: true
+    allowReceiptFromAsn: true
+    allowReceiptFromPurchaseOrder: true
+    inventoryMutation: confirm_receipt
+  inventory:
+    entity: inventory
+    productField: product_id
+    quantityField: quantity
+  lines:
+    productField: product_id
+    quantityField: receipt_quantity
+
 definitions:
   # ============================================================
   # System entities (required by all apps — see §1.1)
@@ -188,6 +207,8 @@ definitions:
         type:
           - string
           - "null"
+        x-ui:
+          width: 8
 
   organization_detail:
     x-generate:
@@ -406,6 +427,10 @@ definitions:
       id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
+      approved_at:
+        type: string
+        format: date-time
+        nullable: true
 
   approvable_detail:
     x-generate:
@@ -476,46 +501,6 @@ definitions:
       commentable_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
-
-  reaction:
-    type: object
-    required:
-      - id
-      - type
-      - user_id
-      - comment_id
-    x-internal:
-      page: false
-      embed: false
-      api: custom
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-      type:
-        type: integer
-        minimum: 0
-        maximum: 4
-        enum:
-          - Like
-          - Love
-          - Laugh
-          - Surprised
-          - Sad
-      user_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: user
-          labelField: name
-      comment_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: comment
-          labelField: id
 
   attachable:
     type: object
@@ -919,8 +904,6 @@ definitions:
         type:
           - string
           - "null"
-        x-ui:
-          rows: 4
       price:
         type: integer
         minimum: 0
@@ -1391,91 +1374,6 @@ definitions:
           attachable:
             $ref: "#/definitions/attachable"
 
-  noteable:
-    type: object
-    required:
-      - id
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-
-  noteable_detail:
-    x-generate:
-      list: false
-      view: false
-      new: false
-      edit: false
-      delete: false
-      invalidate: false
-      api: false
-      test: false
-    allOf:
-      - $ref: "#/definitions/noteable"
-
-  note:
-    type: object
-    required:
-      - id
-      - title
-      - organization_id
-    x-bridge:
-      name: noteable
-      child: note
-      parentCardinality: exactlyOne
-      parents:
-        - role: room_hub
-          target: room
-          labelField: room_no
-        - role: product_hub
-          target: product
-          labelField: name
-        - role: resource_hub
-          target: resource
-          labelField: name
-    x-display:
-      table:
-        - title:
-            primary: true
-            width: 200
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-      title:
-        type: string
-        minLength: 1
-      description:
-        type:
-          - string
-          - "null"
-      organization_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: organization
-          labelField: name
-
-  note_detail:
-    x-generate:
-      list: true
-      view: true
-      new: false
-      edit: true
-      delete: true
-      invalidate: false
-      api: true
-      test: true
-    allOf:
-      - $ref: "#/definitions/note"
-      - type: object
-        required:
-          - organization
-        properties:
-          organization:
-            $ref: "#/definitions/organization"
-
   booking:
     type: object
     required:
@@ -1573,7 +1471,6 @@ definitions:
         type: integer
         minimum: 0
         maximum: 6
-        x-enum-namespace: DayOfWeek
         enum:
           - Sunday
           - Monday
@@ -1651,7 +1548,6 @@ definitions:
         type: integer
         minimum: 0
         maximum: 2
-        x-enum-namespace: ShiftStatus
         enum:
           - Scheduled
           - Approved
@@ -1751,6 +1647,9 @@ definitions:
             width: 200
         - quantity:
             width: 100
+    x-readonly-fields:
+      - quantity
+      - reserved_quantity
     properties:
       id:
         type: string
@@ -1787,7 +1686,7 @@ definitions:
     x-generate:
       list: true
       view: true
-      new: true
+      new: false
       edit: true
       delete: true
       invalidate: false
@@ -1802,12 +1701,69 @@ definitions:
           product:
             $ref: "#/definitions/product"
 
+  inventory_allocation:
+    type: object
+    required:
+      - id
+      - purchase_order_id
+      - purchase_per_item_id
+      - inventory_id
+      - quantity
+      - remaining_quantity
+      - status
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      purchase_order_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: purchase_order
+          labelField: order_no
+      purchase_per_item_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: purchase_per_item
+          labelField: id
+      inventory_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: inventory
+          labelField: id
+      quantity:
+        type: integer
+        minimum: 0
+      remaining_quantity:
+        type: integer
+        minimum: 0
+      status:
+        type: string
+        enum:
+          - reserved
+          - partially_shipped
+          - shipped
+          - released
+          - cancelled
+
   purchase_order:
     type: object
     required:
       - id
       - order_no
       - customer_id
+    x-display:
+      table:
+        - order_no:
+            primary: true
+            width: 150
+        - customer:
+            width: 200
     x-reservation:
       mode: count
       transaction:
@@ -1832,13 +1788,37 @@ definitions:
         lineField: purchase_per_item_id
         poolField: inventory_id
         quantityField: quantity
-    x-display:
-      table:
-        - order_no:
-            primary: true
-            width: 150
-        - customer:
-            width: 200
+      actions:
+        shipOrder:
+          type: ship
+          allocationEntity: inventory_allocation
+          quantityField: quantity
+          remainingField: remaining_quantity
+          statusField: status
+          openStatuses:
+            - reserved
+            - partially_shipped
+          doneStatus: shipped
+        releaseReservation:
+          type: release
+          allocationEntity: inventory_allocation
+          quantityField: quantity
+          remainingField: remaining_quantity
+          statusField: status
+          openStatuses:
+            - reserved
+            - partially_shipped
+          doneStatus: released
+        cancelReservation:
+          type: cancel
+          allocationEntity: inventory_allocation
+          quantityField: quantity
+          remainingField: remaining_quantity
+          statusField: status
+          openStatuses:
+            - reserved
+            - partially_shipped
+          doneStatus: cancelled
     properties:
       id:
         type: string
@@ -1912,43 +1892,6 @@ definitions:
             items:
               $ref: "#/definitions/purchase_per_item"
 
-  inventory_allocation:
-    type: object
-    required:
-      - id
-      - purchase_order_id
-      - purchase_per_item_id
-      - inventory_id
-      - quantity
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-      purchase_order_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: purchase_order
-          labelField: order_no
-      purchase_per_item_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: purchase_per_item
-          labelField: id
-      inventory_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: inventory
-          labelField: lot_number
-      quantity:
-        type: integer
-        minimum: 1
-
   leave_request:
     type: object
     required:
@@ -1958,6 +1901,11 @@ definitions:
       - end_date
       - reason
       - approvable_id
+    x-approval:
+      on_approved:
+        set_fields:
+          status: "approved"
+        emit_hook: true
     x-display:
       table:
         - user:
@@ -1995,6 +1943,12 @@ definitions:
           type: one-to-one_bridge
           target: approvable
           labelField: id
+      status:
+        type: string
+        default: "pending"
+        enum:
+          - pending
+          - approved
 
   leave_request_detail:
     x-generate:
@@ -2218,12 +2172,10 @@ definitions:
       status:
         type: integer
         minimum: 0
-        maximum: 2
-        x-enum-namespace: RoomStatus
+        maximum: 1
         enum:
           - available
           - maintenance
-          - reserved
 
   room_detail:
     x-generate:
@@ -2273,9 +2225,6 @@ definitions:
         strategy: row_lock
       pool:
         entity: room
-        statusField: status
-        availableStatus: 0
-        reservedStatus: 2
       request:
         criteria:
           room_type_id: room_type_id
@@ -2283,6 +2232,7 @@ definitions:
             start: check_in
             end: check_out
       policy:
+        availabilitySource: overlap
         orderBy:
           - floor: asc
           - room_no: asc
@@ -2337,3 +2287,334 @@ definitions:
             $ref: "#/definitions/room_type"
           room:
             $ref: "#/definitions/room"
+
+  # ============================================================
+  # x-receiving: Receiving lifecycle (PO / ASN / Receipt)
+  # Entity names are resolved via x-receiving.roles at the top level —
+  # generator code must never hardcode these names.
+  # ============================================================
+
+  receiving_purchase_order:
+    type: object
+    required:
+      - id
+      - order_no
+      - status
+    x-display:
+      table:
+        - order_no:
+            primary: true
+            width: 200
+        - status:
+            width: 150
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      order_no:
+        type: string
+        minLength: 1
+      status:
+        type: string
+        enum:
+          - draft
+          - issued
+          - partially_received
+          - received
+          - cancelled
+
+  receiving_purchase_order_line:
+    type: object
+    required:
+      - id
+      - receiving_purchase_order_id
+      - product_id
+      - ordered_quantity
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      receiving_purchase_order_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: receiving_purchase_order
+          labelField: order_no
+      product_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: product
+          labelField: name
+      ordered_quantity:
+        type: integer
+        minimum: 0
+      done_quantity:
+        type: integer
+        minimum: 0
+        default: 0
+      cancelled_quantity:
+        type: integer
+        minimum: 0
+        default: 0
+      outstanding_quantity:
+        type: integer
+        minimum: 0
+        default: 0
+      status:
+        type: string
+        enum:
+          - outstanding
+          - partially_received
+          - fully_received
+          - cancelled
+        default: outstanding
+
+  receiving_purchase_order_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    allOf:
+      - $ref: "#/definitions/receiving_purchase_order"
+      - type: object
+        required:
+          - lines
+        properties:
+          lines:
+            type: array
+            items:
+              $ref: "#/definitions/receiving_purchase_order_line"
+
+  receiving_asn:
+    type: object
+    required:
+      - id
+      - asn_no
+      - status
+    x-display:
+      table:
+        - asn_no:
+            primary: true
+            width: 200
+        - status:
+            width: 150
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      asn_no:
+        type: string
+        minLength: 1
+      purchase_order_id:
+        type:
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: receiving_purchase_order
+          labelField: order_no
+      status:
+        type: string
+        enum:
+          - draft
+          - sent
+          - partially_matched
+          - matched
+          - cancelled
+
+  receiving_asn_line:
+    type: object
+    required:
+      - id
+      - receiving_asn_id
+      - product_id
+      - shipped_quantity
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      receiving_asn_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: receiving_asn
+          labelField: asn_no
+      product_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: product
+          labelField: name
+      shipped_quantity:
+        type: integer
+        minimum: 0
+      done_quantity:
+        type: integer
+        minimum: 0
+        default: 0
+      cancelled_quantity:
+        type: integer
+        minimum: 0
+        default: 0
+      outstanding_quantity:
+        type: integer
+        minimum: 0
+        default: 0
+      status:
+        type: string
+        enum:
+          - outstanding
+          - partially_matched
+          - fully_matched
+          - cancelled
+        default: outstanding
+
+  receiving_asn_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    allOf:
+      - $ref: "#/definitions/receiving_asn"
+      - type: object
+        required:
+          - lines
+        properties:
+          purchase_order:
+            $ref: "#/definitions/receiving_purchase_order"
+          lines:
+            type: array
+            items:
+              $ref: "#/definitions/receiving_asn_line"
+
+  receiving_receipt:
+    type: object
+    required:
+      - id
+      - receipt_no
+      - status
+    x-display:
+      table:
+        - receipt_no:
+            primary: true
+            width: 200
+        - status:
+            width: 150
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      receipt_no:
+        type: string
+        minLength: 1
+      purchase_order_id:
+        type:
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: receiving_purchase_order
+          labelField: order_no
+      asn_id:
+        type:
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: receiving_asn
+          labelField: asn_no
+      status:
+        type: string
+        enum:
+          - draft
+          - confirmed
+          - cancelled
+      confirmed_at:
+        type:
+          - string
+          - "null"
+        format: date-time
+
+  receiving_receipt_line:
+    type: object
+    required:
+      - id
+      - receiving_receipt_id
+      - product_id
+      - receipt_quantity
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      receiving_receipt_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: receiving_receipt
+          labelField: receipt_no
+      product_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: product
+          labelField: name
+      receipt_quantity:
+        type: integer
+        minimum: 0
+      done_quantity:
+        type: integer
+        minimum: 0
+        default: 0
+      cancelled_quantity:
+        type: integer
+        minimum: 0
+        default: 0
+      outstanding_quantity:
+        type: integer
+        minimum: 0
+        default: 0
+
+  receiving_receipt_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    allOf:
+      - $ref: "#/definitions/receiving_receipt"
+      - type: object
+        required:
+          - lines
+        properties:
+          purchase_order:
+            $ref: "#/definitions/receiving_purchase_order"
+          asn:
+            $ref: "#/definitions/receiving_asn"
+          lines:
+            type: array
+            items:
+              $ref: "#/definitions/receiving_receipt_line"

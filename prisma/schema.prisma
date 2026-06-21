@@ -66,7 +66,6 @@ model user {
   mfa_recovery_codes        mfa_recovery_code[]
   accounts                  Account[]
   sessions                  Session[]
-  reactions                 reaction[]          @relation("UserReactions")
   created_at                DateTime            @default(now()) @db.Timestamptz(0)
   updated_at                DateTime            @updatedAt @db.Timestamptz(0)
   creator_id                String
@@ -99,8 +98,6 @@ model user {
   updated_users             user[]              @relation("UserUpdater")
   created_resources         resource[]          @relation("ResourceCreator")
   updated_resources         resource[]          @relation("ResourceUpdater")
-  created_notes             note[]              @relation("NoteCreator")
-  updated_notes             note[]              @relation("NoteUpdater")
   created_bookings          booking[]           @relation("BookingCreator")
   updated_bookings          booking[]           @relation("BookingUpdater")
   created_shift_templates   shift_template[]    @relation("ShiftTemplateCreator")
@@ -111,9 +108,14 @@ model user {
   updated_products          product[]           @relation("ProductUpdater")
   created_inventories       inventory[]         @relation("InventoryCreator")
   updated_inventories       inventory[]         @relation("InventoryUpdater")
+  created_inventory_allocations inventory_allocation[] @relation("InventoryAllocationCreator")
+  updated_inventory_allocations inventory_allocation[] @relation("InventoryAllocationUpdater")
   created_purchase_orders   purchase_order[]    @relation("PurchaseOrderCreator")
   updated_purchase_orders   purchase_order[]    @relation("PurchaseOrderUpdater")
   created_comments          comment[]           @relation("CommentCreator")
+  reactions                 reaction[]          @relation("ReactionUser")
+  created_notes             note[]              @relation("NoteCreator")
+  updated_notes             note[]              @relation("NoteUpdater")
   leave_requests            leave_request[]     @relation("LeaveRequestUser")
   created_leave_requests    leave_request[]     @relation("LeaveRequestCreator")
   updated_leave_requests    leave_request[]     @relation("LeaveRequestUpdater")
@@ -133,8 +135,14 @@ model user {
   updated_room_types            room_type[]         @relation("RoomTypeUpdater")
   created_rooms                 room[]              @relation("RoomCreator")
   updated_rooms                 room[]              @relation("RoomUpdater")
-  created_room_reservations     room_reservation[]  @relation("RoomReservationCreator")
-  updated_room_reservations     room_reservation[]  @relation("RoomReservationUpdater")
+  created_room_reservations             room_reservation[]         @relation("RoomReservationCreator")
+  updated_room_reservations             room_reservation[]         @relation("RoomReservationUpdater")
+  created_receiving_purchase_orders     receiving_purchase_order[] @relation("ReceivingPurchaseOrderCreator")
+  updated_receiving_purchase_orders     receiving_purchase_order[] @relation("ReceivingPurchaseOrderUpdater")
+  created_receiving_asns                receiving_asn[]            @relation("ReceivingAsnCreator")
+  updated_receiving_asns                receiving_asn[]            @relation("ReceivingAsnUpdater")
+  created_receiving_receipts            receiving_receipt[]        @relation("ReceivingReceiptCreator")
+  updated_receiving_receipts            receiving_receipt[]        @relation("ReceivingReceiptUpdater")
 
   @@index([api_key])
   @@index([creator_id])
@@ -203,6 +211,7 @@ model approvable {
   creator           user?              @relation("ApprovableCreator", fields: [creator_id], references: [id])
   approval_requests approval_request[]
   leave_request     leave_request?
+  approved_at       DateTime?          @db.Timestamptz(0)
 
   @@index([creator_id])
 }
@@ -275,18 +284,34 @@ model comment {
 }
 
 model reaction {
-  id          String   @id @default(cuid())
-  type        Int
-  user_id     String
-  user        user     @relation("UserReactions", fields: [user_id], references: [id], onDelete: Cascade)
-  comment_id  String
-  comment     comment  @relation(fields: [comment_id], references: [id], onDelete: Cascade)
-  created_at  DateTime @default(now()) @db.Timestamptz(0)
-  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  id         String   @id @default(cuid())
+  type       Int
+  comment_id String
+  comment    comment  @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+  user_id    String
+  user       user     @relation("ReactionUser", fields: [user_id], references: [id])
+  created_at DateTime @default(now()) @db.Timestamptz(0)
 
   @@unique([comment_id, user_id, type])
-  @@index([user_id])
   @@index([comment_id])
+  @@index([user_id])
+}
+
+model note {
+  id              String       @id @default(cuid())
+  title           String
+  description     String?
+  organization_id String
+  organization    organization @relation(fields: [organization_id], references: [id])
+  created_at      DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user         @relation("NoteCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user         @relation("NoteUpdater", fields: [updater_id], references: [id])
+
+  @@index([organization_id])
+  @@index([creator_id])
 }
 
 model attachable {
@@ -599,23 +624,6 @@ model procedure {
   @@index([assignee_id])
 }
 
-model note {
-  id              String       @id @default(cuid())
-  title           String
-  description     String?
-  organization_id String
-  organization    organization @relation(fields: [organization_id], references: [id])
-  created_at      DateTime     @default(now()) @db.Timestamptz(0)
-  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
-  creator_id      String
-  creator         user         @relation("NoteCreator", fields: [creator_id], references: [id])
-  updater_id      String
-  updater         user         @relation("NoteUpdater", fields: [updater_id], references: [id])
-
-  @@index([creator_id])
-  @@index([organization_id])
-}
-
 model resource {
   id              String       @id @default(cuid())
   name            String
@@ -695,9 +703,12 @@ model product {
   barcode            String?
   attachable_id      String              @unique
   attachable         attachable          @relation(fields: [attachable_id], references: [id])
-  inventories        inventory[]
-  purchase_per_items purchase_per_item[]
-  created_at         DateTime            @default(now()) @db.Timestamptz(0)
+  inventories                    inventory[]
+  purchase_per_items             purchase_per_item[]
+  receiving_purchase_order_lines receiving_purchase_order_line[]
+  receiving_asn_lines            receiving_asn_line[]
+  receiving_receipt_lines        receiving_receipt_line[]
+  created_at                     DateTime                        @default(now()) @db.Timestamptz(0)
   updated_at         DateTime            @updatedAt @db.Timestamptz(0)
   creator_id         String
   creator            user                @relation("ProductCreator", fields: [creator_id], references: [id])
@@ -727,24 +738,6 @@ model inventory {
   @@index([creator_id])
 }
 
-model inventory_allocation {
-  id                   String            @id @default(cuid())
-  purchase_order_id    String
-  purchase_order       purchase_order    @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
-  purchase_per_item_id String
-  purchase_per_item    purchase_per_item @relation(fields: [purchase_per_item_id], references: [id], onDelete: Cascade)
-  inventory_id         String
-  inventory            inventory         @relation(fields: [inventory_id], references: [id])
-  quantity             Int
-  creator_id           String
-  updater_id           String
-  created_at           DateTime          @default(now()) @db.Timestamptz(0)
-
-  @@index([purchase_order_id])
-  @@index([inventory_id])
-  @@index([creator_id])
-}
-
 model purchase_order {
   id          String              @id @default(cuid())
   order_no    String
@@ -763,16 +756,37 @@ model purchase_order {
 }
 
 model purchase_per_item {
-  id                String         @id @default(cuid())
-  purchase_order_id String
-  purchase_order    purchase_order @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
-  product_id        String
-  product           product        @relation(fields: [product_id], references: [id], onDelete: Cascade)
-  quantity          Int
-  price             Int?
-  created_at        DateTime       @default(now()) @db.Timestamptz(0)
-  updated_at        DateTime       @updatedAt @db.Timestamptz(0)
+  id                    String                 @id @default(cuid())
+  purchase_order_id     String
+  purchase_order        purchase_order         @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  product_id            String
+  product               product                @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  quantity              Int
+  price                 Int?
   inventory_allocations inventory_allocation[]
+  created_at            DateTime               @default(now()) @db.Timestamptz(0)
+  updated_at            DateTime               @updatedAt @db.Timestamptz(0)
+}
+
+model inventory_allocation {
+  id                   String            @id @default(cuid())
+  purchase_order_id    String
+  purchase_order       purchase_order    @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  purchase_per_item_id String
+  purchase_per_item    purchase_per_item @relation(fields: [purchase_per_item_id], references: [id], onDelete: Cascade)
+  inventory_id         String
+  inventory            inventory         @relation(fields: [inventory_id], references: [id], onDelete: Cascade)
+  quantity             Int
+  remaining_quantity   Int
+  status               String
+  created_at           DateTime          @default(now()) @db.Timestamptz(0)
+  updated_at           DateTime          @updatedAt @db.Timestamptz(0)
+  creator_id           String
+  creator              user              @relation("InventoryAllocationCreator", fields: [creator_id], references: [id])
+  updater_id           String
+  updater              user              @relation("InventoryAllocationUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
 }
 
 model leave_request {
@@ -782,6 +796,7 @@ model leave_request {
   start_date    DateTime   @db.Timestamptz(0)
   end_date      DateTime   @db.Timestamptz(0)
   reason        String
+  status        String     @default("pending")
   approvable_id String     @unique
   approvable    approvable @relation(fields: [approvable_id], references: [id])
   created_at    DateTime   @default(now()) @db.Timestamptz(0)
@@ -900,4 +915,116 @@ model room_reservation {
   updater      user      @relation("RoomReservationUpdater", fields: [updater_id], references: [id])
 
   @@index([creator_id])
+}
+
+// ============================================================
+// x-receiving: Receiving lifecycle (PO / ASN / Receipt)
+// ============================================================
+
+model receiving_purchase_order {
+  id                             String                           @id @default(cuid())
+  order_no                       String
+  status                         String                           @default("draft")
+  lines                          receiving_purchase_order_line[]
+  receiving_asns                 receiving_asn[]
+  receiving_receipts             receiving_receipt[]
+  created_at                     DateTime                         @default(now()) @db.Timestamptz(0)
+  updated_at                     DateTime                         @updatedAt @db.Timestamptz(0)
+  creator_id                     String
+  creator                        user                             @relation("ReceivingPurchaseOrderCreator", fields: [creator_id], references: [id])
+  updater_id                     String
+  updater                        user                             @relation("ReceivingPurchaseOrderUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+}
+
+model receiving_purchase_order_line {
+  id                          String                   @id @default(cuid())
+  receiving_purchase_order_id String
+  receiving_purchase_order    receiving_purchase_order @relation(fields: [receiving_purchase_order_id], references: [id], onDelete: Cascade)
+  product_id                  String
+  product                     product                  @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  ordered_quantity            Int
+  done_quantity               Int                      @default(0)
+  cancelled_quantity          Int                      @default(0)
+  outstanding_quantity        Int                      @default(0)
+  status                      String                   @default("outstanding")
+  created_at                  DateTime                 @default(now()) @db.Timestamptz(0)
+  updated_at                  DateTime                 @updatedAt @db.Timestamptz(0)
+
+  @@index([receiving_purchase_order_id])
+}
+
+model receiving_asn {
+  id                 String                    @id @default(cuid())
+  asn_no             String
+  purchase_order_id  String?
+  purchase_order     receiving_purchase_order? @relation(fields: [purchase_order_id], references: [id])
+  status             String                    @default("draft")
+  lines              receiving_asn_line[]
+  receiving_receipts receiving_receipt[]
+  created_at         DateTime                  @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime                  @updatedAt @db.Timestamptz(0)
+  creator_id         String
+  creator            user                      @relation("ReceivingAsnCreator", fields: [creator_id], references: [id])
+  updater_id         String
+  updater            user                      @relation("ReceivingAsnUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+  @@index([purchase_order_id])
+}
+
+model receiving_asn_line {
+  id                   String        @id @default(cuid())
+  receiving_asn_id     String
+  receiving_asn        receiving_asn @relation(fields: [receiving_asn_id], references: [id], onDelete: Cascade)
+  product_id           String
+  product              product       @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  shipped_quantity     Int
+  done_quantity        Int           @default(0)
+  cancelled_quantity   Int           @default(0)
+  outstanding_quantity Int           @default(0)
+  status               String        @default("outstanding")
+  created_at           DateTime      @default(now()) @db.Timestamptz(0)
+  updated_at           DateTime      @updatedAt @db.Timestamptz(0)
+
+  @@index([receiving_asn_id])
+}
+
+model receiving_receipt {
+  id                String                    @id @default(cuid())
+  receipt_no        String
+  purchase_order_id String?
+  purchase_order    receiving_purchase_order? @relation(fields: [purchase_order_id], references: [id])
+  asn_id            String?
+  asn               receiving_asn?            @relation(fields: [asn_id], references: [id])
+  status            String                    @default("draft")
+  confirmed_at      DateTime?                 @db.Timestamptz(0)
+  lines             receiving_receipt_line[]
+  created_at        DateTime                  @default(now()) @db.Timestamptz(0)
+  updated_at        DateTime                  @updatedAt @db.Timestamptz(0)
+  creator_id        String
+  creator           user                      @relation("ReceivingReceiptCreator", fields: [creator_id], references: [id])
+  updater_id        String
+  updater           user                      @relation("ReceivingReceiptUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+  @@index([purchase_order_id])
+  @@index([asn_id])
+}
+
+model receiving_receipt_line {
+  id                   String            @id @default(cuid())
+  receiving_receipt_id String
+  receiving_receipt    receiving_receipt @relation(fields: [receiving_receipt_id], references: [id], onDelete: Cascade)
+  product_id           String
+  product              product           @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  receipt_quantity     Int
+  done_quantity        Int               @default(0)
+  cancelled_quantity   Int               @default(0)
+  outstanding_quantity Int               @default(0)
+  created_at           DateTime          @default(now()) @db.Timestamptz(0)
+  updated_at           DateTime          @updatedAt @db.Timestamptz(0)
+
+  @@index([receiving_receipt_id])
 }

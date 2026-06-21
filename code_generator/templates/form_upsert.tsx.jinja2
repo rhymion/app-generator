@@ -10,6 +10,9 @@ import type { EntityAutocompleteCellConfig } from '@/components/_standard/Entity
 {% if has_number_props %}
 import NumberField from '@/components/_standard/NumberField';
 {% endif %}
+{% if has_box_import %}
+import Box from '@mui/material/Box';
+{% endif %}
 {% if uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
