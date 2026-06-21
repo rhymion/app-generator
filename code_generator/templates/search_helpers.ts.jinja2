@@ -67,8 +67,8 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
 
     if ({{ entity.has_access_ts_var }}) {
 {% if entity.has_creator_filter %}
-      const {{ entity.org_filter_ts_var }}: Prisma.Sql = associatedOrgIds.length > 0
-        ? Prisma.sql`({{ entity.org_filter }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) }) OR creator_id = ${ userId })`
+      const {{ entity.org_filter_ts_var }}: Prisma.Sql = {{ entity.general_read_ts_var }}
+        ? Prisma.sql`1=1`
         : Prisma.sql`creator_id = ${ userId }`;
 {% else %}
       if (associatedOrgIds.length > 0) {

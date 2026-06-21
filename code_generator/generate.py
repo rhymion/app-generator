@@ -580,17 +580,19 @@ def generate(schema_path: str, output_dir: str) -> None:
             f"similarity(COALESCE({f}, ''), ${{q}}) > 0.3" for f in text_fields
         )
 
-        # bigm_where_sql: each field comparison using bigm_similarity function
-        # pg_bigm's =% operator requires an explicit similarity_limit GUC and causes
-        # type-resolution issues with Prisma.sql parameters, so we use bigm_similarity().
-        # Threshold 0.2 balances: excludes English false positives (e.g. Administrator
-        # vs Organization ≈ 0.14) while including Japanese 2-gram matches (≈ 0.25+).
+        # bigm_where_sql: LIKE containment check (gin_bigm_ops accelerates LIKE '%q%').
+        # pg_bigm's =% operator uses padding bigrams and does NOT match mid-string Japanese
+        # (e.g. '権限' =% '一般権限を...' → FALSE). LIKE '%'||q||'%' correctly matches.
+        # Replaces bigm_similarity()>0.2 which structurally fails for short Japanese queries
+        # (Jaccard denominator grows with text length).
         bigm_where_single = ' OR '.join(
-            f"bigm_similarity(COALESCE({f}, ''), ${{q}}) > 0.2" for f in bigm_fields
+            f"COALESCE({f}, '') LIKE '%' || ${{q}} || '%'" for f in bigm_fields
         )
-        # bigm_similarity_fields_sql: bigm_similarity scores for rank boost
+        # bigm_similarity_fields_sql: containment-based rank score (0.0 or 1.0).
+        # Wrapped in GREATEST(...) * 0.5 by the Jinja2 template.
         bigm_sim_exprs = ', '.join(
-            f"bigm_similarity(COALESCE({f}, ''), ${{q}})" for f in bigm_fields
+            f"CASE WHEN COALESCE({f}, '') LIKE '%' || ${{q}} || '%' THEN 1.0 ELSE 0.0 END::float8"
+            for f in bigm_fields
         )
 
         # Prisma model is lowercase (matches Prisma model definition)
