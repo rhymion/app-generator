@@ -667,7 +667,13 @@ definitions:
       invalidate: false
       api: true
       test: true
-      search: false
+      search: true
+    x-search:
+      text_fields: [name]
+      snippet_field: name
+      org_filter: creator_id
+      has_creator_filter: true
+      bigm_fields: [name]
     x-custom-components:
       - name: DashboardView
         path: "@/components/_standard/DashboardView"

@@ -580,18 +580,19 @@ def generate(schema_path: str, output_dir: str) -> None:
             f"similarity(COALESCE({f}, ''), ${{q}}) > 0.3" for f in text_fields
         )
 
-        # bigm_where_sql: LIKE containment check (gin_bigm_ops accelerates LIKE '%q%').
+        # bigm_where_sql: ILIKE containment check (gin_bigm_ops accelerates ILIKE '%q%').
         # pg_bigm's =% operator uses padding bigrams and does NOT match mid-string Japanese
-        # (e.g. '権限' =% '一般権限を...' → FALSE). LIKE '%'||q||'%' correctly matches.
+        # (e.g. '権限' =% '一般権限を...' → FALSE). ILIKE '%'||q||'%' correctly matches.
         # Replaces bigm_similarity()>0.2 which structurally fails for short Japanese queries
         # (Jaccard denominator grows with text length).
+        # ILIKE: case-insensitive vs LIKE; pg_bigm supports ILIKE with GIN index.
         bigm_where_single = ' OR '.join(
-            f"COALESCE({f}, '') LIKE '%' || ${{q}} || '%'" for f in bigm_fields
+            f"COALESCE({f}, '') ILIKE '%' || ${{q}} || '%'" for f in bigm_fields
         )
         # bigm_similarity_fields_sql: containment-based rank score (0.0 or 1.0).
         # Wrapped in GREATEST(...) * 0.5 by the Jinja2 template.
         bigm_sim_exprs = ', '.join(
-            f"CASE WHEN COALESCE({f}, '') LIKE '%' || ${{q}} || '%' THEN 1.0 ELSE 0.0 END::float8"
+            f"CASE WHEN COALESCE({f}, '') ILIKE '%' || ${{q}} || '%' THEN 1.0 ELSE 0.0 END::float8"
             for f in bigm_fields
         )
 
