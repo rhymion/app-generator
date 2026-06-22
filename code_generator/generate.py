@@ -225,6 +225,76 @@ def _note_stub_created(path: Path, why: str, action: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Search text_fields auto-derivation helpers
+# ---------------------------------------------------------------------------
+
+def _is_string_prop(prop: dict) -> bool:
+    t = prop.get('type')
+    if isinstance(t, str):
+        return t == 'string'
+    if isinstance(t, list):
+        return 'string' in t and all(v in ('string', 'null') for v in t)
+    return False
+
+
+def _derive_text_fields(properties: dict) -> list[str]:
+    """Auto-derive searchable text fields from entity properties.
+
+    Excludes noise (id, FK, enum, CUID pattern, date/uri format, write-only)
+    and per-field opt-outs (x-search: false).
+    """
+    result = []
+    for field_name, prop in properties.items():
+        if not isinstance(prop, dict):
+            continue
+        if not _is_string_prop(prop):
+            continue
+        # id and explicit primary key
+        if field_name == 'id' or prop.get('x-primary'):
+            continue
+        # FK fields: x-relationship annotation or *_id naming convention
+        if prop.get('x-relationship') or field_name.endswith('_id'):
+            continue
+        # enum values (integer or string)
+        if isinstance(prop.get('enum'), list):
+            continue
+        # CUID/ID pattern strings
+        pattern = prop.get('pattern', '')
+        if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
+            continue
+        # Non-text formats
+        if prop.get('format') in ('date', 'date-time', 'time', 'uri'):
+            continue
+        # Write-only fields (e.g. password, api_key)
+        xc = prop.get('x-custom-component', {})
+        if isinstance(xc, dict) and 'upsert' in (xc.get('target') or []):
+            continue
+        # Per-field opt-out
+        if prop.get('x-search') is False:
+            continue
+        result.append(field_name)
+    return result
+
+
+def _get_primary_display_field(entity_defs: list) -> str | None:
+    """Return the x-display.table primary field from the first definition that has one."""
+    for defn in entity_defs:
+        if not isinstance(defn, dict):
+            continue
+        x_display = defn.get('x-display') or {}
+        table = x_display if isinstance(x_display, list) else x_display.get('table')
+        if not table:
+            continue
+        for col in table:
+            if not isinstance(col, dict):
+                continue
+            for col_name, col_cfg in col.items():
+                if isinstance(col_cfg, dict) and col_cfg.get('primary'):
+                    return col_name
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
 
@@ -555,8 +625,23 @@ def generate(schema_path: str, output_dir: str) -> None:
             continue
 
         xsearch = detail_def.get('x-search') or {}
-        text_fields   = xsearch.get('text_fields', ['name'])
-        snippet_field = xsearch.get('snippet_field', text_fields[0] if text_fields else 'id')
+        if 'text_fields' in xsearch:
+            # Explicit curated list takes priority
+            text_fields = xsearch['text_fields']
+        else:
+            # DP-1: auto-derive from base entity string properties (noise + sensitive excluded)
+            base_props = (base_def if isinstance(base_def, dict) else {}).get('properties', {})
+            text_fields = _derive_text_fields(base_props)
+            if not text_fields:
+                print(f'  Search: {parent!r} has no suitable text_fields after exclusion — skipping from UNION')
+                continue
+
+        snippet_field = xsearch.get('snippet_field')
+        if snippet_field is None:
+            # Priority: x-display primary → first text_field
+            primary = _get_primary_display_field([detail_def, base_def])
+            snippet_field = primary if (primary and primary in text_fields) else text_fields[0]
+
         # bigm_fields: fields for Japanese 2-gram search (default: same as text_fields)
         bigm_fields   = xsearch.get('bigm_fields', text_fields)
 
@@ -649,7 +734,18 @@ def generate(schema_path: str, output_dir: str) -> None:
         print(f'  Search routes → lib/search/helpers.ts + app/api/search/route.ts ({entity_names})')
         print(f'  Search UI page → app/[locale]/search/page.tsx + actions.ts')
     else:
-        print('  Search: no entities with x-generate.search: true — skipping search route')
+        # DP-2: no searchable entities — delete stale search files to prevent broken imports
+        print('  Search: no searchable entities — skipping search route generation')
+        _stale_search_files = [
+            out / 'lib' / 'search' / 'helpers.ts',
+            out / 'app' / 'api' / 'search' / 'route.ts',
+            out / 'app' / '[locale]' / 'search' / 'page.tsx',
+            out / 'app' / '[locale]' / 'search' / 'actions.ts',
+        ]
+        for _stale in _stale_search_files:
+            if _stale.exists():
+                _stale.unlink()
+                print(f'  Search: deleted stale {_stale.relative_to(out)}')
 
     # --- docs/generated/index.md + app/[locale]/docs/page.mdx ---
     print('\nGenerating documentation index...')

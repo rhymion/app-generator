@@ -459,3 +459,85 @@ generator が生成するため、スキーマ変更が search にも自動反�
 
 **ハイライト (highlight)**: `ts_headline()` で FTS マッチ箇所をマークアップ。
 XSS 対策として `<<<` / `>>>` マーカーを使用し、UI 層で `<mark>` に変換する。
+
+---
+
+## Phase 3: text_fields Auto-Derivation (cmd_222)
+
+### 背景と RCA (cmd_221)
+
+`generate.py` L558 にて `text_fields = xsearch.get('text_fields', ['name'])` というデフォルトが
+存在し、`name` 列を持たないエンティティ（例: `shift_template`, `shift`）の SQL 生成時に
+PostgreSQL エラー 42703 (column "name" does not exist) が発生していた。
+
+### DP-1: text_fields 自動導出ロジック
+
+`x-search.text_fields` が明示されていない場合、エンティティの base properties から以下のルールで自動導出する:
+
+**選出条件**: 型が `string`（または nullable string `["string", "null"]`）
+
+**ノイズ除外**:
+| 条件 | 理由 |
+|------|------|
+| フィールド名 `id` または `x-primary: true` | PK — 意味のある自由文字列ではない |
+| `x-relationship` を持つ、または `*_id` 命名 | 外部キー — UUID が検索されても意味がない |
+| `enum: [...]` がある | 定型値 — FTS/trigram 検索に不適 |
+| `pattern` が CUID パターン (`^c[a-z0-9]{24,}$`) | ID 文字列 — FTS 不適 |
+| `format: date`, `date-time`, `time`, `uri` | 日付・URI — テキスト検索に不適 |
+
+**機微除外**:
+| 条件 | 理由 |
+|------|------|
+| `x-custom-component: {target: [upsert]}` | 書き込み専用フィールド（例: password, api_key）|
+| `x-search: false`（フィールドレベル） | スキーマ設計者による明示的 opt-out |
+
+**空集合処置**: 除外後 text_fields が空のエンティティは UNION から除外し、警告ログを出力する。
+これにより SQL 42703 エラーを根絶する。
+
+**snippet_field 選定優先順**: x-display primary フィールド → text_fields の先頭
+
+### DP-2: stale search ファイル削除 (Option A)
+
+`search_entities` がゼロ件になった場合（例: opt_in→all 切替時の stale 状態）:
+- `lib/search/helpers.ts` を削除（存在する場合のみ）
+- `app/api/search/route.ts` を削除（存在する場合のみ）
+- `app/[locale]/search/page.tsx` を削除（存在する場合のみ）
+- `app/[locale]/search/actions.ts` を削除（存在する場合のみ）
+- 警告ログを出力
+
+### フィールドレベル opt-out: `x-search: false`
+
+個別フィールドを text_fields から除外するには:
+
+```yaml
+properties:
+  internal_code:
+    type: string
+    x-search: false   # 検索対象から除外
+```
+
+### x-audit エンティティの search 有効化
+
+`x-audit: true` エンティティは `default_scope: all` 配下でもデフォルト除外される。
+明示的に検索対象にするには `x-generate.search: true` が必要:
+
+```yaml
+role_detail:
+  x-generate:
+    search: true
+  x-audit: true
+```
+
+### organization の org_id_field 設定
+
+organization エンティティ自身（org IS the org）を search 対象にする場合、
+org フィルターに使う列を明示する必要がある:
+
+```yaml
+organization_detail:
+  x-search:
+    org_id_field: id   # organization.id が本エンティティの "所属 org" 列
+```
+
+未設定だと `organization_id` を探して `should_filter_by_org = False` となり、
+全ユーザーに全組織が見えるセキュリティ問題が発生する。
