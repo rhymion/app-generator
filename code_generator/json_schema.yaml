@@ -162,8 +162,6 @@ definitions:
     x-search:
       text_fields: [name, description]
       snippet_field: name
-      org_filter: creator_id
-      has_creator_filter: true
       bigm_fields: [name, description]
     # Security-sensitive entity: every create/update/delete is recorded in
     # the audit_log table by the generated service layer.
@@ -215,7 +213,7 @@ definitions:
     x-search:
       text_fields: [name, description]
       snippet_field: name
-      org_filter: id
+      org_id_field: id
       bigm_fields: [name, description]
     x-relationships:
       users:
@@ -671,8 +669,6 @@ definitions:
     x-search:
       text_fields: [name]
       snippet_field: name
-      org_filter: creator_id
-      has_creator_filter: true
       bigm_fields: [name]
     x-custom-components:
       - name: DashboardView

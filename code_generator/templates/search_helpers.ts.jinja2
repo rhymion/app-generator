@@ -33,11 +33,8 @@ export interface SearchOpts {
  * Security:
  *   - All user-supplied values (q, userId, org IDs) are bound via Prisma.sql parameters.
  *   - String concatenation for SQL construction is strictly forbidden.
- *   - org/creator access filtering is applied per-entity inside the WHERE clause.
- *
- * DP-3 (search.default_scope = all): all entities without x-generate.search: false
- * appear in the UNION. Entities must declare x-search.org_filter explicitly when
- * default_scope=all to ensure tenant isolation (validated at generate time).
+ *   - Access filtering reuses the same authorization logic as build<Entity>AccessWhere:
+ *     org scope via should_filter_by_org, creator/assignee scope via perms.general.read.
  */
 export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
   const { q, entityTypes, userId, page, pageSize } = opts;
@@ -47,34 +44,35 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
 
 {% for entity in search_entities %}
   const {{ entity.perms_ts_var }} = await getModelPermissions('{{ entity.entity_type }}', userId);
-  const {{ entity.general_read_ts_var }} = {{ entity.perms_ts_var }}.permissions.read === true;
+  const {{ entity.general_read_ts_var }} = {{ entity.perms_ts_var }}.permissions.general.read === true;
 {% endfor %}
 
   const subQueries: Prisma.Sql[] = [];
 
 {% for entity in search_entities %}
   if (!entityTypes || entityTypes.includes('{{ entity.entity_type }}')) {
-    const {{ entity.has_access_ts_var }} =
-      {{ entity.general_read_ts_var }}
-{% if entity.has_creator_filter %}
-      // The role entity has no FK to organization; access boundary is enforced by
-      // org_filter (creator_id) and creator_id in the WHERE clause — no extra constraint.
-      || true
-{% else %}
-      || associatedOrgIds.length > 0
+    // Build access WHERE mirroring build{{ entity.entity_type | replace("_", "") | title }}AccessWhere
+    const {{ entity.access_clauses_ts_var }}: Prisma.Sql[] = [];
+{% if entity.should_filter_by_org %}
+    if (associatedOrgIds.length > 0) {
+      {{ entity.access_clauses_ts_var }}.push(Prisma.sql`{{ entity.org_id_field }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) })`);
+    } else {
+      {{ entity.access_clauses_ts_var }}.push(Prisma.sql`1=0`);
+    }
 {% endif %}
-      ;
+    if (!{{ entity.general_read_ts_var }}) {
+      const {{ entity.or_clauses_ts_var }}: Prisma.Sql[] = [];
+      if ({{ entity.perms_ts_var }}.permissions.creator?.read && userId) {{ entity.or_clauses_ts_var }}.push(Prisma.sql`creator_id = ${ userId }`);
+{% if entity.has_assignee_id %}
+      if ({{ entity.perms_ts_var }}.permissions.assignee?.read && userId) {{ entity.or_clauses_ts_var }}.push(Prisma.sql`assignee_id = ${ userId }`);
+{% endif %}
+      {{ entity.access_clauses_ts_var }}.push({{ entity.or_clauses_ts_var }}.length > 0 ? Prisma.sql`(${ Prisma.join({{ entity.or_clauses_ts_var }}, ' OR ') })` : Prisma.sql`1=0`);
+    }
+    const {{ entity.access_where_ts_var }}: Prisma.Sql = {{ entity.access_clauses_ts_var }}.length > 0
+      ? Prisma.sql`(${ Prisma.join({{ entity.access_clauses_ts_var }}, ' AND ') })`
+      : Prisma.sql`1=1`;
 
-    if ({{ entity.has_access_ts_var }}) {
-{% if entity.has_creator_filter %}
-      const {{ entity.org_filter_ts_var }}: Prisma.Sql = {{ entity.general_read_ts_var }}
-        ? Prisma.sql`1=1`
-        : Prisma.sql`creator_id = ${ userId }`;
-{% else %}
-      if (associatedOrgIds.length > 0) {
-        const {{ entity.org_filter_ts_var }}: Prisma.Sql = Prisma.sql`{{ entity.org_filter }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) })`;
-{% endif %}
-        subQueries.push(Prisma.sql`
+    subQueries.push(Prisma.sql`
           SELECT
             '{{ entity.entity_type }}'::text AS entity_type,
             id::text AS id,
@@ -107,12 +105,8 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
               OR ({{ entity.similarity_where_sql }})
               OR ({{ entity.bigm_where_sql }})
             )
-            AND ${ {{ entity.org_filter_ts_var }} }
+            AND ${ {{ entity.access_where_ts_var }} }
         `);
-{% if not entity.has_creator_filter %}
-      }
-{% endif %}
-    }
   }
 {% endfor %}
 

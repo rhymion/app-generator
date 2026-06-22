@@ -538,34 +538,25 @@ def generate(schema_path: str, output_dir: str) -> None:
         # generate_config only contains the standard keys; read 'search' from raw x-generate
         x_generate_raw = detail_def.get('x-generate') or base_def.get('x-generate') or {}
         explicit_search = x_generate_raw.get('search')  # True, False, or None
+        # DP-b: x-audit:true entities default to search=false; requires explicit search:true to opt in
+        is_audited = bool(
+            detail_def.get('x-audit') is True
+            or base_def.get('x-audit') is True
+        )
         if search_default_scope == 'all':
-            is_search = explicit_search is not False
+            if is_audited and explicit_search is None:
+                is_search = False
+            else:
+                is_search = explicit_search is not False
         else:  # opt_in
             is_search = explicit_search is True
 
         if not is_search:
             continue
 
-        # Safety guard: with default_scope=all, every auto-included entity must
-        # explicitly declare x-search.org_filter so organization-scoped read authorization
-        # is always enforced (prevents rows from outside the user's associated orgs from
-        # appearing in search results).
-        if search_default_scope == 'all':
-            xsearch_raw = detail_def.get('x-search') or {}
-            if not xsearch_raw or 'org_filter' not in xsearch_raw:
-                raise ValueError(
-                    f"Entity '{parent}' is included in search (default_scope=all) "
-                    f"but has no x-search.org_filter defined. "
-                    f"Add x-search.org_filter to '{parent}' or set x-generate.search: false "
-                    f"to exclude it from the global search UNION."
-                )
-
         xsearch = detail_def.get('x-search') or {}
         text_fields   = xsearch.get('text_fields', ['name'])
         snippet_field = xsearch.get('snippet_field', text_fields[0] if text_fields else 'id')
-        # org_filter: column used for org membership check
-        # 'id' for the organization entity itself; 'organization_id' for normal entities
-        org_filter    = xsearch.get('org_filter', 'organization_id')
         # bigm_fields: fields for Japanese 2-gram search (default: same as text_fields)
         bigm_fields   = xsearch.get('bigm_fields', text_fields)
 
@@ -601,33 +592,37 @@ def generate(schema_path: str, output_dir: str) -> None:
         # Prisma model is lowercase (matches Prisma model definition)
         prisma_model = model  # e.g. 'organization'
 
-        # Detect creator_id presence for creator-scope fallback.
-        # Explicit x-search.has_creator_filter overrides auto-detection; useful for
-        # entities whose creator_id is generated (not declared in schema properties).
+        # DP-a: derive authorization variables from model definition (replaces org_filter/has_creator_filter)
+        # DP-c: x-search.org_id_field allows filtering by a non-standard column (e.g. 'id' for organization)
         all_props = {}
         for item in (base_def if isinstance(base_def, dict) else {}).get('properties', {}).items():
             all_props[item[0]] = item[1]
-        if 'has_creator_filter' in xsearch:
-            has_creator_filter = bool(xsearch['has_creator_filter'])
-        else:
-            has_creator_filter = 'creator_id' in all_props and org_filter != 'id'
+        org_id_field_override = xsearch.get('org_id_field', None)
+        has_organization_id = 'organization_id' in all_props
+        should_filter_by_org = has_organization_id or (org_id_field_override is not None)
+        effective_org_id_field = org_id_field_override if org_id_field_override else 'organization_id'
+        # creator_id is always auto-injected by the code generator (present in every Prisma model)
+        # assignee_id is entity-specific; check schema properties
+        has_assignee_id = 'assignee_id' in all_props
 
         search_entities.append({
             'entity_type':           parent,
             'model':                 prisma_model,
             'text_fields':           text_fields,
             'snippet_field':         snippet_field,
-            'org_filter':            org_filter,
             'ts_vector_fields_sql':  ts_parts,
             'similarity_fields_sql': sim_exprs,
             'similarity_where_sql':  sim_where_single,
-            'has_creator_filter':    has_creator_filter,
-            # Pre-computed TypeScript identifier for the per-entity Prisma.Sql filter var
-            # (avoids Jinja2/TypeScript ${{{...}}} delimiter conflict in templates)
-            'org_filter_ts_var':     f'{parent}OrgFilter',
+            # DP-a: authorization variables aligned with build<Entity>AccessWhere
+            'should_filter_by_org':  should_filter_by_org,
+            'org_id_field':          effective_org_id_field,
+            'has_assignee_id':       has_assignee_id,
+            # Pre-computed TypeScript identifiers (avoids Jinja2/TypeScript ${{{...}}} delimiter conflict)
             'perms_ts_var':          f'{parent}Perms',
             'general_read_ts_var':   f'{parent}GeneralRead',
-            'has_access_ts_var':     f'{parent}HasAccess',
+            'access_clauses_ts_var': f'{parent}AccessClauses',
+            'access_where_ts_var':   f'{parent}AccessWhere',
+            'or_clauses_ts_var':     f'{parent}OrClauses',
             'bigm_where_sql':            bigm_where_single,
             'bigm_similarity_fields_sql': bigm_sim_exprs,
         })

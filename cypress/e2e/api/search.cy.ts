@@ -280,7 +280,61 @@ describe('API: GET /api/search', () => {
     });
   });
 
-  // 8. Phase 2: default_scope=all permission coverage
+  // 8. creator-only access: generalRead bug fix proof
+  // Proves that perms.permissions.general.read (not the merged perms.permissions.read) is used.
+  describe('Creator-only access — generalRead bug fix', () => {
+    it('creator-only user sees only their own roles (not all roles)', () => {
+      // Create admin roles (creator_id = admin user)
+      cy.task('db:grantAllPermissions');
+      cy.task('db:populateRoleFull', 3);
+
+      // Create creator-only user + their owned role
+      cy.task<{ apiKey: string; ownedRoleId: string }>('db:createCreatorOnlyRoleUser').then(
+        ({ apiKey, ownedRoleId }) => {
+          // Search as creator-only user — should see only their OwnedByCreatorUser role
+          cy.request({
+            url: `${SEARCH_URL}?q=Role&entityTypes=role`,
+            headers: { 'X-API-Key': apiKey },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            const returnedIds: string[] = res.body.results.map((r: { id: string }) => r.id);
+            // Creator-only user's owned role must appear
+            expect(returnedIds).to.include(ownedRoleId,
+              'Creator-only user should see the role they own');
+            // Admin's roles (Role 1, Role 2, Role 3) must NOT appear — proves generalRead fix
+            // If the old bug (merged perms.read instead of general.read) were present,
+            // these would appear because perms.read=true (creator.read contributes to merged)
+            const adminRoles = res.body.results.filter(
+              (r: { id: string }) => r.id !== ownedRoleId
+            );
+            expect(adminRoles).to.have.length(0,
+              'Creator-only user must not see roles created by admin (generalRead bug fix)');
+          });
+        }
+      );
+    });
+  });
+
+  // 9. x-audit:true entities excluded from search UNION
+  describe('x-audit:true entities excluded from search UNION', () => {
+    it('audit-flagged entities (permission) do not appear in search results', () => {
+      cy.task('db:grantAllPermissions');
+      cy.request({
+        url: `${SEARCH_URL}?q=permission`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        const entityTypes: string[] = res.body.results.map(
+          (r: { entity_type: string }) => r.entity_type
+        );
+        // permission_detail has x-audit:true and x-generate.search:false — must never appear
+        expect(entityTypes).not.to.include('permission',
+          'Audit entity "permission" must not appear in search UNION');
+      });
+    });
+  });
+
+  // 10. Phase 2: default_scope=all permission coverage
   describe('Phase 2: default_scope=all permission coverage', () => {
     it('does not leak organization data for any entity type when user has no access', () => {
       // Create an org with user as member
