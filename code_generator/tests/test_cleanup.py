@@ -76,3 +76,86 @@ def test_prune_orphans_deletes_orphan_column_def(tmp_path: Path) -> None:
     cleanup._prune_orphans(tmp_path, [])
 
     assert not orphan.exists(), 'Orphan column_def.tsx must be deleted'
+
+
+# ---------------------------------------------------------------------------
+# prune_orphans — orphan entity lib/ boilerplate (actions.ts / getters.ts / etc.)
+# ---------------------------------------------------------------------------
+
+def _make_orphan_entity(out: Path, entity: str) -> dict[str, Path]:
+    """Create a full set of per-entity boilerplate files under out/ and return paths."""
+    lib_dir = out / 'lib' / entity
+    comp_dir = out / 'components' / entity
+    lib_dir.mkdir(parents=True)
+    comp_dir.mkdir(parents=True)
+    files = {}
+    for fname in ('types.ts', 'getters.ts', 'actions.ts', 'service.ts', 'chart-getters.ts',
+                  'service_validation.ts'):
+        p = lib_dir / fname
+        p.write_text(f"'use server';\n// {fname}\n")
+        files[fname] = p
+    for fname in ('FormUpsert.tsx', 'FormView.tsx', 'form_validation.ts'):
+        p = comp_dir / fname
+        p.write_text(f"'use client';\n// {fname}\n")
+        files[fname] = p
+    return files
+
+
+def test_prune_orphans_deletes_all_lib_boilerplate(tmp_path: Path) -> None:
+    """All lib/<entity>/ boilerplate files are deleted for an orphaned entity."""
+    files = _make_orphan_entity(tmp_path, 'booking')
+
+    cleanup._prune_orphans(tmp_path, [])
+
+    for fname in ('types.ts', 'getters.ts', 'actions.ts', 'service.ts', 'chart-getters.ts',
+                  'service_validation.ts'):
+        assert not files[fname].exists(), f'lib/booking/{fname} must be deleted for orphan entity'
+
+
+def test_prune_orphans_deletes_all_component_boilerplate(tmp_path: Path) -> None:
+    """All components/<entity>/ boilerplate files are deleted for an orphaned entity."""
+    files = _make_orphan_entity(tmp_path, 'leave_request')
+
+    cleanup._prune_orphans(tmp_path, [])
+
+    for fname in ('FormUpsert.tsx', 'FormView.tsx', 'form_validation.ts'):
+        assert not files[fname].exists(), f'components/leave_request/{fname} must be deleted for orphan entity'
+
+
+def test_prune_orphans_keeps_in_schema_entity_lib(tmp_path: Path) -> None:
+    """lib/<entity>/ boilerplate is NOT deleted when the entity is still in the schema."""
+    files = _make_orphan_entity(tmp_path, 'project')
+    entity = {'parent': 'project', 'model': 'project', 'generate_config': {}, 'children': []}
+
+    cleanup._prune_orphans(tmp_path, [entity])
+
+    for fname in ('types.ts', 'getters.ts', 'actions.ts', 'service.ts'):
+        assert files[fname].exists(), f'lib/project/{fname} must be kept — entity still in schema'
+
+
+def test_prune_orphans_keeps_customized_service_after_create(tmp_path: Path) -> None:
+    """service_after_create.ts with user customizations is preserved even for an orphan entity."""
+    lib_dir = tmp_path / 'lib' / 'booking'
+    lib_dir.mkdir(parents=True)
+    # Write a signal file so the dir is detected as an entity lib dir
+    (lib_dir / 'types.ts').write_text("import type { Booking } from './booking';\n")
+    # Write a customized (non-boilerplate) service_after_create.ts
+    sac = lib_dir / 'service_after_create.ts'
+    sac.write_text("import { sendEmail } from '@/lib/mailer';\nexport async function afterCreate() { await sendEmail(); }\n")
+
+    cleanup._prune_orphans(tmp_path, [])
+
+    assert sac.exists(), 'Customized service_after_create.ts must be preserved even for orphan entity'
+
+
+def test_prune_orphans_keep_stubs_preserves_stubs(tmp_path: Path) -> None:
+    """With keep_stubs=True, service_validation.ts and form_validation.ts are kept."""
+    files = _make_orphan_entity(tmp_path, 'invoice')
+
+    cleanup._prune_orphans(tmp_path, [], keep_stubs=True)
+
+    assert files['service_validation.ts'].exists(), 'service_validation.ts kept with --keep-stubs'
+    assert files['form_validation.ts'].exists(), 'form_validation.ts kept with --keep-stubs'
+    # Fully regenerated files are still deleted
+    assert not files['types.ts'].exists(), 'types.ts deleted even with --keep-stubs'
+    assert not files['FormUpsert.tsx'].exists(), 'FormUpsert.tsx deleted even with --keep-stubs'

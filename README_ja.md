@@ -409,6 +409,7 @@ app-generator/
 | [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | レスポンシブレイアウト規約 |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | 承認フローシステムの詳細 |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | コメントブリッジシステムの詳細 |
+| [cleanup.md](docs/knowledge/cleanup.md) | 生成ファイルの削除: デフォルトクリーンアップ、マニフェスト vs スキーマ駆動、`--prune-orphans`、孤児ファイル処理 |
 
 ---
 

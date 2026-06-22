@@ -547,7 +547,9 @@ def generate(schema_path: str, output_dir: str) -> None:
             continue
 
         # Safety guard: with default_scope=all, every auto-included entity must
-        # explicitly declare x-search.org_filter so tenant isolation is always enforced.
+        # explicitly declare x-search.org_filter so organization-scoped read authorization
+        # is always enforced (prevents rows from outside the user's associated orgs from
+        # appearing in search results).
         if search_default_scope == 'all':
             xsearch_raw = detail_def.get('x-search') or {}
             if not xsearch_raw or 'org_filter' not in xsearch_raw:

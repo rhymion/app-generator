@@ -298,7 +298,7 @@ def _clean_sidebar(path: Path, nav_hrefs: list) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
-def _prune_orphans(out: Path, entities: list) -> None:
+def _prune_orphans(out: Path, entities: list, keep_stubs: bool = False) -> None:
     """Sweep generator-shaped files that the current schema no longer expects.
 
     The regular cleanup pass is schema-driven: it walks `entities` from the
@@ -307,7 +307,12 @@ def _prune_orphans(out: Path, entities: list) -> None:
     children list, or is renamed/removed entirely), the file generated
     under the old gate is invisible to that pass and lingers forever.
 
-    Today this handles one orphan class:
+    Handles two orphan classes:
+
+    - **Per-entity boilerplate** (lib/<entity>/ and components/<entity>/) for
+      entities that have been removed from the schema entirely. Detected by the
+      presence of generator-specific filenames (types.ts / getters.ts for lib,
+      FormUpsert.tsx / FormView.tsx for components).
 
     - **components/<entity>/column_def.tsx** — generated only when an entity
       has children AND (can_view OR can_edit). When children are removed
@@ -381,6 +386,52 @@ def _prune_orphans(out: Path, entities: list) -> None:
                 if not _is_protected(doc):
                     _delete(doc)
 
+    # lib/<entity>/ — per-entity boilerplate for entities removed from the schema.
+    # Identified by the presence of generator-specific filenames (types.ts or
+    # getters.ts); system lib dirs (authz, prisma, normalize, etc.) don't carry
+    # these names and are therefore skipped.
+    lib_root = out / 'lib'
+    if lib_root.is_dir():
+        for lib_dir in sorted(d for d in lib_root.iterdir() if d.is_dir()):
+            parent = lib_dir.name
+            if entities_by_parent.get(parent) is not None:
+                continue  # entity still in schema
+            if not any((lib_dir / f).exists() for f in ('types.ts', 'getters.ts')):
+                continue  # not an entity lib dir
+            for fname in ('types.ts', 'getters.ts', 'actions.ts', 'service.ts', 'chart-getters.ts'):
+                f = lib_dir / fname
+                if not _is_protected(f):
+                    _delete(f)
+            if not keep_stubs:
+                f = lib_dir / 'service_validation.ts'
+                if not _is_protected(f):
+                    _delete(f)
+            sac = lib_dir / 'service_after_create.ts'
+            if not _is_protected(sac):
+                _delete_if_boilerplate(sac, _SERVICE_AFTER_CREATE_BOILERPLATE)
+            _rmdir_tree(lib_dir)
+
+    # components/<entity>/ — FormUpsert/FormView/form_validation for removed entities.
+    # Identified by the presence of FormUpsert.tsx or FormView.tsx. column_def.tsx
+    # is swept by the loop above; this pass covers the remaining per-entity component
+    # boilerplate.
+    if components_root.is_dir():
+        for comp_dir in sorted(d for d in components_root.iterdir() if d.is_dir()):
+            parent = comp_dir.name
+            if entities_by_parent.get(parent) is not None:
+                continue  # entity still in schema
+            if not any((comp_dir / f).exists() for f in ('FormUpsert.tsx', 'FormView.tsx')):
+                continue  # not an entity component dir
+            for fname in ('FormUpsert.tsx', 'FormView.tsx'):
+                f = comp_dir / fname
+                if not _is_protected(f):
+                    _delete(f)
+            if not keep_stubs:
+                f = comp_dir / 'form_validation.ts'
+                if not _is_protected(f):
+                    _delete(f)
+            _rmdir_tree(comp_dir)
+
 
 def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_orphans: bool = False) -> None:
     with open(schema_path) as f:
@@ -406,7 +457,7 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_o
     _clean_appended_files(out, entities, schema)
 
     if prune_orphans:
-        _prune_orphans(out, entities)
+        _prune_orphans(out, entities, keep_stubs)
 
     print('\nCleanup complete!')
 
