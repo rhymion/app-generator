@@ -299,7 +299,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
     model_props = model_def.get('properties', {})
     formatting_entries = []
     formatting_keys: set[str] = set()
-    enum_ns_list = []       # [{var_name, ns, keys}]
+    enum_ns_list = []       # [{var_name, ns, entries}]
     display_fields_code = ''
     primary_field = ''
 
