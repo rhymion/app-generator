@@ -399,6 +399,33 @@ Entity-level `x-internal` is typically used on bridge or helper records (e.g. `a
 `commentable`) that support another entity's behaviour but are never navigated to directly.
 See §12.5 for the auto-create one-to-one pattern that relies on this.
 
+### 4.6 Field UI Hints (`x-ui`)
+
+Place `x-ui` on a `string` field to control how the form input is rendered.
+
+| Sub-key | Type | Default | Effect |
+|---|---|---|---|
+| `rows` | integer | — | Renders the field as a multiline textarea with the given row count |
+
+**`rows`** — When set, the generator emits `multiline={true} rows={N}` on the `AppFieldText`
+component. Without `x-ui.rows`, only `description` fields receive `rows={4}` by convention;
+all other string fields render as single-line inputs.
+
+```yaml
+description:
+  type: string
+  x-ui:
+    rows: 4    # explicit; same as the built-in default for "description"
+
+notes:
+  type: string
+  x-ui:
+    rows: 6    # taller textarea for any field name
+```
+
+Omitting `x-ui` (or omitting `x-ui.rows`) preserves existing behaviour:
+`description` → 4 rows; all other string fields → single-line.
+
 ---
 
 ## 5. Many-to-One Relationships (`x-relationship`)

@@ -2104,8 +2104,13 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         slot_str = ''
         if min_len is not None: slot_str += f'\n        minLength={{{min_len}}}'
         if max_len is not None: slot_str += f'\n        maxLength={{{max_len}}}'
-        multiline = 'true' if p == 'description' else 'false'
-        rows = '4' if p == 'description' else 'undefined'
+        _ui_rows = (prop.get('x-ui') or {}).get('rows')
+        if _ui_rows is not None:
+            multiline = 'true'
+            rows = str(int(_ui_rows))
+        else:
+            multiline = 'true' if p == 'description' else 'false'
+            rows = '4' if p == 'description' else 'undefined'
         text_jsxs.append(
             f"      <AppFieldText\n"
             f"        label={{tf('{fk}')}}\n"
@@ -3395,8 +3400,13 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 _rel_fds_lines.append(
                     f"    formData.set('{_form_key}', {_ref_var}.current?.value || '');"
                 )
-                _ml  = 'true' if _fname == 'description' else 'false'
-                _rows = '4'   if _fname == 'description' else 'undefined'
+                _ui_rows_flat = (_target_props.get(_fname, {}).get('x-ui') or {}).get('rows')
+                if _ui_rows_flat is not None:
+                    _ml = 'true'
+                    _rows = str(int(_ui_rows_flat))
+                else:
+                    _ml  = 'true' if _fname == 'description' else 'false'
+                    _rows = '4'   if _fname == 'description' else 'undefined'
                 _accordion_fields_jsx.append(
                     f"        <AppFieldText\n"
                     f"          label={{tf('{_fk_label}')}}\n"
