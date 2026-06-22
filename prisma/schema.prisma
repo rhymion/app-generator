@@ -310,6 +310,9 @@ model note {
   updater_id      String
   updater         user         @relation("NoteUpdater", fields: [updater_id], references: [id])
 
+  noteable_id    String
+  noteable       noteable @relation(fields: [noteable_id], references: [id], onDelete: Cascade)
+
   @@index([organization_id])
   @@index([creator_id])
 }
@@ -640,6 +643,9 @@ model resource {
   updater_id      String
   updater         user         @relation("ResourceUpdater", fields: [updater_id], references: [id])
 
+  noteable_id    String       @unique
+  noteable       noteable? @relation("ResourceNoteable", fields: [noteable_id], references: [id])
+
   @@index([creator_id])
   @@index([organization_id])
 }
@@ -715,6 +721,9 @@ model product {
   updater_id         String
   updater            user                @relation("ProductUpdater", fields: [updater_id], references: [id])
 
+  noteable_id    String       @unique
+  noteable       noteable? @relation("ProductNoteable", fields: [noteable_id], references: [id])
+
   @@index([creator_id])
 }
 
@@ -777,8 +786,6 @@ model inventory_allocation {
   inventory_id         String
   inventory            inventory         @relation(fields: [inventory_id], references: [id], onDelete: Cascade)
   quantity             Int
-  remaining_quantity   Int
-  status               String
   created_at           DateTime          @default(now()) @db.Timestamptz(0)
   updated_at           DateTime          @updatedAt @db.Timestamptz(0)
   creator_id           String
@@ -894,6 +901,9 @@ model room {
   creator           user               @relation("RoomCreator", fields: [creator_id], references: [id])
   updater_id        String
   updater           user               @relation("RoomUpdater", fields: [updater_id], references: [id])
+
+  noteable_id    String       @unique
+  noteable       noteable? @relation("RoomNoteable", fields: [noteable_id], references: [id])
 
   @@index([creator_id])
 }
@@ -1027,4 +1037,12 @@ model receiving_receipt_line {
   updated_at           DateTime          @updatedAt @db.Timestamptz(0)
 
   @@index([receiving_receipt_id])
+}
+
+model noteable {
+  id        String      @id @default(cuid())
+  room      room?    @relation("RoomNoteable")
+  product   product?    @relation("ProductNoteable")
+  resource  resource?    @relation("ResourceNoteable")
+  notes     note[]
 }

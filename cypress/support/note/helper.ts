@@ -31,7 +31,35 @@ export async function populateNoteDependencies() {
     });
   }
   const organization = organizationRecord;
-  return { organization };
+  // Idempotent: re-use an existing row (created by an earlier helper call in
+  // the same test) instead of creating a duplicate that would trip @unique.
+  let roomTypeRecord = await prisma.room_type.findFirst({
+    where: { name: 'Test Room Type' },
+    orderBy: { created_at: 'asc' },
+  });
+  if (!roomTypeRecord) {
+    roomTypeRecord = await prisma.room_type.create({
+      data: {
+        name: 'Test Room Type',
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
+  }
+  const roomType = roomTypeRecord;
+  const roomNoteable = await prisma.noteable.create({ data: {} });
+  const roomRecord = await prisma.room.create({
+    data: {
+      noteable_id: roomNoteable.id,
+      room_no: 'Test Room No',
+      status: 0,
+      room_type_id: roomType.id,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+  const room = roomRecord;
+  return { organization, roomType, room };
 }
 
 export async function populateNoteData(length: number) {
@@ -39,8 +67,10 @@ export async function populateNoteData(length: number) {
   const deps = await populateNoteDependencies();
   const records = [];
   for (let i = 1; i <= length; i++) {
+    const noteableItem = await prisma.noteable.create({ data: {} });
     const record = await prisma.note.create({
       data: {
+        noteable_id: noteableItem.id,
         title: `Test Title ${i}`,
         organization_id: deps.organization.id,
         creator_id: testUser.id,
@@ -58,8 +88,10 @@ export async function populateNoteFullData(length: number) {
   const deps = await populateNoteDependencies();
   const records = [];
   for (let i = 1; i <= length; i++) {
+    const noteableItem = await prisma.noteable.create({ data: {} });
     const record = await prisma.note.create({
       data: {
+        noteable_id: noteableItem.id,
         title: `Test Title ${i}`,
         description: `Test Description ${i}`,
         organization_id: deps.organization.id,

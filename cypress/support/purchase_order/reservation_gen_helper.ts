@@ -14,9 +14,11 @@ async function getTestUser() {
 
 async function createTestProduct(testUser: any, suffix: string) {
   const attachable = await prisma.attachable.create({ data: {} });
+  const noteable = await prisma.noteable.create({ data: {} });
   return prisma.product.create({
     data: {
       attachable_id: attachable.id,
+      noteable_id: noteable.id,
       code: `GEN-PROD-${suffix}`,
       name: `Gen Product ${suffix}`,
       price: 0,
