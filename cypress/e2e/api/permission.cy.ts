@@ -11,13 +11,13 @@ describe('API: Permission', () => {
   });
 
   describe('GET /api/permission', () => {
-    it('1.1 returns 35 seed-only item(s)', () => {
+    it('1.1 returns 34 seed-only item(s)', () => {
       cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           expect(res.status).to.eq(200);
-          // db:seed + db:grantAllPermissions pre-populate 35 permission record(s) before any user data
-          expect(res.body.rows).to.have.length(35);
-          expect(res.body.total).to.eq(35);
+          // db:seed + db:grantAllPermissions pre-populate 34 permission record(s) before any user data
+          expect(res.body.rows).to.have.length(34);
+          expect(res.body.total).to.eq(34);
           expect(res.body.page).to.eq(0);
           expect(res.body.pageSize).to.be.a('number');
         });
@@ -28,8 +28,8 @@ describe('API: Permission', () => {
       cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           expect(res.status).to.eq(200);
-          expect(res.body.rows).to.have.length(36);
-          expect(res.body.total).to.eq(36);
+          expect(res.body.rows).to.have.length(35);
+          expect(res.body.total).to.eq(35);
         });
     });
   });

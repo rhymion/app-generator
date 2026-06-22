@@ -214,25 +214,6 @@ export async function setupLeaveRequestOrderedApprovalFlow() {
     data: { name: 'Test Leave Request Ordered Approver Role 2', creator_id: testUser.id, updater_id: testUser.id },
   });
 
-  await Promise.all(
-    [approverRole1, approverRole2].flatMap(role =>
-      ALL_ENTITIES.map(entity =>
-        prisma.permission.create({
-          data: {
-            name: entity,
-            role_id: role.id,
-            create: true,
-            read: true,
-            update: true,
-            delete: true,
-            creator_id: testUser.id,
-            updater_id: testUser.id,
-          },
-        })
-      )
-    )
-  );
-
   const approverUser1 = await prisma.user.create({
     data: {
       name: 'Test Leave Request Ordered Approver 1',

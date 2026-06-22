@@ -22,12 +22,10 @@ export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
 
-  // Level 1: approval_request, attachment, booking, comment, dashboard_widget, field, inventory_allocation, leave_request, note, parent1_child1, parent1_child2, parent1_list, parent_only, permission, procedure, reaction, receiving_asn_line, receiving_purchase_order_line, receiving_receipt_line, room_reservation, shift, shift_template, supply_allocation, yyyyy_yyyyy
+  // Level 1: approval_request, attachment, booking, comment, dashboard_widget, field, inventory_allocation, leave_request, parent1_child1, parent1_child2, parent1_list, parent_only, permission, procedure, receiving_asn_line, receiving_purchase_order_line, receiving_receipt_line, room_reservation, shift, shift_template, supply_allocation, yyyyy_yyyyy
   await prisma.approval_request.deleteMany();
   await prisma.attachment.deleteMany();
   await prisma.booking.deleteMany();
-  await prisma.note.deleteMany();
-  await prisma.reaction.deleteMany();
   await prisma.comment.deleteMany();
   await prisma.dashboard_widget.deleteMany();
   await prisma.field.deleteMany();
@@ -131,7 +129,6 @@ export const ALL_ENTITIES = [
   'db_table',
   'inventory',
   'leave_request',
-  'note',
   'organization',
   'parent_only',
   'permission',

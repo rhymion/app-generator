@@ -255,18 +255,6 @@ export function getGeneratedTasks() {
       const { populateResourceFullData } = require('./resource/helper');
       return await populateResourceFullData(length);
     },
-    async 'db:populateNoteDependencies'() {
-      const { populateNoteDependencies } = require('./note/helper');
-      return await populateNoteDependencies();
-    },
-    async 'db:populateNote'(length: number) {
-      const { populateNoteData } = require('./note/helper');
-      return await populateNoteData(length);
-    },
-    async 'db:populateNoteFull'(length: number) {
-      const { populateNoteFullData } = require('./note/helper');
-      return await populateNoteFullData(length);
-    },
     async 'db:populateBookingDependencies'() {
       const { populateBookingDependencies } = require('./booking/helper');
       return await populateBookingDependencies();
