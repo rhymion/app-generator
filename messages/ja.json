@@ -215,6 +215,7 @@
   "Header": {
     "signIn": "ログイン",
     "signOut": "ログアウト",
+    "setting": "設定",
     "openMenu": "メニューを開く",
     "closeMenu": "メニューを閉じる",
     "language": "言語",

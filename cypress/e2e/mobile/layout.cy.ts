@@ -62,7 +62,9 @@ describe('Mobile-responsive shell', () => {
 
     it('closes the drawer when the backdrop is tapped', () => {
       cy.get('button[aria-controls="sidebar-nav"]').click();
-      cy.get('.fixed.inset-0.z-40 [aria-hidden="true"]').click();
+      // Target the backdrop div directly (direct child of the drawer root) to avoid
+      // matching aria-hidden="true" elements inside the sidebar nav (e.g. the <hr>)
+      cy.get('.fixed.inset-0.z-40 > div[aria-hidden="true"]').click();
       cy.get('.fixed.inset-0.z-40').should('not.exist');
     });
 
@@ -75,6 +77,40 @@ describe('Mobile-responsive shell', () => {
         .click();
       cy.url().should('include', '/role');
       cy.get('.fixed.inset-0.z-40').should('not.exist');
+    });
+
+    it('header hides Setting and Sign Out on mobile to prevent overflow', () => {
+      // Setting link and Sign Out button must be invisible in the header at mobile width
+      // (they move to the sidebar drawer instead)
+      cy.get('header').within(() => {
+        cy.get('a[href*="/setting/view/"]').should('not.be.visible');
+        cy.contains('button', 'Sign Out').should('not.be.visible');
+      });
+    });
+
+    it('mobile sidebar drawer exposes Setting and Sign Out (previously unreachable)', () => {
+      // Open the mobile drawer
+      cy.get('button[aria-controls="sidebar-nav"]').click();
+      cy.get('.fixed.inset-0.z-40 nav#sidebar-nav').should('be.visible');
+
+      // Setting link is accessible inside the drawer
+      cy.get('.fixed.inset-0.z-40 nav#sidebar-nav')
+        .find('a[href*="/setting/view/"]')
+        .should('be.visible');
+
+      // Sign Out button is accessible inside the drawer
+      cy.get('.fixed.inset-0.z-40 nav#sidebar-nav')
+        .find('button')
+        .contains('Sign Out')
+        .should('be.visible');
+    });
+
+    it('mobile drawer Setting link navigates to the setting page', () => {
+      cy.get('button[aria-controls="sidebar-nav"]').click();
+      cy.get('.fixed.inset-0.z-40 nav#sidebar-nav')
+        .find('a[href*="/setting/view/"]')
+        .click();
+      cy.url().should('include', '/setting/view/');
     });
   });
 
@@ -89,6 +125,22 @@ describe('Mobile-responsive shell', () => {
       cy.get('button[aria-controls="sidebar-nav"]').should('not.be.visible');
       // Mobile drawer root is never rendered on desktop
       cy.get('.fixed.inset-0.z-40').should('not.exist');
+    });
+
+    it('desktop header still shows Setting link and Sign Out (unaffected)', () => {
+      // Setting link is visible in the header at desktop width
+      cy.get('header').find('a[href*="/setting/view/"]').should('be.visible');
+      // Sign Out button is visible in the header at desktop width
+      cy.get('header').contains('button', 'Sign Out').should('be.visible');
+    });
+
+    it('desktop sidebar does not show mobile-only account section', () => {
+      // The md:hidden account section is present in the DOM but must not be visible
+      // at desktop width — Tailwind md:hidden sets display:none at ≥768px
+      cy.get('.hidden.md\\:flex nav#sidebar-nav').within(() => {
+        cy.get('a[href*="/setting/view/"]').should('not.be.visible');
+        cy.contains('button', 'Sign Out').should('not.be.visible');
+      });
     });
   });
 });

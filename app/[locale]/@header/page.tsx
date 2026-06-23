@@ -94,20 +94,20 @@ export default function HeaderPage() {
               </svg>
             </Link>
             <NotificationBell />
-            <Link href={`/setting/view/${session.user.id}`} className={`flex items-center gap-2 no-underline`}>
-              <span className="hidden sm:block text-sm opacity-75 truncate max-w-40">
+            <Link href={`/setting/view/${session.user.id}`} className={`hidden md:flex items-center gap-2 no-underline`}>
+              <span className="text-sm opacity-75 truncate max-w-40">
                 {session.user.name ?? session.user.email}
               </span>
             </Link>
             <button
               onClick={() => signOut({ callbackUrl: `/${locale}/login` })}
-              className={themeConfig.header.authButton}
+              className={`hidden md:inline-flex ${themeConfig.header.authButton}`}
             >
               {t("signOut")}
             </button>
           </>
         ) : (
-          <Link href="/login" className={`no-underline ${themeConfig.header.authButton}`}>
+          <Link href="/login" className={`hidden md:inline-flex no-underline ${themeConfig.header.authButton}`}>
             {t("signIn")}
           </Link>
         )}
