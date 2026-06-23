@@ -180,7 +180,9 @@
     "signOut": "Sign Out",
     "openMenu": "Open menu",
     "closeMenu": "Close menu",
-    "language": "Language"
+    "language": "Language",
+    "search": "Search",
+    "searchAriaLabel": "Search"
   },
   "Nav": {
     "approvalFlow": "Approval Flow",

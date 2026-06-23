@@ -81,6 +81,18 @@ export default function HeaderPage() {
       <div className="flex items-center gap-3 shrink-0">
         {session?.user ? (
           <>
+            {/* Search – routes to the cross-entity search page */}
+            <Link
+              href="/search"
+              aria-label={t("searchAriaLabel")}
+              title={t("search")}
+              className={`shrink-0 inline-flex items-center ${themeConfig.header.menuButton}`}
+            >
+              {/* Magnifying glass icon */}
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35m1.35-5.4a6.75 6.75 0 11-13.5 0 6.75 6.75 0 0113.5 0z" />
+              </svg>
+            </Link>
             <NotificationBell />
             <Link href={`/setting/view/${session.user.id}`} className={`flex items-center gap-2 no-underline`}>
               <span className="hidden sm:block text-sm opacity-75 truncate max-w-40">
