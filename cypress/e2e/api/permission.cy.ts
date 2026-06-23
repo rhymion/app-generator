@@ -15,9 +15,9 @@ describe('API: Permission', () => {
       cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           expect(res.status).to.eq(200);
-          // db:seed + db:grantAllPermissions pre-populate 32 permission record(s) before any user data
-          expect(res.body.rows).to.have.length(32);
-          expect(res.body.total).to.eq(32);
+          // db:seed + db:grantAllPermissions pre-populate 6 permission record(s) before any user data
+          expect(res.body.rows).to.have.length(6);
+          expect(res.body.total).to.eq(6);
           expect(res.body.page).to.eq(0);
           expect(res.body.pageSize).to.be.a('number');
         });
@@ -28,8 +28,8 @@ describe('API: Permission', () => {
       cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           expect(res.status).to.eq(200);
-          expect(res.body.rows).to.have.length(33);
-          expect(res.body.total).to.eq(33);
+          expect(res.body.rows).to.have.length(7);
+          expect(res.body.total).to.eq(7);
         });
     });
   });

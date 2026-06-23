@@ -12,28 +12,6 @@ const navTranslationKeys: Record<string, string> = {
   "/permission": "permission",
   "/approval_flow": "approvalFlow",
   "/dashboard": "dashboard",
-  "/db_table": "dbTable",
-  "/xxxxx_xxxxx": "xxxxxXxxxx",
-  "/parent1": "parent1",
-  "/parent_only": "parentOnly",
-  "/procedure": "procedure",
-  "/resource": "resource",
-  "/note": "note",
-  "/booking": "booking",
-  "/shift_template": "shiftTemplate",
-  "/shift": "shift",
-  "/product": "product",
-  "/inventory": "inventory",
-  "/purchase_order": "purchaseOrder",
-  "/leave_request": "leaveRequest",
-  "/supply_pool": "supplyPool",
-  "/supply_request": "supplyRequest",
-  "/room_type": "roomType",
-  "/room": "room",
-  "/room_reservation": "roomReservation",
-  "/receiving_purchase_order": "receivingPurchaseOrder",
-  "/receiving_asn": "receivingAsn",
-  "/receiving_receipt": "receivingReceipt",
 };
 
 export default function Sidebar({ hiddenHrefs = [] }: { hiddenHrefs?: string[] }) {
@@ -63,3 +41,4 @@ export default function Sidebar({ hiddenHrefs = [] }: { hiddenHrefs?: string[] }
     </nav>
   );
 }
+

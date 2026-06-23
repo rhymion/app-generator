@@ -4,7 +4,6 @@
 import type { PrismaClient } from '@/app/generated/prisma/client';
 
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
-import { afterApprove as LeaveRequestAfterApprove } from '@/lib/leave_request/service_after_approve';
 
 /**
  * Dispatch post-approval effects for the approved entity.
@@ -17,16 +16,6 @@ export async function dispatchOnApproved(
   approvableId: string,
   approvedByUserId: string,
 ): Promise<void> {
-  if (entityType === 'leave_request') {
-    const entity = await tx.leave_request.findFirst({ where: { approvable_id: approvableId } });
-    if (!entity) return;
-    // Standard field update (auto-generated from x-approval.on_approved.set_fields)
-    await tx.leave_request.update({
-      where: { id: entity.id },
-      data: { status: 'approved' },
-    });
-    // Custom hook — implement in service_after_approve.ts
-    await LeaveRequestAfterApprove(tx, entity.id, approvableId, approvedByUserId);
-    return;
-  }
+  // No approvable entities defined — dispatch is a no-op.
+  void tx; void entityType; void approvableId; void approvedByUserId;
 }
