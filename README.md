@@ -421,6 +421,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | Responsive layout conventions |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | Approval flow system detail |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | Comment bridge system detail |
+| [cleanup.md](docs/knowledge/cleanup.md) | Removing generated files: default cleanup, manifest vs schema-driven, `--prune-orphans`, orphan handling |
 
 ---
 

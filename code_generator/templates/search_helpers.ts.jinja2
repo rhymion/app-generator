@@ -1,0 +1,146 @@
+// AUTO-GENERATED - DO NOT EDIT
+import { Prisma } from '@/app/generated/prisma/client';
+import prisma from '@/lib/prisma';
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+import { getModelPermissions } from '@/lib/authz';
+
+export interface SearchResult {
+  entity_type: string;
+  id: string;
+  snippet: string;
+  rank: number;
+}
+
+export interface SearchPage {
+  results: SearchResult[];
+  total: number;
+  page: number;
+  pageSize: number;
+  facets: Record<string, number>;
+}
+
+export interface SearchOpts {
+  q: string;
+  entityTypes?: string[];
+  userId: string;
+  page: number;
+  pageSize: number;
+}
+
+/**
+ * Execute a cross-entity full-text + trigram search.
+ *
+ * Security:
+ *   - All user-supplied values (q, userId, org IDs) are bound via Prisma.sql parameters.
+ *   - String concatenation for SQL construction is strictly forbidden.
+ *   - Access filtering reuses the same authorization logic as build<Entity>AccessWhere:
+ *     org scope via should_filter_by_org, creator/assignee scope via perms.general.read.
+ */
+export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
+  const { q, entityTypes, userId, page, pageSize } = opts;
+
+  const associatedOrgs = await getAssociatedOrganizations(userId);
+  const associatedOrgIds = associatedOrgs.map((o) => o.id);
+
+{% for entity in search_entities %}
+  const {{ entity.perms_ts_var }} = await getModelPermissions('{{ entity.entity_type }}', userId);
+  const {{ entity.general_read_ts_var }} = {{ entity.perms_ts_var }}.permissions.general.read === true;
+{% endfor %}
+
+  const subQueries: Prisma.Sql[] = [];
+
+{% for entity in search_entities %}
+  if (!entityTypes || entityTypes.includes('{{ entity.entity_type }}')) {
+    // Build access WHERE mirroring build{{ entity.entity_type | replace("_", "") | title }}AccessWhere
+    const {{ entity.access_clauses_ts_var }}: Prisma.Sql[] = [];
+{% if entity.should_filter_by_org %}
+    if (associatedOrgIds.length > 0) {
+      {{ entity.access_clauses_ts_var }}.push(Prisma.sql`{{ entity.org_id_field }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) })`);
+    } else {
+      {{ entity.access_clauses_ts_var }}.push(Prisma.sql`1=0`);
+    }
+{% endif %}
+    if (!{{ entity.general_read_ts_var }}) {
+      const {{ entity.or_clauses_ts_var }}: Prisma.Sql[] = [];
+      if ({{ entity.perms_ts_var }}.permissions.creator?.read && userId) {{ entity.or_clauses_ts_var }}.push(Prisma.sql`creator_id = ${ userId }`);
+{% if entity.has_assignee_id %}
+      if ({{ entity.perms_ts_var }}.permissions.assignee?.read && userId) {{ entity.or_clauses_ts_var }}.push(Prisma.sql`assignee_id = ${ userId }`);
+{% endif %}
+      {{ entity.access_clauses_ts_var }}.push({{ entity.or_clauses_ts_var }}.length > 0 ? Prisma.sql`(${ Prisma.join({{ entity.or_clauses_ts_var }}, ' OR ') })` : Prisma.sql`1=0`);
+    }
+    const {{ entity.access_where_ts_var }}: Prisma.Sql = {{ entity.access_clauses_ts_var }}.length > 0
+      ? Prisma.sql`(${ Prisma.join({{ entity.access_clauses_ts_var }}, ' AND ') })`
+      : Prisma.sql`1=1`;
+
+    subQueries.push(Prisma.sql`
+          SELECT
+            '{{ entity.entity_type }}'::text AS entity_type,
+            id::text AS id,
+            CASE
+              WHEN to_tsvector('simple', COALESCE({{ entity.ts_vector_fields_sql }}, '')) @@
+                   plainto_tsquery('simple', ${ q })
+              THEN ts_headline(
+                'simple',
+                COALESCE({{ entity.snippet_field }}::text, ''),
+                plainto_tsquery('simple', ${ q }),
+                'StartSel=<<<, StopSel=>>>, MaxWords=20, MinWords=10, ShortWord=2, HighlightAll=false'
+              )
+              ELSE LEFT(COALESCE({{ entity.snippet_field }}::text, ''), 150)
+            END AS snippet,
+            (
+              CASE
+                WHEN to_tsvector('simple', COALESCE({{ entity.ts_vector_fields_sql }}, '')) @@
+                     plainto_tsquery('simple', ${ q })
+                THEN 1.0
+                ELSE 0.0
+              END
+              + GREATEST({{ entity.similarity_fields_sql }})
+              + GREATEST({{ entity.bigm_similarity_fields_sql }}) * 0.5
+            )::float8 AS rank
+          FROM "{{ entity.model }}"
+          WHERE
+            (
+              to_tsvector('simple', COALESCE({{ entity.ts_vector_fields_sql }}, '')) @@
+              plainto_tsquery('simple', ${ q })
+              OR ({{ entity.similarity_where_sql }})
+              OR ({{ entity.bigm_where_sql }})
+            )
+            AND ${ {{ entity.access_where_ts_var }} }
+        `);
+  }
+{% endfor %}
+
+  if (subQueries.length === 0) {
+    return { results: [], total: 0, page, pageSize, facets: {} };
+  }
+
+  const unionSql = Prisma.join(subQueries, ' UNION ALL ');
+
+  const countRows = await prisma.$queryRaw<[{ count: bigint }]>`
+    SELECT COUNT(*)::bigint AS count FROM (${ unionSql }) _search_union
+  `;
+  const total = Number(countRows[0]?.count ?? 0);
+
+  const facetRows = await prisma.$queryRaw<Array<{ entity_type: string; count: bigint }>>`
+    SELECT entity_type, COUNT(*)::bigint AS count
+    FROM (${ unionSql }) _search_union
+    GROUP BY entity_type
+  `;
+  const facets: Record<string, number> = {};
+  for (const row of facetRows) {
+    facets[row.entity_type] = Number(row.count);
+  }
+
+  const clampedPage = Math.max(0, Math.floor(page));
+  const clampedSize = Math.min(Math.max(1, Math.floor(pageSize)), 100);
+  const offset = clampedPage * clampedSize;
+
+  const rows = await prisma.$queryRaw<SearchResult[]>`
+    SELECT entity_type, id, snippet, rank
+    FROM (${ unionSql }) _search_union
+    ORDER BY rank DESC
+    LIMIT ${ clampedSize } OFFSET ${ offset }
+  `;
+
+  return { results: rows, total, page: clampedPage, pageSize: clampedSize, facets };
+}

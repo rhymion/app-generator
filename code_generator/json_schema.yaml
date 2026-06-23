@@ -2,6 +2,14 @@ $schema: "http://json-schema.org/draft-07/schema#"
 
 # Support multi-tenancy
 format-version: 1.0
+
+# Generator configuration (DP-3: search opt-in vs all-entity default)
+# search.default_scope: 'opt_in' — only entities with x-generate.search: true are searchable
+# search.default_scope: 'all'    — all entities are searchable; exclude with x-generate.search: false
+x-generator:
+  search:
+    default_scope: all
+
 definitions:
   # ============================================================
   # System entities (required by all apps — see §1.1)
@@ -81,6 +89,7 @@ definitions:
       invalidate: false
       api: true
       test: true
+      search: false
       fields:
         - name
         - image
@@ -115,6 +124,7 @@ definitions:
       delete: false
       invalidate: false
       api: true
+      search: false
       fields:
         - name
         - email
@@ -148,6 +158,11 @@ definitions:
       invalidate: false
       api: true
       test: true
+      search: true
+    x-search:
+      text_fields: [name, description]
+      snippet_field: name
+      bigm_fields: [name, description]
     # Security-sensitive entity: every create/update/delete is recorded in
     # the audit_log table by the generated service layer.
     x-audit: true
@@ -194,6 +209,12 @@ definitions:
       invalidate: false
       api: true
       test: true
+      search: true
+    x-search:
+      text_fields: [name, description]
+      snippet_field: name
+      org_id_field: id
+      bigm_fields: [name, description]
     x-relationships:
       users:
         type: many-to-many
@@ -261,6 +282,7 @@ definitions:
       invalidate: false
       api: true
       test: true
+      search: false
     # Security-sensitive entity: every create/update/delete is recorded in
     # the audit_log table by the generated service layer.
     x-audit: true
@@ -321,6 +343,7 @@ definitions:
       invalidate: false
       api: true
       test: true
+      search: false
     x-relationships:
       preceded_by:
         type: many-to-many
@@ -642,6 +665,11 @@ definitions:
       invalidate: false
       api: true
       test: true
+      search: true
+    x-search:
+      text_fields: [name]
+      snippet_field: name
+      bigm_fields: [name]
     x-custom-components:
       - name: DashboardView
         path: "@/components/_standard/DashboardView"
