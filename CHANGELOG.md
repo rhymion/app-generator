@@ -25,6 +25,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ### Changed
 - **`x-ui.rows`** — textarea row count is now schema-driven for any string field via `x-ui.rows: N` in the schema; previously only `description` fields had a hardcoded 4-row default. Without `x-ui.rows`, the existing `description`→4 convention is preserved
+- **`x-ui.width`** — control form-field width on desktop; integer = 1–12 grid columns, string = literal CSS; mobile always 100%
 - **`set_fields` type-awareness** — `on_approved.set_fields` resolves enum labels to integer indices when the target field type is `integer`, fixing TypeScript build errors on generated dispatch files
 - **Mobile header** — Setting link and Sign Out button hidden on mobile (`md:hidden`) to prevent header overflow; a mobile-only account section (Setting + Sign Out) added to the sidebar drawer with an `<hr>` separator
 

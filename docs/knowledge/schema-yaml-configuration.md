@@ -406,6 +406,7 @@ Place `x-ui` on a `string` field to control how the form input is rendered.
 | Sub-key | Type | Default | Effect |
 |---|---|---|---|
 | `rows` | integer | — | Renders the field as a multiline textarea with the given row count |
+| `width` | integer \| string | — | Controls form-field wrapper width on desktop (md+); mobile always 100% |
 
 **`rows`** — When set, the generator emits `multiline={true} rows={N}` on the `AppFieldText`
 component. Without `x-ui.rows`, only `description` fields receive `rows={4}` by convention;
@@ -425,6 +426,35 @@ notes:
 
 Omitting `x-ui` (or omitting `x-ui.rows`) preserves existing behaviour:
 `description` → 4 rows; all other string fields → single-line.
+
+#### x-ui.width
+
+Controls the form-field wrapper width on desktop (md+). On mobile (xs), the field always expands to 100%.
+
+| Value type | Behaviour |
+|------------|-----------|
+| integer (1–12) | Grid-column units: `val / 12 × 100%` — e.g. `width: 8` → `66.667%` on md+ |
+| string | Literal CSS value passed to the `md` breakpoint — e.g. `width: '400px'` |
+| omitted | No Box wrapper; field uses full container width |
+
+The generator wraps the field in `<Box sx={{ width: { xs: '100%', md: '<value>' } }}>`.
+
+**Examples:**
+
+```yaml
+description:
+  type: string
+  x-ui:
+    width: 8      # 66.667 % of the form container on md+ screens
+
+short_title:
+  type: string
+  x-ui:
+    rows: 1
+    width: 6      # half-width; combine with rows if needed
+```
+
+`x-ui.rows` and `x-ui.width` can be combined: the generator applies the Box wrapper first, then the multiline attribute.
 
 ---
 
