@@ -24,7 +24,7 @@ from helpers.bridge_direction import get_new_form_bridge
 from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit_child_bridge_fk
 from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
-from build_context import build_context
+from build_context import build_context, _get_actual_type
 from generators import (
     chart_context,
     page_list_context,
@@ -222,6 +222,25 @@ _handwritten_notices: list[str] = []
 
 def _note_stub_created(path: Path, why: str, action: str) -> None:
     _handwritten_notices.append(f'  - {path}\n      {why}\n      -> {action}')
+
+
+def _resolve_set_fields(entity_props: dict, raw: dict) -> dict:
+    resolved = {}
+    for field, value in raw.items():
+        prop_def = entity_props.get(field, {})
+        actual = _get_actual_type(prop_def)
+        enum_vals = prop_def.get('enum')
+        if actual in ('integer', 'number') and isinstance(enum_vals, list) and isinstance(value, str):
+            lower_labels = [str(v).lower() for v in enum_vals]
+            if value.lower() not in lower_labels:
+                raise ValueError(
+                    f"set_fields: label '{value}' not found in enum {enum_vals} "
+                    f"for field '{field}'"
+                )
+            resolved[field] = lower_labels.index(value.lower())
+        else:
+            resolved[field] = value
+    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -532,10 +551,12 @@ def generate(schema_path: str, output_dir: str) -> None:
         if not x_approval:
             continue
         on_approved = x_approval.get('on_approved', {})
+        entity_props = def_val.get('properties', {})
+        resolved_sf = _resolve_set_fields(entity_props, on_approved.get('set_fields') or {})
         approvable_entities.append({
             'snake_name': def_key,
             'pascal_name': to_pascal_case(def_key),
-            'set_fields': on_approved.get('set_fields') or {},
+            'set_fields': resolved_sf,
             'emit_hook': bool(on_approved.get('emit_hook', False)),
         })
     _write(
