@@ -86,6 +86,7 @@ export default function HeaderPage() {
               href="/search"
               aria-label={t("searchAriaLabel")}
               title={t("search")}
+              data-testid="auth-indicator"
               className={`shrink-0 inline-flex items-center ${themeConfig.header.menuButton}`}
             >
               {/* Magnifying glass icon */}

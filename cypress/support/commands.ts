@@ -102,7 +102,7 @@ Cypress.Commands.add('login', (email, password) => {
         cy.get('input[name="email"]').type(email);
         cy.get('input[name="password"]').type(password);
         cy.get('button[type="submit"]').click();
-        cy.get('a[title="Search"]').should('be.visible');
+        cy.get('[data-testid="auth-indicator"]').should('be.visible');
     },
     { cacheAcrossSpecs: true }
     );
