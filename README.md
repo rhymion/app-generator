@@ -18,6 +18,8 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - **Dashboard charts** (`x-display.dashboard: true`) — column, bar, line, and pie chart rendering with stacking modes, timestamp bucketing, typed multi-condition filters, CSV/Excel export, and a REST aggregate endpoint (`/api/{entity}/aggregate`) generated per entity
 - **Inventory reservation** (`x-reservation`) — opt-in capacity/inventory reservation; `count` mode reserves a numeric counter column, `item` mode locks rows via an `inventory_allocation` bridge table
 - **Wrapper component architecture** — generated per-entity components use shared wrappers in `components/_standard/` (statically provided; not overwritten by re-runs) and generated components import shared `App*` wrappers from `components/ui/` instead of `@mui/*`, so auto-generated code no longer depends on MUI directly (provider setup excepted)
+- **Cross-entity full-text search** (`x-generate.search: true`) — `GET /api/search` REST endpoint and a global search UI page (`app/[locale]/search/page.tsx`) generated when searchable entities exist; UNION ALL across opted-in entities with per-entity tenant and permission filters; Japanese 2-gram search via pg_bigm; facets (hit counts per entity type) and XSS-safe snippet highlight
+- **`x-ui.rows`** — textarea row count for any string field controlled via `x-ui: { rows: N }` in the schema
 
 ### Relationships
 
@@ -41,6 +43,8 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - **Attachment management** — file and image upload via polymorphic bridge
 - **Inventory reservation** — schema-level `x-reservation` for capacity and inventory management (count and item modes)
 - **Dashboard charts** — per-entity chart widgets (column, bar, line, pie) generated from schema; stacking modes, time bucketing, typed filters, CSV/Excel export, and REST aggregate endpoints
+- **Cross-entity search** — `GET /api/search` with UNION ALL across searchable entities; facets, highlight, Japanese pg_bigm support; header search icon and full search page generated
+- **Approval event dispatch** — post-approval hooks (`x-approval.on_approved.set_fields`, `x-approval.on_approved.emit_hook`) with fire-once idempotency via `approvable.approved_at`
 
 ### Performance
 
@@ -93,13 +97,16 @@ both TOTP codes and recovery codes.
 
 ### Approval Flow
 
-**What works:** Basic approval workflow with configurable flows
+**What works:** Full approval workflow with configurable flows
 (`approval_flow`), status tracking (Pending/Approved/Rejected), audit
-trail (`approval_history`), and role-based approve/reject permissions.
+trail (`approval_history`), role-based approve/reject permissions, and
+post-approval event dispatch (`x-approval.on_approved.set_fields` for
+field updates, `x-approval.on_approved.emit_hook` for custom logic via
+a generated `service_after_approve.ts` once-stub).
 
-**What's missing:** Approval completion does not trigger downstream
-state changes. Approving a record does not automatically update related
-data or enable new operations.
+**What's missing:** Complex multi-step orchestration (e.g., chaining
+approvals to external workflows or automatically kicking off reservation
+changes) requires custom logic in the once-stub.
 
 ---
 
@@ -418,8 +425,9 @@ All architectural documentation lives in `docs/knowledge/`:
 | [dark-mode-and-hydration.md](docs/knowledge/dark-mode-and-hydration.md) | System-aware dark mode, SSR-safe theme initialization |
 | [timezone-handling.md](docs/knowledge/timezone-handling.md) | Server/client timezone conventions |
 | [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | Inline DataGrid children, reference column rendering |
-| [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | Responsive layout conventions |
-| [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | Approval flow system detail |
+| [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | Responsive layout conventions, search header icon, mobile account section |
+| [search.md](docs/knowledge/search.md) | Cross-entity full-text search: schema opt-in, pg_bigm, authorization, generated API and UI |
+| [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | Approval flow system detail, post-approval event dispatch (`on_approved`) |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | Comment bridge system detail |
 | [cleanup.md](docs/knowledge/cleanup.md) | Removing generated files: default cleanup, manifest vs schema-driven, `--prune-orphans`, orphan handling |
 
@@ -452,8 +460,12 @@ All architectural documentation lives in `docs/knowledge/`:
 | MUI-free generated code (wrapper round 2) | ✅ Implemented |
 | Comment reactions | ✅ Implemented |
 | Generalized bridge pattern | ✅ Implemented |
+| Cross-entity full-text search (x-generate.search) | ✅ Implemented |
+| Approval event dispatch (on_approved) | ✅ Implemented |
+| Mobile header / sidebar account section | ✅ Implemented |
+| Schema-driven textarea rows (x-ui.rows) | ✅ Implemented |
 
-> **Backward compatibility (v1.3 → v1.4)**: Non-breaking. Existing schemas work unchanged. Comment reactions and the generalized bridge are opt-in; no action required unless you want to use the new features.
+> **Backward compatibility (v1.4 → v1.5)**: Non-breaking. Existing schemas work unchanged. Cross-entity search is opt-in per entity (`x-generate.search: true`). Approval event dispatch activates only when `x-approval.on_approved` is set in the schema.
 
 ### In Progress
 
@@ -461,7 +473,6 @@ See the [Roadmap](#roadmap) section for features with partial implementations.
 
 ### Planned
 
-- Full-text search beyond column filtering
 - Performance improvements for large datasets (100k+ rows)
 - Hosted no-code schema editor
 
