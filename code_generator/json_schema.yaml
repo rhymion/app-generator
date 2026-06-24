@@ -36,8 +36,11 @@ definitions:
         minLength: 1
       email:
         type: string
+      # Nullable so SSO-provisioned users (Google, etc.) can exist without a
+      # bcrypt hash. Credentials sign-in still requires a non-null password —
+      # auth.ts authorize() rejects accounts with password === null.
       password:
-        type: 
+        type:
           - string
           - "null"
         x-custom-component:
@@ -198,6 +201,8 @@ definitions:
         type:
           - string
           - "null"
+        x-ui:
+          width: 8
 
   organization_detail:
     x-generate:
@@ -424,6 +429,10 @@ definitions:
       id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
+      approved_at:
+        type: string
+        format: date-time
+        nullable: true
 
   approvable_detail:
     x-generate:
@@ -495,6 +504,46 @@ definitions:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
 
+  reaction:
+    type: object
+    required:
+      - id
+      - type
+      - user_id
+      - comment_id
+    x-internal:
+      page: false
+      embed: false
+      api: custom
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      type:
+        type: integer
+        minimum: 0
+        maximum: 4
+        enum:
+          - Like
+          - Love
+          - Laugh
+          - Surprised
+          - Sad
+      user_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: user
+          labelField: name
+      comment_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: comment
+          labelField: id
+
   attachable:
     type: object
     required:
@@ -525,6 +574,10 @@ definitions:
             x-outputType: list
             items:
               $ref: "#/definitions/attachment"
+          resource:
+            $ref: "#/definitions/resource"
+          product:
+            $ref: "#/definitions/product"
 
   attachment:
     type: object
@@ -686,45 +739,3 @@ definitions:
             items:
               $ref: "#/definitions/dashboard_widget"
 
-  reaction:
-    type: object
-    required:
-      - id
-      - type
-      - user_id
-      - comment_id
-    x-internal:
-      page: false
-      embed: false
-      api: custom
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-      type:
-        type: integer
-        minimum: 0
-        maximum: 7
-        enum:
-          - Like
-          - Love
-          - Laugh
-          - Surprised
-          - Sad
-          - Angry
-          - Helpful
-          - Confused
-      user_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: user
-          labelField: name
-      comment_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: comment
-          labelField: id

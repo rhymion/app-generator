@@ -57,7 +57,7 @@ model user {
   // cascade to users.
   tenant_id                 String              @default("default")
   tenant                    tenant              @relation("UserTenant", fields: [tenant_id], references: [id], onDelete: Restrict)
-  reactions                 reaction[]          @relation("UserReactions")
+  reactions                 reaction[]          @relation("ReactionUser")
   // MFA / TOTP (S5). `mfa_secret` is AES-256-GCM ciphertext produced by
   // lib/mfa/crypto.ts; `mfa_enabled` only flips true after a successful
   // first-code verification. `mfa_recovery_codes` is the back-relation
@@ -155,6 +155,7 @@ model approvable {
   creator_id       String?
   creator          user? @relation("ApprovableCreator", fields: [creator_id], references: [id])
   approval_requests approval_request[]
+  approved_at       DateTime?          @db.Timestamptz(0)
 
   @@index([creator_id])
 }
@@ -226,7 +227,7 @@ model reaction {
   id          String   @id @default(cuid())
   type        Int
   user_id     String
-  user        user     @relation("UserReactions", fields: [user_id], references: [id], onDelete: Cascade)
+  user        user     @relation("ReactionUser", fields: [user_id], references: [id])
   comment_id  String
   comment     comment  @relation(fields: [comment_id], references: [id], onDelete: Cascade)
   created_at  DateTime @default(now()) @db.Timestamptz(0)

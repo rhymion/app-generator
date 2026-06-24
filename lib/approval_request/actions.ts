@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow, getUserRoleIds } from '@/lib/authz';
 import { notify } from '@/lib/_notifier';
+import { dispatchOnApproved } from '@/lib/approval_request/on_approved_dispatch';
 
 /**
  * Look up the user who created the entity behind an approval_request so the
@@ -72,7 +73,11 @@ export async function approveApprovalRequest(id: string, message?: string): Prom
     const req = await tx.approval_request.update({
       where: { id },
       data: { status: 1 },
-      select: { status: true },
+      select: {
+        status: true,
+        approvable_id: true,
+        approval_flow: { select: { entity_name: true } },
+      },
     });
     await tx.approval_history.create({
       data: {
@@ -83,6 +88,25 @@ export async function approveApprovalRequest(id: string, message?: string): Prom
         creator_id: userId,
       },
     });
+    // Fire-once: check if all approval_requests for this approvable are now approved
+    const approvableData = await tx.approvable.findUnique({
+      where: { id: req.approvable_id },
+      select: {
+        id: true,
+        approved_at: true,
+        approval_requests: { select: { status: true } },
+      },
+    });
+    const allApproved = approvableData?.approval_requests.every((r) => r.status === 1) ?? false;
+    const alreadyFired = approvableData?.approved_at != null;
+    if (allApproved && !alreadyFired && approvableData) {
+      // Set approved_at first (idempotency flag — prevents double-fire on concurrent requests)
+      await tx.approvable.update({
+        where: { id: approvableData.id },
+        data: { approved_at: new Date() },
+      });
+      await dispatchOnApproved(tx, req.approval_flow.entity_name, approvableData.id, userId);
+    }
   });
   // Fire-and-forget notification (trigger #3): the requester learns the
   // outcome without sharing the approval_history transaction.

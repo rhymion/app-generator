@@ -22,26 +22,29 @@ export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
 
-  // Level 1: approval_request, attachment, dashboard_widget, organization, permission, reaction
+  // Level 1: leaf tables referencing core entities
+  // noteable excluded: not in prisma schema (internal bridge, not persisted)
   await prisma.approval_request.deleteMany();
   await prisma.attachment.deleteMany();
+  await prisma.audit_log.deleteMany();
+  await prisma.comment.deleteMany();
   await prisma.dashboard_widget.deleteMany();
-  await prisma.organization.deleteMany();
+  await prisma.mfa_recovery_code.deleteMany();
   await prisma.permission.deleteMany();
   await prisma.reaction.deleteMany();
 
-  // Level 2: approvable, approval_flow, attachable, comment, dashboard
+  // Level 2: tables with FK to level-3 entities
   await prisma.approvable.deleteMany();
   await prisma.approval_flow.deleteMany();
-  await prisma.attachable.deleteMany();
-  await prisma.comment.deleteMany();
+  await prisma.commentable.deleteMany();
   await prisma.dashboard.deleteMany();
 
-  // Level 3: commentable, role
-  await prisma.commentable.deleteMany();
+  // Level 3: tables with FK to user/role
+  await prisma.attachable.deleteMany();
+  await prisma.organization.deleteMany();
   await prisma.role.deleteMany();
 
-  // Level 4: user
+  // Level 4: root tables
   await prisma.user.deleteMany();
 
   // Clear in-process LRU caches (api-key, permission) on the running server.

@@ -70,3 +70,4 @@ export default function Sidebar({ hiddenHrefs = [] }: { hiddenHrefs?: string[] }
     </nav>
   );
 }
+

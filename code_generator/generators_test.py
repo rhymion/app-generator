@@ -1413,6 +1413,10 @@ def helper_context(
         for fk in entity_fk_deps:
             if fk.get('dep_var_name') == old_var and fk['prop_name'] == r['prop_name']:
                 fk['dep_var_name'] = new_var
+        for dep in deps:
+            for nested_fk in dep.get('fk_deps', []):
+                if nested_fk.get('dep_var_name') == old_var:
+                    nested_fk['dep_var_name'] = new_var
 
     required_field_metas = [f for f in fields if f['required']]
     optional_field_metas = [f for f in fields if not f['required']]
@@ -2871,10 +2875,22 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
     """
     defs = schema['definitions']
 
+    # Entities used as x-bridge.name targets are internal junction tables whose
+    # Prisma model is declared in a separate file (bridge_additions.prisma) that
+    # is NOT loaded by prisma.config.ts. Excluding them prevents
+    # prisma.<bridge>.deleteMany() calls that would fail at runtime.
+    xbridge_table_names: set[str] = set()
+    for defn in defs.values():
+        bridge_name = (defn.get('x-bridge') or {}).get('name')
+        if bridge_name:
+            xbridge_table_names.add(bridge_name)
+
     # --- Collect base entities ---
     base_entities: dict[str, dict] = {}
     for key, defn in defs.items():
         if key.endswith('_detail') or key.endswith('_input'):
+            continue
+        if key in xbridge_table_names:
             continue
         if defn.get('type') == 'object' and 'id' in defn.get('properties', {}):
             base_entities[key] = defn

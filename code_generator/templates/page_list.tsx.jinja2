@@ -58,8 +58,8 @@ async function {{ parent_pascal }}ListContent({
   ]);
 {% for ns in enum_ns_list %}
   const {{ ns.var_name }}: Record<number, string> = {
-{% for idx, key in ns.entries %}
-    {{ idx }}: {{ ns.var_name }}T('{{ key }}'),
+{% for entry in ns['entries'] %}
+    {{ entry[0] }}: {{ ns.var_name }}T('{{ entry[1] }}'),
 {% endfor %}
   };
 {% endfor %}
@@ -81,8 +81,8 @@ async function {{ parent_pascal }}ListContent({
 {% for ns in enum_ns_list %}
     const {{ ns.var_name }}T = await getTranslations('{{ ns.ns }}');
     const {{ ns.var_name }}: Record<number, string> = {
-{% for idx, key in ns.entries %}
-      {{ idx }}: {{ ns.var_name }}T('{{ key }}'),
+{% for entry in ns['entries'] %}
+      {{ entry[0] }}: {{ ns.var_name }}T('{{ entry[1] }}'),
 {% endfor %}
     };
 {% endfor %}
