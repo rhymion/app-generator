@@ -244,6 +244,76 @@ def _resolve_set_fields(entity_props: dict, raw: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Search text_fields auto-derivation helpers
+# ---------------------------------------------------------------------------
+
+def _is_string_prop(prop: dict) -> bool:
+    t = prop.get('type')
+    if isinstance(t, str):
+        return t == 'string'
+    if isinstance(t, list):
+        return 'string' in t and all(v in ('string', 'null') for v in t)
+    return False
+
+
+def _derive_text_fields(properties: dict) -> list[str]:
+    """Auto-derive searchable text fields from entity properties.
+
+    Excludes noise (id, FK, enum, CUID pattern, date/uri format, write-only)
+    and per-field opt-outs (x-search: false).
+    """
+    result = []
+    for field_name, prop in properties.items():
+        if not isinstance(prop, dict):
+            continue
+        if not _is_string_prop(prop):
+            continue
+        # id and explicit primary key
+        if field_name == 'id' or prop.get('x-primary'):
+            continue
+        # FK fields: x-relationship annotation or *_id naming convention
+        if prop.get('x-relationship') or field_name.endswith('_id'):
+            continue
+        # enum values (integer or string)
+        if isinstance(prop.get('enum'), list):
+            continue
+        # CUID/ID pattern strings
+        pattern = prop.get('pattern', '')
+        if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
+            continue
+        # Non-text formats
+        if prop.get('format') in ('date', 'date-time', 'time', 'uri'):
+            continue
+        # Write-only fields (e.g. password, api_key)
+        xc = prop.get('x-custom-component', {})
+        if isinstance(xc, dict) and 'upsert' in (xc.get('target') or []):
+            continue
+        # Per-field opt-out
+        if prop.get('x-search') is False:
+            continue
+        result.append(field_name)
+    return result
+
+
+def _get_primary_display_field(entity_defs: list) -> str | None:
+    """Return the x-display.table primary field from the first definition that has one."""
+    for defn in entity_defs:
+        if not isinstance(defn, dict):
+            continue
+        x_display = defn.get('x-display') or {}
+        table = x_display if isinstance(x_display, list) else x_display.get('table')
+        if not table:
+            continue
+        for col in table:
+            if not isinstance(col, dict):
+                continue
+            for col_name, col_cfg in col.items():
+                if isinstance(col_cfg, dict) and col_cfg.get('primary'):
+                    return col_name
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
 
@@ -571,6 +641,164 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _render(env, 'service_after_approve_stub.ts.jinja2', ent),
             )
             print(f"  Approval stub → lib/{ent['snake_name']}/service_after_approve.ts")
+    # --- Search templates (lib/search/helpers.ts + app/api/search/route.ts) ---
+    # DP-3: default_scope from x-generator.search.default_scope.
+    #   'opt_in' (default) — only entities with x-generate.search: true are searchable
+    #   'all'              — all entities searchable; exclude with x-generate.search: false
+    gen_config = schema.get('x-generator', {})
+    search_default_scope = gen_config.get('search', {}).get('default_scope', 'opt_in')
+
+    search_entities = []
+    for entity in entities:
+        model      = entity['model']
+        parent     = entity['parent']
+        def_key    = entity['definition_key']
+        gen_cfg    = entity.get('generate_config', {})
+        detail_def = schema['definitions'].get(def_key, {}) or {}
+        base_def   = schema['definitions'].get(model, {}) or {}
+
+        # Determine if this entity is search-enabled per DP-3 logic
+        # generate_config only contains the standard keys; read 'search' from raw x-generate
+        x_generate_raw = detail_def.get('x-generate') or base_def.get('x-generate') or {}
+        explicit_search = x_generate_raw.get('search')  # True, False, or None
+        # DP-b: x-audit:true entities default to search=false; requires explicit search:true to opt in
+        is_audited = bool(
+            detail_def.get('x-audit') is True
+            or base_def.get('x-audit') is True
+        )
+        if search_default_scope == 'all':
+            if is_audited and explicit_search is None:
+                is_search = False
+            else:
+                is_search = explicit_search is not False
+        else:  # opt_in
+            is_search = explicit_search is True
+
+        if not is_search:
+            continue
+
+        xsearch = detail_def.get('x-search') or {}
+        if 'text_fields' in xsearch:
+            # Explicit curated list takes priority
+            text_fields = xsearch['text_fields']
+        else:
+            # DP-1: auto-derive from base entity string properties (noise + sensitive excluded)
+            base_props = (base_def if isinstance(base_def, dict) else {}).get('properties', {})
+            text_fields = _derive_text_fields(base_props)
+            if not text_fields:
+                print(f'  Search: {parent!r} has no suitable text_fields after exclusion — skipping from UNION')
+                continue
+
+        snippet_field = xsearch.get('snippet_field')
+        if snippet_field is None:
+            # Priority: x-display primary → first text_field
+            primary = _get_primary_display_field([detail_def, base_def])
+            snippet_field = primary if (primary and primary in text_fields) else text_fields[0]
+
+        # bigm_fields: fields for Japanese 2-gram search (default: same as text_fields)
+        bigm_fields   = xsearch.get('bigm_fields', text_fields)
+
+        # Build SQL fragments used inside the Jinja2 template
+        # ts_vector_fields_sql: concat of all text fields, COALESCE-wrapped
+        ts_parts = " || ' ' || ".join(f"COALESCE({f}, '')" for f in text_fields)
+
+        # similarity_fields_sql: GREATEST(similarity(f1, q), similarity(f2, q), ...)
+        sim_exprs = ', '.join(f"similarity(COALESCE({f}, ''), ${{q}})" for f in text_fields)
+
+        # similarity_where_sql: each field comparison with > 0.3 threshold
+        # Used in WHERE: (sim_f1 > 0.3 OR sim_f2 > 0.3)
+        sim_where_single = ' OR '.join(
+            f"similarity(COALESCE({f}, ''), ${{q}}) > 0.3" for f in text_fields
+        )
+
+        # bigm_where_sql: ILIKE containment check (gin_bigm_ops accelerates ILIKE '%q%').
+        # pg_bigm's =% operator uses padding bigrams and does NOT match mid-string Japanese
+        # (e.g. '権限' =% '一般権限を...' → FALSE). ILIKE '%'||q||'%' correctly matches.
+        # Replaces bigm_similarity()>0.2 which structurally fails for short Japanese queries
+        # (Jaccard denominator grows with text length).
+        # ILIKE: case-insensitive vs LIKE; pg_bigm supports ILIKE with GIN index.
+        bigm_where_single = ' OR '.join(
+            f"COALESCE({f}, '') ILIKE '%' || ${{q}} || '%'" for f in bigm_fields
+        )
+        # bigm_similarity_fields_sql: containment-based rank score (0.0 or 1.0).
+        # Wrapped in GREATEST(...) * 0.5 by the Jinja2 template.
+        bigm_sim_exprs = ', '.join(
+            f"CASE WHEN COALESCE({f}, '') ILIKE '%' || ${{q}} || '%' THEN 1.0 ELSE 0.0 END::float8"
+            for f in bigm_fields
+        )
+
+        # Prisma model is lowercase (matches Prisma model definition)
+        prisma_model = model  # e.g. 'organization'
+
+        # DP-a: derive authorization variables from model definition (replaces org_filter/has_creator_filter)
+        # DP-c: x-search.org_id_field allows filtering by a non-standard column (e.g. 'id' for organization)
+        all_props = {}
+        for item in (base_def if isinstance(base_def, dict) else {}).get('properties', {}).items():
+            all_props[item[0]] = item[1]
+        org_id_field_override = xsearch.get('org_id_field', None)
+        has_organization_id = 'organization_id' in all_props
+        should_filter_by_org = has_organization_id or (org_id_field_override is not None)
+        effective_org_id_field = org_id_field_override if org_id_field_override else 'organization_id'
+        # creator_id is always auto-injected by the code generator (present in every Prisma model)
+        # assignee_id is entity-specific; check schema properties
+        has_assignee_id = 'assignee_id' in all_props
+
+        search_entities.append({
+            'entity_type':           parent,
+            'model':                 prisma_model,
+            'text_fields':           text_fields,
+            'snippet_field':         snippet_field,
+            'ts_vector_fields_sql':  ts_parts,
+            'similarity_fields_sql': sim_exprs,
+            'similarity_where_sql':  sim_where_single,
+            # DP-a: authorization variables aligned with build<Entity>AccessWhere
+            'should_filter_by_org':  should_filter_by_org,
+            'org_id_field':          effective_org_id_field,
+            'has_assignee_id':       has_assignee_id,
+            # Pre-computed TypeScript identifiers (avoids Jinja2/TypeScript ${{{...}}} delimiter conflict)
+            'perms_ts_var':          f'{parent}Perms',
+            'general_read_ts_var':   f'{parent}GeneralRead',
+            'access_clauses_ts_var': f'{parent}AccessClauses',
+            'access_where_ts_var':   f'{parent}AccessWhere',
+            'or_clauses_ts_var':     f'{parent}OrClauses',
+            'bigm_where_sql':            bigm_where_single,
+            'bigm_similarity_fields_sql': bigm_sim_exprs,
+        })
+
+    if search_entities:
+        search_ctx = {'search_entities': search_entities}
+        _write(
+            out / 'lib' / 'search' / 'helpers.ts',
+            _render(env, 'search_helpers.ts.jinja2', search_ctx),
+        )
+        _write(
+            out / 'app' / 'api' / 'search' / 'route.ts',
+            _render(env, 'search_route.ts.jinja2', search_ctx),
+        )
+        _write(
+            out / 'app' / '[locale]' / 'search' / 'page.tsx',
+            _render(env, 'search_page.tsx.jinja2', search_ctx),
+        )
+        _write(
+            out / 'app' / '[locale]' / 'search' / 'actions.ts',
+            _render(env, 'search_actions.ts.jinja2', search_ctx),
+        )
+        entity_names = ', '.join(e['entity_type'] for e in search_entities)
+        print(f'  Search routes → lib/search/helpers.ts + app/api/search/route.ts ({entity_names})')
+        print(f'  Search UI page → app/[locale]/search/page.tsx + actions.ts')
+    else:
+        # DP-2: no searchable entities — delete stale search files to prevent broken imports
+        print('  Search: no searchable entities — skipping search route generation')
+        _stale_search_files = [
+            out / 'lib' / 'search' / 'helpers.ts',
+            out / 'app' / 'api' / 'search' / 'route.ts',
+            out / 'app' / '[locale]' / 'search' / 'page.tsx',
+            out / 'app' / '[locale]' / 'search' / 'actions.ts',
+        ]
+        for _stale in _stale_search_files:
+            if _stale.exists():
+                _stale.unlink()
+                print(f'  Search: deleted stale {_stale.relative_to(out)}')
 
     # --- docs/generated/index.md + app/[locale]/docs/page.mdx ---
     print('\nGenerating documentation index...')

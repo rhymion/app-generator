@@ -18,8 +18,11 @@ export default defineConfig({
       // Task to reset and seed database before tests
       on('task', {
         async 'db:reset'() {
-          const { resetTestDatabase } = require('./cypress/support/db-helpers');
+          const { resetTestDatabase, prisma } = require('./cypress/support/db-helpers');
           await resetTestDatabase();
+          // Ensure search extensions exist after reset
+          await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+          await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pg_bigm');
           // Phase 1.2: re-seat the bootstrap tenant after the wipe so the
           // NOT NULL user.tenant_id constraint is satisfiable in subsequent
           // seeding. Removed when ticket 3.5 folds this into the generated
@@ -111,6 +114,77 @@ export default defineConfig({
             records.push(record);
           }
           return JSON.parse(JSON.stringify(records));
+        },
+        async 'db:createOrganizationJa'(params: { name: string }) {
+          // Creates a Japanese-named organization enrolled by the test user (for pg_bigm tests).
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
+          const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+          if (!testUser) throw new Error('Test user not found. Make sure db:seed has run first.');
+          const record = await prisma.organization.create({
+            data: {
+              name: params.name,
+              creator_id: testUser.id,
+              updater_id: testUser.id,
+              users: { connect: [{ id: testUser.id }] },
+            },
+          });
+          return JSON.parse(JSON.stringify(record));
+        },
+        async 'db:createCreatorOnlyRoleUser'() {
+          // Creates a user with only a 'Creator' special role for 'role' model (no general read).
+          // Also creates one role owned by this user for search isolation testing.
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
+          const { createId } = require('@paralleldrive/cuid2');
+          const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+          if (!testUser) throw new Error('Test user not found. Make sure db:seed has run first.');
+          const creatorUserId = createId();
+          const creatorApiKey = 'test_mk_creator_only_role_000000000000000000000000000000000000000';
+          // Create the 'Creator' special role (role name must be exactly 'Creator')
+          const creatorRole = await prisma.role.create({
+            data: {
+              name: 'Creator',
+              creator_id: testUser.id,
+              updater_id: testUser.id,
+            },
+          });
+          // Grant creator.read for 'role' model via the Creator role
+          await prisma.permission.create({
+            data: {
+              name: 'role',
+              role_id: creatorRole.id,
+              create: true,
+              read: true,
+              update: true,
+              delete: true,
+              creator_id: testUser.id,
+              updater_id: testUser.id,
+            },
+          });
+          // Create the creator-only user
+          await prisma.user.create({
+            data: {
+              id: creatorUserId,
+              creator_id: creatorUserId,
+              updater_id: creatorUserId,
+              email: 'creator_only_role_search@example.com',
+              name: 'Creator Only User (Search Test)',
+              password: 'not_needed',
+              api_key: creatorApiKey,
+              roles: { connect: [{ id: creatorRole.id }] },
+            },
+          });
+          // Create a role owned by this creator-only user (name contains 'Role' for search match)
+          const ownedRole = await prisma.role.create({
+            data: {
+              name: 'RoleOwnedByCreatorUser',
+              description: 'Role for creator-only search isolation test',
+              creator_id: creatorUserId,
+              updater_id: creatorUserId,
+            },
+          });
+          return JSON.parse(JSON.stringify({ apiKey: creatorApiKey, ownedRoleId: ownedRole.id }));
         },
         ...getGeneratedTasks(),
         async 'db:seedReservationInventory'(params: { quantity: number }) {

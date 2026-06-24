@@ -1,6 +1,9 @@
 services:
   postgres-test:
-    image: postgres:16-alpine
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.postgres
+    image: app-postgres-bigm:16
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

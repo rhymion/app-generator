@@ -19,6 +19,11 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
   console.log('Seeding tenant...');
 
+  // ── PostgreSQL extensions required for full-text search ──────────────────
+  // pg_trgm provides the similarity() function used by GET /api/search.
+  // CREATE EXTENSION IF NOT EXISTS is idempotent.
+  await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+
   // ── Default tenant ────────────────────────────────────────────────────────
   // Phase 1 multi-tenancy: every user has a NOT NULL `tenant_id`. The
   // bootstrap "default" tenant must exist before any user is inserted —
