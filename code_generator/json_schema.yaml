@@ -574,10 +574,6 @@ definitions:
             x-outputType: list
             items:
               $ref: "#/definitions/attachment"
-          resource:
-            $ref: "#/definitions/resource"
-          product:
-            $ref: "#/definitions/product"
 
   attachment:
     type: object
