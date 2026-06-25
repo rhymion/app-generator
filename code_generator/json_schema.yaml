@@ -162,10 +162,6 @@ definitions:
       api: true
       test: true
       search: true
-    x-search:
-      text_fields: [name, description]
-      snippet_field: name
-      bigm_fields: [name, description]
     # Security-sensitive entity: every create/update/delete is recorded in
     # the audit_log table by the generated service layer.
     x-audit: true
@@ -216,10 +212,7 @@ definitions:
       test: true
       search: true
     x-search:
-      text_fields: [name, description]
-      snippet_field: name
       org_id_field: id
-      bigm_fields: [name, description]
     x-relationships:
       users:
         type: many-to-many
