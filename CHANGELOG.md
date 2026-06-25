@@ -3,7 +3,31 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [1.5.0] - 2026-06-24
+## [2.0.0] - 2026-06-25
+
+> Consolidates the unreleased 1.5 feature set and corrects two breaking changes
+> that shipped silently in 1.4 (comment reactions) and 1.5-dev (approval
+> dispatch). Released as a major bump rather than patches because 1.5 was never
+> announced. Full upgrade steps: [docs/UPGRADE-2.0.md](docs/UPGRADE-2.0.md).
+
+### BREAKING
+- **`reaction` model now required** (comment reactions, static since 1.4) — the
+  comment-reaction code (`app/api/comment/[commentId]/reactions/toggle/route.ts`,
+  `lib/db_table/actions.ts`, `CommentReactionBar.tsx`) calls `prisma.reaction.*`
+  unconditionally, but the generator did not emit the model, so 1.3-era schemas
+  failed to build. 1.4 adds `reaction` (+ `user`/`comment` relations,
+  `@@unique([comment_id, user_id, type])`, indexes). Pre-1.4 databases must add
+  the table: `prisma db push`, or `docs/sql/2.0-reaction.sql`. New empty table —
+  no backfill.
+- **`approvable.approved_at` column now required** (approval dispatch) —
+  `approve/route.ts` and `lib/approval_request/actions.ts` read/write
+  `approved_at` unconditionally as the fire-once idempotency flag, but the
+  generator did not emit the column. 2.0 adds the nullable column. Pre-2.0
+  databases must add it (`prisma db push`) and run the already-approved backfill
+  so historical items are not re-dispatched: `docs/sql/2.0-approved_at-backfill.sql`.
+- Both are additive (new table / new nullable column / new indexes), so
+  `prisma db push` applies them without data loss. Verified non-breaking back to
+  1.0 once present.
 
 ### Added
 - **Cross-entity full-text search** (`x-generate.search: true`) via PostgreSQL FTS + pg_trgm + pg_bigm:
@@ -34,7 +58,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - Search authorization: fixed `perms.permissions.read` (merged flag) → `perms.permissions.general.read` in search WHERE generation; creator-only users no longer see all rows
 - Schema contamination: restored `json_schema.yaml` (730 lines) after testbed entity definitions (2 367 lines) leaked in via `prj:sync`; also restored `user_detail.search:false` and `setting.search:false` security flags
 
-> **Backward compatibility**: Non-breaking from v1.4. Existing schemas work unchanged. Cross-entity search is opt-in per entity (`x-generate.search: true`). Approval event dispatch requires `x-approval.on_approved` in the schema to activate. No breaking changes.
+> **Backward compatibility**: Cross-entity search is opt-in per entity (`x-generate.search: true`). Approval event dispatch requires `x-approval.on_approved` in the schema to activate. **Correction:** the pre-release 1.5 note claimed "no breaking changes" — that was wrong. Upgrading a pre-2.0 database requires the additive schema changes listed in the **BREAKING** section above; see [docs/UPGRADE-2.0.md](docs/UPGRADE-2.0.md).
 
 ## [1.4.0] - 2026-06-18
 

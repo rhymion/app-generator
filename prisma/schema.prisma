@@ -1,6 +1,7 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 // Corresponding Prisma version: 7
+// Corresponding JSON schema version: 2.0
 
 generator client {
   provider = "prisma-client"
