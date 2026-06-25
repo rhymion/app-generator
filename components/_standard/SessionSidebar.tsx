@@ -29,8 +29,12 @@ export default function SessionSidebar({ hiddenHrefs = [] }: { hiddenHrefs?: str
       {/* Mobile drawer – shown when isOpen */}
       {isOpen && (
         <div className="md:hidden fixed inset-0 z-40 flex">
-          {/* Drawer panel */}
-          <div className={`flex-none w-64 h-full overflow-y-auto shadow-xl mt-14 ${themeConfig.sidebar.panel}`}>
+          {/* Drawer panel — height is viewport minus the mt-14 header offset so the
+              full nav list (including the bottom Sign Out) can be scrolled into view.
+              Using plain h-full would make the panel 100vh tall *plus* the mt-14
+              offset, pushing its bottom 3.5rem below the viewport where overflow-y-auto
+              can never reach it (latent until the nav list is long enough to scroll). */}
+          <div className={`flex-none w-64 h-[calc(100%-3.5rem)] overflow-y-auto shadow-xl mt-14 ${themeConfig.sidebar.panel}`}>
             <Sidebar hiddenHrefs={hiddenHrefs} />
           </div>
           {/* Backdrop – click to close */}

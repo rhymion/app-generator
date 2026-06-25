@@ -93,15 +93,22 @@ describe('Mobile-responsive shell', () => {
       cy.get('button[aria-controls="sidebar-nav"]').click();
       cy.get('.fixed.inset-0.z-40 nav#sidebar-nav').should('be.visible');
 
-      // Setting link is accessible inside the drawer
+      // Setting link is accessible inside the drawer. With a long nav list the
+      // account section sits below the drawer's overflow-y-auto fold; be.visible
+      // does NOT auto-scroll and Cypress treats an element clipped by a scroll
+      // ancestor as hidden, so scroll it into the panel's viewport first.
+      // (scrollIntoView walks up to the overflow-y-auto panel — the nav itself
+      // is not the scroll container, so scrolling the nav would no-op.)
       cy.get('.fixed.inset-0.z-40 nav#sidebar-nav')
         .find('a[href*="/setting/view/"]')
+        .scrollIntoView()
         .should('be.visible');
 
       // Sign Out button is accessible inside the drawer
       cy.get('.fixed.inset-0.z-40 nav#sidebar-nav')
         .find('button')
         .contains('Sign Out')
+        .scrollIntoView()
         .should('be.visible');
     });
 
@@ -109,6 +116,7 @@ describe('Mobile-responsive shell', () => {
       cy.get('button[aria-controls="sidebar-nav"]').click();
       cy.get('.fixed.inset-0.z-40 nav#sidebar-nav')
         .find('a[href*="/setting/view/"]')
+        .scrollIntoView()
         .click();
       cy.url().should('include', '/setting/view/');
     });
