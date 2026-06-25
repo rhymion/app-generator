@@ -102,6 +102,34 @@ The switch between mobile and desktop layout happens at **`md` (768 px)**. To ch
 
 ---
 
+## Header Search Icon (v1.5.0)
+
+A search icon link to `/search` was added to the global header for authenticated users.
+
+- Rendered only for authenticated users (matching `NotificationBell` visibility logic).
+- Uses `next-intl` `Link` so locale prefix is applied automatically.
+- i18n keys: `Header.search` (tooltip/title) and `Header.searchAriaLabel` (aria-label).
+- Defined in `app/@header/page.tsx` (a static file not overwritten by `generate-code`).
+
+---
+
+## Mobile Account Section (v1.5.0)
+
+To prevent header overflow on small screens, account operations were moved from the header to the sidebar on mobile.
+
+**Header changes:**
+- Setting link, Sign Out button, and Sign In button are hidden on mobile (`md:hidden`).
+- Sign In remains visible on desktop for unauthenticated users who reach `/docs` (public path).
+
+**Sidebar changes:**
+- A mobile-only account section (`md:hidden`) is added below the nav links with an `<hr>` separator.
+- Contains: Setting link (`/setting/view/{userId}`) and Sign Out button.
+- i18n key: `Header.setting` (en = "Setting", ja = "設定").
+
+This approach keeps mobile UX intact without introducing a new UI surface.
+
+---
+
 ## Dark Mode
 
 Base body colours (`--background`, `--foreground`) in `app/globals.css` respond to `prefers-color-scheme: dark`. Component-level colours (header, sidebar, footer) are set via `themeConfig` and do not automatically invert — override them manually for a dark theme variant if needed.

@@ -22,6 +22,8 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **ダッシュボードチャート** (`x-display.dashboard: true`) — カラム・バー・ライン・パイチャートのレンダリングを生成；スタッキングモード・タイムスタンプバケット・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント（`/api/{entity}/aggregate`）をエンティティごとに生成
 - **インベントリ予約** (`x-reservation`) — 容量・在庫管理のためのスキーマレベルのオプトイン；`count` モードは数値カウンターカラムを条件付き UPDATE で予約し、`item` モードは `inventory_allocation` ブリッジテーブルで行ロックを実施
 - **ラッパーコンポーネントアーキテクチャ** — エンティティごとに生成されたコンポーネントが `components/_standard/` の共有ラッパーを使用（静的提供；`generate-code` 再実行で上書きされない）、生成コンポーネントは `@mui/*` の代わりに `components/ui/` の共有 `App*` ラッパーを import するため、自動生成コードが MUI に直接依存しなくなりました（プロバイダー設定を除く）
+- **エンティティ横断全文検索** (`x-generate.search: true`) — 検索可能なエンティティが存在する場合に `GET /api/search` REST エンドポイントとグローバル検索 UI ページ（`app/[locale]/search/page.tsx`）を生成；オプトインしたエンティティ全体への UNION ALL クエリで、エンティティごとにテナント・権限フィルターを適用；pg_bigm による日本語 2-gram 検索；ファセット（エンティティタイプ別ヒット件数）と XSS セーフなスニペットハイライト
+- **`x-ui.rows`** — スキーマの `x-ui: { rows: N }` で任意の文字列フィールドのテキストエリア行数を制御
 
 ### リレーションシップ
 
@@ -45,6 +47,8 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **添付ファイル管理** — ポリモーフィックブリッジ経由のファイル・画像アップロード
 - **インベントリ予約** — スキーマレベルの `x-reservation` による容量・在庫管理（count モードと item モード）
 - **ダッシュボードチャート** — スキーマから生成されるエンティティごとのチャートウィジェット（カラム・バー・ライン・パイ）；スタッキング・時間バケット・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント
+- **エンティティ横断検索** — オプトインしたエンティティへの UNION ALL による `GET /api/search`；ファセット・ハイライト・日本語 pg_bigm 対応；ヘッダー検索アイコンと検索ページを生成
+- **承認後イベント発火** — `x-approval.on_approved.set_fields`（フィールド更新）および `x-approval.on_approved.emit_hook`（生成 `service_after_approve.ts` による カスタムロジック）；`approvable.approved_at` による冪等性保証
 
 ### パフォーマンス
 
@@ -85,9 +89,9 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 ### 承認フロー
 
-**動作するもの:** 設定可能なフロー（`approval_flow`）、ステータス管理（保留中/承認済み/却下済み）、監査証跡（`approval_history`）、ロールベースの承認・却下権限を備えた基本的な承認ワークフローが実装されています。
+**動作するもの:** 設定可能なフロー（`approval_flow`）、ステータス管理（保留中/承認済み/却下済み）、監査証跡（`approval_history`）、ロールベースの承認・却下権限を備えた完全な承認ワークフローが実装されています。また、承認後イベント発火（`x-approval.on_approved.set_fields` によるフィールド更新、`x-approval.on_approved.emit_hook` による生成 `service_after_approve.ts` カスタムロジック）もサポートしています。
 
-**未実装のもの:** 承認完了後のダウンストリーム状態変更がトリガーされません。レコードを承認しても、関連データが自動更新されたり新しい操作が有効化されたりしません。
+**未実装のもの:** 複雑なマルチステップオーケストレーション（例：承認を外部ワークフローにチェーン、予約変更の自動起動）はカスタムロジックをワンスタブに実装する必要があります。
 
 ---
 
@@ -214,7 +218,7 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 ### 承認フロー
 
-ステータス管理（保留中/承認済み/却下済み）と完全な監査証跡を備えた、マルチステップかつロールベースの承認ワークフローです。ロールベース権限による基本的な承認・却下は動作しますが、承認完了後のダウンストリーム状態変更はまだトリガーされません。詳細はロードマップセクションを参照してください。
+ステータス管理（保留中/承認済み/却下済み）と完全な監査証跡を備えた、マルチステップかつロールベースの承認ワークフローです。ロールベース権限による承認・却下が動作し、`x-approval.on_approved` によりフィールド更新（`set_fields`）やカスタムロジック（`emit_hook`）などの承認後イベントもトリガーされます。
 
 [docs/knowledge/appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) を参照してください。
 
@@ -406,8 +410,9 @@ app-generator/
 | [dark-mode-and-hydration.md](docs/knowledge/dark-mode-and-hydration.md) | システム連動ダークモード、SSR セーフなテーマ初期化 |
 | [timezone-handling.md](docs/knowledge/timezone-handling.md) | サーバー/クライアントのタイムゾーン規約 |
 | [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | インライン DataGrid 子エンティティ、参照列のレンダリング |
-| [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | レスポンシブレイアウト規約 |
-| [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | 承認フローシステムの詳細 |
+| [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | レスポンシブレイアウト規約、検索ヘッダーアイコン、モバイルアカウントセクション |
+| [search.md](docs/knowledge/search.md) | エンティティ横断全文検索：スキーマオプトイン・pg_bigm・認可・生成 API と UI |
+| [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | 承認フローシステムの詳細、承認後イベント発火（`on_approved`） |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | コメントブリッジシステムの詳細 |
 | [cleanup.md](docs/knowledge/cleanup.md) | 生成ファイルの削除: デフォルトクリーンアップ、マニフェスト vs スキーマ駆動、`--prune-orphans`、孤児ファイル処理 |
 
@@ -439,8 +444,12 @@ app-generator/
 | MUI 非依存の生成コード（ラッパー第2弾） | ✅ 実装済み |
 | コメントリアクション | ✅ 実装済み |
 | ブリッジパターンの汎用化 | ✅ 実装済み |
+| エンティティ横断全文検索（x-generate.search） | ✅ 実装済み |
+| 承認後イベント発火（on_approved） | ✅ 実装済み |
+| モバイルヘッダー / サイドバーアカウントセクション | ✅ 実装済み |
+| スキーマ駆動テキストエリア行数（x-ui.rows） | ✅ 実装済み |
 
-> **後方互換（v1.3 → v1.4）**: 非破壊的変更。既存のスキーマはそのまま動作します。コメントリアクション・汎用ブリッジはオプトインです。新機能を使用しない限り、既存プロジェクトへの対応は不要です。
+> **後方互換（v1.4 → v1.5）**: 非破壊的変更。既存のスキーマはそのまま動作します。エンティティ横断検索はエンティティごとのオプトイン（`x-generate.search: true`）です。承認後イベント発火はスキーマに `x-approval.on_approved` を設定した場合のみ有効になります。
 
 ### 開発中
 
@@ -448,7 +457,6 @@ app-generator/
 
 ### 計画中
 
-- カラムフィルタリングを超えた全文検索
 - 大規模データセット（10 万行以上）のパフォーマンス改善
 - ホスト型ノーコードスキーマエディター
 

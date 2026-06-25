@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(npm run docker:up:test)",
       "Bash(npm run docker:down:test)",
@@ -21,6 +22,28 @@
       "Bash(npx vitest:*)",
       "Bash(npx cypress run --browser chromium --spec *)",
       "Bash(pytest code_generator/tests*)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf /mnt/*)",
+      "Bash(rm -rf /mnt/c/*)",
+      "Bash(rm -rf /home/*)",
+      "Bash(rm -rf ~*)",
+      "Bash(sudo *)",
+      "Bash(su *)",
+      "Bash(kill *)",
+      "Bash(killall *)",
+      "Bash(pkill *)",
+      "Bash(git push --force*)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard*)",
+      "Bash(tmux kill-server*)",
+      "Bash(tmux kill-session*)",
+      "Bash(mkfs*)",
+      "Bash(dd if=*)",
+      "Bash(chmod -R * /)",
+      "Bash(chown -R * /)"
     ]
   },
   "hooks": {

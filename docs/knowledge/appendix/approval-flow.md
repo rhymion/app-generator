@@ -222,5 +222,98 @@ Approver clicks Approve:
     → checks user has approver_role_id
     → updates approval_request.status = 1
     → creates approval_history { pre_status: 0, post_status: 1, ... }
+    → dispatches on_approved events (see §16.9)
     → revalidates path
+```
+
+### 16.9 Post-approval event dispatch (`x-approval.on_approved`)
+
+Added in v1.5.0. When an entity schema includes `x-approval.on_approved`, the generator creates
+`lib/{entity}/on_approved_dispatch.ts` (overwritten on each `generate-code` run) and wires it
+into both the API route (`approve/route.ts`) and server action approval paths.
+
+Fire-once idempotency is guaranteed by `approvable.approved_at`: the dispatch runs only when
+`approved_at` is `null`, then sets it to the current timestamp in the same transaction.
+
+#### Schema: `on_approved.set_fields`
+
+Performs arbitrary field updates on the entity at approval time.
+
+```yaml
+purchase_order:
+  x-approval:
+    on_approved:
+      set_fields:
+        - field: status         # target field name on this entity
+          value: "1"            # string label (resolved to integer index for Int fields)
+```
+
+The generator resolves enum labels to integer indices when the target field type is `integer`,
+preventing TypeScript build errors in the generated dispatch file.
+
+#### Schema: `on_approved.emit_hook`
+
+Generates `lib/{entity}/service_after_approve.ts` as a **once-stub** (written only when the file
+does not exist; never overwritten by `generate-code` re-runs). This is the safe extension point
+for custom post-approval logic.
+
+```yaml
+purchase_order:
+  x-approval:
+    on_approved:
+      emit_hook: true
+```
+
+Generated stub (`lib/purchase_order/service_after_approve.ts`):
+
+```typescript
+import type { Prisma } from "@prisma/client";
+
+type Tx = Omit<Prisma.TransactionClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
+
+export async function afterApprove(tx: Tx, approvedId: string) {
+  // Custom post-approval logic here.
+  // approvedId = the purchase_order record id that was just approved.
+}
+```
+
+#### Generated `on_approved_dispatch.ts`
+
+```typescript
+// lib/purchase_order/on_approved_dispatch.ts  (generated — do not edit)
+export async function dispatchOnApproved(tx: Tx, approvedId: string) {
+  const record = await tx.approvable.findUnique({
+    where: { id: approvedId },
+    include: { purchase_order: true },
+  });
+  if (!record?.purchase_order || record.purchase_order.approvable?.approved_at) return;
+
+  // set_fields
+  await tx.purchase_order.update({
+    where: { id: record.purchase_order.id },
+    data: { status: 1 },
+  });
+
+  // set approved_at for idempotency
+  await tx.approvable.update({
+    where: { id: approvedId },
+    data: { approved_at: new Date() },
+  });
+
+  // emit_hook
+  const { afterApprove } = await import("@/lib/purchase_order/service_after_approve");
+  await afterApprove(tx, record.purchase_order.id);
+}
+```
+
+#### Prisma model change
+
+`approvable` gains `approved_at DateTime?` for idempotency tracking:
+
+```prisma
+model approvable {
+  id               String             @id @default(cuid())
+  approved_at      DateTime?          // set by on_approved_dispatch; prevents re-firing
+  approval_requests approval_request[]
+}
 ```

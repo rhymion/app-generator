@@ -3,6 +3,39 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [1.5.0] - 2026-06-24
+
+### Added
+- **Cross-entity full-text search** (`x-generate.search: true`) via PostgreSQL FTS + pg_trgm + pg_bigm:
+  - `GET /api/search` REST endpoint generated when searchable entities exist; UNION ALL query across all opted-in entities with tenant and permission filters applied per entity
+  - `app/[locale]/search/page.tsx` global search UI (mobile-responsive client component) with search box, entity-type chip per result, snippet, and "View details" link
+  - Japanese 2-gram search via pg_bigm extension (custom Docker image `app-postgres-bigm:16`; GIN bigm indexes via migration)
+  - Facets — per-entity hit counts returned in `facets` field; rendered as filter chips above results
+  - Snippet highlight — `ts_headline` output with XSS-safe `<<<`/`>>>` markers converted to `<mark>` tags in the UI
+  - `text_fields` auto-derivation from entity properties: excludes PKs, FKs (`*_id`), enum fields, CUID-pattern strings, date/URI formats, and `x-search: false` opt-outs; entities left with no text fields are skipped from UNION
+  - Authorization reuse: search WHERE clauses use the same `build<Entity>AccessWhere` / `RichPermissions` logic as list pages — no separate permission configuration needed
+  - `x-audit: true` entities default to `search: false` (audit-safe by default); opt in with `x-generate.search: true`
+  - `x-search.org_id_field` hint for entities where the organization key is not `organization_id` (e.g., `organization_detail.id`)
+  - Global header search icon linking to `/search` (authenticated users only); i18n keys `Header.search` / `Header.searchAriaLabel`
+- **Approval event dispatch** (DP-1~4) — post-approval hooks fired on `approve`:
+  - `approvable.approved_at` DB timestamp flag for fire-once idempotency (prevents re-firing on re-approval)
+  - `x-approval.on_approved.set_fields` — arbitrary field updates performed at approval time; integer/enum target fields receive the correct integer index (not a label string)
+  - `x-approval.on_approved.emit_hook` — generated `service_after_approve.ts` once-stub for custom post-approval logic (not overwritten by `generate-code` re-runs)
+  - `on_approved_dispatch.ts` generated per approvable entity; wired into both the API key (`approve/route.ts`) and server-action (`actions.ts`) approval paths
+
+### Changed
+- **`x-ui.rows`** — textarea row count is now schema-driven for any string field via `x-ui.rows: N` in the schema; previously only `description` fields had a hardcoded 4-row default. Without `x-ui.rows`, the existing `description`→4 convention is preserved
+- **`x-ui.width`** — control form-field width on desktop; integer = 1–12 grid columns, string = literal CSS; mobile always 100%
+- **`set_fields` type-awareness** — `on_approved.set_fields` resolves enum labels to integer indices when the target field type is `integer`, fixing TypeScript build errors on generated dispatch files
+- **Mobile header** — Setting link and Sign Out button hidden on mobile (`md:hidden`) to prevent header overflow; a mobile-only account section (Setting + Sign Out) added to the sidebar drawer with an `<hr>` separator
+
+### Fixed
+- pg_bigm WHERE clause: replaced incorrect `%%` operator with `LIKE '%'||q||'%'` containment (pg_bigm `=%` uses padding bigrams and fails for mid-string Japanese; LIKE containment is GIN index-accelerated and reliable)
+- Search authorization: fixed `perms.permissions.read` (merged flag) → `perms.permissions.general.read` in search WHERE generation; creator-only users no longer see all rows
+- Schema contamination: restored `json_schema.yaml` (730 lines) after testbed entity definitions (2 367 lines) leaked in via `prj:sync`; also restored `user_detail.search:false` and `setting.search:false` security flags
+
+> **Backward compatibility**: Non-breaking from v1.4. Existing schemas work unchanged. Cross-entity search is opt-in per entity (`x-generate.search: true`). Approval event dispatch requires `x-approval.on_approved` in the schema to activate. No breaking changes.
+
 ## [1.4.0] - 2026-06-18
 
 ### Added
