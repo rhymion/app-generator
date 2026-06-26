@@ -3,13 +3,36 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [1.5.0] - 2026-06-24
+## [2.0.0] - 2026-06-25
+
+> Consolidates the unreleased 1.5 feature set and corrects two breaking changes
+> that shipped silently in 1.4 (comment reactions) and 1.5-dev (approval
+> dispatch). Released as a major bump rather than patches because 1.5 was never
+> announced. Full upgrade steps: [docs/UPGRADE-2.0.md](docs/UPGRADE-2.0.md).
+
+### BREAKING
+- **`reaction` model now required** (comment reactions, static since 1.4) — the
+  comment-reaction code (`app/api/comment/[commentId]/reactions/toggle/route.ts`,
+  `lib/db_table/actions.ts`, `CommentReactionBar.tsx`) calls `prisma.reaction.*`
+  unconditionally, but the generator did not emit the model, so 1.3-era schemas
+  failed to build. 1.4 adds `reaction` (+ `user`/`comment` relations,
+  `@@unique([comment_id, user_id, type])`, indexes). Pre-1.4 databases must add
+  the table: `prisma db push`, or `docs/sql/2.0-reaction.sql`. New empty table —
+  no backfill.
+- **`approvable.approved_at` column now required** (approval dispatch) —
+  `approve/route.ts` and `lib/approval_request/actions.ts` read/write
+  `approved_at` unconditionally as the fire-once idempotency flag, but the
+  generator did not emit the column. 2.0 adds the nullable column. Pre-2.0
+  databases must add it (`prisma db push`) and run the already-approved backfill
+  so historical items are not re-dispatched: `docs/sql/2.0-approved_at-backfill.sql`.
+- Both are additive (new table / new nullable column / new indexes), so
+  `prisma db push` applies them without data loss. Verified non-breaking back to
+  1.0 once present.
 
 ### Added
 - **Cross-entity full-text search** (`x-generate.search: true`) via PostgreSQL FTS + pg_trgm + pg_bigm:
   - `GET /api/search` REST endpoint generated when searchable entities exist; UNION ALL query across all opted-in entities with tenant and permission filters applied per entity
   - `app/[locale]/search/page.tsx` global search UI (mobile-responsive client component) with search box, entity-type chip per result, snippet, and "View details" link
-  - Japanese 2-gram search via pg_bigm extension (custom Docker image `app-postgres-bigm:16`; GIN bigm indexes via migration)
   - Facets — per-entity hit counts returned in `facets` field; rendered as filter chips above results
   - Snippet highlight — `ts_headline` output with XSS-safe `<<<`/`>>>` markers converted to `<mark>` tags in the UI
   - `text_fields` auto-derivation from entity properties: excludes PKs, FKs (`*_id`), enum fields, CUID-pattern strings, date/URI formats, and `x-search: false` opt-outs; entities left with no text fields are skipped from UNION
@@ -24,17 +47,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   - `on_approved_dispatch.ts` generated per approvable entity; wired into both the API key (`approve/route.ts`) and server-action (`actions.ts`) approval paths
 
 ### Changed
-- **`x-ui.rows`** — textarea row count is now schema-driven for any string field via `x-ui.rows: N` in the schema; previously only `description` fields had a hardcoded 4-row default. Without `x-ui.rows`, the existing `description`→4 convention is preserved
+- **`x-ui.rows`** — textarea row count is now schema-driven for any string field via `x-ui.rows: N` in the schema; previously only `description` fields had a hardcoded 4-row default
 - **`x-ui.width`** — control form-field width on desktop; integer = 1–12 grid columns, string = literal CSS; mobile always 100%
-- **`set_fields` type-awareness** — `on_approved.set_fields` resolves enum labels to integer indices when the target field type is `integer`, fixing TypeScript build errors on generated dispatch files
 - **Mobile header** — Setting link and Sign Out button hidden on mobile (`md:hidden`) to prevent header overflow; a mobile-only account section (Setting + Sign Out) added to the sidebar drawer with an `<hr>` separator
 
 ### Fixed
-- pg_bigm WHERE clause: replaced incorrect `%%` operator with `LIKE '%'||q||'%'` containment (pg_bigm `=%` uses padding bigrams and fails for mid-string Japanese; LIKE containment is GIN index-accelerated and reliable)
-- Search authorization: fixed `perms.permissions.read` (merged flag) → `perms.permissions.general.read` in search WHERE generation; creator-only users no longer see all rows
-- Schema contamination: restored `json_schema.yaml` (730 lines) after testbed entity definitions (2 367 lines) leaked in via `prj:sync`; also restored `user_detail.search:false` and `setting.search:false` security flags
+- Approval flow: the code generator updated to generate service_after_create.ts stub with approval requests for entities using approval flow
 
-> **Backward compatibility**: Non-breaking from v1.4. Existing schemas work unchanged. Cross-entity search is opt-in per entity (`x-generate.search: true`). Approval event dispatch requires `x-approval.on_approved` in the schema to activate. No breaking changes.
+> **Backward compatibility**: Cross-entity search is opt-in per entity (`x-generate.search: true`). Approval event dispatch requires `x-approval.on_approved` in the schema to activate. **Correction:** the pre-release 1.5 note claimed "no breaking changes" — that was wrong. Upgrading a pre-2.0 database requires the additive schema changes listed in the **BREAKING** section above; see [docs/UPGRADE-2.0.md](docs/UPGRADE-2.0.md).
 
 ## [1.4.0] - 2026-06-18
 
@@ -55,7 +75,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   - Outcome: MUI imports eliminated from generated output (provider setup excepted)
 - **UI improvements** — consumer-grade default styling for generated apps: refreshed theme tokens (header / sidebar / footer), MUI palette and typography (Inter / Noto Sans JP), rounded surfaces, and responsive list/card layouts
 
-> **Backward compatibility**: Non-breaking from v1.3. Existing schemas work unchanged; comment reactions and the generalized bridge are opt-in. No breaking changes.
+> **Backward compatibility**: ~~Non-breaking from v1.3. Existing schemas work unchanged; comment reactions and the generalized bridge are opt-in. No breaking changes.~~ Comment reactions feature turned out to be breaking. See changelog for 2.0.0.
 
 ## [1.3.0] - 2026-06-10
 
