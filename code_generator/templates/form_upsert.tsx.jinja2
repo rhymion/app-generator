@@ -22,7 +22,7 @@ import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 {% endif %}
 import type { FormUpsertProps } from '@/lib/{{ parent }}/types';
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
-import AuditMetadataSection from '@/components/common/AuditMetadataSection';
+import AuditInfo from '@/components/_standard/AuditInfo';
 import { AppFieldText, AppFieldBoolean, AppValidationError{% if has_entity_autocomplete %}, AppFieldRelation{% endif %}{% if has_flatten_accordion_upsert %}, AppSection{% endif %}{% if has_field_select %}, AppFieldSelect{% endif %} } from '@/components/ui';
 {% if has_comment_children %}
 import CommentListWrapper from '@/components/_standard/CommentListWrapper';
@@ -162,7 +162,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {{ flatten_edit_sections }}
 {% endif %}
       <AppValidationError message={validationError} />
-      {isEdit && <AuditMetadataSection src={src} />}
+      {isEdit && <AuditInfo src={src} />}
     </>
   );
 

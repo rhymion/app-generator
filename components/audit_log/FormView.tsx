@@ -2,8 +2,8 @@
 
 import { useTranslations } from 'next-intl';
 import type { FormViewProps } from '@/lib/audit_log/types';
-import AuditMetadataSection from '@/components/common/AuditMetadataSection';
-import { AppDetailShell, AppDetailHeader, AppFieldText, AppFieldBoolean, AppFieldRelation } from '@/components/ui';
+import Box from '@mui/material/Box';
+import { AppDetailShell, AppDetailHeader, AppFieldText, AppFieldBoolean, AppFieldRelation, AppSection } from '@/components/ui';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const tf = useTranslations('Fields');
@@ -37,7 +37,15 @@ export default function FormView({ src, permissions }: FormViewProps) {
         href={src.actor_user_id ? `/user/view/${src.actor_user_id}` : null}
         readOnly
       />
-      <AuditMetadataSection src={src} />
+      {src.metadata && (
+        <AppSection label={tf('metadata')}>
+          <Box component="pre"
+            sx={{ overflow: 'auto', fontSize: '0.85em', m: 0, p: 1,
+                  bgcolor: 'background.paper', borderRadius: 1 }}>
+            {JSON.stringify(src.metadata, null, 2)}
+          </Box>
+        </AppSection>
+      )}
     </AppDetailShell>
   );
 }
