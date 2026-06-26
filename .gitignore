@@ -104,6 +104,9 @@ lib/dashboard/types.ts
 !lib/approval_request/actions.ts
 !lib/approval_request/order-check.ts
 !lib/setting/password-actions.ts
+!lib/audit_log/getters.ts
+!lib/audit_log/types.ts
+!lib/audit_log/virtual_resolvers.ts
 
 # ── app/[locale]/ ──
 app/\[locale\]/*/
@@ -157,6 +160,7 @@ components/*/*
 components/setting/FormUpsert.tsx
 components/setting/FormView.tsx
 components/setting/column_def.tsx
+!components/audit_log/FormView.tsx
 
 # ── cypress/e2e/ ──
 cypress/e2e/*.cy.ts
@@ -169,6 +173,9 @@ cypress/e2e/api/*.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/
+!cypress/support/audit_log/
+cypress/support/audit_log/*
+!cypress/support/audit_log/helper.ts
 
 # ── docs/generated/ ──
 docs/generated/

@@ -195,6 +195,14 @@ export default defineConfig({
           const { getInventoryAllocation } = require('./cypress/support/purchase_order/reservation_helper');
           return await getInventoryAllocation(params.purchase_order_id);
         },
+        async 'db:populateAuditLog'(length: number) {
+          const { populateAuditLogData } = require('./cypress/support/audit_log/helper');
+          return await populateAuditLogData(length);
+        },
+        async 'db:populateAuditLogFull'(length: number) {
+          const { populateAuditLogFullData } = require('./cypress/support/audit_log/helper');
+          return await populateAuditLogFullData(length);
+        },
       });
 
       return config;
