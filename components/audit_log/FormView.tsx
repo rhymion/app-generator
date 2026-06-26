@@ -32,8 +32,8 @@ export default function FormView({ src, permissions }: FormViewProps) {
         readOnly
       />
       <AppFieldRelation
-        label={tf('actionUser')}
-        value={src.actor_user_id || ''}
+        label={tf('actorUser')}
+        value={src.actor_user?.name || ''}
         href={src.actor_user_id ? `/user/view/${src.actor_user_id}` : null}
         readOnly
       />

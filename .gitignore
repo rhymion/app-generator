@@ -118,6 +118,8 @@ app/\[locale\]/*/
 !app/\[locale\]/@sidebar/**
 !app/\[locale\]/_hide/
 !app/\[locale\]/_hide/**
+!app/\[locale\]/audit_log/
+!app/\[locale\]/audit_log/**
 !app/\[locale\]/login/
 !app/\[locale\]/login/**
 !app/\[locale\]/register/

@@ -93,7 +93,8 @@ model user {
   updated_dashboards        dashboard[]         @relation("DashboardUpdater")
   created_tenants           tenant[]            @relation("TenantCreator")
   updated_tenants           tenant[]            @relation("TenantUpdater")
- 
+  audit_logs                audit_log[]
+
   @@index([api_key])
   @@index([creator_id])
   @@index([tenant_id])
@@ -298,6 +299,7 @@ model dashboard_widget {
 model audit_log {
   id            String   @id @default(cuid())
   actor_user_id String?
+  actor_user    user?    @relation(fields: [actor_user_id], references: [id], onDelete: Restrict)
   action        String
   target_table  String?
   target_id     String?
