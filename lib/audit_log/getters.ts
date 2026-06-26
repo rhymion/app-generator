@@ -29,6 +29,9 @@ function buildAuditLogAccessWhere(
 export async function getAuditLogDetail(id: string): Promise<AuditLogDetail | null> {
   const auditLog = await prisma.audit_log.findUnique({
     where: { id },
+    include: {
+      actor_user: true,
+    },
   });
 
   if (!auditLog) {
@@ -75,7 +78,9 @@ export async function getAuditLogPage(
   const orderBy = buildOrderBy(opts.sort, SORTABLE_FIELDS);
 
   const [rowsRaw, total] = await prisma.$transaction([
-    prisma.audit_log.findMany({ where, orderBy, skip, take }),
+    prisma.audit_log.findMany({ where, orderBy, skip, take,
+      include: { actor_user: true },
+    }),
     prisma.audit_log.count({ where }),
   ]);
 
@@ -87,6 +92,7 @@ export async function getAuditLogPage(
     actor_user_id: auditLog.actor_user_id,
     metadata: auditLog.metadata as Record<string, unknown> | null,
     created_at: auditLog.created_at,
+    actor_user: auditLog.actor_user,
   }));
   return { rows, total, page, pageSize };
 }
