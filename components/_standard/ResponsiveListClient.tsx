@@ -17,6 +17,7 @@ interface DisplayFieldConfig<T> {
   headerName: string;
   width?: number;
   format?: 'date-time' | 'date' | 'time';
+  showSeconds?: boolean;
   enumLabels?: Record<number, string>;
   uriKind?: 'image' | 'link';
 }

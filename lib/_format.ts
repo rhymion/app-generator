@@ -18,6 +18,7 @@ import dayjs from 'dayjs';
 export function formatLabelValue(
   value: unknown,
   format?: 'date' | 'time' | 'date-time',
+  showSeconds?: boolean,
 ): string {
   if (value === null || value === undefined || value === '') return '';
   if (format === 'date') {
@@ -27,7 +28,7 @@ export function formatLabelValue(
     return dayjs(value as string).format('HH:mm');
   }
   if (format === 'date-time') {
-    return dayjs(value as string).format('YYYY-MM-DD HH:mm');
+    return dayjs(value as string).format(showSeconds ? 'YYYY-MM-DD HH:mm:ss' : 'YYYY-MM-DD HH:mm');
   }
   return String(value);
 }

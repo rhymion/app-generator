@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import type { FormViewProps } from '@/lib/audit_log/types';
-import AuditInfo from '@/components/_standard/AuditInfo';
+import AuditMetadataSection from '@/components/common/AuditMetadataSection';
 import { AppDetailShell, AppDetailHeader, AppFieldText, AppFieldBoolean, AppFieldRelation } from '@/components/ui';
 
 export default function FormView({ src, permissions }: FormViewProps) {
@@ -37,7 +37,7 @@ export default function FormView({ src, permissions }: FormViewProps) {
         href={src.actor_user_id ? `/user/view/${src.actor_user_id}` : null}
         readOnly
       />
-      <AuditInfo src={src} />
+      <AuditMetadataSection src={src} />
     </AppDetailShell>
   );
 }

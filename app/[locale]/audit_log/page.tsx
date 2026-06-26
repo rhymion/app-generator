@@ -75,7 +75,7 @@ async function AuditLogListContent({
         displayFields={[
           { field: 'action', headerName: tf('action'), width: 200 },
           { field: 'actor_user', headerName: tf('actorUser'), width: 150 },
-          { field: 'created_at', headerName: tf('created_at'), width: 200 }
+          { field: 'created_at', headerName: tf('created_at'), width: 200, format: 'date-time', showSeconds: true }
         ]}
         primaryField="action"
       />

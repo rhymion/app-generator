@@ -149,6 +149,8 @@ app/api/*/
 !app/api/uploads/**
 !app/api/approval_request/
 !app/api/approval_request/**
+!app/api/entity-audit/
+!app/api/entity-audit/**
 app/api/approval_request/route.ts
 app/api/approval_request/\[id\]/route.ts
 app/api/approval_request/bulk/route.ts
@@ -163,6 +165,7 @@ components/setting/FormUpsert.tsx
 components/setting/FormView.tsx
 components/setting/column_def.tsx
 !components/audit_log/FormView.tsx
+!components/common/AuditMetadataSection.tsx
 
 # ── cypress/e2e/ ──
 cypress/e2e/*.cy.ts

@@ -154,6 +154,21 @@ export const getModelPermissions = cache(async (
     if (cached) return cached;
   }
 
+  // audit_log is a system-admin capability. Users holding the 'Administrator' role
+  // get full CRUD access without an explicit permission record, so audit_log does
+  // not appear in the user-facing permission list (permission.cy.ts count stays at 6).
+  if (model === 'audit_log') {
+    const adminRoleCount = await prisma.role.count({
+      where: { name: 'Administrator', users: { some: { id: resolvedUserId } } },
+    });
+    if (adminRoleCount > 0) {
+      const adminPerms: RichPermissions = { ...FULL_FLAGS, general: { ...FULL_FLAGS }, creator: null, assignee: null };
+      const result = { permissions: adminPerms, userId: resolvedUserId };
+      if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
+      return result;
+    }
+  }
+
   const rows = await prisma.permission.findMany({
     where: {
       name: model,

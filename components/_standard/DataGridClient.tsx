@@ -38,6 +38,7 @@ interface DisplayFieldConfig<T> {
   headerName: string;
   width?: number;
   format?: 'date-time' | 'date' | 'time';
+  showSeconds?: boolean;
   enumLabels?: Record<number, string>;
   uriKind?: 'image' | 'link';
 }
@@ -216,7 +217,7 @@ export default function DataGridClient<T extends BaseEntity>({
       valueGetter: (value, row) => {
         const fieldValue = row[fieldConfig.field];
         if (fieldValue === null || fieldValue === undefined) return '';
-        if (fieldConfig.format) return formatLabelValue(fieldValue, fieldConfig.format);
+        if (fieldConfig.format) return formatLabelValue(fieldValue, fieldConfig.format, fieldConfig.showSeconds);
         if (fieldConfig.enumLabels && typeof fieldValue === 'number') return fieldConfig.enumLabels[fieldValue] ?? String(fieldValue);
         if (typeof fieldValue === 'object' && 'name' in (fieldValue as object)) return (fieldValue as unknown as { name: string }).name;
         return String(fieldValue);

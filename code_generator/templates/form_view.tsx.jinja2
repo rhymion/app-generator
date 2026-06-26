@@ -36,7 +36,7 @@ import { add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 {% endif %}
 {% endif %}
-import AuditInfo from '@/components/_standard/AuditInfo';
+import AuditMetadataSection from '@/components/common/AuditMetadataSection';
 import { AppDetailShell, AppDetailHeader, AppFieldText, AppFieldBoolean{% if has_rel_links %}, AppFieldRelation{% endif %}{% if needs_accordion %}, AppSection{% endif %} } from '@/components/ui';
 {% if custom_view_imports %}
 {{ custom_view_imports }}
@@ -85,7 +85,7 @@ export default function FormView({ src, permissions{% if entity_view_components 
 {% if child_view_grids %}
 {{ child_view_grids }}
 {% endif %}
-      <AuditInfo src={src} />
+      <AuditMetadataSection src={src} />
 {% for comp in entity_view_components %}
       <{{ comp.name }} src={src} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />
 {% endfor %}
