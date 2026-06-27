@@ -8,13 +8,13 @@ import { siteConfig, themeConfig } from "@/lib/site-config";
 // Maps nav link href to Nav translation key
 const navTranslationKeys: Record<string, string> = {
   "/": "home",
+  "/audit_log": "auditLog",
   "/user": "user",
   "/role": "role",
   "/organization": "organization",
   "/permission": "permission",
   "/approval_flow": "approvalFlow",
   "/dashboard": "dashboard",
-  "/audit_log": "auditLog",
 };
 
 export default function Sidebar({ hiddenHrefs = [] }: { hiddenHrefs?: string[] }) {
