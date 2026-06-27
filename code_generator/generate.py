@@ -24,7 +24,7 @@ from helpers.bridge_direction import get_new_form_bridge
 from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit_child_bridge_fk
 from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
-from build_context import build_context, _get_actual_type
+from build_context import build_context, build_anonymize_user_context, _get_actual_type
 from generators import (
     chart_context,
     page_list_context,
@@ -626,6 +626,17 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'reaction_constants.ts.jinja2', {'named_constants': named_constants}),
         )
         print(f'  Named constants → lib/reaction_constants.ts ({len(named_constants)} constant(s))')
+
+    # --- anonymize_user.ts (lib/compliance/anonymize_user.ts) ---
+    # Emitted when the user entity has at least one x-pii annotated field.
+    # Generates GDPR Art.17 right-to-erasure scrub function from x-pii annotations.
+    anon_ctx = build_anonymize_user_context(schema)
+    if anon_ctx['has_pii_user']:
+        _write(
+            out / 'lib' / 'compliance' / 'anonymize_user.ts',
+            _render(env, 'anonymize_user.ts.jinja2', anon_ctx),
+        )
+        print(f"  anonymize_user → lib/compliance/anonymize_user.ts ({len(anon_ctx['pii_fields'])} x-pii fields)")
 
     # --- Mention parser (lib/mention/parser.ts) ---
     # Emitted when at least one field in any schema definition is annotated with x-mention: true.

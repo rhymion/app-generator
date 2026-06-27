@@ -628,6 +628,83 @@ def canonicalize_bridges(entity_schema: dict, all_defs: dict) -> dict:
     return {**entity_schema, 'properties': props}
 
 
+def build_anonymize_user_context(schema: dict) -> dict:
+    """Build context for anonymize_user.ts generation.
+
+    Extracts x-pii annotated fields from the user entity definition and computes
+    the pii_data_block string (pre-formatted TypeScript lines for the data: {} block).
+
+    Fields not in json_schema but present in schema.prisma (emailVerified, mfa_secret)
+    are hardcoded after 'image' to match the canonical scrub order.
+
+    Returns:
+        has_pii_user: bool — True when the user entity has at least one x-pii field.
+        pii_data_block: str — pre-formatted TypeScript lines for the data block.
+        pii_fields: list — [{name, pii_type, field_type, scrub_value}] for each x-pii field.
+    """
+    user_def = schema.get('definitions', {}).get('user', {})
+    if not isinstance(user_def, dict):
+        return {'has_pii_user': False, 'pii_data_block': '', 'pii_fields': []}
+
+    props = user_def.get('properties', {}) or {}
+
+    pii_fields = []
+    for field_name, prop_def in props.items():
+        if not isinstance(prop_def, dict):
+            continue
+        pii_type = prop_def.get('x-pii')
+        if pii_type is None:
+            continue
+
+        actual_type = _get_actual_type(prop_def)
+        is_email = (field_name == 'email')
+        is_boolean = (actual_type == 'boolean')
+
+        if is_email:
+            scrub_value = 'placeholderEmail'
+        elif pii_type == 'direct':
+            scrub_value = "'[deleted]'"
+        elif is_boolean:
+            scrub_value = 'false'
+        else:
+            scrub_value = 'null'
+
+        pii_fields.append({
+            'name': field_name,
+            'pii_type': pii_type,
+            'field_type': actual_type or 'string',
+            'scrub_value': scrub_value,
+        })
+
+    if not pii_fields:
+        return {'has_pii_user': False, 'pii_data_block': '', 'pii_fields': []}
+
+    # Build the data block lines (10-space indent matches `data: {` nesting in template).
+    # Prisma-only fields (emailVerified, mfa_secret) are inserted after 'image' to
+    # match the canonical hand-written order.
+    INDENT = '          '
+    lines = []
+    prisma_only_inserted = False
+    for f in pii_fields:
+        lines.append(f"{INDENT}{f['name']}: {f['scrub_value']},")
+        if f['name'] == 'image' and not prisma_only_inserted:
+            lines.append(f"{INDENT}emailVerified: null,")
+            lines.append(f"{INDENT}mfa_secret: null,")
+            prisma_only_inserted = True
+
+    if not prisma_only_inserted:
+        lines.append(f"{INDENT}emailVerified: null,")
+        lines.append(f"{INDENT}mfa_secret: null,")
+
+    lines.append(f"{INDENT}anonymized_at: anonymizedAt,")
+
+    return {
+        'has_pii_user': True,
+        'pii_data_block': '\n'.join(lines),
+        'pii_fields': pii_fields,
+    }
+
+
 def build_context(entity: dict, schema: dict) -> dict:
     parent      = entity['parent']
     model       = entity['model']
