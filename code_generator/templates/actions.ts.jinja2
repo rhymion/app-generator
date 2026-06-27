@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 {% endif %}import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 {% if comment_actions_code %}import { notify } from '@/lib/_notifier';
+{% endif %}{% if comment_has_mention %}import { encodeMentions, type UserLookup } from '@/lib/mention/parser';
 {% endif %}{% if has_commentable %}import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 import type { CommentReactionSummary } from './types';
 {% endif %}

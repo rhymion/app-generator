@@ -627,6 +627,23 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         print(f'  Named constants → lib/reaction_constants.ts ({len(named_constants)} constant(s))')
 
+    # --- Mention parser (lib/mention/parser.ts) ---
+    # Emitted when at least one field in any schema definition is annotated with x-mention: true.
+    _has_any_mention = any(
+        any(
+            isinstance(prop, dict) and prop.get('x-mention') is True
+            for prop in defn.get('properties', {}).values()
+        )
+        for defn in schema.get('definitions', {}).values()
+        if isinstance(defn, dict)
+    )
+    if _has_any_mention:
+        _write(
+            out / 'lib' / 'mention' / 'parser.ts',
+            _render(env, 'mention_parser.ts.jinja2', {}),
+        )
+        print('  Mention parser → lib/mention/parser.ts')
+
     # --- Comment reactions API route (app/api/comment/[commentId]/reactions/toggle/route.ts) ---
     # Emitted whenever x-internal integer enum entities exist (i.e., reactions are enabled).
     # D3=A: toggle endpoint is POST /api/comment/[commentId]/reactions/toggle

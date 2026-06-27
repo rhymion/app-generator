@@ -301,22 +301,30 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
     return '\n'.join(lines)
 
 
-def _build_comment_actions(comment_children: list[dict], parent: str, model: str, has_assignee_id: bool) -> str:
+def _build_comment_actions(comment_children: list[dict], parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False) -> str:
     parent_pascal = to_pascal_case(parent)
     assignee_select = ", assignee_id: true" if has_assignee_id else ""
     recipient_list = (
         "[parentRow.creator_id, parentRow.assignee_id]"
         if has_assignee_id else "[parentRow.creator_id]"
     )
+    encode_block = (
+        "\n  const allUsers = await prisma.user.findMany({ select: { id: true, name: true } });"
+        "\n  const userLookup: UserLookup = Object.fromEntries("
+        "\n    allUsers.map(u => [u.name, { id: u.id, name: u.name }])"
+        "\n  );"
+        "\n  const storedMessage = encodeMentions(message, userLookup);"
+    ) if comment_has_mention else ""
+    stored_var = "storedMessage" if comment_has_mention else "message"
     lines = []
     for c in comment_children:
         child_model   = c['name']
         parent_id_prop = f'{model}_id'
         lines.append(f"""
 export async function add{parent_pascal}Comment({parent_id_prop}: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();
+  const userId = await getSessionUserIdOrThrow();{encode_block}
   await prisma.{child_model}.create({{
-    data: {{ message, {parent_id_prop}, creator_id: userId }},
+    data: {{ message: {stored_var}, {parent_id_prop}, creator_id: userId }},
   }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
@@ -340,12 +348,12 @@ export async function add{parent_pascal}Comment({parent_id_prop}: string, messag
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();
+  const userId = await getSessionUserIdOrThrow();{encode_block}
   const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
   }}
-  await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message }} }});
+  await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message: {stored_var} }} }});
   revalidatePath('/{parent}');
 }}
 
@@ -362,7 +370,7 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
     return '\n'.join(lines)
 
 
-def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool) -> str:
+def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False) -> str:
     """Generate comment actions using the shared commentable bridge (single comment table)."""
     parent_pascal = to_pascal_case(parent)
     assignee_select = ", assignee_id: true" if has_assignee_id else ""
@@ -370,11 +378,19 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
         "[parentRow.creator_id, parentRow.assignee_id]"
         if has_assignee_id else "[parentRow.creator_id]"
     )
+    encode_block = (
+        "\n  const allUsers = await prisma.user.findMany({ select: { id: true, name: true } });"
+        "\n  const userLookup: UserLookup = Object.fromEntries("
+        "\n    allUsers.map(u => [u.name, { id: u.id, name: u.name }])"
+        "\n  );"
+        "\n  const storedMessage = encodeMentions(message, userLookup);"
+    ) if comment_has_mention else ""
+    stored_var = "storedMessage" if comment_has_mention else "message"
     return f"""
 export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();
+  const userId = await getSessionUserIdOrThrow();{encode_block}
   await prisma.comment.create({{
-    data: {{ message, commentable_id, creator_id: userId }},
+    data: {{ message: {stored_var}, commentable_id, creator_id: userId }},
   }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
@@ -398,12 +414,12 @@ export async function add{parent_pascal}Comment(commentable_id: string, message:
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();
+  const userId = await getSessionUserIdOrThrow();{encode_block}
   const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
   }}
-  await prisma.comment.update({{ where: {{ id: commentId }}, data: {{ message }} }});
+  await prisma.comment.update({{ where: {{ id: commentId }}, data: {{ message: {stored_var} }} }});
   revalidatePath('/{parent}');
 }}
 
@@ -1022,11 +1038,18 @@ def build_context(entity: dict, schema: dict) -> dict:
     self_parent_rel  = next((r for r in parent_rels_raw if r['target'] == model), None)
     self_parent_prop = self_parent_rel['prop_name'] if self_parent_rel else None
 
+    # Detect mention fields on the shared comment entity (P2-1: encodeMentions on save).
+    _comment_def = schema.get('definitions', {}).get('comment', {})
+    comment_has_mention = bool(commentable_rel or comment_children) and any(
+        isinstance(fp, dict) and fp.get('x-mention') is True
+        for fp in (_comment_def.get('properties') or {}).values()
+    )
+
     # Comment actions code
     if commentable_rel:
-        comment_actions_code = _build_comment_actions_bridge(parent, model, has_assignee_id)
+        comment_actions_code = _build_comment_actions_bridge(parent, model, has_assignee_id, comment_has_mention)
     else:
-        comment_actions_code = _build_comment_actions(comment_children, parent, model, has_assignee_id)
+        comment_actions_code = _build_comment_actions(comment_children, parent, model, has_assignee_id, comment_has_mention)
 
     # Snapshot child mappings (for service)
     snapshot_child_mappings = '\n'.join(
@@ -1688,6 +1711,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         non_comment_ch=embedded_ch,
         comment_children=comment_children,
         has_commentable=bool(commentable_rel),
+        comment_has_mention=comment_has_mention,
         commentable_rel_name=commentable_rel['relation_name'] if commentable_rel else None,
         child_mappings=child_mappings,
         child_form_data_extractions=child_form_data_extractions,
