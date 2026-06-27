@@ -765,3 +765,31 @@ Phase 3:
 4. Use row locking or a guarded status update as the default for item mode.
 5. Treat cancellation/release/backorder as later patterns, not first-scope CRUD
    updates.
+
+## Decision Log
+
+### x-receiving: Top-Level Singleton (Option A) — Lord's Ruling 2026-06-27
+
+x-receiving stays top-level singleton (Option A, Lord's decision 2026-06-27).
+No concrete multi-series receiving requirement exists; YAGNI applies.
+
+**Asymmetry justification**: The asymmetry with x-reservation is intentional
+and justified:
+
+- x-reservation: entity-level because it models a single entity's behavior
+  (count|item mode coexist)
+- x-receiving: top-level because it spans PO/ASN/Receipt + inventory — no
+  single owning entity
+
+**Anti-pattern warning**: Do NOT mechanically symmetrize x-receiving to
+entity-level — it is an anti-pattern. Item-mode entities (e.g. rooms, fixed
+assets) do NOT need a corresponding x-receiving.
+
+**Future path**: If multi-series receiving becomes a real requirement, the
+correct extension is a top-level named map
+(Option B: `x-receiving: {raw_materials: {...}, finished_goods: {...}}`),
+NOT entity-level.
+
+**Inventory pool consistency**: Count-mode reservations and receiving operate on
+the same inventory pool (receiving = quantity increase; reservation =
+reserved_quantity hold). Always reference the same pool entity consistently.
