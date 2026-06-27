@@ -33,6 +33,7 @@ interface ResponsiveListClientProps<T extends BaseEntity> {
   fetchPage?: (opts: PageOpts) => Promise<PageResult<T>>;
   basePath: string;
   removeAction?: (ids: string[]) => Promise<void>;
+  invalidateAction?: (id: string) => Promise<void>;
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];
   permissions?: ModelPermissions;
@@ -56,6 +57,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
   fetchPage,
   basePath,
   removeAction,
+  invalidateAction,
   entityLabel = 'Item',
   displayFields,
   permissions,
@@ -96,6 +98,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
       fetchPage={fetchPage}
       basePath={basePath}
       removeAction={removeAction}
+      invalidateAction={invalidateAction}
       entityLabel={entityLabel}
       displayFields={displayFields}
       permissions={permissions}

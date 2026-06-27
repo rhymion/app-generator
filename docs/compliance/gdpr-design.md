@@ -149,7 +149,7 @@ generator テンプレート変更 + schema アノテーション追加
 1. 対象 user レコードを特定 (email で検索)
 2. user テーブルの PII フィールドをスクラブ:
    - name      → "[deleted]"  (または固定プレースホルダ)
-   - email     → "<uuid>@deleted.invalid"  (ユニーク制約維持のため uuid を付与)
+   - email     → "${userId}@deleted.invalid"  (userId 由来 placeholder — @unique 制約維持のため NULL 化より適切。NULL 化には nullable マイグレーションが必要で過剰。userId 由来のため実 PII を含まない)
    - password  → NULL
    - api_key   → NULL
    - image     → NULL
@@ -157,8 +157,8 @@ generator テンプレート変更 + schema アノテーション追加
    - mfa_secret → NULL
 3. Account テーブルの対象行を削除 (Cascade 済みだが明示的に確認)
 4. Session テーブルの対象行を削除 (Cascade 済み)
-5. audit_log.actor_user_id → NULL に更新 (Restrict のため user 行は残す)
-   audit_log.metadata の PII 部分 → NULL または "[redacted]" に更新
+5. audit_log.metadata の email 等 PII キーを "[redacted]" に置換
+   actor_user_id は保持 (擬似匿名キーとして監査チェーン維持 — DP-6 改定参照)
 6. comment.message / approval_history.message の PII 検出・上書き
    (自由記述のため半自動: 検索 + 人的確認 → Phase 3 で自動化検討)
 7. attachment.name / attachment.path → "[redacted_N]" に変名
@@ -182,7 +182,7 @@ generator テンプレート変更 + schema アノテーション追加
 |--------|-------------------------------|-----------------|
 | `comment` | user 行残存・`creator_id` FK はそのまま (表示時 `[deleted]`) | `message` 内の PII テキストを人的 + 半自動で redact |
 | `approval_history` | `creator_id` FK はそのまま | `message` 内の PII テキストを redact |
-| `audit_log` | `actor_user_id` を NULL に更新 | `metadata` 内の PII を NULL / `[redacted]` に |
+| `audit_log` | `actor_user_id` を保持 (擬似匿名キー — DP-6 改定) | `metadata` 内の email 等 PII キーを `[redacted]` に |
 | `reaction` | `user_id` FK はそのまま (匿名ユーザーのリアクションとして扱う) | N/A |
 | その他 `creator_id` 系 | FK はそのまま。表示時に「削除済みユーザー」として処理 | N/A |
 
@@ -597,21 +597,39 @@ cmd_102 設計原則 (memory より):
 
 ---
 
-### DP-6: audit_log の Restrict 維持 vs 変更 (追加 DP)
+### DP-6: audit_log の Restrict 維持 vs actor_user_id 扱い (改定 2026-06-27)
 
 **問**: `audit_log.actor_user_id` の明示的 Restrict (schema.prisma:301-302) を維持するか
 
 | 選択肢 | 内容 |
 |--------|------|
-| **A: Restrict 維持 + actor_user_id NULL 化** (推奨) | 監査ログ行を保持しつつ、消去要請時に `actor_user_id` を NULL に更新。監査証跡の完全性を維持 |
-| **B: SetNull に変更** | user 削除時に自動的に NULL になる。簡単だが「意図的 Restrict」の保護を失う |
+| **A: Restrict 維持 + actor_user_id NULL 化** | 監査ログ行を保持しつつ、消去要請時に `actor_user_id` を NULL に更新 |
+| **B: Restrict 維持 + actor_user_id 保持** (**採用**) | `actor_user_id` を削除せず擬似匿名キーとして保持。PII(email/name/metadata) は redact 済で表示上識別不能。同一 actor の監査チェーン追跡・不正調査参照可能性を維持 |
 | **C: Cascade** | user 削除と同時に監査ログも削除。⚠️ 監査完全性が失われ法的リスク |
 
-**推奨**: A — 監査ログは正当な利益 (Art.6(1)(f)) で保持。actor の匿名化で GDPR 対応と両立。
+**殿裁定 (cmd_244)**: B — `actor_user_id` NULL 化を廃止。
+- PII(name/email/metadata) は redact 済で表示上識別不能
+- `actor_user_id`(UUID) は擬似匿名キーとして保持: 削除済 user の不正調査・同一 actor 追跡に必要
+- 根拠: GDPR 17条(3)(b)(e) — 法的請求・正当利益による保持例外
+
+**実装**: `anonymizeUser()` の `actor_user_id` NULL 化ステップを削除し、代わりに `audit_log.metadata` の email 等 PII キーを `[redacted]` に置換。
 
 ---
 
-*以上、全 6 決定点を列挙。DP-1〜4 は当初タスクYAML記載のもの。DP-5・DP-6 は設計分析中に新たに発見した必要決定点として追加。*
+### DP-7: legal-hold — 削除済 wrongdoer の再識別手段 (将来 Decision Point)
+
+**背景**: 擬似匿名キー保持 (DP-6 B) だけでは、真の意味で削除済み wrongdoer を後から再識別するには不足する。
+
+**将来課題**:
+- 匿名化前 snapshot を封緘ストア (access-controlled vault) へ保存
+- 17条(3)(e) 正当化: 公共の利益・法的義務・legal hold
+- アクセス制限付き・期間限定の identity 保持機構
+
+**本 Phase での扱い**: 作り込まず。将来 Phase (Phase 3 以降) で設計する Decision Point とする。
+
+---
+
+*以上、全 7 決定点を列挙。DP-1〜4 は当初タスクYAML記載のもの。DP-5・DP-6 は設計分析中に発見。DP-7 は cmd_244 殿指摘による将来 Decision Point。*
 
 ---
 
