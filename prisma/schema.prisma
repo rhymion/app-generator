@@ -94,6 +94,7 @@ model user {
   created_tenants           tenant[]            @relation("TenantCreator")
   updated_tenants           tenant[]            @relation("TenantUpdater")
   audit_logs                audit_log[]
+  anonymized_at             DateTime?            // Timestamp when PII was scrubbed (GDPR anonymization)
 
   @@index([api_key])
   @@index([creator_id])

@@ -622,6 +622,25 @@ def validate_schema(schema: dict) -> None:
                     )
 
     # -----------------------------------------------------------------------
+    # 8. x-pii field annotation validation
+    # -----------------------------------------------------------------------
+    _VALID_PII_VALUES = {'direct', 'indirect', 'sensitive', 'none'}
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        props = defn.get('properties', {})
+        for prop_name, prop_def in props.items():
+            if not isinstance(prop_def, dict):
+                continue
+            pii_val = prop_def.get('x-pii')
+            if pii_val is not None and pii_val not in _VALID_PII_VALUES:
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"x-pii value '{pii_val}' is not valid.  "
+                    f"Allowed values: {sorted(_VALID_PII_VALUES)}."
+                )
+
+    # -----------------------------------------------------------------------
     # Report
     # -----------------------------------------------------------------------
     if errors:

@@ -22,7 +22,7 @@ export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
 
-  // Level 1: leaf tables (no FK to generated entities) + schema-external tables
+  // Level 1: leaf tables with no outbound FKs to generated entities
   await prisma.approval_request.deleteMany();
   await prisma.attachment.deleteMany();
   await prisma.audit_log.deleteMany();
