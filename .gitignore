@@ -108,6 +108,7 @@ lib/dashboard/types.ts
 !lib/audit_log/types.ts
 !lib/audit_log/virtual_resolvers.ts
 !lib/compliance/**
+!lib/mention/**
 
 # ── app/[locale]/ ──
 app/\[locale\]/*/

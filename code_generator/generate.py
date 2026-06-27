@@ -295,6 +295,19 @@ def _derive_text_fields(properties: dict) -> list[str]:
     return result
 
 
+def _derive_mention_fields(properties: dict) -> list[str]:
+    """Return field names annotated with x-mention: true.
+
+    These fields store @[user_id:uuid] mention syntax and require mention-parser
+    utilities at render time. Detected here so Phase 2 templates can use the list.
+    """
+    return [
+        field_name
+        for field_name, prop in properties.items()
+        if isinstance(prop, dict) and prop.get('x-mention') is True
+    ]
+
+
 def _get_primary_display_field(entity_defs: list) -> str | None:
     """Return the x-display.table primary field from the first definition that has one."""
     for defn in entity_defs:

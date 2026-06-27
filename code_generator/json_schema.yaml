@@ -30,6 +30,15 @@ x-retention:
     Examples: "account_lifetime", "7_years", "30_days_after_deletion"
     Used to generate retention enforcement logic in future phases.
 
+x-mention:
+  type: boolean
+  default: false
+  description: |
+    When true, the field supports @[user_id:uuid] mention syntax.
+    The generator will include mention-parser utilities for this field.
+    On render: @[user_id:xxx] is resolved to user.name (or '[deleted]' after anonymization).
+    On save: @username patterns are converted to @[user_id:xxx] format.
+
 definitions:
   # ============================================================
   # System entities (required by all apps — see §1.1)
@@ -519,6 +528,7 @@ definitions:
       message:
         type: string
         minLength: 1
+        x-mention: true
       commentable_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"

@@ -637,6 +637,12 @@ def build_context(entity: dict, schema: dict) -> dict:
         }
     filtered_props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
 
+    # Mention fields: fields annotated with x-mention: true (Phase 2 template generation).
+    mention_fields: list[str] = [
+        fn for fn, fp in filtered_props.items()
+        if isinstance(fp, dict) and fp.get('x-mention') is True
+    ]
+
     # Collect explicit readonly fields: x-readonly per-field OR x-readonly-fields entity-level.
     # Stage 2 will extend this with automatic bridge parent fields.
     _ro_from_entity: set[str] = set(model_def.get('x-readonly-fields') or [])
@@ -1761,4 +1767,6 @@ def build_context(entity: dict, schema: dict) -> dict:
         readonly_fields=readonly_fields,
         readonly_fields_api=readonly_fields_api,
         readonly_fields_api_select=readonly_fields_api_select,
+        # Mention fields: x-mention: true annotations. Phase 2 templates use this list.
+        mention_fields=mention_fields,
     )
