@@ -39,6 +39,19 @@ x-mention:
     On render: @[user_id:xxx] is resolved to user.name (or '[deleted]' after anonymization).
     On save: @username patterns are converted to @[user_id:xxx] format.
 
+x-gdpr-mode:
+  type: string
+  enum:
+    - internal   # Applies to employee/internal user data only
+    - consumer   # Applies to general consumer data only
+    - both       # Applies to both internal and consumer data
+  default: both
+  description: |
+    Specifies the data subject scope this model/field applies to.
+    internal: employee data only
+    consumer: general consumer data only
+    both: applies to both scopes
+
 definitions:
   # ============================================================
   # System entities (required by all apps — see §1.1)

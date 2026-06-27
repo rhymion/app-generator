@@ -643,6 +643,15 @@ def build_context(entity: dict, schema: dict) -> dict:
         if isinstance(fp, dict) and fp.get('x-mention') is True
     ]
 
+    # GDPR mode: field-level x-gdpr-mode annotations (default 'both' when absent).
+    # Model-level x-gdpr-mode overrides the per-field default when set.
+    model_gdpr_mode: str = model_def.get('x-gdpr-mode', 'both')
+    gdpr_mode_fields: dict[str, str] = {
+        fn: fp.get('x-gdpr-mode', 'both')
+        for fn, fp in filtered_props.items()
+        if isinstance(fp, dict) and fp.get('x-gdpr-mode') is not None
+    }
+
     # Collect explicit readonly fields: x-readonly per-field OR x-readonly-fields entity-level.
     # Stage 2 will extend this with automatic bridge parent fields.
     _ro_from_entity: set[str] = set(model_def.get('x-readonly-fields') or [])
@@ -1769,4 +1778,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         readonly_fields_api_select=readonly_fields_api_select,
         # Mention fields: x-mention: true annotations. Phase 2 templates use this list.
         mention_fields=mention_fields,
+        # GDPR mode: model-level and field-level x-gdpr-mode annotations.
+        model_gdpr_mode=model_gdpr_mode,
+        gdpr_mode_fields=gdpr_mode_fields,
     )

@@ -308,6 +308,23 @@ def _derive_mention_fields(properties: dict) -> list[str]:
     ]
 
 
+def _derive_gdpr_mode_fields(properties: dict) -> dict[str, str]:
+    """Return a mapping of field_name -> x-gdpr-mode for fields that have the annotation.
+
+    Fields without x-gdpr-mode are not included; callers should default to 'both'.
+    """
+    return {
+        field_name: prop.get('x-gdpr-mode', 'both')
+        for field_name, prop in properties.items()
+        if isinstance(prop, dict) and prop.get('x-gdpr-mode') is not None
+    }
+
+
+def _get_model_gdpr_mode(model_def: dict) -> str:
+    """Return the model-level x-gdpr-mode value, defaulting to 'both'."""
+    return model_def.get('x-gdpr-mode', 'both')
+
+
 def _get_primary_display_field(entity_defs: list) -> str | None:
     """Return the x-display.table primary field from the first definition that has one."""
     for defn in entity_defs:
