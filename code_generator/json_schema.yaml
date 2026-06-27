@@ -136,8 +136,11 @@ definitions:
       view: true
       new: false
       edit: true
-      delete: true
-      invalidate: false
+      delete: false
+      invalidate:
+        enabled: true
+        handler: anonymizeUser
+        module: lib/compliance/anonymize_user
       api: true
       test: true
       search: false

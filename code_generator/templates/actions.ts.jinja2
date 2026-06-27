@@ -1,8 +1,11 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-{% if comment_actions_code or (can_list and can_delete) %}import { revalidatePath } from 'next/cache';
+{% if comment_actions_code or (can_list and can_delete) or can_invalidate %}import { revalidatePath } from 'next/cache';
 {% endif %}import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
+{% if can_invalidate and invalidate_module %}
+import { {{ invalidate_handler }} } from '@/{{ invalidate_module }}';
+{% endif %}
 import prisma from '@/lib/prisma';
 {% if comment_actions_code %}import { notify } from '@/lib/_notifier';
 {% endif %}{% if comment_has_mention %}import { encodeMentions, type UserLookup } from '@/lib/mention/parser';
@@ -43,6 +46,21 @@ export async function remove{{ parent_pascal }}(ids: string[]) {
 }
 {% endif %}
 {{ comment_actions_code }}
+{% if can_invalidate %}
+
+export async function invalidate{{ parent_pascal }}(id: string): Promise<void> {
+  const userId = await getSessionUserIdOrThrow();
+  // TODO: separate 'invalidate' permission from 'delete' in future
+  await requirePermission('{{ parent }}', 'delete', undefined, userId);
+  {% if invalidate_module %}
+  await {{ invalidate_handler }}(id);
+  {% else %}
+  // write-once stub: implement invalidate{{ parent_pascal }} in lib/{{ parent }}/invalidate_handler.ts
+  throw new Error('invalidate{{ parent_pascal }}: handler not configured');
+  {% endif %}
+  revalidatePath('/{{ parent }}');
+}
+{% endif %}
 {% if has_commentable %}
 
 export async function toggle{{ parent_pascal }}CommentReaction(

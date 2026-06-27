@@ -404,6 +404,17 @@ def generate(schema_path: str, output_dir: str) -> None:
         can_delete = gen_cfg.get('delete', True)
         can_api    = gen_cfg.get('api', False)
 
+        # invalidate flag: accepts bool or {enabled, handler, module}
+        _inv = gen_cfg.get('invalidate', False)
+        if isinstance(_inv, dict):
+            can_invalidate    = bool(_inv.get('enabled', False))
+            invalidate_handler = _inv.get('handler', '')
+            invalidate_module  = _inv.get('module', '')
+        else:
+            can_invalidate    = bool(_inv)
+            invalidate_handler = ''
+            invalidate_module  = ''
+
         print(f'\nGenerating: {parent}' + (f' (model: {model})' if model != parent else ''))
 
         # Paths
@@ -475,7 +486,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                 )
 
         # --- actions.ts ---
-        if can_new or can_edit or can_delete:
+        if can_new or can_edit or can_delete or can_invalidate:
             act_ctx = {**ctx, **actions_context(ctx)}
             _write(lib_dir / 'actions.ts', _render(env, 'actions.ts.jinja2', act_ctx))
 
@@ -489,6 +500,13 @@ def generate(schema_path: str, output_dir: str) -> None:
             if can_new or can_edit or can_delete:
                 _write(api_dir / 'bulk' / 'route.ts', _render(env, 'api_bulk_route.ts.jinja2', ctx))
             print(f'  API routes → app/api/{parent}/')
+
+        # --- Invalidate action route (independent of can_api) ---
+        if can_invalidate:
+            inv_api_dir = out / 'app' / 'api' / parent / '[id]' / 'actions' / 'invalidate'
+            _write(inv_api_dir / 'route.ts',
+                   _render(env, 'invalidate_action_route.ts.jinja2', ctx))
+            print(f'  Invalidate route → app/api/{parent}/[id]/actions/invalidate/')
 
         # --- column_def.tsx ---
         has_children = bool(entity.get('children'))

@@ -16,7 +16,7 @@ import Box from '@mui/material/Box';
 {% if uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
-import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}{% endif %}{% if has_comment_children %}, add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment{% if named_constants %}, toggle{{ parent_pascal }}CommentReaction{% endif %}{% endif %} } from '@/lib/{{ parent }}/actions';
+import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}{% endif %}{% if can_invalidate %}, invalidate{{ parent_pascal }}{% endif %}{% if has_comment_children %}, add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment{% if named_constants %}, toggle{{ parent_pascal }}CommentReaction{% endif %}{% endif %} } from '@/lib/{{ parent }}/actions';
 {% if has_comment_children and named_constants %}
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 {% endif %}
@@ -122,6 +122,13 @@ export default function FormUpsert({{ form_upsert_params }}) {
     await remove{{ parent_pascal }}([src.id]);
   };
 {% endif %}
+{% if can_invalidate %}
+
+  const handleInvalidate = async () => {
+    await invalidate{{ parent_pascal }}(src.id);
+    router.push('/{{ parent }}');
+  };
+{% endif %}
 
   const handleBack = () => {
     router.push('/{{ parent }}');
@@ -174,6 +181,10 @@ export default function FormUpsert({{ form_upsert_params }}) {
         formFields={formFields}
         onSubmit={handleSubmit}
         onDelete={ {{- 'isEdit && canDelete ? handleDelete : undefined' if can_delete else 'undefined' -}} }
+{% if can_invalidate %}
+        {# TODO: separate 'invalidate' permission from 'delete' in future #}
+        onInvalidate={isEdit && canDelete ? handleInvalidate : undefined}
+{% endif %}
         onBack={handleBack}
         deleteEntityLabel={te('{{ parent_camel }}')}
         submitButtonLabel={tc('save')}

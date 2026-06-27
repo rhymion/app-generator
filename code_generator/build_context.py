@@ -768,6 +768,17 @@ def build_context(entity: dict, schema: dict) -> dict:
     can_list   = gen_cfg.get('list',   True) is not False
     can_view   = gen_cfg.get('view',   True) is not False
 
+    # invalidate flag: accepts bool or {enabled, handler, module}
+    _inv = gen_cfg.get('invalidate', False)
+    if isinstance(_inv, dict):
+        can_invalidate    = bool(_inv.get('enabled', False))
+        invalidate_handler = _inv.get('handler', '')
+        invalidate_module  = _inv.get('module', '')
+    else:
+        can_invalidate    = bool(_inv)
+        invalidate_handler = ''
+        invalidate_module  = ''
+
     # Parent relationships (many-to-one) — all of them, not deduplicated by target.
     # Both selector and auto-create one-to-one relations are excluded here:
     # selector OTO is re-added through `selector_oto_rels` (autocomplete UI),
@@ -1757,6 +1768,9 @@ def build_context(entity: dict, schema: dict) -> dict:
         can_delete=can_delete,
         can_list=can_list,
         can_view=can_view,
+        can_invalidate=can_invalidate,
+        invalidate_handler=invalidate_handler,
+        invalidate_module=invalidate_module,
         # Relationships
         parent_rels=parent_rels,
         parent_rels_raw=parent_rels_raw,

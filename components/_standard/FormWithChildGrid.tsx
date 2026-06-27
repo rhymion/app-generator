@@ -11,6 +11,7 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import SaveIcon from '@mui/icons-material/Save';
 import DeleteIcon from '@mui/icons-material/Delete';
+import BlockIcon from '@mui/icons-material/Block';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useTranslations } from 'next-intl';
 
@@ -20,6 +21,7 @@ interface FormWithChildGridProps {
   formFields: ReactNode;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => Promise<void>;
   onDelete?: () => Promise<void>;
+  onInvalidate?: () => Promise<void>;
   onBack: () => void;
   deleteEntityLabel?: string;
   submitButtonLabel?: string;
@@ -32,12 +34,14 @@ export default function FormWithChildGrid({
   formFields,
   onSubmit,
   onDelete,
+  onInvalidate,
   onBack,
   deleteEntityLabel = 'Item',
   submitButtonLabel = 'Save',
   error,
 }: FormWithChildGridProps) {
   const [openDeleteEntityDialog, setOpenDeleteEntityDialog] = useState(false);
+  const [openInvalidateDialog, setOpenInvalidateDialog] = useState(false);
   const [openBackDialog, setOpenBackDialog] = useState(false);
   const tc = useTranslations('Common');
   const tf = useTranslations('Fields');
@@ -47,6 +51,13 @@ export default function FormWithChildGrid({
       await onDelete();
     }
     setOpenDeleteEntityDialog(false);
+  };
+
+  const handleInvalidateConfirmed = async () => {
+    if (onInvalidate) {
+      await onInvalidate();
+    }
+    setOpenInvalidateDialog(false);
   };
 
   const handleBackConfirmed = () => {
@@ -88,7 +99,41 @@ export default function FormWithChildGrid({
             </IconButton>
           </Tooltip>
         )}
+        {isEdit && onInvalidate && (
+          <Tooltip title={`Invalidate ${deleteEntityLabel}`}>
+            <IconButton
+              onClick={() => setOpenInvalidateDialog(true)}
+              color="warning"
+              aria-label={`Invalidate ${deleteEntityLabel}`}
+              sx={{ mt: 2 }}
+            >
+              <BlockIcon />
+            </IconButton>
+          </Tooltip>
+        )}
       </form>
+
+      {/* Invalidate Entity Dialog */}
+      {isEdit && onInvalidate && (
+        <Dialog
+          open={openInvalidateDialog}
+          onClose={() => setOpenInvalidateDialog(false)}
+          aria-labelledby="invalidate-entity-dialog-title"
+        >
+          <DialogTitle id="invalidate-entity-dialog-title">
+            Invalidate this {deleteEntityLabel}?
+          </DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              This action is irreversible. All personal data will be anonymized.
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setOpenInvalidateDialog(false)} color="inherit">{tc('cancel')}</Button>
+            <Button onClick={handleInvalidateConfirmed} color="warning" variant="contained" aria-label="Invalidate">Invalidate</Button>
+          </DialogActions>
+        </Dialog>
+      )}
 
       {/* Delete Entity Dialog */}
       {isEdit && onDelete && (
