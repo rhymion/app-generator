@@ -550,7 +550,7 @@ def _get_entity_options(schema: dict) -> list[dict]:
 # Main builder
 # ---------------------------------------------------------------------------
 
-def build_context(entity: dict, schema: dict) -> dict:
+def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> dict:
     parent      = entity['parent']
     model       = entity['model']
     def_key     = entity['definition_key']
@@ -1211,8 +1211,9 @@ def build_context(entity: dict, schema: dict) -> dict:
                         )
                     # comment children always carry creator + orderBy (no FK rels defined in schema)
                     if c.get('child_name') == 'comment':
+                        _rxn = ", reactions: true" if has_reactions else ""
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }}{_rxn} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:
@@ -1220,8 +1221,9 @@ def build_context(entity: dict, schema: dict) -> dict:
                 else:
                     # comment child has no FK rels in schema — emit include + orderBy directly
                     if c.get('child_name') == 'comment':
+                        _rxn = ", reactions: true" if has_reactions else ""
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }}{_rxn} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:
@@ -1420,6 +1422,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         xdisplay_table=xdisplay_table_raw,
         # Virtual columns: fields in x-display.table but not in properties.
         virtual_columns=virtual_columns,
+        non_creator_virtual_columns=virtual_columns,
         virtual_mapping=virtual_mapping,
         # One-to-one outbound FK rels
         one_to_one_rels=auto_create_oto_rels,      # auto-create OTO only (for types/service templates)
