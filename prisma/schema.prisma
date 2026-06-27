@@ -247,15 +247,17 @@ model attachable {
 }
 
 model attachment {
-  id            String     @id @default(cuid())
-  type          Int        @default(0)
-  order         Int        @default(0)
-  name          String
-  path          String
-  attachable_id String
-  attachable    attachable @relation(fields: [attachable_id], references: [id], onDelete: Cascade)
-  created_at    DateTime   @default(now()) @db.Timestamptz(0)
-  updated_at    DateTime   @updatedAt @db.Timestamptz(0)
+  id                     String     @id @default(cuid())
+  type                   Int        @default(0)
+  order                  Int        @default(0)
+  name                   String
+  path                   String
+  encrypted_original_name String?
+  name_iv                String?
+  attachable_id          String
+  attachable             attachable @relation(fields: [attachable_id], references: [id], onDelete: Cascade)
+  created_at             DateTime   @default(now()) @db.Timestamptz(0)
+  updated_at             DateTime   @updatedAt @db.Timestamptz(0)
 }
 
 model dashboard {
