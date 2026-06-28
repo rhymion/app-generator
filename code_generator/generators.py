@@ -2510,7 +2510,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      {{isEdit && (\n"
             f"        <AppFieldText\n"
             f"          label={{tf('{_ro_fk}')}}\n"
-            f"          defaultValue={{src.{_ro_fn} !== null && src.{_ro_fn} !== undefined ? String(src.{_ro_fn}) : ''}}\n"
+            f"          value={{src.{_ro_fn} !== null && src.{_ro_fn} !== undefined ? String(src.{_ro_fn}) : ''}}\n"
             f"          readOnly\n"
             f"        />\n"
             f"      )}}"

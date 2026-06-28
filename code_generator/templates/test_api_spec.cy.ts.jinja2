@@ -142,6 +142,11 @@ describe('API: {{ title }}', () => {
               .then((getRes) => {
                 expect(getRes.status).to.eq(200);
                 {{ assert_update }}
+{% if readonly_fields %}
+{% for f in readonly_fields %}
+                expect(getRes.body.{{ f }}, '{{ f }} must not change after PUT').to.eq(records[0].{{ f }});
+{% endfor %}
+{% endif %}
               });
           });
         });
@@ -163,6 +168,11 @@ describe('API: {{ title }}', () => {
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
               {{ assert_update }}
+{% if readonly_fields %}
+{% for f in readonly_fields %}
+              expect(getRes.body.{{ f }}, '{{ f }} must not change after PUT').to.eq(records[0].{{ f }});
+{% endfor %}
+{% endif %}
             });
         });
       });
