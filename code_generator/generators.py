@@ -38,6 +38,39 @@ def _is_nullable(defn: dict) -> bool:
     return isinstance(t, list) and 'null' in t
 
 
+def _enum_value_literal(defn: dict, label) -> str:
+    """Return the TS literal for an enum `label` of property `defn`.
+
+    Integer/number enums persist the ordinal index, so a string label like
+    'reserved' is emitted as its position in the enum list (e.g. 0). Numeric
+    labels pass through unchanged. String enums (or non-enum fields) keep the
+    quoted string. This mirrors the value Prisma stores so generated code
+    typechecks against the client.
+    """
+    if isinstance(label, bool):
+        return 'true' if label else 'false'
+    actual = _get_actual_type(defn or {})
+    enum_vals = (defn or {}).get('enum')
+    if actual in ('integer', 'number') and isinstance(enum_vals, list):
+        if isinstance(label, (int, float)):
+            return str(int(label))
+        s = str(label)
+        if s.lstrip('-').isdigit():
+            return s
+        if s in enum_vals:
+            return str(enum_vals.index(s))
+        return '0'  # unknown label for an int enum — keep numeric so it compiles
+    if isinstance(label, (int, float)):
+        return str(int(label))
+    return f"'{label}'"
+
+
+def _status_prop_defn(schema: dict | None, entity: str, field: str) -> dict:
+    """Look up the property definition for <entity>.<field> (empty dict if absent)."""
+    return (((schema or {}).get('definitions', {}).get(entity, {}) or {})
+            .get('properties', {}) or {}).get(field) or {}
+
+
 def _has_string_labels(enum_values) -> bool:
     return any(isinstance(v, str) and not str(v).lstrip('-').isdigit() for v in (enum_values or []))
 
@@ -715,7 +748,7 @@ def _build_reservation_mutation_guard_delete(rc: dict, model: str) -> str:
     )
 
 
-def _build_reservation_allocation_code(rc: dict, model: str) -> str:
+def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None = None) -> str:
     """Generate the TypeScript allocation phase for count mode reservation."""
     pool        = rc.get('pool') or {}
     req         = rc.get('request') or {}
@@ -814,9 +847,12 @@ def _build_reservation_allocation_code(rc: dict, model: str) -> str:
         if rc.get('has_actions'):
             _rem_f_ac = rc.get('actions_remaining_field', 'remaining_quantity')
             _stat_f_ac = rc.get('actions_status_field', 'status')
+            _init_status = rc.get('actions_initial_status', 'reserved')
+            _init_status_ts = _enum_value_literal(
+                _status_prop_defn(schema, alloc_entity, _stat_f_ac), _init_status)
             alloc_data_entries += [
                 f"              {_rem_f_ac}: _claim,",
-                f"              {_stat_f_ac}: 'reserved',",
+                f"              {_stat_f_ac}: {_init_status_ts},",
             ]
         if alloc_has_creator:
             alloc_data_entries += [
@@ -919,7 +955,7 @@ def _build_reservation_allocation_code(rc: dict, model: str) -> str:
     return '\n'.join(lines)
 
 
-def _build_reservation_action_functions(rc: dict, model: str) -> str:
+def _build_reservation_action_functions(rc: dict, model: str, schema: dict | None = None) -> str:
     """Generate TypeScript action functions for shipOrder / releaseReservation / cancelReservation."""
     actions: list[dict] = rc.get('reservation_actions', [])
     if not actions:
@@ -947,7 +983,12 @@ def _build_reservation_action_functions(rc: dict, model: str) -> str:
         stat_field = action.get('statusField', 'status')
         open_statuses = action.get('openStatuses', [])
         done_status = action.get('doneStatus', '')
-        open_statuses_ts = ', '.join(f"'{s}'" for s in open_statuses)
+        # Resolve status literals against the allocation entity's status field so
+        # integer-enum statuses are emitted as ordinals (string enums stay quoted).
+        _status_defn = _status_prop_defn(schema, alloc_entity, stat_field)
+        open_statuses_ts = ', '.join(_enum_value_literal(_status_defn, s) for s in open_statuses)
+        done_status_ts = _enum_value_literal(_status_defn, done_status)
+        partial_status_ts = _enum_value_literal(_status_defn, 'partially_shipped')
 
         if act_type == 'ship':
             parts.append(
@@ -985,7 +1026,7 @@ def _build_reservation_action_functions(rc: dict, model: str) -> str:
                 f"          where: {{ id: alloc.id }},\n"
                 f"          data: {{\n"
                 f"            {rem_field}: newRemaining,\n"
-                f"            {stat_field}: newRemaining === 0 ? '{done_status}' : 'partially_shipped',\n"
+                f"            {stat_field}: newRemaining === 0 ? {done_status_ts} : {partial_status_ts},\n"
                 f"            updater_id: actorId,\n"
                 f"          }},\n"
                 f"        }});\n"
@@ -1032,7 +1073,7 @@ def _build_reservation_action_functions(rc: dict, model: str) -> str:
                 f"          where: {{ id: alloc.id }},\n"
                 f"          data: {{\n"
                 f"            {rem_field}: newRemaining,\n"
-                f"            {stat_field}: newRemaining === 0 ? '{done_status}' : 'partially_shipped',\n"
+                f"            {stat_field}: newRemaining === 0 ? {done_status_ts} : {partial_status_ts},\n"
                 f"            updater_id: actorId,\n"
                 f"          }},\n"
                 f"        }});\n"
@@ -1072,7 +1113,7 @@ def _build_reservation_action_functions(rc: dict, model: str) -> str:
                 f"        where: {{ id: alloc.id }},\n"
                 f"        data: {{\n"
                 f"          {rem_field}: 0,\n"
-                f"          {stat_field}: '{done_status}',\n"
+                f"          {stat_field}: {done_status_ts},\n"
                 f"          updater_id: actorId,\n"
                 f"        }},\n"
                 f"      }});\n"
@@ -1422,12 +1463,12 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     # Reservation count mode: build allocation code block
     reservation_allocation_code = ''
     if has_reservation and reservation_config is not None:
-        reservation_allocation_code = _build_reservation_allocation_code(reservation_config, model)
+        reservation_allocation_code = _build_reservation_allocation_code(reservation_config, model, schema)
 
     # Action functions (ship / release / cancel)
     reservation_actions_code = ''
     if has_reservation and reservation_config is not None and reservation_config.get('has_actions'):
-        reservation_actions_code = _build_reservation_action_functions(reservation_config, model)
+        reservation_actions_code = _build_reservation_action_functions(reservation_config, model, schema)
 
     _insufficient_inventory_error_class_def = (
         "\n\nexport class InsufficientInventoryError extends Error {\n"
@@ -2718,7 +2759,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 if nullable:
                     return 'null'
                 schema_default = defn.get('default')
-                return str(schema_default) if schema_default is not None else '0'
+                if schema_default is None:
+                    return '0'
+                # Integer-enum defaults may be string labels (e.g. 'outstanding');
+                # emit the stored ordinal so the row value typechecks as a number.
+                return _enum_value_literal(defn, schema_default)
             return 'null'
 
         create_body = '\n'.join(

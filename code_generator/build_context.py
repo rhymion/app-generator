@@ -734,7 +734,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     parent_data_obj = '\n'.join(
         _base_data_lines + ([one_to_one_fk_data_lines] if one_to_one_fk_data_lines else [])
     )
-    parent_data_obj_update = '\n'.join(_base_data_lines)
+    # Read-only fields are preserved on update: omit them from the update `data` so
+    # Prisma leaves the stored value untouched. The server action reads absent form
+    # fields as Number(null)=0, so without this a required read-only field (e.g. a
+    # reservation pool's quantity) would be silently zeroed. Create still sets them,
+    # and the field stays in validation_data_obj so its param remains referenced.
+    _ro_update_skip = set(readonly_fields)
+    parent_data_obj_update = '\n'.join(
+        f"        {p['prop']}: {p['var_name']},"
+        for p in parent_prop_infos if p['prop'] not in _ro_update_skip
+    )
     validation_data_obj  = '\n'.join(f"      {p['prop']}: {p['var_name']}," for p in parent_prop_infos)
     # Synthetic object spreading created record with nested auto-create OTO stubs for afterCreate
     one_to_one_spread = ', '.join(

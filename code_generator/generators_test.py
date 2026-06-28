@@ -67,6 +67,18 @@ from build_context import _get_entity_options
 from generate_types import extract_entities
 
 
+def _readonly_field_names(model_def: dict) -> set[str]:
+    """Fields marked read-only via x-readonly-fields (entity) or x-readonly (per field).
+
+    Such fields render as non-editable text in the form, so UI tests must not try
+    to fill or clear them (the helper would fail typing into a read-only input).
+    """
+    ro = set(model_def.get('x-readonly-fields') or [])
+    ro |= {k for k, v in (model_def.get('properties') or {}).items()
+           if isinstance(v, dict) and v.get('x-readonly')}
+    return ro
+
+
 def _safe_entity_opts(opts: list, schema: dict) -> list:
     """Return entity options filtered to prefer non-test entities.
 
@@ -1010,6 +1022,8 @@ def gen_fill_commands(fields: list, entity_title: str, indent: str, fk_dep_vars:
     """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup."""
     lines = []
     for field in fields:
+        if field.get('readonly'):
+            continue  # read-only fields are non-editable in the form
         if field['category'] == 'autocomplete':
             dep_target = field.get('dep_target')
             if dep_target:
@@ -1039,6 +1053,8 @@ def gen_assert_commands(
     flatten_m2o_props = flatten_m2o_props or set()
     lines = []
     for field in fields:
+        if field.get('readonly'):
+            continue  # read-only fields aren't filled, so don't assert the edited value
         if field['category'] == 'autocomplete':
             dep_target = field.get('dep_target')
             if dep_target:
@@ -1294,6 +1310,12 @@ def helper_context(
     internal_fk_deps = get_all_internal_fk_deps(model_name, schema)
     internal_fk_prop_names = {d['prop_name'] for d in internal_fk_deps}
     fields = [f for f in fields if f['prop_name'] not in internal_fk_prop_names]
+    # Mark read-only fields: they stay in `fields` (so seed/prisma data still sets
+    # required values) but UI fill/clear/assert commands skip them — the form renders
+    # them non-editable, so typing into them would fail.
+    _readonly_props = _readonly_field_names(parent_def)
+    for _f in fields:
+        _f['readonly'] = _f['prop_name'] in _readonly_props
     deps = resolve_dependencies(model_name, schema)
     entity_fk_deps = get_entity_fk_deps(model_name, schema, deps)
 
@@ -1418,6 +1440,8 @@ def helper_context(
                 if nested_fk.get('dep_var_name') == old_var:
                     nested_fk['dep_var_name'] = new_var
 
+    # Note: read-only fields stay in these lists so seed/prisma create data includes
+    # their required values; the fill/clear/assert command builders skip them.
     required_field_metas = [f for f in fields if f['required']]
     optional_field_metas = [f for f in fields if not f['required']]
 
@@ -1893,6 +1917,11 @@ def spec_context(
     # Exclude outbound one-to-one FK fields (internal bridge records, not user-facing).
     _internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model_name, schema)}
     fields = [f for f in fields if f['prop_name'] not in _internal_fk_prop_names]
+    # Mark read-only fields: kept in `fields` for seed/prisma data, skipped by UI
+    # fill/clear/assert commands (the form renders them non-editable).
+    _readonly_props = _readonly_field_names(parent_def)
+    for _f in fields:
+        _f['readonly'] = _f['prop_name'] in _readonly_props
     deps = resolve_dependencies(model_name, schema)
 
     # Collect ALL user_account FK fields (required and optional) for fill/assert commands.
@@ -1961,9 +1990,15 @@ def spec_context(
     )
     needs_pool_for_create = _has_nolines_reservation and not has_deps
 
+    # Note: read-only fields stay in these lists so seed/prisma create data includes
+    # their required values; the fill/clear/assert command builders skip them.
     required_field_metas = [f for f in fields if f['required']]
     optional_field_metas = [f for f in fields if not f['required']]
-    non_autocomplete_required = [f for f in required_field_metas if f['category'] != 'autocomplete']
+    # Fail-edit/clear target must be a user-editable required field (not read-only).
+    non_autocomplete_required = [
+        f for f in required_field_metas
+        if f['category'] != 'autocomplete' and not f.get('readonly')
+    ]
     # Only include editable-list-autocomplete (optional-FK reverse lists).
     # editable-list-text children have a required FK to the parent, so the product
     # UI does not show Add/remove management on the parent form — skip them in tests.
@@ -2263,7 +2298,7 @@ def spec_context(
     opt_fill_cmds_3_1_non_ac = [
         gen_fill_command(f, cypress_create_value(f, title), '        ')
         for f in optional_field_metas
-        if f['category'] != 'autocomplete'
+        if f['category'] != 'autocomplete' and not f.get('readonly')
     ]
     opt_fill_cmds_3_1_ac = gen_fill_commands(
         [f for f in optional_field_metas if f['category'] == 'autocomplete'],
@@ -2281,7 +2316,7 @@ def spec_context(
     opt_clear_cmds_3_2 = [
         gen_clear_command(f, '        ')
         for f in optional_field_metas
-        if f['category'] != 'autocomplete'
+        if f['category'] != 'autocomplete' and not f.get('readonly')
     ]
 
     # Section 3.3: primary field edit command
@@ -2320,8 +2355,12 @@ def spec_context(
     # Section 3.3: edit value for first non-autocomplete optional field
     edit_fill_cmd_3_3 = None
     if optional_field_metas:
-        first_opt = optional_field_metas[0]
-        if first_opt['category'] != 'autocomplete':
+        first_opt = next(
+            (f for f in optional_field_metas
+             if f['category'] != 'autocomplete' and not f.get('readonly')),
+            None,
+        )
+        if first_opt is not None:
             edit_fill_cmd_3_3 = gen_fill_command(first_opt, cypress_edit_value(first_opt, title), '        ')
 
     # Section 5.1: fill all required fields except one
@@ -2580,6 +2619,14 @@ def api_spec_context(
         and k not in _api_internal_fk_prop_names
     ]
 
+    # Collect readonly fields (x-readonly-fields entity-level OR x-readonly per-field).
+    _ro_from_entity: set[str] = set(model_def.get('x-readonly-fields') or [])
+    _ro_from_props: set[str] = {
+        fn for fn, fp in (model_def.get('properties') or {}).items()
+        if isinstance(fp, dict) and fp.get('x-readonly')
+    }
+    readonly_fields: list[str] = sorted(_ro_from_entity | _ro_from_props)
+
     # Primary display field detection
     primary_field_name = _get_primary_display_field_name(model_def)
     primary_is_fk = bool(
@@ -2792,6 +2839,20 @@ def api_spec_context(
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
+    def _put_body_ro_zero_impl(indent: str) -> list[str]:
+        """PUT body for readonly preservation test: excludes readonly fields entirely,
+        uses original.{prop} for all others (simulating correct form behavior where
+        readOnly fields are not submitted).  Verifies readonly fields are not accidentally
+        cleared or overwritten by a legitimate PUT update."""
+        out = []
+        readonly_set = set(readonly_fields)
+        for prop in put_body_props:
+            if prop not in readonly_set:
+                out.append(f"{indent}{prop}: original.{prop},")
+        for c in api_child_metas:
+            out.append(f"{indent}{c['child']['property_name']}: [],")
+        return out
+
     has_approvable = any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model, schema))
 
     # Detect count-mode reservation without lines: POST tests must seed the pool entity first.
@@ -2850,6 +2911,8 @@ def api_spec_context(
         'bulk_put_body_valid_fk': _put_body_impl('                '), # 16 spaces
         'has_approvable': has_approvable,
         'reservation_count_pool_pascal': _reservation_count_pool_pascal,
+        'readonly_fields': readonly_fields,
+        'put_body_readonly_zero': _put_body_ro_zero_impl('            '),
     }
 
 

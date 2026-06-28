@@ -417,6 +417,36 @@ describe('API: {{ title }}', () => {
   });
 {% endif %}
 
+{% if readonly_fields and can_edit %}
+
+  describe('Readonly field preservation (PUT {{ api_path }}/:id)', () => {
+    it('4.3 should preserve readonly field values ({{ readonly_fields | join(", ") }}) after editing other fields', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        const original = records[0];
+        cy.request({
+          method: 'PUT',
+          url: `${API_BASE}/${original.id}`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: {
+{% for ln in put_body_readonly_zero %}
+{{ ln }}
+{% endfor %}
+          },
+        }).then((res) => {
+          expect(res.status).to.eq(200);
+          cy.request({ url: `${API_BASE}/${original.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+            .then((getRes) => {
+              expect(getRes.status).to.eq(200);
+{% for f in readonly_fields %}
+              expect(getRes.body.{{ f }}, '{{ f }} must not be overwritten by PUT').to.eq(original.{{ f }});
+{% endfor %}
+            });
+        });
+      });
+    });
+  });
+{% endif %}
+
   describe('Authentication errors', () => {
     it('6.1 returns 4xx without API key', () => {
       cy.request({ url: API_BASE, failOnStatusCode: false })
