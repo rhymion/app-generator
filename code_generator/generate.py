@@ -321,6 +321,15 @@ def generate(schema_path: str, output_dir: str) -> None:
     with open(schema_path) as f:
         schema = yaml.safe_load(f)
 
+    # x-cloud opt-in: only generate cloud artifacts when explicitly enabled
+    x_cloud = schema.get('x-cloud', None)
+    cloud_enabled = (
+        x_cloud is not None
+        and x_cloud.get('enabled', False)
+        and x_cloud.get('provider') is not None
+    )
+    cloud_provider = x_cloud.get('provider', '') if x_cloud else ''
+
     try:
         validate_schema(schema)
         validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma')
@@ -884,6 +893,41 @@ def generate(schema_path: str, output_dir: str) -> None:
     # --- i18n / config updates ---
     print('\nUpdating i18n and navigation config...')
     update_i18n_and_config(entities, schema, out)
+
+    # --- x-cloud opt-in: GCP Cloud Run artifacts ---
+    if cloud_enabled and cloud_provider == 'gcp':
+        print('\nGenerating GCP Cloud Run artifacts (x-cloud:gcp opt-in)...')
+
+        # Dockerfile
+        _write(out / 'Dockerfile', _render(env, 'Dockerfile.jinja2', {}))
+        print('  Cloud: Dockerfile → Dockerfile')
+
+        # .dockerignore
+        _write(out / '.dockerignore', _render(env, '.dockerignore.jinja2', {}))
+        print('  Cloud: .dockerignore → .dockerignore')
+
+        # upload/route.ts — replace Vercel Blob with GCS
+        _write(
+            out / 'app' / 'api' / 'upload' / 'route.ts',
+            _render(env, 'upload_route_gcs.ts.jinja2', {}),
+        )
+        print('  Cloud: GCS upload route → app/api/upload/route.ts')
+
+        # next.config.ts — add output: 'standalone'
+        next_config_path = out / 'next.config.ts'
+        if next_config_path.exists():
+            content = next_config_path.read_text(encoding='utf-8')
+            if "output: 'standalone'" not in content:
+                content = content.replace(
+                    'const nextConfig: NextConfig = {\n',
+                    "const nextConfig: NextConfig = {\n  output: 'standalone',\n",
+                )
+                next_config_path.write_text(content, encoding='utf-8')
+                print('  Cloud: added output:standalone → next.config.ts')
+            else:
+                print('  Cloud: output:standalone already present in next.config.ts')
+        else:
+            print('  Cloud: next.config.ts not found — skipping standalone injection')
 
     # --- generation manifest (drives cleanup.py) ---
     # Written last so it reflects exactly what this run produced. Appended files
