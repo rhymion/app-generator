@@ -1141,6 +1141,7 @@ def _build_action_route_code(action: dict, parent: str, model: str) -> str:
     return (
         f"import {{ NextRequest, NextResponse }} from 'next/server';\n"
         f"import {{ {act_name} }} from '@/lib/{parent}/reservation_actions';\n"
+        f"import {{ authenticateApiKey }} from '@/lib/api-auth';\n"
         f"\n"
         f"type Params = {{ params: Promise<{{ id: string }}> }};\n"
         f"export async function POST(\n"
@@ -1148,7 +1149,7 @@ def _build_action_route_code(action: dict, parent: str, model: str) -> str:
         f"  {{ params }}: Params\n"
         f"): Promise<NextResponse> {{\n"
         f"  const {{ id }} = await params;{body_destructure}\n"
-        f"  const actorId = req.headers.get('x-actor-id') ?? 'system';\n"
+        f"  const {{ userId: actorId }} = await authenticateApiKey(req);\n"
         f"  try {{\n"
         f"    {service_call}\n"
         f"    return NextResponse.json({{ ok: true }});\n"
