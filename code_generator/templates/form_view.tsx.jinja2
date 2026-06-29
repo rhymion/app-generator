@@ -93,7 +93,7 @@ export default function FormView({ src, permissions{% if entity_view_components 
       <ReservationActionButtons id={src.id} />
 {% endif %}
 {% for comp in entity_view_components %}
-      <{{ comp.name }} src={src} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />
+      <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />
 {% endfor %}
     </AppDetailShell>
   );

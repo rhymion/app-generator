@@ -105,7 +105,7 @@ async function {{ parent_pascal }}ListContent({
 {% endif %}
       >
 {% for comp in entity_custom_components %}
-        <{{ comp.name }} permissions={userPermissions} />
+        <{{ comp.name }}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={userPermissions} />
 {% endfor %}
       </AppListToolbar>
       <{{ list_component }}

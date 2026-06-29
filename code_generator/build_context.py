@@ -986,6 +986,18 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             f"x-custom-components on '{def_key}' must be a list of component objects; "
             f"got {type(_xcc_list_raw).__name__}"
         )
+    def _jsx_props_str(props_dict: dict) -> str:
+        """Serialize a dict of props to a JSX attribute string, e.g. 'showImages={false} showFiles={true}'."""
+        parts = []
+        for k, v in props_dict.items():
+            if isinstance(v, bool):
+                parts.append(f'{k}={{{str(v).lower()}}}')
+            elif isinstance(v, (int, float)):
+                parts.append(f'{k}={{{v}}}')
+            else:
+                parts.append(f'{k}="{v}"')
+        return ' '.join(parts)
+
     _xcc_items = []
     for _item in _xcc_list_raw:
         if not isinstance(_item, dict) or not _item.get('name'):
@@ -994,18 +1006,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             'name': _item['name'],
             'path': _item.get('path'),
             'target': _item.get('target') or ['list'],
+            'props_jsx': _jsx_props_str(_item.get('props') or {}),
         })
-    # Per-target lists. Each entry is {name, path?} so templates can iterate.
+    # Per-target lists. Each entry is {name, path?, props_jsx} so templates can iterate.
     entity_custom_components = [
-        {'name': i['name'], 'path': i['path']}
+        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx']}
         for i in _xcc_items if 'list' in i['target']
     ]
     entity_view_components = [
-        {'name': i['name'], 'path': i['path']}
+        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx']}
         for i in _xcc_items if 'view' in i['target']
     ]
     entity_edit_components = [
-        {'name': i['name'], 'path': i['path']}
+        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx']}
         for i in _xcc_items if 'edit' in i['target']
     ]
 
