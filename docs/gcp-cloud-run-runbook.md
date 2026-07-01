@@ -33,7 +33,7 @@ head -5 app/api/upload/route.ts | grep google    # GCS import があること
 ```bash
 PROJECT_ID=$(gcloud config get-value project)
 REGION=asia-northeast1
-REPO_NAME=app-repo
+REPO_NAME=app-generator # changed from app-repo but other name is okay
 
 gcloud artifacts repositories create "$REPO_NAME" \
   --repository-format=docker \
@@ -52,6 +52,7 @@ DB_NAME=appdb
 gcloud sql instances create "$INSTANCE_NAME" \
   --database-version=POSTGRES_16 \
   --tier=db-f1-micro \
+  --edition=ENTERPRISE \
   --region="$REGION" \
   --storage-type=SSD \
   --storage-size=10GB \
@@ -76,7 +77,18 @@ DATABASE_URL="postgresql://postgres:${DB_PASSWORD}@localhost/${DB_NAME}?host=/cl
 
 ```bash
 # 必須シークレット
+# DATABASE_URL: Cloud SQL への「直接」接続文字列。
+#   - Cloud Run Jobs の `prisma migrate deploy` が使用（マイグレーションは
+#     Accelerate 経由では実行不可のため必ず直結）。
 echo -n "$DATABASE_URL" | gcloud secrets create app-database-url --data-file=-
+
+# PRISMA_DATABASE_URL: Prisma Accelerate 接続文字列（prisma:// で始まる）。
+#   - Cloud Run "service"（実行時）はこちらを使い、lib/prisma.ts の
+#     Accelerate 分岐に入る（GCP では pg アダプタを使わない）。
+#   - 値は Prisma Data Platform で発行した Accelerate API キー付き URL に置換すること。
+echo -n "prisma://accelerate.prisma-data.net/?api_key=<YOUR_ACCELERATE_API_KEY>" \
+  | gcloud secrets create app-prisma-database-url --data-file=-
+
 echo -n "$(openssl rand -base64 32)" | gcloud secrets create app-auth-secret --data-file=-
 echo -n "https://<your-cloud-run-url>" | gcloud secrets create app-nextauth-url --data-file=-
 
@@ -109,46 +121,63 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:${SA_EMAIL}" \
   --role="roles/storage.objectAdmin" \
-  --condition="resource.name.startsWith(//storage.googleapis.com/projects/_/buckets/${GCS_BUCKET})"
+  --condition="expression=resource.name.startsWith('//storage.googleapis.com/projects/_/buckets/${GCS_BUCKET}'),title=storage-bucket-scope,description=Allow access to the app upload bucket"
 ```
 
 ### 1-5. docker build & push to Artifact Registry
 
 ```bash
 IMAGE_TAG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/app:latest"
+MIGRATE_IMAGE_TAG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/app-migrate:latest"
 
-# プロジェクトルートで実行 (x-cloud opt-in 済み Dockerfile を使用)
+# サービス用イメージ (slim standalone runner)。プロジェクトルートで実行。
 docker build -t "$IMAGE_TAG" .
-
 docker push "$IMAGE_TAG"
+
+# マイグレーション用イメージ (builder ステージ)。
+#   slim な runner には Prisma CLI / エンジン / prisma.config.ts が含まれないため、
+#   `prisma migrate deploy` は full node_modules + prisma.config.ts + schema +
+#   migrations を持つ builder ステージのイメージから実行する。
+#   上の build とレイヤキャッシュを共有するので追加コストは小さい。
+docker build --target builder -t "$MIGRATE_IMAGE_TAG" .
+docker push "$MIGRATE_IMAGE_TAG"
 ```
 
 ### 1-6. Cloud Run deploy
 
 ```bash
+EMAIL_ADDRESS=<YOUR_GMAIL_ADDRESS>
+gcloud beta run services add-iam-policy-binding --region=asia-northeast1 --member="user:$EMAIL_ADDRESS" --role=roles/run.invoker app
+
+# 実行時は PRISMA_DATABASE_URL(Accelerate) を注入し、lib/prisma.ts の Accelerate
+# 分岐に入れる（GCP では pg アダプタを使わない）。Accelerate はコネクションプールを
+# 肩代わりするため Cloud SQL への直結は不要。マイグレーション専用の直結
+# DATABASE_URL は §1-7 の Job 側にのみ渡す。
 gcloud run deploy app \
   --image="$IMAGE_TAG" \
   --platform=managed \
   --region="$REGION" \
   --service-account="$SA_EMAIL" \
-  --add-cloudsql-instances="$CLOUD_SQL_CONNECTION_NAME" \
-  --set-secrets="DATABASE_URL=app-database-url:latest,AUTH_SECRET=app-auth-secret:latest,NEXTAUTH_URL=app-nextauth-url:latest,GCS_BUCKET_NAME=app-gcs-bucket-name:latest" \
+  --set-secrets="PRISMA_DATABASE_URL=app-prisma-database-url:latest,AUTH_SECRET=app-auth-secret:latest,NEXTAUTH_URL=app-nextauth-url:latest,GCS_BUCKET_NAME=app-gcs-bucket-name:latest" \
   --set-env-vars="NODE_ENV=production" \
   --allow-unauthenticated \
   --min-instances=0 \
   --max-instances=10 \
-  --memory=1Gi \
+  --memory=2Gi \
   --cpu=1
 ```
 
 ### 1-7. Cloud Run Jobs で prisma migrate deploy
 
 ```bash
+# builder ステージのイメージを使用（Prisma CLI + prisma.config.ts + schema +
+# migrations + full node_modules を含む）。DATABASE_URL は Cloud SQL 直結を渡す
+# （Accelerate ではマイグレーション不可のため PRISMA_DATABASE_URL は渡さない）。
 gcloud run jobs create app-migrate \
-  --image="$IMAGE_TAG" \
+  --image="$MIGRATE_IMAGE_TAG" \
   --region="$REGION" \
   --service-account="$SA_EMAIL" \
-  --add-cloudsql-instances="$CLOUD_SQL_CONNECTION_NAME" \
+  --set-cloudsql-instances="$CLOUD_SQL_CONNECTION_NAME" \
   --set-secrets="DATABASE_URL=app-database-url:latest" \
   --command="npx" \
   --args="prisma,migrate,deploy"
@@ -208,7 +237,7 @@ gcloud artifacts repositories delete "$REPO_NAME" \
   --location="$REGION" --quiet
 
 # 6. Secret Manager シークレット削除
-for secret in app-database-url app-auth-secret app-nextauth-url app-gcs-bucket-name; do
+for secret in app-database-url app-prisma-database-url app-auth-secret app-nextauth-url app-gcs-bucket-name; do
   gcloud secrets delete "$secret" --quiet
 done
 

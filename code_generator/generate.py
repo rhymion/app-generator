@@ -720,12 +720,10 @@ def generate(schema_path: str, output_dir: str) -> None:
             f"similarity(COALESCE({f}, ''), ${{q}}) > 0.3" for f in text_fields
         )
 
-        # bigm_where_sql: ILIKE containment check (gin_bigm_ops accelerates ILIKE '%q%').
-        # pg_bigm's =% operator uses padding bigrams and does NOT match mid-string Japanese
-        # (e.g. '権限' =% '一般権限を...' → FALSE). ILIKE '%'||q||'%' correctly matches.
-        # Replaces bigm_similarity()>0.2 which structurally fails for short Japanese queries
-        # (Jaccard denominator grows with text length).
-        # ILIKE: case-insensitive vs LIKE; pg_bigm supports ILIKE with GIN index.
+        # bigm_where_sql: ILIKE containment check (gin_trgm_ops accelerates ILIKE '%q%').
+        # C3=A: use pg_trgm (Cloud SQL compatible) instead of pg_bigm (Cloud SQL unsupported).
+        # pg_trgm's GIN index (gin_trgm_ops) accelerates ILIKE on Cloud SQL.
+        # ILIKE '%'||q||'%' correctly matches mid-string Japanese (e.g. '権限' in '一般権限を...').
         bigm_where_single = ' OR '.join(
             f"COALESCE({f}, '') ILIKE '%' || ${{q}} || '%'" for f in bigm_fields
         )
@@ -772,6 +770,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'or_clauses_ts_var':     f'{parent}OrClauses',
             'bigm_where_sql':            bigm_where_single,
             'bigm_similarity_fields_sql': bigm_sim_exprs,
+            'bigm_fields':               bigm_fields,
         })
 
     if search_entities:
@@ -795,6 +794,11 @@ def generate(schema_path: str, output_dir: str) -> None:
         entity_names = ', '.join(e['entity_type'] for e in search_entities)
         print(f'  Search routes → lib/search/helpers.ts + app/api/search/route.ts ({entity_names})')
         print(f'  Search UI page → app/[locale]/search/page.tsx + actions.ts')
+        _write(
+            out / 'lib' / 'db-init.ts',
+            _render(env, 'db_init.ts.jinja2', search_ctx),
+        )
+        print(f'  DB init → lib/db-init.ts (GIN indexes for gin_trgm_ops)')
     else:
         # DP-2: no searchable entities — delete stale search files to prevent broken imports
         print('  Search: no searchable entities — skipping search route generation')
