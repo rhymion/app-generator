@@ -14,14 +14,14 @@ const PUBLIC_PATHS = ['/login', '/register', '/docs'];
 // load and rate-limiting it would only hurt legitimate users).
 function bucketForAuthRequest(pathname: string, method: string): string | null {
   if (!pathname.startsWith('/api/auth/')) return null;
-  if (pathname.startsWith('/api/auth/callback/')) return 'auth:callback';
-  if (pathname.startsWith('/api/auth/signin/credentials')) return 'auth:signin:credentials';
   // Credentials submit goes through `/api/auth/callback/credentials` as a POST
   // (Auth.js v5 routes the form post through the callback endpoint), so we
   // catch it under the credentials bucket too.
   if (pathname === '/api/auth/callback/credentials' && method === 'POST') {
     return 'auth:signin:credentials';
   }
+  if (pathname.startsWith('/api/auth/callback/')) return 'auth:callback';
+  if (pathname.startsWith('/api/auth/signin/credentials')) return 'auth:signin:credentials';
   if (pathname.startsWith('/api/auth/signin/')) return 'auth:signin:provider';
   // Anything else under /api/auth — session reads, csrf, providers list — is
   // not abuse-prone, so it's not rate-limited.
