@@ -247,7 +247,7 @@ echo -n "$GCS_BUCKET" | gcloud secrets create app-gcs-bucket-name --data-file=-
 >
 > ```
 > AUTH_URL = <Cloud Run サービス URL (末尾スラッシュなし)>
-> # 例: https://app-447339764272.asia-northeast1.run.app
+> # 例: https://app-<PROJECT_NUMBER>.<REGION>.run.app
 >
 > AUTH_TRUST_HOST = true  # 非 Vercel デプロイでは必須 (Vercel は自動設定)
 > ```
@@ -800,11 +800,55 @@ gcloud run services describe app \
 
 ## Phase 3: 完全撤去手順 (課金を残すな)
 
-PoC 終了後は必ず全リソースを削除すること。**削除順序を守ること**（依存関係あり）。
+PoC 終了後は必ず全リソースを削除すること。
+
+### 方針: プロジェクトごと削除 (推奨)
+
+個別リソース削除は取りこぼしが発生しやすい (Secret Manager・Artifact Registry・
+デフォルト compute SA 等)。**プロジェクトごと削除が確実**。
+
+#### 削除前確認
+
+```bash
+# 対象プロジェクトを確認
+gcloud projects list
+gcloud projects describe "$PROJECT_ID"
+
+# 課金アカウントを確認 (削除後に残らぬこと)
+gcloud billing projects describe "$PROJECT_ID"
+```
+
+#### プロジェクト削除
+
+```bash
+# プロジェクトごと削除 (30日間 soft-delete → 恒久削除)
+# Cloud Run / Cloud SQL / GCS / Artifact Registry / Secrets /
+# カスタム SA / デフォルト compute SA が同時に消える
+gcloud projects delete "$PROJECT_ID"
+```
+
+> ⚠️ **デフォルト compute SA について**:
+> `<PROJECT_NUMBER>-compute@developer.gserviceaccount.com` は GCP 自動生成 SA。
+> 単独で削除すると復元困難になる場合がある。プロジェクト削除で自動的に消えるので、
+> 個別に `gcloud iam service-accounts delete` しないこと。
+
+#### GCP 外リソースの後始末 (プロジェクト削除後も残る)
+
+| リソース | 削除方法 | 備考 |
+|----------|---------|------|
+| **Upstash Redis** | Upstash コンソール (https://console.upstash.com) でデータベースを削除 | プロジェクト削除では消えない |
+| **Prisma Accelerate 接続** | Prisma Console (https://console.prisma.io) でプロジェクトを削除 | 任意 (課金なければ放置可) |
+| **Docker ローカルイメージ** | `docker rmi $(docker images 'asia-northeast1-docker.pkg.dev/*' -q)` | ローカル環境のみ |
+
+---
+
+### 参考: 個別リソース削除 (プロジェクト削除できない場合)
+
+プロジェクトを残して GCP リソースのみ削除する場合。**削除順序を守ること**（依存関係あり）。
 
 ```bash
 # 1. Cloud Run サービス削除
-gcloud run services delete app --region="$REGION" --quiet
+gcloud run services delete "$SERVICE_NAME" --region="$REGION" --quiet
 
 # 2. Cloud Run Jobs 削除
 gcloud run jobs delete app-migrate --region="$REGION" --quiet
@@ -820,18 +864,18 @@ gcloud artifacts repositories delete "$REPO_NAME" \
   --location="$REGION" --quiet
 
 # 6. Secret Manager シークレット削除
-for secret in app-database-url app-prisma-database-url app-auth-secret app-nextauth-url app-gcs-bucket-name; do
+for secret in app-database-url app-prisma-database-url app-auth-secret app-nextauth-url app-gcs-bucket-name app-redis-url; do
   gcloud secrets delete "$secret" --quiet
 done
 
-# 7. サービスアカウント削除
+# 7. カスタムサービスアカウント削除 (デフォルト compute SA は削除しない)
 gcloud iam service-accounts delete "$SA_EMAIL" --quiet
 
-# 8. 課金リソース確認
-gcloud projects list  # このプロジェクトのリソースが消えたこと
-gcloud sql instances list --filter="name:app-*"   # 空であること
-gcloud run services list --region="$REGION"       # 空であること
+# 8. 削除後の確認
+gcloud sql instances list --filter="name:app-*"          # 空であること
+gcloud run services list --region="$REGION"              # 空であること
 gcloud artifacts repositories list --location="$REGION"  # 空であること
+gcloud secrets list --filter="name:app-*"                # 空であること
 ```
 
 ---
