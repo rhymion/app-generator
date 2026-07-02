@@ -10,6 +10,37 @@
 
 ## Phase 1: 構築手順
 
+## 変数定義 (全節で共通)
+
+以下を一度実行することで、runbook の全コマンドを copy-paste 可能になる:
+
+```bash
+# GCP プロジェクト設定
+PROJECT_ID=$(gcloud config get-value project)
+REGION=asia-northeast1
+
+# Cloud SQL
+INSTANCE_NAME=app-pg16
+DB_NAME=appdb
+
+# Cloud Run サービス名
+SERVICE_NAME=app
+
+# サービスアカウント
+SA_NAME=app-cloud-run-sa
+SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+# Artifact Registry
+REPO_NAME=app-generator
+
+# Cloud Run サービス URL (deploy 後に取得)
+# export SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" \
+#   --region="$REGION" --format='value(status.url)')
+```
+
+> ℹ️ `SERVICE_NAME=app` は実機で確認済み (gcloud run services describe/logs/update が `app` で通る)。
+> `INSTANCE_NAME=app-pg16` / `DB_NAME=appdb` は §1-2 の作成値に準拠。
+
 ### 1-0. 事前: x-cloud opt-in で generate-code
 
 ```bash
@@ -259,6 +290,81 @@ Platform (console.prisma.io)** で設定する。Vercel で「Prisma Postgres」
 | service 実行時 | `app-prisma-database-url` | `prisma://...?api_key=` | Accelerate → Cloud SQL (公開 IP) |
 | migrate Job | `app-database-url` | `postgresql://...?host=/cloudsql/...` | Auth Proxy socket (直結) |
 
+### 1-3.7. Redis (rate-limit) — Upstash 接続設定
+
+app の認証 rate-limit (`lib/rate-limit/`) は環境変数 `REDIS_URL` の有無で動作が変わる。
+
+| REDIS_URL | 動作 | 本番可否 |
+|-----------|------|---------|
+| 設定あり  | ioredis (Lua sliding-window) | ✅ インスタンス間で共有 |
+| **未設定** | **in-memory per-process** | **❌ Cloud Run 複数インスタンスで counter が独立 → brute-force 保護が実質無効** |
+
+> ⚠️ **PoC フェーズ**: in-memory のまま進める場合、認証試行の brute-force 防御は per-instance のみ有効。
+> 実ユーザー招待前 / 本番 go-live 前に必ず (ii) の手順で Upstash を接続すること。
+
+#### (i) Upstash Redis の作成と接続文字列取得
+
+```bash
+# 1. https://upstash.com でサインアップ / ログイン
+# 2. "Create Database" → Redis → リージョン例: ap-northeast-1 (Tokyo)
+# 3. "Connect" → "ioredis" タブを選択
+# 4. 表示される TLS 接続文字列をコピー (形式: rediss://:PASSWORD@HOST:PORT)
+REDIS_URL="rediss://:PASSWORD@HOST:PORT"
+```
+
+> ioredis は TLS (`rediss://`) に対応済み。VPC Connector は不要。
+
+#### (ii) Secret Manager への登録と Cloud Run 配線
+
+```bash
+# Secret 登録
+echo -n "$REDIS_URL" \
+  | gcloud secrets create app-redis-url \
+      --replication-policy=automatic \
+      --data-file=-
+# (既存の場合は versions add)
+# echo -n "$REDIS_URL" | gcloud secrets versions add app-redis-url --data-file=-
+
+# SA に secretAccessor 権限付与 (§1-4 で付与済みの場合はスキップ)
+gcloud secrets add-iam-policy-binding app-redis-url \
+  --member="serviceAccount:${SA_EMAIL}" \
+  --role="roles/secretmanager.secretAccessor"
+
+# Cloud Run に配線 (再デプロイ)
+gcloud run services update "$SERVICE_NAME" \
+  --region="$REGION" \
+  --update-secrets=REDIS_URL=app-redis-url:latest
+```
+
+#### (iii) 動作確認 — 429 応答テスト
+
+```bash
+# credentials 認証を 11 回叩いて 429 を確認 (bucket limit = 10/min)
+for i in $(seq 1 11); do
+  STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "${SERVICE_URL}/api/auth/signin/credentials" \
+    -H "Content-Type: application/json" \
+    -d '{"username":"test","password":"wrong","csrfToken":"dummy"}')
+  echo "Request $i: $STATUS"
+done
+# 11 回目以降が 429 かつ Retry-After ヘッダ付きであれば正常
+```
+
+#### (iv) REDIS_URL 未設定時の注意
+
+`REDIS_URL` を設定しない場合、`lib/rate-limit/in-memory.ts` の per-process カウンタが使われる。
+Cloud Run はリクエスト数に応じてインスタンスを増減するため、各インスタンスが独立したカウンタを持ち、
+**rate-limit はセキュリティ境界として機能しない**。
+PoC / 開発環境での利用は許容するが、実ユーザー向けデプロイ前に必ず上記 (i)〜(ii) を実施すること。
+
+#### (v) 補足: ioredis の接続挙動
+
+- `lazyConnect: true` で import 時に TCP 接続しない (Next.js middleware に安全)
+- Upstash TCP endpoint は `rediss://` スキームで TLS 必須。`redis://` (非TLS) は接続拒否される
+- VPC Connector 不要 (Upstash はパブリックエンドポイント)
+- ioredis が `rediss://` に接続できない場合 (例: ファイアウォール問題) → ログに ECONNREFUSED が出る。
+  REDIS_URL を未設定に戻して in-memory fallback で継続し、ネットワーク経路を確認すること
+
 ### 1-4. サービスアカウントの作成と権限付与
 
 ```bash
@@ -287,10 +393,12 @@ gcloud storage buckets add-iam-policy-binding gs://${GCS_BUCKET} \
   --member="serviceAccount:${SA_EMAIL}" \
   --role="roles/storage.objectAdmin"
 
-# V4 Signed URL 発行に必要な self-impersonation 権限
-# Cloud Run ADC (Workload Identity) では SA の秘密鍵が露出しない。
-# @google-cloud/storage の V4 Signed URL は IAM Credentials API (signBlob) を使うため、
-# SA が自身を impersonate できる権限が必要 (permission: iam.serviceAccounts.signBlob)。
+# ⚠️ 必須 (省略不可): V4 Signed URL 発行に必要な self-impersonation 権限
+# Cloud Run では SA の秘密鍵が露出しない (Workload Identity/ADC)。
+# GCS proxy (app/api/gcs/[...path]/route.ts) は new Storage() + getSignedUrl v4 を使用。
+# V4 署名には IAM Credentials API (signBlob) が必要なため、
+# runtime SA に自身への self-impersonation 権限が必須 (permission: iam.serviceAccounts.signBlob)。
+# 省略すると: GCS proxy (/api/gcs/...) が SigningError で 403 → 画像が表示されない。
 gcloud iam service-accounts add-iam-policy-binding "${SA_EMAIL}" \
   --member="serviceAccount:${SA_EMAIL}" \
   --role="roles/iam.serviceAccountTokenCreator"
@@ -347,21 +455,30 @@ gcloud run deploy app \
   --platform=managed \
   --region="$REGION" \
   --service-account="$SA_EMAIL" \
-  --set-secrets="PRISMA_DATABASE_URL=app-prisma-database-url:latest,AUTH_SECRET=app-auth-secret:latest,NEXTAUTH_URL=app-nextauth-url:latest,GCS_BUCKET_NAME=app-gcs-bucket-name:latest" \
-  --set-env-vars="NODE_ENV=production,AUTH_TRUST_HOST=true,AUTH_URL=https://app-${PROJECT_NUMBER}.${REGION}.run.app" \
+  --set-secrets="PRISMA_DATABASE_URL=app-prisma-database-url:latest,AUTH_SECRET=app-auth-secret:latest,GCS_BUCKET_NAME=app-gcs-bucket-name:latest" \
+  --set-env-vars="NODE_ENV=production,AUTH_TRUST_HOST=true" \
   --no-invoker-iam-check \
   --min-instances=0 \
   --max-instances=10 \
   --memory=2Gi \
   --cpu=1
+# ⚠️ AUTH_URL/NEXTAUTH_URL をハードコード厳禁 (Auth.js v5 は HOST から自動推定・再デプロイ耐性)
+# AUTH_TRUST_HOST=true のみ設定せよ。AUTH_URL 付与は再デプロイ後に placeholder 未展開 → 404 の原因になる。
+
+# ---- deploy 後: 実 Service URL を取得 ----
+# ⚠️ Service URL は手入力・ハードコード禁止 (hash形式とproject-number形式の2つが有効で予測不可)
+# 実 URL の取得:
+export SERVICE_URL=$(gcloud run services describe app \
+  --region=$REGION --format='value(status.url)')
+echo "Service URL: $SERVICE_URL"
 
 # ---- Auth.js v5 UntrustedHost 対処 (deploy 後確認・URL 変更時) ----
-# ⚠ NEXTAUTH_URL は v5 で無視 → AUTH_URL を使用
-# deploy コマンドの --set-env-vars に AUTH_TRUST_HOST=true / AUTH_URL が含まれていれば不要。
-# URL が変わった場合や未設定の場合は以下で更新:
+# ⚠ NEXTAUTH_URL は v5 で無視。AUTH_TRUST_HOST=true のみで HOST ヘッダから自動推定する。
+# AUTH_URL/NEXTAUTH_URL は設定不要。未設定・再デプロイ後も AUTH_TRUST_HOST=true で動作継続。
+# UntrustedHost が出た場合は AUTH_TRUST_HOST=true が欠落しているか revision に未反映:
 gcloud run services update app \
   --region=$REGION \
-  --update-env-vars=AUTH_TRUST_HOST=true,AUTH_URL=<service_url末尾スラッシュ無>
+  --update-env-vars=AUTH_TRUST_HOST=true
 ```
 
 > ⚠️ **注意: 再デプロイ時の DB 配線巻き戻りに注意**
@@ -438,7 +555,7 @@ gcloud run jobs update app-migrate \
 gcloud run jobs execute app-migrate --region="$REGION" --wait
 
 # 完了確認
-gcloud run jobs logs show app-migrate --region="$REGION" --limit=50
+gcloud run jobs logs read app-migrate --region="$REGION" --limit=50
 
 # 次のステップ (§1-8) に進む前に app-migrate を db push コマンドに戻す
 gcloud run jobs update app-migrate \
@@ -463,7 +580,7 @@ Cloud Run サービス URL にアクセスすると `Error: Forbidden` (HTTP 403
 Cloud Run ログに上記が出ていれば Auth.js v5 UntrustedHost が原因（reverse proxy 越しの Host ヘッダ検証失敗）。
 `NEXTAUTH_URL` は Auth.js v5 では無視されるため、この設定では解消しない。
 
-対処: `AUTH_TRUST_HOST=true` + `AUTH_URL` 設定 (§1-6 または §1-3 参照)
+対処: `AUTH_TRUST_HOST=true` のみ設定 (§1-6 参照)。AUTH_URL ハードコード禁止 (再デプロイ後に placeholder 未展開 → 404 の原因)。
 出典: errors.authjs.dev#untrustedhost
 
 #### 原因の切り分け (インフラ層 vs アプリ層、症状 A 向け)

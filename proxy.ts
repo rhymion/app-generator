@@ -1,5 +1,5 @@
 import createIntlMiddleware from 'next-intl/middleware';
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import { routing } from './i18n/routing';
 import { getRateLimiter } from '@/lib/rate-limit';
@@ -32,6 +32,46 @@ function clientIp(req: Request): string {
   const fwd = req.headers.get('x-forwarded-for');
   if (fwd) return fwd.split(',')[0]!.trim();
   return req.headers.get('x-real-ip') ?? 'unknown';
+}
+
+/**
+ * Reconstruct an external URL using X-Forwarded-* headers when running behind
+ * a reverse proxy (e.g. Cloud Run). Without this, req.nextUrl reflects the
+ * internal :8080 address, leaking it into Location headers on redirect.
+ */
+function buildExternalUrl(req: NextRequest, targetPath: string): URL {
+  const proto = req.headers.get('x-forwarded-proto') ?? req.nextUrl.protocol.replace(':', '');
+  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? req.nextUrl.host;
+  const url = new URL(req.nextUrl.href);
+  url.protocol = proto + ':';
+  url.host = host;
+  url.port = '';  // strip internal port (:8080) that Cloud Run exposes
+  url.pathname = targetPath;
+  return url;
+}
+
+/**
+ * Normalize Location header in redirect responses from intlMiddleware when
+ * the internal port (:8080) has leaked into the URL. Only applies when
+ * x-forwarded-host is present (i.e., running behind a reverse proxy).
+ */
+function normalizeIntlRedirect(req: NextRequest, response: NextResponse): NextResponse {
+  if (!req.headers.get('x-forwarded-host')) return response;
+  const { status } = response;
+  if (status < 300 || status >= 400) return response;
+  const location = response.headers.get('location');
+  if (!location) return response;
+  try {
+    const proto = req.headers.get('x-forwarded-proto') ?? req.nextUrl.protocol.replace(':', '');
+    const host = req.headers.get('x-forwarded-host')!;
+    const loc = new URL(location);
+    loc.protocol = proto + ':';
+    loc.host = host;
+    loc.port = '';
+    return NextResponse.redirect(loc.toString(), { status });
+  } catch {
+    return response;
+  }
 }
 
 // Auth.js v5 proxy. `auth()` wraps the handler and exposes `req.auth` (the
@@ -94,19 +134,17 @@ export const proxy = auth(async (req) => {
 
   // Public paths — no auth check needed
   if (isPublicPath) {
-    return intlResponse;
+    return normalizeIntlRedirect(req, intlResponse);
   }
 
   // Protected paths — require a valid session (DB-backed for OAuth, JWT
   // for credentials, both resolved by the auth() wrapper).
   if (!req.auth) {
     const locale = localePrefix ?? routing.defaultLocale;
-    const url = req.nextUrl.clone();
-    url.pathname = `/${locale}/login`;
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(buildExternalUrl(req, `/${locale}/login`));
   }
 
-  return intlResponse;
+  return normalizeIntlRedirect(req, intlResponse);
 });
 
 export const config = {

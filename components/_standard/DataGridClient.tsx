@@ -184,6 +184,9 @@ export default function DataGridClient<T extends BaseEntity>({
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
+              color: 'inherit',
+              textDecoration: 'underline',
+              cursor: 'pointer',
             }}
           >
             {`${(fieldValue && typeof fieldValue === 'object' && 'name' in fieldValue ? fieldValue.name : String(fieldValue || params.id))}`}
