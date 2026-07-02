@@ -1,0 +1,45 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { Storage } from '@google-cloud/storage';
+import { auth } from '@/auth';
+
+const storage = new Storage();
+const bucketName = process.env.GCS_BUCKET_NAME!;
+
+type Params = { params: Promise<{ path: string[] }> };
+
+export async function GET(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return new NextResponse(null, { status: 401 });
+  }
+
+  const { path: segments } = await params;
+  if (!segments || segments.length === 0) {
+    return new NextResponse(null, { status: 404 });
+  }
+
+  // Prevent path traversal: GCS paths never start with /
+  const gcsPath = segments.join('/');
+  if (gcsPath.includes('..')) {
+    return new NextResponse(null, { status: 403 });
+  }
+
+  const bucket = storage.bucket(bucketName);
+  const gcsFile = bucket.file(gcsPath);
+
+  try {
+    const [signedUrl] = await gcsFile.getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: Date.now() + 15 * 60 * 1000, // 15 min
+    });
+    // no-store: force browser/CDN to revalidate each time so signed URL is always fresh
+    return NextResponse.redirect(signedUrl, {
+      status: 302,
+      headers: { 'Cache-Control': 'no-store' },
+    });
+  } catch (error) {
+    console.error('GCS signed URL error:', error);
+    return new NextResponse(null, { status: 500 });
+  }
+}

@@ -36,15 +36,22 @@ function attachSlowQueryListener(client: PrismaClient<'query'>): void {
 // Use Accelerate URL if available, otherwise fall back to direct connection
 const createPrismaClient = async () => {
   if (process.env.PRISMA_DATABASE_URL) {
+    const accelerateUrl = process.env.PRISMA_DATABASE_URL;
+    // Fail fast if PRISMA_DATABASE_URL is a placeholder (e.g. created by runbook §1-3
+    // without replacing <YOUR_ACCELERATE_API_KEY>). A placeholder passes the truthy
+    // check above but causes P1001 + driverAdapterError on the first query.
+    if (!accelerateUrl.startsWith('prisma://') && !accelerateUrl.startsWith('prisma+postgres://')) {
+      throw new Error(
+        `[prisma] PRISMA_DATABASE_URL must start with prisma:// or prisma+postgres://. ` +
+        `Got: "${accelerateUrl.slice(0, 30)}..." — see gcp-cloud-run-runbook.md §1-3.5.`
+      );
+    }
     console.log('Using Accelerate URL for Prisma Client');
-    // Accelerate runs queries remotely, so local $on('query') events don't
-    // include the network/cache hop. Slow-query monitoring for Accelerate
-    // belongs in the Accelerate dashboard, not here.
-    const accelerateUrl = process.env.PRISMA_DATABASE_URL
+    // log option is absent from all official Prisma 7 + Accelerate examples.
+    // Accelerate monitoring belongs in the Prisma dashboard, not local events.
     const client = new PrismaClient({
       accelerateUrl,
-      log: prismaLogLevels,
-    }).$extends(withAccelerate());
+    }).$extends(withAccelerate()) as unknown as PrismaClient;
     return client;
   } else {
     console.log('Using direct database connection for Prisma Client');

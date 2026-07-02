@@ -15,7 +15,7 @@ import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
-import Link from '@mui/material/Link';
+import { Link as NextLink } from '@/i18n/navigation';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import AddIcon from '@mui/icons-material/Add';
@@ -120,13 +120,13 @@ export default function CardListClient<T extends BaseEntity>({
     <Box>
       <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
         {permissions.create && allowCreate && (
-          <Link href={`${basePath}/new`}>
+          <NextLink href={`${basePath}/new`}>
             <Tooltip title={`Create New ${entityLabel}`}>
               <IconButton color="primary" aria-label={`Create New ${entityLabel}`}>
                 <AddIcon />
               </IconButton>
             </Tooltip>
-          </Link>
+          </NextLink>
         )}
         {permissions.delete && (
           <Tooltip title="Delete Selected">
@@ -161,11 +161,11 @@ export default function CardListClient<T extends BaseEntity>({
               >
                 <CardContent sx={{ pb: 0 }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
-                    <Link href={`${basePath}/view/${item.id}`} underline="hover" color="inherit">
+                    <NextLink href={`${basePath}/view/${item.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
                       <Typography variant="h6" component="div" sx={{ lineHeight: 1.3 }}>
                         {primaryValue || item.id}
                       </Typography>
-                    </Link>
+                    </NextLink>
                     {permissions.delete && (
                       <Checkbox
                         checked={isSelected}
@@ -207,13 +207,13 @@ export default function CardListClient<T extends BaseEntity>({
                 </CardContent>
                 {permissions.update && (
                   <CardActions sx={{ justifyContent: 'flex-end' }}>
-                    <Link href={`${basePath}/edit/${item.id}`}>
+                    <NextLink href={`${basePath}/edit/${item.id}`}>
                       <Tooltip title="Edit">
                         <IconButton size="small" color="primary" aria-label="Edit">
                           <EditIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-                    </Link>
+                    </NextLink>
                   </CardActions>
                 )}
               </Card>

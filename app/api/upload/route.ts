@@ -50,12 +50,13 @@ export async function POST(request: NextRequest) {
 
     const bucket = storage.bucket(bucketName);
     const gcsFile = bucket.file(gcsPath);
+    // UBLA: save without ACL; object remains private
     await gcsFile.save(buffer, {
       metadata: { contentType: file.type },
-      public: true,
     });
 
-    const url = `https://storage.googleapis.com/${bucketName}/${gcsPath}`;
+    // Return internal proxy URL; /api/gcs route generates a fresh V4 signed URL per request
+    const url = `/api/gcs/${gcsPath}`;
 
     return NextResponse.json({ url }, { status: 200 });
   } catch (error) {

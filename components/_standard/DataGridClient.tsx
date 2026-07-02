@@ -14,7 +14,7 @@ import {
 import Paper from '@mui/material/Paper';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
-import Link from '@mui/material/Link';
+import { Link as NextLink } from '@/i18n/navigation';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -176,9 +176,9 @@ export default function DataGridClient<T extends BaseEntity>({
           // next column, which makes Cypress' `cy.click()` fail with "is being
           // covered by another element" because the next cell's div sits over
           // the overflowing portion of the link.
-          return <Link
+          return <NextLink
             href={`${basePath}/view/${params.id}`}
-            sx={{
+            style={{
               display: 'block',
               maxWidth: '100%',
               overflow: 'hidden',
@@ -187,7 +187,7 @@ export default function DataGridClient<T extends BaseEntity>({
             }}
           >
             {`${(fieldValue && typeof fieldValue === 'object' && 'name' in fieldValue ? fieldValue.name : String(fieldValue || params.id))}`}
-          </Link>;
+          </NextLink>;
         },
       };
     }
@@ -234,13 +234,13 @@ export default function DataGridClient<T extends BaseEntity>({
       filterable: false,
       renderCell: (params) => {
         return (
-          <Link href={`${basePath}/edit/${params.id}`} target={openLinksInNewTab ? '_blank' : undefined} rel={openLinksInNewTab ? 'noopener noreferrer' : undefined}>
+          <NextLink href={`${basePath}/edit/${params.id}`} target={openLinksInNewTab ? '_blank' : undefined} rel={openLinksInNewTab ? 'noopener noreferrer' : undefined}>
             <Tooltip title="Edit">
               <IconButton size="small" aria-label="Edit" color="primary">
                 <EditIcon fontSize="small" />
               </IconButton>
             </Tooltip>
-          </Link>
+          </NextLink>
         );
       },
     },
@@ -250,13 +250,13 @@ export default function DataGridClient<T extends BaseEntity>({
     <div>
       <div className="flex mb-4">
         {permissions.create && allowCreate && (
-        <Link href={`${basePath}/new`}>
+        <NextLink href={`${basePath}/new`}>
           <Tooltip title={`Create New ${entityLabel}`}>
             <IconButton color="primary" aria-label={`Create New ${entityLabel}`}>
               <AddIcon />
             </IconButton>
           </Tooltip>
-        </Link>
+        </NextLink>
         )}
         {permissions.delete && (
         <Tooltip title="Delete Selected">

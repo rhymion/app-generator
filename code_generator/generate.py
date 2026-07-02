@@ -917,6 +917,15 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         print('  Cloud: GCS upload route → app/api/upload/route.ts')
 
+        # GCS object serving route (V4 Signed URL proxy)
+        gcs_serve_dir = out / 'app' / 'api' / 'gcs' / '[...path]'
+        gcs_serve_dir.mkdir(parents=True, exist_ok=True)
+        _write(
+            gcs_serve_dir / 'route.ts',
+            _render(env, 'gcs_serve_route.ts.jinja2', {}),
+        )
+        print('  Cloud: GCS serve route → app/api/gcs/[...path]/route.ts')
+
         # next.config.ts — add output: 'standalone'
         next_config_path = out / 'next.config.ts'
         if next_config_path.exists():
