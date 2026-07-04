@@ -5,9 +5,9 @@ import DataGridClient from './DataGridClient';
 import { TickTestUtils } from '../../cypress/support/tick';
 import { renderWithIntl } from '../../vitest/i18n';
 
-// Mock Next.js Link component
-vi.mock('next/link', () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
+// Mock @/i18n/navigation (replaces next/navigation in this component)
+vi.mock('@/i18n/navigation', () => ({
+  Link: ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   ),
 }));
