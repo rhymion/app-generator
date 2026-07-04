@@ -29,6 +29,44 @@ run() {
   fi
 }
 
+# IAM is eventually consistent: a service account that was JUST created can be
+# invisible to policy-binding checks on other APIs (Resource Manager, IAM Admin,
+# Storage) for a few seconds up to ~1 minute, causing
+# "INVALID_ARGUMENT: ... does not exist" even though creation already succeeded.
+# This wrapper retries a gcloud command with exponential backoff ONLY when its
+# stderr shows that specific propagation-lag error. When the service account
+# already existed (idempotent re-run), no such error is ever produced, so the
+# command succeeds on the first attempt and no wait is incurred.
+IAM_RETRY_MAX_ATTEMPTS=6
+run_iam_binding() {
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "[DRY-RUN] $*"
+    return 0
+  fi
+  local attempt=1 delay=2 stderr_file
+  stderr_file="$(mktemp)"
+  while true; do
+    if "$@" 2>"$stderr_file"; then
+      cat "$stderr_file" >&2
+      rm -f "$stderr_file"
+      return 0
+    fi
+    if grep -q "does not exist" "$stderr_file" && (( attempt < IAM_RETRY_MAX_ATTEMPTS )); then
+      echo "  [IAM propagation lag] attempt ${attempt}/${IAM_RETRY_MAX_ATTEMPTS} failed, retrying in ${delay}s..." >&2
+      cat "$stderr_file" >&2
+      sleep "$delay"
+      attempt=$((attempt + 1))
+      delay=$((delay * 2))
+      : > "$stderr_file"
+      continue
+    fi
+    cat "$stderr_file" >&2
+    rm -f "$stderr_file"
+    echo "ERROR: gcloud command failed after ${attempt} attempt(s): $*" >&2
+    return 1
+  done
+}
+
 # Idempotent Secret Manager upsert: create if new, add version if existing.
 upsert_secret() {
   local name="$1" value="$2"
@@ -156,12 +194,12 @@ else
     --display-name="App Cloud Run SA"
 fi
 
-run gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+run_iam_binding gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:${SA_EMAIL}" \
   --role="roles/cloudsql.client" \
   --condition=None
 
-run gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+run_iam_binding gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:${SA_EMAIL}" \
   --role="roles/secretmanager.secretAccessor" \
   --condition=None
@@ -169,7 +207,7 @@ run gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 # GCS objectAdmin at bucket level (avoids UBLA + condition mismatch issues)
 # Bucket may not exist yet; this binding is re-applied after Step 6 as well.
 # Self-impersonation required for V4 Signed URL (signBlob via IAM Credentials API)
-run gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
+run_iam_binding gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
   --member="serviceAccount:${SA_EMAIL}" \
   --role="roles/iam.serviceAccountTokenCreator"
 
@@ -305,8 +343,11 @@ else
     --location="$REGION" \
     --uniform-bucket-level-access
 fi
-# Always (re-)apply the IAM binding — idempotent
-run gcloud storage buckets add-iam-policy-binding "gs://${GCS_BUCKET}" \
+# Always (re-)apply the IAM binding — idempotent. Also protected against IAM
+# propagation lag: on a fast idempotent re-run (Steps 4.5/5 all hit their [SKIP]
+# branches), only a few seconds elapse since SA creation in Step 4, which can
+# still be inside the eventual-consistency window for the Storage API.
+run_iam_binding gcloud storage buckets add-iam-policy-binding "gs://${GCS_BUCKET}" \
   --member="serviceAccount:${SA_EMAIL}" \
   --role=roles/storage.objectAdmin
 
