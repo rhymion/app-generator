@@ -27,6 +27,7 @@ REPO_NAME="${REPO_NAME:-app-generator}"
 
 # PROJECT_ID: prefer .env.production.local, fall back to gcloud config
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || true)}"
+gcloud config set project "${PROJECT_ID}" &>/dev/null || true
 
 # Required variables — abort with a clear message if missing
 : "${PROJECT_ID:?PROJECT_ID is required — set in .env.production.local or run: gcloud config set project YOUR_PROJECT_ID}"
@@ -69,6 +70,24 @@ fi
 # Optional: needed for Step 5 Accelerate secret (follow runbook §1-3.5 to obtain)
 PRISMA_ACCELERATE_API_KEY="${PRISMA_ACCELERATE_API_KEY:-}"
 
+# Cloud SQL authorized networks (Step 3). Default 0.0.0.0/0 is open-to-internet —
+# acceptable for PoC (guarded by ENCRYPTED_ONLY SSL + strong password), NOT for
+# production with real customer data.
+#
+# Production hardening (do this before customer launch):
+#   1. Upgrade Prisma to Pro/Business and enable "Static IP" on the Accelerate
+#      environment (Network restrictions). Note: Static IP cannot be toggled on an
+#      existing env — create a new Accelerate env with the same DB URL, which
+#      rotates PRISMA_ACCELERATE_API_KEY / PRISMA_DATABASE_URL.
+#   2. Prisma provides a fixed list of egress IPs. Set them here, e.g.:
+#      SQL_AUTHORIZED_NETWORKS="203.0.113.10/32,203.0.113.11/32"
+# Comma-separated CIDR list; passed verbatim to `gcloud sql instances patch`.
+SQL_AUTHORIZED_NETWORKS="${SQL_AUTHORIZED_NETWORKS:-0.0.0.0/0}"
+
+# Upstash global DB primary region (Step 4.5). AWS-style region name; the DB is
+# created as global tier. ap-northeast-1 (Tokyo) is closest to GCP asia-northeast1.
+UPSTASH_PRIMARY_REGION="${UPSTASH_PRIMARY_REGION:-ap-northeast-1}"
+
 # Derived variables (require a working gcloud pointing at PROJECT_ID)
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 GCS_BUCKET="${GCS_BUCKET:-${PROJECT_ID}-app-uploads}"
@@ -88,3 +107,4 @@ export PROJECT_ID REGION SERVICE_NAME INSTANCE_NAME DB_NAME DB_PASSWORD
 export SA_NAME SA_EMAIL REPO_NAME GCS_BUCKET CLOUD_SQL_CONNECTION_NAME
 export IMAGE MIGRATE_IMAGE DATABASE_URL CLOUD_SQL_PUBLIC_IP REDIS_URL
 export AUTH_SECRET UPSTASH_EMAIL UPSTASH_API_KEY PRISMA_ACCELERATE_API_KEY
+export SQL_AUTHORIZED_NETWORKS UPSTASH_PRIMARY_REGION

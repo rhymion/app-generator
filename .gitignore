@@ -63,6 +63,11 @@ next-env.d.ts
 *.db
 *.db-journal
 /prisma/schema.postgres.backup
+# Prisma migrations: derived from the generated schema.prisma, so they are build
+# artifacts (developer-prepared per build/deploy) rather than tracked source. They
+# still reach the Docker build context (.dockerignore does not exclude them) and are
+# applied by the app-migrate Job via `prisma migrate deploy`.
+/prisma/migrations/
 # Uploaded files
 /public/uploads/
 
