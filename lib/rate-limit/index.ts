@@ -63,7 +63,7 @@ export interface RateLimiter {
   check(bucket: string, key: string): Promise<RateLimitDecision>;
 }
 
-export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> = {
+const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // 10 credential attempts per IP per minute. Tight: anything sustained at
   // this rate is almost certainly a script.
   'auth:signin:credentials': { limit: 10, windowMs: 60_000 },
@@ -74,6 +74,32 @@ export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // genuine traffic is bounded; allow a comfortable burst.
   'auth:callback':           { limit: 60, windowMs: 60_000 },
 };
+
+// The Cypress UI suite intentionally logs in fresh for every `it()` (each
+// test's `beforeEach` calls `Cypress.session.clearAllSavedSessions()` before
+// `cy.login`, because it also runs `db:reset` — reusing a session tied to an
+// already-deleted user would be wrong). That's ~150+ legitimate credential
+// POSTs from one IP inside the suite's ~10-minute run, all sharing the same
+// Redis-backed counter (docker-compose.test.yml wires REDIS_URL into
+// NODE_ENV=test on purpose, to exercise the real Redis adapter rather than
+// the in-memory one). The production ceiling would false-positive on that
+// traffic shape, so `RATE_LIMIT_AUTH_CREDENTIALS_LIMIT` lets `.env.test`
+// widen just that bucket without touching the production default.
+//
+// This MUST be a plain, uniquely-named env var rather than a
+// `process.env.NODE_ENV === 'test'` check: Next.js's bundler statically
+// inlines `process.env.NODE_ENV` at build time (both `next build` and the
+// `next start` server it produces treat the app as a production build), so
+// a NODE_ENV-gated branch here gets dead-code-eliminated to the production
+// value even when the process is actually run with NODE_ENV=test. A
+// distinctly-named var has no such special-casing and is read dynamically
+// at runtime as expected.
+const credentialsLimitOverride = Number(process.env.RATE_LIMIT_AUTH_CREDENTIALS_LIMIT);
+
+export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> =
+  Number.isFinite(credentialsLimitOverride) && credentialsLimitOverride > 0
+    ? { ...PRODUCTION_BUCKETS, 'auth:signin:credentials': { limit: credentialsLimitOverride, windowMs: 60_000 } }
+    : PRODUCTION_BUCKETS;
 
 let _instance: RateLimiter | null = null;
 

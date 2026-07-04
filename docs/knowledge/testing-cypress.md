@@ -62,6 +62,14 @@ Each generated spec covers these categories:
 | 6.1 | Fail edit (required parent cleared) | URL stays on `/edit` |
 | 6.2 | Fail edit (required child cleared) | URL stays on `/edit` |
 
+Run with: `npm run test:e2e:cy:ui` (full suite takes roughly 6 minutes).
+
+Each spec logs in fresh in `beforeEach` (see `beforeEach` Pattern below), so changes
+to rate-limiting (thresholds, adapter swaps) can hit auth rate limits across the
+suite. Check `RATE_LIMIT_AUTH_CREDENTIALS_LIMIT` (`lib/rate-limit/index.ts`), which
+lets `.env.test` raise the login rate limit for test runs, before assuming a UI
+test failure is a real bug.
+
 ### API tests
 
 Generated when `api: true && test: true` in x-generate config. Located in `cypress/e2e/api/`.
@@ -378,6 +386,12 @@ starts Postgres on port 5432 matching `DATABASE_URL` in `.env.test`. Do **not** 
 a redundant `services.postgres` block in the workflow — it runs on a different port
 and is never connected to.
 
+`docker-compose.test.yml`'s `postgres-test` and `redis-test` are single shared
+instances. Do **not** run multiple E2E suites (e.g. `test:e2e:cy:api` and
+`test:e2e:cy:ui`) concurrently against them — each suite's `db:reset` races the
+other's in-flight test data, causing FK violations and other spurious failures.
+Run E2E suites sequentially, not in parallel.
+
 ---
 
 ## Gotchas and known issues
@@ -411,6 +425,14 @@ Expected to find element: `.MuiPickerPopper-root`, but never found it.
 
 It does **not** occur in headed `cy:open` because the browser window has real focus.
 **Fix**: use digit-only keyboard input (see `fillDateTime` above).
+
+### `process.env.NODE_ENV` branches are statically fixed at Next.js build time
+
+Next.js inlines and dead-code-eliminates `process.env.NODE_ENV` checks at build
+time — a production build always resolves `NODE_ENV === 'test'` to `false`, even
+when the app is actually running against the test env. Do **not** gate test-only
+behavior on `NODE_ENV`; use a dedicated env var (e.g. an explicit test-mode flag
+read from `.env.test`) instead, so the branch survives the production build.
 
 ### `singleSelect` display with no options
 
