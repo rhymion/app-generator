@@ -9,15 +9,17 @@
 
 Step 1: Run in the local environment
 ```bash
-cd ~/work/sandbox/app-generator-2
+cd <app-generator root dir>
 # Baseline for existing DB
 npx prisma migrate dev --name baseline
 # → generates prisma/migrations/YYYYMMDDHHMMSS_baseline/migration.sql
 ```
 
-Step 2: Track the migration file in VCS
+Step 2: Track the migration file in VCS (of wrapper repository) 
 ```bash
-git add prisma/migrations/
+cd <wrapper repository root dir>
+cp prisma/migrations ../proj/prisma/
+git add prj/prisma/migrations/
 git commit -m "chore: add baseline migration"
 ```
 
@@ -30,6 +32,7 @@ Step 3: Subsequent schema changes
 
 ```bash
 # Command executed internally by the migrate Job
+cd <app-generator root dir>
 npx prisma migrate deploy
 # → applies pending migrations in prisma/migrations/ in order
 ```

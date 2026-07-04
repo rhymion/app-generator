@@ -2,7 +2,7 @@
 
 ## Operations That Cannot Be Automated
 
-### 1. Obtain Prisma Accelerate URL (after gcp-setup.sh Step 2 completes)
+### 1. Obtain Prisma Accelerate URL (after gcp-setup.sh Step 2 of `docs/gcp-automation-design.md` completes, suspended now)
 
 > **Prerequisite**: Run gcp-setup.sh first and note the `DATABASE_URL_PUBLIC` displayed at the end.
 > Use this URL as the connection string for Cloud SQL.
