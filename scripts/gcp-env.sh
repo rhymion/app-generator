@@ -67,7 +67,8 @@ fi
 : "${UPSTASH_EMAIL:?UPSTASH_EMAIL is required — set in .env.production.local}"
 : "${UPSTASH_API_KEY:?UPSTASH_API_KEY is required — set in .env.production.local}"
 
-# Optional: needed for Step 5 Accelerate secret (follow runbook §1-3.5 to obtain)
+# Optional: needed for Step 5 Accelerate secret (obtained via the manual
+# Prisma Accelerate step printed by gcp-setup.sh Step 3, if used)
 PRISMA_ACCELERATE_API_KEY="${PRISMA_ACCELERATE_API_KEY:-}"
 
 # Cloud SQL authorized networks (Step 3). Default 0.0.0.0/0 is open-to-internet —

@@ -36,7 +36,8 @@ gcloud beta billing projects link $PROJECT_ID \
 ### 4. Grant Cloud Run IAM Invoker Permission (for DRS organizations)
 
 In DRS (Domain Restricted Sharing) organizations, --allow-unauthenticated cannot be used.
-Alternative: use the `--no-invoker-iam-check` flag (see runbook §1-6)
+`scripts/gcp-deploy.sh` already applies the `--no-invoker-iam-check` alternative
+unconditionally in its `gcloud run deploy` step (Step 4).
 
 ### 5. Confirm GCP Project Number (PROJECT_NUMBER)
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # GCP environment setup for the generated app (Cloud Run + Cloud SQL + Accelerate + Upstash).
-# Implements runbook §1-0.5 through §1-7 with idempotency on every step.
+# Provisions GCP APIs, Artifact Registry, Cloud SQL, the service account,
+# Upstash Redis, Secret Manager, and the GCS bucket (Steps 1-6 below),
+# each step idempotent (safe to re-run after a partial failure).
 #
 # Usage:
 #   ./scripts/gcp-setup.sh             # live run
@@ -176,7 +178,8 @@ if [[ "$DRY_RUN" != "true" ]]; then
     --format="value(ipAddresses[0].ipAddress)")
   echo "Cloud SQL Public IP: ${CLOUD_SQL_PUBLIC_IP}"
   echo ""
-  echo "  ⚠ Manual step required (runbook §1-3.5):"
+  echo "  ⚠ Optional manual step (Prisma Accelerate — skip if using the direct"
+  echo "    Cloud SQL socket path; see lib/prisma.ts for the toggle):"
   echo "    Go to https://console.prisma.io → New project → Accelerate"
   echo "    Connection string: postgresql://postgres:${DB_PASSWORD}@${CLOUD_SQL_PUBLIC_IP}:5432/${DB_NAME}?sslmode=require"
   echo "    Copy the API key and set PRISMA_ACCELERATE_API_KEY in .env.production.local, then re-run."
@@ -370,7 +373,8 @@ if [[ "$DRY_RUN" != "true" ]]; then
   echo "  1. Register the following DATABASE_URL_PUBLIC in Prisma Console:"
   echo "     https://console.prisma.io"
   echo ""
-  # Must match line 131 and the runbook: explicit :5432 and ?sslmode=require
+  # Must match the connection string logged in Step 3 above (line 184):
+  # explicit :5432 and ?sslmode=require
   # (Cloud SQL is --ssl-mode=ENCRYPTED_ONLY, so SSL is mandatory).
   DATABASE_URL_PUBLIC="postgresql://postgres:${DB_PASSWORD}@${CLOUD_SQL_PUBLIC_IP}:5432/${DB_NAME}?sslmode=require"
   echo "     DATABASE_URL_PUBLIC=${DATABASE_URL_PUBLIC}"

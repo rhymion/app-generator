@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-time database seeding via the existing app-migrate Cloud Run Job.
 #
-# Sequence (runbook §1-7 "db:seed-tenant"):
+# Sequence ("db:seed-tenant"):
 #   1. Repoint app-migrate to `npm run db:seed-tenant`
 #   2. Execute the Job and wait
 #   3. Restore app-migrate to its normal command `npx prisma migrate deploy`
