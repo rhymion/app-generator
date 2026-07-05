@@ -33,17 +33,23 @@ function attachSlowQueryListener(client: PrismaClient<'query'>): void {
   });
 }
 
-// Use Accelerate URL if available, otherwise fall back to direct connection
+// Use Accelerate URL if available, otherwise fall back to direct connection.
+// Accelerate is off by default (PRISMA_DATABASE_URL unset) because it has
+// never reached this environment's Cloud SQL instance — GOOGLE_MANAGED_INTERNAL_CA
+// TLS verification fails (rca_266a/267a). Doreen (the Lord) is following up with
+// Prisma support after other urgent work; once resolved, set PRISMA_DATABASE_URL
+// again to switch back to this branch without further code changes.
 const createPrismaClient = async () => {
   if (process.env.PRISMA_DATABASE_URL) {
     const accelerateUrl = process.env.PRISMA_DATABASE_URL;
-    // Fail fast if PRISMA_DATABASE_URL is a placeholder (e.g. created by runbook §1-3
-    // without replacing <YOUR_ACCELERATE_API_KEY>). A placeholder passes the truthy
-    // check above but causes P1001 + driverAdapterError on the first query.
+    // Fail fast if PRISMA_DATABASE_URL is a placeholder (e.g. created by
+    // docs/knowledge/manual-ops.md §1 without replacing <YOUR_ACCELERATE_API_KEY>).
+    // A placeholder passes the truthy check above but causes P1001 +
+    // driverAdapterError on the first query.
     if (!accelerateUrl.startsWith('prisma://') && !accelerateUrl.startsWith('prisma+postgres://')) {
       throw new Error(
         `[prisma] PRISMA_DATABASE_URL must start with prisma:// or prisma+postgres://. ` +
-        `Got: "${accelerateUrl.slice(0, 30)}..." — see gcp-cloud-run-runbook.md §1-3.5.`
+        `Got: "${accelerateUrl.slice(0, 30)}..." — see docs/knowledge/manual-ops.md §1.`
       );
     }
     console.log('Using Accelerate URL for Prisma Client');
@@ -74,7 +80,15 @@ const createPrismaClient = async () => {
 
     // Dynamic import to avoid bundling @prisma/adapter-pg in production
     const { PrismaPg } = await import('@prisma/adapter-pg');
-    const adapter = new PrismaPg({ connectionString }, schemaName ? { schema: schemaName } : undefined);
+    // Pool cap for the socket path (rca_267a §6, Option A): Cloud Run
+    // max-instances=10 × pool max=2 = 20 connections < Cloud SQL db-f1-micro
+    // max_connections=25, leaving headroom for admin/migration connections.
+    // `max` is a pg.PoolConfig field on the adapter's first constructor arg
+    // (Prisma 7 PrismaPg API — https://www.prisma.io/docs/orm/prisma-client/setup-and-configuration/databases-connections/connection-pool).
+    const adapter = new PrismaPg(
+      { connectionString, max: 2 },
+      schemaName ? { schema: schemaName } : undefined,
+    );
     if (slowQueryLogEnabled) {
       // Replace the stdout `query` level with an event-shaped one so $on('query')
       // fires. Other levels (info/warn/error) keep going to stdout.
