@@ -898,6 +898,16 @@ def generate(schema_path: str, output_dir: str) -> None:
     print('\nUpdating i18n and navigation config...')
     update_i18n_and_config(entities, schema, out)
 
+    # --- upload/route.ts (Vercel Blob, base default) ---
+    # Always emitted so app/api/upload/route.ts is a full generated artifact
+    # (manifest-tracked, cleanup-eligible) in both modes. x-cloud:gcp below
+    # overwrites this with the GCS version when enabled (cmd_269/cmd_272).
+    _write(
+        out / 'app' / 'api' / 'upload' / 'route.ts',
+        _render(env, 'upload_route_vercel.ts.jinja2', {}),
+    )
+    print('  Upload route (Vercel Blob) → app/api/upload/route.ts')
+
     # --- x-cloud opt-in: GCP Cloud Run artifacts ---
     if cloud_enabled and cloud_provider == 'gcp':
         print('\nGenerating GCP Cloud Run artifacts (x-cloud:gcp opt-in)...')
