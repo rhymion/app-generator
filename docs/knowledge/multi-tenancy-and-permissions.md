@@ -2,6 +2,11 @@
 
 This document describes how the app-generator handles tenant isolation at the organization level and how the role-based permission system controls access to data.
 
+Note: `docs/multi-tenancy.md`, referenced below by phase number, was removed
+as a planning doc in commit b11269b. Its content is not superseded by
+anything in-repo; recover it via `git show b11269b^:docs/multi-tenancy.md`
+if you need the full phase-by-phase plan or the "Decisions" rationale.
+
 ---
 
 ## 1. Organization-based tenant isolation

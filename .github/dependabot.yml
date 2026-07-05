@@ -1,4 +1,4 @@
-# Dependabot configuration — see docs/todo.md S3.
+# Dependabot configuration.
 #
 # Scans three ecosystems weekly:
 #   - npm        : the Next.js app's runtime + dev deps.

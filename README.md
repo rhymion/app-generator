@@ -81,8 +81,9 @@ Phases 1.3–4.3 of the multi-tenancy roadmap are not yet implemented:
 tenant resolution in auth sessions, tenant-aware code generation
 templates, cross-tenant isolation tests, and invite-only sign-up.
 Users from different tenants in the same deployment can currently
-access each other's data. See `docs/multi-tenancy.md` for the full
-phased plan.
+access each other's data. The full phased plan was removed as a
+planning doc in commit b11269b; recover it via
+`git show b11269b^:docs/multi-tenancy.md`.
 
 ### MFA / Two-Factor Authentication
 

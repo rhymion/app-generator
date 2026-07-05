@@ -968,7 +968,7 @@ def generate(schema_path: str, output_dir: str) -> None:
               'commit it to version control so it survives a fresh rebuild:\n')
         for note in _handwritten_notices:
             print(note)
-        print('\nSee docs/extension-points.md for the full list of extension points.')
+        print('\nSee docs/knowledge/code-generation-custom-extensions.md for the full list of extension points.')
         print(bar)
 
     print('\nCode generation complete!')
