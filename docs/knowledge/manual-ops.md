@@ -2,22 +2,39 @@
 
 ## Operations That Cannot Be Automated
 
-### 1. Obtain Prisma Accelerate URL (after gcp-setup.sh Step 2 of `docs/gcp-automation-design.md` completes, suspended now)
+### 1. Obtain Prisma Accelerate URL (disabled by default — direct socket is the production DB path)
 
-> **Prerequisite**: Run gcp-setup.sh first and note the `DATABASE_URL_PUBLIC` displayed at the end.
-> Use this URL as the connection string for Cloud SQL.
+> **Decision (2026-07-04, rca_267a §6): direct Cloud SQL socket (`DATABASE_URL`) is
+> the default production DB path, not Accelerate.** Accelerate has never
+> successfully reached this environment's Cloud SQL instance (P1001,
+> `GOOGLE_MANAGED_INTERNAL_CA` TLS verification failure — see
+> `rca_266a_accelerate_cloudsql.md` / `rca_267a_db_path_decision.md`). The Lord is
+> pursuing this with Prisma support separately. **Do not follow this procedure for
+> normal setup/deploy** — it is kept only for re-testing Accelerate once that
+> support thread resolves.
 
-1. Go to https://console.prisma.io
-2. Create a project (or select existing one)
-3. Enable Accelerate → enter the `DATABASE_URL_PUBLIC` output by gcp-setup.sh as the connection string
-4. Obtain the issued `prisma+postgres://...` URL
-5. Set it as `PRISMA_DATABASE_URL` in `.env.production.local`
+Revival procedure (once Accelerate is confirmed reachable again):
+1. Run gcp-setup.sh first and note the `DATABASE_URL_PUBLIC` displayed at the end.
+2. Go to https://console.prisma.io
+3. Create a project (or select existing one)
+4. Enable Accelerate → enter `DATABASE_URL_PUBLIC` as the connection string
+5. Obtain the issued `prisma+postgres://...` URL
+6. Set it as `PRISMA_DATABASE_URL` in `.env.production.local`
    ```bash
    # .env.production.local
    PRISMA_DATABASE_URL=prisma+postgres://accelerate.prisma-data.net/?api_key=...
    ```
-6. After completing the above, run `bash scripts/gcp-deploy.sh`
-   (gcp-deploy.sh fails fast and redirects to this procedure if PRISMA_DATABASE_URL is empty)
+7. In `scripts/gcp-deploy.sh`, uncomment the three Accelerate blocks (the
+   `PRISMA_DATABASE_URL` guard, the Step 0 secret registration, and the
+   `PRISMA_DATABASE_URL=app-prisma-database-url:latest` entry in the Step 4
+   `--set-secrets` list) — they are commented out, not deleted, specifically
+   for this revival path.
+8. `lib/prisma.ts` already branches on `PRISMA_DATABASE_URL` being set, so no
+   application code change is needed.
+9. Run `bash scripts/gcp-deploy.sh`.
+
+Without these steps, `PRISMA_DATABASE_URL` stays unset and `gcp-deploy.sh` /
+`lib/prisma.ts` use the direct socket path (current default).
 
 ### 2. Link GCP Billing Account
 

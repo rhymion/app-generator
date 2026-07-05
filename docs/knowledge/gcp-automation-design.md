@@ -47,15 +47,26 @@ Operations performed (idempotent — safe to re-run):
 - At the end: **echo DATABASE_URL_PUBLIC → prompt to register in Prisma Console**
 - **⚠️ app-prisma-database-url is not created yet (until Step 3 is complete)**
 
-### Step 3: [Manual] Obtain Accelerate URL from Prisma Console (suspended now)
+### Step 3: [Optional, currently disabled] Obtain Accelerate URL from Prisma Console
 
-> **This step cannot be automated (Prisma Platform API does not support URL issuance)**
-> See `docs/knowledge/manual-ops.md §1`
+> **Decision (2026-07-04, rca_267a §6, Lord-approved cmd_267+addendum): the direct
+> Cloud SQL socket path (`DATABASE_URL`) is the DEFAULT production DB path, not
+> Accelerate.** Accelerate has never successfully reached this environment's
+> Cloud SQL instance — it fails with P1001 due to `GOOGLE_MANAGED_INTERNAL_CA` TLS
+> verification (see `rca_266a_accelerate_cloudsql.md` / `rca_267a_db_path_decision.md`
+> in the shogun repo's `queue/reports/`). The Lord is following up with Prisma
+> support separately; this step is skipped for normal setup/deploy.
+>
+> Skip straight to Step 4 unless you are specifically re-testing Accelerate.
 
+If re-testing Accelerate anyway (this step still cannot be automated — the Prisma
+Platform API does not support URL issuance):
 1. Go to https://console.prisma.io
 2. Register the project connection using `DATABASE_URL_PUBLIC` output in Step 2
 3. Enable Prisma Accelerate → obtain the issued `prisma+postgres://...` URL
 4. Set it as `PRISMA_DATABASE_URL` in `.env.production.local`
+5. See `docs/knowledge/manual-ops.md §1` for the revival toggle in
+   `scripts/gcp-deploy.sh` (commented out, not deleted) that must also be re-enabled.
 
 ### Step 4: Run gcp-deploy.sh (image build + deploy)
 
@@ -63,17 +74,32 @@ Operations performed (idempotent — safe to re-run):
 bash scripts/gcp-deploy.sh
 ```
 
-Operations performed:
-- Required check for PRISMA_DATABASE_URL (fail-fast to Step 3 if empty)
-- Create/update app-prisma-database-url Secret (register URL obtained in Step 3)
-- Docker image build + push to Artifact Registry
-- Migration Job: prisma migrate deploy (uses direct DATABASE_URL socket — cannot go through Accelerate)
+Operations performed (default = direct socket path, Option A):
+- Docker image build + push to Artifact Registry (service + migrate images)
+- Migration Job: `prisma migrate deploy` via direct `DATABASE_URL` socket
 - Run seed
-- Cloud Run Service deploy (atomic wiring):
+- Cloud Run Service deploy:
   - `--add-cloudsql-instances` (for DATABASE_URL direct socket)
-  - `--set-secrets`: PRISMA_DATABASE_URL / DATABASE_URL / AUTH_SECRET / GCS_BUCKET / REDIS_URL
+  - `--set-secrets`: DATABASE_URL / AUTH_SECRET / GCS_BUCKET / REDIS_URL
   - `--set-env-vars`: AUTH_TRUST_HOST=true / NODE_ENV=production
-- Output Service URL (`gcloud run services describe --format='value(status.url)'`)
+  - `--max-instances=10` — paired with the `lib/prisma.ts` PrismaPg pool cap
+    (`max: 2`) so 10 instances × 2 pool ≤ 20 connections, under the
+    db-f1-micro `max_connections=25` ceiling (rca_267a §1/§6). If instance
+    count or pool size changes, re-derive this budget.
+  - Output Service URL (`gcloud run services describe --format='value(status.url)'`)
+
+The Accelerate wiring (Step 0 secret registration + `PRISMA_DATABASE_URL`
+guard + `--set-secrets` entry) is commented out in `gcp-deploy.sh`, not
+deleted. To revive it: uncomment those three blocks, complete Step 3 above,
+and set `PRISMA_DATABASE_URL` in `.env.production.local` — no other code
+changes needed (`lib/prisma.ts` already branches on that variable).
+
+**Scaling beyond the 10×2 budget**: raise the Cloud SQL tier to
+`db-g1-small` (`max_connections≈50`) and adjust `--max-instances`/pool
+`max` proportionally (e.g. 10×5=50) rather than reintroducing Accelerate
+or an external pooler — see rca_267a §2 for why Managed Connection Pooling
+(Enterprise Plus only) and a PgBouncer sidecar (Cloud Run has no sidecar
+support) were both rejected.
 
 ### On Redeploy (no infrastructure changes)
 
