@@ -22,29 +22,26 @@ export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
 
-  // Level 1: leaf tables referencing core entities
-  // noteable excluded: not in prisma schema (internal bridge, not persisted)
+  // Level 1: approval_request, attachment, dashboard_widget, organization, permission, reaction
   await prisma.approval_request.deleteMany();
   await prisma.attachment.deleteMany();
-  await prisma.audit_log.deleteMany();
-  await prisma.comment.deleteMany();
   await prisma.dashboard_widget.deleteMany();
-  await prisma.mfa_recovery_code.deleteMany();
+  await prisma.organization.deleteMany();
   await prisma.permission.deleteMany();
   await prisma.reaction.deleteMany();
 
-  // Level 2: tables with FK to level-3 entities
+  // Level 2: approvable, approval_flow, attachable, comment, dashboard
   await prisma.approvable.deleteMany();
   await prisma.approval_flow.deleteMany();
-  await prisma.commentable.deleteMany();
+  await prisma.attachable.deleteMany();
+  await prisma.comment.deleteMany();
   await prisma.dashboard.deleteMany();
 
-  // Level 3: tables with FK to user/role
-  await prisma.attachable.deleteMany();
-  await prisma.organization.deleteMany();
+  // Level 3: commentable, role
+  await prisma.commentable.deleteMany();
   await prisma.role.deleteMany();
 
-  // Level 4: root tables
+  // Level 4: user
   await prisma.user.deleteMany();
 
   // Clear in-process LRU caches (api-key, permission) on the running server.
@@ -53,7 +50,16 @@ export async function resetTestDatabase() {
   // a deleted user_account row, causing the next write to fail with a
   // <model>_updater_id_fkey violation. The endpoint is gated by
   // TEST_RESET_TOKEN — only enabled in .env.test.
-  const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
+  //
+  // Keyed off PORT, not NEXTAUTH_URL: PORT is what actually varies when a
+  // caller overrides it to dodge a residual process on the default port
+  // (e.g. `PORT=3001 npm run test:e2e:cy:api`). NEXTAUTH_URL stays pinned to
+  // .env.test's default and does not track that override, so using it here
+  // sends this call to a server that isn't listening — the fetch fails
+  // silently (see catch below), the cache never clears, and a later request
+  // resolves a stale/deleted userId, surfacing as a `<model>_x_id_fkey`
+  // violation or a spurious 403 several tests later.
+  const baseUrl = `http://localhost:${process.env.PORT ?? 3000}`;
   const token = process.env.TEST_RESET_TOKEN;
   if (token) {
     try {
