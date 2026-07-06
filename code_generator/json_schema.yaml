@@ -4,11 +4,11 @@ $schema: "http://json-schema.org/draft-07/schema#"
 format-version: 2.0
 
 # x-cloud: GCP Cloud Run opt-in (コメントを解除して使用)
-x-cloud:
-  enabled: true
-  provider: gcp
-  service: cloud_run
-  region: asia-northeast1
+# x-cloud:
+#   enabled: true
+#   provider: gcp
+#   service: cloud_run
+#   region: asia-northeast1
 
 # Generator configuration (DP-3: search opt-in vs all-entity default)
 # search.default_scope: 'opt_in' — only entities with x-generate.search: true are searchable
