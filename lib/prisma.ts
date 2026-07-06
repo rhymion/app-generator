@@ -77,7 +77,12 @@ const createPrismaClient = async () => {
       }
       // Bound how long a runaway query can hold a connection open. Set
       // STATEMENT_TIMEOUT_MS=0 to disable (e.g. for long-running batch jobs).
-      const timeoutMs = parseInt(process.env.STATEMENT_TIMEOUT_MS ?? '', 10) || 30000;
+      // `|| 30000` previously treated 0 as falsy, silently coercing an
+      // explicit disable request back to the default — distinguish "not set"
+      // (NaN) from "explicitly 0" instead.
+      const rawTimeout = process.env.STATEMENT_TIMEOUT_MS;
+      const parsedTimeout = (rawTimeout == null || rawTimeout === '') ? NaN : parseInt(rawTimeout, 10);
+      const timeoutMs = Number.isNaN(parsedTimeout) ? 30000 : parsedTimeout;
       u.searchParams.set('statement_timeout', String(timeoutMs));
       connectionString = u.toString();
     } catch { /* malformed URL — fall through with original values */ }
