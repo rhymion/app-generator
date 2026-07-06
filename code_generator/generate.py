@@ -892,9 +892,14 @@ def generate(schema_path: str, output_dir: str) -> None:
             out / 'app' / '[locale]' / 'search' / 'actions.ts',
             _render(env, 'search_actions.ts.jinja2', search_ctx),
         )
+        _write(
+            out / 'scripts' / 'create-gin-indexes.sql',
+            _render(env, 'create_gin_indexes.sql.jinja2', search_ctx),
+        )
         entity_names = ', '.join(e['entity_type'] for e in search_entities)
         print(f'  Search routes → lib/search/helpers.ts + app/api/search/route.ts ({entity_names})')
         print(f'  Search UI page → app/[locale]/search/page.tsx + actions.ts')
+        print(f'  Search GIN index script → scripts/create-gin-indexes.sql (apply with psql before test:e2e:cy:api)')
         _write(
             out / 'lib' / 'db-init.ts',
             _render(env, 'db_init.ts.jinja2', search_ctx),
@@ -908,6 +913,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             out / 'app' / 'api' / 'search' / 'route.ts',
             out / 'app' / '[locale]' / 'search' / 'page.tsx',
             out / 'app' / '[locale]' / 'search' / 'actions.ts',
+            out / 'scripts' / 'create-gin-indexes.sql',
         ]
         for _stale in _stale_search_files:
             if _stale.exists():

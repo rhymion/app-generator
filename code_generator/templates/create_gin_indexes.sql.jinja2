@@ -1,0 +1,17 @@
+-- AUTO-GENERATED - DO NOT EDIT
+-- Apply with: psql "$DATABASE_URL" -f scripts/create-gin-indexes.sql
+-- Idempotent: safe to re-run.
+--
+-- GIN + gin_trgm_ops indexes backing similarity() (and ILIKE '%...%') lookups
+-- in lib/search/helpers.ts. Kept out of prisma/schema.prisma: Prisma 7's
+-- `ops: raw("gin_trgm_ops")` syntax works, but `prisma migrate dev` enters an
+-- infinite drop/recreate drift loop on it (Prisma issue #16275, unresolved).
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+{% for entity in search_entities %}
+{% for field in entity.text_fields %}
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_{{ entity.model }}_{{ field }}_gin_trgm"
+  ON "{{ entity.model }}" USING GIN ("{{ field }}" gin_trgm_ops);
+{% endfor %}
+{% endfor %}
