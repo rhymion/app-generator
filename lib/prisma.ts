@@ -74,8 +74,12 @@ const createPrismaClient = async () => {
       if (s) {
         schemaName = s;
         u.searchParams.delete('schema');
-        connectionString = u.toString();
       }
+      // Bound how long a runaway query can hold a connection open. Set
+      // STATEMENT_TIMEOUT_MS=0 to disable (e.g. for long-running batch jobs).
+      const timeoutMs = parseInt(process.env.STATEMENT_TIMEOUT_MS ?? '', 10) || 30000;
+      u.searchParams.set('statement_timeout', String(timeoutMs));
+      connectionString = u.toString();
     } catch { /* malformed URL — fall through with original values */ }
 
     // Dynamic import to avoid bundling @prisma/adapter-pg in production
