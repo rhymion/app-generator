@@ -25,6 +25,7 @@ export interface SearchOpts {
   userId: string;
   page: number;
   pageSize: number;
+  count?: boolean;
 }
 
 /**
@@ -38,6 +39,7 @@ export interface SearchOpts {
  */
 export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
   const { q, entityTypes, userId, page, pageSize } = opts;
+  const shouldCount = opts.count !== false;
 
   const associatedOrgs = await getAssociatedOrganizations(userId);
   const associatedOrgIds = associatedOrgs.map((o) => o.id);
@@ -116,19 +118,22 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
 
   const unionSql = Prisma.join(subQueries, ' UNION ALL ');
 
-  const countRows = await prisma.$queryRaw<[{ count: bigint }]>`
-    SELECT COUNT(*)::bigint AS count FROM (${ unionSql }) _search_union
-  `;
-  const total = Number(countRows[0]?.count ?? 0);
-
-  const facetRows = await prisma.$queryRaw<Array<{ entity_type: string; count: bigint }>>`
-    SELECT entity_type, COUNT(*)::bigint AS count
-    FROM (${ unionSql }) _search_union
-    GROUP BY entity_type
-  `;
+  let total = -1;
   const facets: Record<string, number> = {};
-  for (const row of facetRows) {
-    facets[row.entity_type] = Number(row.count);
+  if (shouldCount) {
+    const countRows = await prisma.$queryRaw<[{ count: bigint }]>`
+      SELECT COUNT(*)::bigint AS count FROM (${ unionSql }) _search_union
+    `;
+    total = Number(countRows[0]?.count ?? 0);
+
+    const facetRows = await prisma.$queryRaw<Array<{ entity_type: string; count: bigint }>>`
+      SELECT entity_type, COUNT(*)::bigint AS count
+      FROM (${ unionSql }) _search_union
+      GROUP BY entity_type
+    `;
+    for (const row of facetRows) {
+      facets[row.entity_type] = Number(row.count);
+    }
   }
 
   const clampedPage = Math.max(0, Math.floor(page));
