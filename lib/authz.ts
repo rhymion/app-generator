@@ -52,6 +52,7 @@ export type ItemContext = {
 
 const EMPTY_FLAGS: OperationFlags = { create: false, read: false, update: false, delete: false };
 const FULL_FLAGS: OperationFlags = { create: true, read: true, update: true, delete: true };
+const READ_ONLY_FLAGS: OperationFlags = { create: false, read: true, update: false, delete: false };
 const SPECIAL_ROLE_NAMES = ['Creator', 'Assignee'] as const;
 
 function mergeFlags(a: OperationFlags, b: OperationFlags): OperationFlags {
@@ -152,6 +153,21 @@ export const getModelPermissions = cache(async (
   if (permissionCacheEnabled) {
     const cached = permissionCache.get(cacheKey);
     if (cached) return cached;
+  }
+
+  // audit_log is a system-admin capability. Users holding the 'Administrator' role
+  // get full CRUD access without an explicit permission record, so audit_log does
+  // not appear in the user-facing permission list (permission.cy.ts count stays at 6).
+  if (model === 'audit_log') {
+    const adminRoleCount = await prisma.role.count({
+      where: { name: 'Administrator', users: { some: { id: resolvedUserId } } },
+    });
+    if (adminRoleCount > 0) {
+      const adminPerms: RichPermissions = { ...READ_ONLY_FLAGS, general: READ_ONLY_FLAGS, creator: null, assignee: null };
+      const result = { permissions: adminPerms, userId: resolvedUserId };
+      if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
+      return result;
+    }
   }
 
   const rows = await prisma.permission.findMany({

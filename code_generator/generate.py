@@ -24,7 +24,7 @@ from helpers.bridge_direction import get_new_form_bridge
 from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit_child_bridge_fk
 from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
-from build_context import build_context, _get_actual_type
+from build_context import build_context, build_anonymize_user_context, _get_actual_type
 from generators import (
     chart_context,
     page_list_context,
@@ -295,6 +295,36 @@ def _derive_text_fields(properties: dict) -> list[str]:
     return result
 
 
+def _derive_mention_fields(properties: dict) -> list[str]:
+    """Return field names annotated with x-mention: true.
+
+    These fields store @[user_id:uuid] mention syntax and require mention-parser
+    utilities at render time. Detected here so Phase 2 templates can use the list.
+    """
+    return [
+        field_name
+        for field_name, prop in properties.items()
+        if isinstance(prop, dict) and prop.get('x-mention') is True
+    ]
+
+
+def _derive_gdpr_mode_fields(properties: dict) -> dict[str, str]:
+    """Return a mapping of field_name -> x-gdpr-mode for fields that have the annotation.
+
+    Fields without x-gdpr-mode are not included; callers should default to 'both'.
+    """
+    return {
+        field_name: prop.get('x-gdpr-mode', 'both')
+        for field_name, prop in properties.items()
+        if isinstance(prop, dict) and prop.get('x-gdpr-mode') is not None
+    }
+
+
+def _get_model_gdpr_mode(model_def: dict) -> str:
+    """Return the model-level x-gdpr-mode value, defaulting to 'both'."""
+    return model_def.get('x-gdpr-mode', 'both')
+
+
 def _get_primary_display_field(entity_defs: list) -> str | None:
     """Return the x-display.table primary field from the first definition that has one."""
     for defn in entity_defs:
@@ -374,6 +404,17 @@ def generate(schema_path: str, output_dir: str) -> None:
         can_delete = gen_cfg.get('delete', True)
         can_api    = gen_cfg.get('api', False)
 
+        # invalidate flag: accepts bool or {enabled, handler, module}
+        _inv = gen_cfg.get('invalidate', False)
+        if isinstance(_inv, dict):
+            can_invalidate    = bool(_inv.get('enabled', False))
+            invalidate_handler = _inv.get('handler', '')
+            invalidate_module  = _inv.get('module', '')
+        else:
+            can_invalidate    = bool(_inv)
+            invalidate_handler = ''
+            invalidate_module  = ''
+
         print(f'\nGenerating: {parent}' + (f' (model: {model})' if model != parent else ''))
 
         # Paths
@@ -445,7 +486,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                 )
 
         # --- actions.ts ---
-        if can_new or can_edit or can_delete:
+        if can_new or can_edit or can_delete or can_invalidate:
             act_ctx = {**ctx, **actions_context(ctx)}
             _write(lib_dir / 'actions.ts', _render(env, 'actions.ts.jinja2', act_ctx))
 
@@ -459,6 +500,13 @@ def generate(schema_path: str, output_dir: str) -> None:
             if can_new or can_edit or can_delete:
                 _write(api_dir / 'bulk' / 'route.ts', _render(env, 'api_bulk_route.ts.jinja2', ctx))
             print(f'  API routes → app/api/{parent}/')
+
+        # --- Invalidate action route (independent of can_api) ---
+        if can_invalidate:
+            inv_api_dir = out / 'app' / 'api' / parent / '[id]' / 'actions' / 'invalidate'
+            _write(inv_api_dir / 'route.ts',
+                   _render(env, 'invalidate_action_route.ts.jinja2', ctx))
+            print(f'  Invalidate route → app/api/{parent}/[id]/actions/invalidate/')
 
         # --- column_def.tsx ---
         has_children = bool(entity.get('children'))
@@ -596,6 +644,34 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'reaction_constants.ts.jinja2', {'named_constants': named_constants}),
         )
         print(f'  Named constants → lib/reaction_constants.ts ({len(named_constants)} constant(s))')
+
+    # --- anonymize_user.ts (lib/compliance/anonymize_user.ts) ---
+    # Emitted when the user entity has at least one x-pii annotated field.
+    # Generates GDPR Art.17 right-to-erasure scrub function from x-pii annotations.
+    anon_ctx = build_anonymize_user_context(schema)
+    if anon_ctx['has_pii_user']:
+        _write(
+            out / 'lib' / 'compliance' / 'anonymize_user.ts',
+            _render(env, 'anonymize_user.ts.jinja2', anon_ctx),
+        )
+        print(f"  anonymize_user → lib/compliance/anonymize_user.ts ({len(anon_ctx['pii_fields'])} x-pii fields)")
+
+    # --- Mention parser (lib/mention/parser.ts) ---
+    # Emitted when at least one field in any schema definition is annotated with x-mention: true.
+    _has_any_mention = any(
+        any(
+            isinstance(prop, dict) and prop.get('x-mention') is True
+            for prop in defn.get('properties', {}).values()
+        )
+        for defn in schema.get('definitions', {}).values()
+        if isinstance(defn, dict)
+    )
+    if _has_any_mention:
+        _write(
+            out / 'lib' / 'mention' / 'parser.ts',
+            _render(env, 'mention_parser.ts.jinja2', {}),
+        )
+        print('  Mention parser → lib/mention/parser.ts')
 
     # --- Comment reactions API route (app/api/comment/[commentId]/reactions/toggle/route.ts) ---
     # Emitted whenever x-internal integer enum entities exist (i.e., reactions are enabled).

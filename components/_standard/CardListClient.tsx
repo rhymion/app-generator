@@ -35,6 +35,7 @@ interface DisplayFieldConfig<T> {
   headerName: string;
   width?: number;
   format?: 'date-time' | 'date' | 'time';
+  showSeconds?: boolean;
   uriKind?: 'image' | 'link';
 }
 
@@ -60,14 +61,14 @@ interface CardListClientProps<T extends BaseEntity> {
   allowCreate?: boolean;
 }
 
-function formatValue<T>(item: T, field: keyof T, format?: 'date-time' | 'date' | 'time'): string {
+function formatValue<T>(item: T, field: keyof T, format?: 'date-time' | 'date' | 'time', showSeconds?: boolean): string {
   const value = item[field];
   if (value === null || value === undefined) return '';
-  if (format === 'date-time') return dayjs(value as string).format('YYYY-MM-DD HH:mm');
+  if (format === 'date-time') return dayjs(value as string).format(showSeconds ? 'YYYY-MM-DD HH:mm:ss' : 'YYYY-MM-DD HH:mm');
   if (format === 'date') return dayjs(new Date(value as string).toISOString().slice(0, 10) as string).format('YYYY-MM-DD');
   if (format === 'time') return dayjs(value as string).format('HH:mm');;
   if (typeof value === 'object' && value !== null && 'name' in value) return (value as { name: string }).name;
-  if (value instanceof Date) return dayjs(value).format('YYYY-MM-DD HH:mm');
+  if (value instanceof Date) return dayjs(value).format(showSeconds ? 'YYYY-MM-DD HH:mm:ss' : 'YYYY-MM-DD HH:mm');
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   return String(value);
 }
@@ -75,6 +76,10 @@ function formatValue<T>(item: T, field: keyof T, format?: 'date-time' | 'date' |
 export default function CardListClient<T extends BaseEntity>({
   src,
   initialRows,
+  initialRowCount,
+  initialPage,
+  initialPageSize,
+  fetchPage,
   basePath,
   removeAction,
   entityLabel = 'Item',
@@ -83,8 +88,24 @@ export default function CardListClient<T extends BaseEntity>({
   primaryField = 'name' as keyof T,
   allowCreate = true,
 }: CardListClientProps<T>) {
-  const [items] = useState<T[]>(initialRows ?? src ?? []);
+  const [items, setItems] = useState<T[]>(initialRows ?? src ?? []);
+  const [page, setPage] = useState<number>(initialPage ?? 0);
+  const [rowCount, setRowCount] = useState<number>(initialRowCount ?? (initialRows ?? src ?? []).length);
+  const pageSize = initialPageSize ?? 50;
   const [isPending, startTransition] = useTransition();
+
+  const hasPrev = page > 0;
+  const hasNext = (page + 1) * pageSize < rowCount;
+
+  const loadPage = (newPage: number) => {
+    if (!fetchPage) return;
+    startTransition(async () => {
+      const result = await fetchPage({ page: newPage, pageSize });
+      setItems(result.rows as T[]);
+      setRowCount(result.total);
+      setPage(newPage);
+    });
+  };
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -151,7 +172,7 @@ export default function CardListClient<T extends BaseEntity>({
           items.map((item) => {
             const isSelected = selectedIds.has(item.id);
             const primaryFieldConfig = defaultDisplayFields.find(f => f.field === primaryField);
-            const primaryValue = formatValue(item, primaryField, primaryFieldConfig?.format);
+            const primaryValue = formatValue(item, primaryField, primaryFieldConfig?.format, primaryFieldConfig?.showSeconds);
 
             return (
               <Card
@@ -191,7 +212,7 @@ export default function CardListClient<T extends BaseEntity>({
                         </Box>
                       );
                     }
-                    const value = formatValue(item, fieldConfig.field, fieldConfig.format);
+                    const value = formatValue(item, fieldConfig.field, fieldConfig.format, fieldConfig.showSeconds);
                     if (!value) return null;
                     return (
                       <Box key={String(fieldConfig.field)} sx={{ mt: 0.5 }}>
@@ -221,6 +242,32 @@ export default function CardListClient<T extends BaseEntity>({
           })
         )}
       </Box>
+
+      {fetchPage && (hasPrev || hasNext) && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 2, mt: 2 }}>
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={!hasPrev || isPending}
+            onClick={() => loadPage(page - 1)}
+            aria-label="Previous page"
+          >
+            前へ
+          </Button>
+          <Typography variant="body2" color="text.secondary">
+            {page + 1}
+          </Typography>
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={!hasNext || isPending}
+            onClick={() => loadPage(page + 1)}
+            aria-label="Next page"
+          >
+            次へ
+          </Button>
+        </Box>
+      )}
 
       <Dialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)}>
         <DialogTitle>Delete {entityLabel}(s)?</DialogTitle>

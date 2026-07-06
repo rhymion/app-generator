@@ -1,0 +1,32 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+{% if invalidate_module %}
+import { {{ invalidate_handler }} } from '@/{{ invalidate_module }}';
+{% else %}
+import { invalidate{{ parent_pascal }} } from '@/lib/{{ parent }}/invalidate_handler';
+{% endif %}
+
+// POST /api/{{ parent }}/[id]/actions/invalidate
+// Anonymizes all PII for the given {{ parent }} record. Irreversible.
+// TODO: separate 'invalidate' permission from 'delete' in future
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const { userId } = await authenticateApiKey(request);
+
+    await requireApiPermission(userId, '{{ parent }}', 'delete');
+
+    {% if invalidate_module %}
+    const result = await {{ invalidate_handler }}(id);
+    {% else %}
+    const result = await invalidate{{ parent_pascal }}(id);
+    {% endif %}
+
+    return NextResponse.json(result ?? { success: true });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

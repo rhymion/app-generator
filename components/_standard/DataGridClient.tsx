@@ -24,6 +24,7 @@ import Button from '@mui/material/Button';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
+import PersonOffIcon from '@mui/icons-material/PersonOff';
 import type { ModelPermissions } from '@/lib/authz';
 import type { PageOpts, PageResult } from '@/lib/_pagination';
 
@@ -38,6 +39,7 @@ interface DisplayFieldConfig<T> {
   headerName: string;
   width?: number;
   format?: 'date-time' | 'date' | 'time';
+  showSeconds?: boolean;
   enumLabels?: Record<number, string>;
   uriKind?: 'image' | 'link';
 }
@@ -57,6 +59,7 @@ interface DataGridClientProps<T extends BaseEntity> {
   fetchPage?: (opts: PageOpts) => Promise<PageResult<T>>;
   basePath: string;
   removeAction?: (ids: string[]) => Promise<void>;
+  invalidateAction?: (id: string) => Promise<void>;
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];
   permissions?: ModelPermissions;
@@ -77,6 +80,7 @@ export default function DataGridClient<T extends BaseEntity>({
   fetchPage,
   basePath,
   removeAction,
+  invalidateAction,
   entityLabel = 'Item',
   displayFields,
   permissions = { create: true, read: true, update: true, delete: true },
@@ -99,8 +103,10 @@ export default function DataGridClient<T extends BaseEntity>({
   const [sortModel, setSortModel] = useState<GridSortModel>([]);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
+  const [openInvalidateDialog, setOpenInvalidateDialog] = useState(false);
   const [selectedRowIds, setSelectedRowIds] = useState<GridRowSelectionModel>({ type: 'include', ids: new Set() });
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
+  const [pendingInvalidateId, setPendingInvalidateId] = useState<string | null>(null);
   const apiRef = useGridApiRef();
   const tc = useTranslations('Common');
   const tf = useTranslations('Fields');
@@ -154,6 +160,20 @@ export default function DataGridClient<T extends BaseEntity>({
     }
     setOpenDeleteDialog(false);
     setPendingDeleteIds([]);
+  };
+
+  const handleInvalidateClick = (id: string) => {
+    setPendingInvalidateId(id);
+    setOpenInvalidateDialog(true);
+  };
+
+  const invalidateConfirmed = () => {
+    if (pendingInvalidateId && invalidateAction) {
+      const id = pendingInvalidateId;
+      startTransition(() => invalidateAction(id));
+    }
+    setOpenInvalidateDialog(false);
+    setPendingInvalidateId(null);
   };
 
   // Build dynamic columns based on displayFields, with name as default first column
@@ -216,7 +236,7 @@ export default function DataGridClient<T extends BaseEntity>({
       valueGetter: (value, row) => {
         const fieldValue = row[fieldConfig.field];
         if (fieldValue === null || fieldValue === undefined) return '';
-        if (fieldConfig.format) return formatLabelValue(fieldValue, fieldConfig.format);
+        if (fieldConfig.format) return formatLabelValue(fieldValue, fieldConfig.format, fieldConfig.showSeconds);
         if (fieldConfig.enumLabels && typeof fieldValue === 'number') return fieldConfig.enumLabels[fieldValue] ?? String(fieldValue);
         if (typeof fieldValue === 'object' && 'name' in (fieldValue as object)) return (fieldValue as unknown as { name: string }).name;
         return String(fieldValue);
@@ -225,22 +245,38 @@ export default function DataGridClient<T extends BaseEntity>({
   });
 
   const columns: GridColDef<T>[] = dataColumns;
-  if (permissions.update) columns.push(
+  if (permissions.update || invalidateAction) columns.push(
     {
       field: 'actions',
       headerName: tf('actions'),
-      width: 80,
+      width: invalidateAction ? 120 : 80,
       sortable: false,
       filterable: false,
       renderCell: (params) => {
         return (
-          <Link href={`${basePath}/edit/${params.id}`} target={openLinksInNewTab ? '_blank' : undefined} rel={openLinksInNewTab ? 'noopener noreferrer' : undefined}>
-            <Tooltip title="Edit">
-              <IconButton size="small" aria-label="Edit" color="primary">
-                <EditIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          </Link>
+          <span style={{ display: 'flex', gap: 4 }}>
+            {permissions.update && (
+              <Link href={`${basePath}/edit/${params.id}`} target={openLinksInNewTab ? '_blank' : undefined} rel={openLinksInNewTab ? 'noopener noreferrer' : undefined}>
+                <Tooltip title="Edit">
+                  <IconButton size="small" aria-label="Edit" color="primary">
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Link>
+            )}
+            {invalidateAction && (
+              <Tooltip title="Invalidate (irreversible)">
+                <IconButton
+                  size="small"
+                  aria-label="Invalidate"
+                  color="warning"
+                  onClick={() => handleInvalidateClick(params.id as string)}
+                >
+                  <PersonOffIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+          </span>
         );
       },
     },
@@ -258,7 +294,7 @@ export default function DataGridClient<T extends BaseEntity>({
           </Tooltip>
         </Link>
         )}
-        {permissions.delete && (
+        {permissions.delete && removeAction && (
         <Tooltip title="Delete Selected">
           <span>
             <IconButton
@@ -325,6 +361,23 @@ export default function DataGridClient<T extends BaseEntity>({
         <DialogActions>
           <Button onClick={() => setOpenDeleteDialog(false)} color="inherit">{tc('cancel')}</Button>
           <Button onClick={deleteConfirmed} color="error" variant="contained" aria-label="Delete">{tc('delete')}</Button>
+        </DialogActions>
+      </Dialog>
+      {/* Invalidate Dialog — irreversible action */}
+      <Dialog
+        open={openInvalidateDialog}
+        onClose={() => setOpenInvalidateDialog(false)}
+        aria-labelledby="invalidate-dialog-title"
+      >
+        <DialogTitle id="invalidate-dialog-title">Invalidate {entityLabel}?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This action is <strong>irreversible</strong>. The {entityLabel.toLowerCase()}&apos;s personal data will be permanently anonymized. Are you sure?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenInvalidateDialog(false)} color="inherit">{tc('cancel')}</Button>
+          <Button onClick={invalidateConfirmed} color="warning" variant="contained" aria-label="Invalidate">Invalidate</Button>
         </DialogActions>
       </Dialog>
     </div>

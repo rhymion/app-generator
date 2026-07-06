@@ -131,14 +131,15 @@ def extract_entities(schema: dict) -> list[dict]:
             child_to_parents.setdefault(child['name'], []).append(model_name)
 
         generate_config = {
-            'list':   x_generate.get('list',   True) is not False,
-            'view':   x_generate.get('view',   True) is not False,
-            'new':    x_generate.get('new',    True) is not False,
-            'edit':   x_generate.get('edit',   True) is not False,
-            'delete': x_generate.get('delete', True) is not False,
-            'api':    x_generate.get('api')  is True,
-            'test':   x_generate.get('test') is True,
-            'fields': x_generate.get('fields'),
+            'list':       x_generate.get('list',   True) is not False,
+            'view':       x_generate.get('view',   True) is not False,
+            'new':        x_generate.get('new',    True) is not False,
+            'edit':       x_generate.get('edit',   True) is not False,
+            'delete':     x_generate.get('delete', True) is not False,
+            'api':        x_generate.get('api')  is True,
+            'test':       x_generate.get('test') is True,
+            'fields':     x_generate.get('fields'),
+            'invalidate': x_generate.get('invalidate', False),
         }
 
         # Skip entities where all user-facing flags are explicitly False (internal models)

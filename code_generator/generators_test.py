@@ -2959,6 +2959,14 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
             assigned.add(name)
             remaining.remove(name)
 
+    # System tables: not in json_schema.yaml definitions, but have FK constraints
+    # that block user.deleteMany(). audit_log uses onDelete: Restrict — must be
+    # deleted before user rows. mfa_recovery_code is Cascade but explicit ordering
+    # avoids any partial-delete race during test reset.
+    system_first = [t for t in ['audit_log', 'mfa_recovery_code'] if t not in base_entities]
+    if system_first:
+        levels.insert(0, system_first)
+
     return {
         'deletion_levels': levels,
         'test_entity_names': sorted(test_entity_names) if test_entity_names is not None else [],

@@ -622,6 +622,51 @@ def validate_schema(schema: dict) -> None:
                     )
 
     # -----------------------------------------------------------------------
+    # 8. x-pii field annotation validation
+    # -----------------------------------------------------------------------
+    _VALID_PII_VALUES = {'direct', 'indirect', 'sensitive', 'none'}
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        props = defn.get('properties', {})
+        for prop_name, prop_def in props.items():
+            if not isinstance(prop_def, dict):
+                continue
+            pii_val = prop_def.get('x-pii')
+            if pii_val is not None and pii_val not in _VALID_PII_VALUES:
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"x-pii value '{pii_val}' is not valid.  "
+                    f"Allowed values: {sorted(_VALID_PII_VALUES)}."
+                )
+
+    # -----------------------------------------------------------------------
+    # 9. x-gdpr-mode annotation validation (model-level and field-level)
+    # -----------------------------------------------------------------------
+    _VALID_GDPR_MODE_VALUES = {'internal', 'consumer', 'both'}
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        gdpr_mode_val = defn.get('x-gdpr-mode')
+        if gdpr_mode_val is not None and gdpr_mode_val not in _VALID_GDPR_MODE_VALUES:
+            errors.append(
+                f"Definition '{def_key}': "
+                f"x-gdpr-mode value '{gdpr_mode_val}' is not valid. "
+                f"Allowed values: {sorted(_VALID_GDPR_MODE_VALUES)}."
+            )
+        props = defn.get('properties', {})
+        for prop_name, prop_def in props.items():
+            if not isinstance(prop_def, dict):
+                continue
+            gdpr_mode_field_val = prop_def.get('x-gdpr-mode')
+            if gdpr_mode_field_val is not None and gdpr_mode_field_val not in _VALID_GDPR_MODE_VALUES:
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"x-gdpr-mode value '{gdpr_mode_field_val}' is not valid. "
+                    f"Allowed values: {sorted(_VALID_GDPR_MODE_VALUES)}."
+                )
+
+    # -----------------------------------------------------------------------
     # Report
     # -----------------------------------------------------------------------
     if errors:

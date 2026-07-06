@@ -93,7 +93,9 @@ model user {
   updated_dashboards        dashboard[]         @relation("DashboardUpdater")
   created_tenants           tenant[]            @relation("TenantCreator")
   updated_tenants           tenant[]            @relation("TenantUpdater")
- 
+  audit_logs                audit_log[]
+  anonymized_at             DateTime?            // Timestamp when PII was scrubbed (GDPR anonymization)
+
   @@index([api_key])
   @@index([creator_id])
   @@index([tenant_id])
@@ -245,15 +247,17 @@ model attachable {
 }
 
 model attachment {
-  id            String     @id @default(cuid())
-  type          Int        @default(0)
-  order         Int        @default(0)
-  name          String
-  path          String
-  attachable_id String
-  attachable    attachable @relation(fields: [attachable_id], references: [id], onDelete: Cascade)
-  created_at    DateTime   @default(now()) @db.Timestamptz(0)
-  updated_at    DateTime   @updatedAt @db.Timestamptz(0)
+  id                     String     @id @default(cuid())
+  type                   Int        @default(0)
+  order                  Int        @default(0)
+  name                   String
+  path                   String
+  encrypted_original_name String?
+  name_iv                String?
+  attachable_id          String
+  attachable             attachable @relation(fields: [attachable_id], references: [id], onDelete: Cascade)
+  created_at             DateTime   @default(now()) @db.Timestamptz(0)
+  updated_at             DateTime   @updatedAt @db.Timestamptz(0)
 }
 
 model dashboard {
@@ -298,6 +302,7 @@ model dashboard_widget {
 model audit_log {
   id            String   @id @default(cuid())
   actor_user_id String?
+  actor_user    user?    @relation(fields: [actor_user_id], references: [id], onDelete: Restrict)
   action        String
   target_table  String?
   target_id     String?

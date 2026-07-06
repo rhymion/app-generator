@@ -195,6 +195,38 @@ export default defineConfig({
           const { getInventoryAllocation } = require('./cypress/support/purchase_order/reservation_helper');
           return await getInventoryAllocation(params.purchase_order_id);
         },
+        async 'db:populateAuditLog'(length: number) {
+          const { populateAuditLogData } = require('./cypress/support/audit_log/helper');
+          return await populateAuditLogData(length);
+        },
+        async 'db:populateAuditLogFull'(length: number) {
+          const { populateAuditLogFullData } = require('./cypress/support/audit_log/helper');
+          return await populateAuditLogFullData(length);
+        },
+        async 'db:createAuditLogWithMetadata'(params: { actorUserId: string; metadata: Record<string, unknown> }) {
+          const { prisma } = require('./cypress/support/db-helpers');
+          const row = await prisma.audit_log.create({
+            data: { action: 'test_action', actor_user_id: params.actorUserId, metadata: params.metadata },
+          });
+          return JSON.parse(JSON.stringify(row));
+        },
+        async 'db:getAuditLogByActor'(actorUserId: string) {
+          const { prisma } = require('./cypress/support/db-helpers');
+          const rows = await prisma.audit_log.findMany({ where: { actor_user_id: actorUserId } });
+          return JSON.parse(JSON.stringify(rows));
+        },
+        async 'db:getAuditLogById'(rowId: string) {
+          const { prisma } = require('./cypress/support/db-helpers');
+          const row = await prisma.audit_log.findUnique({ where: { id: rowId } });
+          return JSON.parse(JSON.stringify(row));
+        },
+        async 'compliance:anonymizeUser'(userId: string) {
+          // Calls anonymizeUser directly in the Node.js task process (bypasses HTTP server),
+          // ensuring tests run against the current source file, not the compiled bundle.
+          const { anonymizeUser } = require('./lib/compliance/anonymize_user');
+          const result = await anonymizeUser(userId);
+          return JSON.parse(JSON.stringify(result));
+        },
       });
 
       return config;
