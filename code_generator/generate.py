@@ -146,6 +146,30 @@ def _inject_into_model_block(content: str, model_name: str,
     return content[:m.start(2)] + new_body + content[m.end(2):]
 
 
+def _inject_index_into_model_block(content: str, model_name: str, fk_col: str) -> str:
+    """Ensure `@@index([fk_col])` exists in a Prisma model block (idempotent).
+
+    Needed for the child-side bridge FK (e.g. `commentable_id` on `comment`),
+    which has no `@unique` (unlike the parent-side FK) and so gets no implicit
+    index from Prisma/Postgres — see docs/knowledge/prisma-schema-conventions.md.
+    """
+    pat = re.compile(
+        rf'^(model {re.escape(model_name)} \{{)(.*?)(^\}})',
+        re.MULTILINE | re.DOTALL,
+    )
+    m = pat.search(content)
+    if not m:
+        return content
+
+    body = m.group(2)
+    for decl in re.findall(r'@@index\(\s*\[([^\]]+)\]', body):
+        if decl.split(',', 1)[0].strip() == fk_col:
+            return content  # already indexed — idempotent
+
+    new_body = body.rstrip('\n') + f'\n  @@index([{fk_col}])\n'
+    return content[:m.start(2)] + new_body + content[m.end(2):]
+
+
 def inject_bridge_into_schema(schema_prisma_path: Path, bridges: dict) -> None:
     """Inject bridge models and parent/child FK fields into schema.prisma (idempotent).
 
@@ -171,6 +195,7 @@ def inject_bridge_into_schema(schema_prisma_path: Path, bridges: dict) -> None:
         modified = _inject_into_model_block(
             modified, child, child_scalar, child_relation, f'{bridge_name}_id'
         )
+        modified = _inject_index_into_model_block(modified, child, f'{bridge_name}_id')
 
         if f'model {bridge_name} {{' not in modified:
             bridge_block = emit_bridge_model(bridge_name, child, parent_targets)
