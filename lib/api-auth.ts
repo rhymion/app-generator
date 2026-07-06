@@ -19,11 +19,15 @@ export class ApiError extends Error {
 // LRU cap keeps unknown-key probing bounded. Rotations invalidate via
 // `invalidateApiKeyCache()` from settings/account mutations.
 //
-// Gated to production: `cy:test:api` runs `cy.task('db:reset')` between
-// tests, which wipes user_account rows but cannot reach into the dev
-// server's process to clear this cache. Without the gate, the cached
-// userId would survive the reset and the next write would fail with
-// `<entity>_updater_id_fkey` violations.
+// Gated on NODE_ENV === 'production' — which is always true here: `next build`
+// bakes NODE_ENV=production into the bundle regardless of the runtime env
+// (.env.test's NODE_ENV=test is not honored by a built server), so the cache
+// is effectively always on for `cy:test:api` runs too. `cy.task('db:reset')`
+// wipes user_account rows but cannot reach into the server's process to
+// clear this cache; without an explicit clear the cached userId would
+// survive the reset and the next write would fail with an
+// `<entity>_updater_id_fkey` violation — see `clearApiKeyCache()` below,
+// invoked via the `/api/test-utils/reset-caches` endpoint.
 const API_KEY_TTL_MS = 5 * 60 * 1000;
 const API_KEY_MAX_ENTRIES = 1000;
 const apiKeyCacheEnabled = process.env.NODE_ENV === 'production';

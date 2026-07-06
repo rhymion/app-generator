@@ -1,6 +1,6 @@
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
-import Link from '@mui/material/Link';
+import { Link } from '@/i18n/navigation';
 import EditIcon from '@mui/icons-material/Edit';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
@@ -17,7 +17,7 @@ export default function AppDetailHeader({ title, editHref, backHref }: AppDetail
       <div>
         {editHref && (
           <Tooltip title="Edit">
-            <Link href={editHref} sx={{ mx: 1 }} aria-label="Edit">
+            <Link href={editHref} style={{ margin: '0 8px' }} aria-label="Edit">
               <IconButton component="span" color="primary" tabIndex={-1}>
                 <EditIcon />
               </IconButton>

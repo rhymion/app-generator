@@ -3,7 +3,7 @@
 # when REDIS_URL is unset (see lib/rate-limit/index.ts).
 services:
   postgres-prod:
-    image: app-postgres-bigm:16
+    image: postgres:16
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

@@ -54,7 +54,16 @@ export async function resetTestDatabase() {
   // a deleted user_account row, causing the next write to fail with a
   // <model>_updater_id_fkey violation. The endpoint is gated by
   // TEST_RESET_TOKEN — only enabled in .env.test.
-  const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
+  //
+  // Keyed off PORT, not NEXTAUTH_URL: PORT is what actually varies when a
+  // caller overrides it to dodge a residual process on the default port
+  // (e.g. `PORT=3001 npm run test:e2e:cy:api`). NEXTAUTH_URL stays pinned to
+  // .env.test's default and does not track that override, so using it here
+  // sends this call to a server that isn't listening — the fetch fails
+  // silently (see catch below), the cache never clears, and a later request
+  // resolves a stale/deleted userId, surfacing as a `<model>_x_id_fkey`
+  // violation or a spurious 403 several tests later.
+  const baseUrl = `http://localhost:${process.env.PORT ?? 3000}`;
   const token = process.env.TEST_RESET_TOKEN;
   if (token) {
     try {

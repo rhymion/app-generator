@@ -116,9 +116,15 @@ export async function resolvePermissions(
  * instantly — `invalidatePermissionCache()` is exposed for callers that need
  * tighter bounds (admin tools, role-mutation endpoints).
  *
- * Gated to production: `cy:test:api` resets the DB between tests but cannot
- * reach into the dev server's process to clear this cache, so a stale
- * cached entry would silently widen permissions for the new run.
+ * Gated on NODE_ENV === 'production' — which is always true here: `next build`
+ * bakes NODE_ENV=production into the bundle regardless of the runtime env
+ * (.env.test's NODE_ENV=test is not honored by a built server), so the cache
+ * is effectively always on for `cy:test:api` runs too. `cy.task('db:reset')`
+ * resets the DB between tests but cannot reach into the server's process to
+ * clear this cache; without an explicit clear, a stale cached entry would
+ * silently widen permissions for the next run — see
+ * `invalidatePermissionCache()` below, invoked via the
+ * `/api/test-utils/reset-caches` endpoint.
  */
 const PERMISSION_TTL_MS = 30 * 1000;
 const PERMISSION_MAX_ENTRIES = 1000;

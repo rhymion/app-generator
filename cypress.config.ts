@@ -22,7 +22,6 @@ export default defineConfig({
           await resetTestDatabase();
           // Ensure search extensions exist after reset
           await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pg_trgm');
-          await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pg_bigm');
           // Phase 1.2: re-seat the bootstrap tenant after the wipe so the
           // NOT NULL user.tenant_id constraint is satisfiable in subsequent
           // seeding. Removed when ticket 3.5 folds this into the generated
@@ -116,7 +115,7 @@ export default defineConfig({
           return JSON.parse(JSON.stringify(records));
         },
         async 'db:createOrganizationJa'(params: { name: string }) {
-          // Creates a Japanese-named organization enrolled by the test user (for pg_bigm tests).
+          // Creates a Japanese-named organization enrolled by the test user (for Japanese text search tests).
           const { prisma } = require('./cypress/support/db-helpers');
           const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
           const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });

@@ -10,6 +10,11 @@ Scope: $ARGUMENTS (if empty, review all generated queries and API routes)
 Minimum docs to read before starting:
 - `docs/knowledge/multi-tenancy-and-permissions.md` — tenant isolation, auth/authz system
 
+Note: `docs/multi-tenancy.md`, referenced below by phase number (e.g. "Phase 1.3"),
+was removed as a planning doc in commit b11269b. Its content is not superseded by
+anything in-repo; recover it via `git show b11269b^:docs/multi-tenancy.md` if you
+need the full phase-by-phase plan.
+
 ## How to run this review
 
 1. Read the relevant source files (schema, generated API routes, middleware).

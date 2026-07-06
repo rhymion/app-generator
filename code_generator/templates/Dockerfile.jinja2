@@ -1,0 +1,56 @@
+# =====================
+# Stage 1: deps
+# =====================
+FROM node:{{ node_version | default('22') }}-alpine AS deps
+WORKDIR /app
+RUN apk add --no-cache python3 py3-pip libc6-compat
+COPY package*.json ./
+# Full install (incl. devDependencies), not `npm ci --only=production`: the builder
+# stage needs the Prisma CLI, Next.js and TypeScript to generate + build, and the
+# same node_modules backs the `--target builder` image used to run
+# `prisma migrate deploy` as a Cloud Run Job. `npm install` (not `npm ci`) avoids
+# a hard failure when package-lock.json drifts from package.json during the build.
+RUN npm install --no-audit --no-fund
+
+# =====================
+# Stage 2: builder
+# =====================
+FROM node:{{ node_version | default('22') }}-alpine AS builder
+WORKDIR /app
+RUN apk add --no-cache python3 py3-pip
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN pip3 install -r requirements.txt --break-system-packages
+RUN python3 code_generator/generate.py code_generator/json_schema.yaml ./
+RUN npx prisma generate
+ENV NODE_ENV=production
+RUN npm run build
+
+# =====================
+# Stage 3: runner
+# =====================
+FROM node:{{ node_version | default('22') }}-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+RUN addgroup --system --gid 1001 nodejs \
+    && adduser --system --uid 1001 nextjs
+
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+# Generated Prisma client lives under app/generated/prisma (custom `output` in
+# schema.prisma), not node_modules/.prisma. On GCP the client talks to the DB via
+# Prisma Accelerate (PRISMA_DATABASE_URL) — no query-engine binary or pg adapter
+# is bundled at runtime.
+COPY --from=builder --chown=nextjs:nodejs /app/app/generated/prisma ./app/generated/prisma
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:3000/api/health || exit 1
+
+USER nextjs
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+CMD ["node", "server.js"]

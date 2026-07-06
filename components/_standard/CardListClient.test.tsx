@@ -7,6 +7,13 @@ vi.mock('next-intl', () => ({
   useTranslations: () => (key: string) => key,
 }));
 
+// Mock @/i18n/navigation (replaces next/navigation in this component)
+vi.mock('@/i18n/navigation', () => ({
+  Link: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+
 type Item = { id: string; name: string; description?: string };
 
 const item1: Item = { id: '1', name: 'Alpha', description: 'First item' };

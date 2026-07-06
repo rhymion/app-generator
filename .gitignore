@@ -42,6 +42,9 @@ yarn-error.log*
 !.env.example
 # .env.local, .env.*.local, .env.production remain ignored
 
+# GCP production secrets
+.env.production.local
+
 # vercel
 .vercel
 
@@ -60,6 +63,11 @@ next-env.d.ts
 *.db
 *.db-journal
 /prisma/schema.postgres.backup
+# Prisma migrations: derived from the generated schema.prisma, so they are build
+# artifacts (developer-prepared per build/deploy) rather than tracked source. They
+# still reach the Docker build context (.dockerignore does not exclude them) and are
+# applied by the app-migrate Job via `prisma migrate deploy`.
+/prisma/migrations/
 # Uploaded files
 /public/uploads/
 
@@ -145,8 +153,10 @@ app/api/*/
 !app/api/notifications/**
 !app/api/test-utils/
 !app/api/test-utils/**
-!app/api/upload/
-!app/api/upload/**
+# app/api/upload/route.ts is a full generate-code target in both modes
+# (generate.py: base emits the Vercel Blob version, x-cloud:gcp overwrites it
+# with the GCS version), so it is intentionally NOT negated here — it stays
+# ignored to avoid generated-vs-VCS drift (cmd_269/cmd_272, 殿 ruling 2026-07-04).
 !app/api/uploads/
 !app/api/uploads/**
 !app/api/approval_request/

@@ -351,6 +351,15 @@ def generate(schema_path: str, output_dir: str) -> None:
     with open(schema_path) as f:
         schema = yaml.safe_load(f)
 
+    # x-cloud opt-in: only generate cloud artifacts when explicitly enabled
+    x_cloud = schema.get('x-cloud', None)
+    cloud_enabled = (
+        x_cloud is not None
+        and x_cloud.get('enabled', False)
+        and x_cloud.get('provider') is not None
+    )
+    cloud_provider = x_cloud.get('provider', '') if x_cloud else ''
+
     try:
         validate_schema(schema)
         validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma')
@@ -787,12 +796,10 @@ def generate(schema_path: str, output_dir: str) -> None:
             f"similarity(COALESCE({f}, ''), ${{q}}) > 0.3" for f in text_fields
         )
 
-        # bigm_where_sql: ILIKE containment check (gin_bigm_ops accelerates ILIKE '%q%').
-        # pg_bigm's =% operator uses padding bigrams and does NOT match mid-string Japanese
-        # (e.g. '権限' =% '一般権限を...' → FALSE). ILIKE '%'||q||'%' correctly matches.
-        # Replaces bigm_similarity()>0.2 which structurally fails for short Japanese queries
-        # (Jaccard denominator grows with text length).
-        # ILIKE: case-insensitive vs LIKE; pg_bigm supports ILIKE with GIN index.
+        # bigm_where_sql: ILIKE containment check (gin_trgm_ops accelerates ILIKE '%q%').
+        # C3=A: use pg_trgm (Cloud SQL compatible) instead of pg_bigm (Cloud SQL unsupported).
+        # pg_trgm's GIN index (gin_trgm_ops) accelerates ILIKE on Cloud SQL.
+        # ILIKE '%'||q||'%' correctly matches mid-string Japanese (e.g. '権限' in '一般権限を...').
         bigm_where_single = ' OR '.join(
             f"COALESCE({f}, '') ILIKE '%' || ${{q}} || '%'" for f in bigm_fields
         )
@@ -839,6 +846,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'or_clauses_ts_var':     f'{parent}OrClauses',
             'bigm_where_sql':            bigm_where_single,
             'bigm_similarity_fields_sql': bigm_sim_exprs,
+            'bigm_fields':               bigm_fields,
         })
 
     if search_entities:
@@ -862,6 +870,11 @@ def generate(schema_path: str, output_dir: str) -> None:
         entity_names = ', '.join(e['entity_type'] for e in search_entities)
         print(f'  Search routes → lib/search/helpers.ts + app/api/search/route.ts ({entity_names})')
         print(f'  Search UI page → app/[locale]/search/page.tsx + actions.ts')
+        _write(
+            out / 'lib' / 'db-init.ts',
+            _render(env, 'db_init.ts.jinja2', search_ctx),
+        )
+        print(f'  DB init → lib/db-init.ts (GIN indexes for gin_trgm_ops)')
     else:
         # DP-2: no searchable entities — delete stale search files to prevent broken imports
         print('  Search: no searchable entities — skipping search route generation')
@@ -961,6 +974,60 @@ def generate(schema_path: str, output_dir: str) -> None:
     print('\nUpdating i18n and navigation config...')
     update_i18n_and_config(entities, schema, out)
 
+    # --- upload/route.ts (Vercel Blob, base default) ---
+    # Always emitted so app/api/upload/route.ts is a full generated artifact
+    # (manifest-tracked, cleanup-eligible) in both modes. x-cloud:gcp below
+    # overwrites this with the GCS version when enabled (cmd_269/cmd_272).
+    _write(
+        out / 'app' / 'api' / 'upload' / 'route.ts',
+        _render(env, 'upload_route_vercel.ts.jinja2', {}),
+    )
+    print('  Upload route (Vercel Blob) → app/api/upload/route.ts')
+
+    # --- x-cloud opt-in: GCP Cloud Run artifacts ---
+    if cloud_enabled and cloud_provider == 'gcp':
+        print('\nGenerating GCP Cloud Run artifacts (x-cloud:gcp opt-in)...')
+
+        # Dockerfile
+        _write(out / 'Dockerfile', _render(env, 'Dockerfile.jinja2', {}))
+        print('  Cloud: Dockerfile → Dockerfile')
+
+        # .dockerignore
+        _write(out / '.dockerignore', _render(env, '.dockerignore.jinja2', {}))
+        print('  Cloud: .dockerignore → .dockerignore')
+
+        # upload/route.ts — replace Vercel Blob with GCS
+        _write(
+            out / 'app' / 'api' / 'upload' / 'route.ts',
+            _render(env, 'upload_route_gcs.ts.jinja2', {}),
+        )
+        print('  Cloud: GCS upload route → app/api/upload/route.ts')
+
+        # GCS object serving route (V4 Signed URL proxy)
+        gcs_serve_dir = out / 'app' / 'api' / 'gcs' / '[...path]'
+        gcs_serve_dir.mkdir(parents=True, exist_ok=True)
+        _write(
+            gcs_serve_dir / 'route.ts',
+            _render(env, 'gcs_serve_route.ts.jinja2', {}),
+        )
+        print('  Cloud: GCS serve route → app/api/gcs/[...path]/route.ts')
+
+        # next.config.ts — add output: 'standalone'
+        next_config_path = out / 'next.config.ts'
+        if next_config_path.exists():
+            content = next_config_path.read_text(encoding='utf-8')
+            if "output: 'standalone'" not in content:
+                content = content.replace(
+                    'const nextConfig: NextConfig = {\n',
+                    "const nextConfig: NextConfig = {\n  output: 'standalone',\n",
+                )
+                next_config_path.write_text(content, encoding='utf-8')
+                print('  Cloud: added output:standalone → next.config.ts')
+            else:
+                print('  Cloud: output:standalone already present in next.config.ts')
+        else:
+            print('  Cloud: next.config.ts not found — skipping standalone injection')
+
     # --- generation manifest (drives cleanup.py) ---
     # Written last so it reflects exactly what this run produced. Appended files
     # touched by update_i18n_and_config above are intentionally not listed.
@@ -977,7 +1044,7 @@ def generate(schema_path: str, output_dir: str) -> None:
               'commit it to version control so it survives a fresh rebuild:\n')
         for note in _handwritten_notices:
             print(note)
-        print('\nSee docs/extension-points.md for the full list of extension points.')
+        print('\nSee docs/knowledge/code-generation-custom-extensions.md for the full list of extension points.')
         print(bar)
 
     print('\nCode generation complete!')

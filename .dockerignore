@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+*.md
+docs/
+cypress/
+.env*
+!.env.example
+__pycache__
+.pytest_cache
+*.pyc

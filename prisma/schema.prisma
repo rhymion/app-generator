@@ -17,7 +17,9 @@ datasource db {
 // ============================================================
 
 // Tenant — deployment-level partition (one SaaS customer = one tenant).
-// See docs/multi-tenancy.md for the broader design.
+// The broader design doc was removed as a planning doc in commit b11269b;
+// recover it via `git show b11269b^:docs/multi-tenancy.md`. See also
+// docs/knowledge/multi-tenancy-and-permissions.md for the current state.
 //
 // `creator_id` / `updater_id` are nullable because the bootstrap "default"
 // tenant created by scripts/seed-its.ts and the 1.5 migration script
