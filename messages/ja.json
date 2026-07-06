@@ -23,6 +23,7 @@
   },
   "EntityLabel": {
     "approvalFlow": "Approval Flow",
+    "auditLog": "Audit Log",
     "dashboard": "Dashboard",
     "organization": "Organization",
     "permission": "Permission",
@@ -33,7 +34,9 @@
     "xxxxxXxxxx": "Xxxxx Xxxxx"
   },
   "Fields": {
+    "action": "アクション",
     "actions": "アクション",
+    "actorUser": "ユーザ",
     "apiKey": "Api Key",
     "approvableId": "Approvable Id",
     "approvalHistory": "承認履歴",
@@ -47,6 +50,7 @@
     "code": "コード",
     "comments": "コメント",
     "create": "Create",
+    "created_at": "作成日時",
     "customer": "顧客",
     "dashboard": "ダッシュボード",
     "dateOfBirth": "生年月日",
@@ -80,6 +84,7 @@
     "max": "最大",
     "maxLength": "最大長",
     "message": "メッセージ",
+    "metadata": "メタデータ",
     "mfaEnabled": "Mfa Enabled",
     "name": "Name",
     "order": "No.",
@@ -106,6 +111,8 @@
     "startDate": "開始日",
     "startTime": "開始時刻",
     "status": "ステータス",
+    "targetId": "Target Id",
+    "targetTable": "Target Table",
     "team": "チーム",
     "title": "タイトル",
     "type": "タイプ",
@@ -158,6 +165,7 @@
   },
   "Nav": {
     "approvalFlow": "Approval Flow",
+    "auditLog": "Audit Log",
     "channel": "チャネル",
     "character": "キャラクター",
     "creator": "クリエイター",

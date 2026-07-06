@@ -82,7 +82,7 @@ async function main() {
   const entities = [
     'user', 'role', 'organization', 'permission', 'setting',
     'approval_request', 'approval_flow', 
-    'dashboard', 'audit_log', 'tenant',
+    'dashboard',
   ];
   await Promise.all(entities.map(entity =>
     prisma.permission.upsert({
@@ -101,6 +101,20 @@ async function main() {
     })
   ));
 
+  await prisma.permission.upsert({
+    where: { name_role_id: { name: 'audit_log', role_id: adminRole!.id } },
+    update: {},
+    create: {
+      name: 'audit_log',
+      role_id: adminRole!.id,
+      creator_id: admin.id,
+      updater_id: admin.id,
+      create: false,
+      read: true,
+      update: false,
+      delete: false,
+    },
+  });
   console.log('Tenant seeded successfully!');
 }
 

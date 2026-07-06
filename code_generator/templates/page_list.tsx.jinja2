@@ -10,6 +10,9 @@ import { get{{ parent_pascal }}PagedData, fetch{{ parent_pascal }}Page } from '@
 {% if can_delete %}
 import { remove{{ parent_pascal }} } from '@/lib/{{ parent }}/actions';
 {% endif %}
+{% if can_invalidate %}
+import { invalidate{{ parent_pascal }} } from '@/lib/{{ parent }}/actions';
+{% endif %}
 import { DEFAULT_PAGE_SIZE{% if needs_formatting %}, type PageOpts{% endif %} } from '@/lib/_pagination';
 {% if list_uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
@@ -105,7 +108,7 @@ async function {{ parent_pascal }}ListContent({
 {% endif %}
       >
 {% for comp in entity_custom_components %}
-        <{{ comp.name }} permissions={userPermissions} />
+        <{{ comp.name }}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={userPermissions} />
 {% endfor %}
       </AppListToolbar>
       <{{ list_component }}
@@ -122,6 +125,9 @@ async function {{ parent_pascal }}ListContent({
 {% endif %}
 {% if can_delete %}
         removeAction={remove{{ parent_pascal }}}
+{% endif %}
+{% if can_invalidate %}
+        invalidateAction={invalidate{{ parent_pascal }}}
 {% endif %}
 {% if display_fields_code %}
         displayFields={[

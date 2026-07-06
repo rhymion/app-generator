@@ -30,6 +30,8 @@ type Props = {
   permissions?: ModelPermissions;
   currentUserRoleIds?: string[];
   currentUserId?: string | null;
+  showImages?: boolean;
+  showFiles?: boolean;
 };
 
 type ListHandle = { getItems: () => EditableListWrapperItem[] };
@@ -44,7 +46,12 @@ function toItem(a: Attachment): EditableListWrapperItem {
   };
 }
 
-export default function AttachmentSection({ src, permissions }: Props) {
+export default function AttachmentSection({
+  src,
+  permissions,
+  showImages = true,
+  showFiles = true,
+}: Props) {
   const tf = useTranslations('Fields');
   const canEdit = permissions ? !!permissions.update : true;
   const [isPending, startTransition] = useTransition();
@@ -72,21 +79,25 @@ export default function AttachmentSection({ src, permissions }: Props) {
 
   const handleSave = () => {
     setError(null);
-    const imageItems = (imagesRef.current?.getItems() ?? []).map((i) => ({
-      id: typeof i.id === 'string' && !i.id.startsWith('temp-') ? i.id : i.originalId ?? null,
-      name: i.label ?? '',
-      path: String(i.value ?? ''),
-    }));
-    const fileItems = (filesRef.current?.getItems() ?? []).map((i, idx) => ({
-      id: typeof i.id === 'string' && !i.id.startsWith('temp-') ? i.id : i.originalId ?? null,
-      order: typeof i.order === 'number' ? i.order : idx,
-      name: i.label ?? '',
-      path: String(i.value ?? ''),
-    }));
     startTransition(async () => {
       try {
-        await setAttachmentsForBridge(attachableId, TYPE_IMAGE, imageItems);
-        await setAttachmentsForBridge(attachableId, TYPE_FILE, fileItems);
+        if (showImages) {
+          const imageItems = (imagesRef.current?.getItems() ?? []).map((i) => ({
+            id: typeof i.id === 'string' && !i.id.startsWith('temp-') ? i.id : i.originalId ?? null,
+            name: i.label ?? '',
+            path: String(i.value ?? ''),
+          }));
+          await setAttachmentsForBridge(attachableId, TYPE_IMAGE, imageItems);
+        }
+        if (showFiles) {
+          const fileItems = (filesRef.current?.getItems() ?? []).map((i, idx) => ({
+            id: typeof i.id === 'string' && !i.id.startsWith('temp-') ? i.id : i.originalId ?? null,
+            order: typeof i.order === 'number' ? i.order : idx,
+            name: i.label ?? '',
+            path: String(i.value ?? ''),
+          }));
+          await setAttachmentsForBridge(attachableId, TYPE_FILE, fileItems);
+        }
         setSavedAt(Date.now());
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to save attachments');
@@ -96,32 +107,36 @@ export default function AttachmentSection({ src, permissions }: Props) {
 
   return (
     <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <EditableListWrapper
-        ref={imagesRef}
-        initialItems={initialImages}
-        itemType="file"
-        fileVariant="image"
-        acceptedFileTypes="image/jpeg,image/png,image/gif,image/webp"
-        addButtonLabel="Add Image"
-        showTitle
-        title={tf('images') ?? 'Images'}
-      />
-      <OrderedEditableListWrapper
-        ref={filesRef}
-        initialItems={initialFiles}
-        itemType="file"
-        fileVariant="file"
-        acceptedFileTypes=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip"
-        addButtonLabel="Add File"
-        showTitle
-        title={tf('attachments') ?? 'Attachments'}
-      />
+      {showImages && (
+        <EditableListWrapper
+          ref={imagesRef}
+          initialItems={initialImages}
+          itemType="file"
+          fileVariant="image"
+          acceptedFileTypes="image/jpeg,image/png,image/gif,image/webp"
+          addButtonLabel="Add Image"
+          showTitle
+          title={tf('images') ?? 'Images'}
+        />
+      )}
+      {showFiles && (
+        <OrderedEditableListWrapper
+          ref={filesRef}
+          initialItems={initialFiles}
+          itemType="file"
+          fileVariant="file"
+          acceptedFileTypes=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip"
+          addButtonLabel="Add File"
+          showTitle
+          title={tf('attachments') ?? 'Attachments'}
+        />
+      )}
       {error && (
         <Typography color="error" variant="caption">
           {error}
         </Typography>
       )}
-      {canEdit && (
+      {canEdit && (showImages || showFiles) && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Button variant="outlined" size="small" onClick={handleSave} disabled={isPending}>
             {isPending ? 'Saving…' : 'Save attachments'}

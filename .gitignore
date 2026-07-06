@@ -112,6 +112,11 @@ lib/dashboard/types.ts
 !lib/approval_request/actions.ts
 !lib/approval_request/order-check.ts
 !lib/setting/password-actions.ts
+!lib/audit_log/getters.ts
+!lib/audit_log/types.ts
+!lib/audit_log/virtual_resolvers.ts
+!lib/compliance/**
+!lib/mention/**
 
 # ── app/[locale]/ ──
 app/\[locale\]/*/
@@ -123,6 +128,8 @@ app/\[locale\]/*/
 !app/\[locale\]/@sidebar/**
 !app/\[locale\]/_hide/
 !app/\[locale\]/_hide/**
+!app/\[locale\]/audit_log/
+!app/\[locale\]/audit_log/**
 !app/\[locale\]/login/
 !app/\[locale\]/login/**
 !app/\[locale\]/register/
@@ -167,6 +174,7 @@ components/*/*
 components/setting/FormUpsert.tsx
 components/setting/FormView.tsx
 components/setting/column_def.tsx
+!components/audit_log/FormView.tsx
 
 # ── cypress/e2e/ ──
 cypress/e2e/*.cy.ts
@@ -176,9 +184,14 @@ cypress/e2e/mobile/*.cy.ts
 !cypress/e2e/mobile/layout.cy.ts
 cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/search.cy.ts
+!cypress/e2e/api/user_invalidate.cy.ts
+!cypress/e2e/api/user_invalidate_dp6.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/
+!cypress/support/audit_log/
+cypress/support/audit_log/*
+!cypress/support/audit_log/helper.ts
 
 # ── docs/generated/ ──
 docs/generated/

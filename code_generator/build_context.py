@@ -301,22 +301,30 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
     return '\n'.join(lines)
 
 
-def _build_comment_actions(comment_children: list[dict], parent: str, model: str, has_assignee_id: bool) -> str:
+def _build_comment_actions(comment_children: list[dict], parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False) -> str:
     parent_pascal = to_pascal_case(parent)
     assignee_select = ", assignee_id: true" if has_assignee_id else ""
     recipient_list = (
         "[parentRow.creator_id, parentRow.assignee_id]"
         if has_assignee_id else "[parentRow.creator_id]"
     )
+    encode_block = (
+        "\n  const allUsers = await prisma.user.findMany({ select: { id: true, name: true } });"
+        "\n  const userLookup: UserLookup = Object.fromEntries("
+        "\n    allUsers.map(u => [u.name, { id: u.id, name: u.name }])"
+        "\n  );"
+        "\n  const storedMessage = encodeMentions(message, userLookup);"
+    ) if comment_has_mention else ""
+    stored_var = "storedMessage" if comment_has_mention else "message"
     lines = []
     for c in comment_children:
         child_model   = c['name']
         parent_id_prop = f'{model}_id'
         lines.append(f"""
 export async function add{parent_pascal}Comment({parent_id_prop}: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();
+  const userId = await getSessionUserIdOrThrow();{encode_block}
   await prisma.{child_model}.create({{
-    data: {{ message, {parent_id_prop}, creator_id: userId }},
+    data: {{ message: {stored_var}, {parent_id_prop}, creator_id: userId }},
   }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
@@ -340,12 +348,12 @@ export async function add{parent_pascal}Comment({parent_id_prop}: string, messag
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();
+  const userId = await getSessionUserIdOrThrow();{encode_block}
   const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
   }}
-  await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message }} }});
+  await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message: {stored_var} }} }});
   revalidatePath('/{parent}');
 }}
 
@@ -362,7 +370,7 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
     return '\n'.join(lines)
 
 
-def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool) -> str:
+def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False) -> str:
     """Generate comment actions using the shared commentable bridge (single comment table)."""
     parent_pascal = to_pascal_case(parent)
     assignee_select = ", assignee_id: true" if has_assignee_id else ""
@@ -370,11 +378,19 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
         "[parentRow.creator_id, parentRow.assignee_id]"
         if has_assignee_id else "[parentRow.creator_id]"
     )
+    encode_block = (
+        "\n  const allUsers = await prisma.user.findMany({ select: { id: true, name: true } });"
+        "\n  const userLookup: UserLookup = Object.fromEntries("
+        "\n    allUsers.map(u => [u.name, { id: u.id, name: u.name }])"
+        "\n  );"
+        "\n  const storedMessage = encodeMentions(message, userLookup);"
+    ) if comment_has_mention else ""
+    stored_var = "storedMessage" if comment_has_mention else "message"
     return f"""
 export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();
+  const userId = await getSessionUserIdOrThrow();{encode_block}
   await prisma.comment.create({{
-    data: {{ message, commentable_id, creator_id: userId }},
+    data: {{ message: {stored_var}, commentable_id, creator_id: userId }},
   }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
@@ -398,12 +414,12 @@ export async function add{parent_pascal}Comment(commentable_id: string, message:
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();
+  const userId = await getSessionUserIdOrThrow();{encode_block}
   const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
   }}
-  await prisma.comment.update({{ where: {{ id: commentId }}, data: {{ message }} }});
+  await prisma.comment.update({{ where: {{ id: commentId }}, data: {{ message: {stored_var} }} }});
   revalidatePath('/{parent}');
 }}
 
@@ -612,6 +628,83 @@ def canonicalize_bridges(entity_schema: dict, all_defs: dict) -> dict:
     return {**entity_schema, 'properties': props}
 
 
+def build_anonymize_user_context(schema: dict) -> dict:
+    """Build context for anonymize_user.ts generation.
+
+    Extracts x-pii annotated fields from the user entity definition and computes
+    the pii_data_block string (pre-formatted TypeScript lines for the data: {} block).
+
+    Fields not in json_schema but present in schema.prisma (emailVerified, mfa_secret)
+    are hardcoded after 'image' to match the canonical scrub order.
+
+    Returns:
+        has_pii_user: bool — True when the user entity has at least one x-pii field.
+        pii_data_block: str — pre-formatted TypeScript lines for the data block.
+        pii_fields: list — [{name, pii_type, field_type, scrub_value}] for each x-pii field.
+    """
+    user_def = schema.get('definitions', {}).get('user', {})
+    if not isinstance(user_def, dict):
+        return {'has_pii_user': False, 'pii_data_block': '', 'pii_fields': []}
+
+    props = user_def.get('properties', {}) or {}
+
+    pii_fields = []
+    for field_name, prop_def in props.items():
+        if not isinstance(prop_def, dict):
+            continue
+        pii_type = prop_def.get('x-pii')
+        if pii_type is None:
+            continue
+
+        actual_type = _get_actual_type(prop_def)
+        is_email = (field_name == 'email')
+        is_boolean = (actual_type == 'boolean')
+
+        if is_email:
+            scrub_value = 'placeholderEmail'
+        elif pii_type == 'direct':
+            scrub_value = "'[deleted]'"
+        elif is_boolean:
+            scrub_value = 'false'
+        else:
+            scrub_value = 'null'
+
+        pii_fields.append({
+            'name': field_name,
+            'pii_type': pii_type,
+            'field_type': actual_type or 'string',
+            'scrub_value': scrub_value,
+        })
+
+    if not pii_fields:
+        return {'has_pii_user': False, 'pii_data_block': '', 'pii_fields': []}
+
+    # Build the data block lines (10-space indent matches `data: {` nesting in template).
+    # Prisma-only fields (emailVerified, mfa_secret) are inserted after 'image' to
+    # match the canonical hand-written order.
+    INDENT = '          '
+    lines = []
+    prisma_only_inserted = False
+    for f in pii_fields:
+        lines.append(f"{INDENT}{f['name']}: {f['scrub_value']},")
+        if f['name'] == 'image' and not prisma_only_inserted:
+            lines.append(f"{INDENT}emailVerified: null,")
+            lines.append(f"{INDENT}mfa_secret: null,")
+            prisma_only_inserted = True
+
+    if not prisma_only_inserted:
+        lines.append(f"{INDENT}emailVerified: null,")
+        lines.append(f"{INDENT}mfa_secret: null,")
+
+    lines.append(f"{INDENT}anonymized_at: anonymizedAt,")
+
+    return {
+        'has_pii_user': True,
+        'pii_data_block': '\n'.join(lines),
+        'pii_fields': pii_fields,
+    }
+
+
 def build_context(entity: dict, schema: dict) -> dict:
     parent      = entity['parent']
     model       = entity['model']
@@ -637,6 +730,21 @@ def build_context(entity: dict, schema: dict) -> dict:
         }
     filtered_props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
 
+    # Mention fields: fields annotated with x-mention: true (Phase 2 template generation).
+    mention_fields: list[str] = [
+        fn for fn, fp in filtered_props.items()
+        if isinstance(fp, dict) and fp.get('x-mention') is True
+    ]
+
+    # GDPR mode: field-level x-gdpr-mode annotations (default 'both' when absent).
+    # Model-level x-gdpr-mode overrides the per-field default when set.
+    model_gdpr_mode: str = model_def.get('x-gdpr-mode', 'both')
+    gdpr_mode_fields: dict[str, str] = {
+        fn: fp.get('x-gdpr-mode', 'both')
+        for fn, fp in filtered_props.items()
+        if isinstance(fp, dict) and fp.get('x-gdpr-mode') is not None
+    }
+
     # Collect explicit readonly fields: x-readonly per-field OR x-readonly-fields entity-level.
     # Stage 2 will extend this with automatic bridge parent fields.
     _ro_from_entity: set[str] = set(model_def.get('x-readonly-fields') or [])
@@ -659,6 +767,17 @@ def build_context(entity: dict, schema: dict) -> dict:
     can_delete = gen_cfg.get('delete', True) is not False
     can_list   = gen_cfg.get('list',   True) is not False
     can_view   = gen_cfg.get('view',   True) is not False
+
+    # invalidate flag: accepts bool or {enabled, handler, module}
+    _inv = gen_cfg.get('invalidate', False)
+    if isinstance(_inv, dict):
+        can_invalidate    = bool(_inv.get('enabled', False))
+        invalidate_handler = _inv.get('handler', '')
+        invalidate_module  = _inv.get('module', '')
+    else:
+        can_invalidate    = bool(_inv)
+        invalidate_handler = ''
+        invalidate_module  = ''
 
     # Parent relationships (many-to-one) — all of them, not deduplicated by target.
     # Both selector and auto-create one-to-one relations are excluded here:
@@ -1007,11 +1126,18 @@ def build_context(entity: dict, schema: dict) -> dict:
     self_parent_rel  = next((r for r in parent_rels_raw if r['target'] == model), None)
     self_parent_prop = self_parent_rel['prop_name'] if self_parent_rel else None
 
+    # Detect mention fields on the shared comment entity (P2-1: encodeMentions on save).
+    _comment_def = schema.get('definitions', {}).get('comment', {})
+    comment_has_mention = bool(commentable_rel or comment_children) and any(
+        isinstance(fp, dict) and fp.get('x-mention') is True
+        for fp in (_comment_def.get('properties') or {}).values()
+    )
+
     # Comment actions code
     if commentable_rel:
-        comment_actions_code = _build_comment_actions_bridge(parent, model, has_assignee_id)
+        comment_actions_code = _build_comment_actions_bridge(parent, model, has_assignee_id, comment_has_mention)
     else:
-        comment_actions_code = _build_comment_actions(comment_children, parent, model, has_assignee_id)
+        comment_actions_code = _build_comment_actions(comment_children, parent, model, has_assignee_id, comment_has_mention)
 
     # Snapshot child mappings (for service)
     snapshot_child_mappings = '\n'.join(
@@ -1177,6 +1303,18 @@ def build_context(entity: dict, schema: dict) -> dict:
             f"x-custom-components on '{def_key}' must be a list of component objects; "
             f"got {type(_xcc_list_raw).__name__}"
         )
+    def _jsx_props_str(props_dict: dict) -> str:
+        """Serialize a dict of props to a JSX attribute string, e.g. 'showImages={false} showFiles={true}'."""
+        parts = []
+        for k, v in props_dict.items():
+            if isinstance(v, bool):
+                parts.append(f'{k}={{{str(v).lower()}}}')
+            elif isinstance(v, (int, float)):
+                parts.append(f'{k}={{{v}}}')
+            else:
+                parts.append(f'{k}="{v}"')
+        return ' '.join(parts)
+
     _xcc_items = []
     for _item in _xcc_list_raw:
         if not isinstance(_item, dict) or not _item.get('name'):
@@ -1185,18 +1323,19 @@ def build_context(entity: dict, schema: dict) -> dict:
             'name': _item['name'],
             'path': _item.get('path'),
             'target': _item.get('target') or ['list'],
+            'props_jsx': _jsx_props_str(_item.get('props') or {}),
         })
-    # Per-target lists. Each entry is {name, path?} so templates can iterate.
+    # Per-target lists. Each entry is {name, path?, props_jsx} so templates can iterate.
     entity_custom_components = [
-        {'name': i['name'], 'path': i['path']}
+        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx']}
         for i in _xcc_items if 'list' in i['target']
     ]
     entity_view_components = [
-        {'name': i['name'], 'path': i['path']}
+        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx']}
         for i in _xcc_items if 'view' in i['target']
     ]
     entity_edit_components = [
-        {'name': i['name'], 'path': i['path']}
+        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx']}
         for i in _xcc_items if 'edit' in i['target']
     ]
 
@@ -1642,6 +1781,9 @@ def build_context(entity: dict, schema: dict) -> dict:
         can_delete=can_delete,
         can_list=can_list,
         can_view=can_view,
+        can_invalidate=can_invalidate,
+        invalidate_handler=invalidate_handler,
+        invalidate_module=invalidate_module,
         # Relationships
         parent_rels=parent_rels,
         parent_rels_raw=parent_rels_raw,
@@ -1673,6 +1815,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         non_comment_ch=embedded_ch,
         comment_children=comment_children,
         has_commentable=bool(commentable_rel),
+        comment_has_mention=comment_has_mention,
         commentable_rel_name=commentable_rel['relation_name'] if commentable_rel else None,
         child_mappings=child_mappings,
         child_form_data_extractions=child_form_data_extractions,
@@ -1761,4 +1904,9 @@ def build_context(entity: dict, schema: dict) -> dict:
         readonly_fields=readonly_fields,
         readonly_fields_api=readonly_fields_api,
         readonly_fields_api_select=readonly_fields_api_select,
+        # Mention fields: x-mention: true annotations. Phase 2 templates use this list.
+        mention_fields=mention_fields,
+        # GDPR mode: model-level and field-level x-gdpr-mode annotations.
+        model_gdpr_mode=model_gdpr_mode,
+        gdpr_mode_fields=gdpr_mode_fields,
     )

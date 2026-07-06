@@ -7,6 +7,7 @@
 import { revalidatePath } from 'next/cache';
 import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow } from '@/lib/authz';
+import { encryptFileName } from '@/lib/compliance/attachment_name_crypto';
 
 export type AttachmentItemInput = {
   id?: string | null;
@@ -78,14 +79,29 @@ export async function setAttachmentsForBridge(
     }
     for (const [idx, item] of items.entries()) {
       const order = item.order ?? idx;
+      const encrypted = encryptFileName(item.name);
       if (item.id && keepIds.has(item.id)) {
         await tx.attachment.update({
           where: { id: item.id },
-          data: { name: item.name, path: item.path, order },
+          data: {
+            name: encrypted.uuid,
+            encrypted_original_name: encrypted.encryptedName,
+            name_iv: encrypted.iv,
+            path: item.path,
+            order,
+          },
         });
       } else {
         await tx.attachment.create({
-          data: { attachable_id, type, name: item.name, path: item.path, order },
+          data: {
+            attachable_id,
+            type,
+            name: encrypted.uuid,
+            encrypted_original_name: encrypted.encryptedName,
+            name_iv: encrypted.iv,
+            path: item.path,
+            order,
+          },
         });
       }
     }

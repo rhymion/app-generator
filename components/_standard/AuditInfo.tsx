@@ -1,5 +1,6 @@
 'use client';
 
+import dayjs from 'dayjs';
 import Typography from '@mui/material/Typography';
 
 type AuditInfoProps = {
@@ -15,7 +16,7 @@ export default function AuditInfo({ src }: AuditInfoProps) {
   if (!src.created_at && !src.updated_at) return null;
 
   const formatDate = (date: string | Date) => {
-    return new Date(date).toLocaleString('sv-SE');
+    return dayjs(date).format('YYYY-MM-DD HH:mm:ss');
   };
 
   return (
