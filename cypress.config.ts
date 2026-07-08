@@ -195,6 +195,46 @@ export default defineConfig({
           const { getInventoryAllocation } = require('./cypress/support/purchase_order/reservation_helper');
           return await getInventoryAllocation(params.purchase_order_id);
         },
+        async 'db:setupPurchasePerItemApprovalFlow'() {
+          const { setupPurchasePerItemApprovalFlow } = require('./cypress/support/purchase_order/reservation_helper');
+          return await setupPurchasePerItemApprovalFlow();
+        },
+        async 'db:getPurchasePerItemsForOrder'(params: { purchase_order_id: string }) {
+          const { getPurchasePerItemsForOrder } = require('./cypress/support/purchase_order/reservation_helper');
+          return await getPurchasePerItemsForOrder(params.purchase_order_id);
+        },
+        async 'db:seedSecondInventoryLot'(params: { product_id: string; quantity: number; location: string }) {
+          const { seedSecondInventoryLot } = require('./cypress/support/purchase_order/reservation_helper');
+          return await seedSecondInventoryLot(params.product_id, params.quantity, params.location);
+        },
+        async 'db:setInventoryQuantity'(params: { inventory_id: string; quantity: number }) {
+          const { setInventoryQuantity } = require('./cypress/support/purchase_order/reservation_helper');
+          return await setInventoryQuantity(params.inventory_id, params.quantity);
+        },
+        async 'db:setupReceivingReceiptLineApprovalFlow'() {
+          const { setupReceivingReceiptLineApprovalFlow } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
+          return await setupReceivingReceiptLineApprovalFlow();
+        },
+        async 'db:populateReceivingReceiptLineWithApproval'(params: { creatorId: string; approvalFlowIds: string[]; inventoryId?: string | null }) {
+          const { populateReceivingReceiptLineWithApproval } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
+          return await populateReceivingReceiptLineWithApproval(params.creatorId, params.approvalFlowIds, { inventoryId: params.inventoryId ?? null });
+        },
+        async 'db:getApprovableById'(params: { approvable_id: string }) {
+          const { getApprovableById } = require('./cypress/support/approval_test_helpers');
+          return await getApprovableById(params.approvable_id);
+        },
+        async 'db:getPendingApprovalRequest'(params: { approvable_id: string }) {
+          const { getPendingApprovalRequest } = require('./cypress/support/approval_test_helpers');
+          return await getPendingApprovalRequest(params.approvable_id);
+        },
+        async 'db:getInventoryTransactionsByBridge'(params: { inventory_transactionable_id: string }) {
+          const { getInventoryTransactionsByBridge } = require('./cypress/support/approval_test_helpers');
+          return await getInventoryTransactionsByBridge(params.inventory_transactionable_id);
+        },
+        async 'db:countAllInventoryTransactions'() {
+          const { countAllInventoryTransactions } = require('./cypress/support/approval_test_helpers');
+          return await countAllInventoryTransactions();
+        },
       });
 
       return config;

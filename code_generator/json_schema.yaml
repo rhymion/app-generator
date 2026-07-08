@@ -1736,7 +1736,7 @@ definitions:
     x-generate:
       list: true
       view: true
-      new: false
+      new: true
       edit: true
       delete: true
       invalidate: false
