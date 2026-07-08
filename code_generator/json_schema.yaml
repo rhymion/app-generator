@@ -421,11 +421,12 @@ definitions:
       status:
         type: integer
         minimum: 0
-        maximum: 2
+        maximum: 3
         enum:
           - Pending
           - Approved
           - Rejected
+          - TerminalRejected
 
   approvable:
     type: object
@@ -1950,6 +1951,11 @@ definitions:
         set_fields:
           status: "approved"
         emit_hook: true
+      on_rejected:
+        terminal: false
+        set_fields:
+          status: "rejected"
+        emit_hook: false
     x-display:
       table:
         - user:
@@ -1990,12 +1996,13 @@ definitions:
       status:
         type: integer
         minimum: 0
-        maximum: 1
+        maximum: 2
         default: 0
         x-enum-namespace: LeaveRequestStatus
         enum:
           - pending
           - approved
+          - rejected
 
   leave_request_detail:
     x-generate:

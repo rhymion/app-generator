@@ -2854,6 +2854,9 @@ def api_spec_context(
         return out
 
     has_approvable = any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model, schema))
+    _x_approval = model_def.get('x-approval')
+    entity_on_rejected = _x_approval.get('on_rejected') if _x_approval else None
+    entity_on_rejected_terminal = bool((_x_approval or {}).get('on_rejected', {}).get('terminal', False))
 
     # Detect count-mode reservation without lines: POST tests must seed the pool entity first.
     _xres_def = model_def.get('x-reservation')
@@ -2910,6 +2913,8 @@ def api_spec_context(
         'bulk_put_body_valid':    _put_body_impl('              '),   # 14 spaces
         'bulk_put_body_valid_fk': _put_body_impl('                '), # 16 spaces
         'has_approvable': has_approvable,
+        'entity_on_rejected': entity_on_rejected,
+        'entity_on_rejected_terminal': entity_on_rejected_terminal,
         'reservation_count_pool_pascal': _reservation_count_pool_pascal,
         'readonly_fields': readonly_fields,
         'put_body_readonly_zero': _put_body_ro_zero_impl('            '),
