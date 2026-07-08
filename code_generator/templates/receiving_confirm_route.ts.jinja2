@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { requireSession, handleApiError } from '@/lib/api-auth';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -7,6 +8,11 @@ export async function POST(
   req: NextRequest,
   { params }: Params
 ): Promise<NextResponse> {
+  try {
+    await requireSession();
+  } catch (error) {
+    return handleApiError(error);
+  }
   const { id } = await params;
   let body: { inventory_selections?: { inventory_id: string; quantity: number }[] };
   try {
