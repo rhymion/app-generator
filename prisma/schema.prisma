@@ -767,7 +767,7 @@ model inventory {
   creator           user      @relation("InventoryCreator", fields: [creator_id], references: [id])
   updater_id        String
   updater           user      @relation("InventoryUpdater", fields: [updater_id], references: [id])
-  inventory_allocations inventory_allocation[]
+  receiving_receipt_lines receiving_receipt_line[] @relation("ReceiptLineInventory")
 
   @@index([creator_id])
 }
@@ -958,7 +958,7 @@ model room_reservation {
 model receiving_purchase_order {
   id                             String                           @id @default(cuid())
   order_no                       String
-  status                         String                           @default("draft")
+  status                         Int                           @default(0)
   lines                          receiving_purchase_order_line[]
   receiving_asns                 receiving_asn[]
   receiving_receipts             receiving_receipt[]
@@ -982,7 +982,7 @@ model receiving_purchase_order_line {
   done_quantity               Int                      @default(0)
   cancelled_quantity          Int                      @default(0)
   outstanding_quantity        Int                      @default(0)
-  status                      String                   @default("outstanding")
+  status                      Int                      @default(0)
   created_at                  DateTime                 @default(now()) @db.Timestamptz(0)
   updated_at                  DateTime                 @updatedAt @db.Timestamptz(0)
 
@@ -994,7 +994,7 @@ model receiving_asn {
   asn_no             String
   purchase_order_id  String?
   purchase_order     receiving_purchase_order? @relation(fields: [purchase_order_id], references: [id])
-  status             String                    @default("draft")
+  status             Int                       @default(0)
   lines              receiving_asn_line[]
   receiving_receipts receiving_receipt[]
   created_at         DateTime                  @default(now()) @db.Timestamptz(0)
@@ -1018,7 +1018,7 @@ model receiving_asn_line {
   done_quantity        Int           @default(0)
   cancelled_quantity   Int           @default(0)
   outstanding_quantity Int           @default(0)
-  status               String        @default("outstanding")
+  status               Int           @default(0)
   created_at           DateTime      @default(now()) @db.Timestamptz(0)
   updated_at           DateTime      @updatedAt @db.Timestamptz(0)
 
@@ -1032,7 +1032,7 @@ model receiving_receipt {
   purchase_order    receiving_purchase_order? @relation(fields: [purchase_order_id], references: [id])
   asn_id            String?
   asn               receiving_asn?            @relation(fields: [asn_id], references: [id])
-  status            String                    @default("draft")
+  status            Int                       @default(0)
   confirmed_at      DateTime?                 @db.Timestamptz(0)
   lines             receiving_receipt_line[]
   created_at        DateTime                  @default(now()) @db.Timestamptz(0)
@@ -1057,8 +1057,21 @@ model receiving_receipt_line {
   done_quantity        Int               @default(0)
   cancelled_quantity   Int               @default(0)
   outstanding_quantity Int               @default(0)
+  status               Int               @default(0)
+  inventory_id         String?
+  inventory            inventory?        @relation("ReceiptLineInventory", fields: [inventory_id], references: [id])
+  approvable_id        String?           @unique
+  approvable           approvable?       @relation(fields: [approvable_id], references: [id])
+  parent_id            String?
+  parent               receiving_receipt_line?   @relation("ReceiptLineSplit", fields: [parent_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children             receiving_receipt_line[]  @relation("ReceiptLineSplit")
+  is_split_result      Boolean           @default(false)
+  inventory_transactionable_id String?
+  inventory_transactionable    inventory_transactionable? @relation(fields: [inventory_transactionable_id], references: [id])
   created_at           DateTime          @default(now()) @db.Timestamptz(0)
   updated_at           DateTime          @updatedAt @db.Timestamptz(0)
 
   @@index([receiving_receipt_id])
+  @@index([inventory_id])
+  @@index([parent_id])
 }

@@ -2370,7 +2370,9 @@ definitions:
         type: string
         minLength: 1
       status:
-        type: string
+        type: integer
+        minimum: 0
+        maximum: 4
         enum:
           - draft
           - issued
@@ -2419,7 +2421,9 @@ definitions:
         minimum: 0
         default: 0
       status:
-        type: string
+        type: integer
+        minimum: 0
+        maximum: 3
         enum:
           - outstanding
           - partially_received
@@ -2478,7 +2482,9 @@ definitions:
           target: receiving_purchase_order
           labelField: order_no
       status:
-        type: string
+        type: integer
+        minimum: 0
+        maximum: 4
         enum:
           - draft
           - sent
@@ -2527,7 +2533,9 @@ definitions:
         minimum: 0
         default: 0
       status:
-        type: string
+        type: integer
+        minimum: 0
+        maximum: 3
         enum:
           - outstanding
           - partially_matched
@@ -2597,7 +2605,9 @@ definitions:
           target: receiving_asn
           labelField: asn_no
       status:
-        type: string
+        type: integer
+        minimum: 0
+        maximum: 2
         enum:
           - draft
           - confirmed
@@ -2615,6 +2625,21 @@ definitions:
       - receiving_receipt_id
       - product_id
       - receipt_quantity
+      - status
+      - inventory_id
+    x-approval:
+      on_approved:
+        emit_hook: true
+      on_rejected:
+        terminal: true
+        emit_hook: false
+        set_fields:
+          status: "rejected"
+    x-splittable: true
+    x-ledger-source:
+      event_type: receive
+      quantity_delta_field: receipt_quantity
+      inventory_id_field: inventory_id
     properties:
       id:
         type: string
@@ -2648,6 +2673,50 @@ definitions:
         type: integer
         minimum: 0
         default: 0
+      status:
+        type: integer
+        minimum: 0
+        maximum: 2
+        enum:
+          - pending
+          - split
+          - rejected
+        default: pending
+      inventory_id:
+        type:
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: inventory
+          labelField: id
+      approvable_id:
+        type:
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: one-to-one_bridge
+          target: approvable
+          labelField: id
+      parent_id:
+        type:
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+      is_split_result:
+        type: boolean
+        default: false
+      inventory_transactionable_id:
+        # Plain FK, no x-relationship: inventory_transactionable is an internal
+        # bridge (no x-generate, no generated types module — same as
+        # commentable/approvable), so it cannot be a many-to-one relation target.
+        # Consumed by ledger_write_stub.ts.jinja2 for idempotent ledger writes.
+        type:
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
 
   receiving_receipt_detail:
     x-generate:
@@ -2659,6 +2728,10 @@ definitions:
       invalidate: false
       api: true
       test: true
+    x-custom-components:
+      - name: ReceivingConfirmForm
+        target:
+          - view
     allOf:
       - $ref: "#/definitions/receiving_receipt"
       - type: object
