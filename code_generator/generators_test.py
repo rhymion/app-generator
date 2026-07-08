@@ -1468,7 +1468,19 @@ def helper_context(
                 prop_stem = re.sub(r'_id$', '', field['prop_name'])
                 var_name = to_camel_case(prop_stem)
                 if not any(d['var_name'] == var_name for d in deps):
-                    deps.append({'target': target, 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': []})
+                    # Bring in the target's own transitive deps first (e.g. inventory → product),
+                    # then wire its required FK fields that are now resolvable — otherwise the
+                    # dep's own create() call in populateXxxDependencies omits mandatory FK columns.
+                    for td in resolve_dependencies(target, schema):
+                        if not any(d['target'] == td['target'] for d in deps):
+                            deps.append(td)
+                    target_def = schema['definitions'].get(target, {})
+                    target_fk_deps = [
+                        {'prop_name': r['prop_name'], 'dep_var_name': to_camel_case(r['target'])}
+                        for r in get_parent_relationships(target_def, schema)
+                        if any(d['target'] == r['target'] for d in deps)
+                    ]
+                    deps.append({'target': target, 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': target_fk_deps})
 
     # Collect ALL user_account FK fields (required and optional) as separate deps.
     # ua_dep_fields: required only (for populateData); ua_dep_fields_full: all (for populateFullData).

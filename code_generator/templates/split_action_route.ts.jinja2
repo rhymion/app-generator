@@ -1,0 +1,99 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { requireSession, handleApiError, ApiError } from '@/lib/api-auth';
+import prisma from '@/lib/prisma';
+
+const SPLIT_STATUS = {{ status_split_value }};
+const REJECTED_STATUS = {{ status_rejected_value }};
+
+type SplitPart = {
+{% for field in inherited_fields %}
+  {{ field }}?: unknown;
+{% endfor %}
+  receipt_quantity: number;
+  inventory_id?: string;
+};
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { userId } = await requireSession();
+    void userId;
+    const { id } = await params;
+
+    let body: { parts?: SplitPart[] };
+    try {
+      body = await req.json();
+    } catch {
+      throw new ApiError(400, 'Invalid JSON body');
+    }
+    const { parts } = body;
+    if (!Array.isArray(parts) || parts.length < 2) {
+      throw new ApiError(400, 'parts must be an array with at least 2 items');
+    }
+
+    const parent = await prisma.{{ entity_name }}.findUnique({
+      where: { id },
+      {% if has_approvable %}
+      include: { approvable: true },
+      {% endif %}
+    });
+    if (!parent) throw new ApiError(404, 'Not found');
+
+    // R6: only pending entities may be split
+    if (parent.status === SPLIT_STATUS || parent.status === REJECTED_STATUS) {
+      throw new ApiError(400, `Cannot split an entity with status: ${parent.status}`);
+    }
+    {% if has_approvable %}
+    if (parent.approvable?.approved_at != null) {
+      throw new ApiError(400, 'Cannot split an already-approved entity');
+    }
+    // R4: every part must specify inventory_id
+    for (const part of parts) {
+      if (!part.inventory_id) {
+        throw new ApiError(400, 'Each part must specify inventory_id (R4)');
+      }
+    }
+    {% endif %}
+
+    await prisma.$transaction(async (tx) => {
+      // 1. Set parent status = split; invalidate approval (FS-2 multi-layer defense)
+      {% if has_approvable %}
+      if (parent.approvable_id) {
+        await tx.approval_request.deleteMany({ where: { approvable_id: parent.approvable_id } });
+        await tx.approvable.delete({ where: { id: parent.approvable_id } });
+      }
+      await tx.{{ entity_name }}.update({
+        where: { id },
+        data: { status: SPLIT_STATUS, approvable_id: null },
+      });
+      {% else %}
+      await tx.{{ entity_name }}.update({ where: { id }, data: { status: SPLIT_STATUS } });
+      {% endif %}
+
+      // 2. Create child records — inherit parent fields, override with part-specific values
+      for (const part of parts) {
+        {% if has_approvable %}
+        const childApprovable = await tx.approvable.create({ data: {} });
+        {% endif %}
+        await tx.{{ entity_name }}.create({
+          data: {
+            {% for field in inherited_fields %}
+            {{ field }}: (part.{{ field }} ?? parent.{{ field }}) as never,
+            {% endfor %}
+            receipt_quantity: part.receipt_quantity,
+            inventory_id: part.inventory_id ?? parent.inventory_id,
+            parent_id: parent.id,
+            is_split_result: true,
+            status: 0, // pending
+            {% if has_approvable %}
+            approvable_id: childApprovable.id,
+            {% endif %}
+          },
+        });
+      }
+    });
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

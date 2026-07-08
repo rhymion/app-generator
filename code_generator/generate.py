@@ -614,6 +614,39 @@ def generate(schema_path: str, output_dir: str) -> None:
                _render(env, 'receiving_confirm_form.tsx.jinja2', _confirm_ctx))
         print(f'  ReceivingConfirmForm.tsx → components/{_receipt_entity}/')
 
+    # --- x-splittable: split action route per entity ---
+    #
+    # Entities marked x-splittable get a POST /actions/split route that closes
+    # out the parent (status=split, approvable invalidated — FS-2) and creates
+    # child records inheriting the parent's fields. receipt_quantity/inventory_id
+    # are excluded from inherited_fields since the split template overrides them
+    # explicitly per-part (FS-5: avoids duplicate object-literal keys).
+    _splittable_defs = schema.get('definitions', {})
+    for _def_key, _def_val in _splittable_defs.items():
+        if _def_key.endswith('_detail'):
+            continue
+        if not _def_val.get('x-splittable'):
+            continue
+        _split_entity_props = _def_val.get('properties', {})
+        _split_status_enum = (_split_entity_props.get('status') or {}).get('enum') or []
+        _split_ctx = {
+            'entity_name': _def_key,
+            'pascal_name': to_pascal_case(_def_key),
+            'status_split_value': _split_status_enum.index('split') if 'split' in _split_status_enum else 1,
+            'status_rejected_value': _split_status_enum.index('rejected') if 'rejected' in _split_status_enum else 2,
+            'has_approvable': 'approvable_id' in _split_entity_props,
+            'inherited_fields': [
+                f for f in _split_entity_props
+                if f not in (
+                    'id', 'parent_id', 'is_split_result', 'status', 'approvable_id',
+                    'receipt_quantity', 'inventory_id', 'inventory_transactionable_id',
+                )
+            ],
+        }
+        _split_api_dir = out / 'app' / 'api' / _def_key / '[id]' / 'actions' / 'split'
+        _write(_split_api_dir / 'route.ts', _render(env, 'split_action_route.ts.jinja2', _split_ctx))
+        print(f'  Split action route → app/api/{_def_key}/[id]/actions/split/')
+
     # --- Dashboard catalog (lib/dashboard/catalog.ts) ---
     dashboard_catalog = build_dashboard_catalog(schema)
     if True:
