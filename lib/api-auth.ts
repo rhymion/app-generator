@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { requirePermission, type RichPermissions, type Operation, type ItemContext } from '@/lib/authz';
+import { requirePermission, getSessionUserId, type RichPermissions, type Operation, type ItemContext } from '@/lib/authz';
 import { TtlLruCache } from '@/lib/_ttl_lru';
 
 export class ApiError extends Error {
@@ -74,6 +74,12 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
   }
 
   return { userId: user.id };
+}
+
+export async function requireSession(): Promise<{ userId: string }> {
+  const userId = await getSessionUserId();
+  if (!userId) throw new ApiError(401, 'Login required.');
+  return { userId };
 }
 
 export async function requireApiPermission(
