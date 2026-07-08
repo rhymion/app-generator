@@ -1747,55 +1747,82 @@ definitions:
           product:
             $ref: "#/definitions/product"
 
-  inventory_allocation:
+  inventory_transactionable:
     type: object
+    # Polymorphic bridge through-table (same minimal pattern as commentable/approvable).
+    # No x-generate block → excluded from the entity loop (extract_entities skips
+    # definitions with no x-generate), so no pages/CRUD are generated for it.
     required:
       - id
-      - purchase_order_id
-      - purchase_per_item_id
-      - inventory_id
-      - quantity
-      - remaining_quantity
-      - status
     properties:
       id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
-      purchase_order_id:
+
+  inventory_transaction:
+    type: object
+    x-generate:
+      new: false
+      edit: false
+      delete: false
+      invalidate: false     # O-1: entity level read-only (list/view only, no UI mutation)
+    required:
+      - id
+      - inventory_transactionable_id
+      - event_type
+      - quantity_delta
+      - reserved_delta
+      - product_id
+      - location
+      - created_by_id
+    properties:
+      id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: purchase_order
-          labelField: order_no
-      purchase_per_item_id:
+      inventory_transactionable_id:
+        # Plain FK, no x-relationship: inventory_transactionable is an internal
+        # bridge (no x-generate, no generated types module — same as
+        # commentable/approvable), so it cannot be a many-to-one relation target.
         type: string
         pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: purchase_per_item
-          labelField: id
-      inventory_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: inventory
-          labelField: id
-      quantity:
-        type: integer
-        minimum: 0
-      remaining_quantity:
-        type: integer
-        minimum: 0
-      status:
+      event_type:
         type: string
         enum:
-          - reserved
-          - partially_shipped
-          - shipped
-          - released
-          - cancelled
+          - reserve
+          - ship
+          - receive
+          - release
+          - cancel
+      quantity_delta:
+        type: integer       # O-4: physical inventory movement
+      reserved_delta:
+        type: integer       # O-4: reserved-slot movement
+      product_id:
+        type: string        # O-6: denormalized
+      location:
+        type: string         # O-6: denormalized
+      lot_number:
+        type:
+          - string
+          - "null"
+      expiration_date:
+        type:
+          - string
+          - "null"
+        format: date        # O-6; aligned to existing inventory.expiration_date naming (B5-Q1)
+      approved_via:
+        type:
+          - string
+          - "null"
+      created_by_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: user
+          labelField: name
+    # inventory_transaction_detail is not created (no _detail definition needed;
+    # this entity is not exposed as a child of any parent).
 
   purchase_order:
     type: object
@@ -1813,7 +1840,7 @@ definitions:
     x-reservation:
       mode: count
       transaction:
-        strategy: conditional_update
+        strategy: ledger_transaction
       lines: items
       pool:
         entity: inventory
@@ -1829,42 +1856,12 @@ definitions:
           - lot_number: asc
           - id: asc
       result:
-        allocationEntity: inventory_allocation
         parentField: purchase_order_id
-        lineField: purchase_per_item_id
-        poolField: inventory_id
+        lineTransactionableField: inventory_transactionable_id
         quantityField: quantity
-      actions:
-        shipOrder:
-          type: ship
-          allocationEntity: inventory_allocation
-          quantityField: quantity
-          remainingField: remaining_quantity
-          statusField: status
-          openStatuses:
-            - reserved
-            - partially_shipped
-          doneStatus: shipped
-        releaseReservation:
-          type: release
-          allocationEntity: inventory_allocation
-          quantityField: quantity
-          remainingField: remaining_quantity
-          statusField: status
-          openStatuses:
-            - reserved
-            - partially_shipped
-          doneStatus: released
-        cancelReservation:
-          type: cancel
-          allocationEntity: inventory_allocation
-          quantityField: quantity
-          remainingField: remaining_quantity
-          statusField: status
-          openStatuses:
-            - reserved
-            - partially_shipped
-          doneStatus: cancelled
+      # No "actions" block: under strategy: ledger_transaction, ship/cancel are
+      # driven by the standard approve/reject flow on purchase_per_item.approvable_id
+      # (see purchase_per_item's x-approval below), not by bespoke action routes.
     properties:
       id:
         type: string
@@ -1887,6 +1884,12 @@ definitions:
       - purchase_order_id
       - product_id
       - quantity
+    x-approval:
+      on_approved:
+        emit_hook: true
+      on_rejected:
+        terminal: true
+        emit_hook: true
     properties:
       id:
         type: string
@@ -1913,6 +1916,22 @@ definitions:
           - integer
           - "null"
         minimum: 0
+      approvable_id:
+        type:
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: one-to-one_bridge
+          target: approvable
+          labelField: id
+      inventory_transactionable_id:
+        # Plain FK, no x-relationship: inventory_transactionable is an internal
+        # bridge (no x-generate, no generated types module).
+        type:
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
 
   purchase_order_detail:
     x-generate:

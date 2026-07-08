@@ -665,6 +665,8 @@ def actions_context(ctx: dict) -> dict:
 
 def _build_reservation_mutation_guard_update(rc: dict, model: str) -> str:
     """Generate TypeScript update guard that rejects criteria changes after allocation."""
+    if rc.get('transaction_strategy') == 'ledger_transaction':
+        return _build_reservation_mutation_guard_update_ledger(rc, model)
     res          = rc.get('result') or {}
     alloc_entity = res.get('allocationEntity') or ''
     parent_field = res.get('parentField') or f'{model}_id'
@@ -733,6 +735,8 @@ def _build_reservation_mutation_guard_update(rc: dict, model: str) -> str:
 
 def _build_reservation_mutation_guard_delete(rc: dict, model: str) -> str:
     """Generate TypeScript delete guard that rejects delete when allocation exists."""
+    if rc.get('transaction_strategy') == 'ledger_transaction':
+        return _build_reservation_mutation_guard_delete_ledger(rc, model)
     res          = rc.get('result') or {}
     alloc_entity = res.get('allocationEntity') or ''
     parent_field = res.get('parentField') or f'{model}_id'
@@ -748,8 +752,255 @@ def _build_reservation_mutation_guard_delete(rc: dict, model: str) -> str:
     )
 
 
+def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict | None = None) -> str:
+    """Generate the TypeScript reserve phase for strategy: ledger_transaction.
+
+    No allocationEntity: each pool claim is written as an inventory_transaction
+    ledger row (event_type='reserve', quantity_delta=0 — O-4) instead of an
+    allocation table row, and the line entity's own bridge FK
+    (result.lineTransactionableField) records which transactions belong to it.
+    Each line also gets its own approvable + approval_request(s), mirroring the
+    generic one-to-one_bridge afterCreate pattern (service_after_create_stub),
+    since nested-created lines never run their own afterCreate.
+    """
+    pool           = rc.get('pool') or {}
+    req            = rc.get('request') or {}
+    pol            = rc.get('policy') or {}
+    res            = rc.get('result') or {}
+
+    pool_entity    = pool.get('entity', 'inventory')
+    pool_qty_field = pool.get('quantityField', 'quantity')
+    pool_res_field = pool.get('reservedField', 'reserved_quantity')
+    lines_prop     = rc.get('lines')
+    lines_entity   = rc.get('lines_entity') or ''
+    req_qty_field  = req.get('quantityField', 'quantity')
+    criteria       = req.get('criteria') or {}
+    policy_order   = pol.get('orderBy') or []
+    line_txable_f  = res.get('lineTransactionableField') or 'inventory_transactionable_id'
+    entity_name    = lines_entity or model
+    has_lines      = rc.get('hasLines', bool(lines_entity))
+    self_qty_field = rc.get('selfQuantityField', req_qty_field)
+
+    def _order_entry(field: str, direction: str) -> str:
+        if direction == 'asc_nulls_last':
+            return f"{{ {field}: {{ sort: 'asc', nulls: 'last' }} }}"
+        if direction == 'desc_nulls_first':
+            return f"{{ {field}: {{ sort: 'desc', nulls: 'first' }} }}"
+        return f"{{ {field}: '{direction}' }}"
+
+    order_parts: list[str] = []
+    for item in policy_order:
+        for field, direction in item.items():
+            order_parts.append(_order_entry(field, str(direction)))
+    order_str = ', '.join(order_parts)
+
+    criteria_lines = [f'          {k}: _line.{v},' for k, v in criteria.items()]
+    criteria_str   = '\n'.join(criteria_lines) if criteria_lines else ''
+    where_clause = f"          {pool_qty_field}: {{ gt: 0 }},"
+    if criteria_str:
+        where_clause = criteria_str + '\n' + f"          {pool_qty_field}: {{ gt: 0 }},"
+
+    # Per-line body: claim inventory via ledger rows against one shared bridge,
+    # then create the line's own approvable + approval_request(s).
+    claim_and_approval_body = (
+        f"      const _candidates = await tx.{pool_entity}.findMany({{\n"
+        f"        where: {{\n"
+        f"{where_clause}\n"
+        f"        }},\n"
+        + (f"        orderBy: [{order_str}],\n" if order_str else '') +
+        f"      }});\n"
+        f"      const bridge = await tx.inventory_transactionable.create({{ data: {{}} }});\n"
+        f"      for (const _candidate of _candidates) {{\n"
+        f"        if (_remaining <= 0) break;\n"
+        f"        const _available = _candidate.{pool_qty_field} - _candidate.{pool_res_field};\n"
+        f"        if (_available <= 0) continue;\n"
+        f"        const _claim = Math.min(_remaining, _available);\n"
+        f"        const _claimResult = await tx.{pool_entity}.updateMany({{\n"
+        f"          where: {{ id: _candidate.id, {pool_res_field}: {{ lte: _candidate.{pool_qty_field} - _claim }} }},\n"
+        f"          data: {{ {pool_res_field}: {{ increment: _claim }} }}, // O-4: quantity unchanged on reserve\n"
+        f"        }});\n"
+        f"        if (_claimResult.count > 0) {{\n"
+        f"          _remaining -= _claim;\n"
+        f"          await tx.inventory_transaction.create({{\n"
+        f"            data: {{\n"
+        f"              inventory_transactionable_id: bridge.id,\n"
+        f"              event_type: 'reserve',\n"
+        f"              quantity_delta: 0,\n"
+        f"              reserved_delta: _claim,\n"
+        f"              product_id: _candidate.product_id,\n"
+        f"              location: _candidate.location ?? '',\n"
+        f"              lot_number: _candidate.lot_number,\n"
+        f"              expiration_date: _candidate.expiration_date,\n"
+        f"              created_by_id: actorId,\n"
+        f"              creator_id: actorId,\n"
+        f"              updater_id: actorId,\n"
+        f"            }},\n"
+        f"          }});\n"
+        f"        }}\n"
+        f"      }}\n"
+        f"      if (_remaining > 0) {{\n"
+        f"        throw new InsufficientInventoryError(\n"
+        f"          `Insufficient inventory for {entity_name} line`\n"
+        f"        );\n"
+        f"      }}\n"
+        f"\n"
+        f"      const approvable = await tx.approvable.create({{ data: {{}} }});\n"
+        f"      let _hasFlow = false;\n"
+        f"      for (const flow of _approvalFlows) {{\n"
+        f"        if (flow.requestor_role_id && !_creatorRoleIds.includes(flow.requestor_role_id)) {{\n"
+        f"          continue;\n"
+        f"        }}\n"
+        f"        await tx.approval_request.create({{\n"
+        f"          data: {{ approvable_id: approvable.id, approval_flow_id: flow.id, status: 0 }},\n"
+        f"        }});\n"
+        f"        _hasFlow = true;\n"
+        f"      }}\n"
+        f"      if (_hasFlow) {{\n"
+        f"        await tx.approvable.update({{ where: {{ id: approvable.id }}, data: {{ creator_id: actorId }} }});\n"
+        f"      }}\n"
+    )
+
+    header = (
+        f"    // Reservation (strategy: ledger_transaction): allocate {pool_entity} via\n"
+        f"    // inventory_transaction ledger rows (O-4/O-6/O-8) — no allocation entity.\n"
+        f"    const _creator = await tx.user.findUnique({{\n"
+        f"      where: {{ id: actorId }},\n"
+        f"      select: {{ roles: {{ select: {{ id: true }} }} }},\n"
+        f"    }});\n"
+        f"    const _creatorRoleIds = _creator?.roles.map((r) => r.id) ?? [];\n"
+        f"    const _approvalFlows = await tx.approval_flow.findMany({{\n"
+        f"      where: {{ entity_name: '{entity_name}' }},\n"
+        f"    }});\n"
+    )
+
+    if not lines_entity:
+        # count mode without lines: the request entity itself is the single line
+        return (
+            header +
+            f"    {{\n"
+            f"      let _remaining = (created as Record<string, unknown>).{self_qty_field} as number;\n"
+            + claim_and_approval_body +
+            f"      await tx.{model}.update({{\n"
+            f"        where: {{ id: created.id }},\n"
+            f"        data: {{\n"
+            f"          {line_txable_f}: bridge.id,\n"
+            f"          approvable_id: approvable.id,\n"
+            f"        }},\n"
+            f"      }});\n"
+            f"    }}"
+        )
+
+    return (
+        header +
+        f"    const _reservationLines = await tx.{lines_entity}.findMany({{\n"
+        f"      where: {{ {model}_id: created.id }},\n"
+        f"    }});\n"
+        f"    for (const _line of _reservationLines) {{\n"
+        f"      let _remaining = (_line as Record<string, unknown>).{req_qty_field} as number;\n"
+        + claim_and_approval_body +
+        f"      await tx.{lines_entity}.update({{\n"
+        f"        where: {{ id: _line.id }},\n"
+        f"        data: {{\n"
+        f"          {line_txable_f}: bridge.id,\n"
+        f"          approvable_id: approvable.id,\n"
+        f"        }},\n"
+        f"      }});\n"
+        f"    }}"
+    )
+
+
+def _build_reservation_mutation_guard_update_ledger(rc: dict, model: str) -> str:
+    """Mutation guard for strategy: ledger_transaction (no allocationEntity).
+
+    A line counts as "allocated" once it has a non-null lineTransactionableField.
+    """
+    res            = rc.get('result') or {}
+    line_txable_f  = res.get('lineTransactionableField') or 'inventory_transactionable_id'
+    lines_entity   = rc.get('lines_entity') or ''
+    lines_prop     = rc.get('lines') or 'items'
+    lines_var      = to_camel_case(lines_prop)
+
+    req         = rc.get('request') or {}
+    criteria    = req.get('criteria') or {}
+    qty_field   = req.get('quantityField', 'quantity')
+
+    if not lines_entity:
+        return (
+            f"    // Reservation mutation guard (ledger_transaction): reject criteria changes after allocation\n"
+            f"    const _existingSelf = await tx.{model}.findUnique({{\n"
+            f"      where: {{ id }},\n"
+            f"      select: {{ {qty_field}: true, {line_txable_f}: true }},\n"
+            f"    }});\n"
+            f"    if (_existingSelf?.{line_txable_f} && _existingSelf.{qty_field} !== {qty_field}) {{\n"
+            f"      throw new ReservationMutationError('Cannot modify reservation criteria after allocation.');\n"
+            f"    }}"
+        )
+
+    select_fields_set = list(dict.fromkeys(list(criteria.keys()) + [qty_field]))
+    select_fields_str = ', '.join(f'{f}: true' for f in select_fields_set)
+    check_parts = [f'ex.{f} !== incoming.{f}' for f in select_fields_set]
+    criteria_check = ' || '.join(check_parts)
+
+    return (
+        f"    // Reservation mutation guard (ledger_transaction): reject criteria changes after allocation\n"
+        f"    const _allocatedCount = await tx.{lines_entity}.count({{\n"
+        f"      where: {{ {model}_id: id, {line_txable_f}: {{ not: null }} }},\n"
+        f"    }});\n"
+        f"    if (_allocatedCount > 0) {{\n"
+        f"      const _existingLines = await tx.{lines_entity}.findMany({{\n"
+        f"        where: {{ {model}_id: id }},\n"
+        f"        select: {{ id: true, {select_fields_str} }},\n"
+        f"      }});\n"
+        f"      const _existingMap = new Map(_existingLines.map(i => [i.id, i]));\n"
+        f"      const _existingIds = new Set(_existingLines.map(i => i.id));\n"
+        f"      const _incomingWithId = {lines_var}Items.filter(i => i.id);\n"
+        f"      const _incomingIds = new Set(_incomingWithId.map(i => i.id as string));\n"
+        f"      const _mutated =\n"
+        f"        {lines_var}Items.some(i => !i.id) ||\n"
+        f"        [..._existingIds].some(eid => !_incomingIds.has(eid)) ||\n"
+        f"        _incomingWithId.some(incoming => {{\n"
+        f"          const ex = _existingMap.get(incoming.id as string);\n"
+        f"          return ex !== undefined && ({criteria_check});\n"
+        f"        }});\n"
+        f"      if (_mutated) {{\n"
+        f"        throw new ReservationMutationError('Cannot modify reservation criteria after allocation.');\n"
+        f"      }}\n"
+        f"    }}"
+    )
+
+
+def _build_reservation_mutation_guard_delete_ledger(rc: dict, model: str) -> str:
+    """Delete guard for strategy: ledger_transaction (no allocationEntity)."""
+    res            = rc.get('result') or {}
+    line_txable_f  = res.get('lineTransactionableField') or 'inventory_transactionable_id'
+    lines_entity   = rc.get('lines_entity') or ''
+
+    if not lines_entity:
+        return (
+            f"  // Reservation mutation guard (ledger_transaction): reject delete when allocated\n"
+            f"  const _allocatedCount = await prisma.{model}.count({{\n"
+            f"    where: {{ id: {{ in: ids }}, {line_txable_f}: {{ not: null }} }},\n"
+            f"  }});\n"
+            f"  if (_allocatedCount > 0) {{\n"
+            f"    throw new ReservationMutationError('Cannot delete {model} with existing reservation allocation.');\n"
+            f"  }}"
+        )
+
+    return (
+        f"  // Reservation mutation guard (ledger_transaction): reject delete when allocated\n"
+        f"  const _allocatedCount = await prisma.{lines_entity}.count({{\n"
+        f"    where: {{ {model}_id: {{ in: ids }}, {line_txable_f}: {{ not: null }} }},\n"
+        f"  }});\n"
+        f"  if (_allocatedCount > 0) {{\n"
+        f"    throw new ReservationMutationError('Cannot delete {model} with existing reservation allocation.');\n"
+        f"  }}"
+    )
+
+
 def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None = None) -> str:
     """Generate the TypeScript allocation phase for count mode reservation."""
+    if rc.get('transaction_strategy') == 'ledger_transaction':
+        return _build_ledger_reservation_allocation_code(rc, model, schema)
     pool        = rc.get('pool') or {}
     req         = rc.get('request') or {}
     pol         = rc.get('policy') or {}

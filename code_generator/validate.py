@@ -297,6 +297,8 @@ def validate_schema(schema: dict) -> None:
         pool   = xres.get('pool') or {}
         result = xres.get('result') or {}
         lines  = xres.get('lines')
+        strategy = (xres.get('transaction') or {}).get('strategy', 'conditional_update')
+        is_ledger_transaction = strategy == 'ledger_transaction'
 
         # pool.entity is required for all modes
         pool_entity = pool.get('entity')
@@ -325,17 +327,27 @@ def validate_schema(schema: dict) -> None:
                     f"for count mode."
                 )
             # Required result fields for count mode
-            alloc_entity = result.get('allocationEntity')
-            if not alloc_entity:
-                errors.append(
-                    f"Definition '{def_key}': x-reservation.result.allocationEntity is required "
-                    f"for count mode."
-                )
-            elif alloc_entity not in defs:
-                errors.append(
-                    f"Definition '{def_key}': x-reservation.result.allocationEntity '{alloc_entity}' "
-                    f"is not defined in the schema."
-                )
+            if is_ledger_transaction:
+                # strategy: ledger_transaction has no allocationEntity — the ledger
+                # (inventory_transaction) IS the allocation record. It writes directly
+                # to the line entity's bridge FK instead.
+                if not result.get('lineTransactionableField'):
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.result.lineTransactionableField "
+                        f"is required for count mode with strategy: ledger_transaction."
+                    )
+            else:
+                alloc_entity = result.get('allocationEntity')
+                if not alloc_entity:
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.result.allocationEntity is required "
+                        f"for count mode."
+                    )
+                elif alloc_entity not in defs:
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.result.allocationEntity '{alloc_entity}' "
+                        f"is not defined in the schema."
+                    )
             if not result.get('parentField'):
                 errors.append(
                     f"Definition '{def_key}': x-reservation.result.parentField is required "
@@ -344,7 +356,9 @@ def validate_schema(schema: dict) -> None:
             # Mode × lines matrix (count)
             if lines:
                 # (D) count + lines specified → result.lineField required
-                if not result.get('lineField'):
+                # (ledger_transaction strategy uses lineTransactionableField instead,
+                # already validated above)
+                if not is_ledger_transaction and not result.get('lineField'):
                     errors.append(
                         f"Definition '{def_key}': x-reservation.result.lineField is required "
                         f"for count mode with 'lines'."

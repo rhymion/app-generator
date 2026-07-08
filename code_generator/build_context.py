@@ -919,6 +919,21 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 })
             reservation_config['reservation_actions'] = _reservation_actions
             reservation_config['has_actions'] = bool(_reservation_actions)
+            # R8-new-A: an entity declaring both x-reservation and x-approval is
+            # ambiguous about which lifecycle owns its state transitions.
+            # x-approval wins; skip x-reservation's action route generation.
+            if reservation_config['has_actions'] and model_def.get('x-approval'):
+                print(
+                    f'  [WARN] {model}: both x-reservation and x-approval defined. '
+                    f'x-approval takes precedence (x-reservation action routes skipped).'
+                )
+                reservation_config['has_actions'] = False
+            # strategy: ledger_transaction never uses bespoke action routes — ship/cancel
+            # are driven by the standard approve/reject flow on the *line* entity's own
+            # approvable_id (declared via x-approval on the lines entity, not here), so
+            # any 'actions' block under this strategy is ignored defensively.
+            if reservation_config['transaction_strategy'] == 'ledger_transaction':
+                reservation_config['has_actions'] = False
             if _reservation_actions:
                 reservation_config['actions_remaining_field'] = _reservation_actions[0]['remainingField']
                 reservation_config['actions_status_field'] = _reservation_actions[0]['statusField']

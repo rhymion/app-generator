@@ -109,8 +109,9 @@ model user {
   updated_products          product[]           @relation("ProductUpdater")
   created_inventories       inventory[]         @relation("InventoryCreator")
   updated_inventories       inventory[]         @relation("InventoryUpdater")
-  created_inventory_allocations inventory_allocation[] @relation("InventoryAllocationCreator")
-  updated_inventory_allocations inventory_allocation[] @relation("InventoryAllocationUpdater")
+  created_by_inventory_transactions inventory_transaction[] @relation("InventoryTransactionCreatedBy")
+  created_inventory_transactions inventory_transaction[] @relation("InventoryTransactionCreator")
+  updated_inventory_transactions inventory_transaction[] @relation("InventoryTransactionUpdater")
   created_purchase_orders   purchase_order[]    @relation("PurchaseOrderCreator")
   updated_purchase_orders   purchase_order[]    @relation("PurchaseOrderUpdater")
   created_comments          comment[]           @relation("CommentCreator")
@@ -212,6 +213,8 @@ model approvable {
   creator           user?              @relation("ApprovableCreator", fields: [creator_id], references: [id])
   approval_requests approval_request[]
   leave_request     leave_request?
+  purchase_per_item purchase_per_item?
+  receiving_receipt_line receiving_receipt_line?
   approved_at       DateTime?          @db.Timestamptz(0)
 
   @@index([creator_id])
@@ -784,7 +787,6 @@ model purchase_order {
   creator     user                @relation("PurchaseOrderCreator", fields: [creator_id], references: [id])
   updater_id  String
   updater     user                @relation("PurchaseOrderUpdater", fields: [updater_id], references: [id])
-  inventory_allocations inventory_allocation[]
 
   @@index([creator_id])
 }
@@ -797,30 +799,12 @@ model purchase_per_item {
   product               product                @relation(fields: [product_id], references: [id], onDelete: Cascade)
   quantity              Int
   price                 Int?
-  inventory_allocations inventory_allocation[]
+  approvable_id                 String?                    @unique
+  approvable                    approvable?                @relation(fields: [approvable_id], references: [id])
+  inventory_transactionable_id  String?
+  inventory_transactionable     inventory_transactionable? @relation(fields: [inventory_transactionable_id], references: [id])
   created_at            DateTime               @default(now()) @db.Timestamptz(0)
   updated_at            DateTime               @updatedAt @db.Timestamptz(0)
-}
-
-model inventory_allocation {
-  id                   String            @id @default(cuid())
-  purchase_order_id    String
-  purchase_order       purchase_order    @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
-  purchase_per_item_id String
-  purchase_per_item    purchase_per_item @relation(fields: [purchase_per_item_id], references: [id], onDelete: Cascade)
-  inventory_id         String
-  inventory            inventory         @relation(fields: [inventory_id], references: [id], onDelete: Cascade)
-  quantity             Int
-  remaining_quantity   Int
-  status               String
-  created_at           DateTime          @default(now()) @db.Timestamptz(0)
-  updated_at           DateTime          @updatedAt @db.Timestamptz(0)
-  creator_id           String
-  creator              user              @relation("InventoryAllocationCreator", fields: [creator_id], references: [id])
-  updater_id           String
-  updater              user              @relation("InventoryAllocationUpdater", fields: [updater_id], references: [id])
-
-  @@index([creator_id])
 }
 
 model leave_request {
