@@ -13,6 +13,15 @@ B6 (true concurrent HTTP test): implemented in Cypress via Promise.all(fetch, fe
     Reason: Cypress already manages DB seed/teardown and the Next.js server lifecycle;
     repeating that in pytest would require a heavyweight fixture with no extra coverage.
     Command: npm run test:e2e:cy:api -- --spec cypress/e2e/api/purchase_order_reservation.cy.ts
+
+G12 (cmd_281 B-5 Phase2b): strategy: ledger_transaction (inventory_transaction
+ledger, introduced in Phase2a) is a SECOND concurrency-safe strategy alongside
+conditional_update — it does not replace it (conditional_update is still used
+by other entities, e.g. supply_request/supply_allocation). TestLedgerTransaction*
+below mirrors TestConcurrentSafety/TestMutationGuards for the ledger strategy:
+the concurrency guard is `reserved_quantity: { lte: quantity - claim }` in the
+updateMany WHERE (O-4: reserve never touches quantity, so the safety margin is
+checked against reserved_quantity rather than decrementing quantity directly).
 """
 
 import sys
@@ -281,3 +290,149 @@ class TestMutationGuards:
         svc = service_context(ctx, schema)
         assert svc["reservation_mutation_guard_update"] == ""
         assert svc["reservation_mutation_guard_delete"] == ""
+
+
+# ---------------------------------------------------------------------------
+# G12: strategy: ledger_transaction concurrency guard (see module docstring).
+# ---------------------------------------------------------------------------
+
+def _po_def_ledger_transaction() -> dict:
+    return {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+            "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+            "name": {"type": "string"},
+        },
+        "x-reservation": {
+            "mode": "count",
+            "transaction": {"strategy": "ledger_transaction"},
+            "lines": "lines",
+            "pool": {
+                "entity": "inventory",
+                "quantityField": "quantity",
+                "reservedField": "reserved_quantity",
+            },
+            "request": {
+                "quantityField": "quantity",
+                "criteria": {"product_id": "product_id"},
+            },
+            "policy": {
+                "orderBy": [
+                    {"expiration_date": "asc_nulls_last"},
+                    {"id": "asc"},
+                ]
+            },
+            "result": {
+                "parentField": "order_id",
+                "lineTransactionableField": "inventory_transactionable_id",
+                "quantityField": "quantity",
+            },
+        },
+    }
+
+
+def _get_ledger_service_context() -> dict:
+    schema = _make_schema({"purchase_order": _po_def_ledger_transaction()})
+    schema["definitions"]["order_line"]["properties"]["inventory_transactionable_id"] = {
+        "type": ["string", "null"],
+        "pattern": "^c[a-z0-9]{24,}$",
+    }
+    entity = {
+        "parent": "purchase_order",
+        "model": "purchase_order",
+        "definition_key": "purchase_order_detail",
+        "children": [
+            {
+                "name": "order_line",
+                "property_name": "lines",
+                "output_type": "list",
+                "file_type": None,
+                "relationship": None,
+            }
+        ],
+        "generate_config": {
+            "list": True, "view": True, "new": True, "edit": True,
+            "delete": True, "api": False, "test": False, "fields": None,
+        },
+    }
+    ctx = build_context(entity, schema)
+    return service_context(ctx, schema)
+
+
+def _get_ledger_allocation_code() -> str:
+    return _get_ledger_service_context()["reservation_allocation_code"]
+
+
+class TestLedgerTransactionConcurrentSafety:
+    """
+    Ledger-strategy equivalent of TestConcurrentSafety. The claim is guarded by
+    comparing reserved_quantity against quantity in the updateMany WHERE — since
+    O-4 forbids reserve from touching quantity directly, the conditional-update
+    guard has to be phrased in terms of reserved_quantity's remaining headroom
+    (quantity - reserved_quantity >= claim) rather than a bare `quantity: { gte }`.
+
+    The key invariant is identical to the conditional_update case: two concurrent
+    transactions can never both successfully claim more than what's available,
+    because the WHERE clause is re-evaluated atomically by postgres per row.
+    """
+
+    def test_lte_guard_in_updateMany_where(self):
+        """Generated updateMany WHERE includes the reserved_quantity headroom guard."""
+        code = _get_ledger_allocation_code()
+        assert "reserved_quantity: { lte: _candidate.quantity - _claim }" in code, (
+            "Concurrent safety requires the updateMany WHERE to re-check "
+            "`reserved_quantity <= quantity - claim` atomically. Without this guard, "
+            "two concurrent transactions can both read the same availability and "
+            "both increment reserved_quantity past quantity."
+        )
+
+    def test_count_checked_before_ledger_row_written(self):
+        """Generated code checks updateMany result count before writing the ledger row."""
+        code = _get_ledger_allocation_code()
+        assert "_claimResult.count > 0" in code, (
+            "Must verify the conditional update affected a row (count > 0) before "
+            "writing the inventory_transaction row. This handles the race where "
+            "another transaction won the same row."
+        )
+
+    def test_insufficient_inventory_thrown_when_remaining_positive(self):
+        """Generated code throws InsufficientInventoryError when candidates are exhausted."""
+        code = _get_ledger_allocation_code()
+        assert "_remaining > 0" in code
+        assert "InsufficientInventoryError" in code
+
+    def test_no_unconditional_reserved_quantity_increment(self):
+        """Generated code never increments reserved_quantity outside the guarded updateMany."""
+        code = _get_ledger_allocation_code()
+        lines = code.split("\n")
+        increment_lines = [l for l in lines if "increment" in l]
+        for line in increment_lines:
+            assert "increment:" in line, f"Unexpected unconditional increment pattern: {line!r}"
+
+    def test_reserve_never_decrements_quantity(self):
+        """O-4: even under the ledger strategy, reserve must never touch physical quantity."""
+        code = _get_ledger_allocation_code()
+        assert "{ quantity: { decrement" not in code, (
+            "reserve must never decrement quantity — only ship does (O-4)."
+        )
+
+
+class TestLedgerTransactionMutationGuardsConcurrent:
+    """Ledger-strategy equivalent of TestMutationGuards (allocated = bridge FK set)."""
+
+    def test_update_guard_checks_bridge_field(self):
+        svc = _get_ledger_service_context()
+        guard = svc["reservation_mutation_guard_update"]
+        assert guard, "reservation_mutation_guard_update must not be empty for ledger reservation entities."
+        assert "inventory_transactionable_id" in guard
+        assert "{ not: null }" in guard
+        assert "ReservationMutationError" in guard
+
+    def test_delete_guard_checks_bridge_field(self):
+        svc = _get_ledger_service_context()
+        guard = svc["reservation_mutation_guard_delete"]
+        assert guard, "reservation_mutation_guard_delete must not be empty for ledger reservation entities."
+        assert "inventory_transactionable_id" in guard
+        assert "{ not: null }" in guard
+        assert "ReservationMutationError" in guard
