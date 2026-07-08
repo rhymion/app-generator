@@ -163,10 +163,31 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
 
         parent_id_props = _get_child_parent_id_props(child_name, model, parent_rels_raw, schema)
 
+        # System-managed bridge FKs: never client-writable via the parent's nested
+        # create/update body (they're set internally by reservation/approval flows,
+        # e.g. purchase_per_item.approvable_id / inventory_transactionable_id).
+        # one-to-one_bridge relations (e.g. approvable_id) are always excluded;
+        # a strategy: ledger_transaction reservation's own lineTransactionableField
+        # (e.g. inventory_transactionable_id) has no x-relationship, so it is
+        # excluded by name instead.
+        _child_bridge_excludes = {
+            k for k, v in child_props_dict.items()
+            if isinstance(v, dict) and (v.get('x-relationship') or {}).get('type') == 'one-to-one_bridge'
+        }
+        _parent_xres = schema['definitions'].get(model, {}).get('x-reservation') or {}
+        if (
+            (_parent_xres.get('transaction') or {}).get('strategy') == 'ledger_transaction'
+            and _parent_xres.get('lines') == prop_name
+        ):
+            _line_txable_f = (_parent_xres.get('result') or {}).get('lineTransactionableField')
+            if _line_txable_f:
+                _child_bridge_excludes.add(_line_txable_f)
+
         # Fields WITHOUT id (for create body)
         props_no_id = [
             k for k in child_props_dict
             if k not in parent_id_props and k not in _EXCLUDE_ID_TS and k != 'id'
+            and k not in _child_bridge_excludes
         ]
         # Fields WITH id — same set as props_no_id but with `id` prepended.
         # Kept as a separate var so call sites that don't need the id (the
