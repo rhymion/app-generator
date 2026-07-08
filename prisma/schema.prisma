@@ -216,6 +216,7 @@ model approvable {
   purchase_per_item purchase_per_item?
   receiving_receipt_line receiving_receipt_line?
   approved_at       DateTime?          @db.Timestamptz(0)
+  rejection_reason  String?
 
   @@index([creator_id])
 }

@@ -29,6 +29,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const body = await request.json().catch(() => ({}));
     const message: string | undefined = body?.message || undefined;
+    const reason: string | undefined = body?.reason || undefined;
 
     const updated = await prisma.$transaction(async (tx) => {
       const result = await tx.approval_request.update({
@@ -50,6 +51,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         where: { id: result.approvable_id },
         select: { id: true, approved_at: true },
       });
+
+      if (reason && approvableData) {
+        await tx.approvable.update({
+          where: { id: approvableData.id },
+          data: { rejection_reason: reason },
+        });
+      }
 
       if (terminal) {
         // Symmetric to the O-5 guard on approve: idempotency via approved_at
