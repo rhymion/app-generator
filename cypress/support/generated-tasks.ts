@@ -387,6 +387,10 @@ export function getGeneratedTasks() {
       const { populateLeaveRequestWithRejectedApproval } = require('./leave_request/helper');
       return await populateLeaveRequestWithRejectedApproval(params.creatorId, params.approvalFlowIds);
     },
+    async 'db:populateLeaveRequestWithTerminalRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populateLeaveRequestWithTerminalRejectedApproval } = require('./leave_request/helper');
+      return await populateLeaveRequestWithTerminalRejectedApproval(params.creatorId, params.approvalFlowIds);
+    },
     async 'db:populateSupplyPoolDependencies'() {
       const { populateSupplyPoolDependencies } = require('./supply_pool/helper');
       return await populateSupplyPoolDependencies();

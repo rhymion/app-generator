@@ -78,6 +78,7 @@ export const siteConfig = {
     { label: "Receiving Purchase Order", href: "/receiving_purchase_order" },
     { label: "Receiving Asn", href: "/receiving_asn" },
     { label: "Receiving Receipt", href: "/receiving_receipt" },
+      { label: "Inventory Transaction", href: "/inventory_transaction" },
   ] satisfies NavLink[],
 };
 

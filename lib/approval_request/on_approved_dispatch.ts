@@ -4,7 +4,9 @@
 import type { PrismaClient } from '@/app/generated/prisma/client';
 
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+import { afterApprove as PurchasePerItemAfterApprove } from '@/lib/purchase_per_item/service_after_approve';
 import { afterApprove as LeaveRequestAfterApprove } from '@/lib/leave_request/service_after_approve';
+import { afterApprove as ReceivingReceiptLineAfterApprove } from '@/lib/receiving_receipt_line/service_after_approve';
 
 /**
  * Dispatch post-approval effects for the approved entity.
@@ -17,6 +19,13 @@ export async function dispatchOnApproved(
   approvableId: string,
   approvedByUserId: string,
 ): Promise<void> {
+  if (entityType === 'purchase_per_item') {
+    const entity = await tx.purchase_per_item.findFirst({ where: { approvable_id: approvableId } });
+    if (!entity) return;
+    // Custom hook — implement in service_after_approve.ts
+    await PurchasePerItemAfterApprove(tx, entity.id, approvableId, approvedByUserId);
+    return;
+  }
   if (entityType === 'leave_request') {
     const entity = await tx.leave_request.findFirst({ where: { approvable_id: approvableId } });
     if (!entity) return;
@@ -27,6 +36,13 @@ export async function dispatchOnApproved(
     });
     // Custom hook — implement in service_after_approve.ts
     await LeaveRequestAfterApprove(tx, entity.id, approvableId, approvedByUserId);
+    return;
+  }
+  if (entityType === 'receiving_receipt_line') {
+    const entity = await tx.receiving_receipt_line.findFirst({ where: { approvable_id: approvableId } });
+    if (!entity) return;
+    // Custom hook — implement in service_after_approve.ts
+    await ReceivingReceiptLineAfterApprove(tx, entity.id, approvableId, approvedByUserId);
     return;
   }
 }

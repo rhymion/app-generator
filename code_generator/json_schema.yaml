@@ -1709,6 +1709,7 @@ definitions:
       quantity:
         type: integer
         minimum: 0
+        default: 0
       reserved_quantity:
         type: integer
         minimum: 0

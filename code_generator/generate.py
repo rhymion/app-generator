@@ -682,6 +682,9 @@ def generate(schema_path: str, output_dir: str) -> None:
         if not x_approval:
             continue
         on_approved = x_approval.get('on_approved', {})
+        if not on_approved:
+            continue
+        x_ledger_source = def_val.get('x-ledger-source', {})
         entity_props = def_val.get('properties', {})
         resolved_sf = _resolve_set_fields(entity_props, on_approved.get('set_fields') or {})
         approvable_entities.append({
@@ -689,6 +692,8 @@ def generate(schema_path: str, output_dir: str) -> None:
             'pascal_name': to_pascal_case(def_key),
             'set_fields': resolved_sf,
             'emit_hook': bool(on_approved.get('emit_hook', False)),
+            'has_ledger_source': bool(x_ledger_source),
+            'ledger_source': x_ledger_source,
         })
     _write(
         out / 'lib' / 'approval_request' / 'on_approved_dispatch.ts',
@@ -697,9 +702,14 @@ def generate(schema_path: str, output_dir: str) -> None:
     print(f'  Approval dispatch → lib/approval_request/on_approved_dispatch.ts ({len(approvable_entities)} entities)')
     for ent in approvable_entities:
         if ent['emit_hook']:
+            template_name = (
+                'ledger_write_stub.ts.jinja2'
+                if ent.get('has_ledger_source')
+                else 'service_after_approve_stub.ts.jinja2'
+            )
             _write_stub(
                 out / 'lib' / ent['snake_name'] / 'service_after_approve.ts',
-                _render(env, 'service_after_approve_stub.ts.jinja2', ent),
+                _render(env, template_name, ent),
             )
             print(f"  Approval stub → lib/{ent['snake_name']}/service_after_approve.ts")
 

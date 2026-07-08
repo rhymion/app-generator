@@ -22,13 +22,13 @@ export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
 
-  // Level 1: approval_request, attachment, booking, dashboard_widget, field, inventory_allocation, leave_request, parent1_child1, parent1_child2, parent1_list, parent_only, permission, procedure, reaction, receiving_asn_line, receiving_purchase_order_line, receiving_receipt_line, room_reservation, shift, shift_template, supply_allocation, yyyyy_yyyyy
+  // Level 1: approval_request, attachment, booking, dashboard_widget, field, inventory_transaction, leave_request, parent1_child1, parent1_child2, parent1_list, parent_only, permission, procedure, purchase_per_item, reaction, receiving_asn_line, receiving_purchase_order_line, receiving_receipt_line, room_reservation, shift, shift_template, supply_allocation, yyyyy_yyyyy
   await prisma.approval_request.deleteMany();
   await prisma.attachment.deleteMany();
   await prisma.booking.deleteMany();
   await prisma.dashboard_widget.deleteMany();
   await prisma.field.deleteMany();
-  await prisma.inventory_allocation.deleteMany();
+  await prisma.inventory_transaction.deleteMany();
   await prisma.leave_request.deleteMany();
   await prisma.parent1_child1.deleteMany();
   await prisma.parent1_child2.deleteMany();
@@ -36,6 +36,7 @@ export async function resetTestDatabase() {
   await prisma.parent_only.deleteMany();
   await prisma.permission.deleteMany();
   await prisma.procedure.deleteMany();
+  await prisma.purchase_per_item.deleteMany();
   await prisma.reaction.deleteMany();
   await prisma.receiving_asn_line.deleteMany();
   await prisma.receiving_purchase_order_line.deleteMany();
@@ -46,15 +47,16 @@ export async function resetTestDatabase() {
   await prisma.supply_allocation.deleteMany();
   await prisma.yyyyy_yyyyy.deleteMany();
 
-  // Level 2: approvable, approval_flow, comment, dashboard, db_table, inventory, parent1, purchase_per_item, receiving_receipt, resource, room, supply_pool, supply_request, xxxxx_xxxxx
+  // Level 2: approvable, approval_flow, comment, dashboard, db_table, inventory, inventory_transactionable, parent1, purchase_order, receiving_receipt, resource, room, supply_pool, supply_request, xxxxx_xxxxx
   await prisma.approvable.deleteMany();
   await prisma.approval_flow.deleteMany();
   await prisma.comment.deleteMany();
   await prisma.dashboard.deleteMany();
   await prisma.db_table.deleteMany();
   await prisma.inventory.deleteMany();
+  await prisma.inventory_transactionable.deleteMany();
   await prisma.parent1.deleteMany();
-  await prisma.purchase_per_item.deleteMany();
+  await prisma.purchase_order.deleteMany();
   await prisma.receiving_receipt.deleteMany();
   await prisma.resource.deleteMany();
   await prisma.room.deleteMany();
@@ -62,11 +64,10 @@ export async function resetTestDatabase() {
   await prisma.supply_request.deleteMany();
   await prisma.xxxxx_xxxxx.deleteMany();
 
-  // Level 3: commentable, organization, product, purchase_order, receiving_asn, role, room_type
+  // Level 3: commentable, organization, product, receiving_asn, role, room_type
   await prisma.commentable.deleteMany();
   await prisma.organization.deleteMany();
   await prisma.product.deleteMany();
-  await prisma.purchase_order.deleteMany();
   await prisma.receiving_asn.deleteMany();
   await prisma.role.deleteMany();
   await prisma.room_type.deleteMany();

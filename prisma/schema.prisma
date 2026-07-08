@@ -270,6 +270,39 @@ model commentable {
   db_table db_table?
 }
 
+model inventory_transactionable {
+  id                     String                  @id @default(cuid())
+  purchase_per_items     purchase_per_item[]
+  receiving_receipt_lines receiving_receipt_line[]
+  inventory_transactions inventory_transaction[]
+}
+
+model inventory_transaction {
+  id                            String                    @id @default(cuid())
+  inventory_transactionable_id  String
+  inventory_transactionable     inventory_transactionable @relation(fields: [inventory_transactionable_id], references: [id])
+  event_type                    String
+  quantity_delta                Int
+  reserved_delta                Int
+  product_id                    String
+  location                      String
+  lot_number                    String?
+  expiration_date               DateTime?                 @db.Timestamptz(0)
+  approved_via                  String?
+  created_at                    DateTime                  @default(now()) @db.Timestamptz(0)
+  updated_at                    DateTime                  @updatedAt @db.Timestamptz(0)
+  created_by_id                 String
+  created_by                    user                      @relation("InventoryTransactionCreatedBy", fields: [created_by_id], references: [id])
+  creator_id                    String
+  creator                       user                      @relation("InventoryTransactionCreator", fields: [creator_id], references: [id])
+  updater_id                    String
+  updater                       user                      @relation("InventoryTransactionUpdater", fields: [updater_id], references: [id])
+
+  @@index([inventory_transactionable_id])
+  @@index([created_by_id])
+  @@index([creator_id])
+}
+
 model comment {
   id             String      @id @default(cuid())
   message        String
