@@ -109,6 +109,7 @@ export function selectDataGridSingleSelect(rowIndex: number, field: string, labe
   // edit buffer to be written" gate before fillDataGridRow proceeds.
   getDataGridCell(rowIndex, field).find('input').should('have.value', label);
   cy.press(Cypress.Keyboard.Keys.TAB);
+  cy.get('.MuiDataGrid-virtualScroller').scrollTo('left', { ensureScrollable: false });
   cy.get(`div[role="row"][aria-rowindex="1"]`).find(`input[type="checkbox"]`).click();
 }
 

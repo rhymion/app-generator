@@ -83,7 +83,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}// Add required child: {{ child.title }}
 {{ I }}cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_create_fields %}
-{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', '{{ fk.label }}');
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
 {% endfor %}
 {% if child.create_obj != '{}' %}
 {{ I }}fillDataGridRow(0, {{ child.create_obj }});
@@ -146,7 +146,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}// Add child: {{ child.title }}
 {{ I }}cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_full_fields %}
-{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', '{{ fk.label }}');
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
 {% endfor %}
 {% if child.full_create_obj != '{}' %}
 {{ I }}fillDataGridRow(0, {{ child.full_create_obj }});
@@ -253,7 +253,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         // Add child: {{ child.title }}
         cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_create_fields %}
-        selectDataGridSingleSelect(0, '{{ fk.field }}', '{{ fk.label }}');
+        selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
 {% endfor %}
 {% if child.create_obj != '{}' %}
         fillDataGridRow(0, {{ child.create_obj }});
@@ -584,7 +584,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {{ I }}cy.clickButton('Add {{ fail_create_5_2_scalar.title }}');
 {% for fk in fail_create_5_2_scalar.fk_fields %}
-{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', '{{ fk.label }}');
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
 {% endfor %}
 {% if fail_create_5_2_scalar.partial_obj %}
 {{ I }}fillDataGridRow(0, {{ fail_create_5_2_scalar.partial_obj }});

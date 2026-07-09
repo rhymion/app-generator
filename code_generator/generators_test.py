@@ -704,6 +704,36 @@ def get_child_render_type(child: dict, schema: dict = None, parent_model_name: s
     return 'datagrid'
 
 
+def _child_system_managed_fk_excludes(child_def: dict) -> set[str]:
+    """FK-shaped fields on a datagrid child that the UI never collects via plain
+    text/select — the service sets them internally (reservation/split/approval
+    flows). Excluding them keeps generated full-data e2e tests from calling
+    fillDataGridRow with a literal string on a field that requires a real cuid
+    (root cause: queue/reports/subtask_294a_gunshi.yaml failure_classification).
+
+    - x-relationship.type == 'one-to-one_bridge' (e.g. approvable_id): the
+      generic internal-bridge FK marker used throughout code_generator.
+    - 'inventory_transactionable_id': the reservation/ledger line-transactionable
+      FK. It intentionally carries no x-relationship (inventory_transactionable
+      has no x-generate/pages — see build_context.py _child_bridge_excludes and
+      generators.py line_txable_f), so — consistent with that existing
+      by-name exclusion — it is matched by name here too.
+    - 'parent_id' on x-splittable children (e.g. receiving_receipt_line): the
+      self-FK to the pre-split parent row (see generate.py split inherited_fields
+      exclusion list, which treats it the same way).
+    """
+    props = child_def.get('properties') or {}
+    excludes = {
+        prop_name for prop_name, prop in props.items()
+        if isinstance(prop, dict) and (prop.get('x-relationship') or {}).get('type') == 'one-to-one_bridge'
+    }
+    if 'inventory_transactionable_id' in props:
+        excludes.add('inventory_transactionable_id')
+    if child_def.get('x-splittable') and 'parent_id' in props:
+        excludes.add('parent_id')
+    return excludes
+
+
 def analyze_children(children: list, schema: dict, parent_model_name: str) -> list[dict]:
     """Port of analyzeChildren()."""
     result = []
@@ -721,7 +751,7 @@ def analyze_children(children: list, schema: dict, parent_model_name: str) -> li
         parent_fk_prop = f'{parent_model_name}_id'
 
         child_rels = get_parent_relationships(child_def, schema)
-        exclude_keys = {'id', parent_fk_prop, 'order'}
+        exclude_keys = {'id', parent_fk_prop, 'order'} | _child_system_managed_fk_excludes(child_def)
         child_properties = {k: v for k, v in child_def['properties'].items() if k not in exclude_keys}
 
         fields = get_field_metas(child_properties, child_required, child_rels)
@@ -1128,17 +1158,30 @@ def gen_child_full_datagrid_object(child_meta: dict) -> str:
 
 
 def gen_child_datagrid_fk_fields(fields: list) -> list[dict]:
-    """Return [{field, label}] for FK (singleSelect) fields in a datagrid child.
+    """Return [{field, label_code}] for FK (singleSelect) fields in a datagrid child.
 
     Uses prop-stem-based label so reference_id → 'Test Reference' (not 'Test Db Table').
     The parent FK (e.g. db_table_id) is already excluded from fields by analyze_children.
+
+    `label_code` is a ready-to-embed JS expression (the template renders it
+    unquoted): normally a quoted "Test X" string literal, but when the target's
+    labelField is 'id' (no human-readable name field, e.g. inventory) the UI
+    autocomplete option text is the row's raw id rather than a static
+    placeholder, so we emit a runtime `deps.{stem}.id` reference instead. This
+    relies on `deps` being in scope, which callers of this fn feed into
+    has_child_fk_deps → has_deps, guaranteeing it whenever an FK field is present.
     """
-    return [
-        {'field': f['prop_name'], 'label': f"Test {to_title_case(re.sub(r'_id$', '', f['prop_name']))}"}
-        for f in fields
-        if f['category'] == 'autocomplete'
-        and f.get('dep_target')
-    ]
+    result = []
+    for f in fields:
+        if f['category'] != 'autocomplete' or not f.get('dep_target'):
+            continue
+        stem = re.sub(r'_id$', '', f['prop_name'])
+        if f.get('dep_label_field') == 'id':
+            label_code = f'deps.{to_camel_case(stem)}.id'
+        else:
+            label_code = f"'Test {to_title_case(stem)}'"
+        result.append({'field': f['prop_name'], 'label_code': label_code})
+    return result
 
 
 def _compute_flatten_test_rels(parent: str, pascal: str, definition_key: str, schema: dict) -> list[dict]:
