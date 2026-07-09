@@ -17,6 +17,9 @@ from helpers.schema_helpers import (
     get_detail_ref_rels, get_flatten_rels,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
+from helpers.bridge_direction import (
+    collect_parent_bridge_fk_props, get_new_form_bridge,
+)
 import copy
 import warnings
 
@@ -42,6 +45,16 @@ def _get_actual_type(defn: dict) -> str | None:
     if isinstance(t, list):
         return next((x for x in t if x != 'null'), None)
     return t
+
+
+def get_uri_kind(prop: dict) -> str | None:
+    """Return the uri kind for a format:uri property. Default is 'image'."""
+    if prop.get('format') != 'uri':
+        return None
+    kind = prop.get('x-uri-kind', 'image')
+    if kind not in ('image', 'link'):
+        raise ValueError(f"x-uri-kind must be 'image' or 'link', got: {kind!r}")
+    return kind
 
 
 def _is_nullable(defn: dict) -> bool:
@@ -508,6 +521,7 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
     enum_integer  = []
     enum_string   = []
     image         = []
+    link_uri      = []
     boolean       = []
     entity_select = []
     text          = []
@@ -529,7 +543,10 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         elif actual == 'boolean':
             boolean.append(p)
         elif actual == 'string' and fmt == 'uri':
-            image.append(p)
+            if get_uri_kind(defn) == 'link':
+                link_uri.append(p)
+            else:
+                image.append(p)
         elif actual == 'string' and defn.get('x-entity-select'):
             entity_select.append(p)
         elif actual == 'string' and isinstance(defn.get('enum'), list):
@@ -544,6 +561,7 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         'enum_integer': enum_integer,
         'enum_string': enum_string,
         'image': image,
+        'link_uri': link_uri,
         'boolean': boolean,
         'entity_select': entity_select,
         'text': text,
@@ -571,6 +589,50 @@ def _get_entity_options(schema: dict) -> list[dict]:
 # Main builder
 # ---------------------------------------------------------------------------
 
+def canonicalize_bridges(entity_schema: dict, all_defs: dict) -> dict:
+    """Normalize x-bridge into synthetic x-relationship annotations.
+
+    Two forms are supported:
+    - Old array form (list of {role, target, via, kind}): converts each entry
+      into a field-level x-relationship annotation on the `via` field, so the
+      existing one_to_one_rel detection path picks it up unchanged.
+    - New object form (dict with name/child/parentCardinality/parents): FK is on
+      the parent side; nothing to inject here — parent FK injection is handled
+      in build_context() via collect_parent_bridge_fk_props().
+
+    Returns a modified shallow copy of entity_schema, or entity_schema unchanged
+    if no x-bridge is present.
+    """
+    x_bridge = entity_schema.get('x-bridge')
+    if not x_bridge:
+        return entity_schema
+
+    # New object form — FK-on-parent; parent FK injection done in build_context()
+    if isinstance(x_bridge, dict):
+        return entity_schema
+
+    # Old array form: inject x-relationship annotations onto via fields
+    props = dict(entity_schema.get('properties', {}))
+    _KIND_MAP = {
+        'one_to_one_bridge': 'one-to-one_bridge',
+        'one-to-one_bridge': 'one-to-one_bridge',
+    }
+    for entry in x_bridge:
+        via_field = entry.get('via')
+        target = entry.get('target')
+        kind = entry.get('kind', 'one_to_one_bridge')
+        rel_type = _KIND_MAP.get(kind, kind)  # normalize to internal hyphen format
+
+        if not via_field or not target or via_field not in props:
+            continue  # validation.py reports missing required fields
+
+        # Old-form field-level annotation takes precedence
+        if not props[via_field].get('x-relationship'):
+            props[via_field] = {**props[via_field], 'x-relationship': {'type': rel_type, 'target': target}}
+
+    return {**entity_schema, 'properties': props}
+
+
 def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> dict:
     parent      = entity['parent']
     model       = entity['model']
@@ -581,7 +643,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     parent_pascal = to_pascal_case(parent)
     parent_camel  = to_camel_case(parent)
 
-    model_def      = schema['definitions'].get(model, {})
+    model_def      = canonicalize_bridges(
+        schema['definitions'].get(model, {}),
+        schema.get('definitions', {}),
+    )
+    # Inject parent-side bridge FK props synthesized from new-form x-bridge declarations
+    # on child entities that list this model as a parent. These FKs look like
+    # one-to-one_bridge relations so the existing OTO machinery handles auto-create/include.
+    _parent_bridge_fks = collect_parent_bridge_fk_props(model, schema)
+    if _parent_bridge_fks:
+        model_def = {
+            **model_def,
+            'properties': {**model_def.get('properties', {}), **_parent_bridge_fks},
+        }
     filtered_props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
 
     # Collect explicit readonly fields: x-readonly per-field OR x-readonly-fields entity-level.
@@ -619,6 +693,127 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     auto_create_oto_rels = [r for r in one_to_one_rels if not r['is_selector']]
     selector_oto_rels    = [r for r in one_to_one_rels if r['is_selector']]
     oto_prop_names = {r['prop_name'] for r in one_to_one_rels}
+
+    # Bridge child IR: new-form x-bridge on this entity (as child), with parent targets.
+    # Used by child forms to render parent-entity autocomplete and by service to
+    # resolve parent → <child>able_id.
+    bridge_child_ir = get_new_form_bridge(schema.get('definitions', {}).get(model, {}))
+
+    # Bridge child service context: extended vars for service template
+    # (parent resolution code and FK data line).
+    bridge_child_params_str = ''
+    bridge_child_pre_create_code = ''
+    bridge_child_fk_data_line = ''
+    if bridge_child_ir:
+        _bc_bridge_name = bridge_child_ir['name']
+        _bc_fk_col = f'{_bc_bridge_name}_id'
+        _bc_parent_targets = bridge_child_ir['parent_targets']
+        bridge_child_params_str = 'selectedParentType: string, selectedParentId: string'
+        bridge_child_fk_data_line = f'        {_bc_fk_col}: _resolvedBridgeFk,'
+        _res_lines = ['    let _resolvedBridgeFk: string;']
+        for _bi, _pt in enumerate(_bc_parent_targets):
+            _pt_pascal = to_pascal_case(_pt)
+            _kw = 'if' if _bi == 0 else '    } else if'
+            _res_lines.extend([
+                f"    {_kw} (selectedParentType === '{_pt}') {{",
+                f"      const _bp = await tx.{_pt}.findUnique({{ where: {{ id: selectedParentId }}, select: {{ {_bc_fk_col}: true }} }});",
+                f"      if (!_bp) throw new Error('{_pt_pascal} does not exist');",
+                f"      _resolvedBridgeFk = _bp.{_bc_fk_col};",
+            ])
+        _res_lines.extend([
+            '    } else {',
+            "      throw new Error('Invalid bridge parent type: ' + selectedParentType);",
+            '    }',
+        ])
+        bridge_child_pre_create_code = '\n'.join(_res_lines)
+
+    # Bridge parent options: for each parent target in x-bridge, collect display metadata.
+    # label_field resolution: AP-1 A+B — x-bridge.parents[].labelField → x-display primary → fallback.
+    bridge_parent_options: list[dict] = []
+    if bridge_child_ir:
+        for _bpo in (bridge_child_ir.get('parents') or []):
+            _bpo_target = _bpo.get('target', '')
+            _bpo_lf = _bpo.get('labelField')  # AP-1-A: schema-specified per-parent labelField
+            if not _bpo_lf:
+                # AP-1-B fallback: target entity's x-display.table primary field
+                _bpo_tdef = schema.get('definitions', {}).get(_bpo_target, {})
+                _bpo_xdisp = _bpo_tdef.get('x-display') or {}
+                _bpo_table = (
+                    _bpo_xdisp if isinstance(_bpo_xdisp, list)
+                    else (_bpo_xdisp.get('table') if isinstance(_bpo_xdisp, dict) else None)
+                )
+                if _bpo_table:
+                    for _bpo_col in _bpo_table:
+                        for _fn, _fcfg in _bpo_col.items():
+                            if isinstance(_fcfg, dict) and _fcfg.get('primary'):
+                                _bpo_lf = _fn
+                                break
+                        if _bpo_lf:
+                            break
+            if not _bpo_lf:
+                # Final fallback: name → title → label → id
+                _bpo_tprops = (schema.get('definitions', {}).get(_bpo_target, {}).get('properties') or {})
+                _bpo_lf = next(
+                    (f for f in ('name', 'title', 'label', 'id') if f in _bpo_tprops), 'id'
+                )
+            bridge_parent_options.append({
+                'target': _bpo_target,
+                'role': _bpo.get('role', ''),
+                'label_field': _bpo_lf,
+                'relation_name_on_bridge': _bpo_target,  # Prisma back-relation on bridge model
+            })
+
+    # Stage 2: auto-add bridge FK prop to readonly_fields for bridge child entities.
+    if bridge_child_ir:
+        _bridge_fk_prop = f'{bridge_child_ir["name"]}_id'
+        if _bridge_fk_prop not in readonly_fields and _bridge_fk_prop in filtered_props:
+            readonly_fields = sorted(set(readonly_fields) | {_bridge_fk_prop})
+            if _bridge_fk_prop not in readonly_fields_api:
+                readonly_fields_api = sorted(set(readonly_fields_api) | {_bridge_fk_prop})
+                readonly_fields_api_select = (
+                    '{ ' + ', '.join(f'{f}: true' for f in readonly_fields_api) + ' }'
+                )
+
+    # Collect bridge targets from new-form x-bridge declarations in the schema.
+    _new_form_bridge_targets: set[str] = set()
+    for _ename, _edef in schema.get('definitions', {}).items():
+        if _ename.endswith('_detail') or not isinstance(_edef, dict):
+            continue
+        _bridge_ir = get_new_form_bridge(_edef)
+        if _bridge_ir:
+            _new_form_bridge_targets.add(_bridge_ir['name'])
+    # Also include old-form bridge targets (commentable, approvable, attachable) which
+    # are referenced via one-to-one_bridge x-relationship directly on fields.
+    _bridge_cleanup_targets = _new_form_bridge_targets | {
+        r['target'] for r in auto_create_oto_rels
+        if r.get('relation_type') == 'one-to-one_bridge'
+    }
+
+    # Bridge cleanup relations: FK-on-parent bridge relations auto-created by this entity.
+    # Parent delete must explicitly delete these bridge rows; onDelete: Cascade only flows
+    # bridge → child (not parent → bridge).
+    bridge_cleanup_rels = [
+        {
+            'relation_name': r['relation_name'],
+            'prop_name': r['prop_name'],
+            'target': r['target'],
+        }
+        for r in auto_create_oto_rels
+        if r['target'] in _bridge_cleanup_targets
+    ]
+    # Pre-computed strings for service delete template
+    if bridge_cleanup_rels:
+        _bc_select = ', '.join(f'{r["prop_name"]}: true' for r in bridge_cleanup_rels)
+        bridge_pre_delete_select = f'{{ {_bc_select} }}'
+        bridge_post_delete_cleanups = '\n'.join(
+            f'  await prisma.{r["target"]}.deleteMany({{ where: {{ id: {{ in: _bridgeRows'
+            f'.map((r) => r.{r["prop_name"]}).filter(Boolean) }} }} }});'
+            for r in bridge_cleanup_rels
+        )
+    else:
+        bridge_pre_delete_select = None
+        bridge_post_delete_cleanups = ''
+
     parent_rels_raw = [r for r in _all_parent_rels_raw if r['prop_name'] not in oto_prop_names]
     # relationship_targets: deduplicated by target for import / type purposes
     seen: dict[str, dict] = {}
@@ -838,6 +1033,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     # Selection targets (page_new, page_edit)
     selection_targets = _get_selection_targets(children_raw, parent_rels_raw, schema, model)
+    # Extend with bridge parent targets so child forms load parent entity autocomplete options
+    if bridge_child_ir:
+        selection_targets = _dedupe_ordered([*selection_targets, *bridge_child_ir.get('parent_targets', [])])
 
     # Field categorisation (for FormUpsert / FormView)
     # Use all_oto_fk_props to exclude BOTH auto-create and selector OTO FK props from plain field treatment
@@ -1168,7 +1366,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         cdef     = schema['definitions'].get(cn, {})
         if out_type == 'comments':
             child_include_entries.append(
-                f"{prop}: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }} }}, orderBy: {{ created_at: 'asc' }} }}"
+                f"{prop}: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }},"
+                f" reactions: {{ select: {{ type: true, user_id: true }} }} }},"
+                f" orderBy: {{ created_at: 'asc' }} }}"
             )
         elif not cdef.get('properties'):
             child_include_entries.append(f"{prop}: true")
@@ -1395,6 +1595,21 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
 
+    # Named constants for x-internal entities (e.g. COMMENT_REACTION_TYPES)
+    from generate_types import extract_named_constants
+    _all_named_constants = extract_named_constants(schema)
+
+    # Batched groupBy context for getCommentReactions — consumed by service/132b templates
+    reaction_batch_query = (
+        {
+            "fn_name": "getCommentReactions",
+            "input": "commentIds: string[]",
+            "return_type": "Promise<CommentReactionSummary[]>",
+            "strategy": "batched_group_by",
+        }
+        if comment_children else None
+    )
+
     return dict(
         # Naming
         parent=parent,
@@ -1440,6 +1655,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         children_data=children_data,
         non_comment_ch=embedded_ch,
         comment_children=comment_children,
+        named_constants=_all_named_constants,
+        reaction_batch_query=reaction_batch_query,
+        bridge_parent_options=bridge_parent_options,
+        bridge_child_ir=bridge_child_ir,
+        bridge_child_params_str=bridge_child_params_str,
+        bridge_child_pre_create_code=bridge_child_pre_create_code,
+        bridge_child_fk_data_line=bridge_child_fk_data_line,
+        bridge_cleanup_rels=bridge_cleanup_rels,
+        bridge_pre_delete_select=bridge_pre_delete_select,
+        bridge_post_delete_cleanups=bridge_post_delete_cleanups,
         has_commentable=bool(commentable_rel),
         commentable_rel_name=commentable_rel['relation_name'] if commentable_rel else None,
         child_mappings=child_mappings,

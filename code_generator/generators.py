@@ -388,19 +388,18 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                 enum_ns  = prop.get('x-enum-namespace')
 
                 if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
-                    if enum_ns:
-                        keys = [
-                            (v.lower()[0] + v[1:] if isinstance(v, str) and not v.lstrip('-').isdigit() else str(v))
-                            for v in enum_vals
-                        ]
-                        var_name = f'{to_camel_case(field_name)}Labels'
-                        # avoid duplicates
-                        if not any(e['var_name'] == var_name for e in enum_ns_list):
-                            enum_ns_list.append({'var_name': var_name, 'ns': enum_ns, 'keys': keys})
-                        add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
-                    else:
-                        labels = ', '.join(f"'{v}'" for v in enum_vals)
-                        add_formatting(field_name, f"([{labels}] as const)[item.{field_name} as number] ?? ''")
+                    var_name = f'{to_camel_case(field_name)}Labels'
+                    ns_to_use = enum_ns or 'Fields'
+                    entries = [
+                        (i, f"{field_name}_{v}" if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
+                        if not enum_ns
+                        else (i, v.lower()[0] + v[1:] if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
+                        for i, v in enumerate(enum_vals)
+                    ]
+                    # avoid duplicates
+                    if not any(e['var_name'] == var_name for e in enum_ns_list):
+                        enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries})
+                    add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
 
             if config.get('primary'):
                 primary_field = field_name
@@ -425,18 +424,17 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
             enum_vals = prop.get('enum')
             enum_ns = prop.get('x-enum-namespace')
             if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
-                if enum_ns:
-                    keys = [
-                        (v.lower()[0] + v[1:] if isinstance(v, str) and not v.lstrip('-').isdigit() else str(v))
-                        for v in enum_vals
-                    ]
-                    var_name = f'{to_camel_case(field_name)}Labels'
-                    if not any(e['var_name'] == var_name for e in enum_ns_list):
-                        enum_ns_list.append({'var_name': var_name, 'ns': enum_ns, 'keys': keys})
-                    add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
-                else:
-                    labels = ', '.join(f"'{v}'" for v in enum_vals)
-                    add_formatting(field_name, f"([{labels}] as const)[item.{field_name} as number] ?? ''")
+                var_name = f'{to_camel_case(field_name)}Labels'
+                ns_to_use = enum_ns or 'Fields'
+                entries = [
+                    (i, f"{field_name}_{v}" if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
+                    if not enum_ns
+                    else (i, v.lower()[0] + v[1:] if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
+                    for i, v in enumerate(enum_vals)
+                ]
+                if not any(e['var_name'] == var_name for e in enum_ns_list):
+                    enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries})
+                add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
 
     needs_formatting = bool(formatting_entries)
     formatted_var    = f'formatted{parent_pascal}s'
@@ -2440,6 +2438,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     number_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in number_props)
     parent_refs = '\n'.join(filter(None, [text_refs, number_refs]))
 
+    _bridge_child_ir = ctx.get('bridge_child_ir')
+    if _bridge_child_ir:
+        _bridge_refs = (
+            "  const selectedParentTypeRef = useRef<HTMLInputElement>(null);\n"
+            "  const selectedParentIdRef = useRef<HTMLInputElement>(null);"
+        )
+        parent_refs = '\n'.join(filter(None, [parent_refs, _bridge_refs]))
+
     def _setter(var_name: str) -> str:
         return to_pascal_case_from_var(var_name)
 
@@ -2782,6 +2788,27 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         '\n'.join(readonly_edit_jsxs),
     ]))
 
+    if _bridge_child_ir:
+        # Stage 2: bridge parent UI.
+        # Edit mode: parent type and label displayed read-only so the user sees context.
+        # New mode:  hidden inputs carry selectedParentType/Id (populated by parent-embedded create).
+        _bc_bridge_name = _bridge_child_ir['name']
+        _bridge_jsx = (
+            f"      {{/* bridge-parent: {_bc_bridge_name} — set by parent-embedded create, not switchable */}}\n"
+            f"      {{isEdit ? (\n"
+            f"        <>\n"
+            f"          <AppFieldText label={{tf('parentType')}} value={{src.parent_type ?? ''}} readOnly />\n"
+            f"          <AppFieldText label={{tf('parentLabel')}} value={{src.parent_label ?? ''}} readOnly />\n"
+            f"        </>\n"
+            f"      ) : (\n"
+            f"        <>\n"
+            f"          <input type=\"hidden\" ref={{selectedParentTypeRef}} defaultValue={{initialParentType ?? ''}} />\n"
+            f"          <input type=\"hidden\" ref={{selectedParentIdRef}} defaultValue={{initialParentId ?? ''}} />\n"
+            f"        </>\n"
+            f"      )}}"
+        )
+        all_parent_fields_jsx = '\n'.join(filter(None, [_bridge_jsx, all_parent_fields_jsx]))
+
     # ---- FormData sets ----
     text_ds  = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in text_props)
     entity_select_ds = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} || '');" for p in entity_select_props)
@@ -2977,11 +3004,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"  }})));"
                 )
             else:
+                _list_rel = c.get('relationship') or {}
+                _list_lf = _list_rel.get('label_field', 'name')
+                _list_target = _list_rel.get('target', child_name)
+                _list_built = build_label_expression('f', _list_lf, _list_target, schema)
+                if _list_built['has_format']:
+                    uses_format_label_value = True
+                _list_expr = _list_built['expression']
                 child_grid_setup_parts.append(
                     f"  const [localInitial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                     f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
-                    f"    value: f.name,\n"
-                    f"    label: f.name,\n"
+                    f"    value: {_list_expr},\n"
+                    f"    label: {_list_expr},\n"
                     f"    originalId: f.id,{order_line}\n"
                     f"  }})));"
                 )
@@ -3412,12 +3446,17 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     extra_default_props = ', '.join(_initial_props + _search_props)
     entity_edit_components = ctx.get('entity_edit_components') or []
     has_current_user_role_ids = bool(entity_edit_components)
-    if extra_default_props or has_comment_children or has_current_user_role_ids:
+    # Bridge children receive parent context (set on the create form by the
+    # parent-embedded grid via /new?parentType=&parentId=).
+    _is_bridge_child = bool(_bridge_child_ir)
+    _bridge_params = ', initialParentType, initialParentId' if _is_bridge_child else ''
+    if extra_default_props or has_comment_children or has_current_user_role_ids or _is_bridge_child:
         form_upsert_params = (
             f"{{ src, isEdit, permissions"
             + (', currentUserId' if has_comment_children else '')
             + (', currentUserRoleIds' if has_current_user_role_ids else '')
             + (f', {extra_default_props}' if extra_default_props else '')
+            + _bridge_params
             + " }: FormUpsertProps"
         )
     else:
@@ -3757,6 +3796,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     all_states_merged = '\n'.join(filter(None, [all_states, _flatten_states_str]))
     _flatten_fds_str = '\n'.join(flatten_edit_form_data_sets_blocks)
     parent_form_data_sets_merged = '\n'.join(filter(None, [parent_form_data_sets, _flatten_fds_str]))
+    if _bridge_child_ir:
+        _bridge_fds = (
+            "    formData.set('selectedParentType', selectedParentTypeRef.current?.value || '');\n"
+            "    formData.set('selectedParentId', selectedParentIdRef.current?.value || '');"
+        )
+        parent_form_data_sets_merged = '\n'.join(filter(None, [parent_form_data_sets_merged, _bridge_fds]))
     _all_enum_ns_hooks = '\n'.join(enum_ns_hooks + flatten_enum_ns_hooks_upsert)
     _all_enum_opt_setups = '\n'.join(enum_opt_setups + entity_select_opt_setups + flatten_enum_opt_setups_upsert)
     _flatten_validation_code = '\n\n'.join(flatten_validation_parts)
