@@ -44,47 +44,48 @@ export async function afterApprove(
     if (existing) return; // already written (idempotent)
   }
 
-  // TODO: Implement ledger write sequence:
   // Step 1: Create bridge if not already exists
-  // const bridge = entity.inventory_transactionable_id
-  //   ? { id: entity.inventory_transactionable_id }
-  //   : await tx.inventory_transactionable.create({ data: {} });
-  //
+  const bridge = entity.inventory_transactionable_id
+    ? { id: entity.inventory_transactionable_id }
+    : await tx.inventory_transactionable.create({ data: {} });
+
   // Step 2: Link bridge to entity (if newly created)
-  // if (!entity.inventory_transactionable_id) {
-  //   await tx.{{ snake_name }}.update({
-  //     where: { id: entityId },
-  //     data: { inventory_transactionable_id: bridge.id },
-  //   });
-  // }
-  //
+  if (!entity.inventory_transactionable_id) {
+    await tx.{{ snake_name }}.update({
+      where: { id: entityId },
+      data: { inventory_transactionable_id: bridge.id },
+    });
+  }
+
   // Step 3: Get inventory identity (O-6 non-normalized fields)
-  // const inventory = await tx.inventory.findUniqueOrThrow({ where: { id: entity.inventory_id } });
-  //
+  const inventory = await tx.inventory.findUniqueOrThrow({ where: { id: entity.inventory_id } });
+
   // Step 4: INSERT inventory_transaction
-  // await tx.inventory_transaction.create({
-  //   data: {
-  //     inventory_transactionable_id: bridge.id,
-  //     event_type: '{{ ledger_source.event_type }}',
-  //     quantity_delta: {% if ledger_source.quantity_delta_field %}entity.{{ ledger_source.quantity_delta_field }}{% else %}{{ ledger_source.quantity_delta | default(0) }}{% endif %}, // O-4
-  //     reserved_delta: {% if ledger_source.reserved_delta_field %}entity.{{ ledger_source.reserved_delta_field }}{% else %}{{ ledger_source.reserved_delta | default(0) }}{% endif %}, // O-4
-  //     product_id: inventory.product_id,    // O-6
-  //     location: inventory.location ?? '',   // O-6
-  //     lot_number: inventory.lot_number,     // O-6
-  //     expiration_date: inventory.expiration_date, // O-6
-  //     approved_via: approvableId,           // audit trail (R2)
-  //     created_by_id: approvedByUserId,
-  //   },
-  // });
-  //
+  await tx.inventory_transaction.create({
+    data: {
+      inventory_transactionable_id: bridge.id,
+      event_type: '{{ ledger_source.event_type }}',
+      quantity_delta: {% if ledger_source.quantity_delta_field %}entity.{{ ledger_source.quantity_delta_field }}{% else %}{{ ledger_source.quantity_delta | default(0) }}{% endif %}, // O-4
+      reserved_delta: {% if ledger_source.reserved_delta_field %}entity.{{ ledger_source.reserved_delta_field }}{% else %}{{ ledger_source.reserved_delta | default(0) }}{% endif %}, // O-4
+      product_id: inventory.product_id,    // O-6
+      location: inventory.location ?? '',   // O-6
+      lot_number: inventory.lot_number,     // O-6
+      expiration_date: inventory.expiration_date, // O-6
+      approved_via: approvableId,           // audit trail (R2)
+      created_by_id: approvedByUserId,
+      creator_id: approvedByUserId,
+      updater_id: approvedByUserId,
+    },
+  });
+
   // Step 5: Update inventory cache (materialized SUM)
-  // await tx.inventory.update({
-  //   where: { id: entity.inventory_id },
-  //   data: {
-  //     quantity: { increment: {% if ledger_source.quantity_delta_field %}entity.{{ ledger_source.quantity_delta_field }}{% else %}{{ ledger_source.quantity_delta | default(0) }}{% endif %} },
-  //     reserved_quantity: { increment: {% if ledger_source.reserved_delta_field %}entity.{{ ledger_source.reserved_delta_field }}{% else %}{{ ledger_source.reserved_delta | default(0) }}{% endif %} },
-  //   },
-  // });
+  await tx.inventory.update({
+    where: { id: entity.inventory_id },
+    data: {
+      quantity: { increment: {% if ledger_source.quantity_delta_field %}entity.{{ ledger_source.quantity_delta_field }}{% else %}{{ ledger_source.quantity_delta | default(0) }}{% endif %} },
+      reserved_quantity: { increment: {% if ledger_source.reserved_delta_field %}entity.{{ ledger_source.reserved_delta_field }}{% else %}{{ ledger_source.reserved_delta | default(0) }}{% endif %} },
+    },
+  });
 }
 {% if ledger_source.reject_event_type %}
 
