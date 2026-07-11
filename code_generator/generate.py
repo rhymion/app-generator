@@ -25,6 +25,7 @@ from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit
 from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
 from build_context import build_context, _get_actual_type
+from helpers.label_field import build_label_expression
 from generators import (
     chart_context,
     page_list_context,
@@ -36,6 +37,7 @@ from generators import (
     build_dashboard_catalog,
     build_attachable_owners,
     get_reservation_action_routes,
+    _build_approval_create_block_for_entity,
 )
 from generators_i18n import update_i18n_and_config
 from validate import validate_schema, validate_prisma_indexes, SchemaValidationError
@@ -614,38 +616,126 @@ def generate(schema_path: str, output_dir: str) -> None:
                _render(env, 'receiving_confirm_form.tsx.jinja2', _confirm_ctx))
         print(f'  ReceivingConfirmForm.tsx → components/{_receipt_entity}/')
 
-    # --- x-splittable: split action route per entity ---
+    # --- x-splittable: split action route + UI per entity (cmd_296) ---
     #
     # Entities marked x-splittable get a POST /actions/split route that closes
     # out the parent (status=split, approvable invalidated — FS-2) and creates
-    # child records inheriting the parent's fields. receipt_quantity/inventory_id
-    # are excluded from inherited_fields since the split template overrides them
-    # explicitly per-part (FS-5: avoids duplicate object-literal keys).
+    # child records inheriting the parent's fields. The split quantity field,
+    # the self-referential parent FK, and the split-result boolean flag are
+    # declared via x-splittable (or auto-detected) rather than hardcoded, so
+    # any entity can opt in by declaring x-splittable — not just receiving.
+    #
+    # x-splittable accepts two forms:
+    #   - `true` (legacy/bool): route only, no Σ validation, no UI.
+    #   - `{quantityField, perPartRequired?, parentField?, splitResultField?}`
+    #     (dict): route + Σ validation + SplitActionSection.tsx UI.
+    #     parentField/splitResultField are auto-detected when omitted.
+    def _detect_split_parent_field(props: dict, entity_name: str) -> str | None:
+        """Self-referential many-to-one FK pointing back at `entity_name`."""
+        for prop_name, prop_def in props.items():
+            rel = (prop_def or {}).get('x-relationship') or {}
+            if rel.get('type') == 'many-to-one' and rel.get('target') == entity_name:
+                return prop_name
+        return None
+
+    def _detect_split_result_field(props: dict) -> str | None:
+        """Boolean property named 'is_split_result' by convention."""
+        for prop_name, prop_def in props.items():
+            if (prop_def or {}).get('type') == 'boolean' and prop_name == 'is_split_result':
+                return prop_name
+        return None
+
     _splittable_defs = schema.get('definitions', {})
     for _def_key, _def_val in _splittable_defs.items():
         if _def_key.endswith('_detail'):
             continue
-        if not _def_val.get('x-splittable'):
+        _split_cfg = _def_val.get('x-splittable')
+        if not _split_cfg:
             continue
         _split_entity_props = _def_val.get('properties', {})
         _split_status_enum = (_split_entity_props.get('status') or {}).get('enum') or []
+
+        _splittable_dict = _split_cfg if isinstance(_split_cfg, dict) else {}
+        _qty_field    = _splittable_dict.get('quantityField')
+        _per_part_req = list(_splittable_dict.get('perPartRequired') or [])
+        _parent_f = _splittable_dict.get('parentField') or _detect_split_parent_field(_split_entity_props, _def_key)
+        _split_r_f = _splittable_dict.get('splitResultField') or _detect_split_result_field(_split_entity_props)
+
+        _always_exclude = {
+            'id', 'status', 'approvable_id', 'inventory_transactionable_id',
+            *([_qty_field] if _qty_field else []),
+            *([_parent_f] if _parent_f else []),
+            *([_split_r_f] if _split_r_f else []),
+            *_per_part_req,
+        }
+
+        _split_has_approvable = 'approvable_id' in _split_entity_props
+        # cmd_296 Phase2: one approvable per part, created directly in the
+        # per-part loop (no pre-create array — unlike cmd_295's x-approval-lines
+        # batch). Shares its inner block with _build_approval_lines_post_create_code
+        # via generators.py:_build_approval_create_block_for_entity (see
+        # docs/split-generalization-design.md §4.2).
+        _split_approval_create_block = (
+            _build_approval_create_block_for_entity(
+                approvable_id_expr='childApprovable.id',
+                actor_id_expr='userId',
+                flows_var='_splitApprovalFlows',
+                role_ids_var='_splitCreatorRoleIds',
+                tx_var='tx',
+                indent='        ',
+            )
+            if _split_has_approvable else ''
+        )
+
         _split_ctx = {
             'entity_name': _def_key,
             'pascal_name': to_pascal_case(_def_key),
             'status_split_value': _split_status_enum.index('split') if 'split' in _split_status_enum else 1,
             'status_rejected_value': _split_status_enum.index('rejected') if 'rejected' in _split_status_enum else 2,
-            'has_approvable': 'approvable_id' in _split_entity_props,
-            'inherited_fields': [
-                f for f in _split_entity_props
-                if f not in (
-                    'id', 'parent_id', 'is_split_result', 'status', 'approvable_id',
-                    'receipt_quantity', 'inventory_id', 'inventory_transactionable_id',
-                )
-            ],
+            'has_approvable': _split_has_approvable,
+            'approval_create_block': _split_approval_create_block,
+            'has_quantity_check': bool(_qty_field),
+            'quantity_field': _qty_field,
+            'per_part_required': _per_part_req,
+            'parent_field': _parent_f,
+            'split_result_field': _split_r_f,
+            'inherited_fields': [f for f in _split_entity_props if f not in _always_exclude],
         }
         _split_api_dir = out / 'app' / 'api' / _def_key / '[id]' / 'actions' / 'split'
         _write(_split_api_dir / 'route.ts', _render(env, 'split_action_route.ts.jinja2', _split_ctx))
         print(f'  Split action route → app/api/{_def_key}/[id]/actions/split/')
+
+        # UI generation: only when quantityField is declared (dict form). The
+        # legacy bool form (`x-splittable: true`) keeps pre-cmd_296 API-only
+        # behavior — no UI, no Σ validation.
+        if _qty_field:
+            _split_ui_parts = []
+            for _f in _per_part_req:
+                _f_def = _split_entity_props.get(_f, {})
+                _f_rel = (_f_def or {}).get('x-relationship') or {}
+                _f_target = _f_rel.get('target')
+                if not _f_target:
+                    # No FK relation declared for this field — plain text input.
+                    _split_ui_parts.append({'field': _f, 'is_relation': False})
+                    continue
+                _f_label_field = _f_rel.get('labelField', 'id')
+                _f_built = build_label_expression('item', _f_label_field, _f_target, schema)
+                _split_ui_parts.append({
+                    'field': _f,
+                    'is_relation': True,
+                    'target': _f_target,
+                    'target_pascal': to_pascal_case(_f_target),
+                    'label_expr': _f_built['expression'],
+                })
+            _split_ui_ctx = {
+                'entity_name': _def_key,
+                'pascal_name': to_pascal_case(_def_key),
+                'quantity_field': _qty_field,
+                'per_part_required': _split_ui_parts,
+            }
+            _split_ui_dir = out / 'components' / _def_key
+            _write(_split_ui_dir / 'SplitActionSection.tsx', _render(env, 'split_action_section.tsx.jinja2', _split_ui_ctx))
+            print(f'  SplitActionSection.tsx → components/{_def_key}/')
 
     # --- Dashboard catalog (lib/dashboard/catalog.ts) ---
     dashboard_catalog = build_dashboard_catalog(schema)

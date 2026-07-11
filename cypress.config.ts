@@ -223,6 +223,14 @@ export default defineConfig({
           const { getApprovableById } = require('./cypress/support/approval_test_helpers');
           return await getApprovableById(params.approvable_id);
         },
+        async 'db:getReceivingReceiptLineById'(params: { id: string }) {
+          const { getReceivingReceiptLineById } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
+          return await getReceivingReceiptLineById(params.id);
+        },
+        async 'db:getReceivingReceiptLineChildren'(params: { parentId: string }) {
+          const { getReceivingReceiptLineChildren } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
+          return await getReceivingReceiptLineChildren(params.parentId);
+        },
         async 'db:getPendingApprovalRequest'(params: { approvable_id: string }) {
           const { getPendingApprovalRequest } = require('./cypress/support/approval_test_helpers');
           return await getPendingApprovalRequest(params.approvable_id);

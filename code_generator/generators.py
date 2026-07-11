@@ -1513,6 +1513,49 @@ def _build_approval_lines_pre_create_code(parent_def: dict, model: str, schema: 
     return '\n'.join(blocks)
 
 
+def _build_approval_create_block_for_entity(
+    approvable_id_expr: str,
+    actor_id_expr: str,
+    flows_var: str,
+    role_ids_var: str,
+    tx_var: str = 'tx',
+    indent: str = '  ',
+) -> str:
+    """Create approval_request(s) for ONE pre-created approvable against a
+    pre-fetched, creator-role-filtered approval_flow[], then stamp
+    creator_id on the approvable if any flow matched.
+
+    Shared inner block (cmd_296 Phase2 common-helper — see
+    docs/split-generalization-design.md §4.2) for:
+      - _build_approval_lines_post_create_code (cmd_295 x-approval-lines):
+        called once per pre-created array element, inside the caller's
+        `for (const _apprId of {arr}) {...}` loop.
+      - split_action_route.ts.jinja2 (cmd_296 split): called once per part,
+        directly in the per-part loop — one approvable at a time, no array.
+
+    Caller pre-fetches `flows_var` (approval_flow[] for the entity) and
+    `role_ids_var` (creator's role ids) once, outside any per-approvable loop.
+    """
+    return (
+        f"{indent}let _hasFlow = false;\n"
+        f"{indent}for (const _flow of {flows_var}) {{\n"
+        f"{indent}  if (_flow.requestor_role_id && !{role_ids_var}.includes(_flow.requestor_role_id)) {{\n"
+        f"{indent}    continue;\n"
+        f"{indent}  }}\n"
+        f"{indent}  await {tx_var}.approval_request.create({{\n"
+        f"{indent}    data: {{ approvable_id: {approvable_id_expr}, approval_flow_id: _flow.id, status: 0 }},\n"
+        f"{indent}  }});\n"
+        f"{indent}  _hasFlow = true;\n"
+        f"{indent}}}\n"
+        f"{indent}if (_hasFlow) {{\n"
+        f"{indent}  await {tx_var}.approvable.update({{\n"
+        f"{indent}    where: {{ id: {approvable_id_expr} }},\n"
+        f"{indent}    data: {{ creator_id: {actor_id_expr} }},\n"
+        f"{indent}  }});\n"
+        f"{indent}}}"
+    )
+
+
 def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema: dict) -> str:
     """Create approval_request(s) for each pre-created line approvable.
 
@@ -1534,6 +1577,14 @@ def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema:
         flows_var    = f'_{child_var}ApprFlows'
         creator_var  = f'_{child_var}Creator'
         role_ids_var = f'_{child_var}CreatorRoleIds'
+        inner = _build_approval_create_block_for_entity(
+            approvable_id_expr='_apprId',
+            actor_id_expr='actorId',
+            flows_var=flows_var,
+            role_ids_var=role_ids_var,
+            tx_var='tx',
+            indent='        ',
+        )
         blocks.append(
             f"    if ({arr_var}.length > 0) {{\n"
             f"      const {flows_var} = await tx.approval_flow.findMany({{\n"
@@ -1545,22 +1596,7 @@ def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema:
             f"      }});\n"
             f"      const {role_ids_var} = {creator_var}?.roles.map((r) => r.id) ?? [];\n"
             f"      for (const _apprId of {arr_var}) {{\n"
-            f"        let _hasFlow = false;\n"
-            f"        for (const _flow of {flows_var}) {{\n"
-            f"          if (_flow.requestor_role_id && !{role_ids_var}.includes(_flow.requestor_role_id)) {{\n"
-            f"            continue;\n"
-            f"          }}\n"
-            f"          await tx.approval_request.create({{\n"
-            f"            data: {{ approvable_id: _apprId, approval_flow_id: _flow.id, status: 0 }},\n"
-            f"          }});\n"
-            f"          _hasFlow = true;\n"
-            f"        }}\n"
-            f"        if (_hasFlow) {{\n"
-            f"          await tx.approvable.update({{\n"
-            f"            where: {{ id: _apprId }},\n"
-            f"            data: {{ creator_id: actorId }},\n"
-            f"          }});\n"
-            f"        }}\n"
+            f"{inner}\n"
             f"      }}\n"
             f"    }}"
         )

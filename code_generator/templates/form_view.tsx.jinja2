@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-{% if has_comment_children %}
+{% if has_comment_children or (is_splittable and split_config) %}
 import { useRouter } from 'next/navigation';
 {% endif %}
 {% if has_grid_children or children_raw %}
@@ -47,6 +47,9 @@ import {{ comp.name }} from '{{ comp.path if comp.path else "./" + comp.name }}'
 {% if reservation_config and reservation_config.has_actions %}
 import { ReservationActionButtons } from './ReservationActionButtons';
 {% endif %}
+{% if is_splittable and split_config %}
+import { SplitActionSection } from './SplitActionSection';
+{% endif %}
 {% if use_dayjs %}
 import dayjs from 'dayjs';
 {% endif %}
@@ -58,6 +61,9 @@ export default function FormView({ src, permissions{% if entity_view_components 
 {{ view_enum_ns_hooks }}
 {% endif %}
   const canEdit = permissions?.update ?? true;
+{% if is_splittable and split_config %}
+  const router = useRouter();
+{% endif %}
 {% if view_enum_opt_setups %}
 {{ view_enum_opt_setups }}
 {% endif %}
@@ -91,6 +97,13 @@ export default function FormView({ src, permissions{% if entity_view_components 
       <AuditInfo src={src} />
 {% if reservation_config and reservation_config.has_actions %}
       <ReservationActionButtons id={src.id} />
+{% endif %}
+{% if is_splittable and split_config %}
+      <SplitActionSection
+        id={src.id}
+        {{ split_config.quantity_field }}={(src as Record<string, unknown>).{{ split_config.quantity_field }} as number}
+        onSuccess={() => router.refresh()}
+      />
 {% endif %}
 {% for comp in entity_view_components %}
       <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />
