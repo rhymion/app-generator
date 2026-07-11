@@ -2046,6 +2046,15 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                 continue
 
             rel = prop.get('x-relationship', {})
+            # Internal bridge FKs are implementation details, never shown as a
+            # plain column: one-to-one_bridge relations (e.g. approvable_id)
+            # and unrelated *able_id technical FKs (e.g.
+            # inventory_transactionable_id) — mirrors the form-body exclusion
+            # in build_context.py's _child_bridge_excludes.
+            if rel.get('type') == 'one-to-one_bridge':
+                continue
+            if not rel and key.endswith('able_id'):
+                continue
             if rel.get('type') == 'many-to-one':
                 needs_entity_autocomplete_cell = True
                 label_base   = key.removesuffix('_id')
@@ -3414,7 +3423,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # Child datagrid required-field validation (injected at start of handleSubmit)
     child_validation_parts = []
-    exclude_validation = {'id', 'created_at', 'updated_at', 'creator_id', 'order'}
+    exclude_validation = {'id', 'created_at', 'updated_at', 'creator_id', 'order', 'approvable_id'}
     for c in non_comment_ch:
         child_name = c['name']
         prop_name  = c['property_name']
