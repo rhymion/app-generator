@@ -2012,6 +2012,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
 
     needs_datetime_imports = False
     needs_entity_autocomplete_cell = False
+    uses_format_label_value = False
     column_children = []
 
     for child_raw in non_comment_ch:
@@ -2062,6 +2063,14 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                 prop_camel   = to_camel_case(key)
                 param_name   = f'{prop_camel}Config'
                 label_field  = rel.get('labelField', 'name')
+                # label_field may be a single field name or a composite path list
+                # (e.g. ['product.name', 'location', 'lot_number']) — always go
+                # through build_label_expression rather than raw `row.{label_base}.
+                # {label_field}` property access, which breaks on composite/array
+                # labelField.
+                label_built = build_label_expression(f'row.{label_base}', label_field, rel.get('target'), schema)
+                if label_built['has_format']:
+                    uses_format_label_value = True
                 # When the config is provided, pick uses EntityAutocomplete (any object selectable
                 # via server-side search). When it's missing, the column is read-only with the
                 # included relation's label.
@@ -2073,7 +2082,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                     f"          ),\n"
                     f"          valueFormatter: entityAutocompleteValueFormatter({param_name}) }}]\n"
                     f"      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
-                    f"      : [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: false, valueGetter: (_value: any, row: any) => row.{label_base}?.{label_field} ?? '' }}]),"
+                    f"      : [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: false, valueGetter: (_value: any, row: any) => {label_built['expression']} }}]),"
                 )
                 continue
 
@@ -2143,6 +2152,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
         'column_children': column_children,
         'needs_datetime_imports': needs_datetime_imports,
         'needs_entity_autocomplete_cell': needs_entity_autocomplete_cell,
+        'uses_format_label_value': uses_format_label_value,
     }
 
 
@@ -3310,23 +3320,32 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             prop_initial  = f'initial{target_pascal}s'
             prop_search   = f'search{target_pascal}Options'
 
+            # label_field may be a single field name or a composite path list
+            # (e.g. ['product.name', 'location', 'lot_number']) — always go
+            # through build_label_expression rather than raw `item.{label_field}`
+            # property access, which breaks on composite/array labelField.
+            item_built = build_label_expression('item', label_field, target, schema)
+            row_built  = build_label_expression(f'row.{label_base}', label_field, target, schema)
+            if item_built['has_format'] or row_built['has_format']:
+                uses_format_label_value = True
+
             child_entity_rel_opt.append(
                 f"  const {lookup_var} = useMemo<Map<string, string>>(() => {{\n"
                 f"    const m = new Map<string, string>();\n"
                 f"    src.{child_prop_name}.forEach(row => {{\n"
-                f"      if (row.{label_base}) m.set(row.{label_base}.id, row.{label_base}.{label_field});\n"
+                f"      if (row.{label_base}) m.set(row.{label_base}.id, {row_built['expression']});\n"
                 f"    }});\n"
-                f"    ({prop_initial} ?? []).forEach(item => {{ m.set(item.id, item.{label_field}); }});\n"
+                f"    ({prop_initial} ?? []).forEach(item => {{ m.set(item.id, {item_built['expression']}); }});\n"
                 f"    return m;\n"
                 f"  }}, [src.{child_prop_name}, {prop_initial}]);\n"
                 f"  const {initial_opts_var} = useMemo(() =>\n"
-                f"    ({prop_initial} ?? []).map(item => ({{ id: item.id, label: item.{label_field} }})),\n"
+                f"    ({prop_initial} ?? []).map(item => ({{ id: item.id, label: {item_built['expression']} }})),\n"
                 f"  [{prop_initial}]);\n"
                 f"  const {config_var} = useMemo<EntityAutocompleteCellConfig>(() => ({{\n"
                 f"    searchAction: async (query, includeIds) => {{\n"
                 f"      const rows = (await {prop_search}?.(query, includeIds)) ?? [];\n"
-                f"      rows.forEach(item => {{ {lookup_var}.set(item.id, item.{label_field}); }});\n"
-                f"      return rows.map(item => ({{ id: item.id, label: item.{label_field} }}));\n"
+                f"      rows.forEach(item => {{ {lookup_var}.set(item.id, {item_built['expression']}); }});\n"
+                f"      return rows.map(item => ({{ id: item.id, label: {item_built['expression']} }}));\n"
                 f"    }},\n"
                 f"    initialOptions: {initial_opts_var},\n"
                 f"    labelLookup: {lookup_var},\n"
