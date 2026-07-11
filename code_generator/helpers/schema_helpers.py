@@ -43,6 +43,37 @@ def get_detail_properties(parent: str, schema: dict, detail_key: str | None = No
     return None
 
 
+def get_approval_lines_props(parent_def: dict, model: str, schema: dict) -> list[str]:
+    """Embedded-line properties whose approvable_id must be pre-created before
+    the parent create/update (nested-create can't back-fill a NOT NULL FK).
+
+    Two independent schema signals feed this, and both need identical
+    treatment (see docs/receiving-approval-backfill-design.md §5.2 — D2):
+    - explicit `x-approval-lines: [prop, ...]` (e.g. receiving_receipt.lines)
+    - `x-reservation` with `transaction.strategy: ledger_transaction` whose
+      *lines entity itself declares `x-approval`* (e.g. purchase_order.items
+      -> purchase_per_item) — its lines carry their own approvable per-line
+      just like x-approval-lines children, so they're folded into the same
+      list rather than duplicating the pre-create/post-create machinery.
+
+      The x-approval gate matters: ledger_transaction is also used (in tests,
+      and potentially future schemas) for reservation lines that carry no
+      approval at all — those must NOT get approvable_id injected into a
+      nested-create/update body that has no such column.
+    """
+    props = list(parent_def.get('x-approval-lines') or [])
+    xres = parent_def.get('x-reservation') or {}
+    if (xres.get('transaction') or {}).get('strategy') == 'ledger_transaction':
+        lines_prop = xres.get('lines')
+        if lines_prop and lines_prop not in props:
+            detail_props = get_detail_properties(model, schema) or {}
+            ref = ((detail_props.get(lines_prop) or {}).get('items') or {}).get('$ref', '')
+            lines_entity = ref.rsplit('/', 1)[-1]
+            if lines_entity and (schema.get('definitions', {}).get(lines_entity) or {}).get('x-approval'):
+                props.append(lines_prop)
+    return props
+
+
 def get_detail_relation_name(parent: str, target: str, schema: dict, detail_key: str | None = None) -> str:
     """Resolves the property name that $ref-s to `target` in the detail definition.
     e.g. for target='organization', finds 'organization' property with $ref: '#/definitions/organization'

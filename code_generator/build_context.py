@@ -14,7 +14,7 @@ from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
     is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
-    get_detail_ref_rels, get_flatten_rels,
+    get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -237,6 +237,18 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         child_pascal = to_pascal_case(prop_name)
         form_key     = singularize(prop_name)
 
+        # x-approval-lines (explicit) or x-reservation ledger_transaction lines
+        # (same gap, same fix — see helpers.schema_helpers.get_approval_lines_props):
+        # this child's approvable_id is pre-created (see
+        # generators.py:_build_approval_lines_pre_create_code) and passed into
+        # the nested create/update by index rather than from form data.
+        # approvable_id itself stays in _child_bridge_excludes above (still
+        # not client-writable) — _build_child_nested_create/_update append it
+        # explicitly using approval_array_var.
+        _parent_approval_lines = set(get_approval_lines_props(schema['definitions'].get(model, {}), model, schema))
+        approval_indexed = prop_name in _parent_approval_lines
+        approval_array_var = f'_{child_var}ApprIds' if approval_indexed else ''
+
         result.append({
             **child_raw,
             'child_var':        child_var,
@@ -251,6 +263,8 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             'field_type':       field_type,
             'field_type_with_id': field_type_with_id,
             'field_map_create': field_map_create,
+            'approval_indexed':   approval_indexed,
+            'approval_array_var': approval_array_var,
         })
     return result
 
@@ -289,6 +303,19 @@ def _build_child_nested_create(children_data: list[dict]) -> str:
         fmc = c['field_map_create']
         if c['use_connect']:
             lines.append(f"      {pn}: {{\n        connect: {cv}Ids.map((id) => ({{ id }})),\n      }},")
+        elif c.get('approval_indexed'):
+            # x-approval-lines: approvable_id was pre-created (in index order,
+            # matching this same `{cv}Items` array) — see
+            # generators.py:_build_approval_lines_pre_create_code.
+            arr = c['approval_array_var']
+            lines.append(
+                f"      {pn}: {{\n"
+                f"        create: {cv}Items.map((f, _i) => ({{\n"
+                f"{fmc}\n"
+                f"          approvable_id: {arr}[_i],\n"
+                f"        }})),\n"
+                f"      }},"
+            )
         else:
             lines.append(f"      {pn}: {{\n        create: {cv}Items.map(f => ({{\n{fmc}\n        }})),\n      }},")
     return '\n'.join(lines)
@@ -302,6 +329,25 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
         fmc = c['field_map_create']
         if c['use_connect']:
             lines.append(f"      {pn}: {{\n        set: {cv}Ids.map((id) => ({{ id }})),\n      }},")
+        elif c.get('approval_indexed'):
+            # x-approval-lines: newly-added lines (no id) get an approvable
+            # pre-created in the same filter order — see
+            # generators.py:_build_approval_lines_pre_create_code(mode='update').
+            # Existing lines (have id) keep their original approvable_id untouched.
+            arr = c['approval_array_var']
+            lines.append(
+                f"      {pn}: {{\n"
+                f"        deleteMany: {{ id: {{ notIn: {cv}Items.map(f => f.id).filter((id): id is string => Boolean(id)) }} }},\n"
+                f"        update: {cv}Items.filter(f => f.id).map(f => ({{\n"
+                f"          where: {{ id: f.id! }},\n"
+                f"          data: {{\n{fmc}\n          }},\n"
+                f"        }})),\n"
+                f"        create: {cv}Items.filter(f => !f.id).map((f, _i) => ({{\n"
+                f"{fmc}\n"
+                f"          approvable_id: {arr}[_i],\n"
+                f"        }})),\n"
+                f"      }},"
+            )
         else:
             # Diff incoming vs existing instead of nuke-and-rebuild
             # (#6 in performance-plan-session.md). Items the form returned

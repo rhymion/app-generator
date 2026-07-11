@@ -15,6 +15,8 @@ from helpers.schema_helpers import (
     get_parent_relationships,
     get_parent_fk_props,
     find_fk_derivation_path,
+    get_detail_properties,
+    get_approval_lines_props,
 )
 from helpers.label_field import (
     build_label_expression,
@@ -757,9 +759,20 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     ledger row (event_type='reserve', quantity_delta=0 — O-4) instead of an
     allocation table row, and the line entity's own bridge FK
     (result.lineTransactionableField) records which transactions belong to it.
-    Each line also gets its own approvable + approval_request(s), mirroring the
-    generic one-to-one_bridge afterCreate pattern (service_after_create_stub),
-    since nested-created lines never run their own afterCreate.
+
+    Lines case (has_lines=True, e.g. purchase_per_item): the line's own
+    approvable + approval_request(s) are pre-created and nested-created with
+    the parent (see get_approval_lines_props / _build_approval_lines_*_code —
+    the ledger_transaction lines prop is folded into that same mechanism),
+    so this function only claims inventory and links the bridge FK here —
+    it does not touch approvable at all, and never back-fills approvable_id.
+
+    Self case (has_lines=False, no lines_entity — currently unexercised by
+    any schema entity): kept on the original create-then-back-fill approvable
+    pattern, since there is no embedded child array for the pre-create
+    mechanism to hook into; an entity that needs this path with a NOT NULL
+    approvable_id would need the leave_request-style one_to_one_pre_creates
+    treatment instead (out of scope here — see docs/receiving-approval-backfill-design.md §5.2).
     """
     pool           = rc.get('pool') or {}
     req            = rc.get('request') or {}
@@ -798,9 +811,8 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     if criteria_str:
         where_clause = criteria_str + '\n' + f"          {pool_qty_field}: {{ gt: 0 }},"
 
-    # Per-line body: claim inventory via ledger rows against one shared bridge,
-    # then create the line's own approvable + approval_request(s).
-    claim_and_approval_body = (
+    # Per-line body: claim inventory via ledger rows against one shared bridge.
+    claim_body = (
         f"      const _candidates = await tx.{pool_entity}.findMany({{\n"
         f"        where: {{\n"
         f"{where_clause}\n"
@@ -841,6 +853,12 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"          `Insufficient inventory for {entity_name} line`\n"
         f"        );\n"
         f"      }}\n"
+    )
+
+    # Self case only (no lines_entity): approvable is created inline and
+    # back-filled, since there's no embedded child array for the pre-create
+    # mechanism to hook into (see function docstring).
+    approval_body = (
         f"\n"
         f"      const approvable = await tx.approvable.create({{ data: {{}} }});\n"
         f"      let _hasFlow = false;\n"
@@ -858,9 +876,11 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"      }}\n"
     )
 
-    header = (
+    header_comment = (
         f"    // Reservation (strategy: ledger_transaction): allocate {pool_entity} via\n"
         f"    // inventory_transaction ledger rows (O-4/O-6/O-8) — no allocation entity.\n"
+    )
+    approval_lookup_header = (
         f"    const _creator = await tx.user.findUnique({{\n"
         f"      where: {{ id: actorId }},\n"
         f"      select: {{ roles: {{ select: {{ id: true }} }} }},\n"
@@ -874,10 +894,10 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     if not lines_entity:
         # count mode without lines: the request entity itself is the single line
         return (
-            header +
+            header_comment + approval_lookup_header +
             f"    {{\n"
             f"      let _remaining = (created as Record<string, unknown>).{self_qty_field} as number;\n"
-            + claim_and_approval_body +
+            + claim_body + approval_body +
             f"      await tx.{model}.update({{\n"
             f"        where: {{ id: created.id }},\n"
             f"        data: {{\n"
@@ -888,19 +908,22 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
             f"    }}"
         )
 
+    # Lines case (e.g. purchase_per_item): approvable_id was already set on
+    # each line by the parent's nested-create (get_approval_lines_props pre-
+    # create/post-create mechanism — see docstring). Only the inventory
+    # claim + bridge link happen here; approvable is never touched.
     return (
-        header +
+        header_comment +
         f"    const _reservationLines = await tx.{lines_entity}.findMany({{\n"
         f"      where: {{ {model}_id: created.id }},\n"
         f"    }});\n"
         f"    for (const _line of _reservationLines) {{\n"
         f"      let _remaining = (_line as Record<string, unknown>).{req_qty_field} as number;\n"
-        + claim_and_approval_body +
+        + claim_body +
         f"      await tx.{lines_entity}.update({{\n"
         f"        where: {{ id: _line.id }},\n"
         f"        data: {{\n"
         f"          {line_txable_f}: bridge.id,\n"
-        f"          approvable_id: approvable.id,\n"
         f"        }},\n"
         f"      }});\n"
         f"    }}"
@@ -1424,6 +1447,126 @@ def get_reservation_action_routes(rc: dict, model: str) -> list[dict]:
     ]
 
 
+# ---------------------------------------------------------------------------
+# x-approval-lines: pre-create approval on new:false embedded line children
+# ---------------------------------------------------------------------------
+#
+# receiving_receipt_line (and similarly-shaped line children) carry x-approval
+# but are new:false — they're created only via the parent's nested-create and
+# never run their own service_after_create, so approvable/approval_request
+# rows never get generated for them. approvable_id is also mandatory
+# (String @unique, non-null), so a create-then-UPDATE-back-fill approach
+# would violate the NOT NULL constraint. Instead, one approvable is
+# pre-created per line *before* the parent create, so the nested-create body
+# can include approvable_id directly.
+#
+# purchase_per_item (x-reservation, transaction.strategy: ledger_transaction)
+# has the exact same shape and gap, so helpers.schema_helpers.
+# get_approval_lines_props() folds both signals into one list and this same
+# pre-create/post-create pair covers both — see
+# docs/receiving-approval-backfill-design.md §5.2 (D2).
+
+def _resolve_approval_lines_entity(model: str, prop_name: str, schema: dict) -> str:
+    """Resolve the child entity name for an x-approval-lines property.
+
+    The parent's own definition has no properties for embedded list children
+    — only the `{model}_detail` allOf view does — so entity resolution goes
+    through `{model}_detail.properties.{prop_name}.items.$ref`.
+    """
+    props = get_detail_properties(model, schema) or {}
+    prop  = props.get(prop_name, {})
+    ref   = (prop.get('items') or {}).get('$ref', '')
+    entity = ref.rsplit('/', 1)[-1]
+    if not entity:
+        raise ValueError(
+            f"x-approval-lines: cannot resolve entity for {model}.{prop_name} "
+            f"via {model}_detail.properties.{prop_name}.items.$ref"
+        )
+    return entity
+
+
+def _build_approval_lines_pre_create_code(parent_def: dict, model: str, schema: dict, mode: str = 'create') -> str:
+    """Pre-create one approvable per line, before the parent create/update.
+
+    mode='create': pre-creates for every incoming line (all get nested-created).
+    mode='update': pre-creates only for newly-added lines (no `id` — see
+    _build_child_nested_update), since existing lines already have an
+    approvable from their original creation.
+    """
+    props = get_approval_lines_props(parent_def, model, schema)
+    if not props:
+        return ''
+    blocks = []
+    for prop_name in props:
+        child_var = safe_var_name(prop_name)
+        arr_var   = f'_{child_var}ApprIds'
+        if mode == 'update':
+            src_var = f'_{child_var}NewItems'
+            blocks.append(f"    const {src_var} = {child_var}Items.filter(f => !f.id);")
+        else:
+            src_var = f'{child_var}Items'
+        blocks.append(
+            f"    const {arr_var} = {src_var}.length > 0\n"
+            f"      ? await Promise.all({src_var}.map(() => tx.approvable.create({{ data: {{}} }}).then((a) => a.id)))\n"
+            f"      : [];"
+        )
+    return '\n'.join(blocks)
+
+
+def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema: dict) -> str:
+    """Create approval_request(s) for each pre-created line approvable.
+
+    Mirrors the per-child approval body in
+    _build_ledger_reservation_allocation_code (creator-role-filtered
+    approval_flow lookup, one approval_request per matching flow, then stamp
+    creator_id on the approvable). Used for both the create and update flow —
+    the caller passes a different `_{child_var}ApprIds` population for each
+    (all lines vs. only newly-added lines).
+    """
+    props = get_approval_lines_props(parent_def, model, schema)
+    if not props:
+        return ''
+    blocks = []
+    for prop_name in props:
+        child_var    = safe_var_name(prop_name)
+        arr_var      = f'_{child_var}ApprIds'
+        lines_entity = _resolve_approval_lines_entity(model, prop_name, schema)
+        flows_var    = f'_{child_var}ApprFlows'
+        creator_var  = f'_{child_var}Creator'
+        role_ids_var = f'_{child_var}CreatorRoleIds'
+        blocks.append(
+            f"    if ({arr_var}.length > 0) {{\n"
+            f"      const {flows_var} = await tx.approval_flow.findMany({{\n"
+            f"        where: {{ entity_name: '{lines_entity}' }},\n"
+            f"      }});\n"
+            f"      const {creator_var} = await tx.user.findUnique({{\n"
+            f"        where: {{ id: actorId }},\n"
+            f"        select: {{ roles: {{ select: {{ id: true }} }} }},\n"
+            f"      }});\n"
+            f"      const {role_ids_var} = {creator_var}?.roles.map((r) => r.id) ?? [];\n"
+            f"      for (const _apprId of {arr_var}) {{\n"
+            f"        let _hasFlow = false;\n"
+            f"        for (const _flow of {flows_var}) {{\n"
+            f"          if (_flow.requestor_role_id && !{role_ids_var}.includes(_flow.requestor_role_id)) {{\n"
+            f"            continue;\n"
+            f"          }}\n"
+            f"          await tx.approval_request.create({{\n"
+            f"            data: {{ approvable_id: _apprId, approval_flow_id: _flow.id, status: 0 }},\n"
+            f"          }});\n"
+            f"          _hasFlow = true;\n"
+            f"        }}\n"
+            f"        if (_hasFlow) {{\n"
+            f"          await tx.approvable.update({{\n"
+            f"            where: {{ id: _apprId }},\n"
+            f"            data: {{ creator_id: actorId }},\n"
+            f"          }});\n"
+            f"        }}\n"
+            f"      }}\n"
+            f"    }}"
+        )
+    return '\n'.join(blocks)
+
+
 def service_context(ctx: dict, schema: dict | None = None) -> dict:
     parent                  = ctx['parent']
     parent_def              = (schema or {}).get('definitions', {}).get(parent, {})
@@ -1720,6 +1863,19 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     if has_reservation and reservation_config is not None and reservation_config.get('has_actions'):
         reservation_actions_code = _build_reservation_action_functions(reservation_config, model, schema)
 
+    # x-approval-lines: pre-create/post-create approval for embedded line
+    # children that are new:false (see docs/receiving-approval-backfill-design.md).
+    approval_lines_pre_create_code  = ''
+    approval_lines_post_create_code = ''
+    approval_lines_pre_update_code  = ''
+    approval_lines_post_update_code = ''
+    if get_approval_lines_props(parent_def, model, schema):
+        approval_lines_pre_create_code  = _build_approval_lines_pre_create_code(parent_def, model, schema, mode='create')
+        approval_lines_post_create_code = _build_approval_lines_post_create_code(parent_def, model, schema)
+        if can_update:
+            approval_lines_pre_update_code  = _build_approval_lines_pre_create_code(parent_def, model, schema, mode='update')
+            approval_lines_post_update_code = _build_approval_lines_post_create_code(parent_def, model, schema)
+
     _insufficient_inventory_error_class_def = (
         "\n\nexport class InsufficientInventoryError extends Error {\n"
         "  constructor(message: string) {\n"
@@ -1802,6 +1958,10 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'has_item_reservation':               has_item_reservation,
         'reservation_mutation_guard_update':  reservation_mutation_guard_update,
         'reservation_mutation_guard_delete':  reservation_mutation_guard_delete,
+        'approval_lines_pre_create_code':     approval_lines_pre_create_code,
+        'approval_lines_post_create_code':    approval_lines_post_create_code,
+        'approval_lines_pre_update_code':     approval_lines_pre_update_code,
+        'approval_lines_post_update_code':    approval_lines_post_update_code,
     }
 
 

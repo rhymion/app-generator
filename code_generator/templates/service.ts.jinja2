@@ -11,6 +11,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% if one_to_one_pre_creates %}
 {{ one_to_one_pre_creates }}
 {% endif %}
+{% if approval_lines_pre_create_code %}
+{{ approval_lines_pre_create_code }}
+{% endif %}
     const created = await tx.{{ model }}.create({
       data: {
         creator_id: actorId,
@@ -29,6 +32,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% endif %}
 {% if reservation_allocation_code %}
 {{ reservation_allocation_code }}
+{% endif %}
+{% if approval_lines_post_create_code %}
+{{ approval_lines_post_create_code }}
 {% endif %}
 {% if one_to_one_spread %}
     await afterCreate(tx, { ...created, {{ one_to_one_spread }} } as Record<string, unknown>, {
@@ -86,6 +92,9 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
       select: { assignee_id: true },
     }))?.assignee_id ?? null;
 {% endif %}
+{% if approval_lines_pre_update_code %}
+{{ approval_lines_pre_update_code }}
+{% endif %}
     await tx.{{ model }}.update({
       where: { id },
       data: {
@@ -96,6 +105,9 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% endif %}
       },
     });
+{% if approval_lines_post_update_code %}
+{{ approval_lines_post_update_code }}
+{% endif %}
 {% if flatten_nested_updates %}
 {{ flatten_nested_updates }}
 {% endif %}
