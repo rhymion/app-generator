@@ -2258,9 +2258,11 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 f"      />"
             )
         else:
+            fallback_actual = _get_actual_type(filtered_props.get(p, {}))
+            fallback_op = '??' if fallback_actual in ('integer', 'number') else '||'
             text_jsxs.append(
                 f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
-                f"        value={{src.{p} || ''}}\n"
+                f"        value={{src.{p} {fallback_op} ''}}\n"
                 f"        readOnly\n      />"
             )
 
