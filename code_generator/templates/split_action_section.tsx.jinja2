@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Button from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
@@ -57,6 +57,19 @@ export function SplitActionSection({
   const [parts, setParts] = useState<SplitPart[]>([EMPTY_PART(), EMPTY_PART()]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  {% for f in per_part_required %}
+  {% if f.is_relation %}
+  const [{{ f.field | camel_case }}Options, set{{ f.field | pascal_case }}Options] = useState<EntityOption[]>([]);
+  {% endif %}
+  {% endfor %}
+
+  {% for f in per_part_required %}
+  {% if f.is_relation %}
+  useEffect(() => {
+    search{{ pascal_name }}{{ f.field | pascal_case }}Options('', []).then(set{{ f.field | pascal_case }}Options);
+  }, []);
+  {% endif %}
+  {% endfor %}
 
   const totalAssigned = parts.reduce((s, p) => s + (p.{{ quantity_field }} || 0), 0);
   const remaining = {{ quantity_field }} - totalAssigned;
@@ -130,6 +143,7 @@ export function SplitActionSection({
                 value={part.{{ f.field }} || null}
                 onChange={(newId) => updatePart(idx, '{{ f.field }}', newId ?? '')}
                 searchAction={search{{ pascal_name }}{{ f.field | pascal_case }}Options}
+                initialOptions={ {{ f.field | camel_case }}Options }
                 openOnFocus
               />
               {% else %}

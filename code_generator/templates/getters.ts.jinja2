@@ -238,7 +238,7 @@ export async function fetch{{ parent_pascal }}Page(opts: PageOpts): Promise<Page
 
 /**
  * Lightweight search for autocomplete pickers. Returns up to `limit` rows
- * matching `query`{% if searchable_text_fields %} (substring on {{ searchable_text_fields | join(' / ') }}){% endif %} plus any rows in `includeIds` so the
+ * matching `query`{% if searchable_fields_display %} (substring on {{ searchable_fields_display | join(' / ') }}){% endif %} plus any rows in `includeIds` so the
  * currently-selected option is always present even when it doesn't match the
  * query. Applies the same access scope as the list page.
  */
@@ -265,6 +265,9 @@ export async function search{{ parent_pascal }}Options(
   if (trimmed) {
 {% for f in searchable_text_fields %}
     orClauses.push({ {{ f }}: { contains: trimmed, mode: 'insensitive' } });
+{% endfor %}
+{% for rf in searchable_relation_fields %}
+    orClauses.push({ {{ rf.relation }}: { {{ rf.field }}: { contains: trimmed, mode: 'insensitive' } } });
 {% endfor %}
   }
   if (includeIds.length > 0) {

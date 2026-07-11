@@ -1,7 +1,83 @@
 """Schema navigation utilities — port of helpers/schema-helpers.ts"""
 
+import re
+
 _DATE_FORMATS = frozenset({'date', 'date-time', 'time'})
 _SYSTEM_FIELDS = frozenset({'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'})
+
+
+def is_string_prop(prop: dict) -> bool:
+    t = prop.get('type')
+    if isinstance(t, str):
+        return t == 'string'
+    if isinstance(t, list):
+        return 'string' in t and all(v in ('string', 'null') for v in t)
+    return False
+
+
+def derive_text_fields(properties: dict) -> list[str]:
+    """Auto-derive searchable text fields from entity properties.
+
+    Excludes noise (id, FK, enum, CUID pattern, date/uri format, write-only)
+    and per-field opt-outs (x-search: false). Shared by the pg_trgm/pg_bigm
+    full-text search context (generate.py) and the per-entity
+    searchXxxOptions autocomplete filter (build_context.py) so both derive
+    the same set of human-readable text columns from a single rule.
+    """
+    result = []
+    for field_name, prop in properties.items():
+        if not isinstance(prop, dict):
+            continue
+        if not is_string_prop(prop):
+            continue
+        # id and explicit primary key
+        if field_name == 'id' or prop.get('x-primary'):
+            continue
+        # FK fields: x-relationship annotation or *_id naming convention
+        if prop.get('x-relationship') or field_name.endswith('_id'):
+            continue
+        # enum values (integer or string)
+        if isinstance(prop.get('enum'), list):
+            continue
+        # CUID/ID pattern strings
+        pattern = prop.get('pattern', '')
+        if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
+            continue
+        # Non-text formats
+        if prop.get('format') in ('date', 'date-time', 'time', 'uri'):
+            continue
+        # Write-only fields (e.g. password, api_key)
+        xc = prop.get('x-custom-component', {})
+        if isinstance(xc, dict) and 'upsert' in (xc.get('target') or []):
+            continue
+        # Per-field opt-out
+        if prop.get('x-search') is False:
+            continue
+        result.append(field_name)
+    return result
+
+
+def derive_searchable_relation_fields(properties: dict) -> list[dict]:
+    """FK relation fields opted into cross-relation substring search.
+
+    A property with `x-relationship.searchField: <name>` contributes a
+    `{relation, field}` pair so the generated searchXxxOptions getter can
+    additionally match rows by a field on the related entity (e.g. inventory
+    matching by its product's name), via a one-hop Prisma nested `where`.
+    Opt-in (schema-driven) — no relation is joined into search unless
+    explicitly marked, so existing autocomplete behaviour is unaffected.
+    """
+    result = []
+    for field_name, prop in properties.items():
+        if not isinstance(prop, dict):
+            continue
+        rel = prop.get('x-relationship') or {}
+        search_field = rel.get('searchField')
+        if not search_field or not rel.get('target'):
+            continue
+        relation_name = field_name.removesuffix('_id') if field_name.endswith('_id') else field_name
+        result.append({'relation': relation_name, 'field': search_field})
+    return result
 
 
 def _get_entity_base_props(entity: str, schema: dict) -> dict:

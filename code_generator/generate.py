@@ -26,6 +26,7 @@ from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
 from build_context import build_context, _get_actual_type
 from helpers.label_field import build_label_expression
+from helpers.schema_helpers import derive_text_fields as _derive_text_fields
 from generators import (
     chart_context,
     page_list_context,
@@ -249,53 +250,11 @@ def _resolve_set_fields(entity_props: dict, raw: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Search text_fields auto-derivation helpers
 # ---------------------------------------------------------------------------
-
-def _is_string_prop(prop: dict) -> bool:
-    t = prop.get('type')
-    if isinstance(t, str):
-        return t == 'string'
-    if isinstance(t, list):
-        return 'string' in t and all(v in ('string', 'null') for v in t)
-    return False
-
-
-def _derive_text_fields(properties: dict) -> list[str]:
-    """Auto-derive searchable text fields from entity properties.
-
-    Excludes noise (id, FK, enum, CUID pattern, date/uri format, write-only)
-    and per-field opt-outs (x-search: false).
-    """
-    result = []
-    for field_name, prop in properties.items():
-        if not isinstance(prop, dict):
-            continue
-        if not _is_string_prop(prop):
-            continue
-        # id and explicit primary key
-        if field_name == 'id' or prop.get('x-primary'):
-            continue
-        # FK fields: x-relationship annotation or *_id naming convention
-        if prop.get('x-relationship') or field_name.endswith('_id'):
-            continue
-        # enum values (integer or string)
-        if isinstance(prop.get('enum'), list):
-            continue
-        # CUID/ID pattern strings
-        pattern = prop.get('pattern', '')
-        if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
-            continue
-        # Non-text formats
-        if prop.get('format') in ('date', 'date-time', 'time', 'uri'):
-            continue
-        # Write-only fields (e.g. password, api_key)
-        xc = prop.get('x-custom-component', {})
-        if isinstance(xc, dict) and 'upsert' in (xc.get('target') or []):
-            continue
-        # Per-field opt-out
-        if prop.get('x-search') is False:
-            continue
-        result.append(field_name)
-    return result
+#
+# _derive_text_fields is an alias for helpers.schema_helpers.derive_text_fields
+# (imported above) so build_context.py's searchable_text_fields
+# (searchXxxOptions autocomplete filter) can share the same exclusion rule
+# instead of a hardcoded field list.
 
 
 def _get_primary_display_field(entity_defs: list) -> str | None:

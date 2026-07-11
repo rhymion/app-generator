@@ -15,6 +15,7 @@ from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
     is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
+    derive_text_fields, derive_searchable_relation_fields,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -909,10 +910,18 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     sortable_fields_quoted = ', '.join(f"'{c}'" for c in _scalar_props)
     filterable_fields_quoted = sortable_fields_quoted
 
-    # Text fields used by searchXxxOptions for substring matching. Limited to
-    # the conventional human-readable columns so callers don't accidentally
-    # search across freeform fields.
-    searchable_text_fields = [f for f in ('name', 'code') if f in filtered_props]
+    # Text fields used by searchXxxOptions for substring matching. Auto-derived
+    # human-readable string columns (shared with the pg_trgm full-text search
+    # rule in generate.py:_derive_text_fields) so callers don't accidentally
+    # search across freeform fields, FKs, enums, or write-only properties.
+    searchable_text_fields = derive_text_fields(filtered_props)
+    # Relation fields opted into cross-relation search via
+    # x-relationship.searchField (e.g. inventory matching by product name) —
+    # rendered as a one-hop nested Prisma `where` alongside the plain fields.
+    searchable_relation_fields = derive_searchable_relation_fields(filtered_props)
+    searchable_fields_display = searchable_text_fields + [
+        f"{rf['relation']}.{rf['field']}" for rf in searchable_relation_fields
+    ]
     # Default ordering for the search action — newest entities are the most
     # likely autocomplete picks. Falls back to id when no audit column exists.
     default_search_order_field = (
@@ -1697,6 +1706,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         sortable_fields_quoted=sortable_fields_quoted,
         filterable_fields_quoted=filterable_fields_quoted,
         searchable_text_fields=searchable_text_fields,
+        searchable_relation_fields=searchable_relation_fields,
+        searchable_fields_display=searchable_fields_display,
         default_search_order_field=default_search_order_field,
         default_search_order_dir=default_search_order_dir,
         self_parent_prop=self_parent_prop,
