@@ -110,7 +110,10 @@ export default function FormUpsert({{ form_upsert_params }}) {
 
     try {
       startTransition(async () => {
-        await upsert{{ parent_pascal }}(formData);
+        const result = (await upsert{{ parent_pascal }}(formData)) as { error?: string } | void;
+        if (result?.error) {
+          setError(result.error);
+        }
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
