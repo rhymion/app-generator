@@ -114,6 +114,8 @@ model user {
   updated_inventory_transactions inventory_transaction[] @relation("InventoryTransactionUpdater")
   created_purchase_orders   purchase_order[]    @relation("PurchaseOrderCreator")
   updated_purchase_orders   purchase_order[]    @relation("PurchaseOrderUpdater")
+  created_purchase_per_items   purchase_per_item[]    @relation("PurchasePerItemCreator")
+  updated_purchase_per_items   purchase_per_item[]    @relation("PurchasePerItemUpdater")
   created_comments          comment[]           @relation("CommentCreator")
   reactions                 reaction[]          @relation("ReactionUser")
   created_notes             note[]              @relation("NoteCreator")
@@ -145,6 +147,8 @@ model user {
   updated_receiving_asns                receiving_asn[]            @relation("ReceivingAsnUpdater")
   created_receiving_receipts            receiving_receipt[]        @relation("ReceivingReceiptCreator")
   updated_receiving_receipts            receiving_receipt[]        @relation("ReceivingReceiptUpdater")
+  created_receiving_receipt_lines       receiving_receipt_line[]   @relation("ReceivingReceiptLineCreator")
+  updated_receiving_receipt_lines       receiving_receipt_line[]   @relation("ReceivingReceiptLineUpdater")
 
   @@index([api_key])
   @@index([creator_id])
@@ -260,6 +264,7 @@ model approval_history {
   pre_status          Int
   post_status         Int
   message             String?
+  reason_kind         Int?             // 0=Customer 1=Internal
   created_at          DateTime         @default(now()) @db.Timestamptz(0)
   updated_at          DateTime         @updatedAt @db.Timestamptz(0)
   creator_id          String
@@ -276,8 +281,8 @@ model commentable {
 
 model inventory_transactionable {
   id                     String                  @id @default(cuid())
-  purchase_per_items     purchase_per_item[]
-  receiving_receipt_lines receiving_receipt_line[]
+  purchase_per_item      purchase_per_item?
+  receiving_receipt_line receiving_receipt_line?
   inventory_transactions inventory_transaction[]
 }
 
@@ -772,6 +777,7 @@ model inventory {
   updater_id        String
   updater           user      @relation("InventoryUpdater", fields: [updater_id], references: [id])
   receiving_receipt_lines receiving_receipt_line[] @relation("ReceiptLineInventory")
+  purchase_per_items purchase_per_item[]
 
   @@index([creator_id])
 }
@@ -799,13 +805,25 @@ model purchase_per_item {
   product_id            String
   product               product                @relation(fields: [product_id], references: [id], onDelete: Cascade)
   quantity              Int
+  status                Int                    @default(0)
   price                 Int?
-  approvable_id                 String?                    @unique
-  approvable                    approvable?                @relation(fields: [approvable_id], references: [id])
-  inventory_transactionable_id  String?
+  approvable_id                 String                    @unique
+  approvable                    approvable                @relation(fields: [approvable_id], references: [id])
+  inventory_transactionable_id  String?                    @unique
   inventory_transactionable     inventory_transactionable? @relation(fields: [inventory_transactionable_id], references: [id])
-  created_at            DateTime               @default(now()) @db.Timestamptz(0)
-  updated_at            DateTime               @updatedAt @db.Timestamptz(0)
+  parent_id            String?
+  parent               purchase_per_item?   @relation("PurchasePerItemSplit", fields: [parent_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children             purchase_per_item[]  @relation("PurchasePerItemSplit")
+  inventory_id         String?
+  inventory            inventory?        @relation(fields: [inventory_id], references: [id])
+  created_at           DateTime          @default(now()) @db.Timestamptz(0)
+  updated_at           DateTime          @updatedAt @db.Timestamptz(0)
+  creator_id           String?
+  creator              user?             @relation("PurchasePerItemCreator", fields: [creator_id], references: [id])
+  updater_id           String?
+  updater              user?             @relation("PurchasePerItemUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
 }
 
 model leave_request {
@@ -1039,24 +1057,26 @@ model receiving_receipt_line {
   product_id           String
   product              product           @relation(fields: [product_id], references: [id], onDelete: Cascade)
   receipt_quantity     Int
-  done_quantity        Int               @default(0)
-  cancelled_quantity   Int               @default(0)
-  outstanding_quantity Int               @default(0)
   status               Int               @default(0)
   inventory_id         String?
   inventory            inventory?        @relation("ReceiptLineInventory", fields: [inventory_id], references: [id])
-  approvable_id        String?           @unique
-  approvable           approvable?       @relation(fields: [approvable_id], references: [id])
+  approvable_id        String           @unique
+  approvable           approvable       @relation(fields: [approvable_id], references: [id])
   parent_id            String?
   parent               receiving_receipt_line?   @relation("ReceiptLineSplit", fields: [parent_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   children             receiving_receipt_line[]  @relation("ReceiptLineSplit")
   is_split_result      Boolean           @default(false)
-  inventory_transactionable_id String?
+  inventory_transactionable_id String?                     @unique
   inventory_transactionable    inventory_transactionable? @relation(fields: [inventory_transactionable_id], references: [id])
   created_at           DateTime          @default(now()) @db.Timestamptz(0)
   updated_at           DateTime          @updatedAt @db.Timestamptz(0)
+  creator_id           String?
+  creator              user?             @relation("ReceivingReceiptLineCreator", fields: [creator_id], references: [id])
+  updater_id           String?
+  updater              user?             @relation("ReceivingReceiptLineUpdater", fields: [updater_id], references: [id])
 
   @@index([receiving_receipt_id])
   @@index([inventory_id])
   @@index([parent_id])
+  @@index([creator_id])
 }
