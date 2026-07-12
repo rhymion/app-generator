@@ -100,9 +100,10 @@ export function fillDataGridRow(
  * @param label - Display label of the option to select
  */
 export function selectDataGridSingleSelect(rowIndex: number, field: string, label: string) {
+  const matchLabel = label.trim().replace(/\s+/g, ' ');
   getDataGridCell(rowIndex, field).dblclick();
   getDataGridCell(rowIndex, field).click();
-  cy.get('[role="option"]').contains(label).click();
+  cy.get('[role="option"]').contains(matchLabel).click();
   // The grid runs in `editMode="row"`, so the cell stays in edit mode after the
   // option click and the chosen label lives on the input's `value` (not in cell
   // textContent). Asserting on the input value also acts as the "wait for the
