@@ -92,7 +92,50 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         data: { status: SPLIT_STATUS },
       });
 
-      // 2. Create child records — inherit parent fields, override with part-specific values
+      {% if has_inventory_bridge and split_reserves_inventory %}
+      // 2. Release parent's reserved inventory BEFORE creating the child
+      // reservations below (cmd_307 FIX-α): re-splitting into the same lot
+      // must free the parent's reserved_quantity first, or the child
+      // availability check double-counts against it and trips a false
+      // 'Concurrent reservation conflict'. Same $transaction, so isolation
+      // is preserved regardless of ordering.
+      if ((parent as Record<string, unknown>).inventory_transactionable_id) {
+        const _parentBridgeId = (parent as Record<string, unknown>)
+          .inventory_transactionable_id as string;
+        const _parentReserveRows = await tx.inventory_transaction.findMany({
+          where: { inventory_transactionable_id: _parentBridgeId, event_type: 'reserve' },
+        });
+        for (const _row of _parentReserveRows) {
+          await tx.inventory.updateMany({
+            where: {
+              product_id: _row.product_id,
+              // O-6 denormalization: inventory_transaction.location stores '' for null-location
+              // lots (written as `?? ''` at PO creation). inventory.location is NULL in the DB.
+              // Must undo the normalization — same pattern as service_after_reject.ts:105.
+              location: _row.location === '' ? null : _row.location,
+              ...(_row.lot_number != null ? { lot_number: _row.lot_number } : {}),
+              ...(_row.expiration_date != null ? { expiration_date: _row.expiration_date } : {}),
+            },
+            data: { reserved_quantity: { decrement: _row.reserved_delta } },
+          });
+          await tx.inventory_transaction.create({
+            data: {
+              inventory_transactionable_id: _parentBridgeId,
+              event_type: 'cancel',
+              quantity_delta: 0,
+              reserved_delta: -_row.reserved_delta,
+              product_id: _row.product_id,
+              location: _row.location ?? '',
+              lot_number: _row.lot_number,
+              expiration_date: _row.expiration_date,
+              creator_id: userId, updater_id: userId, created_by_id: userId,
+            },
+          });
+        }
+      }
+      {% endif %}
+
+      // 3. Create child records — inherit parent fields, override with part-specific values
       {% if has_approvable %}
       // Pre-fetch approval metadata once (shared inner block with cmd_295's
       // x-approval-lines — see generators.py:_build_approval_create_block_for_entity).
@@ -114,9 +157,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         // Bridge allocation per child (cmd_305 FIX-B, design B-3): each split
         // child gets its own inventory_transactionable bridge instead of
         // inheriting the parent's, so afterApprove/afterReject fire on it.
-        const _childInventoryId: string | undefined = (part as Record<string, unknown>).inventory_id as string | undefined;
+        // cmd_307 FIX-γ: '' is the UI's "no lot selected" sentinel for an
+        // unspecified part — normalize it to undefined so it doesn't slip
+        // past a nullish (`??`) check downstream and get written as an
+        // invalid inventory_id FK.
+        const _childInventoryIdRaw = (part as Record<string, unknown>).inventory_id as string | undefined;
+        const _childInventoryId: string | undefined = _childInventoryIdRaw === '' ? undefined : _childInventoryIdRaw;
         let _childBridgeId: string;
 
+        {% if split_reserves_inventory %}
         if (_childInventoryId) {
           // Specified lot: validate availability and reserve exactly that lot
           const _childInv = await tx.inventory.findUnique({
@@ -188,6 +237,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           if (_remaining > 0)
             throw new ApiError(400, `Insufficient inventory for split part (shortfall: ${_remaining})`);
         }
+        {% else %}
+        // cmd_307 FIX-β: receive-type entity (x-ledger-source event_type
+        // 'receive') — split does not reserve existing inventory; afterApprove
+        // writes the receive ledger row at approval time. The child still
+        // gets its own empty bridge so that hook has something to attach to.
+        const _childBridge = await tx.inventory_transactionable.create({ data: {} });
+        _childBridgeId = _childBridge.id;
+        {% endif %}
         {% endif %}
         await tx.{{ entity_name }}.create({
           data: {
@@ -198,7 +255,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             {{ quantity_field }}: part.{{ quantity_field }},
             {% endif %}
             {% for f in per_part_required %}
+            {% if has_inventory_bridge and f == 'inventory_id' %}
+            // cmd_307 FIX-γ: use the normalized child lot id, not
+            // `part.inventory_id ?? parent.inventory_id` — the child must
+            // never inherit the parent's inventory_id (auto-allocate can
+            // span multiple lots, so a single inherited id would be wrong).
+            {{ f }}: _childInventoryId ?? null,
+            {% else %}
             {{ f }}: part.{{ f }} ?? parent.{{ f }},
+            {% endif %}
             {% endfor %}
             {% if parent_field %}
             {{ parent_field }}: parent.id,
@@ -216,43 +281,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           },
         });
       }
-      {% if has_inventory_bridge %}
-      // Release parent's reserved inventory (cancel all reserve rows on parent bridge)
-      if ((parent as Record<string, unknown>).inventory_transactionable_id) {
-        const _parentBridgeId = (parent as Record<string, unknown>)
-          .inventory_transactionable_id as string;
-        const _parentReserveRows = await tx.inventory_transaction.findMany({
-          where: { inventory_transactionable_id: _parentBridgeId, event_type: 'reserve' },
-        });
-        for (const _row of _parentReserveRows) {
-          await tx.inventory.updateMany({
-            where: {
-              product_id: _row.product_id,
-              // O-6 denormalization: inventory_transaction.location stores '' for null-location
-              // lots (written as `?? ''` at PO creation). inventory.location is NULL in the DB.
-              // Must undo the normalization — same pattern as service_after_reject.ts:105.
-              location: _row.location === '' ? null : _row.location,
-              ...(_row.lot_number != null ? { lot_number: _row.lot_number } : {}),
-              ...(_row.expiration_date != null ? { expiration_date: _row.expiration_date } : {}),
-            },
-            data: { reserved_quantity: { decrement: _row.reserved_delta } },
-          });
-          await tx.inventory_transaction.create({
-            data: {
-              inventory_transactionable_id: _parentBridgeId,
-              event_type: 'cancel',
-              quantity_delta: 0,
-              reserved_delta: -_row.reserved_delta,
-              product_id: _row.product_id,
-              location: _row.location ?? '',
-              lot_number: _row.lot_number,
-              expiration_date: _row.expiration_date,
-              creator_id: userId, updater_id: userId, created_by_id: userId,
-            },
-          });
-        }
-      }
-      {% endif %}
     });
 
     return NextResponse.json({ ok: true });

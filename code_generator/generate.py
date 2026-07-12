@@ -640,6 +640,15 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         _product_id_f = _detect_product_id_field(_split_entity_props)
 
+        # cmd_307 FIX-β: entities whose x-ledger-source has event_type 'receive'
+        # (e.g. receiving_receipt_line) add inventory on approval — they never
+        # hold an existing reservation to validate/claim/release at split time.
+        # Entities without x-ledger-source (or with a non-'receive' event_type,
+        # e.g. purchase_per_item) keep the existing reserve/claim/release
+        # semantics. Only meaningful when the entity has a bridge at all.
+        _ledger_source = _def_val.get('x-ledger-source') or {}
+        _split_reserves_inventory = _has_inventory_bridge and _ledger_source.get('event_type') != 'receive'
+
         # perPartRequired fields are enforced as mandatory (every part must
         # supply a truthy value) only when they're also in the entity's own
         # top-level `required:` list. purchase_per_item.inventory_id is in
@@ -690,6 +699,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'split_result_field': _split_r_f,
             'inherited_fields': [f for f in _split_entity_props if f not in _always_exclude],
             'has_inventory_bridge': _has_inventory_bridge,
+            'split_reserves_inventory': _split_reserves_inventory,
             'product_id_field': _product_id_f,
             'per_part_required_mandatory': _per_part_req_mandatory,
         }
