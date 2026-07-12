@@ -1866,7 +1866,6 @@ definitions:
       result:
         parentField: purchase_order_id
         lineTransactionableField: inventory_transactionable_id
-        quantityField: quantity
       # No "actions" block: under strategy: ledger_transaction, ship/cancel are
       # driven by the standard approve/reject flow on purchase_per_item.approvable_id
       # (see purchase_per_item's x-approval below), not by bespoke action routes.
@@ -2143,8 +2142,6 @@ definitions:
       - quantity
     x-reservation:
       mode: count
-      transaction:
-        strategy: conditional_update
       pool:
         entity: supply_pool
         quantityField: quantity
@@ -2154,8 +2151,6 @@ definitions:
       result:
         allocationEntity: supply_allocation
         parentField: supply_request_id
-        poolField: supply_pool_id
-        quantityField: quantity
         allocationAudit: false
     properties:
       id:
@@ -2336,8 +2331,6 @@ definitions:
       dashboard: true
     x-reservation:
       mode: item
-      transaction:
-        strategy: row_lock
       pool:
         entity: room
       request:
