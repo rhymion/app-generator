@@ -5,6 +5,7 @@ import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow, getUserRoleIds } from '@/lib/authz';
 import { notify } from '@/lib/_notifier';
 import { dispatchOnApproved } from '@/lib/approval_request/on_approved_dispatch';
+import { isTerminalReject, dispatchOnRejected } from '@/lib/approval_request/on_rejected_dispatch';
 
 /**
  * Look up the user who created the entity behind an approval_request so the
@@ -123,25 +124,64 @@ export async function approveApprovalRequest(id: string, message?: string): Prom
   revalidatePath('/approval_request');
 }
 
-export async function rejectApprovalRequest(id: string, message?: string): Promise<void> {
+export async function rejectApprovalRequest(
+  id: string,
+  message?: string,
+  options?: { reason?: string; reasonKind?: number },
+): Promise<void> {
   await assertApproverRole(id);
   const userId = await getSessionUserIdOrThrow();
   await prisma.$transaction(async (tx) => {
-    const req = await tx.approval_request.update({
+    const req = await tx.approval_request.findUnique({
       where: { id },
-      data: { status: 2 },
-      select: { status: true },
+      select: { approval_flow: { select: { entity_name: true } } },
+    });
+    if (!req?.approval_flow) throw new Error('Approval request not found');
+
+    const terminal = isTerminalReject(req.approval_flow.entity_name);
+    const newStatus = terminal ? 3 : 2;
+
+    const result = await tx.approval_request.update({
+      where: { id },
+      data: { status: newStatus },
+      select: { id: true, status: true, approvable_id: true },
     });
     await tx.approval_history.create({
       data: {
         approval_request_id: id,
         pre_status: 0,
-        post_status: req.status,
+        post_status: newStatus,
         message: message ?? null,
         creator_id: userId,
+        reason_kind: options?.reasonKind ?? null,
       },
     });
-  });
+
+    const approvableData = await tx.approvable.findUnique({
+      where: { id: result.approvable_id },
+      select: { id: true, approved_at: true },
+    });
+
+    if (options?.reason && approvableData) {
+      await tx.approvable.update({
+        where: { id: approvableData.id },
+        data: { rejection_reason: options.reason },
+      });
+    }
+
+    if (terminal) {
+      const alreadyFired = approvableData?.approved_at != null;
+      if (!alreadyFired && approvableData) {
+        await tx.approvable.update({
+          where: { id: approvableData.id },
+          data: { approved_at: new Date() },
+        });
+        await dispatchOnRejected(tx, req.approval_flow.entity_name, approvableData.id, userId);
+      }
+    } else if (approvableData) {
+      await dispatchOnRejected(tx, req.approval_flow.entity_name, approvableData.id, userId);
+    }
+  }, { isolationLevel: 'Serializable' });
   const { recipientId, entityName } = await getApprovalRequestRecipient(id);
   if (recipientId && recipientId !== userId) {
     notify(recipientId, 'approval_responded', {

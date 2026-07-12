@@ -30,6 +30,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const body = await request.json().catch(() => ({}));
     const message: string | undefined = body?.message || undefined;
     const reason: string | undefined = body?.reason || undefined;
+    const reasonKind: number | undefined =
+      (typeof body?.reason_kind === 'number') ? body.reason_kind : undefined;
 
     const updated = await prisma.$transaction(async (tx) => {
       const result = await tx.approval_request.update({
@@ -43,7 +45,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         },
       });
       await tx.approval_history.create({
-        data: { approval_request_id: id, pre_status: 0, post_status: newStatus, message: message ?? null, creator_id: userId },
+        data: { approval_request_id: id, pre_status: 0, post_status: newStatus, message: message ?? null, creator_id: userId, reason_kind: reasonKind ?? null },
       });
 
       // on_rejected dispatch
