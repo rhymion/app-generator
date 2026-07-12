@@ -1412,6 +1412,9 @@ definitions:
         target:
           - view
           - edit
+        props:
+          showImages: true
+          showFiles: false
     allOf:
       - $ref: "#/definitions/resource"
       - type: object
@@ -2210,6 +2213,195 @@ definitions:
       quantity:
         type: integer
         minimum: 1
+
+  # ============================================================
+  # Cell 3: item mode, no lines (room_reservation example)
+  # Allocates one specific room row; result.allocatedField = room_id.
+  # ============================================================
+
+  room_type:
+    type: object
+    required:
+      - id
+      - name
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+        minLength: 1
+      capacity:
+        type: integer
+        minimum: 1
+      description:
+        type:
+          - string
+          - "null"
+
+  room_type_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    allOf:
+      - $ref: "#/definitions/room_type"
+
+  room:
+    type: object
+    required:
+      - id
+      - room_no
+      - room_type_id
+      - status
+    x-display:
+      table:
+        - room_no:
+            primary: true
+            width: 200
+        - room_type:
+            width: 200
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      room_no:
+        type: string
+        minLength: 1
+      room_type_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: room_type
+          labelField: name
+      floor:
+        type:
+          - integer
+          - "null"
+      status:
+        type: integer
+        minimum: 0
+        maximum: 1
+        enum:
+          - available
+          - maintenance
+
+  room_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    allOf:
+      - $ref: "#/definitions/room"
+      - type: object
+        required:
+          - room_type
+        properties:
+          room_type:
+            $ref: "#/definitions/room_type"
+
+  room_reservation:
+    type: object
+    required:
+      - id
+      - guest_name
+      - room_type_id
+      - check_in
+      - check_out
+    x-display:
+      table:
+        - room_type:
+            primary: true
+            width: 200
+        - room:
+            width: 200
+            labelField: room_id.room_no
+        - guest_name:
+            width: 200
+        - check_in:
+            width: 150
+        - check_out:
+            width: 150
+      dashboard: true
+    x-reservation:
+      mode: item
+      transaction:
+        strategy: row_lock
+      pool:
+        entity: room
+      request:
+        criteria:
+          room_type_id: room_type_id
+          dateRange:
+            start: check_in
+            end: check_out
+      policy:
+        availabilitySource: overlap
+        orderBy:
+          - floor: asc
+          - room_no: asc
+          - id: asc
+      result:
+        allocatedField: room_id
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      guest_name:
+        type: string
+        minLength: 1
+      room_type_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: room_type
+          labelField: name
+      room_id:
+        type:
+          - string
+          - "null"
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: room
+          labelField: room_no
+      check_in:
+        type: string
+        format: date
+      check_out:
+        type: string
+        format: date
+
+  room_reservation_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    allOf:
+      - $ref: "#/definitions/room_reservation"
+      - type: object
+        properties:
+          room_type:
+            $ref: "#/definitions/room_type"
+          room:
+            $ref: "#/definitions/room"
 
   # ============================================================
   # x-receiving: Receiving lifecycle (PO / ASN / Receipt)
