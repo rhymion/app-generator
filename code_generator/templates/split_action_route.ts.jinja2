@@ -53,7 +53,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       throw new ApiError(400, 'Cannot split an already-approved entity');
     }
     {% endif %}
-    {% for f in per_part_required %}
+    {% for f in per_part_required_mandatory %}
     // Each part must specify {{ f }}
     for (const part of parts) {
       if (!part.{{ f }}) {
@@ -110,6 +110,85 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         const childApprovable = await tx.approvable.create({ data: {} });
 {{ approval_create_block }}
         {% endif %}
+        {% if has_inventory_bridge %}
+        // Bridge allocation per child (cmd_305 FIX-B, design B-3): each split
+        // child gets its own inventory_transactionable bridge instead of
+        // inheriting the parent's, so afterApprove/afterReject fire on it.
+        const _childInventoryId: string | undefined = (part as Record<string, unknown>).inventory_id as string | undefined;
+        let _childBridgeId: string;
+
+        if (_childInventoryId) {
+          // Specified lot: validate availability and reserve exactly that lot
+          const _childInv = await tx.inventory.findUnique({
+            where: { id: _childInventoryId },
+            select: { id: true, quantity: true, reserved_quantity: true,
+                      product_id: true, location: true, lot_number: true, expiration_date: true },
+          });
+          if (!_childInv) throw new ApiError(400, `Inventory not found: ${_childInventoryId}`);
+          const _childQty = part.{{ quantity_field }} as number;
+          const _claimResult = await tx.inventory.updateMany({
+            where: { id: _childInventoryId,
+                     reserved_quantity: { lte: _childInv.quantity - _childQty } },
+            data: { reserved_quantity: { increment: _childQty } },
+          });
+          if (_claimResult.count === 0)
+            throw new ApiError(409, 'Concurrent reservation conflict; please retry');
+          const _childBridge = await tx.inventory_transactionable.create({ data: {} });
+          _childBridgeId = _childBridge.id;
+          await tx.inventory_transaction.create({
+            data: {
+              inventory_transactionable_id: _childBridgeId,
+              event_type: 'reserve',
+              quantity_delta: 0,
+              reserved_delta: _childQty,
+              product_id: _childInv.product_id,
+              location: _childInv.location ?? '',
+              lot_number: _childInv.lot_number,
+              expiration_date: _childInv.expiration_date,
+              creator_id: userId, updater_id: userId, created_by_id: userId,
+            },
+          });
+        } else {
+          // Auto-allocate: greedy scan by expiration_date asc, lot_number asc (same as PO creation)
+          const _childQty = part.{{ quantity_field }} as number;
+          const _parentForProduct = parent as Record<string, unknown>;
+          const _candidates = await tx.inventory.findMany({
+            where: { product_id: _parentForProduct.{{ product_id_field }} as string, quantity: { gt: 0 } },
+            orderBy: [{ expiration_date: { sort: 'asc', nulls: 'last' } }, { lot_number: 'asc' }, { id: 'asc' }],
+          });
+          const _childBridge = await tx.inventory_transactionable.create({ data: {} });
+          _childBridgeId = _childBridge.id;
+          let _remaining = _childQty;
+          for (const _cand of _candidates) {
+            if (_remaining <= 0) break;
+            const _avail = _cand.quantity - _cand.reserved_quantity;
+            if (_avail <= 0) continue;
+            const _claim = Math.min(_remaining, _avail);
+            const _claimResult = await tx.inventory.updateMany({
+              where: { id: _cand.id, reserved_quantity: { lte: _cand.quantity - _claim } },
+              data: { reserved_quantity: { increment: _claim } },
+            });
+            if (_claimResult.count > 0) {
+              _remaining -= _claim;
+              await tx.inventory_transaction.create({
+                data: {
+                  inventory_transactionable_id: _childBridgeId,
+                  event_type: 'reserve',
+                  quantity_delta: 0,
+                  reserved_delta: _claim,
+                  product_id: _cand.product_id,
+                  location: _cand.location ?? '',
+                  lot_number: _cand.lot_number,
+                  expiration_date: _cand.expiration_date,
+                  creator_id: userId, updater_id: userId, created_by_id: userId,
+                },
+              });
+            }
+          }
+          if (_remaining > 0)
+            throw new ApiError(400, `Insufficient inventory for split part (shortfall: ${_remaining})`);
+        }
+        {% endif %}
         await tx.{{ entity_name }}.create({
           data: {
             {% for field in inherited_fields %}
@@ -131,9 +210,49 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             {% if has_approvable %}
             approvable_id: childApprovable.id,
             {% endif %}
+            {% if has_inventory_bridge %}
+            inventory_transactionable_id: _childBridgeId,
+            {% endif %}
           },
         });
       }
+      {% if has_inventory_bridge %}
+      // Release parent's reserved inventory (cancel all reserve rows on parent bridge)
+      if ((parent as Record<string, unknown>).inventory_transactionable_id) {
+        const _parentBridgeId = (parent as Record<string, unknown>)
+          .inventory_transactionable_id as string;
+        const _parentReserveRows = await tx.inventory_transaction.findMany({
+          where: { inventory_transactionable_id: _parentBridgeId, event_type: 'reserve' },
+        });
+        for (const _row of _parentReserveRows) {
+          await tx.inventory.updateMany({
+            where: {
+              product_id: _row.product_id,
+              // O-6 denormalization: inventory_transaction.location stores '' for null-location
+              // lots (written as `?? ''` at PO creation). inventory.location is NULL in the DB.
+              // Must undo the normalization — same pattern as service_after_reject.ts:105.
+              location: _row.location === '' ? null : _row.location,
+              ...(_row.lot_number != null ? { lot_number: _row.lot_number } : {}),
+              ...(_row.expiration_date != null ? { expiration_date: _row.expiration_date } : {}),
+            },
+            data: { reserved_quantity: { decrement: _row.reserved_delta } },
+          });
+          await tx.inventory_transaction.create({
+            data: {
+              inventory_transactionable_id: _parentBridgeId,
+              event_type: 'cancel',
+              quantity_delta: 0,
+              reserved_delta: -_row.reserved_delta,
+              product_id: _row.product_id,
+              location: _row.location ?? '',
+              lot_number: _row.lot_number,
+              expiration_date: _row.expiration_date,
+              creator_id: userId, updater_id: userId, created_by_id: userId,
+            },
+          });
+        }
+      }
+      {% endif %}
     });
 
     return NextResponse.json({ ok: true });

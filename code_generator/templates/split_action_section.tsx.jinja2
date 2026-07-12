@@ -74,7 +74,7 @@ export function SplitActionSection({
   const totalAssigned = parts.reduce((s, p) => s + (p.{{ quantity_field }} || 0), 0);
   const remaining = {{ quantity_field }} - totalAssigned;
 
-  function updatePart(idx: number, field: keyof SplitPart, value: string | number) {
+  function updatePart<K extends keyof SplitPart>(idx: number, field: K, value: SplitPart[K]) {
     setParts((prev) => prev.map((p, i) => (i === idx ? { ...p, [field]: value } : p)));
   }
 

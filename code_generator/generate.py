@@ -604,6 +604,14 @@ def generate(schema_path: str, output_dir: str) -> None:
                 return prop_name
         return None
 
+    def _detect_product_id_field(props: dict) -> str | None:
+        """Many-to-one FK pointing at product, for split auto-allocate queries."""
+        for prop_name, prop_def in props.items():
+            rel = (prop_def or {}).get('x-relationship') or {}
+            if rel.get('type') == 'many-to-one' and rel.get('target') == 'product':
+                return prop_name
+        return None
+
     _splittable_defs = schema.get('definitions', {})
     for _def_key, _def_val in _splittable_defs.items():
         if _def_key.endswith('_detail'):
@@ -619,6 +627,28 @@ def generate(schema_path: str, output_dir: str) -> None:
         _per_part_req = list(_splittable_dict.get('perPartRequired') or [])
         _parent_f = _splittable_dict.get('parentField') or _detect_split_parent_field(_split_entity_props, _def_key)
         _split_r_f = _splittable_dict.get('splitResultField') or _detect_split_result_field(_split_entity_props)
+
+        # cmd_305 FIX-B: split children of an entity whose approval hook
+        # reserves inventory (x-approval.on_approved.emit_hook) get their own
+        # inventory_transactionable bridge per child, so the existing
+        # afterApprove/afterReject hooks (which guard on a non-null bridge)
+        # fire correctly instead of silently no-op'ing. See
+        # docs/reservation-split-approval-reject-design.md B-3.
+        _has_inventory_bridge = bool(
+            'inventory_transactionable_id' in _split_entity_props
+            and (_def_val.get('x-approval', {}) or {}).get('on_approved', {}).get('emit_hook')
+        )
+        _product_id_f = _detect_product_id_field(_split_entity_props)
+
+        # perPartRequired fields are enforced as mandatory (every part must
+        # supply a truthy value) only when they're also in the entity's own
+        # top-level `required:` list. purchase_per_item.inventory_id is in
+        # perPartRequired (per-part lot override) but is schema-optional —
+        # split falls back to auto-allocate when a part omits it (cmd_305
+        # FIX-B, DP-B1). receiving_receipt_line.inventory_id is genuinely
+        # required, so its mandatory check is unaffected.
+        _entity_required = set(_def_val.get('required') or [])
+        _per_part_req_mandatory = [f for f in _per_part_req if f in _entity_required]
 
         _always_exclude = {
             'id', 'status', 'approvable_id', 'inventory_transactionable_id',
@@ -659,6 +689,9 @@ def generate(schema_path: str, output_dir: str) -> None:
             'parent_field': _parent_f,
             'split_result_field': _split_r_f,
             'inherited_fields': [f for f in _split_entity_props if f not in _always_exclude],
+            'has_inventory_bridge': _has_inventory_bridge,
+            'product_id_field': _product_id_f,
+            'per_part_required_mandatory': _per_part_req_mandatory,
         }
         _split_api_dir = out / 'app' / 'api' / _def_key / '[id]' / 'actions' / 'split'
         _write(_split_api_dir / 'route.ts', _render(env, 'split_action_route.ts.jinja2', _split_ctx))
