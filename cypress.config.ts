@@ -203,6 +203,14 @@ export default defineConfig({
           const { getPurchasePerItemsForOrder } = require('./cypress/support/purchase_order/reservation_helper');
           return await getPurchasePerItemsForOrder(params.purchase_order_id);
         },
+        async 'db:getPurchasePerItemById'(params: { id: string }) {
+          const { getPurchasePerItemById } = require('./cypress/support/purchase_order/reservation_helper');
+          return await getPurchasePerItemById(params.id);
+        },
+        async 'db:getPurchasePerItemChildren'(params: { parentId: string }) {
+          const { getPurchasePerItemChildren } = require('./cypress/support/purchase_order/reservation_helper');
+          return await getPurchasePerItemChildren(params.parentId);
+        },
         async 'db:seedSecondInventoryLot'(params: { product_id: string; quantity: number; location: string }) {
           const { seedSecondInventoryLot } = require('./cypress/support/purchase_order/reservation_helper');
           return await seedSecondInventoryLot(params.product_id, params.quantity, params.location);
