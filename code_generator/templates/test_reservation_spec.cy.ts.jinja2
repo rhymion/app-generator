@@ -154,7 +154,7 @@ describe('{{ pascal }} Reservation (generated)', () => {
 {% for action in reservation_actions %}
 
   it('LC-{{ loop.index }}: {{ action.name }} — POST /actions/{{ action.type }} succeeds and allocation status updates', () => {
-    cy.task<any>('db:seedReservationInventory', { quantity: 10 }).then((seed: any) => {
+    cy.task<any>('db:seedReservation{{ pascal }}', { quantity: 10 }).then((seed: any) => {
       cy.request({
         method: 'POST',
         url: API_BASE,

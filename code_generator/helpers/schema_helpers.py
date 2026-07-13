@@ -150,6 +150,28 @@ def get_approval_lines_props(parent_def: dict, model: str, schema: dict) -> list
     return props
 
 
+def get_splittable_bridge_field(entity_def: dict) -> str:
+    """The property name on an x-splittable entity that holds its per-child
+    ledger/reservation bridge FK (e.g. purchase_per_item / receiving_receipt_line's
+    inventory_transactionable_id).
+
+    Config-driven via x-splittable.bridgeField, defaulting to
+    'inventory_transactionable_id' — the two current x-splittable entities
+    reach this field through different parent-side mechanisms (purchase_order's
+    x-reservation.transaction.strategy: ledger_transaction vs. receiving_receipt's
+    plain x-approval-lines + receiving_receipt_line's own x-ledger-source), so
+    there is no single reverse lookup that resolves it for both; the entity's
+    own x-splittable config is the one place both agree to declare it (cmd_312
+    Phase1, see queue/reports/subtask_312a_ashigaru3.yaml for why the more
+    "principled" x-reservation reverse-lookup was rejected — it silently
+    dropped the bridge for receiving_receipt_line, which has no x-reservation
+    on its parent at all).
+    """
+    split_cfg = entity_def.get('x-splittable')
+    split_dict = split_cfg if isinstance(split_cfg, dict) else {}
+    return split_dict.get('bridgeField', 'inventory_transactionable_id')
+
+
 def get_detail_relation_name(parent: str, target: str, schema: dict, detail_key: str | None = None) -> str:
     """Resolves the property name that $ref-s to `target` in the detail definition.
     e.g. for target='organization', finds 'organization' property with $ref: '#/definitions/organization'

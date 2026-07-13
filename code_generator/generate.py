@@ -27,6 +27,7 @@ from context import build_entity_context
 from build_context import build_context, _get_actual_type
 from helpers.label_field import build_label_expression
 from helpers.schema_helpers import derive_text_fields as _derive_text_fields
+from helpers.schema_helpers import get_splittable_bridge_field
 from generators import (
     chart_context,
     page_list_context,
@@ -630,12 +631,18 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # cmd_305 FIX-B: split children of an entity whose approval hook
         # reserves inventory (x-approval.on_approved.emit_hook) get their own
-        # inventory_transactionable bridge per child, so the existing
+        # ledger-transaction bridge per child, so the existing
         # afterApprove/afterReject hooks (which guard on a non-null bridge)
         # fire correctly instead of silently no-op'ing. See
         # docs/reservation-split-approval-reject-design.md B-3.
+        # cmd_312 Phase1: bridge field name config-driven via
+        # x-splittable.bridgeField (default 'inventory_transactionable_id')
+        # instead of a literal membership check — see
+        # get_splittable_bridge_field docstring for why this reads from
+        # x-splittable rather than reverse-resolving through x-reservation.
+        _bridge_field = get_splittable_bridge_field(_def_val)
         _has_inventory_bridge = bool(
-            'inventory_transactionable_id' in _split_entity_props
+            _bridge_field in _split_entity_props
             and (_def_val.get('x-approval', {}) or {}).get('on_approved', {}).get('emit_hook')
         )
         _product_id_f = _detect_product_id_field(_split_entity_props)
@@ -660,7 +667,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         _per_part_req_mandatory = [f for f in _per_part_req if f in _entity_required]
 
         _always_exclude = {
-            'id', 'status', 'approvable_id', 'inventory_transactionable_id',
+            'id', 'status', 'approvable_id', _bridge_field,
             *([_qty_field] if _qty_field else []),
             *([_parent_f] if _parent_f else []),
             *([_split_r_f] if _split_r_f else []),
