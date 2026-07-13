@@ -22,24 +22,6 @@ x-ledger-entities:
     ledger: inventory_transaction
     transactionable: inventory_transactionable
 
-x-receiving:
-  roles:
-    purchase_order: receiving_purchase_order
-    asn: receiving_asn
-    receipt: receiving_receipt
-  policy:
-    allowDirectReceipt: true
-    allowReceiptFromAsn: true
-    allowReceiptFromPurchaseOrder: true
-    inventoryMutation: confirm_receipt
-  inventory:
-    entity: inventory
-    productField: product_id
-    quantityField: quantity
-  lines:
-    productField: product_id
-    quantityField: receipt_quantity
-
 definitions:
   # ============================================================
   # System entities (required by all apps — see §1.1)
@@ -2424,9 +2406,7 @@ definitions:
             $ref: "#/definitions/room"
 
   # ============================================================
-  # x-receiving: Receiving lifecycle (PO / ASN / Receipt)
-  # Entity names are resolved via x-receiving.roles at the top level —
-  # generator code must never hardcode these names.
+  # Receiving lifecycle (PO / ASN / Receipt).
   # ============================================================
 
   receiving_purchase_order:
@@ -2827,10 +2807,6 @@ definitions:
       invalidate: false
       api: true
       test: true
-    x-custom-components:
-      - name: ReceivingConfirmForm
-        target:
-          - view
     allOf:
       - $ref: "#/definitions/receiving_receipt"
       - type: object

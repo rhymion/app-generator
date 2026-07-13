@@ -545,38 +545,6 @@ def generate(schema_path: str, output_dir: str) -> None:
         if can_view:
             _write(app_dir / 'view' / '[id]' / 'page.tsx', _render(env, 'page_view.tsx.jinja2', ctx))
 
-    # --- x-receiving: confirm action route + inventory selection UI ---
-    _x_receiving = schema.get('x-receiving') or {}
-    _xr_policy   = _x_receiving.get('policy') or {}
-    if _xr_policy.get('inventoryMutation') == 'confirm_receipt':
-        _xr_roles      = _x_receiving.get('roles') or {}
-        _receipt_entity = _xr_roles.get('receipt', 'receiving_receipt')
-        _xr_inv         = _x_receiving.get('inventory') or {}
-        _inv_entity     = _xr_inv.get('entity', 'inventory')
-        _inv_qty_field  = _xr_inv.get('quantityField', 'quantity')
-        # Determine integer value for 'confirmed' status on the receipt entity
-        _receipt_def    = schema.get('definitions', {}).get(_receipt_entity, {})
-        _receipt_status_enum = (_receipt_def.get('properties') or {}).get('status', {}).get('enum') or []
-        _confirmed_status_val = (
-            _receipt_status_enum.index('confirmed')
-            if 'confirmed' in _receipt_status_enum else 1
-        )
-        _confirm_ctx = {
-            'receiving_receipt_entity':  _receipt_entity,
-            'receiving_receipt_model':   _receipt_entity,
-            'receiving_inventory_entity': _inv_entity,
-            'receiving_inventory_qty_field': _inv_qty_field,
-            'receiving_confirmed_status': _confirmed_status_val,
-        }
-        _receipt_api_dir = out / 'app' / 'api' / _receipt_entity / '[id]' / 'actions' / 'confirm'
-        _write(_receipt_api_dir / 'route.ts',
-               _render(env, 'receiving_confirm_route.ts.jinja2', _confirm_ctx))
-        print(f'  Confirm action route → app/api/{_receipt_entity}/[id]/actions/confirm/')
-        _receipt_comp_dir = out / 'components' / _receipt_entity
-        _write(_receipt_comp_dir / 'ReceivingConfirmForm.tsx',
-               _render(env, 'receiving_confirm_form.tsx.jinja2', _confirm_ctx))
-        print(f'  ReceivingConfirmForm.tsx → components/{_receipt_entity}/')
-
     # --- x-splittable: split action route + UI per entity (cmd_296) ---
     #
     # Entities marked x-splittable get a POST /actions/split route that closes
