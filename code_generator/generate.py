@@ -22,6 +22,7 @@ from jinja2 import Environment, FileSystemLoader
 from helpers.naming import to_pascal_case, to_camel_case
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit_child_bridge_fk
+from helpers.schema_helpers import get_flatten_rels
 from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
 from build_context import build_context, build_anonymize_user_context, _get_actual_type
@@ -366,6 +367,48 @@ def _get_primary_display_field(entity_defs: list) -> str | None:
                 if isinstance(col_cfg, dict) and col_cfg.get('primary'):
                     return col_name
     return None
+
+
+def _append_no_page_child(
+    lst: list, child_name: str, parent_id_field: str,
+    text_fields: list, child_base_def: dict
+) -> None:
+    """Build no_page_child context dict and append to lst.
+
+    All field references are qualified with the `child.` alias — the child
+    subquery JOINs "child" against "parent", and unqualified column names
+    (e.g. `name`) are ambiguous whenever the parent table has a same-named
+    column (e.g. dashboard.name vs dashboard_widget.name).
+    """
+    ts_parts = " || ' ' || ".join(f"COALESCE(child.{f}, '')" for f in text_fields)
+    sim_exprs = ', '.join(f"similarity(COALESCE(child.{f}, ''), ${{q}})" for f in text_fields)
+    sim_where = ' OR '.join(
+        f"similarity(COALESCE(child.{f}, ''), ${{q}}) > 0.3" for f in text_fields
+    )
+    bigm_fields = text_fields  # default: same as text_fields
+    bigm_where = ' OR '.join(
+        f"COALESCE(child.{f}, '') ILIKE '%' || ${{q}} || '%'" for f in bigm_fields
+    )
+    bigm_sim_exprs = ', '.join(
+        f"CASE WHEN COALESCE(child.{f}, '') ILIKE '%' || ${{q}} || '%'"
+        f" THEN 1.0 ELSE 0.0 END::float8"
+        for f in bigm_fields
+    )
+    child_primary = _get_primary_display_field([child_base_def])
+    snippet_raw = child_primary if (child_primary and child_primary in text_fields) else text_fields[0]
+    snippet = f"child.{snippet_raw}"
+
+    lst.append({
+        'child_name':                 child_name,
+        'parent_id_field':            parent_id_field,
+        'text_fields':                text_fields,
+        'snippet_field':              snippet,
+        'ts_vector_fields_sql':       ts_parts,
+        'similarity_fields_sql':      sim_exprs,
+        'similarity_where_sql':       sim_where,
+        'bigm_where_sql':             bigm_where,
+        'bigm_similarity_fields_sql': bigm_sim_exprs,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -851,6 +894,55 @@ def generate(schema_path: str, output_dir: str) -> None:
         # assignee_id is entity-specific; check schema properties
         has_assignee_id = 'assignee_id' in all_props
 
+        # Phase1+2: non-independent child entities searchable via the parent's page
+        # (inline grid / embedded list children, and non-m2o flattened OTO relations).
+        no_page_children = []
+
+        # ---- Phase 1: children (inline grid / embedded list) ----
+        for child in entity.get('children', []):
+            child_name        = child['name']
+            child_output_type = child.get('output_type')
+            # skip non-grid/list (comments, etc.)
+            if child_output_type not in (None, 'list'):
+                continue
+            # skip m2m (junction-table pattern, no parent_id in child)
+            is_m2m = (child.get('relationship') or {}).get('type') == 'many-to-many'
+            if is_m2m:
+                continue
+            # skip children with independent detail pages
+            child_has_detail = bool(
+                schema['definitions'].get(f'{child_name}_detail', {}).get('x-generate')
+            )
+            if child_output_type == 'list' and child_has_detail:
+                continue  # managed on its own page
+            # derive text fields
+            child_base_def   = schema['definitions'].get(child_name, {})
+            child_base_props = child_base_def.get('properties', {})
+            child_text_fields = _derive_text_fields(child_base_props)
+            if not child_text_fields:
+                continue  # no searchable text
+            _append_no_page_child(
+                no_page_children, child_name, f'{parent}_id',
+                child_text_fields, child_base_def
+            )
+
+        # ---- Phase 2: flatten non-m2o (FK in target, pointing to parent) ----
+        for fr in get_flatten_rels(parent, base_def, schema):
+            if fr['is_m2o']:
+                continue  # m2o flatten: FK in parent → skip (Phase3)
+            target = fr['target']
+            if bool(schema['definitions'].get(f'{target}_detail', {}).get('x-generate')):
+                continue  # target has own page
+            target_base_def   = schema['definitions'].get(target, {})
+            target_base_props = target_base_def.get('properties', {})
+            target_text_fields = _derive_text_fields(target_base_props)
+            if not target_text_fields:
+                continue
+            _append_no_page_child(
+                no_page_children, target, f'{parent}_id',
+                target_text_fields, target_base_def
+            )
+
         search_entities.append({
             'entity_type':           parent,
             'model':                 prisma_model,
@@ -871,6 +963,11 @@ def generate(schema_path: str, output_dir: str) -> None:
             'or_clauses_ts_var':     f'{parent}OrClauses',
             'bigm_where_sql':            bigm_where_single,
             'bigm_similarity_fields_sql': bigm_sim_exprs,
+            # Phase1+2: no_page_children search + parent-qualified ACL vars
+            'no_page_children':             no_page_children,
+            'parent_access_clauses_ts_var': f'{parent}ParentAccessClauses',
+            'parent_access_where_ts_var':   f'{parent}ParentAccessWhere',
+            'parent_or_clauses_ts_var':     f'{parent}ParentOrClauses',
             'bigm_fields':               bigm_fields,
         })
 

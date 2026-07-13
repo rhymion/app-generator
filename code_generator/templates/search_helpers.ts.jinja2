@@ -73,6 +73,28 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
     const {{ entity.access_where_ts_var }}: Prisma.Sql = {{ entity.access_clauses_ts_var }}.length > 0
       ? Prisma.sql`(${ Prisma.join({{ entity.access_clauses_ts_var }}, ' AND ') })`
       : Prisma.sql`1=1`;
+{% if entity.no_page_children %}
+    // Parent-qualified ACL for child subqueries (D-8: parent. prefix avoids creator_id ambiguity)
+    const {{ entity.parent_access_clauses_ts_var }}: Prisma.Sql[] = [];
+{% if entity.should_filter_by_org %}
+    if (associatedOrgIds.length > 0) {
+      {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`parent.{{ entity.org_id_field }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) })`);
+    } else {
+      {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`1=0`);
+    }
+{% endif %}
+    if (!{{ entity.general_read_ts_var }}) {
+      const {{ entity.parent_or_clauses_ts_var }}: Prisma.Sql[] = [];
+      if ({{ entity.perms_ts_var }}.permissions.creator?.read && userId) {{ entity.parent_or_clauses_ts_var }}.push(Prisma.sql`parent.creator_id = ${ userId }`);
+{% if entity.has_assignee_id %}
+      if ({{ entity.perms_ts_var }}.permissions.assignee?.read && userId) {{ entity.parent_or_clauses_ts_var }}.push(Prisma.sql`parent.assignee_id = ${ userId }`);
+{% endif %}
+      {{ entity.parent_access_clauses_ts_var }}.push({{ entity.parent_or_clauses_ts_var }}.length > 0 ? Prisma.sql`(${ Prisma.join({{ entity.parent_or_clauses_ts_var }}, ' OR ') })` : Prisma.sql`1=0`);
+    }
+    const {{ entity.parent_access_where_ts_var }}: Prisma.Sql = {{ entity.parent_access_clauses_ts_var }}.length > 0
+      ? Prisma.sql`(${ Prisma.join({{ entity.parent_access_clauses_ts_var }}, ' AND ') })`
+      : Prisma.sql`1=1`;
+{% endif %}
 
     subQueries.push(Prisma.sql`
           SELECT
@@ -109,6 +131,45 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
             )
             AND ${ {{ entity.access_where_ts_var }} }
         `);
+
+{% for child in entity.no_page_children %}
+    subQueries.push(Prisma.sql`
+          SELECT
+            '{{ entity.entity_type }}'::text AS entity_type,
+            child.{{ child.parent_id_field }}::text AS id,
+            CASE
+              WHEN to_tsvector('simple', COALESCE({{ child.ts_vector_fields_sql }}, '')) @@
+                   plainto_tsquery('simple', ${ q })
+              THEN ts_headline(
+                'simple',
+                COALESCE({{ child.snippet_field }}::text, ''),
+                plainto_tsquery('simple', ${ q }),
+                'StartSel=<<<, StopSel=>>>, MaxWords=20, MinWords=10, ShortWord=2, HighlightAll=false'
+              )
+              ELSE LEFT(COALESCE({{ child.snippet_field }}::text, ''), 150)
+            END AS snippet,
+            (
+              CASE
+                WHEN to_tsvector('simple', COALESCE({{ child.ts_vector_fields_sql }}, '')) @@
+                     plainto_tsquery('simple', ${ q })
+                THEN 1.0
+                ELSE 0.0
+              END
+              + GREATEST({{ child.similarity_fields_sql }})
+              + GREATEST({{ child.bigm_similarity_fields_sql }}) * 0.5
+            )::float8 AS rank
+          FROM "{{ child.child_name }}" child
+          JOIN "{{ entity.model }}" parent ON child.{{ child.parent_id_field }} = parent.id
+          WHERE
+            (
+              to_tsvector('simple', COALESCE({{ child.ts_vector_fields_sql }}, '')) @@
+              plainto_tsquery('simple', ${ q })
+              OR ({{ child.similarity_where_sql }})
+              OR ({{ child.bigm_where_sql }})
+            )
+            AND ${ {{ entity.parent_access_where_ts_var }} }
+        `);
+{% endfor %}
   }
 {% endfor %}
 
@@ -122,13 +183,21 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
   const facets: Record<string, number> = {};
   if (shouldCount) {
     const countRows = await prisma.$queryRaw<[{ count: bigint }]>`
-      SELECT COUNT(*)::bigint AS count FROM (${ unionSql }) _search_union
+      SELECT COUNT(*)::bigint AS count FROM (
+        SELECT DISTINCT ON (entity_type, id) entity_type, id
+        FROM (${ unionSql }) _search_union_raw
+        ORDER BY entity_type, id, rank DESC
+      ) _deduped
     `;
     total = Number(countRows[0]?.count ?? 0);
 
     const facetRows = await prisma.$queryRaw<Array<{ entity_type: string; count: bigint }>>`
       SELECT entity_type, COUNT(*)::bigint AS count
-      FROM (${ unionSql }) _search_union
+      FROM (
+        SELECT DISTINCT ON (entity_type, id) entity_type, id
+        FROM (${ unionSql }) _search_union_raw
+        ORDER BY entity_type, id, rank DESC
+      ) _deduped
       GROUP BY entity_type
     `;
     for (const row of facetRows) {
@@ -142,7 +211,11 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
 
   const rows = await prisma.$queryRaw<SearchResult[]>`
     SELECT entity_type, id, snippet, rank
-    FROM (${ unionSql }) _search_union
+    FROM (
+      SELECT DISTINCT ON (entity_type, id) entity_type, id, snippet, rank
+      FROM (${ unionSql }) _search_union_raw
+      ORDER BY entity_type, id, rank DESC
+    ) _deduped
     ORDER BY rank DESC
     LIMIT ${ clampedSize } OFFSET ${ offset }
   `;
