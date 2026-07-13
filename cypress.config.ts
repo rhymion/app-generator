@@ -215,6 +215,10 @@ export default defineConfig({
           const { seedSecondInventoryLot } = require('./cypress/support/purchase_order/reservation_helper');
           return await seedSecondInventoryLot(params.product_id, params.quantity, params.location);
         },
+        async 'db:seedSecondProduct'(params: { quantity: number }) {
+          const { seedSecondProduct } = require('./cypress/support/purchase_order/reservation_helper');
+          return await seedSecondProduct(params.quantity);
+        },
         async 'db:setInventoryQuantity'(params: { inventory_id: string; quantity: number }) {
           const { setInventoryQuantity } = require('./cypress/support/purchase_order/reservation_helper');
           return await setInventoryQuantity(params.inventory_id, params.quantity);
@@ -223,9 +227,9 @@ export default defineConfig({
           const { setupReceivingReceiptLineApprovalFlow } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
           return await setupReceivingReceiptLineApprovalFlow();
         },
-        async 'db:populateReceivingReceiptLineWithApproval'(params: { creatorId: string; approvalFlowIds: string[]; inventoryId?: string | null }) {
+        async 'db:populateReceivingReceiptLineWithApproval'(params: { creatorId: string; approvalFlowIds: string[]; inventoryId?: string | null; productId?: string }) {
           const { populateReceivingReceiptLineWithApproval } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
-          return await populateReceivingReceiptLineWithApproval(params.creatorId, params.approvalFlowIds, { inventoryId: params.inventoryId ?? null });
+          return await populateReceivingReceiptLineWithApproval(params.creatorId, params.approvalFlowIds, { inventoryId: params.inventoryId ?? null, productId: params.productId });
         },
         async 'db:getApprovableById'(params: { approvable_id: string }) {
           const { getApprovableById } = require('./cypress/support/approval_test_helpers');

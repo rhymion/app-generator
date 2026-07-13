@@ -399,6 +399,20 @@ Entity-level `x-internal` is typically used on bridge or helper records (e.g. `a
 `commentable`) that support another entity's behaviour but are never navigated to directly.
 See §12.5 for the auto-create one-to-one pattern that relies on this.
 
+**Auto-detected internal bridge FKs (no `x-internal` flag needed)**
+
+Separately from the explicit `x-internal: true` flag above, the generator also
+auto-detects and hides FK fields that point at an internal bridge record — a
+`one-to-one_bridge` relationship (e.g. `approvable_id`), or a plain FK with no
+`x-relationship` at all whose target has no `x-generate`/types module (e.g.
+`inventory_transactionable_id`, which cannot even declare `x-relationship` since its
+target isn't a normal entity). No schema flag is required; the generator recognizes these
+by relationship type / naming convention. Such fields are excluded from both list columns
+(`column_def.tsx`) **and** detail forms (`FormView.tsx`) while remaining present in the
+Prisma model and writable by the service layer. See
+[Inventory Reservation, Split, and Receiving §5](appendix/inventory-reservation-split.md#5-inventory-relation-display-item1-2026-07-12)
+for a concrete example.
+
 ### 4.6 Field UI Hints (`x-ui`)
 
 Place `x-ui` on a `string` field to control how the form input is rendered.
@@ -474,6 +488,15 @@ resource_id:
 
 `labelField` can be any scalar property on the target model, not just `name`. For example,
 `labelField: order_no` shows an order number in the Autocomplete dropdown instead of a name.
+
+**Composite labels** — `labelField` also accepts a **list** of paths (each either a scalar
+property or a dotted path through the target's own many-to-one/one-to-one relations, e.g.
+`approver_role.name`); the generator concatenates the resolved values with a single space at
+render time (`helpers/label_field.py: build_label_expression`). Used for relation columns where
+a single field is not enough to disambiguate rows — for example an `inventory` relation showing
+product name + location + lot number instead of a bare `cuid`. See
+[Inventory Reservation, Split, and Receiving §5](appendix/inventory-reservation-split.md#5-inventory-relation-display-item1-2026-07-12)
+for that concrete usage.
 
 Add the resolved object to the **detail entity**:
 
@@ -1750,6 +1773,7 @@ If a user requests a FK that would target an embedded entity, reject the request
 For detailed subsystem documentation, see:
 - [Approval Flow System](appendix/approval-flow.md)
 - [Comment Bridge System](appendix/comment-bridge.md)
+- [Inventory Reservation, Split, and Receiving](appendix/inventory-reservation-split.md)
 
 ---
 
