@@ -594,7 +594,7 @@ def actions_context(ctx: dict) -> dict:
                     f"    try {{\n"
                     f"      {create_call}\n"
                     f"    }} catch (e) {{\n"
-                    f"      if (e instanceof InsufficientInventoryError) {{\n"
+                    f"      if (e instanceof InsufficientPoolCapacityError) {{\n"
                     f"        _serviceError = (e as Error).message;\n"
                     f"      }} else {{\n"
                     f"        throw e;\n"
@@ -651,7 +651,7 @@ def actions_context(ctx: dict) -> dict:
         f'update{parent_pascal}' if can_update else '',
         f'delete{parent_pascal}' if can_delete else '',
     ]
-    error_imports = ', InsufficientInventoryError, ReservationMutationError' if has_reservation else ''
+    error_imports = ', InsufficientPoolCapacityError, ReservationMutationError' if has_reservation else ''
     service_imports = ', '.join(f for f in service_fns if f) + error_imports
 
     return {
@@ -864,7 +864,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"        }}\n"
         f"      }}\n"
         f"      if (_remaining > 0) {{\n"
-        f"        throw new InsufficientInventoryError(\n"
+        f"        throw new InsufficientPoolCapacityError(\n"
         f"          `Insufficient inventory for {entity_name} line`\n"
         f"        );\n"
         f"      }}\n"
@@ -1195,7 +1195,7 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
             f"        }}",
             f"      }}",
             f"      if (_remaining > 0) {{",
-            f"        throw new InsufficientInventoryError(",
+            f"        throw new InsufficientPoolCapacityError(",
             f"          `Insufficient inventory for request ${{created.id}}`",
             f"        );",
             f"      }}",
@@ -1239,7 +1239,7 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
         f"        }}",
         f"      }}",
         f"      if (_remaining > 0) {{",
-        f"        throw new InsufficientInventoryError(",
+        f"        throw new InsufficientPoolCapacityError(",
         f"          `Insufficient inventory for product ${{(_line as Record<string, unknown>).product_id}}`",
         f"        );",
         f"      }}",
@@ -1936,10 +1936,10 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
             approval_lines_post_update_code = _build_approval_lines_post_create_code(parent_def, model, schema)
 
     _insufficient_inventory_error_class_def = (
-        "\n\nexport class InsufficientInventoryError extends Error {\n"
+        "\n\nexport class InsufficientPoolCapacityError extends Error {\n"
         "  constructor(message: string) {\n"
         "    super(message);\n"
-        "    this.name = 'InsufficientInventoryError';\n"
+        "    this.name = 'InsufficientPoolCapacityError';\n"
         "  }\n"
         "}"
     )

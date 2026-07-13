@@ -197,13 +197,13 @@ class TestConcurrentSafety:
         )
 
     def test_insufficient_inventory_thrown_when_remaining_positive(self):
-        """Generated code throws InsufficientInventoryError when candidates are exhausted."""
+        """Generated code throws InsufficientPoolCapacityError when candidates are exhausted."""
         code = _get_allocation_code()
         assert "_remaining > 0" in code, (
             "After the candidate loop, _remaining > 0 means stock was insufficient. "
             "The error must be thrown inside the transaction so all writes are rolled back."
         )
-        assert "InsufficientInventoryError" in code
+        assert "InsufficientPoolCapacityError" in code
 
     def test_no_unconditional_decrement(self):
         """Generated code never unconditionally decrements — only via guarded updateMany."""
@@ -229,8 +229,8 @@ class TestMutationGuards:
         """Generated utility_code exports both error classes."""
         svc = _get_service_context()
         code = svc["utility_code"]
-        assert "export class InsufficientInventoryError" in code, (
-            "InsufficientInventoryError must be exported so api_route.ts can import it."
+        assert "export class InsufficientPoolCapacityError" in code, (
+            "InsufficientPoolCapacityError must be exported so api_route.ts can import it."
         )
         assert "export class ReservationMutationError" in code, (
             "ReservationMutationError must be exported so api_detail_route.ts can import it."
@@ -404,10 +404,10 @@ class TestLedgerTransactionConcurrentSafety:
         )
 
     def test_insufficient_inventory_thrown_when_remaining_positive(self):
-        """Generated code throws InsufficientInventoryError when candidates are exhausted."""
+        """Generated code throws InsufficientPoolCapacityError when candidates are exhausted."""
         code = _get_ledger_allocation_code()
         assert "_remaining > 0" in code
-        assert "InsufficientInventoryError" in code
+        assert "InsufficientPoolCapacityError" in code
 
     def test_no_unconditional_reserved_quantity_increment(self):
         """Generated code never increments reserved_quantity outside the guarded updateMany."""

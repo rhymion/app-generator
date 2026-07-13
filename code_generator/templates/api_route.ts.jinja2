@@ -6,7 +6,7 @@ import { parsePageOpts } from '@/lib/_pagination';
 {% endif %}
 {% if can_create %}
 {% if reservation_config %}
-import { add{{ parent_pascal }}, InsufficientInventoryError } from '@/lib/{{ parent }}/service';
+import { add{{ parent_pascal }}, InsufficientPoolCapacityError } from '@/lib/{{ parent }}/service';
 {% else %}
 import { add{{ parent_pascal }} } from '@/lib/{{ parent }}/service';
 {% endif %}
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
 {% if reservation_config %}
-    if (error instanceof InsufficientInventoryError) {
+    if (error instanceof InsufficientPoolCapacityError) {
       return NextResponse.json({ error: (error as Error).message }, { status: 409 });
     }
 {% endif %}

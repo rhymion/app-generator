@@ -178,7 +178,7 @@ class TestBackwardCompat:
         svc = service_context(ctx, schema)
         assert svc["has_reservation"] is False
         assert svc["reservation_allocation_code"] == ""
-        assert "InsufficientInventoryError" not in svc["utility_code"]
+        assert "InsufficientPoolCapacityError" not in svc["utility_code"]
 
 
 # ---------------------------------------------------------------------------
@@ -246,12 +246,12 @@ class TestGenerate:
 
     def test_insufficient_inventory_error_thrown(self):
         code = self._svc()["reservation_allocation_code"]
-        assert "InsufficientInventoryError" in code
+        assert "InsufficientPoolCapacityError" in code
 
     def test_error_class_in_utility(self):
         svc = self._svc()
-        assert "InsufficientInventoryError" in svc["utility_code"]
-        assert "class InsufficientInventoryError" in svc["utility_code"]
+        assert "InsufficientPoolCapacityError" in svc["utility_code"]
+        assert "class InsufficientPoolCapacityError" in svc["utility_code"]
 
     def test_allocation_row_created(self):
         code = self._svc()["reservation_allocation_code"]
@@ -471,10 +471,10 @@ class TestItemModePhase2:
         assert "| 'room'" in svc["utility_code"]
 
     def test_insufficient_inventory_error_exported_for_item_mode(self):
-        """InsufficientInventoryError must be exported so api_route.ts can import it."""
+        """InsufficientPoolCapacityError must be exported so api_route.ts can import it."""
         ctx = self._ctx()
         svc = service_context(ctx)
-        assert "export class InsufficientInventoryError" in svc["utility_code"]
+        assert "export class InsufficientPoolCapacityError" in svc["utility_code"]
 
     def test_reservation_mutation_error_not_exported_for_item_mode(self):
         """ReservationMutationError is count-mode-only and must NOT be in item mode service."""
@@ -1131,7 +1131,7 @@ class TestItemModeOverlapAvailability:
         )
 
     def test_start_end_error_not_wrapped_in_insufficient_inventory(self):
-        """start >= end must NOT be swallowed into InsufficientInventoryError."""
+        """start >= end must NOT be swallowed into InsufficientPoolCapacityError."""
         code = self._service_code()
         # The start/end check must come before the for-loop try/catch block.
         # Verify: 'Start date must be before end date' appears before 'for (const candidate'

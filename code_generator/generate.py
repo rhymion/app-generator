@@ -810,6 +810,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         if not on_approved:
             continue
         x_ledger_source = def_val.get('x-ledger-source', {})
+        x_splittable = def_val.get('x-splittable', {})
         entity_props = def_val.get('properties', {})
         resolved_sf = _resolve_set_fields(entity_props, on_approved.get('set_fields') or {})
         # OD-1: domain resolution (required — no defaults — only when this
@@ -831,6 +832,22 @@ def generate(schema_path: str, output_dir: str) -> None:
                 # a ledger-source entity's bridge FK is declared identically.
                 'bridge_fk_field': get_splittable_bridge_field(def_val),
             }
+        elif x_splittable.get('ledgerDomain'):
+            # Phase 3 / OD-3 (Option B): a splittable, approval-driven entity with
+            # no x-ledger-source of its own (e.g. purchase_per_item) is the "Ship"
+            # side of a ledger_transaction reservation — reserved_quantity was
+            # already moved at reserve time, and approval nets outstanding
+            # reserved_delta per lot before writing the ship row(s). Resolve the
+            # same domain the split route uses (x-splittable.ledgerDomain) so the
+            # generated skeleton names the real entities instead of a bare TODO.
+            _ent_domain = resolve_ledger_domain(schema, x_splittable['ledgerDomain'])
+            _ent_domain_vars = {
+                'ledger_entity': _ent_domain['ledger'],
+                'transactionable_entity': _ent_domain['transactionable'],
+                'pool_entity': _ent_domain['pool'],
+                'bridge_fk_field': get_splittable_bridge_field(def_val),
+                'is_ship_skeleton': True,
+            }
         approvable_entities.append({
             'snake_name': def_key,
             'pascal_name': to_pascal_case(def_key),
@@ -838,6 +855,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'emit_hook': bool(on_approved.get('emit_hook', False)),
             'has_ledger_source': bool(x_ledger_source),
             'ledger_source': x_ledger_source,
+            'is_ship_skeleton': False,
             **_ent_domain_vars,
         })
     _write(

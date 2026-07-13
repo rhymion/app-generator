@@ -228,7 +228,7 @@ export const reserve{{ parent_pascal }} = async (
       });
       return { success: true, {{ reservation_config.allocatedField }}: candidate.id };
     }
-    throw new InsufficientInventoryError('No available {{ reservation_config.pool.entity }} for reservation');
+    throw new InsufficientPoolCapacityError('No available {{ reservation_config.pool.entity }} for reservation');
 {% else %}
     const candidate = await (tx as unknown as typeof prisma).{{ reservation_config.pool.entity }}.findFirst({
       where: {
@@ -250,7 +250,7 @@ export const reserve{{ parent_pascal }} = async (
 {% endif %}
     });
     if (!candidate) {
-      throw new InsufficientInventoryError('No available {{ reservation_config.pool.entity }} for reservation');
+      throw new InsufficientPoolCapacityError('No available {{ reservation_config.pool.entity }} for reservation');
     }
 {% if reservation_config.dateRange %}
     await assertNoDuplicateReservation(

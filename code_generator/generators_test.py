@@ -1893,7 +1893,7 @@ def helper_context(
             })
 
     # Detect count-mode reservation WITH lines: populateDependencies must seed the pool entity
-    # so that create tests (2.1, 2.2) can allocate inventory without hitting InsufficientInventoryError.
+    # so that create tests (2.1, 2.2) can allocate inventory without hitting InsufficientPoolCapacityError.
     reservation_lines_pool_seed = None
     _xres_h = parent_def.get('x-reservation')
     if (_xres_h and isinstance(_xres_h, dict)
