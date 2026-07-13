@@ -1137,6 +1137,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             reservation_config = {
                 'mode': 'count',
                 'transaction_strategy': (_xres.get('transaction') or {}).get('strategy', 'conditional_update'),
+                # OD-1: ledgerDomain reference key (only meaningful for strategy: ledger_transaction)
+                'ledger_domain': (_xres.get('transaction') or {}).get('ledgerDomain'),
                 'lines': _lines_prop,
                 'lines_entity': _lines_entity,
                 'pool': _xres.get('pool') or {},

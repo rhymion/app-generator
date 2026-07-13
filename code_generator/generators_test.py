@@ -60,7 +60,14 @@ def _enum_label(field: dict, value) -> str:
 from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
 )
-from helpers.schema_helpers import filter_fields, get_parent_relationships, is_optional_fk_to_parent, get_flatten_rels
+from helpers.schema_helpers import (
+    filter_fields,
+    get_parent_relationships,
+    is_optional_fk_to_parent,
+    get_flatten_rels,
+    get_splittable_bridge_field,
+    resolve_ledger_domain,
+)
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import build_label_expression, render_prisma_include, resolve_label_paths
 from build_context import _get_entity_options
@@ -216,6 +223,15 @@ def _seed_path_part(
     final_field = segments[-1]
     leaf_def = schema['definitions'].get(cursor_entity, {})
     label_prop = _get_base_properties(leaf_def).get(final_field, {})
+
+    # nullable non-required field → not set by fixture → null → '' in UI
+    leaf_required = set(leaf_def.get('required') or [])
+    if final_field not in leaf_required:
+        _ptype_raw = label_prop.get('type')
+        _ptypes = _ptype_raw if isinstance(_ptype_raw, list) else ([_ptype_raw] if _ptype_raw else [])
+        if 'null' in _ptypes:
+            return ''
+
     prop_type_raw = label_prop.get('type')
     prop_type = next((t for t in prop_type_raw if t != 'null'), None) if isinstance(prop_type_raw, list) else prop_type_raw
 
@@ -713,11 +729,13 @@ def _child_system_managed_fk_excludes(child_def: dict) -> set[str]:
 
     - x-relationship.type == 'one-to-one_bridge' (e.g. approvable_id): the
       generic internal-bridge FK marker used throughout code_generator.
-    - 'inventory_transactionable_id': the reservation/ledger line-transactionable
-      FK. It intentionally carries no x-relationship (inventory_transactionable
-      has no x-generate/pages — see build_context.py _child_bridge_excludes and
-      generators.py line_txable_f), so — consistent with that existing
-      by-name exclusion — it is matched by name here too.
+    - the reservation/ledger line-transactionable FK, config-driven via
+      x-splittable.bridgeField (cmd_312 Phase1, see
+      get_splittable_bridge_field). It intentionally carries no
+      x-relationship (inventory_transactionable has no x-generate/pages —
+      see build_context.py _child_bridge_excludes and generators.py
+      line_txable_f), so — consistent with that existing by-name
+      exclusion — it is matched by resolved field name here too.
     - 'parent_id' on x-splittable children (e.g. receiving_receipt_line): the
       self-FK to the pre-split parent row (see generate.py split inherited_fields
       exclusion list, which treats it the same way).
@@ -727,8 +745,9 @@ def _child_system_managed_fk_excludes(child_def: dict) -> set[str]:
         prop_name for prop_name, prop in props.items()
         if isinstance(prop, dict) and (prop.get('x-relationship') or {}).get('type') == 'one-to-one_bridge'
     }
-    if 'inventory_transactionable_id' in props:
-        excludes.add('inventory_transactionable_id')
+    _bridge_field = get_splittable_bridge_field(child_def)
+    if _bridge_field in props:
+        excludes.add(_bridge_field)
     if child_def.get('x-splittable') and 'parent_id' in props:
         excludes.add('parent_id')
     return excludes
@@ -1157,7 +1176,7 @@ def gen_child_full_datagrid_object(child_meta: dict) -> str:
     return '{ ' + ', '.join(entries) + ' }'
 
 
-def gen_child_datagrid_fk_fields(fields: list) -> list[dict]:
+def gen_child_datagrid_fk_fields(fields: list, schema: dict | None = None) -> list[dict]:
     """Return [{field, label_code}] for FK (singleSelect) fields in a datagrid child.
 
     Uses prop-stem-based label so reference_id → 'Test Reference' (not 'Test Db Table').
@@ -1176,8 +1195,13 @@ def gen_child_datagrid_fk_fields(fields: list) -> list[dict]:
         if f['category'] != 'autocomplete' or not f.get('dep_target'):
             continue
         stem = re.sub(r'_id$', '', f['prop_name'])
-        if f.get('dep_label_field') == 'id':
+        dep_label_field = f.get('dep_label_field')
+        dep_target = f.get('dep_target')
+        if dep_label_field == 'id':
             label_code = f'deps.{to_camel_case(stem)}.id'
+        elif isinstance(dep_label_field, list) and schema is not None:
+            raw = _seed_relation_label_value(dep_target, dep_label_field, False, schema)
+            label_code = f"'{raw}'"
         else:
             label_code = f"'Test {to_title_case(stem)}'"
         result.append({'field': f['prop_name'], 'label_code': label_code})
@@ -1877,7 +1901,13 @@ def helper_context(
             and _xres_h.get('lines')):
         _pool_cfg_h = _xres_h.get('pool', {})
         _request_cfg_h = _xres_h.get('request', {})
+        # OD-1: strategy: ledger_transaction resolves pool.entity via
+        # transaction.ledgerDomain instead of declaring it directly.
         _pool_entity_h = _pool_cfg_h.get('entity')
+        if not _pool_entity_h:
+            _domain_key_h = (_xres_h.get('transaction') or {}).get('ledgerDomain')
+            if _domain_key_h:
+                _pool_entity_h = resolve_ledger_domain(schema, _domain_key_h)['pool']
         _pool_qty_h = _pool_cfg_h.get('quantityField', 'quantity')
         _criteria_h = _request_cfg_h.get('criteria', {})
         _crit_pool_field_h = next(iter(_criteria_h.keys()), None)
@@ -2293,8 +2323,8 @@ def spec_context(
     datagrid_children_data = []
     for child_meta in datagrid_children:
         child_name = child_meta['child']['name']
-        fk_create_fields = gen_child_datagrid_fk_fields(child_meta['required_fields'])
-        fk_full_fields = gen_child_datagrid_fk_fields(child_meta['fields'])
+        fk_create_fields = gen_child_datagrid_fk_fields(child_meta['required_fields'], schema)
+        fk_full_fields = gen_child_datagrid_fk_fields(child_meta['fields'], schema)
         datagrid_children_data.append({
             'title': child_meta['names']['title'],
             'pascal': to_pascal_case(child_name),
@@ -2451,7 +2481,7 @@ def spec_context(
             fail_create_5_2_scalar = {
                 'title': child_title,
                 'partial_obj': ('{ ' + ', '.join(entries) + ' }') if entries else None,
-                'fk_fields': gen_child_datagrid_fk_fields(fk_required),
+                'fk_fields': gen_child_datagrid_fk_fields(fk_required, schema),
                 'fill_cmds': gen_fill_commands(required_field_metas, title, I),
             }
 
@@ -3105,7 +3135,14 @@ def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
     result_cfg  = x_res.get('result', {})
     policy_cfg  = x_res.get('policy', {})
 
+    # OD-1: strategy: ledger_transaction entities resolve pool.entity via
+    # transaction.ledgerDomain (x-ledger-entities) instead of declaring it
+    # directly on x-reservation.pool.
     pool_entity = pool_cfg.get('entity', '')
+    if not pool_entity:
+        _domain_key = (x_res.get('transaction') or {}).get('ledgerDomain')
+        if _domain_key:
+            pool_entity = resolve_ledger_domain(schema, _domain_key)['pool']
     pool_def    = defs.get(pool_entity, {})
     pool_props  = pool_def.get('properties', {})
 

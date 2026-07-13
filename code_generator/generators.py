@@ -17,6 +17,7 @@ from helpers.schema_helpers import (
     find_fk_derivation_path,
     get_detail_properties,
     get_approval_lines_props,
+    resolve_ledger_domain,
 )
 from helpers.label_field import (
     build_label_expression,
@@ -779,7 +780,17 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     pol            = rc.get('policy') or {}
     res            = rc.get('result') or {}
 
-    pool_entity    = pool.get('entity', 'inventory')
+    # OD-1: domain resolution (required — no defaults)
+    domain_key = rc.get('ledger_domain')
+    if not domain_key:
+        raise ValueError(
+            f"x-reservation for {model!r}: transaction.ledgerDomain is required (OD-1)"
+        )
+    _domain               = resolve_ledger_domain(schema or {}, domain_key)
+    pool_entity           = _domain['pool']
+    ledger_entity         = _domain['ledger']
+    transactionable_entity = _domain['transactionable']
+
     pool_qty_field = pool.get('quantityField', 'quantity')
     pool_res_field = pool.get('reservedField', 'reserved_quantity')
     lines_prop     = rc.get('lines')
@@ -787,7 +798,11 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     req_qty_field  = req.get('quantityField', 'quantity')
     criteria       = req.get('criteria') or {}
     policy_order   = pol.get('orderBy') or []
-    line_txable_f  = res.get('lineTransactionableField') or 'inventory_transactionable_id'
+    line_txable_f  = res.get('lineTransactionableField')
+    if not line_txable_f:
+        raise ValueError(
+            f"x-reservation for {model!r}: result.lineTransactionableField is required (OD-1)"
+        )
     entity_name    = lines_entity or model
     has_lines      = rc.get('hasLines', bool(lines_entity))
     self_qty_field = rc.get('selfQuantityField', req_qty_field)
@@ -819,7 +834,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"        }},\n"
         + (f"        orderBy: [{order_str}],\n" if order_str else '') +
         f"      }});\n"
-        f"      const bridge = await tx.inventory_transactionable.create({{ data: {{}} }});\n"
+        f"      const bridge = await tx.{transactionable_entity}.create({{ data: {{}} }});\n"
         f"      for (const _candidate of _candidates) {{\n"
         f"        if (_remaining <= 0) break;\n"
         f"        const _available = _candidate.{pool_qty_field} - _candidate.{pool_res_field};\n"
@@ -831,9 +846,9 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"        }});\n"
         f"        if (_claimResult.count > 0) {{\n"
         f"          _remaining -= _claim;\n"
-        f"          await tx.inventory_transaction.create({{\n"
+        f"          await tx.{ledger_entity}.create({{\n"
         f"            data: {{\n"
-        f"              inventory_transactionable_id: bridge.id,\n"
+        f"              {line_txable_f}: bridge.id,\n"
         f"              event_type: 'reserve',\n"
         f"              quantity_delta: 0,\n"
         f"              reserved_delta: _claim,\n"
@@ -936,7 +951,9 @@ def _build_reservation_mutation_guard_update_ledger(rc: dict, model: str) -> str
     A line counts as "allocated" once it has a non-null lineTransactionableField.
     """
     res            = rc.get('result') or {}
-    line_txable_f  = res.get('lineTransactionableField') or 'inventory_transactionable_id'
+    line_txable_f  = res.get('lineTransactionableField')
+    if not line_txable_f:
+        raise ValueError(f"x-reservation for {model!r}: result.lineTransactionableField is required")
     lines_entity   = rc.get('lines_entity') or ''
     lines_prop     = rc.get('lines') or 'items'
     lines_var      = to_camel_case(lines_prop)
@@ -993,7 +1010,9 @@ def _build_reservation_mutation_guard_update_ledger(rc: dict, model: str) -> str
 def _build_reservation_mutation_guard_delete_ledger(rc: dict, model: str) -> str:
     """Delete guard for strategy: ledger_transaction (no allocationEntity)."""
     res            = rc.get('result') or {}
-    line_txable_f  = res.get('lineTransactionableField') or 'inventory_transactionable_id'
+    line_txable_f  = res.get('lineTransactionableField')
+    if not line_txable_f:
+        raise ValueError(f"x-reservation for {model!r}: result.lineTransactionableField is required")
     lines_entity   = rc.get('lines_entity') or ''
 
     if not lines_entity:
@@ -1027,7 +1046,9 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
     pol         = rc.get('policy') or {}
     res         = rc.get('result') or {}
 
-    pool_entity     = pool.get('entity', 'inventory')
+    pool_entity     = pool.get('entity')
+    if not pool_entity:
+        raise ValueError(f"x-reservation for {model!r}: pool.entity is required")
     pool_qty_field  = pool.get('quantityField', 'quantity')
     pool_res_field  = pool.get('reservedField', 'reserved_quantity')
     lines_prop      = rc.get('lines')  # None when no lines configured
@@ -1233,7 +1254,9 @@ def _build_reservation_action_functions(rc: dict, model: str, schema: dict | Non
     if not actions:
         return ''
     pool = rc.get('pool') or {}
-    pool_entity = pool.get('entity', 'inventory')
+    pool_entity = pool.get('entity')
+    if not pool_entity:
+        raise ValueError(f"x-reservation for {model!r}: pool.entity is required in action functions")
     pool_qty_field = pool.get('quantityField', 'quantity')
     pool_res_field = pool.get('reservedField', 'reserved_quantity')
     res = rc.get('result') or {}
@@ -2188,8 +2211,18 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     one_to_one_fk_props = {r['prop_name'] for r in ctx.get('one_to_one_rels', [])}
     flatten_rels_raw = ctx.get('flatten_rels', [])
     flatten_m2o_fk_props = ctx.get('flatten_m2o_fk_props', set())
+    # Unrelated *able_id technical FKs with no x-relationship (e.g.
+    # inventory_transactionable_id) are system-managed internal bridge FKs —
+    # mirrors the same exclusion in column_def_context.
+    bridge_fk_no_rel_props = {
+        k for k in filtered_props
+        if k.endswith('able_id') and not filtered_props[k].get('x-relationship')
+    }
     # m2o flatten FK props are rendered as accordion sections, not plain FK TextFields
-    EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'} | one_to_one_fk_props | flatten_m2o_fk_props
+    EXCLUDE = (
+        {'id', 'created_at', 'updated_at', 'creator_id'}
+        | one_to_one_fk_props | flatten_m2o_fk_props | bridge_fk_no_rel_props
+    )
     parent_props = [k for k in filtered_props if k not in EXCLUDE]
 
     custom_view_props = [

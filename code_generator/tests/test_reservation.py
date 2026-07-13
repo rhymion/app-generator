@@ -1563,10 +1563,9 @@ def _po_def_ledger_transaction() -> dict:
     base = _po_def_no_reservation()
     base["x-reservation"] = {
         "mode": "count",
-        "transaction": {"strategy": "ledger_transaction"},
+        "transaction": {"strategy": "ledger_transaction", "ledgerDomain": "inventory_domain"},
         "lines": "lines",
         "pool": {
-            "entity": "inventory",
             "quantityField": "quantity",
             "reservedField": "reserved_quantity",
         },
@@ -1598,6 +1597,14 @@ def _make_ledger_schema() -> dict:
         "type": ["string", "null"],
         "pattern": "^c[a-z0-9]{24,}$",
     }
+    # OD-1: top-level domain declaration resolved via transaction.ledgerDomain
+    schema["x-ledger-entities"] = {
+        "inventory_domain": {
+            "pool": "inventory",
+            "ledger": "inventory_transaction",
+            "transactionable": "inventory_transactionable",
+        }
+    }
     return schema
 
 
@@ -1610,7 +1617,8 @@ def _ledger_reservation_config() -> dict:
 
 def _ledger_allocation_code() -> str:
     rc = _ledger_reservation_config()
-    return _build_reservation_allocation_code(rc, "purchase_order")
+    schema = _make_ledger_schema()
+    return _build_reservation_allocation_code(rc, "purchase_order", schema)
 
 
 class TestLedgerTransactionReservePath:

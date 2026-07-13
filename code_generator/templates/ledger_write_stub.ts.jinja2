@@ -31,39 +31,39 @@ export async function afterApprove(
   if (!entity.approvable_id) return;
 
   // FS-3 defensive guard: ledger writes require a resolved inventory target.
-  if (!entity.inventory_id) throw new Error('inventory_id required for ledger write ({{ snake_name }})');
+  if (!entity.{{ ledger_source.poolIdField }}) throw new Error('{{ ledger_source.poolIdField }} required for ledger write ({{ snake_name }})');
 
   // Idempotency guard: entity-level (preferred over approvable.approved_at check)
   // NOTE: approved_at is set by approve route BEFORE this function runs in the
   // same transaction, so approvable-level guard would always fire. Use entity-level
   // check instead: verify that no inventory_transaction exists for this source.
-  if (entity.inventory_transactionable_id) {
-    const existing = await tx.inventory_transaction.findFirst({
-      where: { inventory_transactionable_id: entity.inventory_transactionable_id },
+  if (entity.{{ bridge_fk_field }}) {
+    const existing = await tx.{{ ledger_entity }}.findFirst({
+      where: { {{ bridge_fk_field }}: entity.{{ bridge_fk_field }} },
     });
     if (existing) return; // already written (idempotent)
   }
 
   // Step 1: Create bridge if not already exists
-  const bridge = entity.inventory_transactionable_id
-    ? { id: entity.inventory_transactionable_id }
-    : await tx.inventory_transactionable.create({ data: {} });
+  const bridge = entity.{{ bridge_fk_field }}
+    ? { id: entity.{{ bridge_fk_field }} }
+    : await tx.{{ transactionable_entity }}.create({ data: {} });
 
   // Step 2: Link bridge to entity (if newly created)
-  if (!entity.inventory_transactionable_id) {
+  if (!entity.{{ bridge_fk_field }}) {
     await tx.{{ snake_name }}.update({
       where: { id: entityId },
-      data: { inventory_transactionable_id: bridge.id },
+      data: { {{ bridge_fk_field }}: bridge.id },
     });
   }
 
   // Step 3: Get inventory identity (O-6 non-normalized fields)
-  const inventory = await tx.inventory.findUniqueOrThrow({ where: { id: entity.inventory_id } });
+  const inventory = await tx.{{ pool_entity }}.findUniqueOrThrow({ where: { id: entity.{{ ledger_source.poolIdField }} } });
 
   // Step 4: INSERT inventory_transaction
-  await tx.inventory_transaction.create({
+  await tx.{{ ledger_entity }}.create({
     data: {
-      inventory_transactionable_id: bridge.id,
+      {{ bridge_fk_field }}: bridge.id,
       event_type: '{{ ledger_source.event_type }}',
       quantity_delta: {% if ledger_source.quantity_delta_field %}entity.{{ ledger_source.quantity_delta_field }}{% else %}{{ ledger_source.quantity_delta | default(0) }}{% endif %}, // O-4
       reserved_delta: {% if ledger_source.reserved_delta_field %}entity.{{ ledger_source.reserved_delta_field }}{% else %}{{ ledger_source.reserved_delta | default(0) }}{% endif %}, // O-4
@@ -79,8 +79,8 @@ export async function afterApprove(
   });
 
   // Step 5: Update inventory cache (materialized SUM)
-  await tx.inventory.update({
-    where: { id: entity.inventory_id },
+  await tx.{{ pool_entity }}.update({
+    where: { id: entity.{{ ledger_source.poolIdField }} },
     data: {
       quantity: { increment: {% if ledger_source.quantity_delta_field %}entity.{{ ledger_source.quantity_delta_field }}{% else %}{{ ledger_source.quantity_delta | default(0) }}{% endif %} },
       reserved_quantity: { increment: {% if ledger_source.reserved_delta_field %}entity.{{ ledger_source.reserved_delta_field }}{% else %}{{ ledger_source.reserved_delta | default(0) }}{% endif %} },
@@ -107,10 +107,10 @@ export async function afterReject(
   const entity = await tx.{{ snake_name }}.findFirst({
     where: { approvable_id: approvableId },
   });
-  if (!entity || !entity.inventory_transactionable_id) return;
+  if (!entity || !entity.{{ bridge_fk_field }}) return;
 
-  const priorTxs = await tx.inventory_transaction.findMany({
-    where: { inventory_transactionable_id: entity.inventory_transactionable_id },
+  const priorTxs = await tx.{{ ledger_entity }}.findMany({
+    where: { {{ bridge_fk_field }}: entity.{{ bridge_fk_field }} },
   });
   if (priorTxs.some((t) => t.event_type === '{{ ledger_source.reject_event_type }}')) return; // idempotent
 
@@ -120,9 +120,9 @@ export async function afterReject(
   const source = priorTxs[0];
 
   // O-4: reject never touches physical quantity; only releases the reserved slot.
-  await tx.inventory_transaction.create({
+  await tx.{{ ledger_entity }}.create({
     data: {
-      inventory_transactionable_id: entity.inventory_transactionable_id,
+      {{ bridge_fk_field }}: entity.{{ bridge_fk_field }},
       event_type: '{{ ledger_source.reject_event_type }}',
       quantity_delta: 0,
       reserved_delta: -reservedQty,
@@ -137,7 +137,7 @@ export async function afterReject(
   });
 
   // O-6: inventory has no direct FK — re-identify via denormalized fields.
-  const inventoryCache = await tx.inventory.findFirst({
+  const inventoryCache = await tx.{{ pool_entity }}.findFirst({
     where: {
       product_id: source.product_id,
       location: source.location,
@@ -146,7 +146,7 @@ export async function afterReject(
     },
   });
   if (inventoryCache) {
-    await tx.inventory.update({
+    await tx.{{ pool_entity }}.update({
       where: { id: inventoryCache.id },
       data: {
         reserved_quantity: { decrement: reservedQty },

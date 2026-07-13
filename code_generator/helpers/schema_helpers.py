@@ -172,6 +172,26 @@ def get_splittable_bridge_field(entity_def: dict) -> str:
     return split_dict.get('bridgeField', 'inventory_transactionable_id')
 
 
+def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
+    """Resolve x-ledger-entities[domain_key] to {pool, ledger, transactionable}.
+
+    OD-1 underlying idea: config required, no defaults. Raises ValueError if
+    the domain or any of its required keys is not declared in the schema.
+    """
+    domains = schema.get('x-ledger-entities') or {}
+    if domain_key not in domains:
+        raise ValueError(f"x-ledger-entities.{domain_key!r} not declared in schema")
+    domain = domains[domain_key]
+    for required_key in ('pool', 'ledger', 'transactionable'):
+        if required_key not in domain:
+            raise ValueError(f"x-ledger-entities.{domain_key!r}.{required_key!r} is required")
+    return {
+        'pool': domain['pool'],
+        'ledger': domain['ledger'],
+        'transactionable': domain['transactionable'],
+    }
+
+
 def get_detail_relation_name(parent: str, target: str, schema: dict, detail_key: str | None = None) -> str:
     """Resolves the property name that $ref-s to `target` in the detail definition.
     e.g. for target='organization', finds 'organization' property with $ref: '#/definitions/organization'

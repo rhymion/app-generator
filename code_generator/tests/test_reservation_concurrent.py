@@ -306,10 +306,9 @@ def _po_def_ledger_transaction() -> dict:
         },
         "x-reservation": {
             "mode": "count",
-            "transaction": {"strategy": "ledger_transaction"},
+            "transaction": {"strategy": "ledger_transaction", "ledgerDomain": "inventory_domain"},
             "lines": "lines",
             "pool": {
-                "entity": "inventory",
                 "quantityField": "quantity",
                 "reservedField": "reserved_quantity",
             },
@@ -337,6 +336,14 @@ def _get_ledger_service_context() -> dict:
     schema["definitions"]["order_line"]["properties"]["inventory_transactionable_id"] = {
         "type": ["string", "null"],
         "pattern": "^c[a-z0-9]{24,}$",
+    }
+    # OD-1: top-level domain declaration resolved via transaction.ledgerDomain
+    schema["x-ledger-entities"] = {
+        "inventory_domain": {
+            "pool": "inventory",
+            "ledger": "inventory_transaction",
+            "transactionable": "inventory_transactionable",
+        }
     }
     entity = {
         "parent": "purchase_order",

@@ -99,14 +99,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       // availability check double-counts against it and trips a false
       // 'Concurrent reservation conflict'. Same $transaction, so isolation
       // is preserved regardless of ordering.
-      if ((parent as Record<string, unknown>).inventory_transactionable_id) {
+      if ((parent as Record<string, unknown>).{{ bridge_fk_field }}) {
         const _parentBridgeId = (parent as Record<string, unknown>)
-          .inventory_transactionable_id as string;
-        const _parentReserveRows = await tx.inventory_transaction.findMany({
-          where: { inventory_transactionable_id: _parentBridgeId, event_type: 'reserve' },
+          .{{ bridge_fk_field }} as string;
+        const _parentReserveRows = await tx.{{ ledger_entity }}.findMany({
+          where: { {{ bridge_fk_field }}: _parentBridgeId, event_type: 'reserve' },
         });
         for (const _row of _parentReserveRows) {
-          await tx.inventory.updateMany({
+          await tx.{{ pool_entity }}.updateMany({
             where: {
               product_id: _row.product_id,
               // O-6 denormalization: inventory_transaction.location stores '' for null-location
@@ -118,9 +118,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             },
             data: { reserved_quantity: { decrement: _row.reserved_delta } },
           });
-          await tx.inventory_transaction.create({
+          await tx.{{ ledger_entity }}.create({
             data: {
-              inventory_transactionable_id: _parentBridgeId,
+              {{ bridge_fk_field }}: _parentBridgeId,
               event_type: 'cancel',
               quantity_delta: 0,
               reserved_delta: -_row.reserved_delta,
@@ -161,32 +161,41 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         // unspecified part — normalize it to undefined so it doesn't slip
         // past a nullish (`??`) check downstream and get written as an
         // invalid inventory_id FK.
-        const _childInventoryIdRaw = (part as Record<string, unknown>).inventory_id as string | undefined;
+        const _childInventoryIdRaw = (part as Record<string, unknown>).{{ pool_fk_field }} as string | undefined;
         const _childInventoryId: string | undefined = _childInventoryIdRaw === '' ? undefined : _childInventoryIdRaw;
         let _childBridgeId: string;
 
         {% if split_reserves_inventory %}
         if (_childInventoryId) {
           // Specified lot: validate availability and reserve exactly that lot
-          const _childInv = await tx.inventory.findUnique({
+          const _childInv = await tx.{{ pool_entity }}.findUnique({
             where: { id: _childInventoryId },
             select: { id: true, quantity: true, reserved_quantity: true,
                       product_id: true, location: true, lot_number: true, expiration_date: true },
           });
           if (!_childInv) throw new ApiError(400, `Inventory not found: ${_childInventoryId}`);
+          {% if product_id_field %}
+          // item3: hard-fail a specified lot that doesn't belong to this part's
+          // product — the pre-fix code only checked existence, so a lot from an
+          // unrelated product could be reserved against this line.
+          const _childEffectiveProductId = (part.{{ product_id_field }} ?? parent.{{ product_id_field }}) as string;
+          if (_childInv.product_id !== _childEffectiveProductId) {
+            throw new ApiError(400, `Inventory ${_childInventoryId} belongs to a different product than this split part`);
+          }
+          {% endif %}
           const _childQty = part.{{ quantity_field }} as number;
-          const _claimResult = await tx.inventory.updateMany({
+          const _claimResult = await tx.{{ pool_entity }}.updateMany({
             where: { id: _childInventoryId,
                      reserved_quantity: { lte: _childInv.quantity - _childQty } },
             data: { reserved_quantity: { increment: _childQty } },
           });
           if (_claimResult.count === 0)
             throw new ApiError(409, 'Concurrent reservation conflict; please retry');
-          const _childBridge = await tx.inventory_transactionable.create({ data: {} });
+          const _childBridge = await tx.{{ transactionable_entity }}.create({ data: {} });
           _childBridgeId = _childBridge.id;
-          await tx.inventory_transaction.create({
+          await tx.{{ ledger_entity }}.create({
             data: {
-              inventory_transactionable_id: _childBridgeId,
+              {{ bridge_fk_field }}: _childBridgeId,
               event_type: 'reserve',
               quantity_delta: 0,
               reserved_delta: _childQty,
@@ -201,11 +210,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           // Auto-allocate: greedy scan by expiration_date asc, lot_number asc (same as PO creation)
           const _childQty = part.{{ quantity_field }} as number;
           const _parentForProduct = parent as Record<string, unknown>;
-          const _candidates = await tx.inventory.findMany({
+          const _candidates = await tx.{{ pool_entity }}.findMany({
             where: { product_id: _parentForProduct.{{ product_id_field }} as string, quantity: { gt: 0 } },
             orderBy: [{ expiration_date: { sort: 'asc', nulls: 'last' } }, { lot_number: 'asc' }, { id: 'asc' }],
           });
-          const _childBridge = await tx.inventory_transactionable.create({ data: {} });
+          const _childBridge = await tx.{{ transactionable_entity }}.create({ data: {} });
           _childBridgeId = _childBridge.id;
           let _remaining = _childQty;
           for (const _cand of _candidates) {
@@ -213,15 +222,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             const _avail = _cand.quantity - _cand.reserved_quantity;
             if (_avail <= 0) continue;
             const _claim = Math.min(_remaining, _avail);
-            const _claimResult = await tx.inventory.updateMany({
+            const _claimResult = await tx.{{ pool_entity }}.updateMany({
               where: { id: _cand.id, reserved_quantity: { lte: _cand.quantity - _claim } },
               data: { reserved_quantity: { increment: _claim } },
             });
             if (_claimResult.count > 0) {
               _remaining -= _claim;
-              await tx.inventory_transaction.create({
+              await tx.{{ ledger_entity }}.create({
                 data: {
-                  inventory_transactionable_id: _childBridgeId,
+                  {{ bridge_fk_field }}: _childBridgeId,
                   event_type: 'reserve',
                   quantity_delta: 0,
                   reserved_delta: _claim,
@@ -242,7 +251,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         // 'receive') — split does not reserve existing inventory; afterApprove
         // writes the receive ledger row at approval time. The child still
         // gets its own empty bridge so that hook has something to attach to.
-        const _childBridge = await tx.inventory_transactionable.create({ data: {} });
+        {% if product_id_field %}
+        if (_childInventoryId) {
+          // item3: hard-fail a specified lot that doesn't belong to this part's
+          // product here too — otherwise the mismatch would only surface later,
+          // silently, when afterApprove writes the receive ledger.
+          const _childInv = await tx.{{ pool_entity }}.findUnique({
+            where: { id: _childInventoryId },
+            select: { product_id: true },
+          });
+          if (!_childInv) throw new ApiError(400, `Inventory not found: ${_childInventoryId}`);
+          const _childEffectiveProductId = (part.{{ product_id_field }} ?? parent.{{ product_id_field }}) as string;
+          if (_childInv.product_id !== _childEffectiveProductId) {
+            throw new ApiError(400, `Inventory ${_childInventoryId} belongs to a different product than this split part`);
+          }
+        }
+        {% endif %}
+        const _childBridge = await tx.{{ transactionable_entity }}.create({ data: {} });
         _childBridgeId = _childBridge.id;
         {% endif %}
         {% endif %}
@@ -255,7 +280,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             {{ quantity_field }}: part.{{ quantity_field }},
             {% endif %}
             {% for f in per_part_required %}
-            {% if has_inventory_bridge and f == 'inventory_id' %}
+            {% if has_inventory_bridge and f == pool_fk_field %}
             // cmd_307 FIX-γ: use the normalized child lot id, not
             // `part.inventory_id ?? parent.inventory_id` — the child must
             // never inherit the parent's inventory_id (auto-allocate can
@@ -276,7 +301,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             approvable_id: childApprovable.id,
             {% endif %}
             {% if has_inventory_bridge %}
-            inventory_transactionable_id: _childBridgeId,
+            {{ bridge_fk_field }}: _childBridgeId,
             {% endif %}
           },
         });

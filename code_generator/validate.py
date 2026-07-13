@@ -297,20 +297,32 @@ def validate_schema(schema: dict) -> None:
         pool   = xres.get('pool') or {}
         result = xres.get('result') or {}
         lines  = xres.get('lines')
-        strategy = (xres.get('transaction') or {}).get('strategy', 'conditional_update')
+        xres_transaction = xres.get('transaction') or {}
+        strategy = xres_transaction.get('strategy', 'conditional_update')
         is_ledger_transaction = strategy == 'ledger_transaction'
 
-        # pool.entity is required for all modes
-        pool_entity = pool.get('entity')
-        if not pool_entity:
-            errors.append(
-                f"Definition '{def_key}': x-reservation.pool.entity is required."
-            )
-        elif pool_entity not in defs:
-            errors.append(
-                f"Definition '{def_key}': x-reservation.pool.entity '{pool_entity}' is not "
-                f"defined in the schema."
-            )
+        # OD-1: pool.entity is required for all modes, UNLESS the entity
+        # resolves its pool via transaction.ledgerDomain (x-ledger-entities).
+        ledger_domain_key = xres_transaction.get('ledgerDomain')
+        if not ledger_domain_key:
+            pool_entity = pool.get('entity')
+            if not pool_entity:
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.pool.entity is required "
+                    f"(or declare transaction.ledgerDomain to resolve pool from x-ledger-entities)."
+                )
+            elif pool_entity not in defs:
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.pool.entity '{pool_entity}' is not "
+                    f"defined in the schema."
+                )
+        else:
+            all_ledger_domains = schema.get('x-ledger-entities') or {}
+            if ledger_domain_key not in all_ledger_domains:
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.transaction.ledgerDomain "
+                    f"'{ledger_domain_key}' is not declared in x-ledger-entities."
+                )
 
         if mode == 'count':
             req = xres.get('request') or {}

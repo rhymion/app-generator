@@ -527,5 +527,69 @@ export function getGeneratedTasks() {
       const { populateReceivingReceiptReceivingReceiptLineData } = require('./receiving_receipt/helper');
       return await populateReceivingReceiptReceivingReceiptLineData(params.parentId, params.length || 1);
     },
+    async 'db:populateReceivingReceiptLineDependencies'() {
+      const { populateReceivingReceiptLineDependencies } = require('./receiving_receipt_line/helper');
+      return await populateReceivingReceiptLineDependencies();
+    },
+    async 'db:populateReceivingReceiptLine'(length: number) {
+      const { populateReceivingReceiptLineData } = require('./receiving_receipt_line/helper');
+      return await populateReceivingReceiptLineData(length);
+    },
+    async 'db:populateReceivingReceiptLineFull'(length: number) {
+      const { populateReceivingReceiptLineFullData } = require('./receiving_receipt_line/helper');
+      return await populateReceivingReceiptLineFullData(length);
+    },
+    async 'db:setupReceivingReceiptLineApprovalFlow'() {
+      const { setupReceivingReceiptLineApprovalFlow } = require('./receiving_receipt_line/helper');
+      return await setupReceivingReceiptLineApprovalFlow();
+    },
+    async 'db:setupReceivingReceiptLineOrderedApprovalFlow'() {
+      const { setupReceivingReceiptLineOrderedApprovalFlow } = require('./receiving_receipt_line/helper');
+      return await setupReceivingReceiptLineOrderedApprovalFlow();
+    },
+    async 'db:populateReceivingReceiptLineWithApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populateReceivingReceiptLineWithApproval } = require('./receiving_receipt_line/helper');
+      return await populateReceivingReceiptLineWithApproval(params.creatorId, params.approvalFlowIds);
+    },
+    async 'db:populateReceivingReceiptLineWithRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populateReceivingReceiptLineWithRejectedApproval } = require('./receiving_receipt_line/helper');
+      return await populateReceivingReceiptLineWithRejectedApproval(params.creatorId, params.approvalFlowIds);
+    },
+    async 'db:populateReceivingReceiptLineWithTerminalRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populateReceivingReceiptLineWithTerminalRejectedApproval } = require('./receiving_receipt_line/helper');
+      return await populateReceivingReceiptLineWithTerminalRejectedApproval(params.creatorId, params.approvalFlowIds);
+    },
+    async 'db:populatePurchasePerItemDependencies'() {
+      const { populatePurchasePerItemDependencies } = require('./purchase_per_item/helper');
+      return await populatePurchasePerItemDependencies();
+    },
+    async 'db:populatePurchasePerItem'(length: number) {
+      const { populatePurchasePerItemData } = require('./purchase_per_item/helper');
+      return await populatePurchasePerItemData(length);
+    },
+    async 'db:populatePurchasePerItemFull'(length: number) {
+      const { populatePurchasePerItemFullData } = require('./purchase_per_item/helper');
+      return await populatePurchasePerItemFullData(length);
+    },
+    async 'db:setupPurchasePerItemApprovalFlow'() {
+      const { setupPurchasePerItemApprovalFlow } = require('./purchase_per_item/helper');
+      return await setupPurchasePerItemApprovalFlow();
+    },
+    async 'db:setupPurchasePerItemOrderedApprovalFlow'() {
+      const { setupPurchasePerItemOrderedApprovalFlow } = require('./purchase_per_item/helper');
+      return await setupPurchasePerItemOrderedApprovalFlow();
+    },
+    async 'db:populatePurchasePerItemWithApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populatePurchasePerItemWithApproval } = require('./purchase_per_item/helper');
+      return await populatePurchasePerItemWithApproval(params.creatorId, params.approvalFlowIds);
+    },
+    async 'db:populatePurchasePerItemWithRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populatePurchasePerItemWithRejectedApproval } = require('./purchase_per_item/helper');
+      return await populatePurchasePerItemWithRejectedApproval(params.creatorId, params.approvalFlowIds);
+    },
+    async 'db:populatePurchasePerItemWithTerminalRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populatePurchasePerItemWithTerminalRejectedApproval } = require('./purchase_per_item/helper');
+      return await populatePurchasePerItemWithTerminalRejectedApproval(params.creatorId, params.approvalFlowIds);
+    },
   };
 }

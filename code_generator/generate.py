@@ -28,6 +28,7 @@ from build_context import build_context, _get_actual_type
 from helpers.label_field import build_label_expression
 from helpers.schema_helpers import derive_text_fields as _derive_text_fields
 from helpers.schema_helpers import get_splittable_bridge_field
+from helpers.schema_helpers import resolve_ledger_domain
 from generators import (
     chart_context,
     page_list_context,
@@ -656,6 +657,29 @@ def generate(schema_path: str, output_dir: str) -> None:
         _ledger_source = _def_val.get('x-ledger-source') or {}
         _split_reserves_inventory = _has_inventory_bridge and _ledger_source.get('event_type') != 'receive'
 
+        # OD-1: domain resolution (required — no defaults — only when this
+        # split entity actually has a ledger bridge to resolve).
+        _ledger_domain_vars = {}
+        if _has_inventory_bridge:
+            _domain_key = _splittable_dict.get('ledgerDomain')
+            if not _domain_key:
+                raise ValueError(
+                    f"x-splittable for {_def_key!r}: ledgerDomain is required when has_inventory_bridge (OD-1)"
+                )
+            _domain = resolve_ledger_domain(schema, _domain_key)
+            _pool_fk_field = _splittable_dict.get('poolIdField')
+            if not _pool_fk_field:
+                raise ValueError(
+                    f"x-splittable for {_def_key!r}: poolIdField is required when has_inventory_bridge (OD-1)"
+                )
+            _ledger_domain_vars = {
+                'ledger_entity': _domain['ledger'],
+                'transactionable_entity': _domain['transactionable'],
+                'pool_entity': _domain['pool'],
+                'bridge_fk_field': _bridge_field,
+                'pool_fk_field': _pool_fk_field,
+            }
+
         # perPartRequired fields are enforced as mandatory (every part must
         # supply a truthy value) only when they're also in the entity's own
         # top-level `required:` list. purchase_per_item.inventory_id is in
@@ -709,6 +733,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'split_reserves_inventory': _split_reserves_inventory,
             'product_id_field': _product_id_f,
             'per_part_required_mandatory': _per_part_req_mandatory,
+            **_ledger_domain_vars,
         }
         _split_api_dir = out / 'app' / 'api' / _def_key / '[id]' / 'actions' / 'split'
         _write(_split_api_dir / 'route.ts', _render(env, 'split_action_route.ts.jinja2', _split_ctx))
@@ -819,6 +844,25 @@ def generate(schema_path: str, output_dir: str) -> None:
         x_ledger_source = def_val.get('x-ledger-source', {})
         entity_props = def_val.get('properties', {})
         resolved_sf = _resolve_set_fields(entity_props, on_approved.get('set_fields') or {})
+        # OD-1: domain resolution (required — no defaults — only when this
+        # entity actually declares x-ledger-source).
+        _ent_domain_vars = {}
+        if x_ledger_source:
+            _ent_domain_key = x_ledger_source.get('ledgerDomain')
+            if not _ent_domain_key:
+                raise ValueError(
+                    f"x-ledger-source for {def_key!r}: ledgerDomain is required (OD-1)"
+                )
+            _ent_domain = resolve_ledger_domain(schema, _ent_domain_key)
+            _ent_domain_vars = {
+                'ledger_entity': _ent_domain['ledger'],
+                'transactionable_entity': _ent_domain['transactionable'],
+                'pool_entity': _ent_domain['pool'],
+                # Entity's own per-row bridge FK — same config source as the
+                # split-route bridge field (get_splittable_bridge_field), since
+                # a ledger-source entity's bridge FK is declared identically.
+                'bridge_fk_field': get_splittable_bridge_field(def_val),
+            }
         approvable_entities.append({
             'snake_name': def_key,
             'pascal_name': to_pascal_case(def_key),
@@ -826,6 +870,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'emit_hook': bool(on_approved.get('emit_hook', False)),
             'has_ledger_source': bool(x_ledger_source),
             'ledger_source': x_ledger_source,
+            **_ent_domain_vars,
         })
     _write(
         out / 'lib' / 'approval_request' / 'on_approved_dispatch.ts',

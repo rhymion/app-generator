@@ -10,6 +10,18 @@ x-generator:
   search:
     default_scope: all
 
+# OD-1: top-level ledger/transactionable/pool entity declarations. Each domain
+# groups the three entities that make up one ledger-transaction inventory-like
+# set — x-reservation.transaction.ledgerDomain, x-ledger-source.ledgerDomain,
+# and x-splittable.ledgerDomain reference a domain key here instead of hardcoding
+# entity names. Config required, no defaults — an undeclared domain is a
+# generator-time ValueError (see resolve_ledger_domain()).
+x-ledger-entities:
+  inventory_domain:
+    pool: inventory
+    ledger: inventory_transaction
+    transactionable: inventory_transactionable
+
 x-receiving:
   roles:
     purchase_order: receiving_purchase_order
@@ -1849,9 +1861,9 @@ definitions:
       mode: count
       transaction:
         strategy: ledger_transaction
+        ledgerDomain: inventory_domain
       lines: items
       pool:
-        entity: inventory
         quantityField: quantity
         reservedField: reserved_quantity
       request:
@@ -1895,6 +1907,19 @@ definitions:
       - quantity
       - status
       - approvable_id
+    x-display:
+      table:
+        - product:
+            primary: true
+            width: 200
+        - purchase_order:
+            width: 150
+        - inventory:
+            width: 250
+        - quantity:
+            width: 100
+        - status:
+            width: 120
     x-approval:
       on_approved:
         emit_hook: true
@@ -1904,6 +1929,8 @@ definitions:
     x-splittable:
       quantityField: quantity
       parentField: parent_id
+      ledgerDomain: inventory_domain
+      poolIdField: inventory_id
       perPartRequired:
         - inventory_id
     properties:
@@ -2683,6 +2710,19 @@ definitions:
       - status
       - inventory_id
       - approvable_id
+    x-display:
+      table:
+        - product:
+            primary: true
+            width: 200
+        - receiving_receipt:
+            width: 150
+        - inventory:
+            width: 250
+        - receipt_quantity:
+            width: 120
+        - status:
+            width: 120
     x-approval:
       on_approved:
         emit_hook: true
@@ -2703,10 +2743,13 @@ definitions:
       # column_def, getters include) for an entity whose x-generate already
       # disables new/edit (receiving_receipt_line_detail).
       parentField: parent_id
+      ledgerDomain: inventory_domain
+      poolIdField: inventory_id
     x-ledger-source:
+      ledgerDomain: inventory_domain
       event_type: receive
       quantity_delta_field: receipt_quantity
-      inventory_id_field: inventory_id
+      poolIdField: inventory_id
     properties:
       id:
         type: string
