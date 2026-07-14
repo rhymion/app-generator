@@ -42,6 +42,7 @@ model tenant {
   users      user[]   @relation("UserTenant")
 
   @@index([creator_id])
+  @@index([updater_id])
 }
 
 model user {
@@ -101,6 +102,7 @@ model user {
   @@index([api_key])
   @@index([creator_id])
   @@index([tenant_id])
+  @@index([updater_id])
 }
 
 model role {
@@ -119,6 +121,7 @@ model role {
   requestor_approval_flows approval_flow[] @relation("ApprovalFlowRequestorRole")
   approver_approval_flows  approval_flow[] @relation("ApprovalFlowApproverRole")
   @@index([creator_id])
+  @@index([updater_id])
 }
 
 model organization {
@@ -133,6 +136,7 @@ model organization {
   updater     user       @relation("OrganizationUpdater", fields: [updater_id], references: [id])
   users       user[]     @relation("UserOrganizations")
   @@index([creator_id])
+  @@index([updater_id])
 }
 
 model permission {
@@ -153,6 +157,8 @@ model permission {
 
   @@unique([name, role_id])
   @@index([creator_id])
+  @@index([role_id])
+  @@index([updater_id])
 }
 
 model approvable {
@@ -182,6 +188,9 @@ model approval_flow {
   updater_id       String
   updater          user @relation("ApprovalFlowUpdater", fields: [updater_id], references: [id])
   @@index([creator_id])
+  @@index([approver_role_id])
+  @@index([requestor_role_id])
+  @@index([updater_id])
 }
 
 model approval_request {
@@ -194,6 +203,8 @@ model approval_request {
   approval_histories approval_history[]
   created_at       DateTime @default(now()) @db.Timestamptz(0)
   updated_at       DateTime @updatedAt @db.Timestamptz(0)
+  @@index([approvable_id])
+  @@index([approval_flow_id])
 }
 
 model approval_history {
@@ -208,6 +219,7 @@ model approval_history {
   creator_id       String
   creator          user @relation("ApprovalHistoryCreator", fields: [creator_id], references: [id])
   @@index([creator_id])
+  @@index([approval_request_id])
 }
 
 model commentable {
@@ -226,6 +238,7 @@ model comment {
   creator_id     String
   creator        user @relation("CommentCreator", fields: [creator_id], references: [id])
   @@index([creator_id])
+  @@index([commentable_id])
 }
 
 model reaction {
@@ -260,6 +273,7 @@ model attachment {
   attachable             attachable @relation(fields: [attachable_id], references: [id], onDelete: Cascade)
   created_at             DateTime   @default(now()) @db.Timestamptz(0)
   updated_at             DateTime   @updatedAt @db.Timestamptz(0)
+  @@index([attachable_id])
 }
 
 model dashboard {
@@ -274,6 +288,7 @@ model dashboard {
   updater    user               @relation("DashboardUpdater", fields: [updater_id], references: [id])
 
   @@index([creator_id])
+  @@index([updater_id])
 }
 
 model dashboard_widget {
@@ -292,6 +307,7 @@ model dashboard_widget {
   order          Int       @default(0)
   created_at     DateTime  @default(now()) @db.Timestamptz(0)
   updated_at     DateTime  @updatedAt @db.Timestamptz(0)
+  @@index([dashboard_id])
 }
 
 // Append-only audit trail for security-relevant events: auth lifecycle
@@ -373,6 +389,7 @@ model Account {
   user              user    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 model Session {
@@ -381,6 +398,7 @@ model Session {
   userId       String
   expires      DateTime
   user         user     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
 }
 
 model VerificationToken {

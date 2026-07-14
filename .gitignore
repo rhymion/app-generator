@@ -9,7 +9,6 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
-package-lock.json
 
 # testing
 /coverage
@@ -164,6 +163,8 @@ app/api/*/
 app/api/approval_request/route.ts
 app/api/approval_request/\[id\]/route.ts
 app/api/approval_request/bulk/route.ts
+!app/api/audit_log/
+!app/api/audit_log/**
 
 # ── components/ ──
 components/*/*
@@ -180,12 +181,15 @@ components/setting/column_def.tsx
 cypress/e2e/*.cy.ts
 !cypress/e2e/auth.cy.ts
 !cypress/e2e/search_page.cy.ts
+!cypress/e2e/audit_log.cy.ts
 cypress/e2e/mobile/*.cy.ts
 !cypress/e2e/mobile/layout.cy.ts
+!cypress/e2e/mobile/audit_log.cy.ts
 cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/search.cy.ts
 !cypress/e2e/api/user_invalidate.cy.ts
 !cypress/e2e/api/user_invalidate_dp6.cy.ts
+!cypress/e2e/api/audit_log.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/

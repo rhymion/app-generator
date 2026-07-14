@@ -8,6 +8,8 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 [Next.js](https://nextjs.org/)、[Prisma](https://www.prisma.io/)、[MUI](https://mui.com/) で構築されています。
 
+> **旧バージョンからのアップグレードをお考えですか？** 3.0 の破壊的変更と移行手順は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照してください。
+
 ---
 
 ## 機能
@@ -44,7 +46,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 ### 組み込みシステム
 
 - **コメントスレッド** — ポリモーフィックブリッジパターンにより、任意のエンティティにコメントスレッドを付与。リアクションボタン対応（トグルエンドポイント・バッチ集計・親オーナー read 認可）
-- **添付ファイル管理** — ポリモーフィックブリッジ経由のファイル・画像アップロード
+- **添付ファイル管理** — ポリモーフィックブリッジ経由のファイル・画像アップロード；画像・ファイルのプレビューはエンティティごとに個別にオプトアウト可能（`AttachmentSection` の `showImages`/`showFiles` props、両方デフォルト `true`）
 - **インベントリ予約** — スキーマレベルの `x-reservation` による容量・在庫管理（count モードと item モード）
 - **ダッシュボードチャート** — スキーマから生成されるエンティティごとのチャートウィジェット（カラム・バー・ライン・パイ）；スタッキング・時間バケット・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント
 - **エンティティ横断検索** — オプトインしたエンティティへの UNION ALL による `GET /api/search`；ファセット・ハイライト・日本語 pg_bigm 対応；ヘッダー検索アイコンと検索ページを生成
@@ -55,12 +57,24 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - 高速 TTFB のためのストリーミング Suspense
 - ローディング中のスケルトン画面
 - データと権限の並列フェッチ
+- 直結接続パスにおけるクエリタイムアウトの設定（`STATEMENT_TIMEOUT_MS`、デフォルト30秒、`0` で無効化）
+- FK インデックスの自動網羅と、検索用の pg_trgm GIN インデックス自動生成
+- 検索の `COUNT(*)` オプトアウト（`SearchOpts.count: false`）で大量結果時に2本のCOUNTクエリをスキップ
 
 ### セキュリティ
 
 - レート制限（Redis、インメモリフォールバック付き）
 - CSRF 保護
 - Prisma によるパラメータ化クエリ
+
+### デプロイメント
+
+- **GCP Cloud Run**（`x-cloud` アノテーション、オプトイン） — マルチステージ `Dockerfile`、GCS バックエンドのアップロード（Signed URL アップロード + プロキシルート）、冪等な環境自動化スクリプト（`gcp-env.sh`、`gcp-setup.sh`、`gcp-deploy.sh`、`gcp-seed.sh`、`gcp-teardown.sh`）；`x-cloud` 未指定時は Vercel がデフォルトのまま
+
+### 監査・コンプライアンス
+
+- **監査ログ** — 全エンティティの作成・更新・削除操作を横断表示する、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）
+- **GDPR / データ保護** — `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）、`anonymizeUser()` 消去関数、`x-gdpr-mode` によるデータ主体区分の分類（`internal`/`consumer`/`both`。スキーマ検証のみで生成コードへの反映は未実装）、添付ファイル名の AES-256-GCM at-rest 暗号化、コメント内の `x-mention` ユーザーメンション解析
 
 ### その他
 
@@ -230,7 +244,7 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 ### 添付ファイル管理
 
-Vercel Blob をバックエンドとした、ポリモーフィックブリッジ経由のファイル・画像アップロードです。オプトインしたエンティティの詳細ページにはファイル添付パネルが表示されます。
+デフォルトでは Vercel Blob をバックエンドとした、ポリモーフィックブリッジ経由のファイル・画像アップロードです（`x-cloud` による GCP デプロイ有効時は GCS バックエンド — [デプロイメント](#デプロイメント)を参照）。オプトインしたエンティティの詳細ページにはファイル添付パネルが表示されます。画像・ファイルのプレビューはエンティティごとに個別に非表示にできます（`AttachmentSection` の `showImages`/`showFiles` props、両方デフォルト `true`）。
 
 ---
 
@@ -250,11 +264,27 @@ Vercel Blob をバックエンドとした、ポリモーフィックブリッ�
 
 ---
 
+## 監査・コンプライアンス
+
+**監査ログ** — `audit_log` モデル上に構築された、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）で、全生成エンティティの作成・更新・削除操作を横断表示します。`lib/audit_log/getters.ts` が FK JOIN でアクター（実行ユーザー）を解決し、`CardListPagination` でページネーションします。生JSONの `metadata` は admin 専用の詳細ページでのみ表示されます。`audit_log` モデルのカラム自体は2.0.0以前から存在しますが、JOIN先である `actor_user` リレーション（`onDelete: Restrict` の外部キー制約含む）は3.0の新規追加です — 詳細は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照。
+
+**GDPR / データ保護**:
+- `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）が、消去（GDPR第17条・忘れられる権利）時に `anonymizeUser()` がスクラブするフィールドを決定します。このスクラブはトランザクション内で不可逆的に実行され、参照整合性を保つためユーザー行自体は削除せず、`user` モデルに `anonymized_at` を記録します。
+- `x-gdpr-mode`（`internal`/`consumer`/`both`）はモデル/フィールド単位のデータ主体区分（対象が従業員データか一般消費者データか）を分類する注釈です。`code_generator/validate.py` でスキーマ検証はされますが、コード生成テンプレート側では未参照のため、3.0時点で生成コードへの影響はありません。
+- 添付ファイル名は AES-256-GCM で at-rest 暗号化されます（`lib/compliance/attachment_name_crypto.ts`）。
+- `x-mention` によりコメント内で `@[user_id:uuid]` メンション構文が有効になり、メンションパーサーが生成されます。
+
+---
+
 ## パフォーマンス
 
 - **ストリーミング Suspense**: ページが即座にブラウザへ HTML をストリームし、TTFB を削減します。データは Suspense 境界内で非同期に読み込まれます。
 - **スケルトン画面**: 生成されたすべてのリスト・詳細ページは、データ読み込み中にスケルトンを表示してレイアウトシフトを防ぎます。
 - **並列フェッチ**: データと権限チェックを `Promise.all` で並列フェッチし、サーバーへのラウンドトリップを最小化します。
+- **クエリタイムアウト**（`lib/prisma.ts`）: 直結接続（PrismaPg）パスにはデフォルト30秒の `statement_timeout` が適用されます。`STATEMENT_TIMEOUT_MS` で設定変更可能（`0` で無効化）。Accelerate パス（Vercel）は `statement_timeout` を転送しないため対象外です。
+- **FK インデックス網羅**: `scripts/add_required_indexes.py` が `@relation` の FK カラムを自動検出し `@@index` を追加します（ジェネレーターのデモスキーマは18本から36本へ増加）。
+- **検索用 pg_trgm GIN インデックス**: `generate-code` が `scripts/create-gin-indexes.sql` を生成し、`psql` で手動適用します — `gin_trgm_ops` による `prisma migrate dev` のドリフトループを避けるため `prisma/schema.prisma` の外に置いています。
+- **検索の `COUNT(*)` オプトアウト**: `SearchOpts.count: false` でエンティティ横断検索の2本の `COUNT(*)` クエリをスキップできます（`total: -1` を返却）。
 
 [docs/knowledge/performance-improvements.md](docs/knowledge/performance-improvements.md) を参照してください。
 
@@ -339,6 +369,34 @@ Next.js は `NODE_ENV` に基づいて環境ファイルを自動的に読み込
 
 ---
 
+## デプロイメント
+
+**Vercel** がデフォルトのデプロイ先です — 設定不要です。
+
+**GCP Cloud Run** は `code_generator/json_schema.yaml` の `x-cloud` アノテーションによるオプトインです（デフォルトでコメントアウト）。`enabled: true` と `provider: gcp` の両方を明示指定した場合のみ有効化され、未指定であれば生成物に影響はありません。
+
+有効化すると、`generate-code` は追加で以下を生成します:
+- `HEALTHCHECK` 付きのマルチステージ・non-root `Dockerfile` および `.dockerignore`
+- `output: 'standalone'` を設定した `next.config.ts`
+- GCS Signed URL アップロードルート（デフォルトの Vercel Blob アップロードルートを上書き）と V4 Signed URL プロキシルート（`app/api/gcs/[...path]/route.ts`）
+- Cloud Run 内部ポート `:8080` がリダイレクトの `Location` ヘッダーに漏出しないようにする `proxy.ts` のヘッダー書き換え
+
+`scripts/` 配下の冪等な自動化スクリプトが GCP 側を駆動します:
+
+| スクリプト | 用途 |
+|---|---|
+| `gcp-env.sh` | 環境変数の読み込み；シークレットの一度きり生成・永続化 |
+| `gcp-setup.sh` | GCP インフラ（Cloud SQL、サービスアカウント、Upstash、Secret Manager、GCS）の冪等プロビジョニング |
+| `gcp-deploy.sh` | イメージビルド・マイグレーション実行・Cloud Run へのデプロイ |
+| `gcp-seed.sh` | データベースのシード |
+| `gcp-teardown.sh` | GCP リソースの削除（2段階確認付き） |
+
+GCP はデータベースに直結します（`DATABASE_URL`、`PrismaPg`、pooler 無し、`STATEMENT_TIMEOUT_MS` 適用）。Vercel は `PRISMA_DATABASE_URL`（Accelerate）を使用し、Accelerate は `statement_timeout` を転送しないため `STATEMENT_TIMEOUT_MS` は無効です。
+
+詳細なランブックは [docs/knowledge/gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) を参照してください。
+
+---
+
 ## プロジェクト構成
 
 ```
@@ -415,6 +473,7 @@ app-generator/
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | 承認フローシステムの詳細、承認後イベント発火（`on_approved`） |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | コメントブリッジシステムの詳細 |
 | [cleanup.md](docs/knowledge/cleanup.md) | 生成ファイルの削除: デフォルトクリーンアップ、マニフェスト vs スキーマ駆動、`--prune-orphans`、孤児ファイル処理 |
+| [gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) | GCP Cloud Run デプロイ: `x-cloud` オプトイン、Dockerfile、GCS アップロード、環境自動化スクリプト |
 
 ---
 
@@ -448,8 +507,15 @@ app-generator/
 | 承認後イベント発火（on_approved） | ✅ 実装済み |
 | モバイルヘッダー / サイドバーアカウントセクション | ✅ 実装済み |
 | スキーマ駆動テキストエリア行数（x-ui.rows） | ✅ 実装済み |
+| GCP Cloud Run デプロイ（x-cloud） | ✅ 実装済み |
+| 監査ログビューア | ✅ 実装済み |
+| GDPR / データ保護（x-pii, anonymizeUser, x-gdpr-mode） | ✅ 実装済み |
+| 添付ファイル表示オプトアウト（showImages/showFiles） | ✅ 実装済み |
+| 性能ハードニング（statement_timeout, FK インデックス, GIN インデックス, COUNT オプトアウト） | ✅ 実装済み |
 
 > **後方互換（v1.4 → v1.5）**: 非破壊的変更。既存のスキーマはそのまま動作します。エンティティ横断検索はエンティティごとのオプトイン（`x-generate.search: true`）です。承認後イベント発火はスキーマに `x-approval.on_approved` を設定した場合のみ有効になります。
+
+> **後方互換（v2.0 → v3.0）**: 4領域で**破壊的変更**あり — デフォルト `statement_timeout`（30秒、直結接続パス）、`pageSize > 200` は切り詰めではなく `400` を返すように変更、新規 `user.anonymized_at` カラム、新規 `audit_log.actor_user` 外部キー制約。後二者は既存データベースで `prisma db push`/`migrate deploy` が必要（外部キーは事前に孤立行の掃除が必要な場合あり）。GCP デプロイ・添付ファイル表示オプトアウトは非破壊的です。詳細は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照してください。
 
 ### 開発中
 

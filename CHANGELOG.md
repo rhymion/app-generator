@@ -3,6 +3,101 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [3.0.0] - 2026-07-07
+
+> Consolidates five feature areas added since 2.0.0: GCP Cloud Run deployment,
+> an audit log viewer, GDPR/data-protection tooling, attachment display
+> opt-out, and a round of performance hardening. Released as a major bump
+> because the performance, data-protection, and audit-log work include
+> breaking changes.
+> Full upgrade steps: [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
+
+### BREAKING
+- **`statement_timeout` now enforced by default (soft breaking)** — the direct
+  (PrismaPg) Prisma connection path (`lib/prisma.ts`) now applies a 30-second
+  `statement_timeout` by default. Queries that previously ran unbounded (large
+  exports, complex reports) will now fail with a timeout error if they exceed
+  30 seconds. Configurable via the `STATEMENT_TIMEOUT_MS` env var; set it to a
+  higher value or `0` to disable. Applies only to the direct-connection path —
+  the Accelerate path (Vercel's `PRISMA_DATABASE_URL`) does not forward
+  `statement_timeout` and is unaffected.
+- **`pageSize > 200` now returns `400 Bad Request` (API contract breaking)** —
+  generated REST API routes (`code_generator/templates/api_route.ts.jinja2`)
+  previously truncated an over-limit `pageSize` query parameter to 200
+  silently. They now reject it with `400 Bad Request`. Existing API clients
+  that send `pageSize` above `MAX_PAGE_SIZE` (200) must cap the value
+  client-side before upgrading.
+- **`user.anonymized_at` column now required (soft breaking)** — the new
+  `anonymizeUser()` GDPR-erasure function (`lib/compliance/anonymize_user.ts`)
+  reads/writes `anonymized_at` on the `user` model. 3.0 adds the column as
+  nullable. Pre-3.0 databases must add it: `prisma db push` or
+  `prisma migrate deploy`. New nullable column — no backfill required (see
+  [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md)).
+- **`audit_log.actor_user_id` now enforces a foreign key to `user.id` (schema
+  breaking)** — `prisma/schema.prisma`'s `audit_log.actor_user` relation
+  (`onDelete: Restrict`) and the matching `user.audit_logs` back-relation were
+  added in `ec2cbb8` ("fix: Show audit log page", 2026-06-26), after the
+  2.0.0 cut (`git log`/`git blame` confirm both fields are absent at the
+  `v2.0.0` tag). Pre-3.0 schemas have no such constraint. `prisma db push` /
+  `prisma migrate deploy` will fail if any existing `audit_log.actor_user_id`
+  value references a `user` row that no longer exists — possible because the
+  pre-3.0 schema let a `user` be deleted without touching their audit history.
+  Clean up orphaned rows first, e.g.
+  `UPDATE audit_log SET actor_user_id = NULL WHERE actor_user_id IS NOT NULL
+  AND actor_user_id NOT IN (SELECT id FROM "user");`. Going forward, deleting
+  a `user` with existing `audit_log` rows is rejected instead of silently
+  orphaning them.
+
+### Added
+- **GCP Cloud Run deployment** (`x-cloud` annotation, opt-in — disabled unless
+  `enabled: true` and `provider: gcp` are both set explicitly) —
+  multi-stage/non-root/`HEALTHCHECK` `Dockerfile`, `.dockerignore`,
+  `next.config.ts` `output: 'standalone'`, a GCS Signed URL upload route
+  (overrides the default Vercel Blob route), a V4 Signed URL proxy route, and
+  `proxy.ts` header rewriting so Cloud Run's internal `:8080` port never leaks
+  into a redirect `Location` header. Idempotent environment automation scripts
+  (`scripts/gcp-env.sh`, `gcp-setup.sh`, `gcp-deploy.sh`, `gcp-seed.sh`,
+  `gcp-teardown.sh`) provision Cloud SQL/service account/Upstash/Secret
+  Manager/GCS and drive build+migrate+deploy. See
+  [docs/knowledge/gcp-automation-design.md](docs/knowledge/gcp-automation-design.md).
+  Pure opt-in — zero impact on existing (Vercel-default) apps.
+- **Audit log viewer** — `app/[locale]/audit_log/page.tsx`, a schema-agnostic
+  read-only viewer over the `audit_log` model. `lib/audit_log/getters.ts`
+  resolves the actor user via FK join, restricts the raw `metadata` JSON to the
+  admin-only detail page, and paginates via `CardListPagination`. The
+  `audit_log` model's core columns (id/actor_user_id/action/target_table/
+  target_id/metadata/created_at) predate 2.0.0, but the `actor_user` relation
+  it's joined through is new in 3.0 — see BREAKING above.
+- **Data protection / GDPR compliance** — `x-pii` annotation (`direct` /
+  `sensitive` / `indirect` classification), `anonymizeUser()` scrub function
+  (irreversible, transactional, preserves referential integrity), `x-gdpr-mode`
+  (model/field-level `internal` / `consumer` / `both` data-subject-scope
+  classification — validated by `code_generator/validate.py` but not yet read
+  by any codegen template, so it has no effect on generated code in 3.0),
+  AES-256-GCM at-rest attachment filename encryption
+  (`lib/compliance/attachment_name_crypto.ts`), and `x-mention` user-mention
+  parsing in comments.
+- **Attachment display opt-out** — `AttachmentSection` (`components/_standard/`)
+  gains `showImages` / `showFiles` props (both default `true`) so image/file
+  previews can be hidden per entity independently.
+- **Performance hardening** — automatic FK index coverage
+  (`scripts/add_required_indexes.py`, generator demo schema grew from 18 to 36
+  indexes), a generated pg_trgm GIN index script
+  (`scripts/create-gin-indexes.sql`, kept outside `prisma/schema.prisma` to
+  avoid a `prisma migrate dev` drift loop), and a `SearchOpts.count: false`
+  opt-out that skips both `COUNT(*)` queries in cross-entity search
+  (returns `total: -1`).
+
+> **Backward compatibility**: GCP deployment and attachment display opt-out
+> are non-breaking (pure opt-in / default-preserving). FK index coverage
+> (`scripts/add_required_indexes.py`), the pg_trgm GIN index script
+> (`scripts/create-gin-indexes.sql`), and the `SearchOpts.count: false`
+> COUNT(*) opt-out are additive only and backward-compatible. The audit log
+> viewer page itself adds no required input, but it surfaces data through a
+> relation that is a breaking schema change — see BREAKING above. The four
+> items in **BREAKING** above require action before upgrading a pre-3.0
+> deployment — see [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
+
 ## [2.0.0] - 2026-06-25
 
 > Consolidates the unreleased 1.5 feature set and corrects two breaking changes

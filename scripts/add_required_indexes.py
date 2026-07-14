@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Idempotently add @@index([col]) for required hot columns in prisma/schema.prisma.
 
-Required columns: creator_id, assignee_id, organization_id.
+Required columns: the hardcoded hot columns (creator_id, assignee_id,
+organization_id) plus every FK column auto-detected from
+`@relation(..., fields: [col], ...)` declarations on the model — mirrors
+code_generator/validate.py's index requirement.
 Run from the repo root: `python3 scripts/add_required_indexes.py`.
 
 Re-running is a no-op if all required indexes are already present.
@@ -14,6 +17,10 @@ from pathlib import Path
 
 REQUIRED_COLUMNS = ("creator_id", "assignee_id", "organization_id")
 SCHEMA_PATH = Path("prisma/schema.prisma")
+
+_RELATION_DECL = re.compile(r"@relation\(([^)]*)\)")
+_RELATION_FIELDS_ARG = re.compile(r"fields:\s*\[\s*([^\]]+)\]")
+_UNIQUE_SCALAR = re.compile(r"^\s*(\w+)\s+\S.*?@unique\b", re.MULTILINE)
 
 
 def find_model_blocks(text: str) -> list[tuple[int, int, str]]:
@@ -40,7 +47,10 @@ def find_model_blocks(text: str) -> list[tuple[int, int, str]]:
 
 
 def existing_indexed_columns(block: str) -> set[str]:
-    """Columns that appear as the LEFTMOST column of some @@index([...]).
+    """Columns that count as already indexed: LEFTMOST column of some
+    @@index([...]), or a column carrying an inline @unique attribute (Prisma/
+    Postgres creates an implicit unique index for those — e.g. the parent-side
+    FK of a bridge model).
 
     Matches the rule enforced by code_generator/validate.py — only the leading
     column of a composite index is usable for single-column lookups in
@@ -51,6 +61,24 @@ def existing_indexed_columns(block: str) -> set[str]:
         first = decl.split(",", 1)[0].strip()
         if first:
             cols.add(first)
+    cols |= set(_UNIQUE_SCALAR.findall(block))
+    return cols
+
+
+def relation_fk_columns(block: str) -> set[str]:
+    """FK columns declared via `@relation(..., fields: [col, ...], ...)`.
+
+    Mirrors code_generator/validate.py's auto-detection so this script adds
+    indexes for exactly the columns validate.py checks, not just the
+    hardcoded REQUIRED_COLUMNS.
+    """
+    cols: set[str] = set()
+    for decl in _RELATION_DECL.findall(block):
+        m = _RELATION_FIELDS_ARG.search(decl)
+        if m:
+            first = m.group(1).split(",", 1)[0].strip()
+            if first:
+                cols.add(first)
     return cols
 
 
@@ -62,8 +90,9 @@ def has_column(block: str, col: str) -> bool:
 def patch_block(block: str) -> tuple[str, list[str]]:
     """Insert missing @@index([col]) lines just before the closing `}`."""
     indexed = existing_indexed_columns(block)
+    required = set(REQUIRED_COLUMNS) | relation_fk_columns(block)
     additions: list[str] = []
-    for col in REQUIRED_COLUMNS:
+    for col in sorted(required):
         if has_column(block, col) and col not in indexed:
             additions.append(f"  @@index([{col}])")
     if not additions:

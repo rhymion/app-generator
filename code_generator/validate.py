@@ -31,6 +31,9 @@ class SchemaValidationError(ValueError):
 
 _MODEL_HEAD = re.compile(r'^model\s+(\w+)\s*\{', re.MULTILINE)
 _INDEX_DECL = re.compile(r'@@index\(\s*\[([^\]]+)\]')
+_RELATION_DECL = re.compile(r'@relation\(([^)]*)\)')
+_RELATION_FIELDS_ARG = re.compile(r'fields:\s*\[\s*([^\]]+)\]')
+_UNIQUE_SCALAR = re.compile(r'^\s*(\w+)\s+\S.*?@unique\b', re.MULTILINE)
 
 
 def _iter_model_blocks(text: str):
@@ -68,6 +71,37 @@ def _leftmost_indexed_columns(body: str) -> set[str]:
     return out
 
 
+def _relation_fk_columns(body: str) -> set[str]:
+    """FK columns declared via `@relation(..., fields: [col, ...], ...)`.
+
+    Auto-detects every FK on the model — not just the hardcoded hot columns in
+    `_REQUIRED_INDEX_COLUMNS` — so bridge/relation columns added later (e.g.
+    `commentable_id`, `approval_flow_id`) are checked without needing a manual
+    list update.  Only the leftmost field of a composite FK is returned,
+    matching the single-column-filtering convention used by
+    `_leftmost_indexed_columns`.
+    """
+    cols: set[str] = set()
+    for decl in _RELATION_DECL.findall(body):
+        m = _RELATION_FIELDS_ARG.search(decl)
+        if m:
+            first = m.group(1).split(',', 1)[0].strip()
+            if first:
+                cols.add(first)
+    return cols
+
+
+def _unique_scalar_columns(body: str) -> set[str]:
+    """Columns with an inline `@unique` field attribute.
+
+    Prisma/Postgres creates an implicit unique index for these (e.g. the
+    parent-side FK of a bridge model, which carries `@unique` instead of
+    `@@index`), so they count as indexed even without an explicit
+    `@@index([...])` declaration.
+    """
+    return set(_UNIQUE_SCALAR.findall(body))
+
+
 def validate_prisma_indexes(schema_path: str | Path) -> None:
     """Verify every model has @@index for required hot columns.
 
@@ -87,16 +121,18 @@ def validate_prisma_indexes(schema_path: str | Path) -> None:
 
     errors: list[str] = []
     for name, body in _iter_model_blocks(text):
-        leftmost = _leftmost_indexed_columns(body)
-        for col in _REQUIRED_INDEX_COLUMNS:
-            if _model_has_column(body, col) and col not in leftmost:
+        indexed = _leftmost_indexed_columns(body) | _unique_scalar_columns(body)
+        required_cols = set(_REQUIRED_INDEX_COLUMNS) | _relation_fk_columns(body)
+        for col in sorted(required_cols):
+            if _model_has_column(body, col) and col not in indexed:
                 errors.append(
                     f"model '{name}': missing required @@index([{col}]).  "
                     f"Postgres does not auto-index this column; queries that filter "
-                    f"on it (Creator/Assignee scoping, org filtering) will fall back "
-                    f"to a full table scan.  Run `python3 scripts/add_required_indexes.py` "
-                    f"to add it, or write `@@index([{col}])` (or a composite starting "
-                    f"with this column) by hand."
+                    f"on it (FK/bridge lookups, Creator/Assignee scoping, org "
+                    f"filtering) will fall back to a full table scan.  Run "
+                    f"`python3 scripts/add_required_indexes.py` to add it, or write "
+                    f"`@@index([{col}])` (or a composite starting with this column) "
+                    f"by hand."
                 )
 
     if errors:
