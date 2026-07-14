@@ -865,11 +865,16 @@ def generate(schema_path: str, output_dir: str) -> None:
     print(f'  Approval dispatch → lib/approval_request/on_approved_dispatch.ts ({len(approvable_entities)} entities)')
     for ent in approvable_entities:
         if ent['emit_hook']:
-            template_name = (
-                'ledger_write_stub.ts.jinja2'
-                if ent.get('has_ledger_source')
-                else 'service_after_approve_stub.ts.jinja2'
-            )
+            if ent.get('has_ledger_source'):
+                _event_type = ent.get('ledger_source', {}).get('event_type', '')
+                if _event_type == 'move':
+                    template_name = 'ledger_move_stub.ts.jinja2'
+                elif _event_type == 'adjust':
+                    template_name = 'ledger_adjust_stub.ts.jinja2'
+                else:
+                    template_name = 'ledger_write_stub.ts.jinja2'
+            else:
+                template_name = 'service_after_approve_stub.ts.jinja2'
             _write_stub(
                 out / 'lib' / ent['snake_name'] / 'service_after_approve.ts',
                 _render(env, template_name, ent),
@@ -1101,8 +1106,18 @@ def generate(schema_path: str, output_dir: str) -> None:
 
             # helper.ts
             helper_ctx = helper_context(parent, children, schema, model, def_key, gen_cfg)
-            _write(cypress_support / parent / 'helper.ts',
-                   _render(env, 'test_helper.ts.jinja2', helper_ctx))
+            if parent in ('inventory_movement', 'inventory_adjustment'):
+                # GENERATED ONCE: these two entities' helper.ts received manual
+                # fixes for a generator bug (dual/single-FK dependency wiring in
+                # the With*Approval populate functions — cmd_312 Phase5 subtask_312t)
+                # that generators_test.py does not yet produce correctly. Regenerating
+                # unconditionally would silently overwrite the manual fix. Scoped to
+                # these 2 entities only; all other entities keep unconditional regen.
+                _write_stub(cypress_support / parent / 'helper.ts',
+                            _render(env, 'test_helper.ts.jinja2', helper_ctx))
+            else:
+                _write(cypress_support / parent / 'helper.ts',
+                       _render(env, 'test_helper.ts.jinja2', helper_ctx))
 
             # e2e spec (desktop)
             spec_ctx = spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)

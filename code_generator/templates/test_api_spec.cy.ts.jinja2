@@ -616,6 +616,7 @@ describe('API: {{ title }}', () => {
   });
 
   describe('Reject (POST /api/approval_request/:id/reject)', () => {
+  {% if not entity_on_rejected_terminal %}
     it('13.1 approver can reject a pending request', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {
@@ -636,6 +637,7 @@ describe('API: {{ title }}', () => {
         });
       });
     });
+  {% endif %}
 
     it('13.2 non-approver cannot reject (403)', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
@@ -685,7 +687,7 @@ describe('API: {{ title }}', () => {
       });
     });
   });
-{% if entity_on_rejected %}
+{% if entity_on_rejected and not entity_on_rejected_terminal %}
     it('13.4 reject fires on_rejected dispatch: entity status updated via set_fields', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {
