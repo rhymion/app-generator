@@ -578,6 +578,12 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(api_dir / 'bulk' / 'route.ts', _render(env, 'api_bulk_route.ts.jinja2', ctx))
             print(f'  API routes → app/api/{parent}/')
 
+            # --- CSV Export route (Phase 1: all entities with can_api+can_list) ---
+            if can_list:
+                _write(api_dir / 'export' / 'route.ts',
+                       _render(env, 'api_export_route.ts.jinja2', ctx))
+                print(f'  CSV Export route → app/api/{parent}/export/')
+
         # --- Invalidate action route (independent of can_api) ---
         if can_invalidate:
             inv_api_dir = out / 'app' / 'api' / parent / '[id]' / 'actions' / 'invalidate'

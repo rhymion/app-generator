@@ -348,14 +348,16 @@ export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pa
 {% endfor %}
 
 // ---------------------------------------------------------------
-// CSV Export (Phase 1) — returns all rows visible to this user,
+// CSV Export (Phase 1) — returns one chunk of rows visible to this
+// user (caller loops with increasing `skip` until an empty chunk),
 // with system fields omitted (id/timestamps/audit refs/tenant scope)
 // and FK relations flattened to display values.
 // ---------------------------------------------------------------
-const EXPORT_ROW_LIMIT = Number(process.env.EXPORT_ROW_LIMIT ?? '1000');
+const EXPORT_CHUNK_SIZE = Number(process.env.EXPORT_CHUNK_SIZE ?? '200');
 
-export async function get{{ parent_pascal }}AllForExport(
+export async function get{{ parent_pascal }}ChunkForExport(
   userId: string,
+  skip: number,
 ): Promise<Record<string, unknown>[]> {
 {% if should_filter_by_org %}
   const associatedOrganizations = await getAssociatedOrganizations(userId);
@@ -366,7 +368,8 @@ export async function get{{ parent_pascal }}AllForExport(
     where: { organization_id: { in: associatedOrganizationIds } },
 {% endif %}
     orderBy: { created_at: 'asc' },
-    take: EXPORT_ROW_LIMIT,
+    skip,
+    take: EXPORT_CHUNK_SIZE,
 {% if include_props_list %}
     include: { {{ include_props_list }} },
 {% endif %}
