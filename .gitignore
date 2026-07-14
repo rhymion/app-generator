@@ -163,6 +163,8 @@ app/api/*/
 app/api/approval_request/route.ts
 app/api/approval_request/\[id\]/route.ts
 app/api/approval_request/bulk/route.ts
+!app/api/audit_log/
+!app/api/audit_log/**
 
 # ── components/ ──
 components/*/*
