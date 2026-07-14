@@ -53,6 +53,7 @@ export const DASHBOARDABLE_ENTITIES: DashboardEntity[] = [
       { name: 'start_date', label: 'Start Date', kind: 'datetime', datetime_format: 'date' },
       { name: 'end_date', label: 'End Date', kind: 'datetime', datetime_format: 'date' },
       { name: 'status', label: 'Status', kind: 'enum', enum_values: ['pending', 'approved', 'rejected'] },
+      { name: 'assignee_id', label: 'Assignee', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
       { name: 'creator_id', label: 'Creator', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
       { name: 'updater_id', label: 'Updater', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
     ],

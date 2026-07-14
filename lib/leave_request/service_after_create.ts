@@ -1,4 +1,3 @@
-{% if one_to_one_rels | selectattr('target', 'equalto', 'approvable') | list %}
 import type { PrismaClient } from '@/app/generated/prisma/client';
 import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
 
@@ -25,7 +24,7 @@ export async function afterCreate(
   }
 
   const flows = await db.approval_flow.findMany({
-    where: { entity_name: '{{ model }}' },
+    where: { entity_name: 'leave_request' },
   });
 
   const createdRequestIds: string[] = [];
@@ -57,10 +56,3 @@ export async function afterCreate(
     }
   }
 }
-{% else %}
-export async function afterCreate(
-  _tx: unknown,
-  _created: Record<string, unknown>,
-  _data: Record<string, unknown>,
-): Promise<void> {}
-{% endif %}
