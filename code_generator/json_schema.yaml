@@ -59,6 +59,18 @@ x-gdpr-mode:
     consumer: general consumer data only
     both: applies to both scopes
 
+x-import-key:
+  type: array
+  items:
+    type: string
+  description: |
+    Natural key fields that uniquely identify a record for import (Phase 2).
+    Also guarantees these columns appear in Phase 1 CSV exports.
+    Single field: [email]
+    Composite: [name, tenant_id]
+    Dotted FK path for Phase 2: [name, role.name] (role_id resolved via role.name)
+    Entities without x-import-key: export-only in Phase 1; import blocked in Phase 2.
+
 definitions:
   # ============================================================
   # System entities (required by all apps — see §1.1)
@@ -71,6 +83,7 @@ definitions:
       - id
       - name
       - email
+    x-import-key: [email]
     x-display:
       table:
         - name:
@@ -125,6 +138,7 @@ definitions:
     required:
       - id
       - name
+    x-import-key: [name]
     properties:
       id:
         type: string
@@ -244,6 +258,7 @@ definitions:
     required:
       - id
       - name
+    x-import-key: [name]
     properties:
       id:
         type: string
@@ -296,6 +311,7 @@ definitions:
       - read
       - update
       - delete
+    x-import-key: [name, role.name]
     x-display:
       table:
         - name:
@@ -355,6 +371,7 @@ definitions:
       - id
       - entity_name
       - approver_role_id
+    x-import-key: [entity_name]
     x-display:
       table:
         - entity_name:

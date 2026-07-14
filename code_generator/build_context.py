@@ -767,6 +767,7 @@ def build_context(entity: dict, schema: dict) -> dict:
     can_delete = gen_cfg.get('delete', True) is not False
     can_list   = gen_cfg.get('list',   True) is not False
     can_view   = gen_cfg.get('view',   True) is not False
+    can_api    = gen_cfg.get('api', False)
 
     # invalidate flag: accepts bool or {enabled, handler, module}
     _inv = gen_cfg.get('invalidate', False)
@@ -938,6 +939,25 @@ def build_context(entity: dict, schema: dict) -> dict:
 
     has_org_rel          = any(r['target'] == 'organization' for r in parent_rels)
     should_filter_by_org = has_org_rel and model not in ('organization', 'user')
+
+    # x-import-key: natural key fields (CSV export column guarantee, Phase 1;
+    # natural-key import matching, Phase 2). Dotted FK paths (e.g. role.name)
+    # are Phase 2-only — Phase 1 export only needs the non-dotted portion.
+    _import_key_raw = model_def.get('x-import-key') or []
+    import_key_fields = [f for f in _import_key_raw if '.' not in f]
+    has_import_key = bool(_import_key_raw)
+
+    # x_relationships_list: m2o/o2o FK relations with a simple (non-dotted)
+    # labelField, used by the CSV export getter to flatten FK id → display value.
+    x_relationships_list = [
+        {
+            'field': r['relation_name'],
+            'display_col': f"{r['relation_name']}_name",
+            'label_field': r['label_field'],
+        }
+        for r in parent_rels
+        if '.' not in r['label_field']
+    ]
 
     has_assignee_id   = 'assignee_id' in filtered_props
     item_context_select = (
@@ -1781,6 +1801,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         can_delete=can_delete,
         can_list=can_list,
         can_view=can_view,
+        can_api=can_api,
         can_invalidate=can_invalidate,
         invalidate_handler=invalidate_handler,
         invalidate_module=invalidate_module,
@@ -1789,6 +1810,10 @@ def build_context(entity: dict, schema: dict) -> dict:
         parent_rels_raw=parent_rels_raw,
         relationship_targets=relationship_targets,
         should_filter_by_org=should_filter_by_org,
+        # CSV export (Phase 1): natural-key columns + FK flatten metadata
+        import_key_fields=import_key_fields,
+        has_import_key=has_import_key,
+        x_relationships_list=x_relationships_list,
         has_assignee_id=has_assignee_id,
         is_audited=is_audited,
         item_context_select=item_context_select,

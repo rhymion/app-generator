@@ -346,3 +346,43 @@ export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pa
   });
 }
 {% endfor %}
+
+// ---------------------------------------------------------------
+// CSV Export (Phase 1) — returns all rows visible to this user,
+// with system fields omitted (id/timestamps/audit refs/tenant scope)
+// and FK relations flattened to display values.
+// ---------------------------------------------------------------
+const EXPORT_ROW_LIMIT = Number(process.env.EXPORT_ROW_LIMIT ?? '1000');
+
+export async function get{{ parent_pascal }}AllForExport(
+  userId: string,
+): Promise<Record<string, unknown>[]> {
+{% if should_filter_by_org %}
+  const associatedOrganizations = await getAssociatedOrganizations(userId);
+  const associatedOrganizationIds = associatedOrganizations.map((o) => o.id);
+{% endif %}
+  const rows = await prisma.{{ model }}.findMany({
+{% if should_filter_by_org %}
+    where: { organization_id: { in: associatedOrganizationIds } },
+{% endif %}
+    orderBy: { created_at: 'asc' },
+    take: EXPORT_ROW_LIMIT,
+{% if include_props_list %}
+    include: { {{ include_props_list }} },
+{% endif %}
+  });
+  return rows.map((row) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { id, created_at, updated_at, creator_id, updater_id, organization_id, ...rest } = row as Record<string, unknown>;
+{% for rel in x_relationships_list %}
+    // Flatten {{ rel.field }}_id → display value via {{ rel.label_field }}
+    if (rest['{{ rel.field }}'] && typeof rest['{{ rel.field }}'] === 'object') {
+      rest['{{ rel.display_col }}'] =
+        (rest['{{ rel.field }}'] as Record<string, unknown>)['{{ rel.label_field }}'];
+      delete rest['{{ rel.field }}'];
+    }
+    delete rest['{{ rel.field }}_id'];
+{% endfor %}
+    return rest;
+  });
+}

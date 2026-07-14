@@ -749,4 +749,73 @@ describe('API: {{ title }}', () => {
     });
   });
 {% endif %}
+{% if can_list %}
+
+  describe('GET {{ api_path }}/export', () => {
+    it('N1 returns 200 CSV with attachment disposition', () => {
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
+        .then((res) => {
+          expect(res.status).to.eq(200);
+          expect(res.headers['content-type']).to.include('text/csv');
+          expect(res.headers['content-disposition']).to.include('attachment');
+        });
+    });
+
+    it('N2 CSV header row does not include an id column', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
+        .then((res) => {
+          const headerLine = (res.body as string).replace(/^﻿/, '').split('\n')[0];
+          const headers = headerLine.split(',');
+          expect(headers).to.not.include('id');
+        });
+    });
+{% if should_filter_by_org %}
+
+    it('N3 only returns rows from the caller\'s own organization', () => {
+      cy.task('db:populateOrganizationWithUser', 1).then(() => {
+        cy.task<{ id: string; name: string }[]>('db:populateOrganization', 1).then((otherOrgs) => {
+          cy.task('db:populate{{ pascal }}', 1);
+          cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
+            .then((res) => {
+              expect(res.status).to.eq(200);
+              const lines = (res.body as string).replace(/^﻿/, '').split('\n').filter(Boolean);
+              expect(lines.length - 1).to.be.at.most({{ seed_count + 1 }});
+              expect(res.body).to.not.include(otherOrgs[0].name);
+            });
+        });
+      });
+    });
+{% endif %}
+{% if has_import_key %}
+
+    it('N4 CSV header includes the x-import-key natural-key column(s)', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
+        .then((res) => {
+          const headerLine = (res.body as string).replace(/^﻿/, '').split('\n')[0];
+          const headers = headerLine.split(',');
+{% for f in import_key_fields %}
+          expect(headers).to.include('{{ f }}');
+{% endfor %}
+        });
+    });
+{% endif %}
+
+    it('N5 CSV header does not include system fields (timestamps/audit/tenant refs)', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
+        .then((res) => {
+          const headerLine = (res.body as string).replace(/^﻿/, '').split('\n')[0];
+          const headers = headerLine.split(',');
+          expect(headers).to.not.include('id');
+          expect(headers).to.not.include('created_at');
+          expect(headers).to.not.include('updated_at');
+          expect(headers).to.not.include('creator_id');
+          expect(headers).to.not.include('updater_id');
+          expect(headers).to.not.include('organization_id');
+        });
+    });
+  });
+{% endif %}
 });

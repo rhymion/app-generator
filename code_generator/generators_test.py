@@ -2547,6 +2547,13 @@ def api_spec_context(
     filtered_props = filter_fields(model_def.get('properties') or {}, gen_cfg.get('fields'))
     relationships = get_parent_relationships({**model_def, 'properties': filtered_props}, schema)
 
+    # CSV Export (Phase 1) test context: org-scoping + x-import-key column presence.
+    has_org_rel = any(r['target'] == 'organization' for r in relationships)
+    should_filter_by_org = has_org_rel and model not in ('organization', 'user')
+    _import_key_raw = model_def.get('x-import-key') or []
+    import_key_fields = [f for f in _import_key_raw if '.' not in f]
+    has_import_key = bool(_import_key_raw)
+
     required_fields_list = model_def.get('required') or []
     _api_entity_options = _get_entity_options(schema)
     all_field_metas = get_field_metas(filtered_props, required_fields_list, relationships, gen_cfg.get('fields'), _api_entity_options)
@@ -2850,6 +2857,10 @@ def api_spec_context(
         'bulk_put_body_valid_fk': _put_body_impl('                '), # 16 spaces
         'has_approvable': has_approvable,
         'reservation_count_pool_pascal': _reservation_count_pool_pascal,
+        # CSV Export (Phase 1) test context
+        'should_filter_by_org': should_filter_by_org,
+        'has_import_key': has_import_key,
+        'import_key_fields': import_key_fields,
     }
 
 
