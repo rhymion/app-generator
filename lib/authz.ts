@@ -18,14 +18,6 @@ export async function getSessionUserIdOrThrow(): Promise<string> {
   return userId;
 }
 
-/** The signed-in user's own api_key, for client-side calls to a CSV export route (Bearer auth). */
-export async function getSessionApiKey(): Promise<string | null> {
-  const userId = await getSessionUserId();
-  if (!userId) return null;
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { api_key: true } });
-  return user?.api_key ?? null;
-}
-
 export type Operation = 'create' | 'read' | 'update' | 'delete';
 export type ModelName = string;
 export type OperationFlags = Record<Operation, boolean>;

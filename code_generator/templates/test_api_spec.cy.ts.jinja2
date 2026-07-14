@@ -1,5 +1,5 @@
 // AUTO-GENERATED - DO NOT EDIT
-import { TEST_API_KEY } from '../../support/test-credentials';
+import { TEST_API_KEY, TEST_CREDENTIALS } from '../../support/test-credentials';
 
 const API_BASE = '{{ api_path }}';
 
@@ -752,8 +752,13 @@ describe('API: {{ title }}', () => {
 {% if can_list %}
 
   describe('GET {{ api_path }}/export', () => {
+    beforeEach(() => {
+      Cypress.session.clearAllSavedSessions();
+      cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+    });
+
     it('N1 returns 200 CSV with attachment disposition', () => {
-      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
+      cy.request({ url: `{{ api_path }}/export` })
         .then((res) => {
           expect(res.status).to.eq(200);
           expect(res.headers['content-type']).to.include('text/csv');
@@ -763,7 +768,7 @@ describe('API: {{ title }}', () => {
 
     it('N2 CSV header row does not include an id column', () => {
       cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
+      cy.request({ url: `{{ api_path }}/export` })
         .then((res) => {
           const headerLine = (res.body as string).replace(/^﻿/, '').split('\n')[0];
           const headers = headerLine.split(',');
@@ -776,7 +781,7 @@ describe('API: {{ title }}', () => {
       cy.task('db:populateOrganizationWithUser', 1).then(() => {
         cy.task<{ id: string; name: string }[]>('db:populateOrganization', 1).then((otherOrgs) => {
           cy.task('db:populate{{ pascal }}', 1);
-          cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
+          cy.request({ url: `{{ api_path }}/export` })
             .then((res) => {
               expect(res.status).to.eq(200);
               const lines = (res.body as string).replace(/^﻿/, '').split('\n').filter(Boolean);
@@ -791,7 +796,7 @@ describe('API: {{ title }}', () => {
 
     it('N4 CSV header includes the x-import-key natural-key column(s)', () => {
       cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
+      cy.request({ url: `{{ api_path }}/export` })
         .then((res) => {
           const headerLine = (res.body as string).replace(/^﻿/, '').split('\n')[0];
           const headers = headerLine.split(',');
@@ -804,7 +809,7 @@ describe('API: {{ title }}', () => {
 
     it('N5 CSV header does not include system fields (timestamps/audit/tenant refs)', () => {
       cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
+      cy.request({ url: `{{ api_path }}/export` })
         .then((res) => {
           const headerLine = (res.body as string).replace(/^﻿/, '').split('\n')[0];
           const headers = headerLine.split(',');

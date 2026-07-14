@@ -4,15 +4,11 @@ import Button from '@mui/material/Button';
 
 interface ExportCsvButtonProps {
   entity: string;
-  apiKey: string | null;
 }
 
-export default function ExportCsvButton({ entity, apiKey }: ExportCsvButtonProps) {
+export default function ExportCsvButton({ entity }: ExportCsvButtonProps) {
   async function handleExport() {
-    if (!apiKey) return;
-    const res = await fetch(`/api/${entity}/export`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
+    const res = await fetch(`/api/${entity}/export`);
     if (!res.ok) return;
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -24,7 +20,7 @@ export default function ExportCsvButton({ entity, apiKey }: ExportCsvButtonProps
   }
 
   return (
-    <Button variant="outlined" size="small" onClick={handleExport} disabled={!apiKey}>
+    <Button variant="outlined" size="small" onClick={handleExport}>
       Export CSV
     </Button>
   );

@@ -20,7 +20,6 @@ import { formatLabelValue } from '@/lib/_format';
 import AppListToolbar from '@/components/ui/layout/AppListToolbar';
 {% if can_api and can_list %}
 import ExportCsvButton from '@/components/_standard/ExportCsvButton';
-import { getSessionApiKey } from '@/lib/authz';
 {% endif %}
 {% for comp in entity_custom_components %}
 import {{ comp.name }} from '{{ comp.path if comp.path else "@/components/" + parent + "/" + comp.name }}';
@@ -63,9 +62,6 @@ async function {{ parent_pascal }}ListContent({
     getTranslations('{{ ns.ns }}'),
 {% endfor %}
   ]);
-{% if can_api and can_list %}
-  const exportApiKey = await getSessionApiKey();
-{% endif %}
 {% for ns in enum_ns_list %}
   const {{ ns.var_name }}: Record<number, string> = {
 {% for entry in ns['entries'] %}
@@ -115,7 +111,7 @@ async function {{ parent_pascal }}ListContent({
 {% endif %}
       >
 {% if can_api and can_list %}
-        <ExportCsvButton entity="{{ parent }}" apiKey={exportApiKey} />
+        <ExportCsvButton entity="{{ parent }}" />
 {% endif %}
 {% for comp in entity_custom_components %}
         <{{ comp.name }}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={userPermissions} />
