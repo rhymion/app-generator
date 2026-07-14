@@ -69,7 +69,9 @@ from helpers.schema_helpers import (
     resolve_ledger_domain,
 )
 from helpers.bridge_direction import get_new_form_bridge
-from helpers.label_field import build_label_expression, render_prisma_include, resolve_label_paths
+from helpers.label_field import (
+    build_label_expression, render_prisma_include, resolve_label_paths, relation_chain_targets,
+)
 from build_context import _get_entity_options
 from generate_types import extract_entities
 
@@ -425,12 +427,34 @@ def resolve_dependencies(model_name: str, schema: dict) -> list[dict]:
         for rel in relevant:
             _resolve(rel['target'])
 
+        # A transitively-included dependency may itself have a required FK to
+        # `user` beyond creator_id/updater_id (e.g. purchase_order.customer_id
+        # when purchase_order is pulled in as a dep of purchase_per_item). The
+        # top-level entity's own such FKs are handled separately in
+        # helper_context's ua_dep_fields block, so this only needs to cover
+        # entities reached via recursion (model != model_name) — otherwise
+        # that create() call ends up missing a required column.
+        user_fk_deps = []
+        if model != model_name:
+            for r in rels:
+                if (r['target'] == 'user'
+                        and r.get('required')
+                        and r['prop_name'] not in ('creator_id', 'updater_id')):
+                    prop_stem = re.sub(r'_id$', '', r['prop_name'])
+                    var_name = to_camel_case(prop_stem)
+                    if not any(d['target'] == 'user' and d['var_name'] == var_name for d in result):
+                        result.append({
+                            'target': 'user', 'var_name': var_name,
+                            'title': to_title_case(prop_stem), 'fk_deps': [],
+                        })
+                    user_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
+
         if model != model_name and not any(d['target'] == model for d in result):
             fk_deps = [
                 {'prop_name': r['prop_name'], 'dep_var_name': to_camel_case(r['target'])}
                 for r in relevant
                 if any(d['target'] == r['target'] for d in result)
-            ]
+            ] + user_fk_deps
             result.append({'target': model, 'var_name': to_camel_case(model), 'fk_deps': fk_deps})
 
     _resolve(model_name)
@@ -1046,10 +1070,10 @@ def gen_clear_command(field: dict, indent: str) -> str:
 def gen_assert_command(field: dict, value: str, indent: str) -> str:
     cat = field['category']
     label = field['label']
-    if cat in ('text', 'number', 'datetime', 'autocomplete', 'enum', 'entity_select'):
-        return f"{indent}cy.checkField('{label}', '{value}');"
-    else:
+    if cat == 'boolean':
         return f"{indent}cy.setCheckbox('{label}', {value}); // verify checkbox state"
+    else:
+        return f"{indent}cy.checkField('{label}', '{value}');"
 
 
 def gen_empty_assert_command(field: dict, indent: str) -> str:
@@ -1779,6 +1803,10 @@ def helper_context(
                 child_fields_prisma.append({**f, 'prisma_val': f'deps.{dep_var}.id'})
             else:
                 child_fields_prisma.append({**f, 'prisma_val': prisma_value(f, 'i', child_title)})
+        # Required internal bridge FKs on the child itself (e.g. approvable_id) —
+        # same nested-create pattern as populate{{pascal}}Data's own internal_fk_deps,
+        # otherwise this "add child to existing parent" helper omits a required column.
+        child_internal_fk_deps = get_all_internal_fk_deps(child_name, schema)
         enriched_datagrid_children.append({
             'model_name': child_name,
             'pascal': child_pascal,
@@ -1786,6 +1814,8 @@ def helper_context(
             'has_order': bool(child_def.get('properties', {}).get('order')),
             'fields_prisma': child_fields_prisma,
             'has_fk_deps': has_fk_deps,
+            'internal_fk_deps': child_internal_fk_deps,
+            'needs_test_user': any(d['target'] == 'user' for d in child_internal_fk_deps),
         })
 
     enriched_comment_children = []
@@ -3022,9 +3052,13 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
        deleted before the entity itself.
 
     test_entity_names: sorted list of entity names for which test specs are generated.
-    These become ALL_ENTITIES in the template — the permission grant set must exactly
-    mirror the test-spec entity set so non-base entities (e.g. settingX variants of
-    xxxxx_xxxxx) are always included.
+    These seed ALL_ENTITIES in the template — the permission grant set must at least
+    cover the test-spec entity set so non-base entities (e.g. settingX variants of
+    xxxxx_xxxxx) are always included. It is additionally widened (below) to include
+    any entity that is only ever reached as an x-relationship labelField hop (e.g.
+    `location` via `inventory`'s `location.name` label) — such entities have no test
+    spec of their own (x-generate.test: false) but still require read permission at
+    runtime for autocomplete label lookups.
     """
     defs = schema['definitions']
 
@@ -3112,9 +3146,40 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
             assigned.add(name)
             remaining.remove(name)
 
+    # --- Widen the permission-grant entity set with labelField hop targets ---
+    # An entity with x-generate.test: false has no test spec of its own but may
+    # still be reached as an intermediate hop while rendering another entity's
+    # autocomplete label (e.g. inventory_movement -> inventory -> location via
+    # `location.name`). Those hops need read permission at runtime even though
+    # they're never the primary subject of a generated spec.
+    def _has_api(entity: str) -> bool:
+        gen_defn = defs.get(f'{entity}_detail', defs.get(entity, {}))
+        return bool(gen_defn.get('x-generate', {}).get('api'))
+
+    labelfield_entities: set[str] = set()
+    for name, defn in base_entities.items():
+        for prop in defn.get('properties', {}).values():
+            rel = prop.get('x-relationship', {})
+            rel_target = rel.get('target')
+            # one-to-one_bridge FKs (e.g. approvable_id) are always rendered as a
+            # plain column, never a client-side autocomplete (build_context.py
+            # excludes them from writable form fields) — no separate API read
+            # call is ever made for their labelField, so they're excluded here.
+            if rel.get('type') not in ('many-to-one', 'one-to-one'):
+                continue
+            if rel_target and rel_target in base_entities and rel.get('labelField'):
+                labelfield_entities |= relation_chain_targets(rel['labelField'], rel_target, schema)
+    # Only entities with a live generated API route are ever subject to a
+    # requirePermission() check — entities with x-generate.api: false (e.g.
+    # approvable, commentable) or no x-generate at all (internal-only, e.g.
+    # comment) have no route to call and so need no permission grant.
+    labelfield_entities = {e for e in labelfield_entities if e in base_entities and _has_api(e)}
+
+    all_permission_entities = set(test_entity_names or []) | labelfield_entities
+
     return {
         'deletion_levels': levels,
-        'test_entity_names': sorted(test_entity_names) if test_entity_names is not None else [],
+        'test_entity_names': sorted(all_permission_entities),
     }
 
 

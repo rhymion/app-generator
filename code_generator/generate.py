@@ -1088,7 +1088,15 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- Cypress test generation ---
     test_entities = [e for e in entities if e['generate_config'].get('test')]
-    _test_entity_count = len(test_entities)
+    # db_ctx's test_entity_names (ALL_ENTITIES) is the actual set granted permissions
+    # by grantAllEntityPermissions() at runtime — it's wider than test_entities alone
+    # (e.g. an entity with x-generate.test: false but reached via another entity's
+    # labelField still needs — and gets — a permission row). The permission entity's
+    # own spec asserts an exact seed-only row count, so it must count this same set,
+    # not just the raw test-spec entity list, or the two silently drift apart.
+    _test_entity_names = sorted(e['parent'] for e in test_entities)
+    db_ctx = db_helpers_context(schema, test_entity_names=_test_entity_names)
+    _test_entity_count = len(db_ctx['test_entity_names'])
     if test_entities:
         print('\nGenerating Cypress tests...')
         cypress_support = out / 'cypress' / 'support'
@@ -1162,8 +1170,6 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- db-helpers.ts (always generated, not gated on test_entities) ---
     print('\nGenerating db-helpers.ts...')
-    _test_entity_names = sorted(e['parent'] for e in test_entities)
-    db_ctx = db_helpers_context(schema, test_entity_names=_test_entity_names)
     _write(out / 'cypress' / 'support' / 'db-helpers.ts',
            _render(env, 'test_db_helpers.ts.jinja2', db_ctx))
 

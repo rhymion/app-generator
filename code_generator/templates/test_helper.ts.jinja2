@@ -588,13 +588,22 @@ export async function populate{{ pascal }}{{ child.pascal }}Data(parentId: strin
 {% if child.has_fk_deps %}
   const deps = await populate{{ pascal }}Dependencies();
 {% endif %}
+{% if child.needs_test_user %}
+  const testUser = await getTestUser();
+{% endif %}
   for (let i = 1; i <= length; i++) {
+{% for fk in child.internal_fk_deps %}
+    const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
     const record = await prisma.{{ child.model_name }}.create({
       data: {
         {{ child.parent_fk_prop }}: parentId,
 {% if child.has_order %}
         order: i,
 {% endif %}
+{% for fk in child.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
+{% endfor %}
 {% for field in child.fields_prisma %}
         {{ field.prop_name }}: {{ field.prisma_val }},
 {% endfor %}
