@@ -137,6 +137,8 @@ model user {
   updated_supply_requests       supply_request[]    @relation("SupplyRequestUpdater")
   created_room_types            room_type[]         @relation("RoomTypeCreator")
   updated_room_types            room_type[]         @relation("RoomTypeUpdater")
+  created_locations              location[]         @relation("LocationCreator")
+  updated_locations              location[]         @relation("LocationUpdater")
   created_rooms                 room[]              @relation("RoomCreator")
   updated_rooms                 room[]              @relation("RoomUpdater")
   created_room_reservations             room_reservation[]         @relation("RoomReservationCreator")
@@ -767,7 +769,8 @@ model inventory {
   product           product   @relation(fields: [product_id], references: [id], onDelete: Cascade)
   quantity          Int
   reserved_quantity Int       @default(0)
-  location          String?
+  location_id       String?
+  location          location? @relation(fields: [location_id], references: [id])
   lot_number        String?
   expiration_date   DateTime?
   created_at        DateTime  @default(now()) @db.Timestamptz(0)
@@ -778,6 +781,21 @@ model inventory {
   updater           user      @relation("InventoryUpdater", fields: [updater_id], references: [id])
   receiving_receipt_lines receiving_receipt_line[] @relation("ReceiptLineInventory")
   purchase_per_items purchase_per_item[]
+
+  @@index([creator_id])
+  @@index([location_id])
+}
+
+model location {
+  id          String      @id @default(cuid())
+  name        String
+  inventories inventory[]
+  created_at  DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user        @relation("LocationCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user        @relation("LocationUpdater", fields: [updater_id], references: [id])
 
   @@index([creator_id])
 }

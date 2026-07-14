@@ -1691,6 +1691,8 @@ definitions:
         - product:
             primary: true
             width: 200
+        - location:
+            width: 150
         - quantity:
             width: 100
     x-readonly-fields:
@@ -1716,10 +1718,15 @@ definitions:
         type: integer
         minimum: 0
         default: 0
-      location:
+      location_id:
         type:
           - string
           - "null"
+        x-relationship:
+          type: many-to-one
+          target: location
+          labelField: name
+          searchField: name
       lot_number:
         type:
           - string
@@ -1748,6 +1755,35 @@ definitions:
         properties:
           product:
             $ref: "#/definitions/product"
+
+  location:
+    type: object
+    required:
+      - id
+      - name
+    x-display:
+      table:
+        - name:
+            primary: true
+    properties:
+      id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+      name:
+        type: string
+
+  location_detail:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    allOf:
+      - $ref: "#/definitions/location"
 
   inventory_transactionable:
     type: object
@@ -1979,8 +2015,9 @@ definitions:
           target: inventory
           labelField:
             - product.name
-            - location
+            - location.name
             - lot_number
+            - expiration_date
 
   purchase_order_detail:
     x-generate:
@@ -2770,8 +2807,9 @@ definitions:
           target: inventory
           labelField:
             - product.name
-            - location
+            - location.name
             - lot_number
+            - expiration_date
       approvable_id:
         type: string
         pattern: "^c[a-z0-9]{24,}$"

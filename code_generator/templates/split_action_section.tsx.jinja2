@@ -14,6 +14,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import Box from '@mui/material/Box';
 {% if per_part_required %}
 import EntityAutocomplete, { type EntityOption } from '@/components/_standard/EntityAutocomplete';
+import { formatLabelValue } from '@/lib/_format';
 {% for f in per_part_required %}
 {% if f.is_relation %}
 import { search{{ f.target_pascal }}Options } from '@/lib/{{ f.target }}/getters';

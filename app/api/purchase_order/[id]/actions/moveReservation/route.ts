@@ -98,13 +98,20 @@ export async function POST(req: NextRequest, { params }: Params) {
         // Step 1: Type2 move-cancel — un-reserve every active lot. Ledger-only;
         // approvable/approval_request are never touched (line stays pending).
         for (const reserve of activeReserves) {
+          // Phase4: inventory.location_id FK — denormalized name from the
+          // ledger needs to be reverse-looked-up to a location_id before
+          // re-identifying the inventory row.
+          const reserveLocName = reserve.location === '' ? null : reserve.location;
+          const reserveLoc = reserveLocName
+            ? await tx.location.findFirst({ where: { name: reserveLocName } })
+            : null;
           const inventoryCache = await tx.inventory.findFirst({
             where: {
               product_id: reserve.product_id,
               // O-6 denormalization writes location as '' for a null source
               // location; undo that for the lookup (same P1 fix as
               // service_after_reject.ts / service_after_approve.ts).
-              location: reserve.location === '' ? null : reserve.location,
+              location_id: reserveLoc?.id ?? null,
               lot_number: reserve.lot_number,
               expiration_date: reserve.expiration_date,
             },
@@ -142,6 +149,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         const availableInventories = await tx.inventory.findMany({
           where: { product_id: productId, quantity: { gt: 0 } },
           orderBy: [{ expiration_date: { sort: 'asc', nulls: 'last' } }, { lot_number: 'asc' }, { id: 'asc' }],
+          include: { location: true },
         });
 
         let remaining = totalQty;
@@ -158,7 +166,7 @@ export async function POST(req: NextRequest, { params }: Params) {
               quantity_delta: 0, // O-4: reserve never touches physical inventory
               reserved_delta: allocQty,
               product_id: inv.product_id,
-              location: inv.location ?? '',
+              location: inv.location?.name ?? '',
               lot_number: inv.lot_number,
               expiration_date: inv.expiration_date,
               created_by_id: actorId,

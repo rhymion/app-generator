@@ -94,13 +94,19 @@ export async function afterApprove(
       },
     });
 
+    // Phase4: inventory.location_id FK — denormalized name from the ledger
+    // needs to be reverse-looked-up to a location_id before re-identifying.
+    const reserveLocName = reserve.location === '' ? null : reserve.location;
+    const reserveLoc = reserveLocName
+      ? await tx.location.findFirst({ where: { name: reserveLocName } })
+      : null;
     const inventoryCache = await tx.inventory.findFirst({
       where: {
         product_id: reserve.product_id,
         // O-6 denormalization writes location as '' when the source inventory's
         // location is null (see lib/purchase_order/service.ts's `?? ''`); undo
         // that here so the re-identification lookup matches the real row.
-        location: reserve.location === '' ? null : reserve.location,
+        location_id: reserveLoc?.id ?? null,
         lot_number: reserve.lot_number,
         expiration_date: reserve.expiration_date,
       },

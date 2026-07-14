@@ -119,7 +119,10 @@ async function main() {
         item.inventory_transactionable_id ?? (await tx.inventory_transactionable.create({ data: {} })).id;
 
       for (const alloc of allocations) {
-        const inv = await tx.inventory.findUnique({ where: { id: alloc.inventory_id } });
+        const inv = await tx.inventory.findUnique({
+          where: { id: alloc.inventory_id },
+          include: { location: true },
+        });
         if (!inv) {
           throw new Error(`inventory ${alloc.inventory_id} referenced by inventory_allocation ${alloc.id} not found`);
         }
@@ -131,7 +134,7 @@ async function main() {
             quantity_delta: 0, // O-4: reserve never touches physical quantity
             reserved_delta: alloc.remaining_quantity, // outstanding amount only (see comment above)
             product_id: inv.product_id,
-            location: inv.location ?? '',
+            location: inv.location?.name ?? '',
             lot_number: inv.lot_number,
             expiration_date: inv.expiration_date,
             created_by_id: alloc.creator_id,
@@ -167,14 +170,17 @@ async function main() {
   // double-counted.
   let mismatches = 0;
   for (const [inventoryId, expectedSum] of expectedByInventoryId) {
-    const inv = await prisma.inventory.findUnique({ where: { id: inventoryId } });
+    const inv = await prisma.inventory.findUnique({
+      where: { id: inventoryId },
+      include: { location: true },
+    });
     if (!inv) continue; // inventory row itself no longer exists — nothing to reconcile
     const agg = await prisma.inventory_transaction.aggregate({
       _sum: { reserved_delta: true },
       where: {
         event_type: 'reserve',
         product_id: inv.product_id,
-        location: inv.location ?? '',
+        location: inv.location?.name ?? '',
         lot_number: inv.lot_number,
         expiration_date: inv.expiration_date,
       },

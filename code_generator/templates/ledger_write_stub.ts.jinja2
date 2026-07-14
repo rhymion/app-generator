@@ -58,7 +58,10 @@ export async function afterApprove(
   }
 
   // Step 3: Get inventory identity (O-6 non-normalized fields)
-  const inventory = await tx.{{ pool_entity }}.findUniqueOrThrow({ where: { id: entity.{{ ledger_source.poolIdField }} } });
+  const inventory = await tx.{{ pool_entity }}.findUniqueOrThrow({
+    where: { id: entity.{{ ledger_source.poolIdField }} },
+    include: { location: true },
+  });
 
   // Step 4: INSERT inventory_transaction
   await tx.{{ ledger_entity }}.create({
@@ -68,7 +71,7 @@ export async function afterApprove(
       quantity_delta: {% if ledger_source.quantity_delta_field %}entity.{{ ledger_source.quantity_delta_field }}{% else %}{{ ledger_source.quantity_delta | default(0) }}{% endif %}, // O-4
       reserved_delta: {% if ledger_source.reserved_delta_field %}entity.{{ ledger_source.reserved_delta_field }}{% else %}{{ ledger_source.reserved_delta | default(0) }}{% endif %}, // O-4
       product_id: inventory.product_id,    // O-6
-      location: inventory.location ?? '',   // O-6
+      location: inventory.location?.name ?? '',   // O-6
       lot_number: inventory.lot_number,     // O-6
       expiration_date: inventory.expiration_date, // O-6
       approved_via: approvableId,           // audit trail (R2)
@@ -136,11 +139,16 @@ export async function afterReject(
     },
   });
 
-  // O-6: inventory has no direct FK — re-identify via denormalized fields.
+  // Phase4: inventory.location_id FK — denormalized name from the ledger
+  // needs to be reverse-looked-up to a location_id before re-identifying.
+  const _sourceLocName = source.location === '' ? null : source.location;
+  const _sourceLoc = _sourceLocName
+    ? await tx.location.findFirst({ where: { name: _sourceLocName } })
+    : null;
   const inventoryCache = await tx.{{ pool_entity }}.findFirst({
     where: {
       product_id: source.product_id,
-      location: source.location,
+      location_id: _sourceLoc?.id ?? null,
       lot_number: source.lot_number,
       expiration_date: source.expiration_date,
     },

@@ -833,6 +833,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"{where_clause}\n"
         f"        }},\n"
         + (f"        orderBy: [{order_str}],\n" if order_str else '') +
+        f"        include: {{ location: true }},\n"
         f"      }});\n"
         f"      const bridge = await tx.{transactionable_entity}.create({{ data: {{}} }});\n"
         f"      for (const _candidate of _candidates) {{\n"
@@ -853,7 +854,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"              quantity_delta: 0,\n"
         f"              reserved_delta: _claim,\n"
         f"              product_id: _candidate.product_id,\n"
-        f"              location: _candidate.location ?? '',\n"
+        f"              location: _candidate.location?.name ?? '',\n"
         f"              lot_number: _candidate.lot_number,\n"
         f"              expiration_date: _candidate.expiration_date,\n"
         f"              created_by_id: actorId,\n"
