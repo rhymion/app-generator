@@ -846,19 +846,50 @@ describe('API: {{ title }}', () => {
 {% if model == 'user' %}
 
     it('N7 CSV export does not expose sensitive columns (allowlist enforcement)', () => {
-      cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export` })
-        .then((res) => {
-          const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
-          const headers = headerLine.split(',');
-          // Sensitive column names must not appear as headers
-          expect(headers).to.not.include('password');
-          expect(headers).to.not.include('api_key');
-          expect(headers).to.not.include('mfa_secret');
-          expect(headers).to.not.include('emailVerified');
-          // Column name absence in the header is sufficient proof — if a
-          // column isn't in the header it cannot have emitted a raw value.
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.request({ url: `{{ api_path }}/export` })
+          .then((res) => {
+            const body = res.body as string;
+            const headerLine = body.replace(/^\uFEFF/, '').split('\r\n')[0];
+            const headers = headerLine.split(',');
+            // Sensitive column names must not appear as headers
+            expect(headers).to.not.include('password');
+            expect(headers).to.not.include('api_key');
+            expect(headers).to.not.include('mfa_secret');
+            expect(headers).to.not.include('email');
+            expect(headers).to.not.include('emailVerified');
+            // Column name absence in the header is sufficient proof — if a
+            // column isn't in the header it cannot have emitted a raw value.
+            // cmd_324 SA-1: confirm with real data that the seeded row's own
+            // email value is never present in the CSV body (value, not just header).
+            expect(body).to.not.include(records[0].email);
+          });
+      });
+    });
+
+    it('N8 CSV export neutralizes formula-injection values with a leading tab (cmd_324 SA-2)', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.request({
+          method: 'PUT',
+          url: `${API_BASE}/${records[0].id}`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: {
+            name: '=1+1',
+            image: records[0].image,
+            roles: [],
+          },
+        }).then(() => {
+          cy.request({ url: `{{ api_path }}/export` })
+            .then((res) => {
+              const body = res.body as string;
+              // The formula-trigger value must be neutralized with a leading tab...
+              expect(body).to.include('\t=1+1');
+              // ...and must never appear as a bare (unescaped, non-tab-prefixed)
+              // field value, which is what Excel/Sheets would interpret as a formula.
+              expect(body).to.not.match(/(^|,)=1\+1(,|\r|$)/m);
+            });
         });
+      });
     });
 {% endif %}
   });
