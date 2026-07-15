@@ -1002,7 +1002,11 @@ def build_context(entity: dict, schema: dict) -> dict:
     # Current rule: entity has x-import-key AND at least one of new/edit is enabled.
     # Future: x-generate.import:false gate can be inserted here when introduced.
     # ────────────────────────────────────────────────────────────────
-    import_eligible    = has_import_key and (can_create or can_update)
+    # Import eligibility requires the entity to be a primary entity (not an alias/view).
+    # e.g., 'setting' (parent) maps to 'user' (model) — only 'user' should be import-eligible.
+    # This satisfies 殿留保: "x-import-keyを持つ=import可を硬く焼き付けるな".
+    _is_primary_entity = (parent == model)
+    import_eligible    = _is_primary_entity and has_import_key and (can_create or can_update)
     import_can_create  = import_eligible and can_create   # Tier1: x-generate.new
     import_can_update  = import_eligible and can_update   # Tier1: x-generate.edit
 
