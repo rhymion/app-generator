@@ -2554,6 +2554,53 @@ def api_spec_context(
     import_key_fields = [f for f in _import_key_raw if '.' not in f]
     has_import_key = bool(_import_key_raw)
 
+    # cmd_324 V1: explicit export-column allowlist + FK flatten metadata for
+    # the CSV export tests (N4/N6/N7). Mirrors the equivalent computation in
+    # build_context.py (used by getters.ts.jinja2 / api_export_route.ts.jinja2)
+    # — this test context is built by a separate function, so the allowlist
+    # must be re-derived here rather than reused.
+    _api_oto_prop_names = {
+        r['prop_name'] for r in relationships
+        if (filtered_props.get(r['prop_name'], {}).get('x-relationship') or {}).get('type') == 'one-to-one'
+    }
+    _api_parent_rels_raw = [r for r in relationships if r['prop_name'] not in _api_oto_prop_names]
+    _api_parent_rels = [
+        {**r, 'relation_name': r['prop_name'].removesuffix('_id')}
+        for r in _api_parent_rels_raw
+    ]
+    x_relationships_list = [
+        {
+            'field': r['relation_name'],
+            'display_col': f"{r['relation_name']}_name",
+            'label_field': r['label_field'],
+        }
+        for r in _api_parent_rels
+        if '.' not in r['label_field']
+    ]
+
+    _EXPORT_SYSTEM_FIELDS = {
+        'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
+        'organization_id', 'tenant_id',
+    }
+    _api_fk_prop_names = {r['prop_name'] for r in _api_parent_rels_raw}
+    _export_candidates = gen_cfg.get('fields') or list(model_def.get('properties', {}).keys())
+
+    def _is_export_scalar(_prop: dict) -> bool:
+        _ptype = _prop.get('type')
+        if isinstance(_ptype, list):  # nullable scalar, e.g. ['string', 'null']
+            return True
+        return _ptype in ('string', 'integer', 'number', 'boolean')
+
+    export_scalar_fields = [
+        f for f in _export_candidates
+        if f not in _EXPORT_SYSTEM_FIELDS
+        and f not in _api_fk_prop_names
+        and f in model_def.get('properties', {})
+        and _is_export_scalar(model_def['properties'][f])
+    ]
+    # NOTE: x-import-key UNION intentionally not applied — see cmd_324 SA-1.
+    export_import_key_fields = [f for f in import_key_fields if f in export_scalar_fields]
+
     required_fields_list = model_def.get('required') or []
     _api_entity_options = _get_entity_options(schema)
     all_field_metas = get_field_metas(filtered_props, required_fields_list, relationships, gen_cfg.get('fields'), _api_entity_options)
@@ -2861,6 +2908,10 @@ def api_spec_context(
         'should_filter_by_org': should_filter_by_org,
         'has_import_key': has_import_key,
         'import_key_fields': import_key_fields,
+        # CSV Export (cmd_324 V1) test context
+        'export_scalar_fields': export_scalar_fields,
+        'export_import_key_fields': export_import_key_fields,
+        'x_relationships_list': x_relationships_list,
     }
 
 

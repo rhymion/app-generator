@@ -959,6 +959,44 @@ def build_context(entity: dict, schema: dict) -> dict:
         if '.' not in r['label_field']
     ]
 
+    # export_scalar_fields: explicit allowlist of CSV export columns (cmd_324 V1).
+    # Replaces the former exclusion-list ('...rest' spread) design, which leaked
+    # any new scalar column (including sensitive ones) by default. The allowlist
+    # is derived from the same view-visible field set used elsewhere in this
+    # function (x-generate.fields, falling back to all base-model properties),
+    # restricted to actual scalar columns on the base model.
+    # NOTE: x-import-key natural-key UNION (Phase 2 import compatibility) is
+    # intentionally NOT applied here — see cmd_324 SA-1 (pending Lord's ruling
+    # on whether user.email should be exported). Once decided, a follow-up
+    # change can union in import-key scalars generically for all entities.
+    _SYSTEM_FIELDS = {
+        'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
+        'organization_id', 'tenant_id',
+    }
+    _fk_prop_names = {r['prop_name'] for r in parent_rels_raw}
+    _export_candidates = gen_cfg.get('fields') or list(model_def.get('properties', {}).keys())
+
+    def _is_export_scalar(_prop: dict) -> bool:
+        _ptype = _prop.get('type')
+        if isinstance(_ptype, list):  # nullable scalar, e.g. ['string', 'null']
+            return True
+        return _ptype in ('string', 'integer', 'number', 'boolean')
+
+    export_scalar_fields = [
+        f for f in _export_candidates
+        if f not in _SYSTEM_FIELDS
+        and f not in _fk_prop_names
+        and f in model_def.get('properties', {})
+        and _is_export_scalar(model_def['properties'][f])
+    ]
+
+    # export_import_key_fields: the subset of import_key_fields that actually
+    # made it into export_scalar_fields. Since the x-import-key UNION is
+    # deferred (see note above), a natural-key field is no longer guaranteed
+    # to appear in export — this drives the N4 test's assertion list so it
+    # only asserts what the current allowlist actually guarantees.
+    export_import_key_fields = [f for f in import_key_fields if f in export_scalar_fields]
+
     has_assignee_id   = 'assignee_id' in filtered_props
     item_context_select = (
         f'{{ id: true, creator_id: true{", assignee_id: true" if has_assignee_id else ""} }}'
@@ -1814,6 +1852,9 @@ def build_context(entity: dict, schema: dict) -> dict:
         import_key_fields=import_key_fields,
         has_import_key=has_import_key,
         x_relationships_list=x_relationships_list,
+        # CSV export (cmd_324 V1): explicit scalar-column allowlist
+        export_scalar_fields=export_scalar_fields,
+        export_import_key_fields=export_import_key_fields,
         has_assignee_id=has_assignee_id,
         is_audited=is_audited,
         item_context_select=item_context_select,

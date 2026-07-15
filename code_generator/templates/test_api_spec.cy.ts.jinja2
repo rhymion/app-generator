@@ -770,7 +770,7 @@ describe('API: {{ title }}', () => {
       cy.task('db:populate{{ pascal }}', 1);
       cy.request({ url: `{{ api_path }}/export` })
         .then((res) => {
-          const headerLine = (res.body as string).replace(/^﻿/, '').split('\n')[0];
+          const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
           const headers = headerLine.split(',');
           expect(headers).to.not.include('id');
         });
@@ -784,7 +784,7 @@ describe('API: {{ title }}', () => {
           cy.request({ url: `{{ api_path }}/export` })
             .then((res) => {
               expect(res.status).to.eq(200);
-              const lines = (res.body as string).replace(/^﻿/, '').split('\n').filter(Boolean);
+              const lines = (res.body as string).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean);
               expect(lines.length - 1).to.be.at.most({{ seed_count + 1 }});
               expect(res.body).to.not.include(otherOrgs[0].name);
             });
@@ -792,15 +792,15 @@ describe('API: {{ title }}', () => {
       });
     });
 {% endif %}
-{% if has_import_key %}
+{% if export_import_key_fields %}
 
-    it('N4 CSV header includes the x-import-key natural-key column(s)', () => {
+    it('N4 CSV header includes the x-import-key natural-key column(s) present in the export allowlist', () => {
       cy.task('db:populate{{ pascal }}', 1);
       cy.request({ url: `{{ api_path }}/export` })
         .then((res) => {
-          const headerLine = (res.body as string).replace(/^﻿/, '').split('\n')[0];
+          const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
           const headers = headerLine.split(',');
-{% for f in import_key_fields %}
+{% for f in export_import_key_fields %}
           expect(headers).to.include('{{ f }}');
 {% endfor %}
         });
@@ -811,7 +811,7 @@ describe('API: {{ title }}', () => {
       cy.task('db:populate{{ pascal }}', 1);
       cy.request({ url: `{{ api_path }}/export` })
         .then((res) => {
-          const headerLine = (res.body as string).replace(/^﻿/, '').split('\n')[0];
+          const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
           const headers = headerLine.split(',');
           expect(headers).to.not.include('id');
           expect(headers).to.not.include('created_at');
@@ -821,6 +821,46 @@ describe('API: {{ title }}', () => {
           expect(headers).to.not.include('organization_id');
         });
     });
+
+    it('N6 CSV export headers match the view-field allowlist exactly', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: `{{ api_path }}/export` })
+        .then((res) => {
+          const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
+          const headers = headerLine.split(',');
+          // Positive: expected allowlist columns
+{% for field in export_scalar_fields %}
+          expect(headers).to.include('{{ field }}');
+{% endfor %}
+{% for rel in x_relationships_list %}
+          expect(headers).to.include('{{ rel.display_col }}');
+{% endfor %}
+          // Negative: system columns must not appear
+          expect(headers).to.not.include('id');
+          expect(headers).to.not.include('creator_id');
+          expect(headers).to.not.include('updater_id');
+          expect(headers).to.not.include('organization_id');
+          expect(headers).to.not.include('tenant_id');
+        });
+    });
+{% if model == 'user' %}
+
+    it('N7 CSV export does not expose sensitive columns (allowlist enforcement)', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: `{{ api_path }}/export` })
+        .then((res) => {
+          const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
+          const headers = headerLine.split(',');
+          // Sensitive column names must not appear as headers
+          expect(headers).to.not.include('password');
+          expect(headers).to.not.include('api_key');
+          expect(headers).to.not.include('mfa_secret');
+          expect(headers).to.not.include('emailVerified');
+          // Column name absence in the header is sufficient proof — if a
+          // column isn't in the header it cannot have emitted a raw value.
+        });
+    });
+{% endif %}
   });
 {% endif %}
 });

@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { getModelPermissions, assertPermission, getSessionUserId } from '@/lib/authz';
 import { handleApiError } from '@/lib/api-auth';
+import { escapeCSV } from '@/lib/_csv';
 import { get{{ parent_pascal }}ChunkForExport } from '@/lib/{{ parent }}/getters';
 
 const EXPORT_CHUNK_SIZE = Number(process.env.EXPORT_CHUNK_SIZE ?? '200');
@@ -31,13 +32,13 @@ export async function GET() {
             if (rows.length === 0) break;
 
             if (!headerWritten) {
-              const header = '﻿' + Object.keys(rows[0]).join(',') + '\n';
+              const header = '\uFEFF' + Object.keys(rows[0]).map(escapeCSV).join(',') + '\r\n';
               controller.enqueue(encoder.encode(header));
               headerWritten = true;
             }
 
             for (const row of rows) {
-              const line = Object.values(row).map(escapeCSV).join(',') + '\n';
+              const line = Object.values(row).map(escapeCSV).join(',') + '\r\n';
               controller.enqueue(encoder.encode(line));
             }
 
@@ -45,7 +46,7 @@ export async function GET() {
             skip += EXPORT_CHUNK_SIZE;
           }
           if (!headerWritten) {
-            controller.enqueue(encoder.encode('﻿'));
+            controller.enqueue(encoder.encode('\uFEFF'));
           }
         } finally {
           controller.close();
@@ -62,10 +63,4 @@ export async function GET() {
   } catch (error) {
     return handleApiError(error);
   }
-}
-
-function escapeCSV(v: unknown): string {
-  if (v === null || v === undefined) return '';
-  const s = v instanceof Date ? v.toISOString() : String(v);
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }

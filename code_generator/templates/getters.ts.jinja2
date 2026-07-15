@@ -347,11 +347,14 @@ export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pa
 }
 {% endfor %}
 
+{% if can_list %}
 // ---------------------------------------------------------------
 // CSV Export (Phase 1) — returns one chunk of rows visible to this
 // user (caller loops with increasing `skip` until an empty chunk),
-// with system fields omitted (id/timestamps/audit refs/tenant scope)
-// and FK relations flattened to display values.
+// restricted to the same access scope as the list page (org / Creator /
+// Assignee) and to an explicit export-column allowlist (system fields,
+// FK id columns, and non-scalar columns are never included), with FK
+// relations flattened to display values.
 // ---------------------------------------------------------------
 const EXPORT_CHUNK_SIZE = Number(process.env.EXPORT_CHUNK_SIZE ?? '200');
 
@@ -360,13 +363,15 @@ export async function get{{ parent_pascal }}ChunkForExport(
   skip: number,
 ): Promise<Record<string, unknown>[]> {
 {% if should_filter_by_org %}
+  const { permissions } = await getModelPermissions('{{ parent }}', userId);
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((o) => o.id);
+{% else %}
+  const { permissions } = await getModelPermissions('{{ parent }}');
 {% endif %}
+  const accessAnd = build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
   const rows = await prisma.{{ model }}.findMany({
-{% if should_filter_by_org %}
-    where: { organization_id: { in: associatedOrganizationIds } },
-{% endif %}
+    where: { AND: accessAnd },
     orderBy: { created_at: 'asc' },
     skip,
     take: EXPORT_CHUNK_SIZE,
@@ -375,17 +380,21 @@ export async function get{{ parent_pascal }}ChunkForExport(
 {% endif %}
   });
   return rows.map((row) => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { id, created_at, updated_at, creator_id, updater_id, organization_id, ...rest } = row as Record<string, unknown>;
-{% for rel in x_relationships_list %}
-    // Flatten {{ rel.field }}_id → display value via {{ rel.label_field }}
-    if (rest['{{ rel.field }}'] && typeof rest['{{ rel.field }}'] === 'object') {
-      rest['{{ rel.display_col }}'] =
-        (rest['{{ rel.field }}'] as Record<string, unknown>)['{{ rel.label_field }}'];
-      delete rest['{{ rel.field }}'];
-    }
-    delete rest['{{ rel.field }}_id'];
+    const result: Record<string, unknown> = {
+{% for field in export_scalar_fields %}
+      '{{ field }}': (row as Record<string, unknown>)['{{ field }}'],
 {% endfor %}
-    return rest;
+    };
+{% for rel in x_relationships_list %}
+    // Flatten {{ rel.field }}_id → display value via {{ rel.label_field }}.
+    // Always set (null when the FK is unset) so the CSV header stays stable
+    // across chunks regardless of which row happens to come first.
+    const _{{ rel.field }}Obj = (row as Record<string, unknown>)['{{ rel.field }}'];
+    result['{{ rel.display_col }}'] = (_{{ rel.field }}Obj && typeof _{{ rel.field }}Obj === 'object')
+      ? (_{{ rel.field }}Obj as Record<string, unknown>)['{{ rel.label_field }}']
+      : null;
+{% endfor %}
+    return result;
   });
 }
+{% endif %}
