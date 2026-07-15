@@ -17,7 +17,11 @@ export async function GET() {
     const { permissions, userId: actorId } = await getModelPermissions('{{ parent }}');
     if (!actorId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 {% endif %}
-    await assertPermission(permissions, 'read', '{{ parent }}');
+    try {
+      await assertPermission(permissions, 'read', '{{ parent }}');
+    } catch {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     const date = new Date().toISOString().slice(0, 10);
     const encoder = new TextEncoder();

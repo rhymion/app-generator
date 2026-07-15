@@ -192,6 +192,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/audit_log.cy.ts
 !cypress/e2e/api/user_import.cy.ts
 !cypress/e2e/api/import_batch2.cy.ts
+!cypress/e2e/api/round_trip.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/

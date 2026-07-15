@@ -703,6 +703,61 @@ def validate_schema(schema: dict) -> None:
                 )
 
     # -----------------------------------------------------------------------
+    # 10. x-import-key ⊆ V1 export allowlist  (IA-8)
+    # -----------------------------------------------------------------------
+    # For every entity that carries x-import-key:
+    #   • direct fields (e.g. "name") must exist in the entity's properties
+    #     and must not be a system/FK column (otherwise they would be excluded
+    #     from export_scalar_fields and the round-trip CSV would be unusable).
+    #   • dotted-FK fields (e.g. "role.name") must reference an existing target
+    #     entity that has the lookup field in its own properties.
+    _IMPORT_SYSTEM_FIELDS = {
+        'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
+        'organization_id', 'tenant_id', 'assignee_id',
+    }
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        _import_key_raw = defn.get('x-import-key', [])
+        if not _import_key_raw:
+            continue
+        if isinstance(_import_key_raw, str):
+            _import_key_raw = [_import_key_raw]
+        _entity_props = defn.get('properties', {})
+        for _raw_key in _import_key_raw:
+            if '.' in _raw_key:
+                # Dotted FK: e.g. "role.name" → look up 'role' entity, check 'name' field
+                _fk_ent, _fk_field = _raw_key.split('.', 1)
+                if _fk_ent not in defs:
+                    errors.append(
+                        f"Definition '{def_key}': x-import-key '{_raw_key}' references "
+                        f"entity '{_fk_ent}' which is not defined in the schema.  "
+                        f"Add a '{_fk_ent}' definition or correct the key."
+                    )
+                elif _fk_field not in defs[_fk_ent].get('properties', {}):
+                    errors.append(
+                        f"Definition '{def_key}': x-import-key '{_raw_key}': field "
+                        f"'{_fk_field}' does not exist on entity '{_fk_ent}'.  "
+                        f"The dotted-FK lookup would fail at import time."
+                    )
+            else:
+                # Direct field: must exist in entity's properties
+                if _raw_key not in _entity_props:
+                    errors.append(
+                        f"Definition '{def_key}': x-import-key field '{_raw_key}' "
+                        f"does not exist in the entity's properties.  "
+                        f"Add it to the schema or remove it from x-import-key."
+                    )
+                elif _raw_key.endswith('_id') or _raw_key in _IMPORT_SYSTEM_FIELDS:
+                    errors.append(
+                        f"Definition '{def_key}': x-import-key field '{_raw_key}' "
+                        f"is a system/FK field that is excluded from the V1 export "
+                        f"allowlist (export_scalar_fields).  The exported CSV will not "
+                        f"contain this column, so a round-trip import would fail.  "
+                        f"Use a natural-key field instead."
+                    )
+
+    # -----------------------------------------------------------------------
     # Report
     # -----------------------------------------------------------------------
     if errors:

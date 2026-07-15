@@ -67,7 +67,11 @@ export async function POST(request: NextRequest) {
     const { permissions, userId: actorId } = await getModelPermissions('{{ parent }}');
     if (!actorId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 {% endif %}
-    await assertPermission(permissions, 'import', '{{ parent }}');
+    try {
+      await assertPermission(permissions, 'import', '{{ parent }}');
+    } catch {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     const body = await request.json();
     const csvRaw = typeof body?.csv === 'string' ? body.csv : '';
