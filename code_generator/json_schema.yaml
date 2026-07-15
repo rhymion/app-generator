@@ -83,7 +83,7 @@ definitions:
       - id
       - name
       - email
-    x-import-key: [email]
+    x-import-key: [name]
     x-display:
       table:
         - name:
