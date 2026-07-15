@@ -21,6 +21,9 @@ import AppListToolbar from '@/components/ui/layout/AppListToolbar';
 {% if can_api and can_list %}
 import ExportCsvButton from '@/components/_standard/ExportCsvButton';
 {% endif %}
+{% if import_eligible %}
+import ImportModal from '@/components/{{ parent }}/ImportModal';
+{% endif %}
 {% for comp in entity_custom_components %}
 import {{ comp.name }} from '{{ comp.path if comp.path else "@/components/" + parent + "/" + comp.name }}';
 {% endfor %}
@@ -112,6 +115,9 @@ async function {{ parent_pascal }}ListContent({
       >
 {% if can_api and can_list %}
         <ExportCsvButton entity="{{ parent }}" />
+{% endif %}
+{% if import_eligible %}
+        <ImportModal permissions={userPermissions} />
 {% endif %}
 {% for comp in entity_custom_components %}
         <{{ comp.name }}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={userPermissions} />

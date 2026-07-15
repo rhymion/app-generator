@@ -591,6 +591,10 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(api_dir / 'import' / 'route.ts',
                        _render(env, 'api_import_route.ts.jinja2', ctx))
                 print(f'  CSV Import route → app/api/{parent}/import/')
+                # --- ImportModal UI component (batch4) ---
+                _write(components_dir / 'ImportModal.tsx',
+                       _render(env, 'components/ImportModal.tsx.jinja2', ctx))
+                print(f'  ImportModal → components/{parent}/ImportModal.tsx')
 
         # --- Invalidate action route (independent of can_api) ---
         if can_invalidate:
