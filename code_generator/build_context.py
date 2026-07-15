@@ -768,6 +768,7 @@ def build_context(entity: dict, schema: dict) -> dict:
     can_list   = gen_cfg.get('list',   True) is not False
     can_view   = gen_cfg.get('view',   True) is not False
     can_api    = gen_cfg.get('api', False)
+    can_export = gen_cfg.get('export', True) is not False  # cmd_330
 
     # invalidate flag: accepts bool or {enabled, handler, module}
     _inv = gen_cfg.get('invalidate', False)
@@ -998,15 +999,18 @@ def build_context(entity: dict, schema: dict) -> dict:
     export_import_key_fields = [f for f in import_key_fields if f in export_scalar_fields]
 
     # ────────────────────────────────────────────────────────────────
-    # Import eligibility — SINGLE PLACE for future gate addition (殿留保 cmd_328).
-    # Current rule: entity has x-import-key AND at least one of new/edit is enabled.
-    # Future: x-generate.import:false gate can be inserted here when introduced.
+    # Import eligibility — SINGLE PLACE (殿留保 cmd_328; cmd_330 adds import: flag).
+    # Rule: primary entity AND x-import-key AND import:true AND (new:true OR edit:true).
+    # import:false suppresses (a) own import route/UI/test only.
+    # (b) dotted-FK lookups by other entities are unaffected —
+    #     import_key_specs is built unconditionally below regardless of this flag.
     # ────────────────────────────────────────────────────────────────
     # Import eligibility requires the entity to be a primary entity (not an alias/view).
     # e.g., 'setting' (parent) maps to 'user' (model) — only 'user' should be import-eligible.
     # This satisfies 殿留保: "x-import-keyを持つ=import可を硬く焼き付けるな".
     _is_primary_entity = (parent == model)
-    import_eligible    = _is_primary_entity and has_import_key and (can_create or can_update)
+    _import_flag       = gen_cfg.get('import', True)          # x-generate.import (cmd_330)
+    import_eligible    = _is_primary_entity and has_import_key and _import_flag and (can_create or can_update)
     import_can_create  = import_eligible and can_create   # Tier1: x-generate.new
     import_can_update  = import_eligible and can_update   # Tier1: x-generate.edit
 
@@ -1934,6 +1938,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         can_list=can_list,
         can_view=can_view,
         can_api=can_api,
+        can_export=can_export,          # cmd_330
         can_invalidate=can_invalidate,
         invalidate_handler=invalidate_handler,
         invalidate_module=invalidate_module,

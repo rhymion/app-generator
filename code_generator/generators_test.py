@@ -2886,6 +2886,7 @@ def api_spec_context(
         'can_new': gen_cfg.get('new', True) is not False,
         'can_edit': gen_cfg.get('edit', True) is not False,
         'can_delete': gen_cfg.get('delete', True) is not False,
+        'can_export': gen_cfg.get('export', True) is not False,   # cmd_330
         'seed_count': seed_count,
         'I': I,
         'I7': I,  # same indentation level as I for section 7

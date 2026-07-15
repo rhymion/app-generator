@@ -18,7 +18,7 @@ import { DEFAULT_PAGE_SIZE{% if needs_formatting %}, type PageOpts{% endif %} } 
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
 import AppListToolbar from '@/components/ui/layout/AppListToolbar';
-{% if can_api and can_list %}
+{% if can_api and can_list and can_export %}
 import ExportCsvButton from '@/components/_standard/ExportCsvButton';
 {% endif %}
 {% if import_eligible %}
@@ -113,7 +113,7 @@ async function {{ parent_pascal }}ListContent({
         chartLabel={tc('chart')}
 {% endif %}
       >
-{% if can_api and can_list %}
+{% if can_api and can_list and can_export %}
         <ExportCsvButton entity="{{ parent }}" />
 {% endif %}
 {% if import_eligible %}

@@ -13,6 +13,14 @@ format-version: 2.0
 # Generator configuration (DP-3: search opt-in vs all-entity default)
 # search.default_scope: 'opt_in' — only entities with x-generate.search: true are searchable
 # search.default_scope: 'all'    — all entities are searchable; exclude with x-generate.search: false
+
+# x-generate per-entity flags (cmd_330):
+#   import: true (default) — generate /api/{entity}/import route + ImportModal UI + test
+#   import: false          — suppress own import route/UI/test;
+#                            x-import-key (b) dotted-FK resolution by other entities
+#                            continues to work (e.g. role.name lookup in permission import)
+#   export: true (default) — generate /api/{entity}/export route + ExportCsvButton + N1-N8 test
+#   export: false          — suppress export route, ExportCsvButton, N1-N8 export tests
 x-generator:
   search:
     default_scope: all
@@ -65,7 +73,9 @@ x-import-key:
     type: string
   description: |
     Natural key fields that uniquely identify a record for import (Phase 2).
-    Also guarantees these columns appear in Phase 1 CSV exports.
+    Also guarantees these columns appear in Phase 1 CSV exports when export:true (the default).
+    Dual purpose: (a) own import key — suppressed by x-generate.import:false;
+    (b) natural-key target for other entities' dotted-FK imports — always active.
     Single field: [name]
     Composite: [name, tenant_id]
     Dotted FK path for Phase 2: [name, role.name] (role_id resolved via role.name)

@@ -749,7 +749,7 @@ describe('API: {{ title }}', () => {
     });
   });
 {% endif %}
-{% if can_list %}
+{% if can_list and can_export %}
 
   describe('GET {{ api_path }}/export', () => {
     beforeEach(() => {

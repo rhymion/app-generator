@@ -482,6 +482,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         can_edit   = gen_cfg.get('edit', True)
         can_delete = gen_cfg.get('delete', True)
         can_api    = gen_cfg.get('api', False)
+        can_export = gen_cfg.get('export', True)    # cmd_330
 
         # invalidate flag: accepts bool or {enabled, handler, module}
         _inv = gen_cfg.get('invalidate', False)
@@ -580,8 +581,8 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(api_dir / 'bulk' / 'route.ts', _render(env, 'api_bulk_route.ts.jinja2', ctx))
             print(f'  API routes → app/api/{parent}/')
 
-            # --- CSV Export route (Phase 1: all entities with can_api+can_list) ---
-            if can_list:
+            # --- CSV Export route (Phase 1: can_api+can_list+can_export) ---
+            if can_list and can_export:                    # cmd_330
                 _write(api_dir / 'export' / 'route.ts',
                        _render(env, 'api_export_route.ts.jinja2', ctx))
                 print(f'  CSV Export route → app/api/{parent}/export/')

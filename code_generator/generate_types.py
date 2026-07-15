@@ -140,6 +140,9 @@ def extract_entities(schema: dict) -> list[dict]:
             'test':       x_generate.get('test') is True,
             'fields':     x_generate.get('fields'),
             'invalidate': x_generate.get('invalidate', False),
+            # cmd_330: opt-out flags (default True = backward compat)
+            'import':     x_generate.get('import', True) is not False,
+            'export':     x_generate.get('export', True) is not False,
         }
 
         # Skip entities where all user-facing flags are explicitly False (internal models)
