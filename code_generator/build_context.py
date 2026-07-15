@@ -1011,12 +1011,19 @@ def build_context(entity: dict, schema: dict) -> dict:
     import_can_update  = import_eligible and can_update   # Tier1: x-generate.edit
 
     # import_key_specs: structured key info for api_import_route.ts template.
-    # Batch1: is_dotted=False (direct field) のみ実装。
-    # Batch2: is_dotted=True (dotted FK, e.g. role.name) を拡張。
+    # Batch2: is_dotted=True (dotted FK, e.g. role.name) implemented — fk_nullable
+    # drives whether an empty CSV value resolves to FK=null or NOT_FOUND.
     import_key_specs = []
     for _raw in _import_key_raw:
         if '.' in _raw:
             _fk_entity, _fk_field = _raw.split('.', 1)
+            # Determine if the FK column on the parent model is nullable.
+            _fk_col      = f'{_fk_entity}_id'
+            _fk_prop     = model_def.get('properties', {}).get(_fk_col, {})
+            _fk_types    = _fk_prop.get('type', [])
+            if isinstance(_fk_types, str):
+                _fk_types = [_fk_types]
+            _fk_nullable = 'null' in _fk_types
             import_key_specs.append({
                 'raw':                  _raw,
                 'is_dotted':            True,
@@ -1024,7 +1031,8 @@ def build_context(entity: dict, schema: dict) -> dict:
                 'lookup_entity':        _fk_entity,                     # e.g. 'role'
                 'lookup_entity_pascal': to_pascal_case(_fk_entity),     # e.g. 'Role'
                 'lookup_field':         _fk_field,                      # e.g. 'name'
-                'result_col':           f'{_fk_entity}_id',             # e.g. 'role_id'
+                'result_col':           _fk_col,                        # e.g. 'role_id'
+                'fk_nullable':          _fk_nullable,
             })
         else:
             import_key_specs.append({
@@ -1034,7 +1042,30 @@ def build_context(entity: dict, schema: dict) -> dict:
                 'lookup_entity': None,
                 'lookup_field':  _raw,
                 'result_col':    _raw,
+                'fk_nullable':   False,
             })
+
+    # _create_feasible: True if all required non-system fields can be provided via CSV.
+    # Required fields that are NOT in export_scalar_fields and NOT resolvable via
+    # import_key_specs (i.e., not a dotted-FK target) cannot be supplied on CREATE
+    # (e.g., approval_flow.approver_role_id is a required FK outside export_scalar_fields
+    # → CREATE would throw a Prisma "missing required argument" error → 500).
+    _SYSTEM_AND_AUTO_IDS = {
+        'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
+        'organization_id', 'tenant_id',
+    }
+    _import_resolvable_cols = {spec['result_col'] for spec in import_key_specs}
+    _required_by_schema     = set(model_def.get('required', []))
+    _create_required_gaps   = (
+        _required_by_schema
+        - _SYSTEM_AND_AUTO_IDS
+        - set(export_scalar_fields)
+        - _import_resolvable_cols
+    )
+    _create_feasible = len(_create_required_gaps) == 0
+
+    # Revise import_can_create with the feasibility gate — Tier1.
+    import_can_create = import_eligible and can_create and _create_feasible
 
     # import_update_fields: CSV columns applied on UPDATE (key columns excluded).
     # On CREATE: use export_scalar_fields (all columns).

@@ -44,6 +44,17 @@ export default defineConfig({
           const { createLimitedApiUser } = require('./cypress/support/db-helpers');
           return await createLimitedApiUser(modelName);
         },
+        // cmd_328 batch2: session-loginable actor with a custom permission set, for
+        // testing session-based routes (CSV import/export) that createLimitedApiUser
+        // (X-API-Key only, unusable password) cannot reach.
+        async 'db:createSessionUserWithPermission'(params: {
+          entityName: string;
+          flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean };
+          label?: string;
+        }) {
+          const { createSessionUserWithPermission } = require('./cypress/support/db-helpers');
+          return await createSessionUserWithPermission(params.entityName, params.flags, params.label);
+        },
         async 'db:seedMfaUser'() {
           const { seedMfaTestUser } = require('./cypress/support/mfa-helpers');
           return await seedMfaTestUser();
