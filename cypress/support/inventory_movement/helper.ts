@@ -59,7 +59,7 @@ export async function populateInventoryMovementDependencies() {
     },
     include: { product: true, location: true },
   });
-  const fromInventory = { ...fromInventoryRecord, name: `${(fromInventoryRecord.product?.name ?? '')} ${(fromInventoryRecord.location?.name ?? '')} ${(fromInventoryRecord.lot_number ?? '')} ${formatLabelValue(fromInventoryRecord.expiration_date, 'date')}` };
+  const fromInventory = { ...fromInventoryRecord, name: `${(fromInventoryRecord.product?.name ?? '')} ${(fromInventoryRecord.location?.name ?? '')} ${(fromInventoryRecord.lot_number ?? '')} ${formatLabelValue(fromInventoryRecord.expiration_date, 'date')}`, searchName: `${(fromInventoryRecord.product?.name ?? '')} ${(fromInventoryRecord.location?.name ?? '')} ${(fromInventoryRecord.lot_number ?? '')}` };
   const toInventoryRecord = await prisma.inventory.create({
     data: {
       quantity: 0,
@@ -70,7 +70,7 @@ export async function populateInventoryMovementDependencies() {
     },
     include: { product: true, location: true },
   });
-  const toInventory = { ...toInventoryRecord, name: `${(toInventoryRecord.product?.name ?? '')} ${(toInventoryRecord.location?.name ?? '')} ${(toInventoryRecord.lot_number ?? '')} ${formatLabelValue(toInventoryRecord.expiration_date, 'date')}` };
+  const toInventory = { ...toInventoryRecord, name: `${(toInventoryRecord.product?.name ?? '')} ${(toInventoryRecord.location?.name ?? '')} ${(toInventoryRecord.lot_number ?? '')} ${formatLabelValue(toInventoryRecord.expiration_date, 'date')}`, searchName: `${(toInventoryRecord.product?.name ?? '')} ${(toInventoryRecord.location?.name ?? '')} ${(toInventoryRecord.lot_number ?? '')}` };
   return { product, location, fromInventory, toInventory, inventory: fromInventory };
 }
 

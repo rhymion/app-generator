@@ -88,7 +88,7 @@ async function _create{{ pascal }}BaseDeps() {
   });
 {% endif %}
 {% if dep.label_expression %}
-  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }} };
+  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }}{% if dep.search_differs %}, searchName: {{ dep.search_label_expression }}{% endif %} };
 {% else %}
   const {{ dep.var_name }} = {{ dep.var_name }}Record;
 {% endif %}
@@ -149,7 +149,7 @@ async function _create{{ pascal }}BaseDeps() {
   });
 {% endif %}
 {% if dep.label_expression_second %}
-  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: {{ dep.label_expression_second }} };
+  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: {{ dep.label_expression_second }}{% if dep.search_differs %}, searchName: {{ dep.search_label_expression_second }}{% endif %} };
 {% else %}
   const {{ dep.var_name }}2 = {{ dep.var_name }}2Record;
 {% endif %}
@@ -187,7 +187,7 @@ export async function populate{{ pascal }}Dependencies() {
 {% endif %}
   });
 {% if dep.label_expression %}
-  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }} };
+  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }}{% if dep.search_differs %}, searchName: {{ dep.search_label_expression }}{% endif %} };
 {% else %}
   const {{ dep.var_name }} = {{ dep.var_name }}Record;
 {% endif %}
@@ -269,7 +269,7 @@ export async function populate{{ pascal }}Dependencies() {
   });
 {% endif %}
 {% if dep.label_expression %}
-  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }} };
+  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }}{% if dep.search_differs %}, searchName: {{ dep.search_label_expression }}{% endif %} };
 {% else %}
   const {{ dep.var_name }} = {{ dep.var_name }}Record;
 {% endif %}
@@ -330,7 +330,7 @@ export async function populate{{ pascal }}Dependencies() {
   });
 {% endif %}
 {% if dep.label_expression_second %}
-  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: {{ dep.label_expression_second }} };
+  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: {{ dep.label_expression_second }}{% if dep.search_differs %}, searchName: {{ dep.search_label_expression_second }}{% endif %} };
 {% else %}
   const {{ dep.var_name }}2 = {{ dep.var_name }}2Record;
 {% endif %}

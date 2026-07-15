@@ -71,6 +71,7 @@ from helpers.schema_helpers import (
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import (
     build_label_expression, render_prisma_include, resolve_label_paths, relation_chain_targets,
+    build_string_only_label_expression,
 )
 from build_context import _get_entity_options
 from generate_types import extract_entities
@@ -1091,8 +1092,15 @@ def gen_empty_assert_command(field: dict, indent: str) -> str:
     return f"{indent}cy.checkField('{label}', '');"
 
 
-def gen_fill_commands(fields: list, entity_title: str, indent: str, fk_dep_vars: dict | None = None) -> list[str]:
-    """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup."""
+def gen_fill_commands(
+    fields: list, entity_title: str, indent: str, fk_dep_vars: dict | None = None,
+    dep_search_info: dict | None = None,
+) -> list[str]:
+    """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup.
+    dep_search_info: optional {prop_name: {search_differs}} — when search_differs is
+    True, the dep's labelField mixes non-string segments (e.g. date), so the test
+    must type the string-only deps.X.searchName but still click deps.X.name (the
+    full label rendered in the dropdown). See RC6 (cmd_323)."""
     lines = []
     for field in fields:
         if field.get('readonly'):
@@ -1101,7 +1109,14 @@ def gen_fill_commands(fields: list, entity_title: str, indent: str, fk_dep_vars:
             dep_target = field.get('dep_target')
             if dep_target:
                 dep_var = (fk_dep_vars or {}).get(field['prop_name']) or to_camel_case(dep_target)
-                lines.append(f"{indent}cy.selectAutocomplete('{field['label']}', deps.{dep_var}.name);")
+                info = (dep_search_info or {}).get(field['prop_name'], {})
+                if info.get('search_differs'):
+                    lines.append(
+                        f"{indent}cy.selectAutocomplete('{field['label']}', "
+                        f"deps.{dep_var}.searchName, deps.{dep_var}.name);"
+                    )
+                else:
+                    lines.append(f"{indent}cy.selectAutocomplete('{field['label']}', deps.{dep_var}.name);")
         else:
             value = cypress_create_value(field, entity_title)
             lines.append(gen_fill_command(field, value, indent))
@@ -1694,6 +1709,14 @@ def helper_context(
         label_expression_second = ''
         prisma_include_str = ''
         label_has_format = False
+        # search_label_expression: the string-only subset of label_expression that
+        # a Cypress test should TYPE into an autocomplete's search box (the server
+        # only searches string fields — date/enum/number segments never match).
+        # search_differs is False when the full label is already string-only, in
+        # which case callers keep using deps.X.name for both search and click.
+        search_label_expression = ''
+        search_label_expression_second = ''
+        search_differs = False
         if label_field and label_field != 'name':
             built = build_label_expression(
                 f'{dep["var_name"]}Record', label_field, dep['target'], schema,
@@ -1705,6 +1728,19 @@ def helper_context(
                 f'{dep["var_name"]}2Record', label_field, dep['target'], schema,
             )
             label_expression_second = built_second['expression']
+
+            search_label_expression = build_string_only_label_expression(
+                f'{dep["var_name"]}Record', label_field, dep['target'], schema,
+            )
+            search_differs = bool(search_label_expression and search_label_expression != label_expression)
+            if not search_label_expression:
+                # S1c-1 fallback: all segments non-string (not present in current
+                # schema) — keep searching by the full label (pre-fix behavior).
+                search_label_expression = label_expression
+                search_differs = False
+            search_label_expression_second = build_string_only_label_expression(
+                f'{dep["var_name"]}2Record', label_field, dep['target'], schema,
+            ) or label_expression_second
         enriched_deps.append({
             **dep,
             'title': title_str,
@@ -1714,6 +1750,9 @@ def helper_context(
             'label_field_is_date': label_field_is_date,
             'label_expression': label_expression,
             'label_expression_second': label_expression_second,
+            'search_label_expression': search_label_expression,
+            'search_label_expression_second': search_label_expression_second,
+            'search_differs': search_differs,
             'prisma_include_str': prisma_include_str,
             'label_has_format': label_has_format,
             # needs_second only for transitive (non-direct) deps matching primary FK target
@@ -2066,6 +2105,28 @@ def spec_context(
             prop_stem = re.sub(r'_id$', '', r['prop_name'])
             fk_dep_vars[r['prop_name']] = to_camel_case(prop_stem)
 
+    # dep_search_info: {prop_name: {search_differs}} — mirrors the same
+    # label_field-derived computation helper_context() does per dep, so
+    # gen_fill_commands() knows (independently of helper_context, which builds
+    # a different template) whether to type deps.X.searchName instead of
+    # deps.X.name. See RC6 (cmd_323): non-string labelField segments (e.g.
+    # expiration_date) aren't searchable server-side.
+    dep_search_info = {}
+    for r in relationships:
+        if r['target'] == 'user' or r['prop_name'] in ('creator_id', 'updater_id'):
+            continue
+        dep_var = fk_dep_vars.get(r['prop_name'])
+        if not dep_var:
+            continue
+        label_field = r.get('label_field', 'name')
+        search_differs = False
+        if label_field and label_field != 'name':
+            item_var = f'{dep_var}Record'
+            label_expr = build_label_expression(item_var, label_field, r['target'], schema)['expression']
+            search_expr = build_string_only_label_expression(item_var, label_field, r['target'], schema)
+            search_differs = bool(search_expr and search_expr != label_expr)
+        dep_search_info[r['prop_name']] = {'search_differs': search_differs}
+
     child_metas = analyze_children(children, schema, model_name)
     list_autocomplete_children = [c for c in child_metas if c['render_type'] == 'editable-list-autocomplete']
 
@@ -2140,8 +2201,8 @@ def spec_context(
         for r in get_flatten_rels(parent, parent_def, schema)
         if r['is_m2o']
     }
-    required_fill_cmds = gen_fill_commands(required_field_metas, title, I, fk_dep_vars)
-    all_fill_cmds = gen_fill_commands(fields, title, I, fk_dep_vars)
+    required_fill_cmds = gen_fill_commands(required_field_metas, title, I, fk_dep_vars, dep_search_info)
+    all_fill_cmds = gen_fill_commands(fields, title, I, fk_dep_vars, dep_search_info)
     required_assert_cmds_no_bool = gen_assert_commands(
         [f for f in required_field_metas if f['category'] != 'boolean'], title, I, fk_dep_vars,
         flatten_m2o_props=flatten_m2o_props_view, schema=schema)
@@ -2417,7 +2478,7 @@ def spec_context(
     ]
     opt_fill_cmds_3_1_ac = gen_fill_commands(
         [f for f in optional_field_metas if f['category'] == 'autocomplete'],
-        title, '        ', fk_dep_vars,
+        title, '        ', fk_dep_vars, dep_search_info,
     ) if use_deps_in_3_1 else []
     # Optional UA FK fields (excluded from field_metas; appended separately via all_ua_spec)
     opt_ua_spec = [ua for ua in all_ua_spec if ua['prop_name'] not in required_fields]
@@ -2490,7 +2551,7 @@ def spec_context(
             primary_required_fk or (non_autocomplete_required[0] if non_autocomplete_required else required_field_metas[0]),
         )
         fields_to_fill_5_1 = [f for f in required_field_metas if f['prop_name'] != field_to_skip['prop_name']]
-        fail_create_5_1 = {'fill_cmds': gen_fill_commands(fields_to_fill_5_1, title, I)}
+        fail_create_5_1 = {'fill_cmds': gen_fill_commands(fields_to_fill_5_1, title, I, dep_search_info=dep_search_info)}
 
     # Section 5.2: missing scalar required child field; 5.3: missing FK required child field
     fail_create_5_2_scalar = None
@@ -2512,7 +2573,7 @@ def spec_context(
                 'title': child_title,
                 'partial_obj': ('{ ' + ', '.join(entries) + ' }') if entries else None,
                 'fk_fields': gen_child_datagrid_fk_fields(fk_required, schema),
-                'fill_cmds': gen_fill_commands(required_field_metas, title, I),
+                'fill_cmds': gen_fill_commands(required_field_metas, title, I, dep_search_info=dep_search_info),
             }
 
         # 5.3: add child with all scalar fields filled but no FK selection
@@ -2521,7 +2582,7 @@ def spec_context(
             fail_create_5_2_fk = {
                 'title': child_title,
                 'partial_obj': ('{ ' + ', '.join(entries) + ' }') if entries else None,
-                'fill_cmds': gen_fill_commands(required_field_metas, title, I),
+                'fill_cmds': gen_fill_commands(required_field_metas, title, I, dep_search_info=dep_search_info),
             }
 
     # Section 6.1: clear a required field

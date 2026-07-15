@@ -59,7 +59,7 @@ export async function populateInventoryAdjustmentDependencies() {
     },
     include: { product: true, location: true },
   });
-  const inventory = { ...inventoryRecord, name: `${(inventoryRecord.product?.name ?? '')} ${(inventoryRecord.location?.name ?? '')} ${(inventoryRecord.lot_number ?? '')} ${formatLabelValue(inventoryRecord.expiration_date, 'date')}` };
+  const inventory = { ...inventoryRecord, name: `${(inventoryRecord.product?.name ?? '')} ${(inventoryRecord.location?.name ?? '')} ${(inventoryRecord.lot_number ?? '')} ${formatLabelValue(inventoryRecord.expiration_date, 'date')}`, searchName: `${(inventoryRecord.product?.name ?? '')} ${(inventoryRecord.location?.name ?? '')} ${(inventoryRecord.lot_number ?? '')}` };
   return { product, location, inventory };
 }
 

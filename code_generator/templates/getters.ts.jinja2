@@ -261,22 +261,38 @@ export async function search{{ parent_pascal }}Options(
   const accessAnd = build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
 
   const trimmed = query.trim();
-  const orClauses: Record<string, unknown>[] = [];
-  if (trimmed) {
+  // Token-split AND search: each whitespace-separated token must match at
+  // least one searchable field (OR), and every token must match (AND) —
+  // so "Test Location" (product-name-word + location-word) narrows instead
+  // of requiring one field to contain the whole combined string.
+  // filter(Boolean) drops empty tokens from leading/trailing/double spaces
+  // (e.g. a null optional labelField segment) so `contains: ''` never
+  // silently wildcard-matches every row.
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  const matchOr: Record<string, unknown>[] = [];
+  if (tokens.length > 0) {
+    const searchAnd = tokens.map((token) => {
+      const orClauses: Record<string, unknown>[] = [];
 {% for f in searchable_text_fields %}
-    orClauses.push({ {{ f }}: { contains: trimmed, mode: 'insensitive' } });
+      orClauses.push({ {{ f }}: { contains: token, mode: 'insensitive' } });
 {% endfor %}
 {% for rf in searchable_relation_fields %}
-    orClauses.push({ {{ rf.relation }}: { {{ rf.field }}: { contains: trimmed, mode: 'insensitive' } } });
+      orClauses.push({ {{ rf.relation }}: { {{ rf.field }}: { contains: token, mode: 'insensitive' } } });
 {% endfor %}
+      return { OR: orClauses };
+    });
+    matchOr.push({ AND: searchAnd });
   }
   if (includeIds.length > 0) {
-    orClauses.push({ id: { in: includeIds } });
+    // Always include currently-selected rows regardless of token search —
+    // an OR sibling of the token-AND block, not ANDed with it, so a
+    // selected option outside the search results still resolves by id.
+    matchOr.push({ id: { in: includeIds } });
   }
   const where = {
     AND: [
       ...accessAnd,
-      ...(orClauses.length > 0 ? [{ OR: orClauses }] : []),
+      ...(matchOr.length > 0 ? [{ OR: matchOr }] : []),
     ],
   };
   const safeLimit = Math.min(Math.max(Math.floor(limit) || 50, 1), 200);
