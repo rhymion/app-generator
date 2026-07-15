@@ -997,6 +997,65 @@ def build_context(entity: dict, schema: dict) -> dict:
     # only asserts what the current allowlist actually guarantees.
     export_import_key_fields = [f for f in import_key_fields if f in export_scalar_fields]
 
+    # ────────────────────────────────────────────────────────────────
+    # Import eligibility — SINGLE PLACE for future gate addition (殿留保 cmd_328).
+    # Current rule: entity has x-import-key AND at least one of new/edit is enabled.
+    # Future: x-generate.import:false gate can be inserted here when introduced.
+    # ────────────────────────────────────────────────────────────────
+    import_eligible    = has_import_key and (can_create or can_update)
+    import_can_create  = import_eligible and can_create   # Tier1: x-generate.new
+    import_can_update  = import_eligible and can_update   # Tier1: x-generate.edit
+
+    # import_key_specs: structured key info for api_import_route.ts template.
+    # Batch1: is_dotted=False (direct field) のみ実装。
+    # Batch2: is_dotted=True (dotted FK, e.g. role.name) を拡張。
+    import_key_specs = []
+    for _raw in _import_key_raw:
+        if '.' in _raw:
+            _fk_entity, _fk_field = _raw.split('.', 1)
+            import_key_specs.append({
+                'raw':                  _raw,
+                'is_dotted':            True,
+                'csv_col':              f'{_fk_entity}_{_fk_field}',   # e.g. 'role_name'
+                'lookup_entity':        _fk_entity,                     # e.g. 'role'
+                'lookup_entity_pascal': to_pascal_case(_fk_entity),     # e.g. 'Role'
+                'lookup_field':         _fk_field,                      # e.g. 'name'
+                'result_col':           f'{_fk_entity}_id',             # e.g. 'role_id'
+            })
+        else:
+            import_key_specs.append({
+                'raw':           _raw,
+                'is_dotted':     False,
+                'csv_col':       _raw,
+                'lookup_entity': None,
+                'lookup_field':  _raw,
+                'result_col':    _raw,
+            })
+
+    # import_update_fields: CSV columns applied on UPDATE (key columns excluded).
+    # On CREATE: use export_scalar_fields (all columns).
+    # On UPDATE: key columns identify the row; don't overwrite them.
+    import_update_fields = [f for f in export_scalar_fields if f not in import_key_fields]
+
+    # import_field_specs: per-column type info for coercion in template.
+    _TSTYPE_MAP = {'string': 'string', 'integer': 'number', 'number': 'number', 'boolean': 'boolean'}
+    import_field_specs = []
+    for _f in export_scalar_fields:
+        _prop  = model_def.get('properties', {}).get(_f, {})
+        _types = _prop.get('type', ['string'])
+        if isinstance(_types, str):
+            _types = [_types]
+        _nullable  = 'null' in _types
+        _base      = [t for t in _types if t != 'null']
+        _ts_type   = _TSTYPE_MAP.get(_base[0] if _base else 'string', 'string')
+        import_field_specs.append({
+            'name':      _f,
+            'ts_type':   _ts_type,
+            'nullable':  _nullable,
+            'is_key':    _f in import_key_fields,
+            'is_update': _f not in import_key_fields,
+        })
+
     has_assignee_id   = 'assignee_id' in filtered_props
     item_context_select = (
         f'{{ id: true, creator_id: true{", assignee_id: true" if has_assignee_id else ""} }}'
@@ -1855,6 +1914,13 @@ def build_context(entity: dict, schema: dict) -> dict:
         # CSV export (cmd_324 V1): explicit scalar-column allowlist
         export_scalar_fields=export_scalar_fields,
         export_import_key_fields=export_import_key_fields,
+        # CSV import (cmd_328 Phase 2)
+        import_eligible=import_eligible,
+        import_can_create=import_can_create,
+        import_can_update=import_can_update,
+        import_key_specs=import_key_specs,
+        import_update_fields=import_update_fields,
+        import_field_specs=import_field_specs,
         has_assignee_id=has_assignee_id,
         is_audited=is_audited,
         item_context_select=item_context_select,

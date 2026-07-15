@@ -70,6 +70,29 @@ export default defineConfig({
           });
           return JSON.parse(JSON.stringify({ commentId: comment.id, userId: testUser.id }));
         },
+        async 'db:createUserWithName'(params: { name: string; image?: string | null }) {
+          // Creates a user row with a caller-chosen (possibly duplicate) name,
+          // owned by the session test user. Used by CSV import tests to set up
+          // natural-key match scenarios (cmd_328).
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
+          const { createId } = require('@paralleldrive/cuid2');
+          const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+          if (!testUser) throw new Error('Test user not found. Run db:seed first.');
+          const newUserId = createId();
+          const record = await prisma.user.create({
+            data: {
+              id: newUserId,
+              creator_id: testUser.id,
+              updater_id: testUser.id,
+              email: `${newUserId}@example.com`,
+              name: params.name,
+              image: params.image ?? null,
+              password: 'not_needed',
+            },
+          });
+          return JSON.parse(JSON.stringify(record));
+        },
         async 'db:createSecondUser'() {
           const { prisma } = require('./cypress/support/db-helpers');
           const { createId } = require('@paralleldrive/cuid2');

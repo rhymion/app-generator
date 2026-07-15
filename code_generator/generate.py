@@ -10,6 +10,7 @@ This is a drop-in replacement for:
     npx tsx code_generator/generate.ts <schema.yaml> .
 
 """
+import json
 import re
 import sys
 import os
@@ -69,6 +70,7 @@ def _make_env() -> Environment:
     )
     env.filters['pascal_case'] = to_pascal_case
     env.filters['camel_case'] = to_camel_case
+    env.filters['tojson'] = json.dumps
     return env
 
 
@@ -583,6 +585,12 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(api_dir / 'export' / 'route.ts',
                        _render(env, 'api_export_route.ts.jinja2', ctx))
                 print(f'  CSV Export route → app/api/{parent}/export/')
+
+            # --- CSV Import route (Phase 2: entities with x-import-key + new/edit) ---
+            if ctx.get('import_eligible'):
+                _write(api_dir / 'import' / 'route.ts',
+                       _render(env, 'api_import_route.ts.jinja2', ctx))
+                print(f'  CSV Import route → app/api/{parent}/import/')
 
         # --- Invalidate action route (independent of can_api) ---
         if can_invalidate:

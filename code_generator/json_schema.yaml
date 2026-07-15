@@ -66,7 +66,7 @@ x-import-key:
   description: |
     Natural key fields that uniquely identify a record for import (Phase 2).
     Also guarantees these columns appear in Phase 1 CSV exports.
-    Single field: [email]
+    Single field: [name]
     Composite: [name, tenant_id]
     Dotted FK path for Phase 2: [name, role.name] (role_id resolved via role.name)
     Entities without x-import-key: export-only in Phase 1; import blocked in Phase 2.

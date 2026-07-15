@@ -83,7 +83,7 @@ export default function DataGridClient<T extends BaseEntity>({
   invalidateAction,
   entityLabel = 'Item',
   displayFields,
-  permissions = { create: true, read: true, update: true, delete: true },
+  permissions = { create: true, read: true, update: true, delete: true, import: true },
   primaryField = 'name' as keyof T,
   openLinksInNewTab,
   allowCreate = true,

@@ -19,3 +19,9 @@ export function escapeCSV(v: unknown): string {
   if (FORMULA_TRIGGER.test(s)) s = '\t' + s;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
+
+/** Strip the tab escape prefix added by escapeCSV() for formula-trigger characters. */
+export function unescapeImportValue(v: string): string {
+  if (/^\t[=+\-@]/.test(v)) return v.slice(1);
+  return v;
+}
