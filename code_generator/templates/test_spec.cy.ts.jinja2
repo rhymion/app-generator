@@ -953,6 +953,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if has_approvable %}
 
   describe('Approval', () => {
+{% if can_new %}
     it('7.1 creates approval requests for user in requestor role', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
@@ -1000,6 +1001,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         });
       });
     });
+{% endif %}
 
     it('7.4 shows Approve/Reject buttons for user in approver role', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {

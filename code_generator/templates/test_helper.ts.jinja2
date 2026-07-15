@@ -849,6 +849,9 @@ export async function setup{{ pascal }}OrderedApprovalFlow() {
 
 export async function populate{{ pascal }}WithRejectedApproval(creatorId: string, approvalFlowIds: string[]) {
   const testUser = await getTestUser();
+{% if needs_deps_in_populate %}
+  const deps = await populate{{ pascal }}Dependencies();
+{% endif %}
 {% for fk in internal_fk_deps %}
   const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -859,7 +862,9 @@ export async function populate{{ pascal }}WithRejectedApproval(creatorId: string
       {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
 {% endfor %}
 {% for field in required_fields_prisma %}
-{% if field.category != 'autocomplete' %}
+{% if field.category == 'autocomplete' and field.dep_var_name %}
+      {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
+{% elif field.category != 'autocomplete' %}
       {{ field.prop_name }}: {{ field.prisma_val_fixed }},
 {% endif %}
 {% endfor %}
@@ -882,6 +887,9 @@ export async function populate{{ pascal }}WithRejectedApproval(creatorId: string
 
 export async function populate{{ pascal }}WithTerminalRejectedApproval(creatorId: string, approvalFlowIds: string[]) {
   const testUser = await getTestUser();
+{% if needs_deps_in_populate %}
+  const deps = await populate{{ pascal }}Dependencies();
+{% endif %}
 {% for fk in internal_fk_deps %}
   const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -892,7 +900,9 @@ export async function populate{{ pascal }}WithTerminalRejectedApproval(creatorId
       {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
 {% endfor %}
 {% for field in required_fields_prisma %}
-{% if field.category != 'autocomplete' %}
+{% if field.category == 'autocomplete' and field.dep_var_name %}
+      {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
+{% elif field.category != 'autocomplete' %}
       {{ field.prop_name }}: {{ field.prisma_val_fixed }},
 {% endif %}
 {% endfor %}
@@ -915,6 +925,9 @@ export async function populate{{ pascal }}WithTerminalRejectedApproval(creatorId
 
 export async function populate{{ pascal }}WithApproval(creatorId: string, approvalFlowIds: string[]) {
   const testUser = await getTestUser();
+{% if needs_deps_in_populate %}
+  const deps = await populate{{ pascal }}Dependencies();
+{% endif %}
 {% for fk in internal_fk_deps %}
   const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -925,7 +938,9 @@ export async function populate{{ pascal }}WithApproval(creatorId: string, approv
       {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
 {% endfor %}
 {% for field in required_fields_prisma %}
-{% if field.category != 'autocomplete' %}
+{% if field.category == 'autocomplete' and field.dep_var_name %}
+      {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
+{% elif field.category != 'autocomplete' %}
       {{ field.prop_name }}: {{ field.prisma_val_fixed }},
 {% endif %}
 {% endfor %}

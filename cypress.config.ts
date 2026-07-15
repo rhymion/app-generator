@@ -195,9 +195,9 @@ export default defineConfig({
           const { getInventoryAllocation } = require('./cypress/support/purchase_order/reservation_helper');
           return await getInventoryAllocation(params.purchase_order_id);
         },
-        async 'db:setupPurchasePerItemApprovalFlow'() {
-          const { setupPurchasePerItemApprovalFlow } = require('./cypress/support/purchase_order/reservation_helper');
-          return await setupPurchasePerItemApprovalFlow();
+        async 'db:setupPurchasePerItemSingleApprovalFlow'() {
+          const { setupPurchasePerItemSingleApprovalFlow } = require('./cypress/support/purchase_order/reservation_helper');
+          return await setupPurchasePerItemSingleApprovalFlow();
         },
         async 'db:getPurchasePerItemsForOrder'(params: { purchase_order_id: string }) {
           const { getPurchasePerItemsForOrder } = require('./cypress/support/purchase_order/reservation_helper');
@@ -223,13 +223,13 @@ export default defineConfig({
           const { setInventoryQuantity } = require('./cypress/support/purchase_order/reservation_helper');
           return await setInventoryQuantity(params.inventory_id, params.quantity);
         },
-        async 'db:setupReceivingReceiptLineApprovalFlow'() {
-          const { setupReceivingReceiptLineApprovalFlow } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
-          return await setupReceivingReceiptLineApprovalFlow();
+        async 'db:setupReceivingReceiptLineSingleApprovalFlow'() {
+          const { setupReceivingReceiptLineSingleApprovalFlow } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
+          return await setupReceivingReceiptLineSingleApprovalFlow();
         },
-        async 'db:populateReceivingReceiptLineWithApproval'(params: { creatorId: string; approvalFlowIds: string[]; inventoryId?: string | null; productId?: string }) {
-          const { populateReceivingReceiptLineWithApproval } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
-          return await populateReceivingReceiptLineWithApproval(params.creatorId, params.approvalFlowIds, { inventoryId: params.inventoryId ?? null, productId: params.productId });
+        async 'db:populateReceivingReceiptLineSingleApproval'(params: { creatorId: string; approvalFlowIds: string[]; inventoryId?: string | null; productId?: string }) {
+          const { populateReceivingReceiptLineSingleApproval } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
+          return await populateReceivingReceiptLineSingleApproval(params.creatorId, params.approvalFlowIds, { inventoryId: params.inventoryId ?? null, productId: params.productId });
         },
         async 'db:getApprovableById'(params: { approvable_id: string }) {
           const { getApprovableById } = require('./cypress/support/approval_test_helpers');
