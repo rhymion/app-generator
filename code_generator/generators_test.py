@@ -201,17 +201,8 @@ def _seed_path_part(
     """
     segments = resolved_path['segments']
     final_format = resolved_path['final_format']
-    # Dates: the UI formats with formatLabelValue → YYYY-MM-DD / HH:mm / YYYY-MM-DD HH:mm.
-    if final_format == 'date':
-        day = unique_index if unique_index is not None else 1
-        return f'2025-01-{day:02d}'
-    if final_format == 'time':
-        return '09:00'
-    if final_format == 'date-time':
-        day = unique_index if unique_index is not None else 1
-        return f'2025-01-{day:02d} 09:00'
 
-    # Walk the relation chain to find the entity that owns the final field.
+    # Walk the relation chain FIRST — needed for nullable check below.
     cursor_entity = target
     for seg in segments[:-1]:
         rels = {}
@@ -227,13 +218,27 @@ def _seed_path_part(
     leaf_def = schema['definitions'].get(cursor_entity, {})
     label_prop = _get_base_properties(leaf_def).get(final_field, {})
 
-    # nullable non-required field → not set by fixture → null → '' in UI
+    # nullable non-required field → not set by fixture → null → '' in UI.
+    # Must run BEFORE format-specific early returns so nullable date fields
+    # (e.g. expiration_date: type=[string,null], format=date, not in required)
+    # return '' rather than a fabricated date string.
     leaf_required = set(leaf_def.get('required') or [])
     if final_field not in leaf_required:
         _ptype_raw = label_prop.get('type')
         _ptypes = _ptype_raw if isinstance(_ptype_raw, list) else ([_ptype_raw] if _ptype_raw else [])
         if 'null' in _ptypes:
             return ''
+
+    # Dates: the UI formats with formatLabelValue → YYYY-MM-DD / HH:mm / YYYY-MM-DD HH:mm.
+    # Only reached for required (non-nullable) date fields.
+    if final_format == 'date':
+        day = unique_index if unique_index is not None else 1
+        return f'2025-01-{day:02d}'
+    if final_format == 'time':
+        return '09:00'
+    if final_format == 'date-time':
+        day = unique_index if unique_index is not None else 1
+        return f'2025-01-{day:02d} 09:00'
 
     prop_type_raw = label_prop.get('type')
     prop_type = next((t for t in prop_type_raw if t != 'null'), None) if isinstance(prop_type_raw, list) else prop_type_raw
@@ -619,7 +624,14 @@ def get_field_metas(
       enum_values, format, dep_target, min, max, entity_options
     """
     filtered = filter_fields(properties, fields_filter)
-    exclude_keys = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
+    # Exclude *able_id FKs with no x-relationship (system-managed internal bridge FKs,
+    # e.g. inventory_transactionable_id). Mirrors form_view/column_def exclusions.
+    _rel_prop_names = {r['prop_name'] for r in relationships}
+    _bridge_fk_keys = {
+        pn for pn in filtered
+        if pn.endswith('able_id') and pn not in _rel_prop_names
+    }
+    exclude_keys = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | _bridge_fk_keys
     metas = []
 
     for prop_name, prop in filtered.items():
@@ -2318,6 +2330,21 @@ def spec_context(
             check_field_label = lbl
             check_field_value_1 = list_id_1
             check_field_updated = list_id_updated
+        elif prim_meta.get('category') == 'number':
+            _first_val = cypress_create_value(prim_meta, title)   # '100'
+            _edit_val  = cypress_edit_value(prim_meta, title)     # '200'
+            list_id_1 = _first_val
+            list_id_is_unique = True
+            after_create_id = _first_val
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = _edit_val
+            has_edit_primary = True
+            edit_field_label = lbl
+            edit_update_value = _edit_val
+            check_field_label = lbl
+            check_field_value_1 = _first_val
+            check_field_updated = _edit_val
         else:
             list_id_1 = f'Test {lbl} 1'
             list_id_is_unique = True

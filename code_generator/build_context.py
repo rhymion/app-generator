@@ -557,9 +557,17 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
                             one_to_one_fk_props: set | None = None) -> dict:
     rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
     _oto_fk = one_to_one_fk_props or set()
+    # Exclude *able_id FKs with no x-relationship (system-managed internal bridge FKs,
+    # e.g. inventory_transactionable_id). Mirrors form_view_context's bridge_fk_no_rel_props.
+    _bridge_fk_no_rel = {
+        k for k in filtered_props
+        if k.endswith('able_id') and not filtered_props[k].get('x-relationship')
+        and k not in rel_prop_names
+    }
     parent_props = [
         k for k in filtered_props
-        if k not in _EXCLUDE_ID_TS and k != 'id' and k not in rel_prop_names and k not in _oto_fk
+        if k not in _EXCLUDE_ID_TS and k != 'id'
+        and k not in rel_prop_names and k not in _oto_fk and k not in _bridge_fk_no_rel
     ]
 
     custom_upsert = []
