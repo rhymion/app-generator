@@ -12,9 +12,13 @@ import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import Box from '@mui/material/Box';
-{% if per_part_required %}
+{% if split_has_relation_field %}
 import EntityAutocomplete, { type EntityOption } from '@/components/_standard/EntityAutocomplete';
+{% endif %}
+{% if split_uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
+{% endif %}
+{% if per_part_required %}
 {% for f in per_part_required %}
 {% if f.is_relation %}
 import { search{{ f.target_pascal }}Options } from '@/lib/{{ f.target }}/getters';

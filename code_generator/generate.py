@@ -712,6 +712,8 @@ def generate(schema_path: str, output_dir: str) -> None:
         # behavior — no UI, no Σ validation.
         if _qty_field:
             _split_ui_parts = []
+            _split_uses_format_label_value = False
+            _split_has_relation_field = False
             for _f in _per_part_req:
                 _f_def = _split_entity_props.get(_f, {})
                 _f_rel = (_f_def or {}).get('x-relationship') or {}
@@ -722,6 +724,9 @@ def generate(schema_path: str, output_dir: str) -> None:
                     continue
                 _f_label_field = _f_rel.get('labelField', 'id')
                 _f_built = build_label_expression('item', _f_label_field, _f_target, schema)
+                if _f_built['has_format']:
+                    _split_uses_format_label_value = True
+                _split_has_relation_field = True
                 _split_ui_parts.append({
                     'field': _f,
                     'is_relation': True,
@@ -734,6 +739,8 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'pascal_name': to_pascal_case(_def_key),
                 'quantity_field': _qty_field,
                 'per_part_required': _split_ui_parts,
+                'split_uses_format_label_value': _split_uses_format_label_value,
+                'split_has_relation_field': _split_has_relation_field,
             }
             _split_ui_dir = out / 'components' / _def_key
             _write(_split_ui_dir / 'SplitActionSection.tsx', _render(env, 'split_action_section.tsx.jinja2', _split_ui_ctx))
