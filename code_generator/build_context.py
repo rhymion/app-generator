@@ -15,6 +15,7 @@ from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
     is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
+    derive_text_fields, derive_searchable_relation_fields,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -551,9 +552,17 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
                             one_to_one_fk_props: set | None = None) -> dict:
     rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
     _oto_fk = one_to_one_fk_props or set()
+    # Exclude *able_id FKs with no x-relationship (system-managed internal bridge FKs,
+    # e.g. inventory_transactionable_id). Mirrors form_view_context's bridge_fk_no_rel_props.
+    _bridge_fk_no_rel = {
+        k for k in filtered_props
+        if k.endswith('able_id') and not filtered_props[k].get('x-relationship')
+        and k not in rel_prop_names
+    }
     parent_props = [
         k for k in filtered_props
-        if k not in _EXCLUDE_ID_TS and k != 'id' and k not in rel_prop_names and k not in _oto_fk
+        if k not in _EXCLUDE_ID_TS and k != 'id'
+        and k not in rel_prop_names and k not in _oto_fk and k not in _bridge_fk_no_rel
     ]
 
     custom_upsert = []
@@ -1163,10 +1172,18 @@ def build_context(entity: dict, schema: dict) -> dict:
     sortable_fields_quoted = ', '.join(f"'{c}'" for c in _scalar_props)
     filterable_fields_quoted = sortable_fields_quoted
 
-    # Text fields used by searchXxxOptions for substring matching. Limited to
-    # the conventional human-readable columns so callers don't accidentally
-    # search across freeform fields.
-    searchable_text_fields = [f for f in ('name', 'code') if f in filtered_props]
+    # Text fields used by searchXxxOptions for substring matching. Auto-derived
+    # human-readable string columns (shared with the pg_trgm full-text search
+    # rule in generate.py:_derive_text_fields) so callers don't accidentally
+    # search across freeform fields, FKs, enums, or write-only properties.
+    searchable_text_fields = derive_text_fields(filtered_props)
+    # Relation fields opted into cross-relation search via
+    # x-relationship.searchField (e.g. inventory matching by product name) —
+    # rendered as a one-hop nested Prisma `where` alongside the plain fields.
+    searchable_relation_fields = derive_searchable_relation_fields(filtered_props)
+    searchable_fields_display = searchable_text_fields + [
+        f"{rf['relation']}.{rf['field']}" for rf in searchable_relation_fields
+    ]
     # Default ordering for the search action — newest entities are the most
     # likely autocomplete picks. Falls back to id when no audit column exists.
     default_search_order_field = (
