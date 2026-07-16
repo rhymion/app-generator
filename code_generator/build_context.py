@@ -47,6 +47,16 @@ def _get_actual_type(defn: dict) -> str | None:
     return t
 
 
+def get_uri_kind(prop: dict) -> str | None:
+    """Return the uri kind for a format:uri property. Default is 'image'."""
+    if prop.get('format') != 'uri':
+        return None
+    kind = prop.get('x-uri-kind', 'image')
+    if kind not in ('image', 'link'):
+        raise ValueError(f"x-uri-kind must be 'image' or 'link', got: {kind!r}")
+    return kind
+
+
 def _is_nullable(defn: dict) -> bool:
     t = defn.get('type')
     return isinstance(t, list) and 'null' in t
@@ -68,16 +78,6 @@ def _normalize_kind(defn: dict) -> str:
 
 def _is_date_field(defn: dict) -> bool:
     return _get_actual_type(defn) == 'string' and defn.get('format') in ('date', 'date-time', 'time')
-
-
-def get_uri_kind(prop: dict) -> str | None:
-    """Return the uri kind for a format:uri property. Default is 'image'."""
-    if prop.get('format') != 'uri':
-        return None
-    kind = prop.get('x-uri-kind', 'image')
-    if kind not in ('image', 'link'):
-        raise ValueError(f"x-uri-kind must be 'image' or 'link', got: {kind!r}")
-    return kind
 
 
 def _dedupe_ordered(items):
