@@ -915,9 +915,6 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     model                   = ctx['model']
     parent_pascal           = ctx['parent_pascal']
     can_create              = ctx['can_create']
-    # Bridge children create via parent context despite new:false (cmd_167 §4) —
-    # generate the add<Entity> service so the parent-embedded create path works.
-    can_create              = can_create or bool(ctx.get('bridge_child_ir'))
     can_update              = ctx['can_update']
     can_delete              = ctx['can_delete']
     non_comment_ch          = ctx['non_comment_ch']
