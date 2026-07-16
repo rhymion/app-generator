@@ -3055,7 +3055,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         setter = _setter(sn)
         custom_jsxs.append(f"      <{comp} value={{{sn}}} onChange={{set{setter}}} isEdit={{isEdit}} />")
 
-    # Readonly fields: displayed as disabled text fields in edit mode, omitted in new mode.
+    # Readonly fields: displayed as readOnly text fields in edit mode, omitted in new mode.
     readonly_edit_jsxs = []
     for _ro_fn in sorted(readonly_field_names):
         if _ro_fn not in filtered_props:
@@ -3065,8 +3065,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      {{isEdit && (\n"
             f"        <AppFieldText\n"
             f"          label={{tf('{_ro_fk}')}}\n"
-            f"          defaultValue={{src.{_ro_fn} !== null && src.{_ro_fn} !== undefined ? String(src.{_ro_fn}) : ''}}\n"
-            f"          disabled\n"
+            f"          value={{src.{_ro_fn} !== null && src.{_ro_fn} !== undefined ? String(src.{_ro_fn}) : ''}}\n"
+            f"          readOnly\n"
             f"        />\n"
             f"      )}}"
         )
