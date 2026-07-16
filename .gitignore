@@ -87,9 +87,6 @@ memory/
 
 # ── lib/ ──
 lib/*/*
-!lib/*/service_after_create.ts
-!lib/*/form_validation.ts
-!lib/*/service_validation.ts
 !lib/account-link/**
 !lib/auth/**
 !lib/mfa/**
