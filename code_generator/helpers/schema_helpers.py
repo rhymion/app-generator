@@ -43,6 +43,79 @@ def get_detail_properties(parent: str, schema: dict, detail_key: str | None = No
     return None
 
 
+def get_approval_lines_props(parent_def: dict, model: str, schema: dict) -> list[str]:
+    """Embedded-line properties whose approvable_id must be pre-created before
+    the parent create/update (nested-create can't back-fill a NOT NULL FK).
+
+    Two independent schema signals feed this, and both need identical
+    treatment (see docs/receiving-approval-backfill-design.md §5.2 — D2):
+    - explicit `x-approval-lines: [prop, ...]` (e.g. receiving_receipt.lines)
+    - `x-reservation` with `transaction.strategy: ledger_transaction` whose
+      *lines entity itself declares `x-approval`* (e.g. purchase_order.items
+      -> purchase_per_item) — its lines carry their own approvable per-line
+      just like x-approval-lines children, so they're folded into the same
+      list rather than duplicating the pre-create/post-create machinery.
+
+      The x-approval gate matters: ledger_transaction is also used (in tests,
+      and potentially future schemas) for reservation lines that carry no
+      approval at all — those must NOT get approvable_id injected into a
+      nested-create/update body that has no such column.
+    """
+    props = list(parent_def.get('x-approval-lines') or [])
+    xres = parent_def.get('x-reservation') or {}
+    if (xres.get('transaction') or {}).get('strategy') == 'ledger_transaction':
+        lines_prop = xres.get('lines')
+        if lines_prop and lines_prop not in props:
+            detail_props = get_detail_properties(model, schema) or {}
+            ref = ((detail_props.get(lines_prop) or {}).get('items') or {}).get('$ref', '')
+            lines_entity = ref.rsplit('/', 1)[-1]
+            if lines_entity and (schema.get('definitions', {}).get(lines_entity) or {}).get('x-approval'):
+                props.append(lines_prop)
+    return props
+
+
+def get_splittable_bridge_field(entity_def: dict) -> str:
+    """The property name on an x-splittable entity that holds its per-child
+    ledger/reservation bridge FK (e.g. purchase_per_item / receiving_receipt_line's
+    inventory_transactionable_id).
+
+    Config-driven via x-splittable.bridgeField, defaulting to
+    'inventory_transactionable_id' — the two current x-splittable entities
+    reach this field through different parent-side mechanisms (purchase_order's
+    x-reservation.transaction.strategy: ledger_transaction vs. receiving_receipt's
+    plain x-approval-lines + receiving_receipt_line's own x-ledger-source), so
+    there is no single reverse lookup that resolves it for both; the entity's
+    own x-splittable config is the one place both agree to declare it (cmd_312
+    Phase1, see queue/reports/subtask_312a_ashigaru3.yaml for why the more
+    "principled" x-reservation reverse-lookup was rejected — it silently
+    dropped the bridge for receiving_receipt_line, which has no x-reservation
+    on its parent at all).
+    """
+    split_cfg = entity_def.get('x-splittable')
+    split_dict = split_cfg if isinstance(split_cfg, dict) else {}
+    return split_dict.get('bridgeField', 'inventory_transactionable_id')
+
+
+def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
+    """Resolve x-ledger-entities[domain_key] to {pool, ledger, transactionable}.
+
+    OD-1 underlying idea: config required, no defaults. Raises ValueError if
+    the domain or any of its required keys is not declared in the schema.
+    """
+    domains = schema.get('x-ledger-entities') or {}
+    if domain_key not in domains:
+        raise ValueError(f"x-ledger-entities.{domain_key!r} not declared in schema")
+    domain = domains[domain_key]
+    for required_key in ('pool', 'ledger', 'transactionable'):
+        if required_key not in domain:
+            raise ValueError(f"x-ledger-entities.{domain_key!r}.{required_key!r} is required")
+    return {
+        'pool': domain['pool'],
+        'ledger': domain['ledger'],
+        'transactionable': domain['transactionable'],
+    }
+
+
 def get_detail_relation_name(parent: str, target: str, schema: dict, detail_key: str | None = None) -> str:
     """Resolves the property name that $ref-s to `target` in the detail definition.
     e.g. for target='organization', finds 'organization' property with $ref: '#/definitions/organization'

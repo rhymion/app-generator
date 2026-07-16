@@ -1,0 +1,76 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+// Phase5: inventory adjustment ledger write stub for {{ snake_name }}
+// x-ledger-source event_type: adjust
+// Pattern: bridge create → entity update → inventory_transaction INSERT → inventory cache update
+
+import type { PrismaClient } from '@/app/generated/prisma/client';
+
+type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+/**
+ * Called after {{ snake_name }} approval is confirmed.
+ * Creates 1 inventory_transaction row with quantity_delta from the adjustment.
+ * quantity_delta may be positive (found stock) or negative (damaged/lost stock).
+ */
+export async function afterApprove(
+  tx: Tx,
+  entityId: string,
+  approvableId: string,
+  approvedByUserId: string,
+): Promise<void> {
+  const entity = await tx.{{ snake_name }}.findFirst({
+    where: { approvable_id: approvableId },
+  });
+  if (!entity) return;
+  if (!entity.approvable_id) return;
+
+  if (!entity.{{ ledger_source.poolIdField }}) throw new Error('{{ ledger_source.poolIdField }} required for ledger adjust write');
+
+  if (entity.{{ bridge_fk_field }}) {
+    const existing = await tx.{{ ledger_entity }}.findFirst({
+      where: { {{ bridge_fk_field }}: entity.{{ bridge_fk_field }} },
+    });
+    if (existing) return;
+  }
+
+  const bridge = entity.{{ bridge_fk_field }}
+    ? { id: entity.{{ bridge_fk_field }} }
+    : await tx.{{ transactionable_entity }}.create({ data: {} });
+
+  if (!entity.{{ bridge_fk_field }}) {
+    await tx.{{ snake_name }}.update({
+      where: { id: entityId },
+      data: { {{ bridge_fk_field }}: bridge.id },
+    });
+  }
+
+  const inventory = await tx.{{ pool_entity }}.findUniqueOrThrow({
+    where: { id: entity.{{ ledger_source.poolIdField }} },
+    include: { location: true },
+  });
+
+  const delta = entity.{{ ledger_source.quantity_delta_field }};
+
+  await tx.{{ ledger_entity }}.create({
+    data: {
+      {{ bridge_fk_field }}: bridge.id,
+      event_type: 'adjust',
+      quantity_delta: delta,
+      reserved_delta: 0,
+      product_id: inventory.product_id,
+      location: inventory.location?.name ?? '',
+      lot_number: inventory.lot_number,
+      expiration_date: inventory.expiration_date,
+      approved_via: approvableId,
+      created_by_id: approvedByUserId,
+      creator_id: approvedByUserId,
+      updater_id: approvedByUserId,
+    },
+  });
+
+  // increment accepts signed integers: positive adds, negative subtracts.
+  await tx.{{ pool_entity }}.update({
+    where: { id: entity.{{ ledger_source.poolIdField }} },
+    data: { quantity: { increment: delta } },
+  });
+}
