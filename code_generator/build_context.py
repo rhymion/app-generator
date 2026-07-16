@@ -746,7 +746,6 @@ def build_context(entity: dict, schema: dict) -> dict:
     }
 
     # Collect explicit readonly fields: x-readonly per-field OR x-readonly-fields entity-level.
-    # Stage 2 will extend this with automatic bridge parent fields.
     _ro_from_entity: set[str] = set(model_def.get('x-readonly-fields') or [])
     _ro_from_props: set[str] = {
         fn for fn, fp in filtered_props.items()
@@ -829,11 +828,9 @@ def build_context(entity: dict, schema: dict) -> dict:
         bridge_child_pre_create_code = '\n'.join(_res_lines)
 
     # Bridge parent options: for each parent target in x-bridge, collect display metadata.
-    # Used by Stage 3 (child list/detail parent display) and Stage 2 (form parent label).
     # label_field resolution: AP-1 A+B — x-bridge.parents[].labelField → x-display primary → fallback.
     bridge_parent_options: list[dict] = []
     if bridge_child_ir:
-        _bc_bridge_name_po = bridge_child_ir['name']
         for _bpo in (bridge_child_ir.get('parents') or []):
             _bpo_target = _bpo.get('target', '')
             _bpo_lf = _bpo.get('labelField')  # AP-1-A: schema-specified per-parent labelField
@@ -867,9 +864,6 @@ def build_context(entity: dict, schema: dict) -> dict:
             })
 
     # Stage 2: auto-add bridge FK prop to readonly_fields for bridge child entities.
-    # The bridge FK (e.g. channelable_id) is already excluded from editable form fields
-    # via auto_create_oto_fk_props; adding it here makes it available as a disabled
-    # display-only field in edit mode and links it to the readonly semantics machinery.
     if bridge_child_ir:
         _bridge_fk_prop = f'{bridge_child_ir["name"]}_id'
         if _bridge_fk_prop not in readonly_fields and _bridge_fk_prop in filtered_props:
@@ -881,8 +875,6 @@ def build_context(entity: dict, schema: dict) -> dict:
                 )
 
     # Collect bridge targets from new-form x-bridge declarations in the schema.
-    # Used to limit bridge_cleanup_rels to FK-on-parent bridge relations only
-    # (B5: prevents accidentally deleting non-bridge auto-create OTO rows).
     _new_form_bridge_targets: set[str] = set()
     for _ename, _edef in schema.get('definitions', {}).items():
         if _ename.endswith('_detail') or not isinstance(_edef, dict):
@@ -892,7 +884,6 @@ def build_context(entity: dict, schema: dict) -> dict:
             _new_form_bridge_targets.add(_bridge_ir['name'])
     # Also include old-form bridge targets (commentable, approvable, attachable) which
     # are referenced via one-to-one_bridge x-relationship directly on fields.
-    # These are auto-created by the parent entity and must also be cleaned up on delete.
     _bridge_cleanup_targets = _new_form_bridge_targets | {
         r['target'] for r in auto_create_oto_rels
         if r.get('relation_type') == 'one-to-one_bridge'
@@ -922,6 +913,7 @@ def build_context(entity: dict, schema: dict) -> dict:
     else:
         bridge_pre_delete_select = None
         bridge_post_delete_cleanups = ''
+
     parent_rels_raw = [r for r in _all_parent_rels_raw if r['prop_name'] not in oto_prop_names]
     # relationship_targets: deduplicated by target for import / type purposes
     seen: dict[str, dict] = {}
@@ -1122,13 +1114,6 @@ def build_context(entity: dict, schema: dict) -> dict:
             _scalar_props.append(_extra)
     if has_assignee_id and 'assignee_id' not in _scalar_props:
         _scalar_props.append('assignee_id')
-    # Bridge children: expose the entity's own `<bridge>_id` FK as filter/sortable so
-    # a parent-embedded grid (cmd_167 §4) can scope the list to one parent's bridge row.
-    _self_bridge = get_new_form_bridge(schema['definitions'].get(model, {}))
-    if _self_bridge:
-        _self_bridge_fk = f"{_self_bridge['name']}_id"
-        if _self_bridge_fk not in _scalar_props:
-            _scalar_props.append(_self_bridge_fk)
     sortable_fields_quoted = ', '.join(f"'{c}'" for c in _scalar_props)
     filterable_fields_quoted = sortable_fields_quoted
 
@@ -1528,17 +1513,6 @@ def build_context(entity: dict, schema: dict) -> dict:
     include_entries_list = [_include_entry_for_rel(r) for r in parent_rels]
     # Selector OTO rels are included in list so the relation column can be displayed
     include_entries_list.extend(_include_entry_for_rel(r) for r in selector_oto_rels)
-    # creator virtual columns: include creator relation directly in the list query
-    if any(vc.get('is_creator_virtual') for vc in virtual_columns):
-        include_entries_list.append('creator: { select: { name: true } }')
-    # Bridge child (Stage 3): add bridge parent include to list query so parent_type/label can be resolved.
-    if bridge_child_ir and bridge_parent_options:
-        _bc_bn_list = bridge_child_ir['name']
-        _bpo_sel_list = ', '.join(
-            f"{bpo['target']}: {{ select: {{ id: true, {bpo['label_field']}: true }} }}"
-            for bpo in bridge_parent_options
-        )
-        include_entries_list.append(f"{_bc_bn_list}: {{ include: {{ {_bpo_sel_list} }} }}")
     include_props_list   = ', '.join(include_entries_list)
 
     # searchXxxOptions returns target rows for OTHER entities' autocompletes.
@@ -1607,14 +1581,6 @@ def build_context(entity: dict, schema: dict) -> dict:
     _merge_include(search_include_dict, own_include_dict)
     _merge_include(search_include_dict, consumer_includes)
     search_include_props_list = render_prisma_include(search_include_dict)
-    # creator virtual columns: include creator in search query too (render_prisma_include
-    # does not support 'select', so append the raw TS fragment after rendering)
-    if any(vc.get('is_creator_virtual') for vc in virtual_columns):
-        creator_frag = 'creator: { select: { name: true } }'
-        search_include_props_list = (
-            f"{search_include_props_list}, {creator_frag}"
-            if search_include_props_list else creator_frag
-        )
 
     child_include_entries = []
     for c in children_raw:
@@ -1749,23 +1715,6 @@ def build_context(entity: dict, schema: dict) -> dict:
                 f"{r['relation_name']}: {{ include: {{ {nested} }} }}"
             )
 
-    # Bridge child (Stage 3): upgrade the flat bridge include to nested parent selects in the detail query.
-    if bridge_child_ir and bridge_parent_options:
-        _bc_bn_det = bridge_child_ir['name']
-        _bpo_sel_det = ', '.join(
-            f"{bpo['target']}: {{ select: {{ id: true, {bpo['label_field']}: true }} }}"
-            for bpo in bridge_parent_options
-        )
-        _bridge_nested_det = f"{_bc_bn_det}: {{ include: {{ {_bpo_sel_det} }} }}"
-        one_to_one_include_entries = [
-            _bridge_nested_det if e == f"{_bc_bn_det}: true" else e
-            for e in one_to_one_include_entries
-        ]
-        # Bridge is not in auto_create_oto_rels (it uses its own slot), so the
-        # upgrade above may be a no-op.  Append directly if still absent.
-        if _bridge_nested_det not in one_to_one_include_entries:
-            one_to_one_include_entries.append(_bridge_nested_det)
-
     # Selector OTO rels included simply — they are independent entities with their own pages
     selector_oto_include_entries = [f"{r['relation_name']}: true" for r in selector_oto_rels]
 
@@ -1825,19 +1774,11 @@ def build_context(entity: dict, schema: dict) -> dict:
     creator_filtered_props = copy.deepcopy(filtered_props)
     creator_filtered_props['creator_id'] = {'type': 'string'}
 
-    _parent_mapping_lines = [
+    parent_mapping = '\n'.join(
         f"    {k}: {parent_camel}.{k},"
         for k in creator_filtered_props
         if k not in _EXCLUDE_FIELDS
-    ]
-    # Prisma auto-managed datetime columns displayed via x-display.table
-    for _dtcol in datetime_display_columns:
-        _parent_mapping_lines.append(
-            f"    {_dtcol}: {parent_camel}.{_dtcol}\n"
-            f"      ? {parent_camel}.{_dtcol}.toISOString().replace('T', ' ').slice(0, 19)\n"
-            f"      : '',"
-        )
-    parent_mapping = '\n'.join(_parent_mapping_lines)
+    )
     relationship_mapping = '\n'.join(
         f"    {r['relation_name']}: {parent_camel}.{r['relation_name']},"
         for r in parent_rels
@@ -1849,32 +1790,10 @@ def build_context(entity: dict, schema: dict) -> dict:
     )
     # Note: reverse_oto_rels are NOT in relationship_mapping because they are not included in
     # the list query. They are fetched only in the detail query and auto-spread via { ...entity }.
-    def _virtual_map_line(vc: dict) -> str:
-        if vc.get('is_creator_virtual'):
-            return f"    {vc['field_name']}: {parent_camel}.creator?.name ?? '',"
-        return f"    {vc['field_name']}: virtualData.get(String({parent_camel}.id ?? ''))?.{vc['field_name']} ?? '',"
-    virtual_mapping = '\n'.join(_virtual_map_line(vc) for vc in virtual_columns)
-    # Bridge child (Stage 3): inline IIFE mapping for parent_type and parent_label.
-    # These do not go through virtual_resolvers.ts — computed directly from the bridge include.
-    if bridge_child_ir and bridge_parent_options:
-        _bc_bn_vm = bridge_child_ir['name']
-        _eda = '      // eslint-disable-next-line @typescript-eslint/no-explicit-any'
-        _type_cases = '\n'.join(
-            f"{_eda}\n      if ((({parent_camel} as any).{_bc_bn_vm})?.{bpo['target']}) return '{bpo['target']}';"
-            for bpo in bridge_parent_options
-        )
-        _label_cases = '\n'.join(
-            f"{_eda}\n"
-            f"      if ((({parent_camel} as any).{_bc_bn_vm})?.{bpo['target']})"
-            f" return String((({parent_camel} as any).{_bc_bn_vm})?.{bpo['target']}.{bpo['label_field']} ?? '');"
-            for bpo in bridge_parent_options
-        )
-        _bp_virt_lines = (
-            f"    parent_type: (() => {{\n{_type_cases}\n      return null;\n    }})(),\n"
-            f"    parent_label: (() => {{\n{_label_cases}\n      return null;\n    }})(),"
-        )
-        virtual_mapping = ((virtual_mapping + '\n') if virtual_mapping else '') + _bp_virt_lines
-    non_creator_virtual_columns = [vc for vc in virtual_columns if not vc.get('is_creator_virtual')]
+    virtual_mapping = '\n'.join(
+        f"    {vc['field_name']}: virtualData.get(String({parent_camel}.id ?? ''))?.{vc['field_name']} ?? '',"
+        for vc in virtual_columns
+    )
     child_mappings = '\n'.join(
         f"    {c['property_name']}: {parent_camel}.{c['property_name']},"
         for c in children_raw
@@ -1896,12 +1815,6 @@ def build_context(entity: dict, schema: dict) -> dict:
     service_args_for_create = f"actorId, {parent_service_args}" + (
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
-    if bridge_child_ir:
-        service_args_for_create += ", selectedParentType, selectedParentId"
-        all_body_fields_create = (
-            (all_body_fields_create + ", " if all_body_fields_create else "")
-            + "selectedParentType, selectedParentId"
-        )
     service_args_for_update = f"actorId, id, {parent_service_args}" + (
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
@@ -1973,7 +1886,6 @@ def build_context(entity: dict, schema: dict) -> dict:
         # Props
         parent_prop_infos=parent_prop_infos,
         parent_params=parent_params,
-        parent_params_no_bridge=parent_params_no_bridge,
         parent_params_with_types=parent_params_with_types,
         parent_data_obj=parent_data_obj,
         parent_data_obj_update=parent_data_obj_update,
@@ -2027,10 +1939,8 @@ def build_context(entity: dict, schema: dict) -> dict:
         xdisplay_table=xdisplay_table_raw,
         # Virtual columns: fields in x-display.table but not in properties.
         virtual_columns=virtual_columns,
-        non_creator_virtual_columns=non_creator_virtual_columns,
+        non_creator_virtual_columns=virtual_columns,
         virtual_mapping=virtual_mapping,
-        # Prisma auto-managed datetime columns displayed via x-display.table
-        datetime_display_columns=datetime_display_columns,
         # One-to-one outbound FK rels
         one_to_one_rels=auto_create_oto_rels,      # auto-create OTO only (for types/service templates)
         selector_oto_rels=selector_oto_rels,        # selector OTO (autocomplete UI, filtered getters)
@@ -2040,15 +1950,6 @@ def build_context(entity: dict, schema: dict) -> dict:
         one_to_one_pre_creates=one_to_one_pre_creates,
         one_to_one_spread=one_to_one_spread,
         one_to_one_include=one_to_one_include,
-        # FK-on-parent bridge IR
-        bridge_parent_options=bridge_parent_options,   # per-parent display metadata for bridge children
-        bridge_child_ir=bridge_child_ir,              # new-form x-bridge on this entity (as child)
-        bridge_child_params_str=bridge_child_params_str,      # extra service params for child parent selection
-        bridge_child_pre_create_code=bridge_child_pre_create_code,  # parent resolution code before create
-        bridge_child_fk_data_line=bridge_child_fk_data_line,  # FK line for create data object
-        bridge_cleanup_rels=bridge_cleanup_rels,       # bridges this entity owns (for parent delete cleanup)
-        bridge_pre_delete_select=bridge_pre_delete_select,   # select clause string for parent delete
-        bridge_post_delete_cleanups=bridge_post_delete_cleanups, # cleanup delete statements for template
         # Page list / view / edit custom components (entity-level, plural).
         entity_custom_components=entity_custom_components,
         entity_view_components=entity_view_components,
@@ -2067,12 +1968,7 @@ def build_context(entity: dict, schema: dict) -> dict:
         is_date_field=_is_date_field,
         get_actual_type=_get_actual_type,
         is_nullable=_is_nullable,
-        # Named constants (x-internal integer enum entities → TS export consts)
-        named_constants=_all_named_constants,
-        # Batched groupBy context for getCommentReactions (used by service/132b templates)
-        reaction_batch_query=reaction_batch_query,
         # Read-only fields: explicit schema annotations (x-readonly / x-readonly-fields).
-        # Stage 2 extends this with automatic bridge parent fields.
         readonly_fields=readonly_fields,
         readonly_fields_api=readonly_fields_api,
         readonly_fields_api_select=readonly_fields_api_select,

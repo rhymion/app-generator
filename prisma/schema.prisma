@@ -25,6 +25,8 @@ datasource db {
 // tenant created by scripts/seed-its.ts and the 1.5 migration script
 // exists before any user does. Normal admin-created tenants always
 // carry both ids.
+// exists before any user does. Normal admin-created tenants always
+// carry both ids.
 model tenant {
   id         String   @id @default(cuid())
   name       String
