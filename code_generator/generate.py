@@ -1055,6 +1055,43 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _render(env, template_name, ent),
             )
             print(f"  Approval stub → lib/{ent['snake_name']}/service_after_approve.ts")
+
+    # --- Rejection event dispatch (lib/approval_request/on_rejected_dispatch.ts) ---
+    #
+    # Emitted when at least one entity declares `x-approval.on_rejected`.
+    # Symmetric to on_approved. Builds rejectable_entities list, generates
+    # dispatch module and per-entity service_after_reject once-stubs (emit_hook only).
+    rejectable_entities = []
+    for def_key, def_val in defs.items():
+        if def_key.endswith('_detail'):
+            continue
+        x_approval = def_val.get('x-approval')
+        if not x_approval:
+            continue
+        on_rejected = x_approval.get('on_rejected', {})
+        if not on_rejected:
+            continue
+        entity_props = def_val.get('properties', {})
+        resolved_sf = _resolve_set_fields(entity_props, on_rejected.get('set_fields') or {})
+        rejectable_entities.append({
+            'snake_name': def_key,
+            'pascal_name': to_pascal_case(def_key),
+            'set_fields': resolved_sf,
+            'emit_hook': bool(on_rejected.get('emit_hook', False)),
+            'terminal': bool(on_rejected.get('terminal', False)),
+        })
+    _write(
+        out / 'lib' / 'approval_request' / 'on_rejected_dispatch.ts',
+        _render(env, 'on_rejected_dispatch.ts.jinja2', {'rejectable_entities': rejectable_entities}),
+    )
+    print(f'  Rejection dispatch → lib/approval_request/on_rejected_dispatch.ts ({len(rejectable_entities)} entities)')
+    for ent in rejectable_entities:
+        if ent['emit_hook']:
+            _write_stub(
+                out / 'lib' / ent['snake_name'] / 'service_after_reject.ts',
+                _render(env, 'service_after_reject_stub.ts.jinja2', ent),
+            )
+            print(f"  Rejection stub → lib/{ent['snake_name']}/service_after_reject.ts")
     # --- Search templates (lib/search/helpers.ts + app/api/search/route.ts) ---
     # DP-3: default_scope from x-generator.search.default_scope.
     #   'opt_in' (default) — only entities with x-generate.search: true are searchable

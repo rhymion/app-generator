@@ -1,5 +1,12 @@
 // GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
-
+{% if is_ship_skeleton %}
+// Ship skeleton (OD-3 Option B — config-driven, not fully declarative): {{ snake_name }}
+// resolves to ledger domain entities Ledger={{ ledger_entity }} / Transactionable={{ transactionable_entity }} /
+// Pool={{ pool_entity }}, via its bridge field `{{ bridge_fk_field }}`. This entity has no
+// x-ledger-source of its own — its parent reserved capacity at reserve time
+// (event_type: 'reserve', reserved_delta only); approval is the "Ship" moment
+// that nets outstanding reserved_delta and writes the offsetting rows below.
+{% endif %}
 import type { PrismaClient } from '@/app/generated/prisma/client';
 
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
@@ -19,5 +26,27 @@ export async function afterApprove(
   approvableId: string,
   approvedByUserId: string,
 ): Promise<void> {
+{% if is_ship_skeleton %}
+  // Netting structure (O-4/O-8 pattern — see appendix/inventory-domain-generalization-design.md §4.4):
+  //
+  // 1. const item = await tx.{{ snake_name }}.findUnique({ where: { id: entityId }, select: { {{ bridge_fk_field }}: true } });
+  //    if (!item?.{{ bridge_fk_field }}) return;
+  //
+  // 2. const txs = await tx.{{ ledger_entity }}.findMany({ where: { {{ bridge_fk_field }}: item.{{ bridge_fk_field }} } });
+  //
+  // 3. Net reserved_delta per pool identity (a bridge may span multiple lots):
+  //    sum txs[].reserved_delta grouped by the pool row's identity fields.
+  //
+  // 4. For each net group with outstanding reserved > 0 and no prior 'ship' row yet
+  //    (idempotency guard): write a new {{ ledger_entity }} row with
+  //    event_type: 'ship', quantity_delta: -net, reserved_delta: -net
+  //    (Ship is the only event that decrements physical quantity — it always
+  //    moves quantity and reserved_quantity down together).
+  //
+  // 5. Update the {{ pool_entity }} cache row: quantity -= net, reserved_quantity -= net.
+  //
+  // TODO: implement post-approval Ship effects here
+{% else %}
   // TODO: implement post-approval effects here
+{% endif %}
 }

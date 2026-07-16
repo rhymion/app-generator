@@ -18,6 +18,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       },
     });
     if (!req) throw new ApiError(404, 'Approval request not found');
+    if (req.status === 3) throw new ApiError(400, 'Terminal rejected requests cannot be re-submitted');
     if (req.status !== 2) throw new ApiError(400, 'Only rejected requests can be re-submitted');
 
     // Authorize: entity creator or user in requestor_role
