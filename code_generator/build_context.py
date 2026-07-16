@@ -1512,8 +1512,11 @@ def build_context(entity: dict, schema: dict) -> dict:
                 'available_status_ts': str(_avail) if isinstance(_avail, int) else f"'{_avail}'",
                 'reserved_status_ts': str(_resrv) if isinstance(_resrv, int) else f"'{_resrv}'",
                 'allocatedField': _result.get('allocatedField', ''),
-                'criteria': _request.get('criteria') or {},
+                'criteria': {k: v for k, v in _criteria_raw.items() if k != 'dateRange'},
                 'hasLines': False,
+                'usesOverlapAvailability': _uses_overlap,
+                'updatesPoolStatusOnReserve': _updates_pool,
+                'excludePoolStatuses': _exclude_statuses,
             }
             if _dateRange_raw:
                 reservation_config['dateRange'] = {
