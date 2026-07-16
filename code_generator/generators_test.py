@@ -65,6 +65,7 @@ from helpers.schema_helpers import (
     get_parent_relationships,
     is_optional_fk_to_parent,
     get_flatten_rels,
+    get_splittable_bridge_field,
     resolve_ledger_domain,
 )
 from helpers.bridge_direction import get_new_form_bridge
@@ -696,6 +697,39 @@ def get_child_render_type(child: dict, schema: dict = None, parent_model_name: s
     if child.get('output_type') == 'comments':
         return 'comments'
     return 'datagrid'
+
+
+def _child_system_managed_fk_excludes(child_def: dict) -> set[str]:
+    """FK-shaped fields on a datagrid child that the UI never collects via plain
+    text/select — the service sets them internally (reservation/split/approval
+    flows). Excluding them keeps generated full-data e2e tests from calling
+    fillDataGridRow with a literal string on a field that requires a real cuid
+    (root cause: queue/reports/subtask_294a_gunshi.yaml failure_classification).
+
+    - x-relationship.type == 'one-to-one_bridge' (e.g. approvable_id): the
+      generic internal-bridge FK marker used throughout code_generator.
+    - the reservation/ledger line-transactionable FK, config-driven via
+      x-splittable.bridgeField (cmd_312 Phase1, see
+      get_splittable_bridge_field). It intentionally carries no
+      x-relationship (inventory_transactionable has no x-generate/pages —
+      see build_context.py _child_bridge_excludes and generators.py
+      line_txable_f), so — consistent with that existing by-name
+      exclusion — it is matched by resolved field name here too.
+    - 'parent_id' on x-splittable children (e.g. receiving_receipt_line): the
+      self-FK to the pre-split parent row (see generate.py split inherited_fields
+      exclusion list, which treats it the same way).
+    """
+    props = child_def.get('properties') or {}
+    excludes = {
+        prop_name for prop_name, prop in props.items()
+        if isinstance(prop, dict) and (prop.get('x-relationship') or {}).get('type') == 'one-to-one_bridge'
+    }
+    _bridge_field = get_splittable_bridge_field(child_def)
+    if _bridge_field in props:
+        excludes.add(_bridge_field)
+    if child_def.get('x-splittable') and 'parent_id' in props:
+        excludes.add('parent_id')
+    return excludes
 
 
 def analyze_children(children: list, schema: dict, parent_model_name: str) -> list[dict]:
