@@ -60,7 +60,13 @@ def _enum_label(field: dict, value) -> str:
 from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
 )
-from helpers.schema_helpers import filter_fields, get_parent_relationships, is_optional_fk_to_parent, get_flatten_rels
+from helpers.schema_helpers import (
+    filter_fields,
+    get_parent_relationships,
+    is_optional_fk_to_parent,
+    get_flatten_rels,
+    resolve_ledger_domain,
+)
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import build_label_expression, render_prisma_include, resolve_label_paths
 from build_context import _get_entity_options
@@ -1798,7 +1804,13 @@ def helper_context(
             and _xres_h.get('lines')):
         _pool_cfg_h = _xres_h.get('pool', {})
         _request_cfg_h = _xres_h.get('request', {})
+        # OD-1: strategy: ledger_transaction resolves pool.entity via
+        # transaction.ledgerDomain instead of declaring it directly.
         _pool_entity_h = _pool_cfg_h.get('entity')
+        if not _pool_entity_h:
+            _domain_key_h = (_xres_h.get('transaction') or {}).get('ledgerDomain')
+            if _domain_key_h:
+                _pool_entity_h = resolve_ledger_domain(schema, _domain_key_h)['pool']
         _pool_qty_h = _pool_cfg_h.get('quantityField', 'quantity')
         _criteria_h = _request_cfg_h.get('criteria', {})
         _crit_pool_field_h = next(iter(_criteria_h.keys()), None)
@@ -3053,7 +3065,14 @@ def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
     result_cfg  = x_res.get('result', {})
     policy_cfg  = x_res.get('policy', {})
 
+    # OD-1: strategy: ledger_transaction entities resolve pool.entity via
+    # transaction.ledgerDomain (x-ledger-entities) instead of declaring it
+    # directly on x-reservation.pool.
     pool_entity = pool_cfg.get('entity', '')
+    if not pool_entity:
+        _domain_key = (x_res.get('transaction') or {}).get('ledgerDomain')
+        if _domain_key:
+            pool_entity = resolve_ledger_domain(schema, _domain_key)['pool']
     pool_def    = defs.get(pool_entity, {})
     pool_props  = pool_def.get('properties', {})
 
