@@ -3354,7 +3354,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 if nullable:
                     return 'null'
                 schema_default = defn.get('default')
-                return str(schema_default) if schema_default is not None else '0'
+                if schema_default is None:
+                    return '0'
+                # Integer-enum defaults may be string labels (e.g. 'outstanding');
+                # emit the stored ordinal so the row value typechecks as a number.
+                return _enum_value_literal(defn, schema_default)
             return 'null'
 
         create_body = '\n'.join(
@@ -4035,12 +4039,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                         for i, v in enumerate(_enum_vals)
                     )
                 else:
-                    _opts = ', '.join(
-                        (f"{{ value: {i}, label: tf('{_fname}_{v}') }}"
-                         if isinstance(v, str) and not str(v).lstrip('-').isdigit()
-                         else f"{{ value: {int(v) if isinstance(v, (int, float)) else i}, label: tf('{_fname}_{v}') }}")
-                        for i, v in enumerate(_enum_vals)
-                    )
+                    _opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(_enum_vals))
                 flatten_enum_opt_setups_upsert.append(f"  const {_opts_var} = [{_opts}];")
                 _accordion_fields_jsx.append(
                     f"        <AppFieldSelect\n"
