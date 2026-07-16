@@ -109,7 +109,6 @@ export async function populateInventoryMovementFullData(length: number) {
         to_inventory_id: deps.toInventory.id,
         quantity: Math.max(1, i * 100),
         status: 'pending',
-        inventory_transactionable_id: `Test Inventory Transactionable Id ${i}`,
         creator_id: testUser.id,
         updater_id: testUser.id,
       },

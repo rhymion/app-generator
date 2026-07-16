@@ -97,7 +97,6 @@ export async function populateInventoryAdjustmentFullData(length: number) {
         quantity_delta: i * 100,
         reason: `Test Reason ${i}`,
         status: 'pending',
-        inventory_transactionable_id: `Test Inventory Transactionable Id ${i}`,
         creator_id: testUser.id,
         updater_id: testUser.id,
       },
