@@ -3108,7 +3108,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # ---- FormData sets ----
     text_ds  = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in text_props)
-    entity_select_ds = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} || '');" for p in entity_select_props)
+    def _entity_select_fds_line(p: str) -> str:
+        var = safe_var_name(p)
+        if _is_nullable(filtered_props.get(p, {})):
+            return f"    if ({var}) formData.set('{p}', {var});"
+        return f"    formData.set('{p}', {var} || '');"
+    entity_select_ds = '\n'.join(_entity_select_fds_line(p) for p in entity_select_props)
     num_ds   = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in number_props)
     dt_ds_parts = []
     for p in date_time_props:
@@ -3121,7 +3126,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             dt_ds_parts.append(f"    formData.set('{p}', {sn}?.toISOString() || '');")
     dt_ds = '\n'.join(dt_ds_parts)
     img_ds   = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in image_props)
-    rel_ds   = '\n'.join(f"    formData.set('{r['prop_name']}', {safe_var_name(r['prop_name'])} || '');" for r in list(parent_rels_raw) + list(selector_oto_rels))
+    def _rel_fds_line(r: dict) -> str:
+        var = safe_var_name(r['prop_name'])
+        # parent_rels_raw entries carry a 'required' key; selector_oto_rels entries carry 'nullable'.
+        is_optional = r.get('nullable', False) or not r.get('required', True)
+        if is_optional:
+            return f"    if ({var}) formData.set('{r['prop_name']}', {var});"
+        return f"    formData.set('{r['prop_name']}', {var} || '');"
+    rel_ds   = '\n'.join(_rel_fds_line(r) for r in list(parent_rels_raw) + list(selector_oto_rels))
     bool_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}.toString());" for p in boolean_props)
     enum_ds      = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} !== null ? String({safe_var_name(p)}) : '');" for p in enum_int_props)
     enum_str_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in enum_str_props)
