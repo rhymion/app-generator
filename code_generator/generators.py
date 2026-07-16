@@ -3534,7 +3534,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # Child datagrid required-field validation (injected at start of handleSubmit)
     child_validation_parts = []
-    exclude_validation = {'id', 'created_at', 'updated_at', 'creator_id', 'order'}
+    exclude_validation = {'id', 'created_at', 'updated_at', 'creator_id', 'order', 'approvable_id'}
     for c in non_comment_ch:
         child_name = c['name']
         prop_name  = c['property_name']
