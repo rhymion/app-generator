@@ -33,11 +33,17 @@ def build_validation_context(ctx: dict) -> dict:
     parent_prop_infos = ctx['parent_prop_infos']
     selector_oto_rels = ctx.get('selector_oto_rels', [])
     required_props = set(model_def.get('required') or [])
+    # Read-only fields are never user-supplied (the form omits them from its inputs),
+    # so they must not be in REQUIRED_FIELDS — otherwise validateForm flags them as
+    # missing ("<Field> is required"). Their stored value is preserved on update.
+    readonly_props = set(ctx.get('readonly_fields') or [])
 
     required_fields: list[dict] = []
     for prop_info in parent_prop_infos:
         prop = prop_info['prop']
         if prop in _SYSTEM_FIELDS:
+            continue
+        if prop in readonly_props:
             continue
         if prop not in required_props:
             continue
