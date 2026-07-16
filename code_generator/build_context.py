@@ -121,7 +121,7 @@ def _build_form_data_gets(prop_infos: list[dict]) -> str:
             lines.append(f"  const {var_name} = data.get('{prop}') === 'true';")
         elif actual in ('integer', 'number'):
             lines.append(f"  const {var_name} = Number(data.get('{prop}'));")
-        elif actual == 'string' and pattern == '^c[a-z0-9]{24,}$' and nullable:
+        elif actual == 'string' and (pattern == '^c[a-z0-9]{24,}$' or defn.get('x-relationship')) and nullable:
             lines.append(f"  const {var_name} = (data.get('{prop}') as string | null) || null;")
         else:
             suffix = ' | null' if nullable else ''
