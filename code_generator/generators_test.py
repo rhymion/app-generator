@@ -1738,6 +1738,10 @@ def helper_context(
                 child_fields_prisma.append({**f, 'prisma_val': f'deps.{dep_var}.id'})
             else:
                 child_fields_prisma.append({**f, 'prisma_val': prisma_value(f, 'i', child_title)})
+        # Required internal bridge FKs on the child itself (e.g. approvable_id) —
+        # same nested-create pattern as populate{{pascal}}Data's own internal_fk_deps,
+        # otherwise this "add child to existing parent" helper omits a required column.
+        child_internal_fk_deps = get_all_internal_fk_deps(child_name, schema)
         enriched_datagrid_children.append({
             'model_name': child_name,
             'pascal': child_pascal,
@@ -1745,6 +1749,8 @@ def helper_context(
             'has_order': bool(child_def.get('properties', {}).get('order')),
             'fields_prisma': child_fields_prisma,
             'has_fk_deps': has_fk_deps,
+            'internal_fk_deps': child_internal_fk_deps,
+            'needs_test_user': any(d['target'] == 'user' for d in child_internal_fk_deps),
         })
 
     enriched_comment_children = []
