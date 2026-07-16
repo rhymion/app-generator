@@ -106,13 +106,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           where: { {{ bridge_fk_field }}: _parentBridgeId, event_type: 'reserve' },
         });
         for (const _row of _parentReserveRows) {
+          // Phase4: inventory.location_id FK — denormalized name from the
+          // ledger needs to be reverse-looked-up to a location_id before
+          // re-identifying the parent's reserved inventory row.
+          const _rowLocName = _row.location === '' ? null : _row.location;
+          const _rowLoc = _rowLocName
+            ? await tx.location.findFirst({ where: { name: _rowLocName } })
+            : null;
           await tx.{{ pool_entity }}.updateMany({
             where: {
               product_id: _row.product_id,
               // O-6 denormalization: inventory_transaction.location stores '' for null-location
-              // lots (written as `?? ''` at PO creation). inventory.location is NULL in the DB.
+              // lots (written as `?? ''` at PO creation). inventory.location_id is NULL in the DB.
               // Must undo the normalization — same pattern as service_after_reject.ts:105.
-              location: _row.location === '' ? null : _row.location,
+              location_id: _rowLoc?.id ?? null,
               ...(_row.lot_number != null ? { lot_number: _row.lot_number } : {}),
               ...(_row.expiration_date != null ? { expiration_date: _row.expiration_date } : {}),
             },
@@ -171,7 +178,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           const _childInv = await tx.{{ pool_entity }}.findUnique({
             where: { id: _childInventoryId },
             select: { id: true, quantity: true, reserved_quantity: true,
-                      product_id: true, location: true, lot_number: true, expiration_date: true },
+                      product_id: true, location_id: true, location: { select: { name: true } },
+                      lot_number: true, expiration_date: true },
           });
           if (!_childInv) throw new ApiError(400, `Inventory not found: ${_childInventoryId}`);
           {% if product_id_field %}
@@ -200,7 +208,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               quantity_delta: 0,
               reserved_delta: _childQty,
               product_id: _childInv.product_id,
-              location: _childInv.location ?? '',
+              location: _childInv.location?.name ?? '',
               lot_number: _childInv.lot_number,
               expiration_date: _childInv.expiration_date,
               creator_id: userId, updater_id: userId, created_by_id: userId,
@@ -213,6 +221,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           const _candidates = await tx.{{ pool_entity }}.findMany({
             where: { product_id: _parentForProduct.{{ product_id_field }} as string, quantity: { gt: 0 } },
             orderBy: [{ expiration_date: { sort: 'asc', nulls: 'last' } }, { lot_number: 'asc' }, { id: 'asc' }],
+            include: { location: true },
           });
           const _childBridge = await tx.{{ transactionable_entity }}.create({ data: {} });
           _childBridgeId = _childBridge.id;
@@ -235,7 +244,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                   quantity_delta: 0,
                   reserved_delta: _claim,
                   product_id: _cand.product_id,
-                  location: _cand.location ?? '',
+                  location: _cand.location?.name ?? '',
                   lot_number: _cand.lot_number,
                   expiration_date: _cand.expiration_date,
                   creator_id: userId, updater_id: userId, created_by_id: userId,
