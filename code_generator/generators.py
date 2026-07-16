@@ -1238,6 +1238,164 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
     return '\n'.join(lines)
 
 
+
+
+# ---------------------------------------------------------------------------
+# x-approval-lines: pre-create approval on new:false embedded line children
+# ---------------------------------------------------------------------------
+#
+# receiving_receipt_line (and similarly-shaped line children) carry x-approval
+# but are new:false — they're created only via the parent's nested-create and
+# never run their own service_after_create, so approvable/approval_request
+# rows never get generated for them. approvable_id is also mandatory
+# (String @unique, non-null), so a create-then-UPDATE-back-fill approach
+# would violate the NOT NULL constraint. Instead, one approvable is
+# pre-created per line *before* the parent create, so the nested-create body
+# can include approvable_id directly.
+#
+# purchase_per_item (x-reservation, transaction.strategy: ledger_transaction)
+# has the exact same shape and gap, so helpers.schema_helpers.
+# get_approval_lines_props() folds both signals into one list and this same
+# pre-create/post-create pair covers both — see
+# docs/receiving-approval-backfill-design.md §5.2 (D2).
+
+def _resolve_approval_lines_entity(model: str, prop_name: str, schema: dict) -> str:
+    """Resolve the child entity name for an x-approval-lines property.
+
+    The parent's own definition has no properties for embedded list children
+    — only the `{model}_detail` allOf view does — so entity resolution goes
+    through `{model}_detail.properties.{prop_name}.items.$ref`.
+    """
+    props = get_detail_properties(model, schema) or {}
+    prop  = props.get(prop_name, {})
+    ref   = (prop.get('items') or {}).get('$ref', '')
+    entity = ref.rsplit('/', 1)[-1]
+    if not entity:
+        raise ValueError(
+            f"x-approval-lines: cannot resolve entity for {model}.{prop_name} "
+            f"via {model}_detail.properties.{prop_name}.items.$ref"
+        )
+    return entity
+
+
+def _build_approval_lines_pre_create_code(parent_def: dict, model: str, schema: dict, mode: str = 'create') -> str:
+    """Pre-create one approvable per line, before the parent create/update.
+
+    mode='create': pre-creates for every incoming line (all get nested-created).
+    mode='update': pre-creates only for newly-added lines (no `id` — see
+    _build_child_nested_update), since existing lines already have an
+    approvable from their original creation.
+    """
+    props = get_approval_lines_props(parent_def, model, schema)
+    if not props:
+        return ''
+    blocks = []
+    for prop_name in props:
+        child_var = safe_var_name(prop_name)
+        arr_var   = f'_{child_var}ApprIds'
+        if mode == 'update':
+            src_var = f'_{child_var}NewItems'
+            blocks.append(f"    const {src_var} = {child_var}Items.filter(f => !f.id);")
+        else:
+            src_var = f'{child_var}Items'
+        blocks.append(
+            f"    const {arr_var} = {src_var}.length > 0\n"
+            f"      ? await Promise.all({src_var}.map(() => tx.approvable.create({{ data: {{}} }}).then((a) => a.id)))\n"
+            f"      : [];"
+        )
+    return '\n'.join(blocks)
+
+
+def _build_approval_create_block_for_entity(
+    approvable_id_expr: str,
+    actor_id_expr: str,
+    flows_var: str,
+    role_ids_var: str,
+    tx_var: str = 'tx',
+    indent: str = '  ',
+) -> str:
+    """Create approval_request(s) for ONE pre-created approvable against a
+    pre-fetched, creator-role-filtered approval_flow[], then stamp
+    creator_id on the approvable if any flow matched.
+
+    Shared inner block (cmd_296 Phase2 common-helper — see
+    docs/split-generalization-design.md §4.2) for:
+      - _build_approval_lines_post_create_code (cmd_295 x-approval-lines):
+        called once per pre-created array element, inside the caller's
+        `for (const _apprId of {arr}) {...}` loop.
+      - split_action_route.ts.jinja2 (cmd_296 split): called once per part,
+        directly in the per-part loop — one approvable at a time, no array.
+
+    Caller pre-fetches `flows_var` (approval_flow[] for the entity) and
+    `role_ids_var` (creator's role ids) once, outside any per-approvable loop.
+    """
+    return (
+        f"{indent}let _hasFlow = false;\n"
+        f"{indent}for (const _flow of {flows_var}) {{\n"
+        f"{indent}  if (_flow.requestor_role_id && !{role_ids_var}.includes(_flow.requestor_role_id)) {{\n"
+        f"{indent}    continue;\n"
+        f"{indent}  }}\n"
+        f"{indent}  await {tx_var}.approval_request.create({{\n"
+        f"{indent}    data: {{ approvable_id: {approvable_id_expr}, approval_flow_id: _flow.id, status: 0 }},\n"
+        f"{indent}  }});\n"
+        f"{indent}  _hasFlow = true;\n"
+        f"{indent}}}\n"
+        f"{indent}if (_hasFlow) {{\n"
+        f"{indent}  await {tx_var}.approvable.update({{\n"
+        f"{indent}    where: {{ id: {approvable_id_expr} }},\n"
+        f"{indent}    data: {{ creator_id: {actor_id_expr} }},\n"
+        f"{indent}  }});\n"
+        f"{indent}}}"
+    )
+
+
+def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema: dict) -> str:
+    """Create approval_request(s) for each pre-created line approvable.
+
+    Mirrors the per-child approval body in
+    _build_ledger_reservation_allocation_code (creator-role-filtered
+    approval_flow lookup, one approval_request per matching flow, then stamp
+    creator_id on the approvable). Used for both the create and update flow —
+    the caller passes a different `_{child_var}ApprIds` population for each
+    (all lines vs. only newly-added lines).
+    """
+    props = get_approval_lines_props(parent_def, model, schema)
+    if not props:
+        return ''
+    blocks = []
+    for prop_name in props:
+        child_var    = safe_var_name(prop_name)
+        arr_var      = f'_{child_var}ApprIds'
+        lines_entity = _resolve_approval_lines_entity(model, prop_name, schema)
+        flows_var    = f'_{child_var}ApprFlows'
+        creator_var  = f'_{child_var}Creator'
+        role_ids_var = f'_{child_var}CreatorRoleIds'
+        inner = _build_approval_create_block_for_entity(
+            approvable_id_expr='_apprId',
+            actor_id_expr='actorId',
+            flows_var=flows_var,
+            role_ids_var=role_ids_var,
+            tx_var='tx',
+            indent='        ',
+        )
+        blocks.append(
+            f"    if ({arr_var}.length > 0) {{\n"
+            f"      const {flows_var} = await tx.approval_flow.findMany({{\n"
+            f"        where: {{ entity_name: '{lines_entity}' }},\n"
+            f"      }});\n"
+            f"      const {creator_var} = await tx.user.findUnique({{\n"
+            f"        where: {{ id: actorId }},\n"
+            f"        select: {{ roles: {{ select: {{ id: true }} }} }},\n"
+            f"      }});\n"
+            f"      const {role_ids_var} = {creator_var}?.roles.map((r) => r.id) ?? [];\n"
+            f"      for (const _apprId of {arr_var}) {{\n"
+            f"{inner}\n"
+            f"      }}\n"
+            f"    }}"
+        )
+    return '\n'.join(blocks)
+
+
 def service_context(ctx: dict, schema: dict | None = None) -> dict:
     parent                  = ctx['parent']
     parent_def              = (schema or {}).get('definitions', {}).get(parent, {})
