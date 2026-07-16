@@ -1434,6 +1434,20 @@ def build_context(entity: dict, schema: dict) -> dict:
                     'endField': _dateRange_raw.get('end', 'end'),
                 }
 
+    # x-splittable (cmd_296): dict form declares quantityField (+ optional
+    # perPartRequired/parentField/splitResultField). UI (SplitActionSection) is
+    # only injected when quantityField is present — the legacy bool form
+    # (`x-splittable: true`) still gets the split API route (see generate.py)
+    # but no UI/Σ validation.
+    _xsplit = model_def.get('x-splittable')
+    is_splittable = False
+    split_config = None
+    if isinstance(_xsplit, dict) and _xsplit.get('quantityField'):
+        is_splittable = True
+        split_config = {
+            'quantity_field': _xsplit.get('quantityField'),
+        }
+
     # Chart config
     xdisplay    = (model_def or {}).get('x-display') or {}
     chart_cfg   = xdisplay.get('chart') if isinstance(xdisplay, dict) else None
@@ -1980,6 +1994,9 @@ def build_context(entity: dict, schema: dict) -> dict:
         # Reservation
         reservation_config=reservation_config,
         reservation=reservation_config,
+        # Split (cmd_296)
+        is_splittable=is_splittable,
+        split_config=split_config,
         # Chart
         chart_cfg=chart_cfg,
         has_chart=has_chart,
