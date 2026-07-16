@@ -1781,6 +1781,10 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'has_item_reservation':               has_item_reservation,
         'reservation_mutation_guard_update':  reservation_mutation_guard_update,
         'reservation_mutation_guard_delete':  reservation_mutation_guard_delete,
+        'approval_lines_pre_create_code':     approval_lines_pre_create_code,
+        'approval_lines_post_create_code':    approval_lines_post_create_code,
+        'approval_lines_pre_update_code':     approval_lines_pre_update_code,
+        'approval_lines_post_update_code':    approval_lines_post_update_code,
     }
 
 
