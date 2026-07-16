@@ -82,6 +82,8 @@ export const siteConfig = {
     { label: "Receiving Receipt Line", href: "/receiving_receipt_line" },
     { label: "Purchase Per Item", href: "/purchase_per_item" },
     { label: "Location", href: "/location" },
+      { label: "Inventory Movement", href: "/inventory_movement" },
+    { label: "Inventory Adjustment", href: "/inventory_adjustment" },
   ] satisfies NavLink[],
 };
 

@@ -4,6 +4,8 @@
 import type { PrismaClient } from '@/app/generated/prisma/client';
 
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+import { afterApprove as InventoryMovementAfterApprove } from '@/lib/inventory_movement/service_after_approve';
+import { afterApprove as InventoryAdjustmentAfterApprove } from '@/lib/inventory_adjustment/service_after_approve';
 import { afterApprove as PurchasePerItemAfterApprove } from '@/lib/purchase_per_item/service_after_approve';
 import { afterApprove as LeaveRequestAfterApprove } from '@/lib/leave_request/service_after_approve';
 import { afterApprove as ReceivingReceiptLineAfterApprove } from '@/lib/receiving_receipt_line/service_after_approve';
@@ -19,6 +21,20 @@ export async function dispatchOnApproved(
   approvableId: string,
   approvedByUserId: string,
 ): Promise<void> {
+  if (entityType === 'inventory_movement') {
+    const entity = await tx.inventory_movement.findFirst({ where: { approvable_id: approvableId } });
+    if (!entity) return;
+    // Custom hook — implement in service_after_approve.ts
+    await InventoryMovementAfterApprove(tx, entity.id, approvableId, approvedByUserId);
+    return;
+  }
+  if (entityType === 'inventory_adjustment') {
+    const entity = await tx.inventory_adjustment.findFirst({ where: { approvable_id: approvableId } });
+    if (!entity) return;
+    // Custom hook — implement in service_after_approve.ts
+    await InventoryAdjustmentAfterApprove(tx, entity.id, approvableId, approvedByUserId);
+    return;
+  }
   if (entityType === 'purchase_per_item') {
     const entity = await tx.purchase_per_item.findFirst({ where: { approvable_id: approvableId } });
     if (!entity) return;

@@ -315,6 +315,70 @@ export function getGeneratedTasks() {
       const { populateInventoryFullData } = require('./inventory/helper');
       return await populateInventoryFullData(length);
     },
+    async 'db:populateInventoryMovementDependencies'() {
+      const { populateInventoryMovementDependencies } = require('./inventory_movement/helper');
+      return await populateInventoryMovementDependencies();
+    },
+    async 'db:populateInventoryMovement'(length: number) {
+      const { populateInventoryMovementData } = require('./inventory_movement/helper');
+      return await populateInventoryMovementData(length);
+    },
+    async 'db:populateInventoryMovementFull'(length: number) {
+      const { populateInventoryMovementFullData } = require('./inventory_movement/helper');
+      return await populateInventoryMovementFullData(length);
+    },
+    async 'db:setupInventoryMovementApprovalFlow'() {
+      const { setupInventoryMovementApprovalFlow } = require('./inventory_movement/helper');
+      return await setupInventoryMovementApprovalFlow();
+    },
+    async 'db:setupInventoryMovementOrderedApprovalFlow'() {
+      const { setupInventoryMovementOrderedApprovalFlow } = require('./inventory_movement/helper');
+      return await setupInventoryMovementOrderedApprovalFlow();
+    },
+    async 'db:populateInventoryMovementWithApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populateInventoryMovementWithApproval } = require('./inventory_movement/helper');
+      return await populateInventoryMovementWithApproval(params.creatorId, params.approvalFlowIds);
+    },
+    async 'db:populateInventoryMovementWithRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populateInventoryMovementWithRejectedApproval } = require('./inventory_movement/helper');
+      return await populateInventoryMovementWithRejectedApproval(params.creatorId, params.approvalFlowIds);
+    },
+    async 'db:populateInventoryMovementWithTerminalRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populateInventoryMovementWithTerminalRejectedApproval } = require('./inventory_movement/helper');
+      return await populateInventoryMovementWithTerminalRejectedApproval(params.creatorId, params.approvalFlowIds);
+    },
+    async 'db:populateInventoryAdjustmentDependencies'() {
+      const { populateInventoryAdjustmentDependencies } = require('./inventory_adjustment/helper');
+      return await populateInventoryAdjustmentDependencies();
+    },
+    async 'db:populateInventoryAdjustment'(length: number) {
+      const { populateInventoryAdjustmentData } = require('./inventory_adjustment/helper');
+      return await populateInventoryAdjustmentData(length);
+    },
+    async 'db:populateInventoryAdjustmentFull'(length: number) {
+      const { populateInventoryAdjustmentFullData } = require('./inventory_adjustment/helper');
+      return await populateInventoryAdjustmentFullData(length);
+    },
+    async 'db:setupInventoryAdjustmentApprovalFlow'() {
+      const { setupInventoryAdjustmentApprovalFlow } = require('./inventory_adjustment/helper');
+      return await setupInventoryAdjustmentApprovalFlow();
+    },
+    async 'db:setupInventoryAdjustmentOrderedApprovalFlow'() {
+      const { setupInventoryAdjustmentOrderedApprovalFlow } = require('./inventory_adjustment/helper');
+      return await setupInventoryAdjustmentOrderedApprovalFlow();
+    },
+    async 'db:populateInventoryAdjustmentWithApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populateInventoryAdjustmentWithApproval } = require('./inventory_adjustment/helper');
+      return await populateInventoryAdjustmentWithApproval(params.creatorId, params.approvalFlowIds);
+    },
+    async 'db:populateInventoryAdjustmentWithRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populateInventoryAdjustmentWithRejectedApproval } = require('./inventory_adjustment/helper');
+      return await populateInventoryAdjustmentWithRejectedApproval(params.creatorId, params.approvalFlowIds);
+    },
+    async 'db:populateInventoryAdjustmentWithTerminalRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populateInventoryAdjustmentWithTerminalRejectedApproval } = require('./inventory_adjustment/helper');
+      return await populateInventoryAdjustmentWithTerminalRejectedApproval(params.creatorId, params.approvalFlowIds);
+    },
     async 'db:populatePurchaseOrderDependencies'() {
       const { populatePurchaseOrderDependencies } = require('./purchase_order/helper');
       return await populatePurchaseOrderDependencies();

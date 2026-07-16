@@ -22,12 +22,14 @@ export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
 
-  // Level 1: approval_request, attachment, booking, dashboard_widget, field, inventory_transaction, leave_request, parent1_child1, parent1_child2, parent1_list, parent_only, permission, procedure, purchase_per_item, reaction, receiving_asn_line, receiving_purchase_order_line, receiving_receipt_line, room_reservation, shift, shift_template, supply_allocation, yyyyy_yyyyy
+  // Level 1: approval_request, attachment, booking, dashboard_widget, field, inventory_adjustment, inventory_movement, inventory_transaction, leave_request, parent1_child1, parent1_child2, parent1_list, parent_only, permission, procedure, purchase_per_item, reaction, receiving_asn_line, receiving_purchase_order_line, receiving_receipt_line, room_reservation, shift, shift_template, supply_allocation, yyyyy_yyyyy
   await prisma.approval_request.deleteMany();
   await prisma.attachment.deleteMany();
   await prisma.booking.deleteMany();
   await prisma.dashboard_widget.deleteMany();
   await prisma.field.deleteMany();
+  await prisma.inventory_adjustment.deleteMany();
+  await prisma.inventory_movement.deleteMany();
   await prisma.inventory_transaction.deleteMany();
   await prisma.leave_request.deleteMany();
   await prisma.parent1_child1.deleteMany();
@@ -64,8 +66,9 @@ export async function resetTestDatabase() {
   await prisma.supply_request.deleteMany();
   await prisma.xxxxx_xxxxx.deleteMany();
 
-  // Level 3: commentable, organization, product, receiving_asn, role, room_type
+  // Level 3: commentable, location, organization, product, receiving_asn, role, room_type
   await prisma.commentable.deleteMany();
+  await prisma.location.deleteMany();
   await prisma.organization.deleteMany();
   await prisma.product.deleteMany();
   await prisma.receiving_asn.deleteMany();
@@ -130,7 +133,10 @@ export const ALL_ENTITIES = [
   'dashboard',
   'db_table',
   'inventory',
+  'inventory_adjustment',
+  'inventory_movement',
   'leave_request',
+  'location',
   'organization',
   'parent_only',
   'permission',

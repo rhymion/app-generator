@@ -39,6 +39,8 @@ const navTranslationKeys: Record<string, string> = {
   "/receiving_receipt_line": "receivingReceiptLine",
   "/purchase_per_item": "purchasePerItem",
   "/location": "location",
+  "/inventory_movement": "inventoryMovement",
+  "/inventory_adjustment": "inventoryAdjustment",
 };
 
 export default function Sidebar({ hiddenHrefs = [] }: { hiddenHrefs?: string[] }) {
