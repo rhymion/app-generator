@@ -3073,7 +3073,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     all_parent_fields_jsx = '\n'.join(filter(None, [
         '\n'.join(text_jsxs),
-        '\n'.join(link_uri_jsxs),
         '\n'.join(entity_select_jsxs),
         '\n'.join(rel_jsxs),
         '\n'.join(num_jsxs),
