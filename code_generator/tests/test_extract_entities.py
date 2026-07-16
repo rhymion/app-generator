@@ -348,3 +348,46 @@ class TestXGenerateChildValidation:
         )
         # Should not raise — field has no x-generate
         extract_entities(schema)
+
+    def _epic_with_readonly_feature_child(self, feature_flags: dict) -> dict:
+        """Epic detail embedding a 'features' child with NO x-outputType (resolves
+        to None). The feature's own detail page carries `feature_flags`."""
+        return _schema(
+            ("epic", _base_entity("epic")),
+            ("epic_detail", {
+                "x-generate": _x_gen(),
+                "allOf": [
+                    {"$ref": "#/definitions/epic"},
+                    {"type": "object", "properties": {
+                        "features": {
+                            "type": "array",
+                            # no x-outputType → output_type None (not 'list')
+                            "items": {"$ref": "#/definitions/feature"},
+                        }
+                    }}
+                ],
+            }),
+            ("feature", _base_entity("feature")),
+            ("feature_detail", {**_detail_entity("feature"), "x-generate": _x_gen(**feature_flags)}),
+        )
+
+    def test_readonly_generated_child_with_non_list_output_type_allowed(self):
+        """A generated child that disables new/edit/delete (e.g. an approval-only
+        detail page) may appear with a non-list x-outputType without raising."""
+        schema = self._epic_with_readonly_feature_child(
+            {"new": False, "edit": False, "delete": False}
+        )
+        # Should not raise — feature is read-only (view/approve-reject only)
+        models = {e["model"] for e in extract_entities(schema)}
+        assert "epic" in models
+        assert "feature" in models
+
+    def test_mutable_generated_child_with_non_list_output_type_raises(self):
+        """A generated child that still permits any mutation (new/edit/delete) must
+        use x-outputType: list — a non-list embedding raises."""
+        for flag in ("new", "edit", "delete"):
+            schema = self._epic_with_readonly_feature_child(
+                {"new": False, "edit": False, "delete": False, flag: True}
+            )
+            with pytest.raises(ValueError, match="must be 'list'"):
+                extract_entities(schema)

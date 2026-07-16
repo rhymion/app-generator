@@ -334,7 +334,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
     model_props = model_def.get('properties', {})
     formatting_entries = []
     formatting_keys: set[str] = set()
-    enum_ns_list = []       # [{var_name, ns, entries}]
+    enum_ns_list = []       # [{var_name, ns, keys}]
     display_fields_code = ''
     primary_field = ''
 
@@ -399,6 +399,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                         else (i, v.lower()[0] + v[1:] if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
                         for i, v in enumerate(enum_vals)
                     ]
+                    # avoid duplicates
                     if not any(e['var_name'] == var_name for e in enum_ns_list):
                         enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries})
                     add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
@@ -2365,12 +2366,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 for i, v in enumerate(enum_vals)
             )
         else:
-            opts = ', '.join(
-                (f"{{ value: {i}, label: tf('{p}_{v}') }}"
-                 if isinstance(v, str) and not str(v).lstrip('-').isdigit()
-                 else f"{{ value: {int(v) if isinstance(v, (int, float)) else i}, label: tf('{p}_{v}') }}")
-                for i, v in enumerate(enum_vals)
-            )
+            opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
         enum_opt_setups.append(f"  const {state_name}Options = [{opts}];")
         fk = _tf(p)
         enum_int_jsxs.append(
@@ -2538,13 +2534,6 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     col_fn_names         = [f"use{to_pascal_case(c['property_name'])}Columns" for c in grid_children]
 
     child_view_grids = []
-    _view_has_reactions = bool(ctx.get('named_constants'))
-    _parent_pascal_view = to_pascal_case(ctx.get('parent', ''))
-    _view_reaction_props = (
-        f"        reactionTypes={{[...COMMENT_REACTION_TYPES]}}\n"
-        f"        onToggleReaction={{toggle{_parent_pascal_view}CommentReaction}}\n"
-        if _view_has_reactions else ""
-    )
     # Bridge-based comment section (commentable one-to-one)
     if has_commentable:
         child_view_grids.append(
@@ -2553,7 +2542,6 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             f"        showTitle={{true}}\n"
             f"        title={{tf('comments')}}\n"
             f"        permissions={{{{ create: false, delete: false }}}}\n"
-            f"{_view_reaction_props}"
             f"      />"
         )
     for child in children_raw:
@@ -2567,7 +2555,6 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 f"        showTitle={{true}}\n"
                 f"        title={{tf('{child_camel}')}}\n"
                 f"        permissions={{{{ create: false, delete: false }}}}\n"
-                f"{_view_reaction_props}"
                 f"      />"
             )
         elif ot == 'list':
@@ -2953,12 +2940,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 for i, v in enumerate(enum_vals)
             )
         else:
-            opts = ', '.join(
-                (f"{{ value: {i}, label: tf('{p}_{v}') }}"
-                 if isinstance(v, str) and not str(v).lstrip('-').isdigit()
-                 else f"{{ value: {int(v) if isinstance(v, (int, float)) else i}, label: tf('{p}_{v}') }}")
-                for i, v in enumerate(enum_vals)
-            )
+            opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
         _enum_int_width_css = _ui_width_css(prop)

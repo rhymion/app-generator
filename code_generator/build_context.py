@@ -781,7 +781,7 @@ def build_anonymize_user_context(schema: dict) -> dict:
     }
 
 
-def build_context(entity: dict, schema: dict) -> dict:
+def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> dict:
     parent      = entity['parent']
     model       = entity['model']
     def_key     = entity['definition_key']
@@ -1830,9 +1830,9 @@ def build_context(entity: dict, schema: dict) -> dict:
                         )
                     # comment children always carry creator + orderBy (no FK rels defined in schema)
                     if c.get('child_name') == 'comment':
+                        _rxn = ", reactions: true" if has_reactions else ""
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }},"
-                            f" reactions: {{ select: {{ type: true, user_id: true }} }} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }}{_rxn} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:
@@ -1840,9 +1840,9 @@ def build_context(entity: dict, schema: dict) -> dict:
                 else:
                     # comment child has no FK rels in schema — emit include + orderBy directly
                     if c.get('child_name') == 'comment':
+                        _rxn = ", reactions: true" if has_reactions else ""
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }},"
-                            f" reactions: {{ select: {{ type: true, user_id: true }} }} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }}{_rxn} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:
@@ -2037,6 +2037,16 @@ def build_context(entity: dict, schema: dict) -> dict:
         children_data=children_data,
         non_comment_ch=embedded_ch,
         comment_children=comment_children,
+        named_constants=_all_named_constants,
+        reaction_batch_query=reaction_batch_query,
+        bridge_parent_options=bridge_parent_options,
+        bridge_child_ir=bridge_child_ir,
+        bridge_child_params_str=bridge_child_params_str,
+        bridge_child_pre_create_code=bridge_child_pre_create_code,
+        bridge_child_fk_data_line=bridge_child_fk_data_line,
+        bridge_cleanup_rels=bridge_cleanup_rels,
+        bridge_pre_delete_select=bridge_pre_delete_select,
+        bridge_post_delete_cleanups=bridge_post_delete_cleanups,
         has_commentable=bool(commentable_rel),
         comment_has_mention=comment_has_mention,
         commentable_rel_name=commentable_rel['relation_name'] if commentable_rel else None,

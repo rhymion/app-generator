@@ -142,6 +142,11 @@ describe('API: {{ title }}', () => {
               .then((getRes) => {
                 expect(getRes.status).to.eq(200);
                 {{ assert_update }}
+{% if readonly_fields %}
+{% for f in readonly_fields %}
+                expect(getRes.body.{{ f }}, '{{ f }} must not change after PUT').to.eq(records[0].{{ f }});
+{% endfor %}
+{% endif %}
               });
           });
         });
@@ -163,6 +168,11 @@ describe('API: {{ title }}', () => {
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
               {{ assert_update }}
+{% if readonly_fields %}
+{% for f in readonly_fields %}
+              expect(getRes.body.{{ f }}, '{{ f }} must not change after PUT').to.eq(records[0].{{ f }});
+{% endfor %}
+{% endif %}
             });
         });
       });
@@ -417,6 +427,36 @@ describe('API: {{ title }}', () => {
   });
 {% endif %}
 
+{% if readonly_fields and can_edit %}
+
+  describe('Readonly field preservation (PUT {{ api_path }}/:id)', () => {
+    it('4.3 should preserve readonly field values ({{ readonly_fields | join(", ") }}) after editing other fields', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        const original = records[0];
+        cy.request({
+          method: 'PUT',
+          url: `${API_BASE}/${original.id}`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: {
+{% for ln in put_body_readonly_zero %}
+{{ ln }}
+{% endfor %}
+          },
+        }).then((res) => {
+          expect(res.status).to.eq(200);
+          cy.request({ url: `${API_BASE}/${original.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+            .then((getRes) => {
+              expect(getRes.status).to.eq(200);
+{% for f in readonly_fields %}
+              expect(getRes.body.{{ f }}, '{{ f }} must not be overwritten by PUT').to.eq(original.{{ f }});
+{% endfor %}
+            });
+        });
+      });
+    });
+  });
+{% endif %}
+
   describe('Authentication errors', () => {
     it('6.1 returns 4xx without API key', () => {
       cy.request({ url: API_BASE, failOnStatusCode: false })
@@ -539,10 +579,12 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/approve`,
-            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
             expect(res.body.status).to.eq(1);
@@ -558,10 +600,12 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.requestorUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/approve`,
-            headers: { 'X-API-Key': setup.requestorUser.api_key },
             failOnStatusCode: false,
           }).then((res) => {
             expect(res.status).to.eq(403);
@@ -572,6 +616,7 @@ describe('API: {{ title }}', () => {
   });
 
   describe('Reject (POST /api/approval_request/:id/reject)', () => {
+  {% if not entity_on_rejected_terminal %}
     it('13.1 approver can reject a pending request', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {
@@ -579,10 +624,12 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
-            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
             expect(res.body.status).to.eq(2);
@@ -590,6 +637,7 @@ describe('API: {{ title }}', () => {
         });
       });
     });
+  {% endif %}
 
     it('13.2 non-approver cannot reject (403)', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
@@ -598,10 +646,12 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.requestorUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
-            headers: { 'X-API-Key': setup.requestorUser.api_key },
             failOnStatusCode: false,
           }).then((res) => {
             expect(res.status).to.eq(403);
@@ -617,10 +667,12 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
-            headers: { 'X-API-Key': setup.approverUser.api_key },
             body: { message: 'Needs more info' },
           }).then((res) => {
             expect(res.status).to.eq(200);
@@ -635,6 +687,80 @@ describe('API: {{ title }}', () => {
       });
     });
   });
+{% if entity_on_rejected and not entity_on_rejected_terminal %}
+    it('13.4 reject fires on_rejected dispatch: entity status updated via set_fields', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/reject`,
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            cy.request({
+              url: `{{ api_path }}/${data.record.id}`,
+              headers: { 'X-API-Key': setup.approverUser.api_key },
+            }).then((getRes) => {
+              expect(getRes.body.approvable.approved_at).to.be.null;
+            });
+          });
+        });
+      });
+    });
+{% endif %}
+{% if entity_on_rejected_terminal %}
+    it('13.5 terminal reject sets approval_request.status = 3 (terminal_rejected)', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/reject`,
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            expect(res.body.status).to.eq(3);
+          });
+        });
+      });
+    });
+
+    it('13.6 terminal reject sets approvable.approved_at (idempotency guard)', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/reject`,
+          }).then(() => {
+            cy.request({
+              url: `{{ api_path }}/${data.record.id}`,
+              headers: { 'X-API-Key': setup.approverUser.api_key },
+            }).then((getRes) => {
+              expect(getRes.body.approvable.approved_at).to.not.be.null;
+            });
+          });
+        });
+      });
+    });
+{% endif %}
 
   describe('Approval order enforcement', () => {
     it('15.1 cannot approve when preceding request is not approved (400)', () => {
@@ -644,10 +770,12 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flow1.id, setup.flow2.id],
         }).then((data) => {
           const ar2 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser2.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${ar2.id}/approve`,
-            headers: { 'X-API-Key': setup.approverUser2.api_key },
             failOnStatusCode: false,
           }).then((res) => {
             expect(res.status).to.eq(400);
@@ -664,16 +792,20 @@ describe('API: {{ title }}', () => {
         }).then((data) => {
           const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
           const ar2 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser1.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${ar1.id}/approve`,
-            headers: { 'X-API-Key': setup.approverUser1.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
+            Cypress.session.clearAllSavedSessions();
+            cy.clearCookies();
+            cy.login(setup.approverUser2.email, 'test-password');
             cy.request({
               method: 'POST',
               url: `/api/approval_request/${ar2.id}/approve`,
-              headers: { 'X-API-Key': setup.approverUser2.api_key },
             }).then((res2) => {
               expect(res2.status).to.eq(200);
               expect(res2.body.status).to.eq(1);
@@ -748,6 +880,26 @@ describe('API: {{ title }}', () => {
       });
     });
   });
+{% if entity_on_rejected_terminal %}
+    it('14.4 terminal_rejected request cannot be re-submitted (400)', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithTerminalRejectedApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/resubmit`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(400);
+          });
+        });
+      });
+    });
+{% endif %}
 {% endif %}
 {% if can_list and can_export %}
 

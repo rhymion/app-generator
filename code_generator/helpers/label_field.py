@@ -357,6 +357,32 @@ def first_label_format(label_field, target: str, schema: dict) -> str | None:
     return None
 
 
+def relation_chain_targets(label_field, target: str, schema: dict) -> set[str]:
+    """Return every entity touched while resolving `label_field` from `target`.
+
+    Includes `target` itself plus each entity reached via an intermediate
+    relation-chain hop (e.g. `product.name` on target `inventory` also
+    touches `product`). Used to find entities that need read access even
+    when they have no test spec of their own (they're only ever reached as
+    an autocomplete label hop).
+    """
+    entities = {target}
+    try:
+        resolved = resolve_label_paths(label_field, target, schema)
+    except ValueError:
+        return entities
+    for r in resolved:
+        cursor_entity = target
+        for seg in r['relation_chain']:
+            rels = _outbound_relations(cursor_entity, schema)
+            nxt = rels.get(seg)
+            if not nxt:
+                break
+            entities.add(nxt)
+            cursor_entity = nxt
+    return entities
+
+
 def first_label_path(label_field) -> str:
     """Return the first path string in `label_field`, or '' if none.
 

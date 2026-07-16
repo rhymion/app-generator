@@ -88,7 +88,7 @@ async function _create{{ pascal }}BaseDeps() {
   });
 {% endif %}
 {% if dep.label_expression %}
-  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }} };
+  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }}{% if dep.search_differs %}, searchName: {{ dep.search_label_expression }}{% endif %} };
 {% else %}
   const {{ dep.var_name }} = {{ dep.var_name }}Record;
 {% endif %}
@@ -149,7 +149,7 @@ async function _create{{ pascal }}BaseDeps() {
   });
 {% endif %}
 {% if dep.label_expression_second %}
-  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: {{ dep.label_expression_second }} };
+  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: {{ dep.label_expression_second }}{% if dep.search_differs %}, searchName: {{ dep.search_label_expression_second }}{% endif %} };
 {% else %}
   const {{ dep.var_name }}2 = {{ dep.var_name }}2Record;
 {% endif %}
@@ -187,7 +187,7 @@ export async function populate{{ pascal }}Dependencies() {
 {% endif %}
   });
 {% if dep.label_expression %}
-  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }} };
+  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }}{% if dep.search_differs %}, searchName: {{ dep.search_label_expression }}{% endif %} };
 {% else %}
   const {{ dep.var_name }} = {{ dep.var_name }}Record;
 {% endif %}
@@ -269,7 +269,7 @@ export async function populate{{ pascal }}Dependencies() {
   });
 {% endif %}
 {% if dep.label_expression %}
-  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }} };
+  const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }}{% if dep.search_differs %}, searchName: {{ dep.search_label_expression }}{% endif %} };
 {% else %}
   const {{ dep.var_name }} = {{ dep.var_name }}Record;
 {% endif %}
@@ -330,7 +330,7 @@ export async function populate{{ pascal }}Dependencies() {
   });
 {% endif %}
 {% if dep.label_expression_second %}
-  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: {{ dep.label_expression_second }} };
+  const {{ dep.var_name }}2 = { ...{{ dep.var_name }}2Record, name: {{ dep.label_expression_second }}{% if dep.search_differs %}, searchName: {{ dep.search_label_expression_second }}{% endif %} };
 {% else %}
   const {{ dep.var_name }}2 = {{ dep.var_name }}2Record;
 {% endif %}
@@ -588,13 +588,22 @@ export async function populate{{ pascal }}{{ child.pascal }}Data(parentId: strin
 {% if child.has_fk_deps %}
   const deps = await populate{{ pascal }}Dependencies();
 {% endif %}
+{% if child.needs_test_user %}
+  const testUser = await getTestUser();
+{% endif %}
   for (let i = 1; i <= length; i++) {
+{% for fk in child.internal_fk_deps %}
+    const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
     const record = await prisma.{{ child.model_name }}.create({
       data: {
         {{ child.parent_fk_prop }}: parentId,
 {% if child.has_order %}
         order: i,
 {% endif %}
+{% for fk in child.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
+{% endfor %}
 {% for field in child.fields_prisma %}
         {{ field.prop_name }}: {{ field.prisma_val }},
 {% endfor %}
@@ -840,6 +849,9 @@ export async function setup{{ pascal }}OrderedApprovalFlow() {
 
 export async function populate{{ pascal }}WithRejectedApproval(creatorId: string, approvalFlowIds: string[]) {
   const testUser = await getTestUser();
+{% if needs_deps_in_populate %}
+  const deps = await populate{{ pascal }}Dependencies();
+{% endif %}
 {% for fk in internal_fk_deps %}
   const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -850,7 +862,9 @@ export async function populate{{ pascal }}WithRejectedApproval(creatorId: string
       {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
 {% endfor %}
 {% for field in required_fields_prisma %}
-{% if field.category != 'autocomplete' %}
+{% if field.category == 'autocomplete' and field.dep_var_name %}
+      {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
+{% elif field.category != 'autocomplete' %}
       {{ field.prop_name }}: {{ field.prisma_val_fixed }},
 {% endif %}
 {% endfor %}
@@ -871,8 +885,11 @@ export async function populate{{ pascal }}WithRejectedApproval(creatorId: string
   return JSON.parse(JSON.stringify({ record, approvalRequests }));
 }
 
-export async function populate{{ pascal }}WithApproval(creatorId: string, approvalFlowIds: string[]) {
+export async function populate{{ pascal }}WithTerminalRejectedApproval(creatorId: string, approvalFlowIds: string[]) {
   const testUser = await getTestUser();
+{% if needs_deps_in_populate %}
+  const deps = await populate{{ pascal }}Dependencies();
+{% endif %}
 {% for fk in internal_fk_deps %}
   const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -883,7 +900,47 @@ export async function populate{{ pascal }}WithApproval(creatorId: string, approv
       {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
 {% endfor %}
 {% for field in required_fields_prisma %}
-{% if field.category != 'autocomplete' %}
+{% if field.category == 'autocomplete' and field.dep_var_name %}
+      {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
+{% elif field.category != 'autocomplete' %}
+      {{ field.prop_name }}: {{ field.prisma_val_fixed }},
+{% endif %}
+{% endfor %}
+{% for ua in ua_dep_fields %}
+      {{ ua.prop_name }}: testUser.id,
+{% endfor %}
+      creator_id: creatorId,
+      updater_id: creatorId,
+    },
+  });
+  const approvalRequests = [];
+  for (const flowId of approvalFlowIds) {
+    const ar = await prisma.approval_request.create({
+      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 3 },
+    });
+    approvalRequests.push(ar);
+  }
+  return JSON.parse(JSON.stringify({ record, approvalRequests }));
+}
+
+export async function populate{{ pascal }}WithApproval(creatorId: string, approvalFlowIds: string[]) {
+  const testUser = await getTestUser();
+{% if needs_deps_in_populate %}
+  const deps = await populate{{ pascal }}Dependencies();
+{% endif %}
+{% for fk in internal_fk_deps %}
+  const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
+{% set approvable_dep = internal_fk_deps | selectattr('target', 'equalto', 'approvable') | first %}
+  const record = await prisma.{{ model_name }}.create({
+    data: {
+{% for fk in internal_fk_deps %}
+      {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
+{% endfor %}
+{% for field in required_fields_prisma %}
+{% if field.category == 'autocomplete' and field.dep_var_name %}
+      {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
+{% elif field.category != 'autocomplete' %}
       {{ field.prop_name }}: {{ field.prisma_val_fixed }},
 {% endif %}
 {% endfor %}

@@ -432,6 +432,9 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     print(f'Found {len(entities)} entities in {schema_path}')
 
+    # Pre-compute named_constants so entity templates (getters.ts) can use it
+    named_constants = extract_named_constants(schema)
+
     doc_dir = out / 'docs' / 'generated'
     entity_doc_summaries: list[dict] = []
 
@@ -471,7 +474,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         _write(lib_dir / 'types.ts', _render(env, 'types.ts.jinja2', asdict(types_ctx)))
 
         # Base context for all other generators
-        ctx = build_context(entity, schema)
+        ctx = build_context(entity, schema, has_reactions=bool(named_constants))
 
         # --- docs/{parent}.md + app/[locale]/docs/{parent}/page.mdx ---
         doc_ctx = build_doc_entity_context(ctx)
@@ -490,7 +493,8 @@ def generate(schema_path: str, output_dir: str) -> None:
         })
 
         # --- getters.ts ---
-        _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', ctx))
+        getters_ctx = {**ctx, 'named_constants': named_constants}
+        _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', getters_ctx))
 
         # --- virtual column resolver stub (per-entity, async/bulk) ---
         parent_pascal = to_pascal_case(parent)
@@ -922,7 +926,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         print(f'  Attachment bridge actions → lib/attachment/actions.ts ({len(attachable_owners)} owners)')
 
     # --- Named constants (lib/reaction_constants.ts) ---
-    named_constants = extract_named_constants(schema)
+    # named_constants was pre-computed before the entity loop
     if named_constants:
         _write(
             out / 'lib' / 'reaction_constants.ts',
@@ -1327,7 +1331,15 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- Cypress test generation ---
     test_entities = [e for e in entities if e['generate_config'].get('test')]
-    _test_entity_count = len(test_entities)
+    # db_ctx's test_entity_names (ALL_ENTITIES) is the actual set granted permissions
+    # by grantAllEntityPermissions() at runtime — it's wider than test_entities alone
+    # (e.g. an entity with x-generate.test: false but reached via another entity's
+    # labelField still needs — and gets — a permission row). The permission entity's
+    # own spec asserts an exact seed-only row count, so it must count this same set,
+    # not just the raw test-spec entity list, or the two silently drift apart.
+    _test_entity_names = sorted(e['parent'] for e in test_entities)
+    db_ctx = db_helpers_context(schema, test_entity_names=_test_entity_names)
+    _test_entity_count = len(db_ctx['test_entity_names'])
     if test_entities:
         print('\nGenerating Cypress tests...')
         cypress_support = out / 'cypress' / 'support'
@@ -1391,8 +1403,6 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- db-helpers.ts (always generated, not gated on test_entities) ---
     print('\nGenerating db-helpers.ts...')
-    _test_entity_names = sorted(e['parent'] for e in test_entities)
-    db_ctx = db_helpers_context(schema, test_entity_names=_test_entity_names)
     _write(out / 'cypress' / 'support' / 'db-helpers.ts',
            _render(env, 'test_db_helpers.ts.jinja2', db_ctx))
 
