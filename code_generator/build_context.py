@@ -1405,18 +1405,67 @@ def build_context(entity: dict, schema: dict) -> dict:
                 reservation_config['selfQuantityField'] = (
                     (_xres.get('request') or {}).get('quantityField', 'quantity')
                 )
+            # Parse x-reservation.actions block (Q3 lifecycle actions)
+            _xres_actions = _xres.get('actions') or {}
+            _reservation_actions = []
+            for _act_name, _act_def in _xres_actions.items():
+                if not isinstance(_act_def, dict):
+                    continue
+                _reservation_actions.append({
+                    'name': _act_name,
+                    'type': _act_def.get('type', ''),
+                    'allocationEntity': (
+                        _act_def.get('allocationEntity')
+                        or _xres_result.get('allocationEntity', '')
+                    ),
+                    'quantityField': _act_def.get('quantityField', 'quantity'),
+                    'remainingField': _act_def.get('remainingField', 'remaining_quantity'),
+                    'statusField': _act_def.get('statusField', 'status'),
+                    'openStatuses': list(_act_def.get('openStatuses') or []),
+                    'doneStatus': _act_def.get('doneStatus', ''),
+                })
+            reservation_config['reservation_actions'] = _reservation_actions
+            reservation_config['has_actions'] = bool(_reservation_actions)
+            # R8-new-A: an entity declaring both x-reservation and x-approval is
+            # ambiguous about which lifecycle owns its state transitions.
+            # x-approval wins; skip x-reservation's action route generation.
+            if reservation_config['has_actions'] and model_def.get('x-approval'):
+                print(
+                    f'  [WARN] {model}: both x-reservation and x-approval defined. '
+                    f'x-approval takes precedence (x-reservation action routes skipped).'
+                )
+                reservation_config['has_actions'] = False
+            # strategy: ledger_transaction never uses bespoke action routes — ship/cancel
+            # are driven by the standard approve/reject flow on the *line* entity's own
+            # approvable_id (declared via x-approval on the lines entity, not here), so
+            # any 'actions' block under this strategy is ignored defensively.
+            if reservation_config['transaction_strategy'] == 'ledger_transaction':
+                reservation_config['has_actions'] = False
+            if _reservation_actions:
+                reservation_config['actions_remaining_field'] = _reservation_actions[0]['remainingField']
+                reservation_config['actions_status_field'] = _reservation_actions[0]['statusField']
+                reservation_config['actions_initial_status'] = 'reserved'
         elif _xres_mode == 'item' and not _xres.get('lines'):
             # Phase 2: item mode without lines (item+lines → Phase 3)
             _pool = _xres.get('pool') or {}
             _result = _xres.get('result') or {}
             _request = _xres.get('request') or {}
-            _dateRange_raw = _request.get('dateRange')
+            _policy = _xres.get('policy') or {}
+            # dateRange can be at request level (legacy) or inside request.criteria
+            _criteria_raw = _request.get('criteria') or {}
+            _dateRange_raw = _request.get('dateRange') or _criteria_raw.get('dateRange')
             _avail = _pool.get('availableStatus', 'available')
             _resrv = _pool.get('reservedStatus', 'reserved')
+            _avail_src = _policy.get('availabilitySource')
+            _uses_overlap = _avail_src == 'overlap'
+            # updatePoolStatusOnReserve: overlap mode defaults false, status mode defaults true
+            _update_pool_default = False if _uses_overlap else True
+            _updates_pool = _policy.get('updatePoolStatusOnReserve', _update_pool_default)
+            _exclude_statuses = _policy.get('excludePoolStatuses') or []
             reservation_config = {
                 'mode': 'item',
                 'pool': _pool,
-                'policy': _xres.get('policy') or {},
+                'policy': _policy,
                 'result': _result,
                 'request': _request,
                 'statusField': _pool.get('statusField', 'status'),

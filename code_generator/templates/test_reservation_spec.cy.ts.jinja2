@@ -11,6 +11,7 @@ describe('{{ pascal }} Reservation (generated)', () => {
     cy.task('db:grantAllPermissions');
   });
 
+{% if alloc_entity %}
   // ---------------------------------------------------------------------------
   // (1) Multi-item allocation success
   // ---------------------------------------------------------------------------
@@ -42,6 +43,14 @@ describe('{{ pascal }} Reservation (generated)', () => {
       });
     });
   });
+{% else %}
+  // NOTE: allocation-count/criteria/orderBy tests are not generated for
+  // strategy: ledger_transaction entities (allocationEntity is not applicable).
+  // Equivalent multi-lot allocation coverage: see purchase_order_move_reservation.cy.ts
+  // (O-8 test) and code_generator/tests/test_reservation.py::TestO4QuantityInvariantArithmetic.
+  // Full ledger_transaction-native reimplementation of these 3 scenarios: tracked as
+  // follow-up (RA-3, deferred from cmd_294).
+{% endif %}
 
   // ---------------------------------------------------------------------------
   // (2) Insufficient stock rollback
@@ -71,6 +80,7 @@ describe('{{ pascal }} Reservation (generated)', () => {
     });
   });
 
+{% if alloc_entity %}
   // ---------------------------------------------------------------------------
   // (3) request.criteria compliance
   // ---------------------------------------------------------------------------
@@ -93,7 +103,9 @@ describe('{{ pascal }} Reservation (generated)', () => {
 
         cy.task<any>('db:get{{ pascal }}AllocationsOrdered', orderId).then((allocs: any[]) => {
           expect(allocs).to.have.length(1);
+{% if pool_field %}
           expect(allocs[0].{{ pool_field }}).to.eq(seed.invMatch.id);
+{% endif %}
         });
 
         cy.task<any>('db:get{{ pascal }}PoolState', seed.invNoMatch.id).then((inv: any) => {
@@ -126,9 +138,72 @@ describe('{{ pascal }} Reservation (generated)', () => {
         cy.task<any>('db:get{{ pascal }}AllocationsOrdered', orderId).then((allocs: any[]) => {
           expect(allocs).to.have.length(1);
           // policy: {{ orderby_desc }} → allocate from the first row (inv1)
+{% if pool_field %}
           expect(allocs[0].{{ pool_field }}).to.eq(seed.inventoryRows[0].id);
+{% endif %}
         });
       });
     });
   });
+{% endif %}
+{% if has_actions %}
+
+  // ---------------------------------------------------------------------------
+  // Lifecycle action tests (ship / release / cancel)
+  // ---------------------------------------------------------------------------
+{% for action in reservation_actions %}
+
+  it('LC-{{ loop.index }}: {{ action.name }} — POST /actions/{{ action.type }} succeeds and allocation status updates', () => {
+    cy.task<any>('db:seedReservation{{ pascal }}', { quantity: 10 }).then((seed: any) => {
+      cy.request({
+        method: 'POST',
+        url: API_BASE,
+        headers: { 'X-API-Key': TEST_API_KEY },
+        body: {
+          {{ parent_str_field }}: 'LC-{{ loop.index }}-TEST',
+          {{ parent_fk_field }}: seed.customer.id,
+          {{ lines_prop }}: [{ {{ criteria_item_field }}: seed.product.id, {{ req_qty_field }}: 3, price: null }],
+        },
+      }).then((orderRes: any) => {
+        expect(orderRes.status).to.eq(201);
+        const orderId = orderRes.body.id;
+
+        cy.request({
+          method: 'POST',
+          url: `${API_BASE}/${orderId}/actions/{{ action.type }}`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+{% if action.type == 'cancel' %}
+          body: {},
+{% else %}
+          body: { requestedQty: 3, releaseQty: 3 },
+{% endif %}
+          failOnStatusCode: false,
+        }).then((actRes: any) => {
+          expect(actRes.status).to.be.oneOf([200, 201]);
+          expect(actRes.body).to.have.property('ok', true);
+{% if action.type == 'ship' %}
+          cy.task<any>('db:get{{ pascal }}AllocationsOrdered', orderId).then((allocs: any[]) => {
+            expect(allocs[0].status).to.eq(2);
+          });
+          cy.task<any>('db:get{{ pascal }}PoolState', seed.inventory.id).then((inv: any) => {
+            expect(inv.{{ pool_res_field }}).to.eq(0);
+          });
+{% elif action.type == 'release' %}
+          cy.task<any>('db:get{{ pascal }}AllocationsOrdered', orderId).then((allocs: any[]) => {
+            expect(allocs[0].status).to.eq(3);
+          });
+          cy.task<any>('db:get{{ pascal }}PoolState', seed.inventory.id).then((inv: any) => {
+            expect(inv.{{ pool_res_field }}).to.eq(0);
+          });
+{% elif action.type == 'cancel' %}
+          cy.task<any>('db:get{{ pascal }}AllocationsOrdered', orderId).then((allocs: any[]) => {
+            expect(allocs[0].status).to.eq(4);
+          });
+{% endif %}
+        });
+      });
+    });
+  });
+{% endfor %}
+{% endif %}
 });

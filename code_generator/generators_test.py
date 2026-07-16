@@ -3221,6 +3221,16 @@ def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
         'orderby_fields':     orderby_fields,
         'orderby_sortable':   orderby_sortable,
         'orderby_desc':       orderby_desc,
+        'has_actions':        bool(x_res.get('actions')),
+        'reservation_actions': [
+            {'name': name, 'type': defn.get('type', name)}
+            for name, defn in (x_res.get('actions') or {}).items()
+            if isinstance(defn, dict)
+        ],
+        'alloc_status_field': list((x_res.get('actions') or {}).values())[0].get('statusField', 'status')
+            if x_res.get('actions') else 'status',
+        'alloc_remaining_field': list((x_res.get('actions') or {}).values())[0].get('remainingField', 'remaining_quantity')
+            if x_res.get('actions') else 'remaining_quantity',
     }
 
 
