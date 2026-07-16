@@ -1121,18 +1121,8 @@ def generate(schema_path: str, output_dir: str) -> None:
 
             # helper.ts
             helper_ctx = helper_context(parent, children, schema, model, def_key, gen_cfg)
-            if parent in ('inventory_movement', 'inventory_adjustment'):
-                # GENERATED ONCE: these two entities' helper.ts received manual
-                # fixes for a generator bug (dual/single-FK dependency wiring in
-                # the With*Approval populate functions — cmd_312 Phase5 subtask_312t)
-                # that generators_test.py does not yet produce correctly. Regenerating
-                # unconditionally would silently overwrite the manual fix. Scoped to
-                # these 2 entities only; all other entities keep unconditional regen.
-                _write_stub(cypress_support / parent / 'helper.ts',
-                            _render(env, 'test_helper.ts.jinja2', helper_ctx))
-            else:
-                _write(cypress_support / parent / 'helper.ts',
-                       _render(env, 'test_helper.ts.jinja2', helper_ctx))
+            _write(cypress_support / parent / 'helper.ts',
+                   _render(env, 'test_helper.ts.jinja2', helper_ctx))
 
             # e2e spec (desktop)
             spec_ctx = spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)

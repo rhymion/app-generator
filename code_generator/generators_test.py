@@ -1517,6 +1517,10 @@ def helper_context(
             target_to_fk_rels.setdefault(r['target'], []).append(r)
     multi_fk_targets = {t: rels for t, rels in target_to_fk_rels.items() if len(rels) > 1}
     for target, fk_rels in multi_fk_targets.items():
+        # Capture original dep's fk_deps before removing it — split prop-stem
+        # deps must inherit them so create() calls include required FK columns.
+        _orig_dep = next((d for d in deps if d['target'] == target), None)
+        _orig_fk_deps = _orig_dep.get('fk_deps', []) if _orig_dep else []
         # Remove the single target-based dep and its entity_fk_deps entries
         deps = [d for d in deps if d['target'] != target]
         entity_fk_deps = [d for d in entity_fk_deps if d['dep_var_name'] != to_camel_case(target)]
@@ -1526,7 +1530,7 @@ def helper_context(
             var_name = to_camel_case(prop_stem)
             title = to_title_case(prop_stem)
             if not any(d['var_name'] == var_name for d in deps):
-                deps.append({'target': target, 'var_name': var_name, 'title': title, 'fk_deps': []})
+                deps.append({'target': target, 'var_name': var_name, 'title': title, 'fk_deps': _orig_fk_deps})
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
 
     # Handle single-FK non-standard prop names (e.g. work_creator_id → creator).
@@ -1803,8 +1807,11 @@ def helper_context(
         # Use the first required rel's prop-stem as the alias value, or first rel if none required
         req_rel = next((r for r in fk_rels if r.get('required')), fk_rels[0])
         alias_var = to_camel_case(re.sub(r'_id$', '', req_rel['prop_name']))
-        if alias_key != alias_var and alias_key not in non_self_deps_return_parts:
-            non_self_deps_return_parts.append(f'{alias_key}: {alias_var}')
+        if alias_key != alias_var:
+            if alias_key not in non_self_deps_return_parts:
+                non_self_deps_return_parts.append(f'{alias_key}: {alias_var}')
+            if alias_key not in [p.split(':')[0].strip() for p in deps_return_parts]:
+                deps_return_parts.append(f'{alias_key}: {alias_var}')
     # Add target-name aliases for single-FK non-standard renames (e.g. creator: workCreator).
     # This allows callers to use either deps.workCreator or deps.creator interchangeably.
     existing_return_keys = {p.split(':')[0].strip() for p in deps_return_parts}
