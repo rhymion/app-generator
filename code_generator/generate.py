@@ -1040,9 +1040,19 @@ def generate(schema_path: str, output_dir: str) -> None:
     print(f'  Approval dispatch → lib/approval_request/on_approved_dispatch.ts ({len(approvable_entities)} entities)')
     for ent in approvable_entities:
         if ent['emit_hook']:
+            if ent.get('has_ledger_source'):
+                _event_type = ent.get('ledger_source', {}).get('event_type', '')
+                if _event_type == 'move':
+                    template_name = 'ledger_move_stub.ts.jinja2'
+                elif _event_type == 'adjust':
+                    template_name = 'ledger_adjust_stub.ts.jinja2'
+                else:
+                    template_name = 'ledger_write_stub.ts.jinja2'
+            else:
+                template_name = 'service_after_approve_stub.ts.jinja2'
             _write_stub(
                 out / 'lib' / ent['snake_name'] / 'service_after_approve.ts',
-                _render(env, 'service_after_approve_stub.ts.jinja2', ent),
+                _render(env, template_name, ent),
             )
             print(f"  Approval stub → lib/{ent['snake_name']}/service_after_approve.ts")
     # --- Search templates (lib/search/helpers.ts + app/api/search/route.ts) ---
