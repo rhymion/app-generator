@@ -2717,6 +2717,14 @@ def api_spec_context(
         and k not in _api_internal_fk_prop_names
     ]
 
+    # Collect readonly fields (x-readonly-fields entity-level OR x-readonly per-field).
+    _ro_from_entity: set[str] = set(model_def.get('x-readonly-fields') or [])
+    _ro_from_props: set[str] = {
+        fn for fn, fp in (model_def.get('properties') or {}).items()
+        if isinstance(fp, dict) and fp.get('x-readonly')
+    }
+    readonly_fields: list[str] = sorted(_ro_from_entity | _ro_from_props)
+
     # Primary display field detection
     primary_field_name = _get_primary_display_field_name(model_def)
     primary_is_fk = bool(
@@ -2929,6 +2937,20 @@ def api_spec_context(
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
+    def _put_body_ro_zero_impl(indent: str) -> list[str]:
+        """PUT body for readonly preservation test: excludes readonly fields entirely,
+        uses original.{prop} for all others (simulating correct form behavior where
+        readOnly fields are not submitted).  Verifies readonly fields are not accidentally
+        cleared or overwritten by a legitimate PUT update."""
+        out = []
+        readonly_set = set(readonly_fields)
+        for prop in put_body_props:
+            if prop not in readonly_set:
+                out.append(f"{indent}{prop}: original.{prop},")
+        for c in api_child_metas:
+            out.append(f"{indent}{c['child']['property_name']}: [],")
+        return out
+
     has_approvable = any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model, schema))
     _x_approval = model_def.get('x-approval')
     entity_on_rejected = _x_approval.get('on_rejected') if _x_approval else None
@@ -3001,6 +3023,8 @@ def api_spec_context(
         'export_scalar_fields': export_scalar_fields,
         'export_import_key_fields': export_import_key_fields,
         'x_relationships_list': x_relationships_list,
+        'readonly_fields': readonly_fields,
+        'put_body_readonly_zero': _put_body_ro_zero_impl('            '),
     }
 
 
