@@ -1267,15 +1267,6 @@ def build_context(entity: dict, schema: dict) -> dict:
 
     # Form data gets (for actions / API POST)
     form_data_gets = _build_form_data_gets(parent_prop_infos)
-    parent_params_no_bridge = parent_params  # pre-bridge version for updateXxx calls
-    if bridge_child_ir:
-        _sep = ', ' if parent_params else ''
-        parent_params = parent_params + _sep + 'selectedParentType, selectedParentId'
-        _bc_fds = (
-            "  const selectedParentType = data.get('selectedParentType') as string;\n"
-            "  const selectedParentId = data.get('selectedParentId') as string;"
-        )
-        form_data_gets = (form_data_gets + '\n' + _bc_fds) if form_data_gets else _bc_fds
 
     # Children (full analysis)
     children_data    = _build_child_data(children_raw, model, schema, parent_rels_raw)
