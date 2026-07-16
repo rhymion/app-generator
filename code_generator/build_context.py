@@ -1554,19 +1554,11 @@ def build_context(entity: dict, schema: dict) -> dict:
     # model properties AND relation display names ({field}_id in properties).
     # Fields derived from a FK relation (e.g. role←role_id) are handled by the
     # existing relation system and must NOT be treated as virtual columns.
-    # Prisma auto-managed datetime fields (created_at, updated_at) are handled
-    # separately as datetime_display_columns — not as virtual columns.
-    _PRISMA_DATETIME_COLS = frozenset({'created_at', 'updated_at'})
     _model_props_for_virtual = (model_def or {}).get('properties') or {}
     virtual_columns: list[dict] = []
-    # datetime columns in x-display.table (Prisma auto-managed, not in schema props)
-    datetime_display_columns: list[str] = []
     if xdisplay_table_raw:
         for _vitem in xdisplay_table_raw:
             _vfn = list(_vitem.keys())[0]
-            if _vfn in _PRISMA_DATETIME_COLS:
-                datetime_display_columns.append(_vfn)
-                continue
             _is_prop = _vfn in _model_props_for_virtual
             _is_rel  = f'{_vfn}_id' in _model_props_for_virtual
             if not _is_prop and not _is_rel:
@@ -1574,17 +1566,10 @@ def build_context(entity: dict, schema: dict) -> dict:
                     f"Virtual column '{_vfn}' on '{def_key}': in x-display.table but not in properties. "
                     "Treating as virtual — resolver expected at lib/{entity}/virtual_resolvers.ts"
                 )
-                # created_by is resolved from the creator relation (creator_id FK).
-                # Include creator in the main query and map directly instead of
-                # using virtual_resolvers.ts (which proved unreliable in production).
-                # creator_id is auto-managed (not in JSON schema properties) so we
-                # detect this pattern by field name alone.
-                _is_creator_virtual = (_vfn == 'created_by')
                 virtual_columns.append({
                     'field_name': _vfn,
                     'field_pascal': to_pascal_case(_vfn),
                     'field_key': to_camel_case(_vfn),
-                    'is_creator_virtual': _is_creator_virtual,
                 })
 
     # Detail def for custom components (entity-level: list of components, plural key).
