@@ -1936,10 +1936,10 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
             approval_lines_post_update_code = _build_approval_lines_post_create_code(parent_def, model, schema)
 
     _insufficient_inventory_error_class_def = (
-        "\n\nexport class InsufficientInventoryError extends Error {\n"
+        "\n\nexport class InsufficientPoolCapacityError extends Error {\n"
         "  constructor(message: string) {\n"
         "    super(message);\n"
-        "    this.name = 'InsufficientInventoryError';\n"
+        "    this.name = 'InsufficientPoolCapacityError';\n"
         "  }\n"
         "}"
     )
