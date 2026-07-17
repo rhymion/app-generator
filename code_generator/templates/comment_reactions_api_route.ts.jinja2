@@ -21,8 +21,8 @@ type Params = { params: Promise<{ commentId: string }> };
 //   API route handles single-comment access for external API clients only.
 // D7=A fallback: auth via API key only. Owner-entity read check (D7=B) is not
 //   implemented here because this route is a global template with no entity-specific
-//   context. D7=B is enforced in the server action layer (actions.ts). See dashboard
-//   🚨要対応 for the pending D7=B API-route re-implementation decision.
+//   context. D7=B is enforced in the server action layer (actions.ts). This is
+//   tracked as a pending action item for the D7=B API-route re-implementation decision.
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { commentId } = await params;

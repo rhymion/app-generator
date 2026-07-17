@@ -882,7 +882,7 @@ from pathlib import Path
 
 
 class TestVirtualResolverNonOverwrite:
-    """generate.py _write_stub は既存ファイルを上書きしない。"""
+    """generate.py's _write_stub does not overwrite an existing file."""
 
     def test_write_stub_does_not_overwrite_existing(self, tmp_path):
         resolver_path = tmp_path / "virtual_resolvers.ts"
@@ -904,11 +904,11 @@ class TestVirtualResolverNonOverwrite:
 # ---------------------------------------------------------------------------
 
 class TestXRelationshipsListCompositeExclusion:
-    """x_relationships_list が composite (list) labelField の FK を除外することを検証。
+    """Verifies that x_relationships_list excludes FKs with a composite (list) labelField.
 
-    回帰テスト: build_context.py の x_relationships_list filter が
-    list 型 label_field に対して '.' not in list → True (buggy) と評価し、
-    無効 TS を生成するバグの再発を防ぐ (cmd_351)。
+    Regression test: prevents recurrence of a bug (cmd_351) where build_context.py's
+    x_relationships_list filter evaluated '.' not in list -> True (buggy) for a
+    list-type label_field, generating invalid TS.
     """
 
     # minimal schema: entity "item" has 3 FKs exercising each labelField shape.
