@@ -897,3 +897,90 @@ class TestVirtualResolverNonOverwrite:
         _write_stub(resolver_path, content)
         assert resolver_path.exists()
         assert resolver_path.read_text() == content
+
+
+# ---------------------------------------------------------------------------
+# x_relationships_list — composite (list) labelField exclusion (cmd_351)
+# ---------------------------------------------------------------------------
+
+class TestXRelationshipsListCompositeExclusion:
+    """x_relationships_list が composite (list) labelField の FK を除外することを検証。
+
+    回帰テスト: build_context.py の x_relationships_list filter が
+    list 型 label_field に対して '.' not in list → True (buggy) と評価し、
+    無効 TS を生成するバグの再発を防ぐ (cmd_351)。
+    """
+
+    # minimal schema: entity "item" has 3 FKs exercising each labelField shape.
+    # Uses this module's _entity()/_fk_field() helpers (see top of file) since
+    # build_context() expects a pre-resolved entity dict (parent/model/
+    # definition_key/children/generate_config), not a raw schema definition.
+    SCHEMA = {
+        "definitions": {
+            "item": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    "stock_id": _fk_field("stock", nullable=True, label=["product_name", "lot_number"]),
+                    "simple_cat_id": _fk_field("category", nullable=True, label="name"),
+                    "dotted_ref_id": _fk_field("category", nullable=True, label="parent.name"),
+                },
+            },
+            "stock": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "product_name": {"type": "string"},
+                    "lot_number": {"type": "string"},
+                },
+            },
+            "category": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "parent_id": {
+                        "type": ["string", "null"],
+                        "x-relationship": {"type": "many-to-one", "target": "category"},
+                    },
+                },
+            },
+        }
+    }
+
+    ENTITY = _entity(model="item")
+
+    def test_composite_label_field_excluded_from_x_relationships_list(self):
+        """FK with list-form labelField must NOT appear in x_relationships_list."""
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        rel_fields = [r["field"] for r in ctx.get("x_relationships_list", [])]
+        # composite labelField ['product_name', 'lot_number'] → must be excluded
+        assert "stock" not in rel_fields, (
+            "composite labelField (list) must be excluded from x_relationships_list; "
+            "found 'stock' entry which would produce invalid TS bracket-access"
+        )
+
+    def test_simple_label_field_still_in_x_relationships_list(self):
+        """FK with simple string labelField ('name') must still be included."""
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        rel_fields = [r["field"] for r in ctx.get("x_relationships_list", [])]
+        assert "simple_cat" in rel_fields, (
+            "simple string labelField ('name', no dot) should remain in x_relationships_list"
+        )
+
+    def test_dotted_label_field_still_excluded(self):
+        """FK with dotted string labelField ('parent.name') must still be excluded."""
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        rel_fields = [r["field"] for r in ctx.get("x_relationships_list", [])]
+        assert "dotted_ref" not in rel_fields, (
+            "dotted string labelField ('parent.name') must be excluded (existing behavior)"
+        )
+
+    def test_no_list_str_in_label_field_values(self):
+        """label_field values in x_relationships_list must never be a Python list."""
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        for rel in ctx.get("x_relationships_list", []):
+            assert isinstance(rel["label_field"], str), (
+                f"x_relationships_list[field={rel['field']}].label_field must be str, "
+                f"got {type(rel['label_field']).__name__}: {rel['label_field']!r}"
+            )
