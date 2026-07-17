@@ -26,3 +26,5 @@ export { default as AppInputAction } from './AppInputAction';
 export { AppDialog } from './AppDialog';
 export { AppDatePicker } from './AppDatePicker';
 export { AppAutocomplete } from './AppAutocomplete';
+export { default as AppCircularProgress } from './AppCircularProgress';
+export { AppTable, AppTableHead, AppTableBody, AppTableRow, AppTableCell } from './AppTable';
