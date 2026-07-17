@@ -238,7 +238,7 @@ export async function fetch{{ parent_pascal }}Page(opts: PageOpts): Promise<Page
 
 /**
  * Lightweight search for autocomplete pickers. Returns up to `limit` rows
- * matching `query`{% if searchable_text_fields %} (substring on {{ searchable_text_fields | join(' / ') }}){% endif %} plus any rows in `includeIds` so the
+ * matching `query`{% if searchable_fields_display %} (substring on {{ searchable_fields_display | join(' / ') }}){% endif %} plus any rows in `includeIds` so the
  * currently-selected option is always present even when it doesn't match the
  * query. Applies the same access scope as the list page.
  */
@@ -261,19 +261,38 @@ export async function search{{ parent_pascal }}Options(
   const accessAnd = build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
 
   const trimmed = query.trim();
-  const orClauses: Record<string, unknown>[] = [];
-  if (trimmed) {
+  // Token-split AND search: each whitespace-separated token must match at
+  // least one searchable field (OR), and every token must match (AND) —
+  // so "Test Location" (product-name-word + location-word) narrows instead
+  // of requiring one field to contain the whole combined string.
+  // filter(Boolean) drops empty tokens from leading/trailing/double spaces
+  // (e.g. a null optional labelField segment) so `contains: ''` never
+  // silently wildcard-matches every row.
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  const matchOr: Record<string, unknown>[] = [];
+  if (tokens.length > 0) {
+    const searchAnd = tokens.map((token) => {
+      const orClauses: Record<string, unknown>[] = [];
 {% for f in searchable_text_fields %}
-    orClauses.push({ {{ f }}: { contains: trimmed, mode: 'insensitive' } });
+      orClauses.push({ {{ f }}: { contains: token, mode: 'insensitive' } });
 {% endfor %}
+{% for rf in searchable_relation_fields %}
+      orClauses.push({ {{ rf.relation }}: { {{ rf.field }}: { contains: token, mode: 'insensitive' } } });
+{% endfor %}
+      return { OR: orClauses };
+    });
+    matchOr.push({ AND: searchAnd });
   }
   if (includeIds.length > 0) {
-    orClauses.push({ id: { in: includeIds } });
+    // Always include currently-selected rows regardless of token search —
+    // an OR sibling of the token-AND block, not ANDed with it, so a
+    // selected option outside the search results still resolves by id.
+    matchOr.push({ id: { in: includeIds } });
   }
   const where = {
     AND: [
       ...accessAnd,
-      ...(orClauses.length > 0 ? [{ OR: orClauses }] : []),
+      ...(matchOr.length > 0 ? [{ OR: matchOr }] : []),
     ],
   };
   const safeLimit = Math.min(Math.max(Math.floor(limit) || 50, 1), 200);
@@ -346,3 +365,55 @@ export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pa
   });
 }
 {% endfor %}
+
+{% if can_list %}
+// ---------------------------------------------------------------
+// CSV Export (Phase 1) — returns one chunk of rows visible to this
+// user (caller loops with increasing `skip` until an empty chunk),
+// restricted to the same access scope as the list page (org / Creator /
+// Assignee) and to an explicit export-column allowlist (system fields,
+// FK id columns, and non-scalar columns are never included), with FK
+// relations flattened to display values.
+// ---------------------------------------------------------------
+const EXPORT_CHUNK_SIZE = Number(process.env.EXPORT_CHUNK_SIZE ?? '200');
+
+export async function get{{ parent_pascal }}ChunkForExport(
+  userId: string,
+  skip: number,
+): Promise<Record<string, unknown>[]> {
+{% if should_filter_by_org %}
+  const { permissions } = await getModelPermissions('{{ parent }}', userId);
+  const associatedOrganizations = await getAssociatedOrganizations(userId);
+  const associatedOrganizationIds = associatedOrganizations.map((o) => o.id);
+{% else %}
+  const { permissions } = await getModelPermissions('{{ parent }}');
+{% endif %}
+  const accessAnd = build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+  const rows = await prisma.{{ model }}.findMany({
+    where: { AND: accessAnd },
+    orderBy: { created_at: 'asc' },
+    skip,
+    take: EXPORT_CHUNK_SIZE,
+{% if include_props_list %}
+    include: { {{ include_props_list }} },
+{% endif %}
+  });
+  return rows.map((row) => {
+    const result: Record<string, unknown> = {
+{% for field in export_scalar_fields %}
+      '{{ field }}': (row as Record<string, unknown>)['{{ field }}'],
+{% endfor %}
+    };
+{% for rel in x_relationships_list %}
+    // Flatten {{ rel.field }}_id → display value via {{ rel.label_field }}.
+    // Always set (null when the FK is unset) so the CSV header stays stable
+    // across chunks regardless of which row happens to come first.
+    const _{{ rel.field }}Obj = (row as Record<string, unknown>)['{{ rel.field }}'];
+    result['{{ rel.display_col }}'] = (_{{ rel.field }}Obj && typeof _{{ rel.field }}Obj === 'object')
+      ? (_{{ rel.field }}Obj as Record<string, unknown>)['{{ rel.label_field }}']
+      : null;
+{% endfor %}
+    return result;
+  });
+}
+{% endif %}

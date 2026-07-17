@@ -10,6 +10,7 @@ This is a drop-in replacement for:
     npx tsx code_generator/generate.ts <schema.yaml> .
 
 """
+import json
 import re
 import sys
 import os
@@ -26,6 +27,10 @@ from helpers.schema_helpers import get_flatten_rels
 from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
 from build_context import build_context, build_anonymize_user_context, _get_actual_type
+from helpers.label_field import build_label_expression
+from helpers.schema_helpers import derive_text_fields as _derive_text_fields
+from helpers.schema_helpers import get_splittable_bridge_field
+from helpers.schema_helpers import resolve_ledger_domain
 from generators import (
     chart_context,
     page_list_context,
@@ -36,6 +41,8 @@ from generators import (
     form_upsert_context,
     build_dashboard_catalog,
     build_attachable_owners,
+    get_reservation_action_routes,
+    _build_approval_create_block_for_entity,
 )
 from generators_i18n import update_i18n_and_config
 from validate import validate_schema, validate_prisma_indexes, SchemaValidationError
@@ -69,6 +76,7 @@ def _make_env() -> Environment:
     )
     env.filters['pascal_case'] = to_pascal_case
     env.filters['camel_case'] = to_camel_case
+    env.filters['tojson'] = json.dumps
     return env
 
 
@@ -272,53 +280,11 @@ def _resolve_set_fields(entity_props: dict, raw: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Search text_fields auto-derivation helpers
 # ---------------------------------------------------------------------------
-
-def _is_string_prop(prop: dict) -> bool:
-    t = prop.get('type')
-    if isinstance(t, str):
-        return t == 'string'
-    if isinstance(t, list):
-        return 'string' in t and all(v in ('string', 'null') for v in t)
-    return False
-
-
-def _derive_text_fields(properties: dict) -> list[str]:
-    """Auto-derive searchable text fields from entity properties.
-
-    Excludes noise (id, FK, enum, CUID pattern, date/uri format, write-only)
-    and per-field opt-outs (x-search: false).
-    """
-    result = []
-    for field_name, prop in properties.items():
-        if not isinstance(prop, dict):
-            continue
-        if not _is_string_prop(prop):
-            continue
-        # id and explicit primary key
-        if field_name == 'id' or prop.get('x-primary'):
-            continue
-        # FK fields: x-relationship annotation or *_id naming convention
-        if prop.get('x-relationship') or field_name.endswith('_id'):
-            continue
-        # enum values (integer or string)
-        if isinstance(prop.get('enum'), list):
-            continue
-        # CUID/ID pattern strings
-        pattern = prop.get('pattern', '')
-        if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
-            continue
-        # Non-text formats
-        if prop.get('format') in ('date', 'date-time', 'time', 'uri'):
-            continue
-        # Write-only fields (e.g. password, api_key)
-        xc = prop.get('x-custom-component', {})
-        if isinstance(xc, dict) and 'upsert' in (xc.get('target') or []):
-            continue
-        # Per-field opt-out
-        if prop.get('x-search') is False:
-            continue
-        result.append(field_name)
-    return result
+#
+# _derive_text_fields is an alias for helpers.schema_helpers.derive_text_fields
+# (imported above) so build_context.py's searchable_text_fields
+# (searchXxxOptions autocomplete filter) can share the same exclusion rule
+# instead of a hardcoded field list.
 
 
 def _derive_mention_fields(properties: dict) -> list[str]:
@@ -466,6 +432,9 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     print(f'Found {len(entities)} entities in {schema_path}')
 
+    # Pre-compute named_constants so entity templates (getters.ts) can use it
+    named_constants = extract_named_constants(schema)
+
     doc_dir = out / 'docs' / 'generated'
     entity_doc_summaries: list[dict] = []
 
@@ -480,6 +449,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         can_edit   = gen_cfg.get('edit', True)
         can_delete = gen_cfg.get('delete', True)
         can_api    = gen_cfg.get('api', False)
+        can_export = gen_cfg.get('export', True)    # cmd_330
 
         # invalidate flag: accepts bool or {enabled, handler, module}
         _inv = gen_cfg.get('invalidate', False)
@@ -504,7 +474,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         _write(lib_dir / 'types.ts', _render(env, 'types.ts.jinja2', asdict(types_ctx)))
 
         # Base context for all other generators
-        ctx = build_context(entity, schema)
+        ctx = build_context(entity, schema, has_reactions=bool(named_constants))
 
         # --- docs/{parent}.md + app/[locale]/docs/{parent}/page.mdx ---
         doc_ctx = build_doc_entity_context(ctx)
@@ -523,7 +493,8 @@ def generate(schema_path: str, output_dir: str) -> None:
         })
 
         # --- getters.ts ---
-        _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', ctx))
+        getters_ctx = {**ctx, 'named_constants': named_constants}
+        _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', getters_ctx))
 
         # --- virtual column resolver stub (per-entity, async/bulk) ---
         parent_pascal = to_pascal_case(parent)
@@ -562,6 +533,30 @@ def generate(schema_path: str, output_dir: str) -> None:
                     _render(env, 'service_after_create_stub.ts.jinja2', ctx),
                 )
 
+        # --- reservation_actions.ts + per-action API routes ---
+        _res_cfg = ctx.get('reservation_config')
+        if _res_cfg and _res_cfg.get('has_actions'):
+            _act_routes = get_reservation_action_routes(_res_cfg, ctx['model'])
+            if _act_routes:
+                # Build reservation_actions.ts via template
+                _svc_acts = svc_ctx.get('reservation_actions_code', '') if (can_new or can_edit or can_delete) else ''
+                if _svc_acts:
+                    _ra_ctx = {**ctx, 'reservation_actions_code': _svc_acts}
+                    _write(lib_dir / 'reservation_actions.ts',
+                           _render(env, 'reservation_actions.ts.jinja2', _ra_ctx))
+                    print(f'  reservation_actions.ts → lib/{parent}/')
+                # Per-action API routes
+                api_actions_base = out / 'app' / 'api' / parent / '[id]' / 'actions'
+                for _route in _act_routes:
+                    _write(api_actions_base / _route['act_type'] / 'route.ts', _route['code'])
+                print(f'  Action routes → app/api/{parent}/[id]/actions/{{ship,release,cancel}}/')
+                # UI action buttons component
+                _write(
+                    components_dir / 'ReservationActionButtons.tsx',
+                    _render(env, 'action_buttons.tsx.jinja2', ctx),
+                )
+                print(f'  ReservationActionButtons.tsx → components/{parent}/')
+
         # --- actions.ts ---
         if can_new or can_edit or can_delete or can_invalidate:
             act_ctx = {**ctx, **actions_context(ctx)}
@@ -577,6 +572,22 @@ def generate(schema_path: str, output_dir: str) -> None:
             if can_new or can_edit or can_delete:
                 _write(api_dir / 'bulk' / 'route.ts', _render(env, 'api_bulk_route.ts.jinja2', ctx))
             print(f'  API routes → app/api/{parent}/')
+
+            # --- CSV Export route (Phase 1: can_api+can_list+can_export) ---
+            if can_list and can_export:                    # cmd_330
+                _write(api_dir / 'export' / 'route.ts',
+                       _render(env, 'api_export_route.ts.jinja2', ctx))
+                print(f'  CSV Export route → app/api/{parent}/export/')
+
+            # --- CSV Import route (Phase 2: entities with x-import-key + new/edit) ---
+            if ctx.get('import_eligible'):
+                _write(api_dir / 'import' / 'route.ts',
+                       _render(env, 'api_import_route.ts.jinja2', ctx))
+                print(f'  CSV Import route → app/api/{parent}/import/')
+                # --- ImportModal UI component (batch4) ---
+                _write(components_dir / 'ImportModal.tsx',
+                       _render(env, 'components/ImportModal.tsx.jinja2', ctx))
+                print(f'  ImportModal → components/{parent}/ImportModal.tsx')
 
         # --- Invalidate action route (independent of can_api) ---
         if can_invalidate:
@@ -678,6 +689,207 @@ def generate(schema_path: str, output_dir: str) -> None:
         if can_view:
             _write(app_dir / 'view' / '[id]' / 'page.tsx', _render(env, 'page_view.tsx.jinja2', ctx))
 
+    # --- x-splittable: split action route + UI per entity (cmd_296) ---
+    #
+    # Entities marked x-splittable get a POST /actions/split route that closes
+    # out the parent (status=split, approvable invalidated — FS-2) and creates
+    # child records inheriting the parent's fields. The split quantity field,
+    # the self-referential parent FK, and the split-result boolean flag are
+    # declared via x-splittable (or auto-detected) rather than hardcoded, so
+    # any entity can opt in by declaring x-splittable — not just receiving.
+    #
+    # x-splittable accepts two forms:
+    #   - `true` (legacy/bool): route only, no Σ validation, no UI.
+    #   - `{quantityField, perPartRequired?, parentField?, splitResultField?}`
+    #     (dict): route + Σ validation + SplitActionSection.tsx UI.
+    #     parentField/splitResultField are auto-detected when omitted.
+    def _detect_split_parent_field(props: dict, entity_name: str) -> str | None:
+        """Self-referential many-to-one FK pointing back at `entity_name`."""
+        for prop_name, prop_def in props.items():
+            rel = (prop_def or {}).get('x-relationship') or {}
+            if rel.get('type') == 'many-to-one' and rel.get('target') == entity_name:
+                return prop_name
+        return None
+
+    def _detect_split_result_field(props: dict) -> str | None:
+        """Boolean property named 'is_split_result' by convention."""
+        for prop_name, prop_def in props.items():
+            if (prop_def or {}).get('type') == 'boolean' and prop_name == 'is_split_result':
+                return prop_name
+        return None
+
+    def _detect_product_id_field(props: dict) -> str | None:
+        """Many-to-one FK pointing at product, for split auto-allocate queries."""
+        for prop_name, prop_def in props.items():
+            rel = (prop_def or {}).get('x-relationship') or {}
+            if rel.get('type') == 'many-to-one' and rel.get('target') == 'product':
+                return prop_name
+        return None
+
+    _splittable_defs = schema.get('definitions', {})
+    for _def_key, _def_val in _splittable_defs.items():
+        if _def_key.endswith('_detail'):
+            continue
+        _split_cfg = _def_val.get('x-splittable')
+        if not _split_cfg:
+            continue
+        _split_entity_props = _def_val.get('properties', {})
+        _split_status_enum = (_split_entity_props.get('status') or {}).get('enum') or []
+
+        _splittable_dict = _split_cfg if isinstance(_split_cfg, dict) else {}
+        _qty_field    = _splittable_dict.get('quantityField')
+        _per_part_req = list(_splittable_dict.get('perPartRequired') or [])
+        _parent_f = _splittable_dict.get('parentField') or _detect_split_parent_field(_split_entity_props, _def_key)
+        _split_r_f = _splittable_dict.get('splitResultField') or _detect_split_result_field(_split_entity_props)
+
+        # cmd_305 FIX-B: split children of an entity whose approval hook
+        # reserves inventory (x-approval.on_approved.emit_hook) get their own
+        # ledger-transaction bridge per child, so the existing
+        # afterApprove/afterReject hooks (which guard on a non-null bridge)
+        # fire correctly instead of silently no-op'ing. See
+        # docs/reservation-split-approval-reject-design.md B-3.
+        # cmd_312 Phase1: bridge field name config-driven via
+        # x-splittable.bridgeField (default 'inventory_transactionable_id')
+        # instead of a literal membership check — see
+        # get_splittable_bridge_field docstring for why this reads from
+        # x-splittable rather than reverse-resolving through x-reservation.
+        _bridge_field = get_splittable_bridge_field(_def_val)
+        _has_inventory_bridge = bool(
+            _bridge_field in _split_entity_props
+            and (_def_val.get('x-approval', {}) or {}).get('on_approved', {}).get('emit_hook')
+        )
+        _product_id_f = _detect_product_id_field(_split_entity_props)
+
+        # cmd_307 FIX-β: entities whose x-ledger-source has event_type 'receive'
+        # (e.g. receiving_receipt_line) add inventory on approval — they never
+        # hold an existing reservation to validate/claim/release at split time.
+        # Entities without x-ledger-source (or with a non-'receive' event_type,
+        # e.g. purchase_per_item) keep the existing reserve/claim/release
+        # semantics. Only meaningful when the entity has a bridge at all.
+        _ledger_source = _def_val.get('x-ledger-source') or {}
+        _split_reserves_inventory = _has_inventory_bridge and _ledger_source.get('event_type') != 'receive'
+
+        # OD-1: domain resolution (required — no defaults — only when this
+        # split entity actually has a ledger bridge to resolve).
+        _ledger_domain_vars = {}
+        if _has_inventory_bridge:
+            _domain_key = _splittable_dict.get('ledgerDomain')
+            if not _domain_key:
+                raise ValueError(
+                    f"x-splittable for {_def_key!r}: ledgerDomain is required when has_inventory_bridge (OD-1)"
+                )
+            _domain = resolve_ledger_domain(schema, _domain_key)
+            _pool_fk_field = _splittable_dict.get('poolIdField')
+            if not _pool_fk_field:
+                raise ValueError(
+                    f"x-splittable for {_def_key!r}: poolIdField is required when has_inventory_bridge (OD-1)"
+                )
+            _ledger_domain_vars = {
+                'ledger_entity': _domain['ledger'],
+                'transactionable_entity': _domain['transactionable'],
+                'pool_entity': _domain['pool'],
+                'bridge_fk_field': _bridge_field,
+                'pool_fk_field': _pool_fk_field,
+            }
+
+        # perPartRequired fields are enforced as mandatory (every part must
+        # supply a truthy value) only when they're also in the entity's own
+        # top-level `required:` list. purchase_per_item.inventory_id is in
+        # perPartRequired (per-part lot override) but is schema-optional —
+        # split falls back to auto-allocate when a part omits it (cmd_305
+        # FIX-B, DP-B1). receiving_receipt_line.inventory_id is genuinely
+        # required, so its mandatory check is unaffected.
+        _entity_required = set(_def_val.get('required') or [])
+        _per_part_req_mandatory = [f for f in _per_part_req if f in _entity_required]
+
+        _always_exclude = {
+            'id', 'status', 'approvable_id', _bridge_field,
+            *([_qty_field] if _qty_field else []),
+            *([_parent_f] if _parent_f else []),
+            *([_split_r_f] if _split_r_f else []),
+            *_per_part_req,
+        }
+
+        _split_has_approvable = 'approvable_id' in _split_entity_props
+        # cmd_296 Phase2: one approvable per part, created directly in the
+        # per-part loop (no pre-create array — unlike cmd_295's x-approval-lines
+        # batch). Shares its inner block with _build_approval_lines_post_create_code
+        # via generators.py:_build_approval_create_block_for_entity (see
+        # docs/split-generalization-design.md §4.2).
+        _split_approval_create_block = (
+            _build_approval_create_block_for_entity(
+                approvable_id_expr='childApprovable.id',
+                actor_id_expr='userId',
+                flows_var='_splitApprovalFlows',
+                role_ids_var='_splitCreatorRoleIds',
+                tx_var='tx',
+                indent='        ',
+            )
+            if _split_has_approvable else ''
+        )
+
+        _split_ctx = {
+            'entity_name': _def_key,
+            'pascal_name': to_pascal_case(_def_key),
+            'status_split_value': _split_status_enum.index('split') if 'split' in _split_status_enum else 1,
+            'status_rejected_value': _split_status_enum.index('rejected') if 'rejected' in _split_status_enum else 2,
+            'has_approvable': _split_has_approvable,
+            'approval_create_block': _split_approval_create_block,
+            'has_quantity_check': bool(_qty_field),
+            'quantity_field': _qty_field,
+            'per_part_required': _per_part_req,
+            'parent_field': _parent_f,
+            'split_result_field': _split_r_f,
+            'inherited_fields': [f for f in _split_entity_props if f not in _always_exclude],
+            'has_inventory_bridge': _has_inventory_bridge,
+            'split_reserves_inventory': _split_reserves_inventory,
+            'product_id_field': _product_id_f,
+            'per_part_required_mandatory': _per_part_req_mandatory,
+            **_ledger_domain_vars,
+        }
+        _split_api_dir = out / 'app' / 'api' / _def_key / '[id]' / 'actions' / 'split'
+        _write(_split_api_dir / 'route.ts', _render(env, 'split_action_route.ts.jinja2', _split_ctx))
+        print(f'  Split action route → app/api/{_def_key}/[id]/actions/split/')
+
+        # UI generation: only when quantityField is declared (dict form). The
+        # legacy bool form (`x-splittable: true`) keeps pre-cmd_296 API-only
+        # behavior — no UI, no Σ validation.
+        if _qty_field:
+            _split_ui_parts = []
+            _split_uses_format_label_value = False
+            _split_has_relation_field = False
+            for _f in _per_part_req:
+                _f_def = _split_entity_props.get(_f, {})
+                _f_rel = (_f_def or {}).get('x-relationship') or {}
+                _f_target = _f_rel.get('target')
+                if not _f_target:
+                    # No FK relation declared for this field — plain text input.
+                    _split_ui_parts.append({'field': _f, 'is_relation': False})
+                    continue
+                _f_label_field = _f_rel.get('labelField', 'id')
+                _f_built = build_label_expression('item', _f_label_field, _f_target, schema)
+                if _f_built['has_format']:
+                    _split_uses_format_label_value = True
+                _split_has_relation_field = True
+                _split_ui_parts.append({
+                    'field': _f,
+                    'is_relation': True,
+                    'target': _f_target,
+                    'target_pascal': to_pascal_case(_f_target),
+                    'label_expr': _f_built['expression'],
+                })
+            _split_ui_ctx = {
+                'entity_name': _def_key,
+                'pascal_name': to_pascal_case(_def_key),
+                'quantity_field': _qty_field,
+                'per_part_required': _split_ui_parts,
+                'split_uses_format_label_value': _split_uses_format_label_value,
+                'split_has_relation_field': _split_has_relation_field,
+            }
+            _split_ui_dir = out / 'components' / _def_key
+            _write(_split_ui_dir / 'SplitActionSection.tsx', _render(env, 'split_action_section.tsx.jinja2', _split_ui_ctx))
+            print(f'  SplitActionSection.tsx → components/{_def_key}/')
+
     # --- Dashboard catalog (lib/dashboard/catalog.ts) ---
     dashboard_catalog = build_dashboard_catalog(schema)
     if True:
@@ -714,7 +926,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         print(f'  Attachment bridge actions → lib/attachment/actions.ts ({len(attachable_owners)} owners)')
 
     # --- Named constants (lib/reaction_constants.ts) ---
-    named_constants = extract_named_constants(schema)
+    # named_constants was pre-computed before the entity loop
     if named_constants:
         _write(
             out / 'lib' / 'reaction_constants.ts',
@@ -774,13 +986,56 @@ def generate(schema_path: str, output_dir: str) -> None:
         if not x_approval:
             continue
         on_approved = x_approval.get('on_approved', {})
+        if not on_approved:
+            continue
+        x_ledger_source = def_val.get('x-ledger-source', {})
+        x_splittable = def_val.get('x-splittable', {})
         entity_props = def_val.get('properties', {})
         resolved_sf = _resolve_set_fields(entity_props, on_approved.get('set_fields') or {})
+        # OD-1: domain resolution (required — no defaults — only when this
+        # entity actually declares x-ledger-source).
+        _ent_domain_vars = {}
+        if x_ledger_source:
+            _ent_domain_key = x_ledger_source.get('ledgerDomain')
+            if not _ent_domain_key:
+                raise ValueError(
+                    f"x-ledger-source for {def_key!r}: ledgerDomain is required (OD-1)"
+                )
+            _ent_domain = resolve_ledger_domain(schema, _ent_domain_key)
+            _ent_domain_vars = {
+                'ledger_entity': _ent_domain['ledger'],
+                'transactionable_entity': _ent_domain['transactionable'],
+                'pool_entity': _ent_domain['pool'],
+                # Entity's own per-row bridge FK — same config source as the
+                # split-route bridge field (get_splittable_bridge_field), since
+                # a ledger-source entity's bridge FK is declared identically.
+                'bridge_fk_field': get_splittable_bridge_field(def_val),
+            }
+        elif x_splittable.get('ledgerDomain'):
+            # Phase 3 / OD-3 (Option B): a splittable, approval-driven entity with
+            # no x-ledger-source of its own (e.g. purchase_per_item) is the "Ship"
+            # side of a ledger_transaction reservation — reserved_quantity was
+            # already moved at reserve time, and approval nets outstanding
+            # reserved_delta per lot before writing the ship row(s). Resolve the
+            # same domain the split route uses (x-splittable.ledgerDomain) so the
+            # generated skeleton names the real entities instead of a bare TODO.
+            _ent_domain = resolve_ledger_domain(schema, x_splittable['ledgerDomain'])
+            _ent_domain_vars = {
+                'ledger_entity': _ent_domain['ledger'],
+                'transactionable_entity': _ent_domain['transactionable'],
+                'pool_entity': _ent_domain['pool'],
+                'bridge_fk_field': get_splittable_bridge_field(def_val),
+                'is_ship_skeleton': True,
+            }
         approvable_entities.append({
             'snake_name': def_key,
             'pascal_name': to_pascal_case(def_key),
             'set_fields': resolved_sf,
             'emit_hook': bool(on_approved.get('emit_hook', False)),
+            'has_ledger_source': bool(x_ledger_source),
+            'ledger_source': x_ledger_source,
+            'is_ship_skeleton': False,
+            **_ent_domain_vars,
         })
     _write(
         out / 'lib' / 'approval_request' / 'on_approved_dispatch.ts',
@@ -789,11 +1044,58 @@ def generate(schema_path: str, output_dir: str) -> None:
     print(f'  Approval dispatch → lib/approval_request/on_approved_dispatch.ts ({len(approvable_entities)} entities)')
     for ent in approvable_entities:
         if ent['emit_hook']:
+            if ent.get('has_ledger_source'):
+                _event_type = ent.get('ledger_source', {}).get('event_type', '')
+                if _event_type == 'move':
+                    template_name = 'ledger_move_stub.ts.jinja2'
+                elif _event_type == 'adjust':
+                    template_name = 'ledger_adjust_stub.ts.jinja2'
+                else:
+                    template_name = 'ledger_write_stub.ts.jinja2'
+            else:
+                template_name = 'service_after_approve_stub.ts.jinja2'
             _write_stub(
                 out / 'lib' / ent['snake_name'] / 'service_after_approve.ts',
-                _render(env, 'service_after_approve_stub.ts.jinja2', ent),
+                _render(env, template_name, ent),
             )
             print(f"  Approval stub → lib/{ent['snake_name']}/service_after_approve.ts")
+
+    # --- Rejection event dispatch (lib/approval_request/on_rejected_dispatch.ts) ---
+    #
+    # Emitted when at least one entity declares `x-approval.on_rejected`.
+    # Symmetric to on_approved. Builds rejectable_entities list, generates
+    # dispatch module and per-entity service_after_reject once-stubs (emit_hook only).
+    rejectable_entities = []
+    for def_key, def_val in defs.items():
+        if def_key.endswith('_detail'):
+            continue
+        x_approval = def_val.get('x-approval')
+        if not x_approval:
+            continue
+        on_rejected = x_approval.get('on_rejected', {})
+        if not on_rejected:
+            continue
+        entity_props = def_val.get('properties', {})
+        resolved_sf = _resolve_set_fields(entity_props, on_rejected.get('set_fields') or {})
+        rejectable_entities.append({
+            'snake_name': def_key,
+            'pascal_name': to_pascal_case(def_key),
+            'set_fields': resolved_sf,
+            'emit_hook': bool(on_rejected.get('emit_hook', False)),
+            'terminal': bool(on_rejected.get('terminal', False)),
+        })
+    _write(
+        out / 'lib' / 'approval_request' / 'on_rejected_dispatch.ts',
+        _render(env, 'on_rejected_dispatch.ts.jinja2', {'rejectable_entities': rejectable_entities}),
+    )
+    print(f'  Rejection dispatch → lib/approval_request/on_rejected_dispatch.ts ({len(rejectable_entities)} entities)')
+    for ent in rejectable_entities:
+        if ent['emit_hook']:
+            _write_stub(
+                out / 'lib' / ent['snake_name'] / 'service_after_reject.ts',
+                _render(env, 'service_after_reject_stub.ts.jinja2', ent),
+            )
+            print(f"  Rejection stub → lib/{ent['snake_name']}/service_after_reject.ts")
     # --- Search templates (lib/search/helpers.ts + app/api/search/route.ts) ---
     # DP-3: default_scope from x-generator.search.default_scope.
     #   'opt_in' (default) — only entities with x-generate.search: true are searchable
@@ -1029,7 +1331,15 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- Cypress test generation ---
     test_entities = [e for e in entities if e['generate_config'].get('test')]
-    _test_entity_count = len(test_entities)
+    # db_ctx's test_entity_names (ALL_ENTITIES) is the actual set granted permissions
+    # by grantAllEntityPermissions() at runtime — it's wider than test_entities alone
+    # (e.g. an entity with x-generate.test: false but reached via another entity's
+    # labelField still needs — and gets — a permission row). The permission entity's
+    # own spec asserts an exact seed-only row count, so it must count this same set,
+    # not just the raw test-spec entity list, or the two silently drift apart.
+    _test_entity_names = sorted(e['parent'] for e in test_entities)
+    db_ctx = db_helpers_context(schema, test_entity_names=_test_entity_names)
+    _test_entity_count = len(db_ctx['test_entity_names'])
     if test_entities:
         print('\nGenerating Cypress tests...')
         cypress_support = out / 'cypress' / 'support'
@@ -1093,8 +1403,6 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- db-helpers.ts (always generated, not gated on test_entities) ---
     print('\nGenerating db-helpers.ts...')
-    _test_entity_names = sorted(e['parent'] for e in test_entities)
-    db_ctx = db_helpers_context(schema, test_entity_names=_test_entity_names)
     _write(out / 'cypress' / 'support' / 'db-helpers.ts',
            _render(env, 'test_db_helpers.ts.jinja2', db_ctx))
 

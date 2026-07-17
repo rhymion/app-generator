@@ -1,0 +1,110 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+// Phase5: inventory movement ledger write stub for {{ snake_name }}
+// x-ledger-source event_type: move
+// Pattern: bridge create → entity update → 2x inventory_transaction INSERT → 2x inventory cache update
+
+import type { PrismaClient } from '@/app/generated/prisma/client';
+
+type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+/**
+ * Called after {{ snake_name }} approval is confirmed.
+ * Creates 2 inventory_transaction rows (OD-7: single entity, 2 ledger rows):
+ *   - from-pool row: quantity_delta = -N (debit)
+ *   - to-pool row:   quantity_delta = +N (credit)
+ * Both rows share one inventory_transactionable bridge (same movement event).
+ */
+export async function afterApprove(
+  tx: Tx,
+  entityId: string,
+  approvableId: string,
+  approvedByUserId: string,
+): Promise<void> {
+  const entity = await tx.{{ snake_name }}.findFirst({
+    where: { approvable_id: approvableId },
+  });
+  if (!entity) return;
+  if (!entity.approvable_id) return;
+
+  if (!entity.{{ ledger_source.fromPoolIdField }}) throw new Error('{{ ledger_source.fromPoolIdField }} required for ledger move write');
+  if (!entity.{{ ledger_source.toPoolIdField }}) throw new Error('{{ ledger_source.toPoolIdField }} required for ledger move write');
+
+  // Idempotency guard: if bridge exists, check for existing transactions.
+  if (entity.{{ bridge_fk_field }}) {
+    const existing = await tx.{{ ledger_entity }}.findFirst({
+      where: { {{ bridge_fk_field }}: entity.{{ bridge_fk_field }} },
+    });
+    if (existing) return;
+  }
+
+  // Step 1: Create shared bridge (one bridge for both debit+credit rows).
+  const bridge = entity.{{ bridge_fk_field }}
+    ? { id: entity.{{ bridge_fk_field }} }
+    : await tx.{{ transactionable_entity }}.create({ data: {} });
+
+  // Step 2: Link bridge to entity (if newly created).
+  if (!entity.{{ bridge_fk_field }}) {
+    await tx.{{ snake_name }}.update({
+      where: { id: entityId },
+      data: { {{ bridge_fk_field }}: bridge.id },
+    });
+  }
+
+  // Step 3: Fetch both inventory pools with their location for denormalized copy.
+  const fromInventory = await tx.{{ pool_entity }}.findUniqueOrThrow({
+    where: { id: entity.{{ ledger_source.fromPoolIdField }} },
+    include: { location: true },
+  });
+  const toInventory = await tx.{{ pool_entity }}.findUniqueOrThrow({
+    where: { id: entity.{{ ledger_source.toPoolIdField }} },
+    include: { location: true },
+  });
+
+  const qty = entity.{{ ledger_source.quantity_delta_field }};
+
+  // Step 4a: Debit row — from-pool loses quantity.
+  await tx.{{ ledger_entity }}.create({
+    data: {
+      {{ bridge_fk_field }}: bridge.id,
+      event_type: 'move',
+      quantity_delta: -qty,
+      reserved_delta: 0,
+      product_id: fromInventory.product_id,
+      location: fromInventory.location?.name ?? '',
+      lot_number: fromInventory.lot_number,
+      expiration_date: fromInventory.expiration_date,
+      approved_via: approvableId,
+      created_by_id: approvedByUserId,
+      creator_id: approvedByUserId,
+      updater_id: approvedByUserId,
+    },
+  });
+
+  // Step 4b: Credit row — to-pool gains quantity.
+  await tx.{{ ledger_entity }}.create({
+    data: {
+      {{ bridge_fk_field }}: bridge.id,
+      event_type: 'move',
+      quantity_delta: +qty,
+      reserved_delta: 0,
+      product_id: toInventory.product_id,
+      location: toInventory.location?.name ?? '',
+      lot_number: toInventory.lot_number,
+      expiration_date: toInventory.expiration_date,
+      approved_via: approvableId,
+      created_by_id: approvedByUserId,
+      creator_id: approvedByUserId,
+      updater_id: approvedByUserId,
+    },
+  });
+
+  // Step 5: Update inventory caches (materialized SUM).
+  await tx.{{ pool_entity }}.update({
+    where: { id: entity.{{ ledger_source.fromPoolIdField }} },
+    data: { quantity: { decrement: qty } },
+  });
+  await tx.{{ pool_entity }}.update({
+    where: { id: entity.{{ ledger_source.toPoolIdField }} },
+    data: { quantity: { increment: qty } },
+  });
+}

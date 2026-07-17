@@ -11,6 +11,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% if one_to_one_pre_creates %}
 {{ one_to_one_pre_creates }}
 {% endif %}
+{% if approval_lines_pre_create_code %}
+{{ approval_lines_pre_create_code }}
+{% endif %}
     const created = await tx.{{ model }}.create({
       data: {
         creator_id: actorId,
@@ -29,6 +32,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% endif %}
 {% if reservation_allocation_code %}
 {{ reservation_allocation_code }}
+{% endif %}
+{% if approval_lines_post_create_code %}
+{{ approval_lines_post_create_code }}
 {% endif %}
 {% if one_to_one_spread %}
     await afterCreate(tx, { ...created, {{ one_to_one_spread }} } as Record<string, unknown>, {
@@ -86,6 +92,9 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
       select: { assignee_id: true },
     }))?.assignee_id ?? null;
 {% endif %}
+{% if approval_lines_pre_update_code %}
+{{ approval_lines_pre_update_code }}
+{% endif %}
     await tx.{{ model }}.update({
       where: { id },
       data: {
@@ -96,6 +105,9 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% endif %}
       },
     });
+{% if approval_lines_post_update_code %}
+{{ approval_lines_post_update_code }}
+{% endif %}
 {% if flatten_nested_updates %}
 {{ flatten_nested_updates }}
 {% endif %}
@@ -173,6 +185,51 @@ export const reserve{{ parent_pascal }} = async (
   criteria: Record<string, unknown> = {}
 ): Promise<{ success: boolean; {{ reservation_config.allocatedField }}: string }> => {
   return await prisma.$transaction(async (tx) => {
+{% if reservation_config.usesOverlapAvailability %}
+    const _startMs = new Date(dateRange.{{ reservation_config.dateRange.startField }} as unknown as string).getTime();
+    const _endMs = new Date(dateRange.{{ reservation_config.dateRange.endField }} as unknown as string).getTime();
+    if (_startMs >= _endMs) {
+      throw new Error('Start date must be before end date');
+    }
+    const candidates = await (tx as unknown as typeof prisma).{{ reservation_config.pool.entity }}.findMany({
+      where: {
+        ...criteria,
+{% if reservation_config.excludePoolStatuses %}
+        {{ reservation_config.statusField }}: { notIn: {{ reservation_config.excludePoolStatuses | tojson }} },
+{% endif %}
+      },
+{% if reservation_config.policy.orderBy %}
+      orderBy: [
+{% for order_item in reservation_config.policy.orderBy %}
+{% for field_name, direction in order_item.items() %}
+{% if '_nulls_' in direction %}
+        { {{ field_name }}: { sort: '{{ direction.split('_nulls_')[0] }}', nulls: '{{ direction.split('_nulls_')[1] }}' } },
+{% else %}
+        { {{ field_name }}: '{{ direction }}' },
+{% endif %}
+{% endfor %}
+{% endfor %}
+      ],
+{% endif %}
+    });
+    for (const candidate of candidates) {
+      try {
+        await assertNoDuplicateReservation(
+          tx as unknown as Pick<typeof prisma, '{{ model }}'>,
+          candidate.id,
+          dateRange
+        );
+      } catch {
+        continue;
+      }
+      await tx.{{ model }}.update({
+        where: { id: requestId },
+        data: { {{ reservation_config.allocatedField }}: candidate.id },
+      });
+      return { success: true, {{ reservation_config.allocatedField }}: candidate.id };
+    }
+    throw new InsufficientPoolCapacityError('No available {{ reservation_config.pool.entity }} for reservation');
+{% else %}
     const candidate = await (tx as unknown as typeof prisma).{{ reservation_config.pool.entity }}.findFirst({
       where: {
         {{ reservation_config.statusField }}: {{ reservation_config.available_status_ts }},
@@ -193,7 +250,7 @@ export const reserve{{ parent_pascal }} = async (
 {% endif %}
     });
     if (!candidate) {
-      throw new InsufficientInventoryError('No available {{ reservation_config.pool.entity }} for reservation');
+      throw new InsufficientPoolCapacityError('No available {{ reservation_config.pool.entity }} for reservation');
     }
 {% if reservation_config.dateRange %}
     await assertNoDuplicateReservation(
@@ -202,15 +259,18 @@ export const reserve{{ parent_pascal }} = async (
       dateRange
     );
 {% endif %}
+{% if reservation_config.updatesPoolStatusOnReserve %}
     await (tx as unknown as typeof prisma).{{ reservation_config.pool.entity }}.update({
       where: { id: candidate.id },
       data: { {{ reservation_config.statusField }}: {{ reservation_config.reserved_status_ts }} },
     });
+{% endif %}
     await tx.{{ model }}.update({
       where: { id: requestId },
       data: { {{ reservation_config.allocatedField }}: candidate.id },
     });
     return { success: true, {{ reservation_config.allocatedField }}: candidate.id };
+{% endif %}
   }, {
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
   });

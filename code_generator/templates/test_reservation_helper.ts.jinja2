@@ -131,12 +131,14 @@ export async function seedReservation{{ pascal }}OrderBy() {
   }));
 }
 
+{% if alloc_entity %}
 /** Count {{ alloc_entity }} rows for a given {{ entity }} */
 export async function count{{ pascal }}Allocations(parentId: string) {
   return prisma.{{ alloc_entity }}.count({
     where: { {{ parent_field }}: parentId },
   });
 }
+{% endif %}
 
 /** Get {{ pool_entity }} by id (includes {{ pool_res_field }}) */
 export async function get{{ pascal }}PoolState(poolId: string) {
@@ -144,6 +146,7 @@ export async function get{{ pascal }}PoolState(poolId: string) {
   return row ? JSON.parse(JSON.stringify(row)) : null;
 }
 
+{% if alloc_entity %}
 /** Get {{ alloc_entity }} rows for a given {{ parent_field }}, with {{ pool_entity }} included */
 export async function get{{ pascal }}AllocationsOrdered(parentId: string) {
   const rows = await prisma.{{ alloc_entity }}.findMany({
@@ -153,3 +156,4 @@ export async function get{{ pascal }}AllocationsOrdered(parentId: string) {
   });
   return JSON.parse(JSON.stringify(rows));
 }
+{% endif %}

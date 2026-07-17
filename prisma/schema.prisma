@@ -25,6 +25,8 @@ datasource db {
 // tenant created by scripts/seed-its.ts and the 1.5 migration script
 // exists before any user does. Normal admin-created tenants always
 // carry both ids.
+// exists before any user does. Normal admin-created tenants always
+// carry both ids.
 model tenant {
   id         String   @id @default(cuid())
   name       String
@@ -148,6 +150,7 @@ model permission {
   read       Boolean
   update     Boolean
   delete     Boolean
+  import     Boolean @default(false)
   created_at DateTime @default(now()) @db.Timestamptz(0)
   updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
@@ -167,6 +170,7 @@ model approvable {
   creator          user? @relation("ApprovableCreator", fields: [creator_id], references: [id])
   approval_requests approval_request[]
   approved_at       DateTime?          @db.Timestamptz(0)
+  rejection_reason  String?
 
   @@index([creator_id])
 }
@@ -214,6 +218,7 @@ model approval_history {
   pre_status       Int
   post_status      Int
   message          String?
+  reason_kind      Int?             // 0=Customer 1=Internal
   created_at       DateTime @default(now()) @db.Timestamptz(0)
   updated_at       DateTime @updatedAt @db.Timestamptz(0)
   creator_id       String

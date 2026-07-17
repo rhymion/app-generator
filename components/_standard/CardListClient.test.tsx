@@ -19,7 +19,7 @@ type Item = { id: string; name: string; description?: string };
 const item1: Item = { id: '1', name: 'Alpha', description: 'First item' };
 const item2: Item = { id: '2', name: 'Beta', description: 'Second item' };
 const basePath = '/items';
-const allPerms = { create: true, read: true, update: true, delete: true };
+const allPerms = { create: true, read: true, update: true, delete: true, import: true };
 
 describe('CardListClient', () => {
   describe('Read (display)', () => {

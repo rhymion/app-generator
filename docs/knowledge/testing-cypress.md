@@ -103,6 +103,23 @@ is seeded into the test user by `seedTestDatabase()` in `db-helpers.ts`.
 
 ---
 
+## Mandatory gate (`test:e2e:cy:api`) composition
+
+`test:e2e:cy:api` is the mandatory gate referenced by `CLAUDE.md`. Its `--spec` argument
+has two parts:
+
+- `cypress/e2e/api/**` — dynamic glob, automatically includes every generated API spec.
+- `cypress/e2e/purchase_order.cy.ts,cypress/e2e/receiving_receipt.cy.ts` — an explicit
+  list of UI specs, added because both regressed during purchase-order/receiving
+  primitive work (cmd_294).
+
+The UI list is a **curated, mutable set**, not a fixed one: when manual e2e finds a new
+UI regression, add that spec's path to the list; once the underlying issue is fixed and
+stable, it may be removed. Edit the `--spec` value in `package.json` directly — no
+separate config file governs this list.
+
+---
+
 ## Cypress commands and helpers
 
 ### `getDataGridRowCount()`

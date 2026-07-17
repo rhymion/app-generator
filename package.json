@@ -74,6 +74,7 @@
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.18",
     "@types/mdx": "^2.0.13",
+    "@types/papaparse": "^5.5.2",
     "@vercel/blob": "^2.0.1",
     "@vercel/postgres": "^0.10.0",
     "bcryptjs": "^3.0.3",
@@ -83,6 +84,7 @@
     "next-auth": "^5.0.0-beta.31",
     "next-intl": "^4.8.3",
     "otplib": "^13.4.0",
+    "papaparse": "^5.5.4",
     "qrcode": "^1.5.4",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"

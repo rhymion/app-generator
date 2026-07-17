@@ -44,6 +44,17 @@ export default defineConfig({
           const { createLimitedApiUser } = require('./cypress/support/db-helpers');
           return await createLimitedApiUser(modelName);
         },
+        // cmd_328 batch2: session-loginable actor with a custom permission set, for
+        // testing session-based routes (CSV import/export) that createLimitedApiUser
+        // (X-API-Key only, unusable password) cannot reach.
+        async 'db:createSessionUserWithPermission'(params: {
+          entityName: string;
+          flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean };
+          label?: string;
+        }) {
+          const { createSessionUserWithPermission } = require('./cypress/support/db-helpers');
+          return await createSessionUserWithPermission(params.entityName, params.flags, params.label);
+        },
         async 'db:seedMfaUser'() {
           const { seedMfaTestUser } = require('./cypress/support/mfa-helpers');
           return await seedMfaTestUser();
@@ -69,6 +80,29 @@ export default defineConfig({
             },
           });
           return JSON.parse(JSON.stringify({ commentId: comment.id, userId: testUser.id }));
+        },
+        async 'db:createUserWithName'(params: { name: string; image?: string | null }) {
+          // Creates a user row with a caller-chosen (possibly duplicate) name,
+          // owned by the session test user. Used by CSV import tests to set up
+          // natural-key match scenarios (cmd_328).
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
+          const { createId } = require('@paralleldrive/cuid2');
+          const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+          if (!testUser) throw new Error('Test user not found. Run db:seed first.');
+          const newUserId = createId();
+          const record = await prisma.user.create({
+            data: {
+              id: newUserId,
+              creator_id: testUser.id,
+              updater_id: testUser.id,
+              email: `${newUserId}@example.com`,
+              name: params.name,
+              image: params.image ?? null,
+              password: 'not_needed',
+            },
+          });
+          return JSON.parse(JSON.stringify(record));
         },
         async 'db:createSecondUser'() {
           const { prisma } = require('./cypress/support/db-helpers');

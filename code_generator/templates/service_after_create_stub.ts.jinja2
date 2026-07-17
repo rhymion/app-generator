@@ -1,5 +1,6 @@
 {% if one_to_one_rels | selectattr('target', 'equalto', 'approvable') | list %}
 import type { PrismaClient } from '@/app/generated/prisma/client';
+import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
 
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
@@ -27,26 +28,33 @@ export async function afterCreate(
     where: { entity_name: '{{ model }}' },
   });
 
-  let hasFlow = false;
+  const createdRequestIds: string[] = [];
   for (const flow of flows) {
     if (flow.requestor_role_id && !creatorRoleIds.includes(flow.requestor_role_id)) {
       continue;
     }
-    await db.approval_request.create({
+    const req = await db.approval_request.create({
       data: {
         approvable_id: approvable.id,
         approval_flow_id: flow.id,
         status: 0,
       },
     });
-    hasFlow = true;
+    createdRequestIds.push(req.id);
   }
 
-  if (hasFlow && creatorId) {
+  if (createdRequestIds.length > 0 && creatorId) {
     await db.approvable.update({
       where: { id: approvable.id },
       data: { creator_id: creatorId },
     });
+    // Trigger #2 (notification design 2026-05-11): notify every
+    // approver-role holder for each created approval_request.
+    for (const reqId of createdRequestIds) {
+      await notifyApprovalRequestCreated(tx, reqId, {
+        excludeUserId: creatorId,
+      });
+    }
   }
 }
 {% else %}

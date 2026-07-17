@@ -18,6 +18,12 @@ import { DEFAULT_PAGE_SIZE{% if needs_formatting %}, type PageOpts{% endif %} } 
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
 import AppListToolbar from '@/components/ui/layout/AppListToolbar';
+{% if can_api and can_list and can_export %}
+import ExportCsvButton from '@/components/_standard/ExportCsvButton';
+{% endif %}
+{% if import_eligible %}
+import ImportModal from '@/components/{{ parent }}/ImportModal';
+{% endif %}
 {% for comp in entity_custom_components %}
 import {{ comp.name }} from '{{ comp.path if comp.path else "@/components/" + parent + "/" + comp.name }}';
 {% endfor %}
@@ -107,6 +113,12 @@ async function {{ parent_pascal }}ListContent({
         chartLabel={tc('chart')}
 {% endif %}
       >
+{% if can_api and can_list and can_export %}
+        <ExportCsvButton entity="{{ parent }}" />
+{% endif %}
+{% if import_eligible %}
+        <ImportModal permissions={userPermissions} />
+{% endif %}
 {% for comp in entity_custom_components %}
         <{{ comp.name }}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={userPermissions} />
 {% endfor %}

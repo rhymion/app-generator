@@ -290,6 +290,38 @@ def build_label_expression(
     }
 
 
+def build_string_only_label_expression(
+    item_var: str,
+    label_field,
+    target: str,
+    schema: dict,
+) -> str:
+    """TS expression producing a label composed of STRING-TYPE segments only.
+
+    Excludes segments whose final field has a format in `_DATE_FORMATS`
+    (date, date-time, time) or is numeric (`final_is_number`). The result is
+    the search string a Cypress test should TYPE into an autocomplete input —
+    it omits date/enum/number display fragments that the server can't search
+    (search{{Entity}}Options only queries string fields).
+
+    Returns '' if ALL segments are non-string — the caller must fall back to
+    the full label expression (or another strategy).
+    """
+    resolved = resolve_label_paths(label_field, target, schema)
+    string_parts = [
+        _path_expression(item_var, r['segments'], None, False, None)
+        for r in resolved
+        if r['final_format'] not in _DATE_FORMATS
+        and not r.get('final_is_number', False)
+    ]
+    if not string_parts:
+        return ''
+    if len(string_parts) == 1:
+        return string_parts[0]
+    inner = ' '.join(f'${{{p}}}' for p in string_parts)
+    return f'`{inner}`'
+
+
 def render_prisma_include(include: dict) -> str:
     """Render a nested Prisma include dict to its TS source form.
 
@@ -323,6 +355,32 @@ def first_label_format(label_field, target: str, schema: dict) -> str | None:
         if r['final_format']:
             return r['final_format']
     return None
+
+
+def relation_chain_targets(label_field, target: str, schema: dict) -> set[str]:
+    """Return every entity touched while resolving `label_field` from `target`.
+
+    Includes `target` itself plus each entity reached via an intermediate
+    relation-chain hop (e.g. `product.name` on target `inventory` also
+    touches `product`). Used to find entities that need read access even
+    when they have no test spec of their own (they're only ever reached as
+    an autocomplete label hop).
+    """
+    entities = {target}
+    try:
+        resolved = resolve_label_paths(label_field, target, schema)
+    except ValueError:
+        return entities
+    for r in resolved:
+        cursor_entity = target
+        for seg in r['relation_chain']:
+            rels = _outbound_relations(cursor_entity, schema)
+            nxt = rels.get(seg)
+            if not nxt:
+                break
+            entities.add(nxt)
+            cursor_entity = nxt
+    return entities
 
 
 def first_label_path(label_field) -> str:

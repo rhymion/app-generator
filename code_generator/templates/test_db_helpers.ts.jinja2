@@ -1,4 +1,4 @@
-// AUTO-GENERATED - DO NOT EDIT (hand-edited sections: grantAllEntityPermissions, createLimitedApiUser)
+// AUTO-GENERATED - DO NOT EDIT (hand-edited sections: grantAllEntityPermissions, createLimitedApiUser, createSessionUserWithPermission)
 import 'dotenv/config'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/app/generated/prisma/client';
@@ -119,6 +119,7 @@ export async function grantAllEntityPermissions(): Promise<void> {
         read: true,
         update: true,
         delete: true,
+        import: true,
         creator_id: testUser.id,
         updater_id: testUser.id,
       },
@@ -165,6 +166,7 @@ export async function createLimitedApiUser(entityName: string): Promise<string> 
       read: false,
       update: false,
       delete: false,
+      import: false,
       creator_id: testUser.id,
       updater_id: testUser.id,
     },
@@ -184,6 +186,66 @@ export async function createLimitedApiUser(entityName: string): Promise<string> 
   });
 
   return limitedApiKey;
+}
+
+/**
+ * Create a session-loginable user with a custom permission set for a given model.
+ * Needed for testing session-based routes (e.g. CSV import/export) where authz is
+ * resolved from the session cookie via getSessionUserId(), not X-API-Key —
+ * createLimitedApiUser's password ('not_needed') cannot pass the login form, so it
+ * cannot be used for these routes.
+ * The returned user always logs in with TEST_CREDENTIALS.password (same hash as the
+ * main test user); only the email differs.
+ */
+export async function createSessionUserWithPermission(
+  entityName: string,
+  flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean },
+  label = 'custom',
+): Promise<string> {
+  const testUser = await prisma.user.findUnique({
+    where: { email: TEST_CREDENTIALS.email },
+  });
+  if (!testUser) throw new Error('Test user not found. Run db:seed first.');
+
+  const hashedPassword = await getTestPasswordHash();
+  const newUserId = createId();
+  const email = `session_${label}_${entityName}@example.com`;
+
+  const customRole = await prisma.role.create({
+    data: {
+      name: `SessionRole_${label}_${entityName}_${newUserId}`,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+
+  await prisma.permission.create({
+    data: {
+      name: entityName,
+      role_id: customRole.id,
+      create: flags.create ?? false,
+      read: flags.read ?? false,
+      update: flags.update ?? false,
+      delete: flags.delete ?? false,
+      import: flags.import ?? false,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+
+  await prisma.user.create({
+    data: {
+      id: newUserId,
+      creator_id: newUserId,
+      updater_id: newUserId,
+      email,
+      name: `Session User (${label}/${entityName})`,
+      password: hashedPassword,
+      roles: { connect: [{ id: customRole.id }] },
+    },
+  });
+
+  return email;
 }
 
 export { prisma };

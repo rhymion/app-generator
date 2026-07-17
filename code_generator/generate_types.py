@@ -140,6 +140,9 @@ def extract_entities(schema: dict) -> list[dict]:
             'test':       x_generate.get('test') is True,
             'fields':     x_generate.get('fields'),
             'invalidate': x_generate.get('invalidate', False),
+            # cmd_330: opt-out flags (default True = backward compat)
+            'import':     x_generate.get('import', True) is not False,
+            'export':     x_generate.get('export', True) is not False,
         }
 
         # Skip entities where all user-facing flags are explicitly False (internal models)
@@ -162,15 +165,23 @@ def extract_entities(schema: dict) -> list[dict]:
             if child in child_to_parents.get(parent_model, []):
                 m2m_pairs.add('<->'.join(sorted([parent_model, child])))
 
-    # Validate: if a generated entity appears as a child, it must use x-outputType: list
+    # Validate: if a generated entity appears as a child, it must use x-outputType:
+    # list — UNLESS the child entity is read-only (its x-generate disables new,
+    # edit AND delete). A read-only child (e.g. an approval-only detail page that
+    # only lets users approve/reject in the view) may appear with a non-list
+    # x-outputType such as 'None', since it never renders a mutable list DataGrid.
     generated_models = {e['model'] for e in results}
+    model_to_config = {e['model']: e['generate_config'] for e in results}
     for entity in results:
         for child in entity['children']:
             if child['name'] in generated_models and child['output_type'] != 'list':
+                child_cfg = model_to_config.get(child['name'], {})
+                if not (child_cfg.get('new') or child_cfg.get('edit') or child_cfg.get('delete')):
+                    continue
                 raise ValueError(
                     f"Entity '{child['name']}' has x-generate but appears as a child of "
                     f"'{entity['parent']}' with x-outputType: '{child['output_type']}' "
-                    f"(must be 'list')"
+                    f"(must be 'list', or the child must disable new/edit/delete)"
                 )
 
     # Filter out entities that are pure children (not in any m2m pair),

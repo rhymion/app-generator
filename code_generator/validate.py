@@ -333,18 +333,32 @@ def validate_schema(schema: dict) -> None:
         pool   = xres.get('pool') or {}
         result = xres.get('result') or {}
         lines  = xres.get('lines')
+        xres_transaction = xres.get('transaction') or {}
+        strategy = xres_transaction.get('strategy', 'conditional_update')
+        is_ledger_transaction = strategy == 'ledger_transaction'
 
-        # pool.entity is required for all modes
-        pool_entity = pool.get('entity')
-        if not pool_entity:
-            errors.append(
-                f"Definition '{def_key}': x-reservation.pool.entity is required."
-            )
-        elif pool_entity not in defs:
-            errors.append(
-                f"Definition '{def_key}': x-reservation.pool.entity '{pool_entity}' is not "
-                f"defined in the schema."
-            )
+        # OD-1: pool.entity is required for all modes, UNLESS the entity
+        # resolves its pool via transaction.ledgerDomain (x-ledger-entities).
+        ledger_domain_key = xres_transaction.get('ledgerDomain')
+        if not ledger_domain_key:
+            pool_entity = pool.get('entity')
+            if not pool_entity:
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.pool.entity is required "
+                    f"(or declare transaction.ledgerDomain to resolve pool from x-ledger-entities)."
+                )
+            elif pool_entity not in defs:
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.pool.entity '{pool_entity}' is not "
+                    f"defined in the schema."
+                )
+        else:
+            all_ledger_domains = schema.get('x-ledger-entities') or {}
+            if ledger_domain_key not in all_ledger_domains:
+                errors.append(
+                    f"Definition '{def_key}': x-reservation.transaction.ledgerDomain "
+                    f"'{ledger_domain_key}' is not declared in x-ledger-entities."
+                )
 
         if mode == 'count':
             req = xres.get('request') or {}
@@ -361,17 +375,27 @@ def validate_schema(schema: dict) -> None:
                     f"for count mode."
                 )
             # Required result fields for count mode
-            alloc_entity = result.get('allocationEntity')
-            if not alloc_entity:
-                errors.append(
-                    f"Definition '{def_key}': x-reservation.result.allocationEntity is required "
-                    f"for count mode."
-                )
-            elif alloc_entity not in defs:
-                errors.append(
-                    f"Definition '{def_key}': x-reservation.result.allocationEntity '{alloc_entity}' "
-                    f"is not defined in the schema."
-                )
+            if is_ledger_transaction:
+                # strategy: ledger_transaction has no allocationEntity — the ledger
+                # (inventory_transaction) IS the allocation record. It writes directly
+                # to the line entity's bridge FK instead.
+                if not result.get('lineTransactionableField'):
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.result.lineTransactionableField "
+                        f"is required for count mode with strategy: ledger_transaction."
+                    )
+            else:
+                alloc_entity = result.get('allocationEntity')
+                if not alloc_entity:
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.result.allocationEntity is required "
+                        f"for count mode."
+                    )
+                elif alloc_entity not in defs:
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.result.allocationEntity '{alloc_entity}' "
+                        f"is not defined in the schema."
+                    )
             if not result.get('parentField'):
                 errors.append(
                     f"Definition '{def_key}': x-reservation.result.parentField is required "
@@ -380,7 +404,9 @@ def validate_schema(schema: dict) -> None:
             # Mode × lines matrix (count)
             if lines:
                 # (D) count + lines specified → result.lineField required
-                if not result.get('lineField'):
+                # (ledger_transaction strategy uses lineTransactionableField instead,
+                # already validated above)
+                if not is_ledger_transaction and not result.get('lineField'):
                     errors.append(
                         f"Definition '{def_key}': x-reservation.result.lineField is required "
                         f"for count mode with 'lines'."
@@ -397,6 +423,81 @@ def validate_schema(schema: dict) -> None:
                         f"request entity itself)."
                     )
 
+            # Validate x-reservation.actions block
+            _xres_actions = xres.get('actions') or {}
+            if _xres_actions:
+                if not isinstance(_xres_actions, dict):
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.actions must be a mapping."
+                    )
+                else:
+                    _identifier_re_act = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+                    _valid_act_types = ('ship', 'release', 'cancel')
+                    _pool_ent_name = pool.get('entity')
+                    _pool_ent_props = (
+                        defs.get(_pool_ent_name, {}).get('properties', {})
+                        if _pool_ent_name else {}
+                    )
+                    _pool_qty_f = pool.get('quantityField')
+                    _pool_res_f = pool.get('reservedField')
+                    # Validate pool fields exist on pool entity
+                    if _pool_ent_name and _pool_ent_name in defs:
+                        if _pool_qty_f and _pool_qty_f not in _pool_ent_props:
+                            errors.append(
+                                f"Definition '{def_key}': x-reservation.pool.quantityField "
+                                f"'{_pool_qty_f}' does not exist on pool entity '{_pool_ent_name}'."
+                            )
+                        if _pool_res_f and _pool_res_f not in _pool_ent_props:
+                            errors.append(
+                                f"Definition '{def_key}': x-reservation.pool.reservedField "
+                                f"'{_pool_res_f}' does not exist on pool entity '{_pool_ent_name}'."
+                            )
+                    for _aname, _adef in _xres_actions.items():
+                        if not _identifier_re_act.match(_aname):
+                            errors.append(
+                                f"Definition '{def_key}': x-reservation.actions '{_aname}': "
+                                f"action name must be a valid identifier."
+                            )
+                        if not isinstance(_adef, dict):
+                            errors.append(
+                                f"Definition '{def_key}': x-reservation.actions.{_aname} "
+                                f"must be a mapping."
+                            )
+                            continue
+                        _atype = _adef.get('type')
+                        if _atype not in _valid_act_types:
+                            errors.append(
+                                f"Definition '{def_key}': x-reservation.actions.{_aname}.type "
+                                f"must be one of {_valid_act_types!r}, got {_atype!r}."
+                            )
+                        _alloc_ent_act = (
+                            _adef.get('allocationEntity') or result.get('allocationEntity')
+                        )
+                        if not _alloc_ent_act:
+                            errors.append(
+                                f"Definition '{def_key}': x-reservation.actions.{_aname}: "
+                                f"allocationEntity is required."
+                            )
+                        elif _alloc_ent_act not in defs:
+                            errors.append(
+                                f"Definition '{def_key}': x-reservation.actions.{_aname}: "
+                                f"allocationEntity '{_alloc_ent_act}' is not defined in the schema."
+                            )
+                        else:
+                            _alloc_props_act = defs[_alloc_ent_act].get('properties', {})
+                            _rem_f = _adef.get('remainingField', 'remaining_quantity')
+                            _stat_f = _adef.get('statusField', 'status')
+                            if _rem_f not in _alloc_props_act:
+                                errors.append(
+                                    f"Definition '{def_key}': x-reservation.actions.{_aname}: "
+                                    f"remainingField '{_rem_f}' does not exist on '{_alloc_ent_act}'."
+                                )
+                            if _stat_f not in _alloc_props_act:
+                                errors.append(
+                                    f"Definition '{def_key}': x-reservation.actions.{_aname}: "
+                                    f"statusField '{_stat_f}' does not exist on '{_alloc_ent_act}'."
+                                )
+
         elif mode == 'item':
             # Mode × lines matrix (item)
             if lines:
@@ -412,6 +513,36 @@ def validate_schema(schema: dict) -> None:
                         f"Definition '{def_key}': x-reservation.result.allocatedField is "
                         f"required for item mode without lines."
                     )
+
+            # Overlap mode specific validations
+            _item_policy = xres.get('policy') or {}
+            _avail_src = _item_policy.get('availabilitySource')
+            if _avail_src == 'overlap':
+                _req = xres.get('request') or {}
+                _criteria = _req.get('criteria') or {}
+                _has_daterange = (
+                    'dateRange' in _req or 'dateRange' in _criteria
+                )
+                if not _has_daterange:
+                    errors.append(
+                        f"Definition '{def_key}': x-reservation.policy.availabilitySource "
+                        f"'overlap' requires x-reservation.request.criteria.dateRange to be set."
+                    )
+                # excludePoolStatuses must be a list of integers
+                _excl = _item_policy.get('excludePoolStatuses')
+                if _excl is not None:
+                    if not isinstance(_excl, list):
+                        errors.append(
+                            f"Definition '{def_key}': x-reservation.policy.excludePoolStatuses "
+                            f"must be a list of integers."
+                        )
+                    else:
+                        for _v in _excl:
+                            if not isinstance(_v, int):
+                                errors.append(
+                                    f"Definition '{def_key}': x-reservation.policy.excludePoolStatuses "
+                                    f"values must be integers, got {_v!r}."
+                                )
 
         # lines dict format: validate entity/field existence
         if isinstance(lines, dict):
@@ -701,6 +832,61 @@ def validate_schema(schema: dict) -> None:
                     f"x-gdpr-mode value '{gdpr_mode_field_val}' is not valid. "
                     f"Allowed values: {sorted(_VALID_GDPR_MODE_VALUES)}."
                 )
+
+    # -----------------------------------------------------------------------
+    # 10. x-import-key ⊆ V1 export allowlist  (IA-8)
+    # -----------------------------------------------------------------------
+    # For every entity that carries x-import-key:
+    #   • direct fields (e.g. "name") must exist in the entity's properties
+    #     and must not be a system/FK column (otherwise they would be excluded
+    #     from export_scalar_fields and the round-trip CSV would be unusable).
+    #   • dotted-FK fields (e.g. "role.name") must reference an existing target
+    #     entity that has the lookup field in its own properties.
+    _IMPORT_SYSTEM_FIELDS = {
+        'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
+        'organization_id', 'tenant_id', 'assignee_id',
+    }
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        _import_key_raw = defn.get('x-import-key', [])
+        if not _import_key_raw:
+            continue
+        if isinstance(_import_key_raw, str):
+            _import_key_raw = [_import_key_raw]
+        _entity_props = defn.get('properties', {})
+        for _raw_key in _import_key_raw:
+            if '.' in _raw_key:
+                # Dotted FK: e.g. "role.name" → look up 'role' entity, check 'name' field
+                _fk_ent, _fk_field = _raw_key.split('.', 1)
+                if _fk_ent not in defs:
+                    errors.append(
+                        f"Definition '{def_key}': x-import-key '{_raw_key}' references "
+                        f"entity '{_fk_ent}' which is not defined in the schema.  "
+                        f"Add a '{_fk_ent}' definition or correct the key."
+                    )
+                elif _fk_field not in defs[_fk_ent].get('properties', {}):
+                    errors.append(
+                        f"Definition '{def_key}': x-import-key '{_raw_key}': field "
+                        f"'{_fk_field}' does not exist on entity '{_fk_ent}'.  "
+                        f"The dotted-FK lookup would fail at import time."
+                    )
+            else:
+                # Direct field: must exist in entity's properties
+                if _raw_key not in _entity_props:
+                    errors.append(
+                        f"Definition '{def_key}': x-import-key field '{_raw_key}' "
+                        f"does not exist in the entity's properties.  "
+                        f"Add it to the schema or remove it from x-import-key."
+                    )
+                elif _raw_key.endswith('_id') or _raw_key in _IMPORT_SYSTEM_FIELDS:
+                    errors.append(
+                        f"Definition '{def_key}': x-import-key field '{_raw_key}' "
+                        f"is a system/FK field that is excluded from the V1 export "
+                        f"allowlist (export_scalar_fields).  The exported CSV will not "
+                        f"contain this column, so a round-trip import would fail.  "
+                        f"Use a natural-key field instead."
+                    )
 
     # -----------------------------------------------------------------------
     # Report

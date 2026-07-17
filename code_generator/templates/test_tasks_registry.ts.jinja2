@@ -51,6 +51,10 @@ export function getGeneratedTasks() {
       const { populate{{ entity.pascal }}WithRejectedApproval } = require('{{ entity.helper_path }}');
       return await populate{{ entity.pascal }}WithRejectedApproval(params.creatorId, params.approvalFlowIds);
     },
+    async 'db:populate{{ entity.pascal }}WithTerminalRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populate{{ entity.pascal }}WithTerminalRejectedApproval } = require('{{ entity.helper_path }}');
+      return await populate{{ entity.pascal }}WithTerminalRejectedApproval(params.creatorId, params.approvalFlowIds);
+    },
 {% endif %}
 {% if entity.has_reservation %}
     async 'db:seedReservation{{ entity.pascal }}Multi'() {

@@ -51,7 +51,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-/app/generated/prisma
+/app/generated/
 
 # database
 /prisma/dev.db
@@ -94,9 +94,6 @@ memory/
 
 # ── lib/ ──
 lib/*/*
-!lib/*/service_after_create.ts
-!lib/*/form_validation.ts
-!lib/*/service_validation.ts
 !lib/account-link/**
 !lib/auth/**
 !lib/mfa/**
@@ -182,6 +179,7 @@ cypress/e2e/*.cy.ts
 !cypress/e2e/auth.cy.ts
 !cypress/e2e/search_page.cy.ts
 !cypress/e2e/audit_log.cy.ts
+!cypress/e2e/import_modal.cy.ts
 cypress/e2e/mobile/*.cy.ts
 !cypress/e2e/mobile/layout.cy.ts
 !cypress/e2e/mobile/audit_log.cy.ts
@@ -190,6 +188,9 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/user_invalidate.cy.ts
 !cypress/e2e/api/user_invalidate_dp6.cy.ts
 !cypress/e2e/api/audit_log.cy.ts
+!cypress/e2e/api/user_import.cy.ts
+!cypress/e2e/api/import_batch2.cy.ts
+!cypress/e2e/api/round_trip.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/

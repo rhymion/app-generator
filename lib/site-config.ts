@@ -51,13 +51,13 @@ export const siteConfig = {
   /** Links listed in the sidebar navigation */
   navLinks: [
     { label: "Home", href: "/", external: false },
+    { label: "Audit Log", href: "/audit_log" },
       { label: "User", href: "/user" },
     { label: "Role", href: "/role" },
     { label: "Organization", href: "/organization" },
     { label: "Permission", href: "/permission" },
     { label: "Approval Flow", href: "/approval_flow" },
     { label: "Dashboard", href: "/dashboard" },
-    { label: "Audit Log", href: "/audit_log" },
   ] satisfies NavLink[],
 };
 

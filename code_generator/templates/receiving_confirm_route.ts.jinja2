@@ -1,0 +1,59 @@
+import { NextRequest, NextResponse } from 'next/server';
+import prisma from '@/lib/prisma';
+import { requireSession, handleApiError } from '@/lib/api-auth';
+
+type Params = { params: Promise<{ id: string }> };
+
+export async function POST(
+  req: NextRequest,
+  { params }: Params
+): Promise<NextResponse> {
+  try {
+    await requireSession();
+  } catch (error) {
+    return handleApiError(error);
+  }
+  const { id } = await params;
+  let body: { inventory_selections?: { inventory_id: string; quantity: number }[] };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+  const { inventory_selections } = body;
+  if (!inventory_selections || !Array.isArray(inventory_selections) || inventory_selections.length === 0) {
+    return NextResponse.json(
+      { error: 'inventory_selections must be a non-empty array of { inventory_id, quantity }' },
+      { status: 400 },
+    );
+  }
+  for (const sel of inventory_selections) {
+    if (!sel.inventory_id || typeof sel.quantity !== 'number' || sel.quantity <= 0) {
+      return NextResponse.json(
+        { error: 'Each selection must have inventory_id (string) and quantity (positive number)' },
+        { status: 400 },
+      );
+    }
+  }
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const sel of inventory_selections) {
+        await tx.{{ receiving_inventory_entity }}.update({
+          where: { id: sel.inventory_id },
+          data: { {{ receiving_inventory_qty_field }}: { increment: sel.quantity } },
+        });
+      }
+      await tx.{{ receiving_receipt_model }}.update({
+        where: { id },
+        data: {
+          status: {{ receiving_confirmed_status }},
+          confirmed_at: new Date(),
+        },
+      });
+    });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

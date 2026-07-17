@@ -84,7 +84,7 @@ export default function CardListClient<T extends BaseEntity>({
   removeAction,
   entityLabel = 'Item',
   displayFields,
-  permissions = { create: true, read: true, update: true, delete: true },
+  permissions = { create: true, read: true, update: true, delete: true, import: true },
   primaryField = 'name' as keyof T,
   allowCreate = true,
 }: CardListClientProps<T>) {
