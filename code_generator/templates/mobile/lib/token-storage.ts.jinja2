@@ -1,0 +1,71 @@
+import { Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import * as LocalAuthentication from 'expo-local-authentication';
+
+const REFRESH_TOKEN_KEY = 'app_refresh_token';
+
+// In-memory only, cleared on app restart by design (354a section_4): a
+// SecureStore read on every request would be unnecessary I/O, and after
+// restart a fresh access token is obtained via the stored refresh token
+// instead of trusting whatever was last written to disk.
+let _accessToken: string | null = null;
+
+const SECURE_STORE_LOCK_OPTIONS: SecureStore.SecureStoreOptions = {
+  requireAuthentication: true,
+  authenticationPrompt: 'Authenticate to continue',
+};
+
+/**
+ * DP-4: biometric/device-PIN lock on the refresh token, default ON for
+ * native platforms — but only when the device actually has a usable lock
+ * screen. `requireAuthentication: true` on a device with neither biometric
+ * enrollment nor a PIN/pattern set fails outright; unconditionally
+ * requesting it would strand exactly the users who most need a working
+ * login. This is the graceful-degradation check cmd_357 condition asks
+ * for — everything else (setTokens/getRefreshToken) just uses whatever
+ * this returns.
+ */
+async function shouldLockRefreshToken(): Promise<boolean> {
+  if (Platform.OS === 'web') return false; // localStorage has no such API
+  try {
+    const hasHardware = await LocalAuthentication.hasHardwareAsync();
+    const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+    return hasHardware && isEnrolled;
+  } catch {
+    return false;
+  }
+}
+
+export async function setTokens(accessToken: string, refreshToken: string): Promise<void> {
+  _accessToken = accessToken;
+  if (Platform.OS === 'web') {
+    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    return;
+  }
+  const locked = await shouldLockRefreshToken();
+  await SecureStore.setItemAsync(
+    REFRESH_TOKEN_KEY,
+    refreshToken,
+    locked ? SECURE_STORE_LOCK_OPTIONS : undefined,
+  );
+}
+
+export async function getRefreshToken(): Promise<string | null> {
+  if (Platform.OS === 'web') return localStorage.getItem(REFRESH_TOKEN_KEY);
+  const locked = await shouldLockRefreshToken();
+  return SecureStore.getItemAsync(REFRESH_TOKEN_KEY, locked ? SECURE_STORE_LOCK_OPTIONS : undefined);
+}
+
+/** In-memory access token — synchronous by design, see module docstring. */
+export function getAccessTokenSync(): string | null {
+  return _accessToken;
+}
+
+export async function clearTokens(): Promise<void> {
+  _accessToken = null;
+  if (Platform.OS === 'web') {
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    return;
+  }
+  await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY).catch(() => {});
+}

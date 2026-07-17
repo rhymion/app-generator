@@ -19,7 +19,14 @@ interface Props {
 }
 
 /**
- * Self-service API key management (cmd_349 GAP-2/DP-4(a)).
+ * Self-service integration API key management (cmd_349 GAP-2/DP-4(a)).
+ *
+ * Repositioned by cmd_357: mobile app sign-in moved to email/password +
+ * access/refresh tokens (POST /api/mobile/auth/token). This key is now
+ * exclusively for service-to-service / integration access via
+ * `X-API-Key` — see the Lord's 2026-07-17 ruling (proj-a-mobile-auth-ruling)
+ * that X-API-Key stays as a service-access mechanism. Never present this as
+ * a mobile login method.
  *
  * Deliberately self-contained: it never receives the raw key as a prop (the
  * `setting` entity's `api_key` field was removed from `fields` for exactly
@@ -104,6 +111,7 @@ export default function ApiKeyManager({ permissions }: Props) {
   return (
     <AppBox display="flex" flexDirection="column" gap={1} mt={2} mb={1}>
       <AppText variant="subtitle2">{tf('title')}</AppText>
+      <AppText variant="body2" color="text.secondary">{tf('description')}</AppText>
 
       {newKey ? (
         <>

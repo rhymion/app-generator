@@ -297,7 +297,8 @@
     "toggleDisableButton": "Disable MFA"
   },
   "ApiKeyManager": {
-    "title": "API Key",
+    "title": "Integration API Key",
+    "description": "For service-to-service and integration access (e.g. scripts, external tools). Not used to sign in to the mobile app — that uses your email and password.",
     "noKeyText": "No API key generated yet.",
     "hasKeyText": "Current key: {prefix}",
     "generateButton": "Generate Key",

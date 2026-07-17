@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Redirect, Tabs } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { getApiKey } from '@/lib/auth-storage';
+import { getRefreshToken } from '@/lib/token-storage';
 
 export default function AppLayout() {
   const [checking, setChecking] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
 
   useEffect(() => {
-    getApiKey().then((key) => {
-      setAuthenticated(!!key);
+    // Presence-only check, same as the old API-key guard: a stored refresh
+    // token means "has a session worth trying". Actual validity (expired /
+    // revoked) is enforced per-request by apiFetch's 401 + refresh handling
+    // in lib/api-base.ts, not here.
+    getRefreshToken().then((token) => {
+      setAuthenticated(!!token);
       setChecking(false);
     });
   }, []);

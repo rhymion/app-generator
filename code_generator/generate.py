@@ -468,7 +468,7 @@ def generate_mobile_target(mobile_entities: list[str], schema_data: dict, output
         ('tsconfig.json.jinja2', 'tsconfig.json'),
         ('babel.config.js.jinja2', 'babel.config.js'),
         ('env.d.ts.jinja2', 'env.d.ts'),
-        ('lib/auth-storage.ts.jinja2', 'lib/auth-storage.ts'),
+        ('lib/token-storage.ts.jinja2', 'lib/token-storage.ts'),
         ('lib/api-base.ts.jinja2', 'lib/api-base.ts'),
         ('app/_layout.tsx.jinja2', 'app/_layout.tsx'),
         ('app/login.tsx.jinja2', 'app/login.tsx'),

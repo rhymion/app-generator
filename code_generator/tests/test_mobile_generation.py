@@ -95,7 +95,7 @@ def test_mobile_target_generated_for_role_entity(tmp_path):
         "tsconfig.json",
         "babel.config.js",
         "env.d.ts",
-        "lib/auth-storage.ts",
+        "lib/token-storage.ts",
         "lib/api-base.ts",
         "app/_layout.tsx",
         "app/login.tsx",

@@ -1,6 +1,13 @@
-import { getApiKey } from './auth-storage';
+import { router } from 'expo-router';
+import { getAccessTokenSync, getRefreshToken, setTokens, clearTokens } from './token-storage';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+
+// 354a section_10.i: plaintext HTTP token transport is meaningless without
+// TLS. __DEV__ (Expo/React Native global) exempts the local dev loop only.
+if (!BASE_URL.startsWith('https://') && !__DEV__) {
+  throw new Error('EXPO_PUBLIC_API_BASE_URL must be https:// in production');
+}
 
 export class ApiError extends Error {
   status: number;
@@ -10,22 +17,65 @@ export class ApiError extends Error {
   }
 }
 
-async function buildHeaders(): Promise<Record<string, string>> {
-  const key = await getApiKey();
-  return {
-    'Content-Type': 'application/json',
-    'X-API-Key': key ?? '',
-  };
+// Serializes concurrent 401-triggered refreshes into one in-flight call
+// (DP-3). The server revokes the *whole* mobile_session if it ever sees two
+// concurrent rotations of the same refresh token — several screens' API
+// calls racing to refresh at once would otherwise self-inflict a logout
+// under ordinary use, not just an actual token-theft scenario.
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const refreshToken = await getRefreshToken();
+      if (!refreshToken) return null;
+      try {
+        const res = await fetch(`${BASE_URL}/api/mobile/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        await setTokens(data.access_token, data.refresh_token);
+        return data.access_token as string;
+      } catch {
+        return null;
+      }
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
+function buildHeaders(accessToken: string | null): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+  return headers;
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const accessToken = getAccessTokenSync();
+  let res = await fetch(`${BASE_URL}${path}`, {
     ...init,
-    headers: {
-      ...(await buildHeaders()),
-      ...(init.headers ?? {}),
-    },
+    headers: { ...buildHeaders(accessToken), ...(init.headers ?? {}) },
   });
+
+  if (res.status === 401) {
+    const newAccessToken = await refreshAccessToken();
+    if (!newAccessToken) {
+      await clearTokens();
+      router.replace('/login');
+      throw new ApiError(401, 'Session expired');
+    }
+    // Retry exactly once with the freshly-rotated token.
+    res = await fetch(`${BASE_URL}${path}`, {
+      ...init,
+      headers: { ...buildHeaders(newAccessToken), ...(init.headers ?? {}) },
+    });
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new ApiError(res.status, text || res.statusText);

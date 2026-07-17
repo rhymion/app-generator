@@ -218,9 +218,9 @@ class TestCommentReactionsApiRouteTemplate:
         return tmpl.render()
 
     def test_route_template_uses_authenticate_api_key(self):
-        """API route must authenticate via authenticateApiKey."""
+        """API route must authenticate via authenticate() (API key or mobile token)."""
         output = self._render_route()
-        assert "authenticateApiKey" in output
+        assert "authenticate" in output
 
     def test_route_template_has_post_toggle_handler(self):
         """API route must export POST handler for the toggle endpoint."""
@@ -261,7 +261,7 @@ class TestGenerateRoutePathB1:
 
 
 class TestApiRouteD7FallbackB2:
-    """B2: API route uses D7=A fallback (authenticateApiKey only); fallback is documented."""
+    """B2: API route uses D7=A fallback (authenticate() only, no owner-entity permission check); fallback is documented."""
 
     def _render_route(self) -> str:
         from jinja2 import Environment, FileSystemLoader

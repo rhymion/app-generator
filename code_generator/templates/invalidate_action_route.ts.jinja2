@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import { authenticate, requireApiPermission, handleApiError } from '@/lib/api-auth';
 {% if invalidate_module %}
 import { {{ invalidate_handler }} } from '@/{{ invalidate_module }}';
 {% else %}
@@ -15,7 +15,7 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const { userId } = await authenticateApiKey(request);
+    const { userId } = await authenticate(request);
 
     await requireApiPermission(userId, '{{ parent }}', 'delete');
 

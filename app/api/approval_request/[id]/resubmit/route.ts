@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, handleApiError } from '@/lib/api-auth';
+import { authenticate, handleApiError } from '@/lib/api-auth';
 import { ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 import { getUserRoleIds } from '@/lib/authz';
@@ -7,7 +7,7 @@ import { getUserRoleIds } from '@/lib/authz';
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const { userId } = await authenticateApiKey(request);
+    const { userId } = await authenticate(request);
 
     const req = await prisma.approval_request.findUnique({
       where: { id },

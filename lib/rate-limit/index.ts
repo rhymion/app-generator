@@ -63,7 +63,7 @@ export interface RateLimiter {
   check(bucket: string, key: string): Promise<RateLimitDecision>;
 }
 
-const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
+export const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // 10 credential attempts per IP per minute. Tight: anything sustained at
   // this rate is almost certainly a script.
   'auth:signin:credentials': { limit: 10, windowMs: 60_000 },
@@ -73,6 +73,12 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // 60 callback hits per IP per minute. Callbacks are exchange-driven so
   // genuine traffic is bounded; allow a comfortable burst.
   'auth:callback':           { limit: 60, windowMs: 60_000 },
+  // 5 attempts per (IP, email) per 15 minutes. Mobile password-grant login
+  // (POST /api/mobile/auth/token, cmd_357) — same brute-force surface as
+  // `auth:signin:credentials` but keyed on IP+email so one attacker probing
+  // many accounts from one IP doesn't burn a single shared counter, and one
+  // legitimate account being probed from many IPs still gets caught.
+  'mobile:auth:token':       { limit: 5, windowMs: 15 * 60_000 },
 };
 
 // The Cypress UI suite intentionally logs in fresh for every `it()` (each
@@ -96,10 +102,23 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
 // at runtime as expected.
 const credentialsLimitOverride = Number(process.env.RATE_LIMIT_AUTH_CREDENTIALS_LIMIT);
 
-export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> =
-  Number.isFinite(credentialsLimitOverride) && credentialsLimitOverride > 0
-    ? { ...PRODUCTION_BUCKETS, 'auth:signin:credentials': { limit: credentialsLimitOverride, windowMs: 60_000 } }
-    : PRODUCTION_BUCKETS;
+// Same reasoning as `auth:signin:credentials` above, for the mobile
+// password-grant endpoint's cypress suite (cmd_357 mobile_auth.cy.ts):
+// several `it()` blocks legitimately call POST /api/mobile/auth/token for
+// the same seeded test identity within one run, all sharing the
+// IP+email-keyed counter. Widen only in test env; production keeps the
+// 5/15min default.
+const mobileAuthTokenLimitOverride = Number(process.env.RATE_LIMIT_MOBILE_AUTH_TOKEN_LIMIT);
+
+export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> = {
+  ...PRODUCTION_BUCKETS,
+  ...(Number.isFinite(credentialsLimitOverride) && credentialsLimitOverride > 0
+    ? { 'auth:signin:credentials': { limit: credentialsLimitOverride, windowMs: 60_000 } }
+    : {}),
+  ...(Number.isFinite(mobileAuthTokenLimitOverride) && mobileAuthTokenLimitOverride > 0
+    ? { 'mobile:auth:token': { limit: mobileAuthTokenLimitOverride, windowMs: 15 * 60_000 } }
+    : {}),
+};
 
 let _instance: RateLimiter | null = null;
 

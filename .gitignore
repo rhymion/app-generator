@@ -54,7 +54,10 @@ next-env.d.ts
 /app/generated/
 
 # mobile app (Expo/React Native) generated from code_generator/templates/mobile/
-/mobile/
+/mobile/*
+# hand-written PoC test files (not generated) — track these explicitly
+!/mobile/e2e/
+!/mobile/playwright.config.ts
 
 # database
 /prisma/dev.db
@@ -165,6 +168,9 @@ app/api/approval_request/\[id\]/route.ts
 app/api/approval_request/bulk/route.ts
 !app/api/audit_log/
 !app/api/audit_log/**
+# hand-written mobile token auth endpoints (cmd_354/357) — not generator output.
+!app/api/mobile/
+!app/api/mobile/**
 
 # ── components/ ──
 components/*/*
@@ -194,6 +200,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/user_import.cy.ts
 !cypress/e2e/api/import_batch2.cy.ts
 !cypress/e2e/api/round_trip.cy.ts
+!cypress/e2e/api/mobile_auth.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/

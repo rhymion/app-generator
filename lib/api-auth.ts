@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requirePermission, getSessionUserId, type RichPermissions, type Operation, type ItemContext } from '@/lib/authz';
 import { TtlLruCache } from '@/lib/_ttl_lru';
+import { isMobileJwt, verifyMobileAccessToken, MobileAuthError } from '@/lib/mobile-auth';
 
 export class ApiError extends Error {
   constructor(
@@ -78,6 +79,53 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
   }
 
   return { userId: user.id };
+}
+
+/**
+ * Unified entry point for the three co-existing auth methods on API routes
+ * (cmd_357 DP-1, Option A): browser session cookie is handled separately by
+ * `requireSession()`; this covers the two Bearer/X-API-Key based methods.
+ *
+ * `Authorization: Bearer <token>` is ambiguous between a mobile access JWT
+ * and a service API key, so the token shape decides: a JWT is always 3
+ * dot-separated segments (header.payload.signature), an API key never is.
+ * `authenticateApiKey()` itself is untouched — existing service/API-key
+ * callers keep working exactly as before.
+ */
+export async function authenticate(request: NextRequest): Promise<{ userId: string }> {
+  const bearer = request.headers.get('Authorization')?.replace('Bearer ', '');
+  if (bearer && isMobileJwt(bearer)) {
+    try {
+      const { userId } = await verifyMobileAccessToken(bearer);
+      return { userId };
+    } catch (e) {
+      const message = e instanceof MobileAuthError ? e.message : 'Invalid mobile access token.';
+      throw new ApiError(401, message);
+    }
+  }
+  return authenticateApiKey(request);
+}
+
+/**
+ * Mobile-session-only auth for `app/api/mobile/auth/*` (logout, refresh,
+ * device list/revoke). Deliberately narrower than `authenticate()`: these
+ * endpoints manage mobile_session rows directly and must reject a plain
+ * service API key even though it could otherwise reach here via the same
+ * `Authorization: Bearer` header.
+ */
+export async function requireMobileAuth(
+  request: NextRequest,
+): Promise<{ userId: string; sessionId: string }> {
+  const bearer = request.headers.get('Authorization')?.replace('Bearer ', '');
+  if (!bearer) {
+    throw new ApiError(401, 'Missing Authorization: Bearer <access_token> header.');
+  }
+  try {
+    return await verifyMobileAccessToken(bearer);
+  } catch (e) {
+    const message = e instanceof MobileAuthError ? e.message : 'Invalid access token.';
+    throw new ApiError(401, message);
+  }
 }
 
 export async function requireSession(): Promise<{ userId: string }> {

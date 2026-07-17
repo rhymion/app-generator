@@ -239,11 +239,11 @@ def test_aggregate_route_template_renders():
 
 
 def test_aggregate_route_enforces_api_key_auth():
-    """Route must authenticate via API key, not session."""
+    """Route must authenticate via authenticate() (API key or mobile token), not session."""
     env = _make_env()
     result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
-    assert 'authenticateApiKey' in result
-    # Must NOT call getServerSession — the API-key path must be used.
+    assert 'authenticate' in result
+    # Must NOT call getServerSession — the API-key/mobile-token path must be used.
     assert 'getServerSession' not in result
 
 
@@ -299,7 +299,7 @@ def test_aggregate_route_handles_401_403():
     """Route must enforce auth before calling aggregateForWidgetCore."""
     env = _make_env()
     result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
-    # authenticateApiKey raises ApiError(401) for missing/invalid key.
+    # authenticate() raises ApiError(401) for missing/invalid key or mobile token.
     # requireApiPermission raises ApiError(403) for insufficient permissions.
-    assert 'authenticateApiKey' in result
+    assert 'authenticate' in result
     assert 'requireApiPermission' in result

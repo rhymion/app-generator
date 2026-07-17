@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, handleApiError } from '@/lib/api-auth';
+import { authenticate, handleApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 
@@ -26,7 +26,7 @@ type Params = { params: Promise<{ commentId: string }> };
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { commentId } = await params;
-    const { userId } = await authenticateApiKey(request);
+    const { userId } = await authenticate(request);
 
     const rawCounts = await prisma.reaction.groupBy({
       by: ['type'],
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 export async function POST(request: NextRequest, { params }: Params) {
   try {
     const { commentId } = await params;
-    const { userId } = await authenticateApiKey(request);
+    const { userId } = await authenticate(request);
 
     const body = await request.json();
     const { type } = body as { type: number };

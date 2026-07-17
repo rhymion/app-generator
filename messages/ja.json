@@ -232,7 +232,8 @@
     "toggleDisableButton": "MFA を無効化"
   },
   "ApiKeyManager": {
-    "title": "API キー",
+    "title": "連携用APIキー",
+    "description": "サービス間連携・外部ツール等の用途向けです。モバイルアプリのログインには使用しません(モバイルはメールアドレスとパスワードでログインします)。",
     "noKeyText": "APIキーはまだ発行されていません。",
     "hasKeyText": "現在のキー: {prefix}",
     "generateButton": "キーを発行",
