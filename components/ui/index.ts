@@ -9,6 +9,7 @@ export { default as AppFieldRelation } from './forms/AppFieldRelation';
 export { default as AppFieldSelect } from './forms/AppFieldSelect';
 export type { AppFieldSelectOption } from './forms/AppFieldSelect';
 export { default as AppFieldInput } from './forms/AppFieldInput';
+export { default as AppFormFieldWrapper } from './forms/AppFormFieldWrapper';
 export { default as AppButton } from './AppButton';
 export { default as AppText } from './AppText';
 export { default as AppBox } from './AppBox';

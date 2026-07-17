@@ -2700,23 +2700,20 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     def _setter(var_name: str) -> str:
         return to_pascal_case_from_var(var_name)
 
-    def _ui_width_css(prop: dict) -> str | None:
+    def _ui_width_cols(prop: dict) -> int | None:
         val = (prop.get('x-ui') or {}).get('width')
-        if val is None:
+        if val is None or not isinstance(val, (int, float)):
             return None
-        if isinstance(val, (int, float)):
-            pct = val / 12 * 100
-            return f"{pct:.5g}%"
-        return str(val)
+        return int(val)
 
-    def _maybe_box_wrap(jsx: str, width_css: str | None) -> str:
-        if not width_css:
+    def _maybe_box_wrap(jsx: str, cols: int | None) -> str:
+        if not cols:
             return jsx
         reindented = '\n'.join('  ' + line if line.strip() else line for line in jsx.splitlines())
         return (
-            f"      <Box sx={{{{ width: {{ xs: '100%', md: '{width_css}' }} }}}}>\n"
+            f"      <AppFormFieldWrapper cols={{{cols}}}>\n"
             f"{reindented}\n"
-            f"      </Box>"
+            f"      </AppFormFieldWrapper>"
         )
 
     has_box_import = False
@@ -2797,8 +2794,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         else:
             multiline = 'true' if p == 'description' else 'false'
             rows = '4' if p == 'description' else 'undefined'
-        _text_width_css = _ui_width_css(prop)
-        if _text_width_css:
+        _text_width_cols = _ui_width_cols(prop)
+        if _text_width_cols:
             has_box_import = True
         _text_jsx = (
             f"      <AppFieldText\n"
@@ -2810,7 +2807,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        rows={{{rows}}}\n"
             f"      />"
         )
-        text_jsxs.append(_maybe_box_wrap(_text_jsx, _text_width_css))
+        text_jsxs.append(_maybe_box_wrap(_text_jsx, _text_width_cols))
 
     def _autocomplete_rel_jsx(prop_name: str, target: str, required: bool) -> str:
         label_base    = prop_name.removesuffix('_id')
@@ -2837,18 +2834,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # Relationship fields (Autocomplete) — many-to-one and selector OTO
     rel_jsxs = []
     for r in parent_rels_raw:
-        _rel_width_css = _ui_width_css(filtered_props.get(r['prop_name'], {}))
-        if _rel_width_css:
+        _rel_width_cols = _ui_width_cols(filtered_props.get(r['prop_name'], {}))
+        if _rel_width_cols:
             has_box_import = True
         _rel_jsx = _autocomplete_rel_jsx(r['prop_name'], r['target'], bool(r.get('required')))
-        rel_jsxs.append(_maybe_box_wrap(_rel_jsx, _rel_width_css))
+        rel_jsxs.append(_maybe_box_wrap(_rel_jsx, _rel_width_cols))
     for r in selector_oto_rels:
         # Selector OTO: required = FK is not nullable
-        _rel_width_css = _ui_width_css(filtered_props.get(r['prop_name'], {}))
-        if _rel_width_css:
+        _rel_width_cols = _ui_width_cols(filtered_props.get(r['prop_name'], {}))
+        if _rel_width_cols:
             has_box_import = True
         _rel_jsx = _autocomplete_rel_jsx(r['prop_name'], r['target'], not r.get('nullable', True))
-        rel_jsxs.append(_maybe_box_wrap(_rel_jsx, _rel_width_css))
+        rel_jsxs.append(_maybe_box_wrap(_rel_jsx, _rel_width_cols))
 
     # Number fields
     num_jsxs = []
@@ -2943,8 +2940,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
-        _enum_int_width_css = _ui_width_css(prop)
-        if _enum_int_width_css:
+        _enum_int_width_cols = _ui_width_cols(prop)
+        if _enum_int_width_cols:
             has_box_import = True
         _enum_int_jsx = (
             f"      <AppFieldSelect\n"
@@ -2955,7 +2952,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        {'required' if req else ''}\n"
             f"      />"
         )
-        enum_int_jsxs.append(_maybe_box_wrap(_enum_int_jsx, _enum_int_width_css))
+        enum_int_jsxs.append(_maybe_box_wrap(_enum_int_jsx, _enum_int_width_cols))
 
     # Enum string fields (string discriminator with fixed enum values)
     enum_str_jsxs = []
@@ -2971,8 +2968,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         opts = ', '.join(f"{{ value: '{v}', label: '{v}' }}" for v in enum_vals)
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
-        _enum_str_width_css = _ui_width_css(prop)
-        if _enum_str_width_css:
+        _enum_str_width_cols = _ui_width_cols(prop)
+        if _enum_str_width_cols:
             has_box_import = True
         _enum_str_jsx = (
             f"      <AppFieldSelect\n"
@@ -2983,7 +2980,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        {'required' if req else ''}\n"
             f"      />"
         )
-        enum_str_jsxs.append(_maybe_box_wrap(_enum_str_jsx, _enum_str_width_css))
+        enum_str_jsxs.append(_maybe_box_wrap(_enum_str_jsx, _enum_str_width_cols))
 
     # For each many-to-one (and selector OTO) relation, emit:
     #   - {prop}InitialOptions  : useMemo over the limited initial set (initial{Target}s)
@@ -3625,8 +3622,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             search_action_var = f'search{target_pascal}Options'
             initial_data_var  = f'initial{target_pascal}s'
             _ch_prop_def = model_def.get('properties', {}).get(prop_name, {})
-            _ch_width_css = _ui_width_css(_ch_prop_def)
-            if _ch_width_css:
+            _ch_width_cols = _ui_width_cols(_ch_prop_def)
+            if _ch_width_cols:
                 has_box_import = True
             _ch_m2m_jsx = (
                 f"      <EditableListWrapper\n"
@@ -3649,7 +3646,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"        excludeOptionIds={{[src.id]}}\n"
                 f"      />"
             )
-            child_grid_components_parts.append(_maybe_box_wrap(_ch_m2m_jsx, _ch_width_css))
+            child_grid_components_parts.append(_maybe_box_wrap(_ch_m2m_jsx, _ch_width_cols))
             continue
 
         if is_list:
@@ -3657,8 +3654,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             has_order = 'order' in child_props_dict
             list_comp = 'OrderedEditableListWrapper' if has_order else 'EditableListWrapper'
             _ch_prop_def = model_def.get('properties', {}).get(prop_name, {})
-            _ch_width_css = _ui_width_css(_ch_prop_def)
-            if _ch_width_css:
+            _ch_width_cols = _ui_width_cols(_ch_prop_def)
+            if _ch_width_cols:
                 has_box_import = True
             if ft:
                 accepted = ('image/jpeg,image/png,image/gif,image/webp' if ft == 'image'
@@ -3688,7 +3685,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"        textFieldPlaceholder=\"Enter name\"\n"
                     f"      />"
                 )
-            child_grid_components_parts.append(_maybe_box_wrap(_ch_list_jsx, _ch_width_css))
+            child_grid_components_parts.append(_maybe_box_wrap(_ch_list_jsx, _ch_width_cols))
             continue
 
         # Grid child
@@ -3718,8 +3715,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         ft = c.get('file_type')
         rel = c.get('relationship') or {}
         _indep_prop_def = model_def.get('properties', {}).get(prop, {})
-        _indep_width_css = _ui_width_css(_indep_prop_def)
-        if _indep_width_css:
+        _indep_width_cols = _ui_width_cols(_indep_prop_def)
+        if _indep_width_cols:
             has_box_import = True
         if ft:
             _indep_jsx = (
@@ -3758,7 +3755,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"        />\n"
                 f"      )}}"
             )
-        indep_list_readonly_parts.append(_maybe_box_wrap(_indep_jsx, _indep_width_css))
+        indep_list_readonly_parts.append(_maybe_box_wrap(_indep_jsx, _indep_width_cols))
     indep_list_readonly_jsx = '\n'.join(indep_list_readonly_parts)
 
     # FormUpsert params signature.
