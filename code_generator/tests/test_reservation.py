@@ -1700,20 +1700,26 @@ class TestLedgerTransactionMutationGuards:
 
 class TestLedgerTransactionShipAndCancelFiles:
     """Ship (afterApprove) and cancel (afterReject) are hand-implemented once-stubs,
-    not code-generated — read them directly to verify the O-4 invariant holds
-    (ship is the only path touching physical quantity; cancel never does)."""
+    not code-generated (generate.py only emits a comment/TODO skeleton for them —
+    see test_ship_skeleton_stub.py). Read a tracked fixture snapshot of the real
+    hand-authored implementation directly to verify the O-4 invariant holds (ship
+    is the only path touching physical quantity; cancel never does), instead of
+    reading the gitignored generated-app working-tree file — that path only
+    exists after a prj/ copy + generate-code run with non-default
+    inventory/reservation entities, which is not the case in a pristine
+    app-generator checkout. See fixtures/purchase_per_item_ledger_ship_cancel/README.md."""
 
     @staticmethod
-    def _read(relative_path: str) -> str:
+    def _read(filename: str) -> str:
         from pathlib import Path
-        root = Path(__file__).parent.parent.parent  # code_generator/tests -> app-generator
-        return (root / relative_path).read_text()
+        fixtures = Path(__file__).parent / "fixtures" / "purchase_per_item_ledger_ship_cancel"
+        return (fixtures / filename).read_text()
 
     def _ship_code(self) -> str:
-        return self._read("lib/purchase_per_item/service_after_approve.ts")
+        return self._read("service_after_approve.ts")
 
     def _cancel_code(self) -> str:
-        return self._read("lib/purchase_per_item/service_after_reject.ts")
+        return self._read("service_after_reject.ts")
 
     def test_ship_event_type(self):
         assert "event_type: 'ship'" in self._ship_code()
