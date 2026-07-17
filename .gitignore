@@ -53,6 +53,9 @@ next-env.d.ts
 
 /app/generated/
 
+# mobile app (Expo/React Native) generated from code_generator/templates/mobile/
+/mobile/
+
 # database
 /prisma/dev.db
 /prisma/dev.db-journal
