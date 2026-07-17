@@ -1025,7 +1025,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             'label_field': r['label_field'],
         }
         for r in parent_rels
-        if '.' not in r['label_field']
+        if isinstance(r['label_field'], str) and '.' not in r['label_field']
     ]
 
     # export_scalar_fields: explicit allowlist of CSV export columns (cmd_324 V1).
