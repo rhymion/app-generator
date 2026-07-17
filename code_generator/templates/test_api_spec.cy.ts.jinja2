@@ -39,6 +39,72 @@ describe('API: {{ title }}', () => {
         });
     });
   });
+
+  // -------------------------------------------------------------------------
+  // GAP-5 (cmd_349): autocomplete endpoint — same read-authz as the list
+  // page, response restricted to { id, label } only. T-4/T-5 also cover the
+  // session-only /api/user-account/api-key endpoint (GAP-2/DP-4(a)) — that
+  // route is global (not per-entity), so these assertions are identical
+  // across every can_list entity's spec file by design.
+  // -------------------------------------------------------------------------
+  describe('GET {{ api_path }}/autocomplete', () => {
+    it('T-1 returns 401 without an API key', () => {
+      cy.request({ url: `${API_BASE}/autocomplete?q=`, failOnStatusCode: false })
+        .then((res) => {
+          expect(res.status).to.eq(401);
+        });
+    });
+
+    it('T-2 returns 403 for an API key without read permission', () => {
+      cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+        cy.request({ url: `${API_BASE}/autocomplete?q=`, headers: { 'X-API-Key': limitedKey }, failOnStatusCode: false })
+          .then((res) => {
+            expect(res.status).to.eq(403);
+          });
+      });
+    });
+
+    it('T-3 returns only { id, label } — no sensitive columns', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: `${API_BASE}/autocomplete?q=`, headers: { 'X-API-Key': TEST_API_KEY } })
+        .then((res) => {
+          expect(res.status).to.eq(200);
+          expect(res.body).to.be.an('array');
+          expect(res.body.length).to.be.greaterThan(0);
+          expect(Object.keys(res.body[0]).sort()).to.deep.equal(['id', 'label']);
+          expect(res.body[0]).to.not.have.property('api_key');
+          expect(res.body[0]).to.not.have.property('password');
+          expect(res.body[0]).to.not.have.property('mfa_secret');
+        });
+    });
+
+    it('T-4 the API-key management endpoint rejects API-key auth (401)', () => {
+      cy.request({
+        method: 'POST',
+        url: '/api/user-account/api-key',
+        headers: { 'X-API-Key': TEST_API_KEY },
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(res.status).to.eq(401);
+      });
+    });
+
+    it('T-5 a revoked API key stops authenticating', () => {
+      Cypress.session.clearAllSavedSessions();
+      cy.clearCookies();
+      cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+      cy.request({ method: 'POST', url: '/api/user-account/api-key' }).then((rotateRes) => {
+        expect(rotateRes.status).to.eq(201);
+        const rotatedKey = rotateRes.body.key;
+        cy.request({ url: API_BASE, headers: { 'X-API-Key': rotatedKey } })
+          .its('status').should('eq', 200);
+        cy.request({ method: 'DELETE', url: '/api/user-account/api-key' })
+          .its('status').should('eq', 200);
+        cy.request({ url: API_BASE, headers: { 'X-API-Key': rotatedKey }, failOnStatusCode: false })
+          .its('status').should('eq', 401);
+      });
+    });
+  });
 {% endif %}
 {% if can_view %}
 

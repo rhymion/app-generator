@@ -342,6 +342,61 @@ def render_prisma_include(include: dict) -> str:
     return ', '.join(parts)
 
 
+def build_label_select(
+    label_field,
+    target: str,
+    schema: dict,
+    *,
+    fallback_field: str = 'name',
+) -> dict:
+    """Build a Prisma `select` dict covering ONLY the columns the label
+    expression for `label_field` needs.
+
+    Unlike `build_label_expression`'s `prisma_include` (which selects the
+    *entire* related row via `{relation: true}` so row-mapping code can reuse
+    the fetched object for other purposes), this walks each path down to its
+    leaf column and selects nothing else — e.g. `organization.name` produces
+    `{'organization': {'name': True}}`, not `{'organization': True}`. Callers
+    that must not fetch extra columns off a related row (autocomplete
+    endpoints returning only `{id, label}`) use this instead.
+    """
+    if not _normalize_paths(label_field):
+        label_field = fallback_field
+    resolved = resolve_label_paths(label_field, target, schema)
+    select: dict = {}
+    for r in resolved:
+        cursor = select
+        segments = r['segments']
+        for i, seg in enumerate(segments):
+            is_last = (i == len(segments) - 1)
+            if is_last:
+                cursor.setdefault(seg, True)
+            else:
+                nested = cursor.get(seg)
+                if not isinstance(nested, dict):
+                    nested = {}
+                    cursor[seg] = nested
+                cursor = nested
+    return select
+
+
+def render_prisma_select(select: dict) -> str:
+    """Render a nested Prisma select dict (as built by `build_label_select`)
+    to its TS source form.
+
+    {'organization': {'name': True}} → "organization: { select: { name: true } }"
+    """
+    if not select:
+        return ''
+    parts = []
+    for key, val in select.items():
+        if val is True:
+            parts.append(f"{key}: true")
+        else:
+            parts.append(f"{key}: {{ select: {{ {render_prisma_select(val)} }} }}")
+    return ', '.join(parts)
+
+
 def first_label_format(label_field, target: str, schema: dict) -> str | None:
     """Return the format ('date' | 'time' | 'date-time') of the first resolvable
     path's final field, or None. Used by legacy code that only cares whether

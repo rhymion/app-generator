@@ -1,0 +1,76 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { randomBytes } from 'node:crypto';
+import { requireSession, invalidateApiKeyCache, handleApiError } from '@/lib/api-auth';
+import prisma from '@/lib/prisma';
+
+/**
+ * /api/user-account/api-key
+ *
+ * Self-service API key management for the signed-in user. Every method here
+ * requires `requireSession()` (browser session cookie) — NOT API-key auth —
+ * so a compromised API key can never be used to rotate or revoke itself, and
+ * cannot read even the prefix of another key.
+ */
+
+function keyPrefix(apiKey: string): string {
+  return `${apiKey.slice(0, 8)}...`;
+}
+
+export async function GET() {
+  try {
+    const { userId: actorId } = await requireSession();
+    const current = await prisma.user.findUnique({
+      where: { id: actorId },
+      select: { api_key: true },
+    });
+    return NextResponse.json({
+      hasKey: !!current?.api_key,
+      prefix: current?.api_key ? keyPrefix(current.api_key) : null,
+    });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const { userId: actorId } = await requireSession();
+    const current = await prisma.user.findUnique({
+      where: { id: actorId },
+      select: { api_key: true },
+    });
+    const newKey = `mk_${randomBytes(32).toString('hex')}`;
+    // 1. DB write first, 2. cache eviction after — never the reverse, or a
+    // request in the write/evict race window could re-cache the old key
+    // straight from the DB read that raced the write.
+    await prisma.user.update({
+      where: { id: actorId },
+      data: { api_key: newKey },
+    });
+    invalidateApiKeyCache(current?.api_key);
+    return NextResponse.json({ key: newKey }, { status: 201 });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const { userId: actorId } = await requireSession();
+    const current = await prisma.user.findUnique({
+      where: { id: actorId },
+      select: { api_key: true },
+    });
+    if (!current?.api_key) {
+      return NextResponse.json({ error: 'No API key to revoke' }, { status: 404 });
+    }
+    await prisma.user.update({
+      where: { id: actorId },
+      data: { api_key: null },
+    });
+    invalidateApiKeyCache(current.api_key);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

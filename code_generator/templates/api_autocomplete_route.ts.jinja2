@@ -1,0 +1,83 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import prisma from '@/lib/prisma';
+import { build{{ parent_pascal }}AccessWhere } from '@/lib/{{ parent }}/getters';
+{% if should_filter_by_org %}
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}
+
+/**
+ * GET /api/{{ parent }}/autocomplete
+ *
+ * Returns id+label pairs for FK picker / autocomplete use.
+ * Applies the same read authorization and access scope as search{{ parent_pascal }}Options().
+ * Response intentionally restricted to { id, label } only — no sensitive columns exposed.
+ *
+ * Query params:
+ *   q          — search string (optional; empty = return top items)
+ *   includeIds — comma-separated IDs to always include (optional)
+ *   limit      — max items, default 50, max 200
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const { userId: actorId } = await authenticateApiKey(request);
+    const richPerms = await requireApiPermission(actorId, '{{ parent }}', 'read');
+{% if should_filter_by_org %}
+    const associatedOrganizations = await getAssociatedOrganizations(actorId);
+    const associatedOrganizationIds = associatedOrganizations.map((o) => o.id);
+{% endif %}
+    const accessAnd = await build{{ parent_pascal }}AccessWhere(richPerms, actorId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+
+    const params = request.nextUrl.searchParams;
+    const q = (params.get('q') ?? '').trim();
+    const includeIdsRaw = params.get('includeIds') ?? '';
+    const includeIds = includeIdsRaw ? includeIdsRaw.split(',').map((s) => s.trim()).filter(Boolean) : [];
+    const safeLimit = Math.min(200, Math.max(1, parseInt(params.get('limit') ?? '50', 10) || 50));
+
+    const tokens = q.split(/\s+/).filter(Boolean);
+    const matchOr: Record<string, unknown>[] = [];
+    if (tokens.length > 0) {
+      const searchAnd = tokens.map((token) => {
+        const orClauses: Record<string, unknown>[] = [];
+{% for f in searchable_text_fields %}
+        orClauses.push({ {{ f }}: { contains: token, mode: 'insensitive' } });
+{% endfor %}
+{% for rf in searchable_relation_fields %}
+        orClauses.push({ {{ rf.relation }}: { {{ rf.field }}: { contains: token, mode: 'insensitive' } } });
+{% endfor %}
+        return { OR: orClauses };
+      });
+      matchOr.push({ AND: searchAnd });
+    }
+    if (includeIds.length > 0) {
+      matchOr.push({ id: { in: includeIds } });
+    }
+    const where = {
+      AND: [
+        ...accessAnd,
+        ...(matchOr.length > 0 ? [{ OR: matchOr }] : []),
+      ],
+    };
+
+    const rows = await prisma.{{ model }}.findMany({
+      where,
+      select: {
+        id: true,
+{% if autocomplete_label_select %}
+        {{ autocomplete_label_select }},
+{% endif %}
+      },
+      orderBy: [{ {{ default_search_order_field }}: '{{ default_search_order_dir }}' }],
+      take: safeLimit + includeIds.length,
+    });
+
+    return NextResponse.json(
+      rows.map((r) => ({
+        id: r.id,
+        label: {{ autocomplete_label_expression }},
+      })),
+    );
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

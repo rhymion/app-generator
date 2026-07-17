@@ -108,6 +108,7 @@
     "resubmit": "再申請",
     "role": "ロール",
     "roles": "ロール",
+    "seriesField": "Series Field",
     "stackMode": "Stack Mode",
     "startDate": "開始日",
     "startTime": "開始時刻",
@@ -121,7 +122,8 @@
     "update": "更新",
     "url": "URL",
     "user": "ユーザ",
-    "users": "ユーザ"
+    "users": "ユーザ",
+    "widgets": "Widgets"
   },
   "Chart": {
     "month": "月",
@@ -227,6 +229,19 @@
     "toggleEnabledLabel": "MFA 有効",
     "toggleDisabledLabel": "MFA 無効",
     "toggleDisableButton": "MFA を無効化"
+  },
+  "ApiKeyManager": {
+    "title": "API キー",
+    "noKeyText": "APIキーはまだ発行されていません。",
+    "hasKeyText": "現在のキー: {prefix}",
+    "generateButton": "キーを発行",
+    "rotateButton": "キーを再発行",
+    "revokeButton": "失効",
+    "newKeyLabel": "新しいAPIキー",
+    "newKeyWarning": "このキーは今のうちにコピーしてください。二度と表示されません。",
+    "copyButton": "クリップボードにコピー",
+    "copiedText": "コピーしました",
+    "errorUnknown": "エラーが発生しました。もう一度お試しください。"
   },
   "Setting": {
     "title": "アカウント設定",

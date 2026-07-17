@@ -17,7 +17,10 @@ from helpers.schema_helpers import (
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
     derive_text_fields, derive_searchable_relation_fields,
 )
-from helpers.label_field import build_label_expression, render_prisma_include
+from helpers.label_field import (
+    build_label_expression, render_prisma_include,
+    build_label_select, render_prisma_select,
+)
 from helpers.bridge_direction import (
     collect_parent_bridge_fk_props, get_new_form_bridge,
 )
@@ -1720,6 +1723,66 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     _merge_include(search_include_dict, consumer_includes)
     search_include_props_list = render_prisma_include(search_include_dict)
 
+    # GAP-5: this entity's own canonical label field for the autocomplete
+    # REST endpoint (cmd_349). Resolution order mirrors bridge_parent_options
+    # (AP-1 A+B, above): a labelField any other entity's x-relationship
+    # already declares for this model (AP-1-A — reuse the label convention
+    # consumers already settled on) → this entity's own x-display.table
+    # primary column (AP-1-B) → name/title/label/id fallback.
+    #
+    # Every candidate is validated against resolve_label_paths (via
+    # build_label_expression) before use — same defensive try/except as the
+    # cross-entity consumer_includes scan above. x-display.table's "primary"
+    # column may itself name a *relation* (the FK prop with `_id` stripped,
+    # e.g. lifestyle's `patient`) rather than a literal scalar property;
+    # resolve_label_paths only accepts a relation name as an intermediate
+    # segment, not as a lone final one, so an unvalidated candidate here can
+    # throw ValueError for entities exactly like that.
+    _ac_candidates: list[str] = []
+    for _ac_other_def in schema.get('definitions', {}).values():
+        if not isinstance(_ac_other_def, dict):
+            continue
+        for _ac_other_prop in (_ac_other_def.get('properties', {}) or {}).values():
+            if not isinstance(_ac_other_prop, dict):
+                continue
+            _ac_other_rel = _ac_other_prop.get('x-relationship') or {}
+            if _ac_other_rel.get('target') != model:
+                continue
+            _ac_cand = _ac_other_rel.get('labelField')
+            if _ac_cand and _ac_cand not in _ac_candidates:
+                _ac_candidates.append(_ac_cand)
+    _ac_xdisplay = model_def.get('x-display') or {}
+    _ac_table = (
+        _ac_xdisplay if isinstance(_ac_xdisplay, list)
+        else (_ac_xdisplay.get('table') if isinstance(_ac_xdisplay, dict) else None)
+    )
+    if _ac_table:
+        for _ac_col in _ac_table:
+            for _ac_fn, _ac_fcfg in _ac_col.items():
+                if isinstance(_ac_fcfg, dict) and _ac_fcfg.get('primary') and _ac_fn not in _ac_candidates:
+                    _ac_candidates.append(_ac_fn)
+    _ac_candidates.extend(f for f in ('name', 'title', 'label') if f in filtered_props)
+    _ac_candidates.append('id')  # always resolvable — final fallback
+
+    _ac_label_field = None
+    _ac_built = None
+    for _ac_cand in _ac_candidates:
+        try:
+            _ac_built = build_label_expression('r', _ac_cand, model, schema)
+        except ValueError:
+            continue
+        _ac_label_field = _ac_cand
+        break
+    autocomplete_label_expression = _ac_built['expression']
+    autocomplete_label_select = render_prisma_select(
+        build_label_select(_ac_label_field, model, schema)
+    )
+    # Entities with no name/title/label column fall back to 'id' as the
+    # label field itself — the route's `select: { id: true, ... }` already
+    # selects id, so skip re-emitting it as a second (duplicate-key) entry.
+    if autocomplete_label_select == 'id: true':
+        autocomplete_label_select = ''
+
     child_include_entries = []
     for c in children_raw:
         cn       = c['name']
@@ -2069,6 +2132,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         # Getters
         include_props_list=include_props_list,
         search_include_props_list=search_include_props_list,
+        autocomplete_label_select=autocomplete_label_select,
+        autocomplete_label_expression=autocomplete_label_expression,
         include_props_detail=include_props_detail,
         include_entries_detail=include_entries_detail,
         # Selection targets (page_new / page_edit)

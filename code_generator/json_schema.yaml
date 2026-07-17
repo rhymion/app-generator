@@ -218,8 +218,21 @@ definitions:
         - email
         - image
         - password
-        - api_key
         - mfa_enabled
+    # cmd_349 GAP-2/DP-4(a): api_key removed from `fields` above so the raw
+    # value never round-trips through get{{Setting}}Detail / GET /api/setting/{id}
+    # (that response feeds FormView/FormUpsert client components — anything
+    # left in `fields` gets serialized to the browser as a prop, custom
+    # component or not). ApiKeyManager is a self-contained standard component
+    # that fetches only { hasKey, prefix } from the session-only
+    # /api/user-account/api-key endpoint — the full key is shown once, at
+    # generation/rotation time, from that POST response only.
+    x-custom-components:
+      - name: ApiKeyManager
+        path: "@/components/_standard/ApiKeyManager"
+        target:
+          - view
+          - edit
     x-relationships:
       roles:
         type: many-to-many

@@ -295,6 +295,19 @@
     "toggleDisabledLabel": "MFA Disabled",
     "toggleDisableButton": "Disable MFA"
   },
+  "ApiKeyManager": {
+    "title": "API Key",
+    "noKeyText": "No API key generated yet.",
+    "hasKeyText": "Current key: {prefix}",
+    "generateButton": "Generate Key",
+    "rotateButton": "Rotate Key",
+    "revokeButton": "Revoke",
+    "newKeyLabel": "New API Key",
+    "newKeyWarning": "Copy this key now — it will not be shown again.",
+    "copyButton": "Copy to clipboard",
+    "copiedText": "Copied to clipboard",
+    "errorUnknown": "Something went wrong. Please try again."
+  },
   "Setting": {
     "title": "Account settings",
     "mfaTitle": "Two-factor authentication",

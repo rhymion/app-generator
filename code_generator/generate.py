@@ -681,6 +681,10 @@ def generate(schema_path: str, output_dir: str) -> None:
             api_dir = out / 'app' / 'api' / parent
             if can_list or can_new:
                 _write(api_dir / 'route.ts', _render(env, 'api_route.ts.jinja2', ctx))
+            if can_list:
+                _write(api_dir / 'autocomplete' / 'route.ts',
+                       _render(env, 'api_autocomplete_route.ts.jinja2', ctx))
+                print(f'  Autocomplete route → app/api/{parent}/autocomplete/')
             if can_view or can_edit or can_delete:
                 _write(api_dir / '[id]' / 'route.ts', _render(env, 'api_detail_route.ts.jinja2', ctx))
             if can_new or can_edit or can_delete:
@@ -1085,6 +1089,15 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'comment_reactions_api_route.ts.jinja2', {}),
         )
         print('  Comment reactions API route → app/api/comment/[commentId]/reactions/toggle/route.ts')
+
+    # --- User account API-key self-service route (cmd_349 GAP-2/DP-4(a)) ---
+    # Platform-level (not per-entity) — emitted once. POST rotates/generates,
+    # DELETE revokes, GET returns {hasKey, prefix} only (never the full key).
+    _write(
+        out / 'app' / 'api' / 'user-account' / 'api-key' / 'route.ts',
+        _render(env, 'user_account_key_route.ts.jinja2', {}),
+    )
+    print('  API key management route → app/api/user-account/api-key/route.ts')
 
     # --- Approval event dispatch (lib/approval_request/on_approved_dispatch.ts) ---
     #

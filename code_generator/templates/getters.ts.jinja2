@@ -20,14 +20,19 @@ import { resolveVirtualColumns } from '@/lib/{{ parent }}/virtual_resolvers';
 const SORTABLE_FIELDS = new Set<string>([{{ sortable_fields_quoted }}]);
 const FILTERABLE_FIELDS = new Set<string>([{{ filterable_fields_quoted }}]);
 
-/** Build the where clauses that enforce read scope (org + Creator/Assignee). */
-function build{{ parent_pascal }}AccessWhere(
+/**
+ * Build the where clauses that enforce read scope (org + Creator/Assignee).
+ * Exported (as `async` — a 'use server' file may only export async
+ * functions) so app/api/{{ parent }}/autocomplete/route.ts can apply the
+ * identical access scope as this file's own read paths.
+ */
+export async function build{{ parent_pascal }}AccessWhere(
   perms: RichPermissions,
   userId: string | null,
 {% if should_filter_by_org %}
   associatedOrganizationIds: string[],
 {% endif %}
-): Record<string, unknown>[] {
+): Promise<Record<string, unknown>[]> {
   const and: Record<string, unknown>[] = [];
 {% if should_filter_by_org %}
   and.push({ organization_id: { in: associatedOrganizationIds } });
@@ -164,7 +169,7 @@ export async function get{{ parent_pascal }}Page(
   const associatedOrganizations = userId ? await getAssociatedOrganizations(userId) : [];
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 {% endif %}
-  const accessAnd = build{{ parent_pascal }}AccessWhere(perms, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+  const accessAnd = await build{{ parent_pascal }}AccessWhere(perms, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
   const filterAnd = buildFilter(opts.filter, FILTERABLE_FIELDS);
   const where = { AND: [...accessAnd, ...filterAnd] };
   const orderBy = buildOrderBy(opts.sort, SORTABLE_FIELDS);
@@ -258,7 +263,7 @@ export async function search{{ parent_pascal }}Options(
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 {% endif %}
-  const accessAnd = build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+  const accessAnd = await build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
 
   const trimmed = query.trim();
   // Token-split AND search: each whitespace-separated token must match at
@@ -388,7 +393,7 @@ export async function get{{ parent_pascal }}ChunkForExport(
 {% else %}
   const { permissions } = await getModelPermissions('{{ parent }}');
 {% endif %}
-  const accessAnd = build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+  const accessAnd = await build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
   const rows = await prisma.{{ model }}.findMany({
     where: { AND: accessAnd },
     orderBy: { created_at: 'asc' },
