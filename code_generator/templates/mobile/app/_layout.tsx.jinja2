@@ -1,5 +1,15 @@
+import { useState } from 'react';
 import { Stack } from 'expo-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 export default function RootLayout() {
-  return <Stack screenOptions={ { headerShown: false } } />;
+  // useState(() => ...) so the QueryClient (and its cache) is created once
+  // per app instance, not re-created on every render.
+  const [queryClient] = useState(() => new QueryClient());
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Stack screenOptions={ { headerShown: false } } />
+    </QueryClientProvider>
+  );
 }

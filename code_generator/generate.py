@@ -481,6 +481,8 @@ def generate_mobile_target(mobile_entities: list[str], schema_data: dict, output
     for entity_name in mobile_entities:
         entity_ctx = {**app_context, **build_mobile_entity_context(entity_name, schema_data)}
         screen_dir = output_dir / 'app' / '(app)' / entity_name
+        _write(screen_dir / '_layout.tsx',
+               _render(env, f'mobile/app/(app)/{entity_name}/_layout.tsx.jinja2', entity_ctx))
         _write(screen_dir / 'index.tsx',
                _render(env, f'mobile/app/(app)/{entity_name}/index.tsx.jinja2', entity_ctx))
         _write(screen_dir / '[id].tsx',

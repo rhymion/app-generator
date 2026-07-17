@@ -6,14 +6,10 @@ const TEST_EMAIL = process.env.TEST_EMAIL ?? 'admin@example.com';
 const TEST_PASSWORD = process.env.TEST_PASSWORD ?? 'password123';
 
 test.describe('Mobile token auth (cmd_357)', () => {
-  // NOTE: this used to also drive the Roles tab (list → detail → edit →
-  // save). That tab is currently broken by a PRE-EXISTING, unrelated bug —
-  // (app)/_layout.tsx's <Tabs.Screen name="role"> doesn't match the actual
-  // role/index.tsx / role/[id].tsx / role/edit.tsx folder structure Expo
-  // Router expects ("No route named 'role' exists in nested children").
-  // Reproduces independently of cmd_357 (the auth guard/tab code above it
-  // is untouched by this task). Scoped down to what cmd_357 actually
-  // covers — the token lifecycle — until that's fixed separately.
+  // Scoped to the token lifecycle only. The Roles tab (list → detail →
+  // edit → save) has its own runtime smoke coverage in role-crud.spec.ts
+  // (cmd_359), which fixed the QueryClientProvider and nested-route bugs
+  // that used to block it.
   test('email/password login reaches the authenticated app shell, and survives a reload via the stored refresh token', async ({ page }) => {
     await page.goto(BASE_URL);
     await page.waitForSelector('input[placeholder="you@example.com"]', { timeout: 30000 });

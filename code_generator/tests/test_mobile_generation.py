@@ -101,6 +101,7 @@ def test_mobile_target_generated_for_role_entity(tmp_path):
         "app/login.tsx",
         "app/(app)/_layout.tsx",
         "app/(app)/index.tsx",
+        "app/(app)/role/_layout.tsx",
         "app/(app)/role/index.tsx",
         "app/(app)/role/[id].tsx",
         "app/(app)/role/edit.tsx",
