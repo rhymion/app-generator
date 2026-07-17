@@ -344,6 +344,9 @@ definitions:
         type: boolean
       delete:
         type: boolean
+      import:
+        type: boolean
+        default: false
       role_id:
         type:
           - string

@@ -116,6 +116,7 @@
     "image": "Image",
     "images": "Images",
     "imageUrl": "Image Url",
+    "import": "Import",
     "inventory": "Inventory",
     "inventoryTransactionableId": "Inventory Transactionable Id",
     "isSplitResult": "Is Split Result",

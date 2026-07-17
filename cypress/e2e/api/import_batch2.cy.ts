@@ -149,7 +149,7 @@ describe('API: CSV Import batch2 (cmd_328) — dotted FK + Tier2/Tier3 authoriza
           body: { name: 'Edit Documents', create: false, read: true, update: false, delete: false, role_id: roleId },
         }).then((permRes) => {
           const permId = permRes.body.id;
-          const csv = 'name,role_name,create,read,update,delete\nEdit Documents,Editor,false,true,true,false';
+          const csv = 'name,role_name,create,read,update,delete,import\nEdit Documents,Editor,false,true,true,false,false';
           cy.request({ method: 'POST', url: PERMISSION_IMPORT_PATH, body: { csv, dryRun: true } }).then((dryRes) => {
             expect(dryRes.body.errors).to.have.length(0);
             const token = dryRes.body.confirmToken;
@@ -182,7 +182,7 @@ describe('API: CSV Import batch2 (cmd_328) — dotted FK + Tier2/Tier3 authoriza
 
     it('p3: an empty role_name resolves to role_id=null and creates the row', () => {
       cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
-      const csv = 'name,role_name,create,read,update,delete\nGlobal Read,,false,true,false,false';
+      const csv = 'name,role_name,create,read,update,delete,import\nGlobal Read,,false,true,false,false,false';
       cy.request({ method: 'POST', url: PERMISSION_IMPORT_PATH, body: { csv, dryRun: true } }).then((dryRes) => {
         expect(dryRes.body.errors).to.have.length(0);
         const token = dryRes.body.confirmToken;
@@ -218,7 +218,7 @@ describe('API: CSV Import batch2 (cmd_328) — dotted FK + Tier2/Tier3 authoriza
           label: 'p4',
         }).then((email) => {
           cy.login(email, TEST_CREDENTIALS.password);
-          const csv = 'name,role_name,create,read,update,delete\n__perm_p4_test__,__test_role_p4__,true,true,false,false';
+          const csv = 'name,role_name,create,read,update,delete,import\n__perm_p4_test__,__test_role_p4__,true,true,false,false,false';
           cy.request({ method: 'POST', url: PERMISSION_IMPORT_PATH, body: { csv, dryRun: true } }).then((dryRes) => {
             expect(dryRes.body.errors).to.have.length(0);
             const token = dryRes.body.confirmToken;

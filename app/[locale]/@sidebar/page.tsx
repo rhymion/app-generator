@@ -9,6 +9,12 @@ import { siteConfig, themeConfig } from "@/lib/site-config";
 const navTranslationKeys: Record<string, string> = {
   "/": "home",
   "/audit_log": "auditLog",
+  "/user": "user",
+  "/role": "role",
+  "/organization": "organization",
+  "/permission": "permission",
+  "/approval_flow": "approvalFlow",
+  "/dashboard": "dashboard",
 };
 
 export default function Sidebar({ hiddenHrefs = [] }: { hiddenHrefs?: string[] }) {
