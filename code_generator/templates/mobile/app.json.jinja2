@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "{{ app_name }}",
+    "slug": "{{ app_name | lower | replace(' ', '-') | replace('_', '-') }}",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "platforms": ["ios", "android"],
+    "plugins": ["expo-secure-store", "expo-router"],
+    "scheme": "{{ app_name | lower | replace(' ', '-') | replace('_', '-') }}"
+  }
+}

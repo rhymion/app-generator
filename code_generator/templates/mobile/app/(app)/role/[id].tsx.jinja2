@@ -1,0 +1,66 @@
+import { useLocalSearchParams, router } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
+import { View, Text, ScrollView, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
+import { fetch{{ label }}ById } from '@/lib/{{ snake_name }}-api';
+
+export default function {{ label }}DetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['{{ snake_name }}', id],
+    queryFn: () => fetch{{ label }}ById(id),
+    enabled: !!id,
+  });
+
+  if (isLoading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (isError || !data) {
+    return (
+      <View style={styles.center}>
+        <Text>Failed to load {{ label }}.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.field}>
+        <Text style={styles.label}>Name</Text>
+        <Text style={styles.value}>{data.name ?? '—'}</Text>
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>Description</Text>
+        <Text style={styles.value}>{data.description ?? '—'}</Text>
+      </View>
+      <Pressable
+        style={styles.button}
+        onPress={() => router.push(`/(app)/{{ snake_name }}/edit?id=${id}`)}
+      >
+        <Text style={styles.buttonText}>Edit</Text>
+      </Pressable>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  content: { padding: 16, gap: 16 },
+  field: { gap: 4 },
+  label: { fontSize: 13, color: '#666' },
+  value: { fontSize: 16 },
+  button: {
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+    padding: 14,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+});

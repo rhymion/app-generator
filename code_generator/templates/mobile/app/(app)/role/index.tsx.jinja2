@@ -1,0 +1,117 @@
+import { useState, useCallback } from 'react';
+import { router } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
+import {
+  View,
+  Text,
+  TextInput,
+  FlatList,
+  Pressable,
+  ActivityIndicator,
+  StyleSheet,
+} from 'react-native';
+import { fetch{{ label }}List } from '@/lib/{{ snake_name }}-api';
+
+export default function {{ label }}ListScreen() {
+  const [search, setSearch] = useState('');
+
+  const { data, isLoading, isError, refetch, isRefetching } = useQuery({
+    queryKey: ['{{ snake_name }}-list'],
+    queryFn: () => fetch{{ label }}List(),
+  });
+
+  const onRefresh = useCallback(() => {
+    refetch();
+  }, [refetch]);
+
+  const rows = (data?.rows ?? []).filter((row) =>
+    search.trim().length === 0
+      ? true
+      : (row.name ?? '').toLowerCase().includes(search.toLowerCase()),
+  );
+
+  if (isLoading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (isError) {
+    return (
+      <View style={styles.center}>
+        <Text>Failed to load {{ plural_label }}.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <TextInput
+        style={styles.search}
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Search {{ plural_label }}"
+      />
+      <FlatList
+        data={rows}
+        keyExtractor={(item) => item.{{ pk_field }}}
+        refreshing={isRefetching}
+        onRefresh={onRefresh}
+        renderItem={({ item }) => (
+          <Pressable
+            style={styles.row}
+            onPress={() => router.push(`/(app)/{{ snake_name }}/${item.{{ pk_field }}}`)}
+          >
+            <Text style={styles.rowTitle}>{item.name}</Text>
+            {item.description ? <Text style={styles.rowSubtitle}>{item.description}</Text> : null}
+          </Pressable>
+        )}
+        ListEmptyComponent={
+          <View style={styles.center}>
+            <Text>No {{ plural_label }} yet.</Text>
+          </View>
+        }
+      />
+      <Pressable
+        style={styles.fab}
+        onPress={() => router.push('/(app)/{{ snake_name }}/edit')}
+      >
+        <Text style={styles.fabText}>+</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  search: {
+    margin: 12,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    padding: 10,
+  },
+  row: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  rowTitle: { fontSize: 16, fontWeight: '500' },
+  rowSubtitle: { fontSize: 13, color: '#666', marginTop: 2 },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#2563eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fabText: { color: '#fff', fontSize: 28, lineHeight: 30 },
+});

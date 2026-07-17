@@ -138,6 +138,7 @@ def extract_entities(schema: dict) -> list[dict]:
             'delete':     x_generate.get('delete', True) is not False,
             'api':        x_generate.get('api')  is True,
             'test':       x_generate.get('test') is True,
+            'mobile':     x_generate.get('mobile') is True,  # cmd_346: Expo Router mobile/ target opt-in
             'fields':     x_generate.get('fields'),
             'invalidate': x_generate.get('invalidate', False),
             # cmd_330: opt-out flags (default True = backward compat)

@@ -1,0 +1,107 @@
+import { useEffect, useState } from 'react';
+import { useLocalSearchParams, router } from 'expo-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  View,
+  Text,
+  TextInput,
+  Pressable,
+  ScrollView,
+  ActivityIndicator,
+  Alert,
+  StyleSheet,
+} from 'react-native';
+import { fetch{{ label }}ById, create{{ label }}, update{{ label }} } from '@/lib/{{ snake_name }}-api';
+
+export default function {{ label }}EditScreen() {
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const isEdit = !!id;
+  const queryClient = useQueryClient();
+
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['{{ snake_name }}', id],
+    queryFn: () => fetch{{ label }}ById(id as string),
+    enabled: isEdit,
+  });
+
+  useEffect(() => {
+    if (data) {
+      setName(data.name ?? '');
+      setDescription(data.description ?? '');
+    }
+  }, [data]);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const input = { name, description: description || null };
+      if (isEdit) {
+        await update{{ label }}(id as string, input);
+      } else {
+        await create{{ label }}(input);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['{{ snake_name }}-list'] });
+      router.back();
+    },
+    onError: (error: unknown) => {
+      Alert.alert('Error', error instanceof Error ? error.message : 'Something went wrong.');
+    },
+  });
+
+  if (isEdit && isLoading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <Text style={styles.label}>Name</Text>
+      <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Name" />
+      <Text style={styles.label}>Description</Text>
+      <TextInput
+        style={[styles.input, styles.multiline]}
+        value={description}
+        onChangeText={setDescription}
+        placeholder="Description"
+        multiline
+      />
+      <Pressable
+        style={styles.button}
+        onPress={() => mutation.mutate()}
+        disabled={mutation.isPending || !name.trim()}
+      >
+        <Text style={styles.buttonText}>{mutation.isPending ? 'Saving…' : 'Save'}</Text>
+      </Pressable>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  content: { padding: 16, gap: 8 },
+  label: { fontSize: 13, color: '#666', marginTop: 8 },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+  },
+  multiline: { minHeight: 80, textAlignVertical: 'top' },
+  button: {
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+    padding: 14,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+});

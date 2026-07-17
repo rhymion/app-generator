@@ -20,7 +20,7 @@ from dataclasses import asdict
 import yaml
 from jinja2 import Environment, FileSystemLoader
 
-from helpers.naming import to_pascal_case, to_camel_case
+from helpers.naming import to_pascal_case, to_camel_case, to_title_case
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit_child_bridge_fk
 from helpers.schema_helpers import get_flatten_rels
@@ -375,6 +375,120 @@ def _append_no_page_child(
         'bigm_where_sql':             bigm_where,
         'bigm_similarity_fields_sql': bigm_sim_exprs,
     })
+
+
+# ---------------------------------------------------------------------------
+# Mobile (Expo Router) target — cmd_346 Phase0/1.
+#
+# Fully independent of the web generation path above: gated on
+# x-generate.mobile: true (default false, opt-in per entity) and writes to
+# output_dir/mobile only. Existing web generation functions are untouched.
+# ---------------------------------------------------------------------------
+
+def get_mobile_entities(schema_data: dict) -> list[str]:
+    """Entity (base) names with x-generate.mobile: true.
+
+    Mirrors extract_entities()'s _detail-suffix stripping so a flag set on
+    `role_detail` (the base/_detail split convention) resolves to `role`.
+    """
+    defs = schema_data.get('definitions', {})
+    result: list[str] = []
+    for def_key, defn in defs.items():
+        x_generate = defn.get('x-generate') or {}
+        if x_generate.get('mobile', False):
+            entity_name = re.sub(r'_detail$', '', def_key) if def_key.endswith('_detail') else def_key
+            if entity_name not in result:
+                result.append(entity_name)
+    return result
+
+
+def build_mobile_entity_context(entity_name: str, schema_data: dict) -> dict:
+    """Minimal per-entity context for Phase1 PoC mobile screens.
+
+    Phase1 scope is FK-free entities only (GAP-5 deferred to Phase2), so this
+    walks the base entity's scalar properties directly rather than reusing the
+    relation-aware EntityContext builder used by the web templates.
+    """
+    defs = schema_data.get('definitions', {})
+    entity_def = defs.get(entity_name, {})
+    properties = entity_def.get('properties', {})
+    required = set(entity_def.get('required', []))
+    pk_field = 'id'
+
+    fields = []
+    for prop_name, prop_schema in properties.items():
+        if prop_name == pk_field:
+            continue
+        prop_type = prop_schema.get('type')
+        if isinstance(prop_type, list):
+            nullable = 'null' in prop_type
+            base_type = next((t for t in prop_type if t != 'null'), 'string')
+        else:
+            nullable = prop_name not in required
+            base_type = prop_type or 'string'
+        ts_type = {'string': 'string', 'integer': 'number', 'number': 'number', 'boolean': 'boolean'}.get(base_type, 'string')
+        if nullable:
+            ts_type = f'{ts_type} | null'
+        fields.append({
+            'name': prop_name,
+            'label': to_title_case(prop_name),
+            'type': base_type,
+            'nullable': nullable,
+            'ts_type': ts_type,
+        })
+
+    label = to_pascal_case(entity_name)
+    plural_label = f'{label}s'
+
+    return {
+        'entity_name': entity_name,
+        'snake_name': entity_name,
+        'label': label,
+        'plural_label': plural_label,
+        'display_fields': fields,
+        'edit_fields': fields,
+        'pk_field': pk_field,
+        'api_path': f'/api/{entity_name}',
+    }
+
+
+def generate_mobile_target(mobile_entities: list[str], schema_data: dict, output_dir: Path, env: Environment) -> None:
+    """Render the Expo Router mobile/ project. Templates live under templates/mobile/."""
+    if not mobile_entities:
+        return
+
+    app_name = 'Generated App'
+    app_context = {'app_name': app_name, 'mobile_entities': [
+        build_mobile_entity_context(name, schema_data) for name in mobile_entities
+    ]}
+
+    scaffold_templates = [
+        ('app.json.jinja2', 'app.json'),
+        ('package.json.jinja2', 'package.json'),
+        ('tsconfig.json.jinja2', 'tsconfig.json'),
+        ('babel.config.js.jinja2', 'babel.config.js'),
+        ('env.d.ts.jinja2', 'env.d.ts'),
+        ('lib/auth-storage.ts.jinja2', 'lib/auth-storage.ts'),
+        ('lib/api-base.ts.jinja2', 'lib/api-base.ts'),
+        ('app/_layout.tsx.jinja2', 'app/_layout.tsx'),
+        ('app/login.tsx.jinja2', 'app/login.tsx'),
+        ('app/(app)/_layout.tsx.jinja2', 'app/(app)/_layout.tsx'),
+        ('app/(app)/index.tsx.jinja2', 'app/(app)/index.tsx'),
+    ]
+    for tmpl_name, rel_out in scaffold_templates:
+        _write(output_dir / rel_out, _render(env, f'mobile/{tmpl_name}', app_context))
+
+    for entity_name in mobile_entities:
+        entity_ctx = {**app_context, **build_mobile_entity_context(entity_name, schema_data)}
+        screen_dir = output_dir / 'app' / '(app)' / entity_name
+        _write(screen_dir / 'index.tsx',
+               _render(env, f'mobile/app/(app)/{entity_name}/index.tsx.jinja2', entity_ctx))
+        _write(screen_dir / '[id].tsx',
+               _render(env, f'mobile/app/(app)/{entity_name}/[id].tsx.jinja2', entity_ctx))
+        _write(screen_dir / 'edit.tsx',
+               _render(env, f'mobile/app/(app)/{entity_name}/edit.tsx.jinja2', entity_ctx))
+        _write(output_dir / 'lib' / f'{entity_name}-api.ts',
+               _render(env, 'mobile/lib/api-client.ts.jinja2', entity_ctx))
 
 
 # ---------------------------------------------------------------------------
@@ -1463,6 +1577,12 @@ def generate(schema_path: str, output_dir: str) -> None:
                 print('  Cloud: output:standalone already present in next.config.ts')
         else:
             print('  Cloud: next.config.ts not found — skipping standalone injection')
+
+    # --- mobile/ (Expo Router) opt-in target (cmd_346 Phase0/1) ---
+    mobile_entities = get_mobile_entities(schema)
+    if mobile_entities:
+        print('\nGenerating mobile/ (Expo Router)...')
+        generate_mobile_target(mobile_entities, schema, out / 'mobile', env)
 
     # --- generation manifest (drives cleanup.py) ---
     # Written last so it reflects exactly what this run produced. Appended files

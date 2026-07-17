@@ -21,6 +21,9 @@ format-version: 2.0
 #                            continues to work (e.g. role.name lookup in permission import)
 #   export: true (default) — generate /api/{entity}/export route + ExportCsvButton + N1-N8 test
 #   export: false          — suppress export route, ExportCsvButton, N1-N8 export tests
+#   mobile: false (default, cmd_346) — skip Expo Router mobile/ screen generation for this entity
+#   mobile: true                     — generate mobile/ Expo Router screens for this entity
+#                                       Phase1: FK-free entities only (GAP-5 deferred to Phase2)
 x-generator:
   search:
     default_scope: all
@@ -244,6 +247,7 @@ definitions:
       api: true
       test: true
       search: true
+      mobile: true   # cmd_346 Phase1 PoC: Expo Router mobile/ screens for role only
     # Security-sensitive entity: every create/update/delete is recorded in
     # the audit_log table by the generated service layer.
     x-audit: true

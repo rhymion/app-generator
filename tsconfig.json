@@ -42,6 +42,8 @@
     "node_modules",
     "custom",
     "**/*.cy.tsx",
-    "cypress" // Exclude the entire Cypress directory
+    "cypress", // Exclude the entire Cypress directory
+    "code_generator", // Python code generator + its test fixtures — not part of the Next.js app
+    "mobile" // Expo Router mobile/ project — has its own tsconfig.json (cmd_346)
   ],
 }

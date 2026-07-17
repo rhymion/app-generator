@@ -844,6 +844,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     can_view   = gen_cfg.get('view',   True) is not False
     can_api    = gen_cfg.get('api', False)
     can_export = gen_cfg.get('export', True) is not False  # cmd_330
+    mobile_enabled = gen_cfg.get('mobile', False)  # cmd_346: Expo Router mobile/ target opt-in
 
     # invalidate flag: accepts bool or {enabled, handler, module}
     _inv = gen_cfg.get('invalidate', False)
@@ -1989,6 +1990,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         can_view=can_view,
         can_api=can_api,
         can_export=can_export,          # cmd_330
+        mobile_enabled=mobile_enabled,  # cmd_346
         can_invalidate=can_invalidate,
         invalidate_handler=invalidate_handler,
         invalidate_module=invalidate_module,
