@@ -332,7 +332,20 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
         cv  = c['child_var']
         fmc = c['field_map_create']
         if c['use_connect']:
-            lines.append(f"      {pn}: {{\n        set: {cv}Ids.map((id) => ({{ id }})),\n      }},")
+            # `{cv}Ids` is `string[] | undefined` here (cmd_366): only touch the
+            # relation when the caller actually sent it. Spreading `{}` when
+            # undefined means "don't include this key" — Prisma leaves the
+            # relation as-is. Emitting an unconditional `set: []` for an
+            # omitted field would detach every related row on every update
+            # from a caller that doesn't submit this relation (e.g. a mobile
+            # edit form with no membership UI wiped its own user's role grant).
+            lines.append(
+                f"      ...({cv}Ids !== undefined ? {{\n"
+                f"        {pn}: {{\n"
+                f"          set: {cv}Ids.map((id) => ({{ id }})),\n"
+                f"        }},\n"
+                f"      }} : {{}}),"
+            )
         elif c.get('approval_indexed'):
             # x-approval-lines: newly-added lines (no id) get an approvable
             # pre-created in the same filter order — see
@@ -1340,7 +1353,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         for c in embedded_ch
     )
     child_params_for_update = ', '.join(
-        f"{c['child_var']}Ids: string[]" if c['use_connect'] else f"{c['child_var']}Items: {c['field_type_with_id']}[]"
+        # `| undefined` (not just `string[]`): a caller that omits this relation
+        # field (e.g. a mobile edit form with no user-membership UI) must leave
+        # the relation untouched, not wipe it. See _build_child_nested_update's
+        # use_connect branch, which only emits `set: [...]` when the value is
+        # actually present. cmd_366 root cause: `?? []` at the old call site
+        # turned "field omitted" into "detach every related row" on every
+        # mobile role save (self-wiped the tester's own role.read grant).
+        f"{c['child_var']}Ids: string[] | undefined" if c['use_connect'] else f"{c['child_var']}Items: {c['field_type_with_id']}[]"
         for c in embedded_ch
     )
     child_args_for_call = ', '.join(
@@ -1628,6 +1648,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
     child_service_args = ', '.join(
         f"{c['child_var']}_ids ?? []" if c['use_connect'] else f"{c['property_name']} ?? []"
+        for c in embedded_ch
+    )
+    # Update-only variant (cmd_366): a connect/m2m relation omitted from the
+    # PUT body must reach updateX() as `undefined`, not `[]` — `?? []` here
+    # is what let a mobile edit form with no membership UI silently detach
+    # every related row on every save (see child_params_for_update and
+    # _build_child_nested_update's use_connect branch, which pair with this).
+    # Non-connect embedded children keep the existing `?? []` default; that
+    # path wasn't implicated by the reproduced bug and is left unchanged.
+    child_service_args_for_update = ', '.join(
+        f"{c['child_var']}_ids" if c['use_connect'] else f"{c['property_name']} ?? []"
         for c in embedded_ch
     )
 
@@ -2017,7 +2048,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
     service_args_for_update = f"actorId, id, {parent_service_args}" + (
-        f", {child_service_args}" if child_service_args else ""
+        f", {child_service_args_for_update}" if child_service_args_for_update else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
 
     # Named constants for x-internal entities (e.g. COMMENT_REACTION_TYPES)
