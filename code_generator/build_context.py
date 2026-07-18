@@ -1324,6 +1324,18 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         comment_children = [{'bridge': True, 'property_name': commentable_rel['relation_name'], 'name': 'comment'}]
     else:
         comment_children = [c for c in children_data if c.get('output_type') == 'comments']
+    # Detect bridge-based attachments via one-to-one rel to 'attachable'. The
+    # `attachments` child carries Prisma-only `encrypted_original_name`/`name_iv`
+    # columns (not declared in json_schema.yaml — see cmd_356) that must never
+    # reach a client component; get{{parent}}Detail() decrypts+strips them
+    # server-side before this object is handed to FormView/FormUpsert.
+    attachable_rel = next((r for r in one_to_one_rels if r['target'] == 'attachable'), None)
+    attachable_attachments_prop = None
+    if attachable_rel:
+        attachable_attachments_prop = next(
+            (c['property_name'] for c in attachable_rel['children'] if c['child_name'] == 'attachment'),
+            None,
+        )
     # Embedded children: exclude independent list children (have own pages; shown read-only here).
     # Non-independent mandatory-FK list children (no own page) are embedded with full CRUD.
     # Many-to-many and optional-FK list children (use_connect=True) use connect/set.
@@ -2050,6 +2062,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         has_commentable=bool(commentable_rel),
         comment_has_mention=comment_has_mention,
         commentable_rel_name=commentable_rel['relation_name'] if commentable_rel else None,
+        has_attachable=bool(attachable_rel and attachable_attachments_prop),
+        attachable_rel_name=attachable_rel['relation_name'] if attachable_rel else None,
+        attachable_attachments_prop=attachable_attachments_prop,
         child_mappings=child_mappings,
         child_form_data_extractions=child_form_data_extractions,
         child_params_for_add=child_params_for_add,
