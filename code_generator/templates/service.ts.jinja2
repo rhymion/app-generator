@@ -139,37 +139,45 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
 {% if reservation_mutation_guard_delete %}
 {{ reservation_mutation_guard_delete }}
 {% endif %}
-  await prisma.$transaction(async (tx) => {
+  try {
+    await prisma.$transaction(async (tx) => {
 {% if bridge_cleanup_rels %}
-    const _bridgeRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
+      const _bridgeRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
 {% endif %}
-    await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+      await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
 {% if bridge_post_delete_cleanups %}
-{{ bridge_post_delete_cleanups | replace('await prisma.', '    await tx.') }}
+{{ bridge_post_delete_cleanups | replace('await prisma.', '      await tx.') }}
 {% endif %}
-    for (const id of ids) {
-      await recordAuditEvent({
-        action: '{{ parent }}:delete',
-        actor_user_id: actorId,
-        target_table: '{{ model }}',
-        target_id: id,
-        tx,
-      });
-    }
-  });
+      for (const id of ids) {
+        await recordAuditEvent({
+          action: '{{ parent }}:delete',
+          actor_user_id: actorId,
+          target_table: '{{ model }}',
+          target_id: id,
+          tx,
+        });
+      }
+    });
+  } catch (error) {
+    throwFriendlyDeleteError(error);
+  }
 }
 {% else %}
 export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
 {% if reservation_mutation_guard_delete %}
 {{ reservation_mutation_guard_delete }}
 {% endif %}
+  try {
 {% if bridge_cleanup_rels %}
-  const _bridgeRows = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
-  await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
-{{ bridge_post_delete_cleanups }}
+    const _bridgeRows = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
+    await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+{{ bridge_post_delete_cleanups | replace('await prisma.', '  await prisma.') }}
 {% else %}
-  await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+    await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
 {% endif %}
+  } catch (error) {
+    throwFriendlyDeleteError(error);
+  }
 }
 {% endif %}
 {% endif %}

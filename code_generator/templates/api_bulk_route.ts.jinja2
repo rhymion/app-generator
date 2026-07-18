@@ -8,6 +8,9 @@ import { add{{ parent_pascal }} } from '@/lib/{{ parent }}/service';
 {% if can_update or can_delete %}
 import { {% if can_update %}update{{ parent_pascal }}{% endif %}{% if can_update and can_delete %}, {% endif %}{% if can_delete %}delete{{ parent_pascal }}{% endif %} } from '@/lib/{{ parent }}/service';
 {% endif %}
+{% if can_delete %}
+import { RecordInUseError } from '@/lib/prisma-errors';
+{% endif %}
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -170,6 +173,9 @@ export async function DELETE(request: NextRequest) {
     results.sort((a, b) => a.index - b.index);
     return NextResponse.json(makeBulkResponse(results), { status: 207 });
   } catch (error) {
+    if (error instanceof RecordInUseError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     return handleApiError(error);
   }
 }

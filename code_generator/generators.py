@@ -1985,6 +1985,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '')
         + (f"\nimport {{ notify }} from '@/lib/_notifier';" if has_assignee_id else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
+        + (f"\nimport {{ throwFriendlyDeleteError }} from '@/lib/prisma-errors';" if can_delete else '')
         + insufficient_inventory_error_class +
         f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"
         f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
