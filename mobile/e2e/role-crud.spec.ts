@@ -16,20 +16,6 @@ const TEST_PASSWORD = process.env.TEST_PASSWORD ?? 'password123';
 // future regression that drops the provider or the nested layout fails this
 // test immediately instead of silently shipping through tsc/expo export
 // (neither of which renders the app).
-// The API/web app's entity REST routes (e.g. /api/role) send no CORS
-// headers (unlike /api/mobile/auth/*, which has withMobileCors()) — a
-// separate, pre-existing gap surfaced by this test running the app and API
-// on different origins/ports. Disabling web security is a test-environment-
-// only workaround so this spec can exercise real data; it is not a fix and
-// does not reflect production CORS posture. See cmd_359 report for the
-// follow-up recommendation (mobile-callable entity REST routes need CORS
-// headers, or the mobile app needs to be served same-origin as the API).
-test.use({
-  launchOptions: {
-    args: ['--disable-web-security', '--disable-site-isolation-trials'],
-  },
-});
-
 test.describe('Mobile role screens runtime smoke (cmd_359)', () => {
   test('login -> single Roles tab -> list -> detail -> edit -> save -> persists on refetch', async ({ page }) => {
     await page.goto(BASE_URL);

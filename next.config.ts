@@ -40,6 +40,18 @@ const nextConfig: NextConfig = {
   },
   // devIndicators: false,
   // cacheComponents: true,
+  experimental: {
+    // cmd_369: broadening the proxy matcher to all of /api/* (for CORS)
+    // now routes CSV import bodies through the proxy layer too, which caps
+    // bodies at 10MB by default — the same threshold the import routes'
+    // own MAX_IMPORT_BYTES check enforces (app/api/*/import/route.ts).
+    // Without headroom here, the proxy silently truncates an over-limit
+    // payload to exactly 10MB before the route handler can see its real
+    // size, turning a clean 400 FILE_TOO_LARGE into a JSON parse failure
+    // (500). Raised above the app's own ceiling so that check still runs
+    // against the full, untruncated body.
+    proxyClientMaxBodySize: '15mb',
+  },
 };
 
 const withMDX = createMDX({})

@@ -9,6 +9,21 @@ const intlMiddleware = createIntlMiddleware(routing);
 // Paths that do not require authentication (matched after stripping locale prefix)
 const PUBLIC_PATHS = ['/login', '/register', '/docs'];
 
+// CORS for mobile clients calling entity REST routes cross-origin (cmd_369).
+// Bearer-only auth (no cookies) makes a wildcard origin safe here — see
+// lib/mobile-auth.ts withMobileCors() for the same reasoning applied to
+// /api/mobile/auth/*. Configurable via MOBILE_CORS_ORIGIN for prod lockdown.
+const CORS_ORIGIN = process.env.MOBILE_CORS_ORIGIN ?? '*';
+const CORS_METHODS = 'GET, POST, PUT, DELETE, OPTIONS';
+const CORS_HEADERS = 'Content-Type, Authorization, X-API-Key';
+
+function addCorsHeaders(res: NextResponse): NextResponse {
+  res.headers.set('Access-Control-Allow-Origin', CORS_ORIGIN);
+  res.headers.set('Access-Control-Allow-Methods', CORS_METHODS);
+  res.headers.set('Access-Control-Allow-Headers', CORS_HEADERS);
+  return res;
+}
+
 // Map a request to the rate-limit bucket name. Returns null when the request
 // shouldn't be rate-limited (e.g. `/api/auth/session` is hit on every page
 // load and rate-limiting it would only hurt legitimate users).
@@ -91,6 +106,18 @@ function normalizeIntlRedirect(req: NextRequest, response: NextResponse): NextRe
 export const proxy = auth(async (req) => {
   const { pathname } = req.nextUrl;
 
+  // Entity REST routes (/api/role, /api/user, etc.) get CORS headers and
+  // never touch the session/i18n logic below — that logic assumes a page
+  // request and would wrongly redirect an unauthenticated API call to
+  // /login. /api/auth/* keeps its existing handling further down (NextAuth
+  // owns that surface); this only covers the rest of /api/*.
+  if (pathname.startsWith('/api/') && !pathname.startsWith('/api/auth/')) {
+    if (req.method === 'OPTIONS') {
+      return addCorsHeaders(new NextResponse(null, { status: 204 }));
+    }
+    return addCorsHeaders(NextResponse.next());
+  }
+
   // Rate-limit auth endpoints before doing anything else. `bucketForAuthRequest`
   // returns null for paths we don't care about (session reads, csrf, providers
   // list) — those fall through with no overhead.
@@ -157,13 +184,13 @@ export const proxy = auth(async (req) => {
 });
 
 export const config = {
-  // Match all pathnames except Next.js internals and static files, plus
-  // /api/auth/* explicitly (we exclude the rest of /api). Two matchers are
-  // used: the first covers app routes, the second pulls auth API routes
-  // through the proxy so they can be rate-limited.
+  // Match all pathnames except Next.js internals and static files, plus all
+  // of /api/* (cmd_369: entity REST routes need CORS headers too, not just
+  // /api/auth/*). Two matchers are used: the first covers app routes, the
+  // second pulls every API route through the proxy.
   matcher: [
     '/((?!api|_next|_vercel|.*\\..*).*)',
-    '/api/auth/:path*',
+    '/api/:path*',
   ],
 };
 // Next.js 16 proxies always run on the Node.js runtime, so Prisma (needed
