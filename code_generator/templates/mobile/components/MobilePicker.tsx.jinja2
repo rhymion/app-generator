@@ -1,0 +1,155 @@
+import { useState } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  FlatList,
+  Pressable,
+  Modal,
+  StyleSheet,
+} from 'react-native';
+
+export interface MobilePickerItem {
+  id: string;
+  label: string;
+}
+
+interface MobilePickerProps {
+  label: string;
+  items: MobilePickerItem[];
+  value: string[];
+  onChange: (ids: string[]) => void;
+  onSearch?: (query: string) => void;
+  multi?: boolean;
+  placeholder?: string;
+}
+
+// Shared picker used for both many-to-many (multi=true) and many-to-one FK
+// (multi=false) fields, generated once per app rather than per entity.
+export function MobilePicker({
+  label,
+  items,
+  value,
+  onChange,
+  onSearch,
+  multi = true,
+  placeholder = 'Search…',
+}: MobilePickerProps) {
+  const [visible, setVisible] = useState(false);
+  const [query, setQuery] = useState('');
+
+  const toggle = (id: string) => {
+    if (multi) {
+      onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id]);
+    } else {
+      onChange([id]);
+      setVisible(false);
+    }
+  };
+
+  const onChangeQuery = (text: string) => {
+    setQuery(text);
+    onSearch?.(text);
+  };
+
+  const selectedLabels = items
+    .filter((item) => value.includes(item.id))
+    .map((item) => item.label)
+    .join(', ');
+
+  return (
+    <View>
+      <Text style={styles.label}>{label}</Text>
+      <Pressable style={styles.trigger} onPress={() => setVisible(true)}>
+        <Text style={styles.triggerText} numberOfLines={1}>
+          {selectedLabels || 'None selected'}
+        </Text>
+      </Pressable>
+      <Modal visible={visible} animationType="slide" transparent onRequestClose={() => setVisible(false)}>
+        <View style={styles.overlay}>
+          <View style={styles.sheet}>
+            <TextInput
+              style={styles.searchInput}
+              value={query}
+              onChangeText={onChangeQuery}
+              placeholder={placeholder}
+              autoFocus
+            />
+            <FlatList
+              data={items}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => {
+                const selected = value.includes(item.id);
+                return (
+                  <Pressable style={styles.row} onPress={() => toggle(item.id)}>
+                    <Text style={styles.rowText}>{item.label}</Text>
+                    {selected ? <Text style={styles.rowCheck}>✓</Text> : null}
+                  </Pressable>
+                );
+              }}
+              ListEmptyComponent={
+                <View style={styles.center}>
+                  <Text style={styles.emptyText}>No results.</Text>
+                </View>
+              }
+            />
+            <Pressable style={styles.doneButton} onPress={() => setVisible(false)}>
+              <Text style={styles.doneButtonText}>Done</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  label: { fontSize: 13, color: '#666', marginTop: 8 },
+  trigger: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    padding: 12,
+  },
+  triggerText: { fontSize: 16 },
+  overlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  sheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 16,
+    maxHeight: '80%',
+  },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  rowText: { fontSize: 16 },
+  rowCheck: { fontSize: 16, color: '#2563eb', fontWeight: '600' },
+  center: { alignItems: 'center', justifyContent: 'center', padding: 20 },
+  emptyText: { color: '#666' },
+  doneButton: {
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+    padding: 14,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  doneButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+});

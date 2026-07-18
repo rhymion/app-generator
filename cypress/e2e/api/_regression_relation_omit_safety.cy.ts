@@ -86,3 +86,64 @@ describe('API: Role update — relation-omission safety (cmd_366 regression)', (
     });
   });
 });
+
+// cmd_376 batch1 supplement: the mobile role-edit screen (unlike the plain
+// PUT-with-no-field case above) now sends `users_ids` explicitly on every
+// save (cmd366_prevention.mobile_edit_screen_invariants). This proves the
+// mobile save path itself over the mobile Bearer-token auth flow: load the
+// detail, derive selectedUserIds from the response's `users` array exactly
+// as edit.tsx.jinja2 does, PUT that same array back untouched, then confirm
+// both the membership and the actor's own role.read access survive — the
+// same access-denied symptom cmd_366 produced when membership was silently
+// wiped.
+describe('Mobile: role edit — users_ids explicit-send guard (cmd_366/cmd_376)', () => {
+  beforeEach(() => {
+    cy.task('db:reset');
+    cy.task('db:seed');
+    cy.task('db:grantAllPermissions');
+  });
+
+  it('PUT with users_ids re-sent unchanged (picker untouched) preserves membership and role.read access', () => {
+    cy.request({
+      method: 'POST',
+      url: AUTH_TOKEN_URL,
+      body: { email: TEST_CREDENTIALS.email, password: TEST_CREDENTIALS.password },
+    }).then((tokenRes) => {
+      expect(tokenRes.status).to.eq(201);
+      const accessToken = tokenRes.body.access_token;
+      const testUserId = decodeJwtSub(accessToken);
+      const authHeaders = { Authorization: `Bearer ${accessToken}` };
+
+      cy.request({
+        method: 'POST',
+        url: ROLE_API_BASE,
+        headers: authHeaders,
+        body: { name: 'cmd_376 mobile guard role', description: 'before', users_ids: [testUserId] },
+      }).then((createRes) => {
+        expect(createRes.status).to.eq(201);
+        const roleId = createRes.body.id;
+
+        cy.request({ url: `${ROLE_API_BASE}/${roleId}`, headers: authHeaders }).then((getRes) => {
+          const selectedUserIds = (getRes.body.users ?? []).map((u: { id: string }) => u.id);
+          expect(selectedUserIds, 'membership loaded before edit').to.include(testUserId);
+
+          cy.request({
+            method: 'PUT',
+            url: `${ROLE_API_BASE}/${roleId}`,
+            headers: authHeaders,
+            body: { name: 'cmd_376 mobile guard role', description: 'after', users_ids: selectedUserIds },
+          }).then((putRes) => {
+            expect(putRes.status).to.eq(200);
+          });
+        });
+
+        cy.request({ url: `${ROLE_API_BASE}/${roleId}`, headers: authHeaders }).then((getRes) => {
+          expect(getRes.status, 'role.read must still be granted to this actor after the edit').to.eq(200);
+          expect(getRes.body.description).to.eq('after');
+          const ids = (getRes.body.users ?? []).map((u: { id: string }) => u.id);
+          expect(ids, 'user connection survives an explicit users_ids re-send').to.include(testUserId);
+        });
+      });
+    });
+  });
+});

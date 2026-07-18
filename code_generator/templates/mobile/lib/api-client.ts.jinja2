@@ -5,6 +5,9 @@ export interface {{ label }} {
 {% for field in display_fields %}
   {{ field.name }}: {{ field.ts_type }};
 {% endfor %}
+{% for rel in mobile_m2m_relations %}
+  {{ rel.prop }}: { id: string }[];
+{% endfor %}
 }
 
 export interface {{ label }}PageResult {
@@ -18,7 +21,17 @@ export interface {{ label }}Input {
 {% for field in edit_fields %}
   {{ field.name }}: {{ field.ts_type }};
 {% endfor %}
+{% for rel in mobile_m2m_relations %}
+  {{ rel.ids_field }}: string[];
+{% endfor %}
 }
+{% if mobile_m2m_relations %}
+
+export interface AutocompleteItem {
+  id: string;
+  label: string;
+}
+{% endif %}
 
 export async function fetch{{ label }}List(page = 0, pageSize = 50): Promise<{{ label }}PageResult> {
   return apiFetch<{{ label }}PageResult>(`{{ api_path }}?page=${page}&pageSize=${pageSize}`);
@@ -47,3 +60,9 @@ export async function delete{{ label }}(id: string): Promise<void> {
     method: 'DELETE',
   });
 }
+{% for rel in mobile_m2m_relations %}
+
+export async function fetch{{ rel.label }}Autocomplete(q = ''): Promise<AutocompleteItem[]> {
+  return apiFetch<AutocompleteItem[]>(`{{ rel.api_path }}/autocomplete?q=${encodeURIComponent(q)}`);
+}
+{% endfor %}

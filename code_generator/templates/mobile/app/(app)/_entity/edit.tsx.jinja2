@@ -11,7 +11,17 @@ import {
   Alert,
   StyleSheet,
 } from 'react-native';
-import { fetch{{ label }}ById, create{{ label }}, update{{ label }} } from '@/lib/{{ snake_name }}-api';
+import {
+  fetch{{ label }}ById,
+  create{{ label }},
+  update{{ label }},
+{% for rel in mobile_m2m_relations %}
+  fetch{{ rel.label }}Autocomplete,
+{% endfor %}
+} from '@/lib/{{ snake_name }}-api';
+{% if mobile_m2m_relations %}
+import { MobilePicker, MobilePickerItem } from '@/components/MobilePicker';
+{% endif %}
 
 export default function {{ label }}EditScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -20,6 +30,10 @@ export default function {{ label }}EditScreen() {
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+{% for rel in mobile_m2m_relations %}
+  const [selected{{ rel.label }}Ids, setSelected{{ rel.label }}Ids] = useState<string[]>([]);
+  const [{{ rel.snake }}Options, set{{ rel.label }}Options] = useState<MobilePickerItem[]>([]);
+{% endfor %}
 
   const { data, isLoading } = useQuery({
     queryKey: ['{{ snake_name }}', id],
@@ -31,12 +45,27 @@ export default function {{ label }}EditScreen() {
     if (data) {
       setName(data.name ?? '');
       setDescription(data.description ?? '');
+{% for rel in mobile_m2m_relations %}
+      setSelected{{ rel.label }}Ids(data.{{ rel.prop }}.map((item) => item.id));
+{% endfor %}
     }
   }, [data]);
+{% for rel in mobile_m2m_relations %}
+
+  useEffect(() => {
+    fetch{{ rel.label }}Autocomplete().then(set{{ rel.label }}Options).catch(() => {});
+  }, []);
+{% endfor %}
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const input = { name, description: description || null };
+      const input = {
+        name,
+        description: description || null,
+{% for rel in mobile_m2m_relations %}
+        {{ rel.ids_field }}: selected{{ rel.label }}Ids, // always explicit — never omit (cmd_366 guard)
+{% endfor %}
+      };
       if (isEdit) {
         await update{{ label }}(id as string, input);
       } else {
@@ -45,7 +74,7 @@ export default function {{ label }}EditScreen() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['{{ snake_name }}-list'] });
-      router.back();
+      router.replace('/(app)/{{ snake_name }}/');
     },
     onError: (error: unknown) => {
       Alert.alert('Error', error instanceof Error ? error.message : 'Something went wrong.');
@@ -72,6 +101,16 @@ export default function {{ label }}EditScreen() {
         placeholder="Description"
         multiline
       />
+{% for rel in mobile_m2m_relations %}
+      <MobilePicker
+        label="{{ rel.label }}s"
+        items={ {{ rel.snake }}Options }
+        value={selected{{ rel.label }}Ids}
+        onChange={setSelected{{ rel.label }}Ids}
+        onSearch={(q) => fetch{{ rel.label }}Autocomplete(q).then(set{{ rel.label }}Options).catch(() => {})}
+        multi
+      />
+{% endfor %}
       <Pressable
         style={styles.button}
         onPress={() => mutation.mutate()}

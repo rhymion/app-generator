@@ -402,12 +402,47 @@ def get_mobile_entities(schema_data: dict) -> list[str]:
     return result
 
 
+def _build_mobile_relation_context(entity_name: str, schema_data: dict) -> dict:
+    """Relation-aware context additions for mobile Phase2.
+
+    x-relationships are declared on the `_detail` variant of an entity (the
+    base/_detail split convention), not on the base definition that
+    build_mobile_entity_context() otherwise walks for scalar fields, so this
+    looks up `<entity_name>_detail` independently.
+
+    Phase2 batch1 scope: many-to-many relations only. FK / enum / search /
+    approval context additions are deferred to later batches.
+    """
+    defs = schema_data.get('definitions', {})
+    detail_def = defs.get(f'{entity_name}_detail', {})
+    x_relationships = detail_def.get('x-relationships', {})
+
+    mobile_m2m_relations = []
+    for prop_name, rel in x_relationships.items():
+        if rel.get('type') != 'many-to-many':
+            continue
+        target = rel.get('target')
+        mobile_m2m_relations.append({
+            'prop': prop_name,
+            'target': target,
+            'label': to_pascal_case(target),
+            'snake': target,
+            'api_path': f'/api/{target}',
+            'ids_field': f'{prop_name}_ids',
+        })
+
+    return {
+        'mobile_m2m_relations': mobile_m2m_relations,
+    }
+
+
 def build_mobile_entity_context(entity_name: str, schema_data: dict) -> dict:
     """Minimal per-entity context for Phase1 PoC mobile screens.
 
     Phase1 scope is FK-free entities only (GAP-5 deferred to Phase2), so this
     walks the base entity's scalar properties directly rather than reusing the
-    relation-aware EntityContext builder used by the web templates.
+    relation-aware EntityContext builder used by the web templates. Phase2
+    adds relation context (m2m in batch1) via _build_mobile_relation_context().
     """
     defs = schema_data.get('definitions', {})
     entity_def = defs.get(entity_name, {})
@@ -449,6 +484,7 @@ def build_mobile_entity_context(entity_name: str, schema_data: dict) -> dict:
         'edit_fields': fields,
         'pk_field': pk_field,
         'api_path': f'/api/{entity_name}',
+        **_build_mobile_relation_context(entity_name, schema_data),
     }
 
 
@@ -474,6 +510,7 @@ def generate_mobile_target(mobile_entities: list[str], schema_data: dict, output
         ('app/login.tsx.jinja2', 'app/login.tsx'),
         ('app/(app)/_layout.tsx.jinja2', 'app/(app)/_layout.tsx'),
         ('app/(app)/index.tsx.jinja2', 'app/(app)/index.tsx'),
+        ('components/MobilePicker.tsx.jinja2', 'components/MobilePicker.tsx'),
     ]
     for tmpl_name, rel_out in scaffold_templates:
         _write(output_dir / rel_out, _render(env, f'mobile/{tmpl_name}', app_context))

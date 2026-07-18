@@ -50,7 +50,15 @@ async function main() {
   const adminId = createId();
   const admin = await prisma.user.upsert({
     where: { email: 'admin@example.com' },
-    update: {},
+    // Re-running seed-tenant against an already-seeded DB must refresh the
+    // admin's name/password to the values below rather than leaving stale
+    // data in place. api_key is intentionally excluded here — it stays
+    // fixed at its create-time value since mobile/e2e clients may depend
+    // on it (cmd_376).
+    update: {
+      name: 'Test Admin',
+      password: hashedPassword,
+    },
     create: {
       id: adminId,
       creator_id: adminId,
