@@ -11,32 +11,9 @@
  * it anywhere would let a web session JWT be accepted as a mobile token or
  * vice versa.
  */
-import { NextResponse } from 'next/server';
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 import { createHmac, randomBytes } from 'node:crypto';
 import { createId } from '@paralleldrive/cuid2';
-
-/**
- * CORS for `app/api/mobile/auth/*` only. `app.json`'s mobile target
- * includes "web" (react-native-web / `expo start --web` / a deployed web
- * build), which — unlike the native iOS/Android app — is subject to
- * browser CORS enforcement and may run on a different origin than the API
- * (e.g. local dev: Expo web on :8082, Next.js on :3000). No other route in
- * this app sends CORS headers; scoped here rather than in `handleApiError`
- * so this doesn't change behavior for the existing REST/CRUD API surface.
- * `*` is safe with the `Authorization` header because mobile auth never
- * uses cookie credentials (`credentials: 'include'`) — it's Bearer-only.
- */
-export function withMobileCors(response: NextResponse): NextResponse {
-  response.headers.set('Access-Control-Allow-Origin', '*');
-  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  return response;
-}
-
-export function mobileCorsPreflight(): NextResponse {
-  return withMobileCors(new NextResponse(null, { status: 204 }));
-}
 
 export const MOBILE_ACCESS_TOKEN_TYPE = 'mobile_access';
 export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60; // 900s (354a section_3)

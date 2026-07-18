@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { handleApiError, requireMobileAuth } from '@/lib/api-auth';
-import { withMobileCors, mobileCorsPreflight } from '@/lib/mobile-auth';
-
-export async function OPTIONS() {
-  return mobileCorsPreflight();
-}
 
 /** GET /api/mobile/auth/sessions — list the caller's active mobile devices (GAP-2). */
 export async function GET(request: NextRequest) {
-  return withMobileCors(await handleGet(request));
+  return handleGet(request);
 }
 
 async function handleGet(request: NextRequest): Promise<NextResponse> {

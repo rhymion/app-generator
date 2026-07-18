@@ -9,10 +9,10 @@ const intlMiddleware = createIntlMiddleware(routing);
 // Paths that do not require authentication (matched after stripping locale prefix)
 const PUBLIC_PATHS = ['/login', '/register', '/docs'];
 
-// CORS for mobile clients calling entity REST routes cross-origin (cmd_369).
-// Bearer-only auth (no cookies) makes a wildcard origin safe here — see
-// lib/mobile-auth.ts withMobileCors() for the same reasoning applied to
-// /api/mobile/auth/*. Configurable via MOBILE_CORS_ORIGIN for prod lockdown.
+// CORS for mobile clients calling entity REST routes cross-origin, including
+// /api/mobile/auth/* (cmd_369, generalized from a route-local mechanism in
+// cmd_374). Bearer-only auth (no cookies) makes a wildcard origin safe here.
+// Configurable via MOBILE_CORS_ORIGIN for prod lockdown.
 const CORS_ORIGIN = process.env.MOBILE_CORS_ORIGIN ?? '*';
 const CORS_METHODS = 'GET, POST, PUT, DELETE, OPTIONS';
 const CORS_HEADERS = 'Content-Type, Authorization, X-API-Key';

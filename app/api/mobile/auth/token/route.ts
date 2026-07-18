@@ -10,13 +10,7 @@ import {
   generateRefreshTokenPlaintext,
   hashRefreshToken,
   signMobileAccessToken,
-  withMobileCors,
-  mobileCorsPreflight,
 } from '@/lib/mobile-auth';
-
-export async function OPTIONS() {
-  return mobileCorsPreflight();
-}
 
 /**
  * POST /api/mobile/auth/token — password-grant mobile login (cmd_354/357).
@@ -34,7 +28,7 @@ function clientIp(request: NextRequest): string {
 }
 
 export async function POST(request: NextRequest) {
-  return withMobileCors(await handlePost(request));
+  return handlePost(request);
 }
 
 async function handlePost(request: NextRequest): Promise<NextResponse> {
@@ -122,7 +116,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function DELETE(request: NextRequest) {
-  return withMobileCors(await handleDelete(request));
+  return handleDelete(request);
 }
 
 async function handleDelete(request: NextRequest): Promise<NextResponse> {

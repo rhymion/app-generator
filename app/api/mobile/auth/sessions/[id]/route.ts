@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { ApiError, handleApiError, requireMobileAuth } from '@/lib/api-auth';
-import { withMobileCors, mobileCorsPreflight } from '@/lib/mobile-auth';
 
 type Params = { params: Promise<{ id: string }> };
-
-export async function OPTIONS() {
-  return mobileCorsPreflight();
-}
 
 /**
  * DELETE /api/mobile/auth/sessions/:id — revoke one device session, own or
@@ -19,7 +14,7 @@ export async function OPTIONS() {
  * path).
  */
 export async function DELETE(request: NextRequest, { params }: Params) {
-  return withMobileCors(await handleDelete(request, { params }));
+  return handleDelete(request, { params });
 }
 
 async function handleDelete(request: NextRequest, { params }: Params): Promise<NextResponse> {

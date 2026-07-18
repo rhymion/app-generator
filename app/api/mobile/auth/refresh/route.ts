@@ -6,13 +6,7 @@ import {
   generateRefreshTokenPlaintext,
   hashRefreshToken,
   signMobileAccessToken,
-  withMobileCors,
-  mobileCorsPreflight,
 } from '@/lib/mobile-auth';
-
-export async function OPTIONS() {
-  return mobileCorsPreflight();
-}
 
 /**
  * POST /api/mobile/auth/refresh — rotate a refresh token for a new
@@ -25,7 +19,7 @@ export async function OPTIONS() {
  * either way the whole session is revoked and the caller gets 401.
  */
 export async function POST(request: NextRequest) {
-  return withMobileCors(await handlePost(request));
+  return handlePost(request);
 }
 
 async function handlePost(request: NextRequest): Promise<NextResponse> {
