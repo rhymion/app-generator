@@ -3,7 +3,7 @@ $schema: "http://json-schema.org/draft-07/schema#"
 # Support multi-tenancy
 format-version: 2.0
 
-# x-cloud: GCP Cloud Run opt-in (コメントを解除して使用)
+# x-cloud: GCP Cloud Run opt-in (uncomment to use)
 # x-cloud:
 #   enabled: true
 #   provider: gcp

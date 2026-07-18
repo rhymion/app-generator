@@ -1,17 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Button from '@mui/material/Button';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import DialogActions from '@mui/material/DialogActions';
-import TextField from '@mui/material/TextField';
-import Typography from '@mui/material/Typography';
-import IconButton from '@mui/material/IconButton';
-import AddIcon from '@mui/icons-material/Add';
-import DeleteIcon from '@mui/icons-material/Delete';
-import Box from '@mui/material/Box';
+import { AppButton, AppText, AppBox, AppIcon, AppIconButton, AppFieldInput, AppDialog } from '@/components/ui';
 {% if split_has_relation_field %}
 import EntityAutocomplete, { type EntityOption } from '@/components/_standard/EntityAutocomplete';
 {% endif %}
@@ -121,62 +111,66 @@ export function SplitActionSection({
 
   return (
     <>
-      <Button variant="outlined" color="secondary" onClick={() => setOpen(true)}>
+      <AppButton variant="outlined" color="secondary" onClick={() => setOpen(true)}>
         Split
-      </Button>
-      <Dialog open={open} onClose={() => !loading && setOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Split {{ entity_name | pascal_case }} (total: { {{ quantity_field }} })</DialogTitle>
-        <DialogContent>
-          {error && <Typography color="error" sx={% raw %}{{ mb: 1 }}{% endraw %}>{error}</Typography>}
-          <Typography variant="body2" color={remaining === 0 ? 'success.main' : 'text.secondary'} sx={% raw %}{{ mb: 2 }}{% endraw %}>
-            Remaining: {remaining}
-          </Typography>
-          {parts.map((part, idx) => (
-            <Box key={idx} sx={% raw %}{{ display: 'flex', gap: 1, alignItems: 'center', mb: 1 }}{% endraw %}>
-              <TextField
-                label="{{ quantity_field }}"
-                type="number"
-                size="small"
-                value={part.{{ quantity_field }}}
-                onChange={(e) => updatePart(idx, '{{ quantity_field }}', Number(e.target.value))}
-                inputProps={% raw %}{{ min: 1 }}{% endraw %} sx={% raw %}{{ width: 120 }}{% endraw %}
-              />
-              {% for f in per_part_required %}
-              {% if f.is_relation %}
-              <EntityAutocomplete
-                sx={% raw %}{{ flex: 1 }}{% endraw %} label="{{ f.field }}"
-                value={part.{{ f.field }} || null}
-                onChange={(newId) => updatePart(idx, '{{ f.field }}', newId ?? '')}
-                searchAction={search{{ pascal_name }}{{ f.field | pascal_case }}Options}
-                initialOptions={ {{ f.field | camel_case }}Options }
-                openOnFocus
-              />
-              {% else %}
-              <TextField
-                label="{{ f.field }}"
-                size="small"
-                value={part.{{ f.field }}}
-                onChange={(e) => updatePart(idx, '{{ f.field }}', e.target.value)}
-                sx={% raw %}{{ flex: 1 }}{% endraw %}
-              />
-              {% endif %}
-              {% endfor %}
-              <IconButton onClick={() => removePart(idx)} disabled={parts.length <= 2} size="small">
-                <DeleteIcon fontSize="small" />
-              </IconButton>
-            </Box>
-          ))}
-          <Button startIcon={<AddIcon />} onClick={addPart} size="small">
-            Add Part
-          </Button>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)} disabled={loading}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={loading || remaining !== 0} variant="contained">
-            {loading ? 'Splitting...' : 'Split'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      </AppButton>
+      <AppDialog
+        open={open}
+        onClose={() => { if (!loading) setOpen(false); }}
+        maxWidth="sm"
+        fullWidth
+        title={`Split {{ entity_name | pascal_case }} (total: ${ {{ quantity_field }} })`}
+        actions={
+          <>
+            <AppButton variant="text" onClick={() => setOpen(false)} disabled={loading}>Cancel</AppButton>
+            <AppButton onClick={handleSubmit} disabled={loading || remaining !== 0} variant="contained">
+              {loading ? 'Splitting...' : 'Split'}
+            </AppButton>
+          </>
+        }
+      >
+        {error && <AppText color="error" mb={1}>{error}</AppText>}
+        <AppText variant="body2" color={remaining === 0 ? 'success.main' : 'text.secondary'} mb={2}>
+          Remaining: {remaining}
+        </AppText>
+        {parts.map((part, idx) => (
+          <AppBox key={idx} display="flex" gap={1} alignItems="center" mb={1}>
+            <AppFieldInput
+              label="{{ quantity_field }}"
+              type="number"
+              size="small"
+              value={String(part.{{ quantity_field }})}
+              onChange={(value) => updatePart(idx, '{{ quantity_field }}', Number(value))}
+              min={1}
+              width={120}
+            />
+            {% for f in per_part_required %}
+            {% if f.is_relation %}
+            <EntityAutocomplete
+              sx={% raw %}{{ flex: 1 }}{% endraw %} label="{{ f.field }}"
+              value={part.{{ f.field }} || null}
+              onChange={(newId) => updatePart(idx, '{{ f.field }}', newId ?? '')}
+              searchAction={search{{ pascal_name }}{{ f.field | pascal_case }}Options}
+              initialOptions={ {{ f.field | camel_case }}Options }
+              openOnFocus
+            />
+            {% else %}
+            <AppFieldInput
+              label="{{ f.field }}"
+              size="small"
+              value={part.{{ f.field }}}
+              onChange={(value) => updatePart(idx, '{{ f.field }}', value)}
+              flex={1}
+            />
+            {% endif %}
+            {% endfor %}
+            <AppIconButton iconName="Delete" iconFontSize="small" onClick={() => removePart(idx)} disabled={parts.length <= 2} size="small" />
+          </AppBox>
+        ))}
+        <AppButton variant="text" startIcon={<AppIcon name="Add" fontSize="small" />} onClick={addPart} size="small">
+          Add Part
+        </AppButton>
+      </AppDialog>
     </>
   );
 }

@@ -1067,7 +1067,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     export_import_key_fields = [f for f in import_key_fields if f in export_scalar_fields]
 
     # ────────────────────────────────────────────────────────────────
-    # Import eligibility — SINGLE PLACE (殿留保 cmd_328; cmd_330 adds import: flag).
+    # Import eligibility — SINGLE PLACE (deliberately left open in cmd_328; cmd_330 adds import: flag).
     # Rule: primary entity AND x-import-key AND import:true AND (new:true OR edit:true).
     # import:false suppresses (a) own import route/UI/test only.
     # (b) dotted-FK lookups by other entities are unaffected —
@@ -1075,7 +1075,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # ────────────────────────────────────────────────────────────────
     # Import eligibility requires the entity to be a primary entity (not an alias/view).
     # e.g., 'setting' (parent) maps to 'user' (model) — only 'user' should be import-eligible.
-    # This satisfies 殿留保: "x-import-keyを持つ=import可を硬く焼き付けるな".
+    # This satisfies the cmd_328 guidance: "having x-import-key must not be hardcoded to imply import-eligible".
     _is_primary_entity = (parent == model)
     _import_flag       = gen_cfg.get('import', True)          # x-generate.import (cmd_330)
     import_eligible    = _is_primary_entity and has_import_key and _import_flag and (can_create or can_update)

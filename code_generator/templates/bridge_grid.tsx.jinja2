@@ -8,19 +8,13 @@
 // parent context to the child create form.
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import type { SxProps, Theme } from '@mui/material/styles';
-import Box from '@mui/material/Box';
-import Tooltip from '@mui/material/Tooltip';
-import IconButton from '@mui/material/IconButton';
-import AddIcon from '@mui/icons-material/Add';
+import { AppBox, AppTooltip, AppIconButton } from '@/components/ui';
 import { Link } from '@/i18n/navigation';
 import ResponsiveListClient from '@/components/_standard/ResponsiveListClient';
 import { fetch{{ child_pascal }}Page } from '@/lib/{{ child }}/getters';
 import { remove{{ child_pascal }} } from '@/lib/{{ child }}/actions';
 import type { {{ child_pascal }} } from '@/lib/{{ child }}/types';
 
-const sectionSx: SxProps<Theme> = { mt: 3 };
-const headerSx: SxProps<Theme> = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 };
 const headingStyle: React.CSSProperties = { margin: 0 };
 
 interface {{ child_pascal }}BridgeGridProps {
@@ -54,17 +48,23 @@ export default function {{ child_pascal }}BridgeGrid({ bridgeId, parentType, par
   const createHref = `/{{ child }}/new?parentType=${encodeURIComponent(parentType)}&parentId=${encodeURIComponent(parentId)}`;
 
   return (
-    <Box sx={sectionSx}>
-      <Box sx={headerSx}>
+    <AppBox mt={3}>
+      <AppBox display="flex" alignItems="center" justifyContent="space-between" mb={1}>
         <h2 style={headingStyle}>{title}</h2>
         {!readOnly && (
-          <Tooltip title={title}>
-            <IconButton component={Link} href={createHref} color="primary" aria-label={title} target="_blank" rel="noopener noreferrer">
-              <AddIcon />
-            </IconButton>
-          </Tooltip>
+          <AppTooltip title={title}>
+            <AppIconButton
+              iconName="Add"
+              component={Link}
+              href={createHref}
+              color="primary"
+              label={title}
+              target="_blank"
+              rel="noopener noreferrer"
+            />
+          </AppTooltip>
         )}
-      </Box>
+      </AppBox>
       {rows !== null && (
         <ResponsiveListClient<{{ child_pascal }}>
           src={rows}
@@ -76,6 +76,6 @@ export default function {{ child_pascal }}BridgeGrid({ bridgeId, parentType, par
           openLinksInNewTab={!readOnly}
         />
       )}
-    </Box>
+    </AppBox>
   );
 }

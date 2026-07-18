@@ -14,7 +14,7 @@ This project uses a multi-database strategy for different environments:
 | Compose file | `docker-compose.dev.yml` | `docker-compose.test.yml` |
 | DB name | `my_next_dev` | `my_next_test` |
 | Postgres port | 5433 | 5434 |
-| Redis | なし (in-memory rate limiter) | `redis-test` (port 6381) |
+| Redis | None (in-memory rate limiter) | `redis-test` (port 6381) |
 | Start | `npm run docker:up:dev` | `npm run docker:up:test` |
 | Stop | `npm run docker:down:dev` | `npm run docker:down:test` |
 

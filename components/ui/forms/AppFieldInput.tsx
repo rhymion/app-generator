@@ -20,6 +20,9 @@ interface AppFieldInputProps {
   className?: string;
   minLength?: number;
   maxLength?: number;
+  min?: number;
+  width?: number | string;
+  flex?: number | string;
   testId?: string;
   readOnly?: boolean;
   endAction?: ReactNode;
@@ -44,6 +47,9 @@ export default function AppFieldInput({
   className,
   minLength,
   maxLength,
+  min,
+  width,
+  flex,
   testId,
   readOnly,
   endAction,
@@ -53,6 +59,7 @@ export default function AppFieldInput({
   if (inputMode) htmlInput.inputMode = inputMode;
   if (minLength !== undefined) htmlInput.minLength = minLength;
   if (maxLength !== undefined) htmlInput.maxLength = maxLength;
+  if (min !== undefined) htmlInput.min = min;
   if (testId) htmlInput['data-testid'] = testId;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -81,7 +88,7 @@ export default function AppFieldInput({
       className={className}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       slotProps={(hasHtmlInput || hasInput) ? { ...(hasHtmlInput ? { htmlInput } : {}), ...(hasInput ? { input } : {}) } as any : undefined}
-      sx={mb !== undefined ? { mb } : undefined}
+      sx={(mb !== undefined || width !== undefined || flex !== undefined) ? { mb, width, flex } : undefined}
     />
   );
 }

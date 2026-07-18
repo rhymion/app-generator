@@ -1,3 +1,3 @@
 export default function MainShow() {
-  return <p>show配下のページ</p>;
+  return <p>Page under show</p>;
 }

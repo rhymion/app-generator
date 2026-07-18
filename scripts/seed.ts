@@ -41,20 +41,20 @@ async function main() {
   });
 
   // ── Roles ──────────────────────────────────────────────────────────────────
-  // Idempotency: role.name（アプリレベル。schema に @@unique なし）
-  // Method: findFirst → create（upsert は @@unique が必要なため不使用）
+  // Idempotency: role.name (application-level; no @@unique in schema)
+  // Method: findFirst → create (upsert not used since @@unique is required for it)
   let adminRole = await prisma.role.findFirst({ where: { name: 'Administrator' } });
   if (!adminRole) {
     adminRole = await prisma.role.create({
       data: {
         name: 'Administrator',
-        description: '管理者権限',
+        description: 'Administrator permissions',
         creator_id: admin.id,
         updater_id: admin.id,
       },
     });
   }
-  // always connect（Prisma connect on existing relation is a no-op）
+  // always connect (Prisma connect on existing relation is a no-op)
   await prisma.role.update({
     where: { id: adminRole.id },
     data: { users: { connect: { id: admin.id } } },
@@ -65,7 +65,7 @@ async function main() {
     creatorRole = await prisma.role.create({
       data: {
         name: 'Creator',
-        description: 'レコード作成者',
+        description: 'Record creator',
         creator_id: admin.id,
         updater_id: admin.id,
       },
@@ -81,7 +81,7 @@ async function main() {
     assigneeRole = await prisma.role.create({
       data: {
         name: 'Assignee',
-        description: '担当者',
+        description: 'Assignee',
         creator_id: admin.id,
         updater_id: admin.id,
       },
@@ -96,8 +96,8 @@ async function main() {
   const entities = ['user', 'role', 'organization', 'permission', 'setting'];
 
   // Administrator: full CRUD
-  // Idempotency: @@unique([name, role_id])（DB制約あり）
-  // Method: upsert（role_id 非null の場合のみ使用可）
+  // Idempotency: @@unique([name, role_id]) (DB constraint present)
+  // Method: upsert (only usable when role_id is non-null)
   await Promise.all(entities.map(entity =>
     prisma.permission.upsert({
       where: { name_role_id: { name: entity, role_id: adminRole.id } },
@@ -116,7 +116,8 @@ async function main() {
   ));
 
   // Global (no role): read-only
-  // Idempotency: name + role_id IS NULL（アプリレベル。Prisma型制約 + PostgreSQL NULL重複許容のため upsert 不可）
+  // Idempotency: name + role_id IS NULL (application-level; upsert is not usable
+  // because of Prisma's type constraints + PostgreSQL allowing duplicate NULLs)
   // Method: findFirst({ where: { name, role_id: null } }) → create
   for (const entity of entities) {
     const existing = await prisma.permission.findFirst({
@@ -187,8 +188,8 @@ async function main() {
   // ));
 
   // Creator: read/update setting (own account)
-  // Idempotency: @@unique([name, role_id])（DB制約あり）
-  // Method: upsert（role_id 非null の場合のみ使用可）
+  // Idempotency: @@unique([name, role_id]) (DB constraint present)
+  // Method: upsert (only usable when role_id is non-null)
   await prisma.permission.upsert({
     where: { name_role_id: { name: 'setting', role_id: creatorRole.id } },
     update: {},
@@ -205,8 +206,8 @@ async function main() {
   });
 
   // ── Organizations ──────────────────────────────────────────────────────────
-  // Idempotency: organization.name（アプリレベル）
-  // Method: findFirst → create + 後段 connect（Prisma connect on existing relation is a no-op）
+  // Idempotency: organization.name (application-level)
+  // Method: findFirst → create + a follow-up connect (Prisma connect on existing relation is a no-op)
   let devOrg = await prisma.organization.findFirst({ where: { name: 'Development devision' } });
   if (!devOrg) {
     devOrg = await prisma.organization.create({
