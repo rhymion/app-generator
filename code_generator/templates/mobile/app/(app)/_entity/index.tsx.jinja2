@@ -68,6 +68,11 @@ export default function {{ label }}ListScreen() {
 {% if has_description %}
             {item.description ? <Text style={styles.rowSubtitle}>{item.description}</Text> : null}
 {% endif %}
+{% if mobile_enum_fields %}
+{% for ef in mobile_enum_fields %}
+            {item.{{ ef.prop }} != null ? <Text style={styles.rowSubtitle}>{({{ ef.labels | tojson }} as string[])[item.{{ ef.prop }}]}</Text> : null}
+{% endfor %}
+{% endif %}
           </Pressable>
         )}
         ListEmptyComponent={

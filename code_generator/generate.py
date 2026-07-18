@@ -411,7 +411,8 @@ def _build_mobile_relation_context(entity_name: str, schema_data: dict) -> dict:
     looks up `<entity_name>_detail` independently.
 
     Phase2 batch2 scope: many-to-many (batch1) + many-to-one FK relations.
-    enum / search / approval context additions are deferred to later batches.
+    enum (batch3, see mobile_enum_fields()) / search / approval context
+    additions are deferred to later batches.
     """
     defs = schema_data.get('definitions', {})
     detail_def = defs.get(f'{entity_name}_detail', {})
@@ -453,6 +454,33 @@ def _build_mobile_relation_context(entity_name: str, schema_data: dict) -> dict:
         'mobile_m2m_relations': mobile_m2m_relations,
         'mobile_fk_relations': mobile_fk_relations,
     }
+
+
+def mobile_enum_fields(entity_name: str, schema_data: dict) -> list[dict]:
+    """Entity-agnostic enum-label context for mobile Phase2 batch3.
+
+    Collects integer properties on the base entity definition that carry an
+    `enum` label list (the same convention the web path reads via
+    prop_def.get('enum') — see set_fields()/Cypress enumLabels above), so
+    mobile screens can render the human-readable label instead of the raw
+    integer.
+
+    Not yet wired into any entity's generated output: no entity has
+    `mobile: true` combined with an integer+enum property today, so this is
+    a pure helper awaiting a future mobile entity to consume it via
+    build_mobile_entity_context()'s returned context.
+    """
+    defs = schema_data.get('definitions', {})
+    entity_def = defs.get(entity_name, {})
+    fields = []
+    for prop_name, prop_schema in entity_def.get('properties', {}).items():
+        if prop_schema.get('type') != 'integer':
+            continue
+        labels = prop_schema.get('enum')
+        if not isinstance(labels, list):
+            continue
+        fields.append({'prop': prop_name, 'labels': labels})
+    return fields
 
 
 def build_mobile_entity_context(entity_name: str, schema_data: dict) -> dict:
@@ -519,6 +547,7 @@ def build_mobile_entity_context(entity_name: str, schema_data: dict) -> dict:
         'api_path': f'/api/{entity_name}',
         'mobile_toggle_fields': mobile_toggle_fields,
         'has_description': has_description,
+        'mobile_enum_fields': mobile_enum_fields(entity_name, schema_data),
         **_build_mobile_relation_context(entity_name, schema_data),
     }
 

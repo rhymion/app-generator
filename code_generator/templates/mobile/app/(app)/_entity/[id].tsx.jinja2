@@ -91,6 +91,14 @@ export default function {{ label }}DetailScreen() {
         <Text style={styles.value}>{data.description ?? '—'}</Text>
       </View>
 {% endif %}
+{% if mobile_enum_fields %}
+{% for ef in mobile_enum_fields %}
+      <View style={styles.field}>
+        <Text style={styles.label}>{{ ef.prop | replace('_', ' ') | title }}</Text>
+        <Text style={styles.value}>{data.{{ ef.prop }} != null ? ({{ ef.labels | tojson }} as string[])[data.{{ ef.prop }}] : '—'}</Text>
+      </View>
+{% endfor %}
+{% endif %}
       <Pressable
         style={styles.button}
         onPress={() => router.push(`/(app)/{{ snake_name }}/edit?id=${id}`)}

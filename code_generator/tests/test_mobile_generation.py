@@ -14,6 +14,7 @@ from generate import (
     get_mobile_entities,
     build_mobile_entity_context,
     generate_mobile_target,
+    mobile_enum_fields,
 )
 
 
@@ -241,3 +242,122 @@ def test_mobile_target_generated_for_permission_entity(tmp_path):
     api_client = (output_dir / "lib" / "permission-api.ts").read_text(encoding="utf-8")
     assert "role_id: string | null;" in api_client
     assert "fetchRoleAutocomplete" in api_client
+
+
+# --- cmd_376 batch3: mobile_enum_fields (entity-agnostic helper, not yet
+# wired to any real entity's mobile: true) -----------------------------------
+
+def test_mobile_enum_fields_collects_integer_enum_properties():
+    schema = {
+        "definitions": {
+            "widget": {
+                "type": "object",
+                "required": ["id", "name", "status"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    "name": {"type": "string", "minLength": 1},
+                    "status": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 2,
+                        "enum": ["Pending", "Approved", "Rejected"],
+                    },
+                },
+            },
+        }
+    }
+    assert mobile_enum_fields("widget", schema) == [
+        {"prop": "status", "labels": ["Pending", "Approved", "Rejected"]}
+    ]
+
+
+def test_mobile_enum_fields_ignores_non_integer_and_non_enum_properties():
+    schema = {
+        "definitions": {
+            "widget": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    "name": {"type": "string", "minLength": 1},
+                    "count": {"type": "integer"},  # no enum -> not a label field
+                    "label": {"type": "string", "enum": ["a", "b"]},  # not integer
+                },
+            },
+        }
+    }
+    assert mobile_enum_fields("widget", schema) == []
+
+
+def test_mobile_enum_fields_empty_when_entity_absent():
+    assert mobile_enum_fields("missing", {"definitions": {}}) == []
+
+
+def test_build_mobile_entity_context_mobile_enum_fields_empty_for_role_and_permission():
+    """Non-regression: neither existing mobile entity (role, permission) has
+    an integer+enum property today, so the new mobile_enum_fields context key
+    must be an empty list for both — this batch adds a pure helper with zero
+    effect on their generated output."""
+    role_ctx = build_mobile_entity_context("role", _role_schema())
+    assert role_ctx["mobile_enum_fields"] == []
+    permission_ctx = build_mobile_entity_context("permission", _permission_schema())
+    assert permission_ctx["mobile_enum_fields"] == []
+
+
+def _widget_schema() -> dict:
+    """Synthetic entity (fictional — not part of json_schema.yaml, and not
+    given mobile: true there) used only to exercise mobile_enum_fields
+    end-to-end through the mobile templates."""
+    return {
+        "definitions": {
+            "widget": {
+                "type": "object",
+                "required": ["id", "name", "status"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    "name": {"type": "string", "minLength": 1},
+                    "status": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 2,
+                        "enum": ["Pending", "Approved", "Rejected"],
+                    },
+                },
+            },
+            "widget_detail": {
+                "x-generate": {
+                    "list": True,
+                    "view": True,
+                    "new": True,
+                    "edit": True,
+                    "delete": True,
+                    "api": True,
+                    "test": True,
+                    "mobile": True,
+                },
+                "allOf": [{"$ref": "#/definitions/widget"}],
+            },
+        }
+    }
+
+
+def test_mobile_target_generated_for_enum_entity(tmp_path):
+    """Full render pass proving the {% if mobile_enum_fields %} template
+    fragments render correctly once an entity actually has an integer+enum
+    property and mobile: true — the condition this batch's real entities
+    don't yet meet."""
+    schema = _widget_schema()
+    env = _make_env()
+    mobile_entities = get_mobile_entities(schema)
+    assert mobile_entities == ["widget"]
+
+    output_dir = tmp_path / "mobile"
+    generate_mobile_target(mobile_entities, schema, output_dir, env)
+
+    index_tsx = (output_dir / "app" / "(app)" / "widget" / "index.tsx").read_text(encoding="utf-8")
+    assert '["Pending", "Approved", "Rejected"]' in index_tsx
+    assert "item.status" in index_tsx
+
+    id_tsx = (output_dir / "app" / "(app)" / "widget" / "[id].tsx").read_text(encoding="utf-8")
+    assert '["Pending", "Approved", "Rejected"]' in id_tsx
+    assert "data.status" in id_tsx
+    assert "Status" in id_tsx
