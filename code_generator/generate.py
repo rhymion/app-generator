@@ -496,8 +496,29 @@ def generate(schema_path: str, output_dir: str) -> None:
         getters_ctx = {**ctx, 'named_constants': named_constants}
         _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', getters_ctx))
 
-        # --- virtual column resolver stub (per-entity, async/bulk) ---
+        # --- autocomplete/list custom filter stubs (cmd_377/379 DP-1) ---
+        # search{Target}Options()/get{Target}Page() in getters.ts (just written
+        # above) always call these — one write-once stub per entity, alongside
+        # getters.ts, following the same _write_stub() skip-if-exists convention
+        # as service_after_create.ts / ledger_write.ts. Default (unedited) stubs
+        # return {} — a documented zero-impact no-op (see getters.ts.jinja2).
         parent_pascal = to_pascal_case(parent)
+        _write_stub(
+            lib_dir / 'autocomplete_filter.ts',
+            _render(env, 'autocomplete_filter_stub.ts.jinja2', {
+                'parent': parent,
+                'parent_pascal': parent_pascal,
+            }),
+        )
+        _write_stub(
+            lib_dir / 'list_filter.ts',
+            _render(env, 'list_filter_stub.ts.jinja2', {
+                'parent': parent,
+                'parent_pascal': parent_pascal,
+            }),
+        )
+
+        # --- virtual column resolver stub (per-entity, async/bulk) ---
         if ctx.get('virtual_columns'):
             vr_path = lib_dir / 'virtual_resolvers.ts'
             created = _write_stub(

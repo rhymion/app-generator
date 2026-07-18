@@ -587,6 +587,12 @@ def get_parent_relationships(parent_def: dict, schema: dict | None = None) -> li
             'label_field': lf,
             'label_field_is_date': _label_field_is_date(lf, target, schema) if schema else False,
             'required': prop_name in required,
+            # DP-5 (cmd_377/379): scalar field names from *this* entity's own
+            # form state to forward as `formValues` into the target's
+            # search{Target}Options() autocomplete filter hook. Empty when the
+            # FK field carries no 'x-autocomplete-context' annotation — the
+            # unchanged (Phase-1) default.
+            'autocomplete_context_fields': list(prop.get('x-autocomplete-context') or []),
         })
     return result
 
