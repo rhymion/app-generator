@@ -14,10 +14,13 @@
     "delete": "Delete",
     "deleteDialogTitle": "Delete {entity}",
     "deleteMessage": "Are you sure you want to delete this {entity}? Deleted data cannot be recovered.",
+    "deletedUser": "[deleted user]",
     "edit": "Edit",
     "editEntity": "Edit {entity}",
     "goBack": "Go Back",
     "imageUrl": "Image URL",
+    "nextPage": "Next",
+    "previousPage": "Previous",
     "save": "Save"
   },
   "EntityLabel": {

@@ -218,7 +218,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - Virtual resolver guide: recorded the spec of the async/bulk/per-entity single-file resolver in `docs/knowledge/virtual-resolver-guide.md`
 
 ### Fixed
-- Deep labelField Prisma include merge: fixed the issue that relations with nested `label_field` are not merged correctly (commit 7aab3c9)。
+- Deep labelField Prisma include merge: fixed the issue that relations with nested `label_field` are not merged correctly (commit 7aab3c9).
 
 ## [1.1.0]
 

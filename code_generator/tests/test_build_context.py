@@ -882,7 +882,7 @@ from pathlib import Path
 
 
 class TestVirtualResolverNonOverwrite:
-    """generate.py _write_stub は既存ファイルを上書きしない。"""
+    """generate.py's _write_stub does not overwrite an existing file."""
 
     def test_write_stub_does_not_overwrite_existing(self, tmp_path):
         resolver_path = tmp_path / "virtual_resolvers.ts"

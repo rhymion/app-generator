@@ -476,7 +476,7 @@ The following decisions from the original Open Decisions (subtask_310e) are now 
 
 ---
 
-## 8. Remaining Concerns for Lord (dashboard 🚨要対応)
+## 8. Remaining Concerns for Lord (dashboard action items)
 
 ### ~~RC-1~~ — RESOLVED (2026-07-13)
 
@@ -549,5 +549,5 @@ Only `purchase_order` gains the `ledgerDomain` reference in Phase 2.
 
 ---
 
-*Document end. All Lord confirmations resolved (OD-1〜8, RC-1, RC-2) as of 2026-07-13. Design phase complete.*
+*Document end. All Lord confirmations resolved (OD-1–8, RC-1, RC-2) as of 2026-07-13. Design phase complete.*
 *Implementation begins after cmd_309 serialization. Phase order: 1 → 2 → 3 → 4 → 5.*

@@ -14,10 +14,13 @@
     "delete": "削除",
     "deleteDialogTitle": "{entity}を削除",
     "deleteMessage": "本当にこの{entity}を削除してもよろしいですか？削除されたデータは復元できません。",
+    "deletedUser": "[削除済みユーザー]",
     "edit": "編集",
     "editEntity": "{entity}を編集",
     "goBack": "戻る",
     "imageUrl": "画像URL",
+    "nextPage": "次へ",
+    "previousPage": "前へ",
     "save": "保存"
   },
   "EntityLabel": {

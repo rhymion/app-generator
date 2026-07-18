@@ -72,13 +72,13 @@ line's own `inventory_id` field — the operator picks the destination inventory
 (via Autocomplete on `receiving_receipt_line.inventory_id`), there is no candidate/criteria
 filtering here at all.
 
-## 4. Cross-product guard (item3, 2026-07-12 殿裁定)
+## 4. Cross-product guard (item3, 2026-07-12 ruling)
 
 **Ruling**: cross-product reservation/receiving is rejected as a **server-side hard error** on
 every path that resolves an inventory row from a user-supplied `inventory_id` — split's explicit
 branch (§2), the receiving ledger write (§3), and any future explicit-inventory path. The check is
 `inventory.product_id !== entity.product_id` (or the relevant parent's product for split parts) →
-throw. This closes a real bug (found by 将軍 read-only review, 2026-07-12): the split explicit-
+throw. This closes a real bug (found during a 2026-07-12 read-only code review): the split explicit-
 inventory branch and the receive ledger write previously did a plain `findUnique`/direct write
 with no product-match check, so an operator could reserve or receive against a lot belonging to a
 different product. The `criteria`-driven auto-allocate path in §1 was already safe by
@@ -142,6 +142,6 @@ different lot goes through split instead.
 key structure documented in §1 above (`pool`/`request`/`policy`/`result`, three current uses:
 `purchase_order`, `supply_request`, `room_reservation`) is the *current* schema shape. A design
 to classify each key as generator-read vs. dead and remove/replace unused keys (especially in
-`count` mode) is pending Gunshi review and 殿裁可 (dashboard 🚨) as of this writing — it has not
+`count` mode) is pending review and approval (dashboard action item) as of this writing — it has not
 been designed into code. Do not assume any `x-reservation` key documented here has been removed
 or replaced until that design lands and a follow-up doc update reflects the actual diff.

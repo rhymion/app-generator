@@ -68,7 +68,7 @@ async function main() {
     adminRole = await prisma.role.create({
       data: {
         name: 'Administrator',
-        description: '管理者権限',
+        description: 'Administrator permissions',
         creator_id: admin.id,
         updater_id: admin.id,
       },

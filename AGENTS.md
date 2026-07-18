@@ -19,7 +19,7 @@ your change.
 - `docs/knowledge/troubleshooting.md` - common errors and fixes
 - `docs/knowledge/appendix/approval-flow.md` - Approval Flow System detail
 - `docs/knowledge/appendix/comment-bridge.md` - Comment Bridge System detail
-- `docs/knowledge/virtual-resolver-guide.md` - virtual display columns の仕様
+- `docs/knowledge/virtual-resolver-guide.md` - virtual display columns spec
 - Other `docs/knowledge/*.md` - topical references (i18n, dark mode, datagrid, timezone, etc.)
 
 ## Docker Compose Setup

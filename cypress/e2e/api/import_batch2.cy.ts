@@ -53,7 +53,7 @@ describe('API: CSV Import batch2 (cmd_328) — dotted FK + Tier2/Tier3 authoriza
   // permission row (import:true only) on top of a Creator role — new db-helpers
   // plumbing outside this task's declared file-change scope (build_context.py +
   // api_import_route.ts.jinja2). Using the design's own documented fallback:
-  // "一般 update 権限のない actor → 全 row 拒否".
+  // "an actor without general update permission → reject all rows".
   it('test5: an actor without general update permission is rejected at Tier3 when updating an existing row', () => {
     cy.request({
       method: 'POST',
