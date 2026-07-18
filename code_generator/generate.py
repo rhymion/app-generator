@@ -20,7 +20,7 @@ from dataclasses import asdict
 import yaml
 from jinja2 import Environment, FileSystemLoader
 
-from helpers.naming import to_pascal_case, to_camel_case, to_title_case
+from helpers.naming import to_pascal_case, to_camel_case, to_title_case, safe_var_name, to_pascal_case_from_var
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit_child_bridge_fk
 from helpers.schema_helpers import get_flatten_rels
@@ -410,8 +410,8 @@ def _build_mobile_relation_context(entity_name: str, schema_data: dict) -> dict:
     build_mobile_entity_context() otherwise walks for scalar fields, so this
     looks up `<entity_name>_detail` independently.
 
-    Phase2 batch1 scope: many-to-many relations only. FK / enum / search /
-    approval context additions are deferred to later batches.
+    Phase2 batch2 scope: many-to-many (batch1) + many-to-one FK relations.
+    enum / search / approval context additions are deferred to later batches.
     """
     defs = schema_data.get('definitions', {})
     detail_def = defs.get(f'{entity_name}_detail', {})
@@ -431,8 +431,27 @@ def _build_mobile_relation_context(entity_name: str, schema_data: dict) -> dict:
             'ids_field': f'{prop_name}_ids',
         })
 
+    # FK (many-to-one) relations are declared per-property via x-relationship
+    # on the *base* entity definition (e.g. permission.role_id) — unlike m2m,
+    # which lives on _detail's x-relationships dict.
+    entity_def = defs.get(entity_name, {})
+    mobile_fk_relations = []
+    for prop_name, prop_schema in entity_def.get('properties', {}).items():
+        rel = prop_schema.get('x-relationship') or {}
+        if rel.get('type') != 'many-to-one':
+            continue
+        target = rel.get('target')
+        mobile_fk_relations.append({
+            'prop': prop_name,
+            'target': target,
+            'label': to_pascal_case(target),
+            'snake': target,
+            'api_path': f'/api/{target}',
+        })
+
     return {
         'mobile_m2m_relations': mobile_m2m_relations,
+        'mobile_fk_relations': mobile_fk_relations,
     }
 
 
@@ -454,6 +473,9 @@ def build_mobile_entity_context(entity_name: str, schema_data: dict) -> dict:
     for prop_name, prop_schema in properties.items():
         if prop_name == pk_field:
             continue
+        rel = prop_schema.get('x-relationship') or {}
+        if rel.get('type') == 'many-to-one':
+            continue  # rendered via mobile_fk_relations picker instead of a plain field
         prop_type = prop_schema.get('type')
         if isinstance(prop_type, list):
             nullable = 'null' in prop_type
@@ -464,8 +486,11 @@ def build_mobile_entity_context(entity_name: str, schema_data: dict) -> dict:
         ts_type = {'string': 'string', 'integer': 'number', 'number': 'number', 'boolean': 'boolean'}.get(base_type, 'string')
         if nullable:
             ts_type = f'{ts_type} | null'
+        var_name = safe_var_name(prop_name)
         fields.append({
             'name': prop_name,
+            'var_name': var_name,
+            'setter_name': f'set{to_pascal_case_from_var(var_name)}',
             'label': to_title_case(prop_name),
             'type': base_type,
             'nullable': nullable,
@@ -474,6 +499,14 @@ def build_mobile_entity_context(entity_name: str, schema_data: dict) -> dict:
 
     label = to_pascal_case(entity_name)
     plural_label = f'{label}s'
+    # edit.tsx.jinja2 hardcodes name/description (Phase1 role-only PoC); other
+    # scalar fields (e.g. permission's create/read/update/delete/import) are
+    # rendered generically as toggles. has_description gates the hardcoded
+    # description UI/state for entities that don't have that column at all
+    # (e.g. permission) — without this guard, generated code references a
+    # field absent from the entity's TS interface and fails tsc.
+    mobile_toggle_fields = [f for f in fields if f['type'] == 'boolean']
+    has_description = any(f['name'] == 'description' for f in fields)
 
     return {
         'entity_name': entity_name,
@@ -484,6 +517,8 @@ def build_mobile_entity_context(entity_name: str, schema_data: dict) -> dict:
         'edit_fields': fields,
         'pk_field': pk_field,
         'api_path': f'/api/{entity_name}',
+        'mobile_toggle_fields': mobile_toggle_fields,
+        'has_description': has_description,
         **_build_mobile_relation_context(entity_name, schema_data),
     }
 

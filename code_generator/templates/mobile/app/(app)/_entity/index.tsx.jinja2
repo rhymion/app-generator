@@ -65,7 +65,9 @@ export default function {{ label }}ListScreen() {
             onPress={() => router.push(`/(app)/{{ snake_name }}/${item.{{ pk_field }}}`)}
           >
             <Text style={styles.rowTitle}>{item.name}</Text>
+{% if has_description %}
             {item.description ? <Text style={styles.rowSubtitle}>{item.description}</Text> : null}
+{% endif %}
           </Pressable>
         )}
         ListEmptyComponent={

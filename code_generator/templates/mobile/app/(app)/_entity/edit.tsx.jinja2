@@ -10,6 +10,9 @@ import {
   ActivityIndicator,
   Alert,
   StyleSheet,
+{% if mobile_toggle_fields %}
+  Switch,
+{% endif %}
 } from 'react-native';
 import {
   fetch{{ label }}ById,
@@ -18,8 +21,11 @@ import {
 {% for rel in mobile_m2m_relations %}
   fetch{{ rel.label }}Autocomplete,
 {% endfor %}
+{% for rel in mobile_fk_relations %}
+  fetch{{ rel.label }}Autocomplete,
+{% endfor %}
 } from '@/lib/{{ snake_name }}-api';
-{% if mobile_m2m_relations %}
+{% if mobile_m2m_relations or mobile_fk_relations %}
 import { MobilePicker, MobilePickerItem } from '@/components/MobilePicker';
 {% endif %}
 
@@ -29,8 +35,17 @@ export default function {{ label }}EditScreen() {
   const queryClient = useQueryClient();
 
   const [name, setName] = useState('');
+{% if has_description %}
   const [description, setDescription] = useState('');
+{% endif %}
+{% for field in mobile_toggle_fields %}
+  const [{{ field.var_name }}, {{ field.setter_name }}] = useState(false);
+{% endfor %}
 {% for rel in mobile_m2m_relations %}
+  const [selected{{ rel.label }}Ids, setSelected{{ rel.label }}Ids] = useState<string[]>([]);
+  const [{{ rel.snake }}Options, set{{ rel.label }}Options] = useState<MobilePickerItem[]>([]);
+{% endfor %}
+{% for rel in mobile_fk_relations %}
   const [selected{{ rel.label }}Ids, setSelected{{ rel.label }}Ids] = useState<string[]>([]);
   const [{{ rel.snake }}Options, set{{ rel.label }}Options] = useState<MobilePickerItem[]>([]);
 {% endfor %}
@@ -44,13 +59,27 @@ export default function {{ label }}EditScreen() {
   useEffect(() => {
     if (data) {
       setName(data.name ?? '');
+{% if has_description %}
       setDescription(data.description ?? '');
+{% endif %}
+{% for field in mobile_toggle_fields %}
+      {{ field.setter_name }}(Boolean(data.{{ field.name }}));
+{% endfor %}
 {% for rel in mobile_m2m_relations %}
       setSelected{{ rel.label }}Ids(data.{{ rel.prop }}.map((item) => item.id));
+{% endfor %}
+{% for rel in mobile_fk_relations %}
+      setSelected{{ rel.label }}Ids(data.{{ rel.prop }} ? [data.{{ rel.prop }}] : []);
 {% endfor %}
     }
   }, [data]);
 {% for rel in mobile_m2m_relations %}
+
+  useEffect(() => {
+    fetch{{ rel.label }}Autocomplete().then(set{{ rel.label }}Options).catch(() => {});
+  }, []);
+{% endfor %}
+{% for rel in mobile_fk_relations %}
 
   useEffect(() => {
     fetch{{ rel.label }}Autocomplete().then(set{{ rel.label }}Options).catch(() => {});
@@ -61,9 +90,17 @@ export default function {{ label }}EditScreen() {
     mutationFn: async () => {
       const input = {
         name,
+{% if has_description %}
         description: description || null,
+{% endif %}
+{% for field in mobile_toggle_fields %}
+        {{ field.name }}: {{ field.var_name }},
+{% endfor %}
 {% for rel in mobile_m2m_relations %}
         {{ rel.ids_field }}: selected{{ rel.label }}Ids, // always explicit — never omit (cmd_366 guard)
+{% endfor %}
+{% for rel in mobile_fk_relations %}
+        {{ rel.prop }}: selected{{ rel.label }}Ids[0] ?? null,
 {% endfor %}
       };
       if (isEdit) {
@@ -93,6 +130,7 @@ export default function {{ label }}EditScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.label}>Name</Text>
       <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Name" />
+{% if has_description %}
       <Text style={styles.label}>Description</Text>
       <TextInput
         style={[styles.input, styles.multiline]}
@@ -101,6 +139,13 @@ export default function {{ label }}EditScreen() {
         placeholder="Description"
         multiline
       />
+{% endif %}
+{% for field in mobile_toggle_fields %}
+      <View style={styles.toggleRow}>
+        <Text style={styles.label}>{{ field.label }}</Text>
+        <Switch value={ {{ field.var_name }} } onValueChange={ {{ field.setter_name }} } />
+      </View>
+{% endfor %}
 {% for rel in mobile_m2m_relations %}
       <MobilePicker
         label="{{ rel.label }}s"
@@ -109,6 +154,16 @@ export default function {{ label }}EditScreen() {
         onChange={setSelected{{ rel.label }}Ids}
         onSearch={(q) => fetch{{ rel.label }}Autocomplete(q).then(set{{ rel.label }}Options).catch(() => {})}
         multi
+      />
+{% endfor %}
+{% for rel in mobile_fk_relations %}
+      <MobilePicker
+        label="{{ rel.label }}"
+        items={ {{ rel.snake }}Options }
+        value={selected{{ rel.label }}Ids}
+        onChange={setSelected{{ rel.label }}Ids}
+        onSearch={(q) => fetch{{ rel.label }}Autocomplete(q).then(set{{ rel.label }}Options).catch(() => {})}
+        multi={false}
       />
 {% endfor %}
       <Pressable
@@ -135,6 +190,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   multiline: { minHeight: 80, textAlignVertical: 'top' },
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
   button: {
     backgroundColor: '#2563eb',
     borderRadius: 8,

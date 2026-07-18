@@ -125,3 +125,119 @@ def test_generate_mobile_target_noop_when_no_mobile_entities(tmp_path):
     output_dir = tmp_path / "mobile"
     generate_mobile_target([], schema, output_dir, env)
     assert not output_dir.exists()
+
+
+def _permission_schema() -> dict:
+    """cmd_376 batch2: FK (many-to-one) + required boolean fields, no
+    'description' column — exercises mobile_fk_relations, mobile_toggle_fields
+    and the has_description guard against a real Phase2 second entity."""
+    return {
+        "definitions": {
+            "role": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    "name": {"type": "string", "minLength": 1},
+                },
+            },
+            "permission": {
+                "type": "object",
+                "required": ["id", "name", "create", "read", "update", "delete"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    "name": {"type": "string", "minLength": 1},
+                    "create": {"type": "boolean"},
+                    "read": {"type": "boolean"},
+                    "update": {"type": "boolean"},
+                    "delete": {"type": "boolean"},
+                    "import": {"type": "boolean", "default": False},
+                    "role_id": {
+                        "type": ["string", "null"],
+                        "pattern": "^c[a-z0-9]{24,}$",
+                        "x-relationship": {"type": "many-to-one", "target": "role", "labelField": "name"},
+                    },
+                },
+            },
+            "permission_detail": {
+                "x-generate": {
+                    "list": True,
+                    "view": True,
+                    "new": True,
+                    "edit": True,
+                    "delete": True,
+                    "api": True,
+                    "test": True,
+                    "mobile": True,
+                },
+                "allOf": [{"$ref": "#/definitions/permission"}],
+            },
+        }
+    }
+
+
+def test_build_mobile_entity_context_fk_relation():
+    schema = _permission_schema()
+    ctx = build_mobile_entity_context("permission", schema)
+    assert ctx["mobile_fk_relations"] == [
+        {
+            "prop": "role_id",
+            "target": "role",
+            "label": "Role",
+            "snake": "role",
+            "api_path": "/api/role",
+        }
+    ]
+    # role_id is represented via mobile_fk_relations, not as a plain field
+    field_names = {f["name"] for f in ctx["display_fields"]}
+    assert "role_id" not in field_names
+
+
+def test_build_mobile_entity_context_toggle_fields_and_reserved_words():
+    schema = _permission_schema()
+    ctx = build_mobile_entity_context("permission", schema)
+    toggle_names = {f["name"] for f in ctx["mobile_toggle_fields"]}
+    assert toggle_names == {"create", "read", "update", "delete", "import"}
+    delete_field = next(f for f in ctx["mobile_toggle_fields"] if f["name"] == "delete")
+    assert delete_field["var_name"] == "deleteValue"
+    assert delete_field["setter_name"] == "setDeleteValue"
+    import_field = next(f for f in ctx["mobile_toggle_fields"] if f["name"] == "import")
+    assert import_field["var_name"] == "importValue"
+    create_field = next(f for f in ctx["mobile_toggle_fields"] if f["name"] == "create")
+    assert create_field["var_name"] == "create"
+    assert create_field["setter_name"] == "setCreate"
+
+
+def test_build_mobile_entity_context_has_description_false_for_permission():
+    schema = _permission_schema()
+    ctx = build_mobile_entity_context("permission", schema)
+    assert ctx["has_description"] is False
+
+
+def test_build_mobile_entity_context_has_description_true_for_role():
+    schema = _role_schema()
+    ctx = build_mobile_entity_context("role", schema)
+    assert ctx["has_description"] is True
+
+
+def test_mobile_target_generated_for_permission_entity(tmp_path):
+    """Full render pass for the FK entity: no Jinja/template errors, and the
+    generated edit screen wires up the role FK picker + boolean toggles."""
+    schema = _permission_schema()
+    env = _make_env()
+    mobile_entities = get_mobile_entities(schema)
+    assert mobile_entities == ["permission"]
+
+    output_dir = tmp_path / "mobile"
+    generate_mobile_target(mobile_entities, schema, output_dir, env)
+
+    edit_tsx = (output_dir / "app" / "(app)" / "permission" / "edit.tsx").read_text(encoding="utf-8")
+    assert "fetchRoleAutocomplete" in edit_tsx
+    assert "multi={false}" in edit_tsx
+    assert "Switch" in edit_tsx
+    assert "deleteValue" in edit_tsx
+    assert "description" not in edit_tsx.lower()
+
+    api_client = (output_dir / "lib" / "permission-api.ts").read_text(encoding="utf-8")
+    assert "role_id: string | null;" in api_client
+    assert "fetchRoleAutocomplete" in api_client

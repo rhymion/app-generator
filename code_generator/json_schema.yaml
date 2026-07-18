@@ -385,6 +385,7 @@ definitions:
       api: true
       test: true
       search: false
+      mobile: true   # cmd_376 Phase2 batch2: FK picker (role) mobile PoC
     # Security-sensitive entity: every create/update/delete is recorded in
     # the audit_log table by the generated service layer.
     x-audit: true

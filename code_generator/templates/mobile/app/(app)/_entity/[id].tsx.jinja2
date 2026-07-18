@@ -85,10 +85,12 @@ export default function {{ label }}DetailScreen() {
         <Text style={styles.label}>Name</Text>
         <Text style={styles.value}>{data.name ?? '—'}</Text>
       </View>
+{% if has_description %}
       <View style={styles.field}>
         <Text style={styles.label}>Description</Text>
         <Text style={styles.value}>{data.description ?? '—'}</Text>
       </View>
+{% endif %}
       <Pressable
         style={styles.button}
         onPress={() => router.push(`/(app)/{{ snake_name }}/edit?id=${id}`)}
