@@ -1,24 +1,47 @@
 # Database Management for Testing
 
-This project uses a multi-database strategy for different environments:
+This project uses a multi-environment database strategy:
 
-- **Development**: PostgreSQL via Docker (`docker-compose.dev.yml`, port 5433, DB `my_next_dev`)
-- **E2E Testing**: Separate PostgreSQL + Redis via Docker (`docker-compose.test.yml`)
+- **Development**: shares the E2E test PostgreSQL container/DB below (`my_next_test`) — no separate dev DB
+- **E2E Testing**: PostgreSQL + Redis via Docker (`docker-compose.test.yml`)
 - **Unit Testing (optional)**: SQLite for speed
 - **Production**: PostgreSQL (Vercel)
+
+### Why dev shares the test DB (cmd_368 / cmd_370)
+
+Dev used to point at a separate `my_next_dev` DB provisioned by
+`docker-compose.dev.yml`, but that container/DB was never actually created —
+`DATABASE_URL` in `.env.development` pointed at a DB that didn't exist
+(discovered cmd_368, fixed cmd_370). Rather than provision a real standalone
+dev DB, the decision was to have dev reuse `my_next_test`: this project
+provisions its schema with `prisma db push` during the PoC phase (no
+`prisma/migrations/` yet — see `docs/knowledge/migration-guide.md`), so
+there's no migration-file-driven dev/test split for a separately-migrated
+dev DB to serve. `docker-compose.dev.yml` is kept only for reference and is
+not started by any npm script.
+
+Because dev and test now share one database, be aware that data you create
+while running `npm run dev` locally is visible to (and can be reset by)
+E2E test runs against the same checkout, and vice versa.
 
 ## Dev vs Test Container Overview
 
 | | Development | Test |
 |---|---|---|
-| Compose file | `docker-compose.dev.yml` | `docker-compose.test.yml` |
-| DB name | `my_next_dev` | `my_next_test` |
-| Postgres port | 5433 | 5434 |
-| Redis | なし (in-memory rate limiter) | `redis-test` (port 6381) |
-| Start | `npm run docker:up:dev` | `npm run docker:up:test` |
-| Stop | `npm run docker:down:dev` | `npm run docker:down:test` |
+| Compose file | `docker-compose.test.yml` (shared) | `docker-compose.test.yml` |
+| DB name | `my_next_test` (same DB as Test) | `my_next_test` |
+| Postgres port | same as Test — see `.env.test`'s `POSTGRES_PORT` | see `.env.test`'s `POSTGRES_PORT` |
+| Redis | なし (in-memory rate limiter) | `redis-test` |
+| Start | `npm run docker:up:dev` (alias for the Test container) | `npm run docker:up:test` |
+| Stop | `npm run docker:down:dev` (no-op — see below) | `npm run docker:down:test` |
 
 Dev omits Redis — `REDIS_URL` is unset in `.env.development`, so `getRateLimiter()` falls back to the in-memory rate limiter automatically.
+
+`docker:down:dev` is intentionally a no-op rather than actually stopping the
+container: since dev and test now share it, a routine "stop the DB when I'm
+done with dev" habit must not silently kill a container that Cypress or
+another session might still be using. Stop it deliberately with
+`npm run docker:down:test` only when you're sure nothing else needs it.
 
 ## Quick Start
 
@@ -80,8 +103,8 @@ npm test
 
 | Script | Description |
 |--------|-------------|
-| `npm run docker:up:dev` | Start dev Postgres container (`postgres-dev`, port 5433) |
-| `npm run docker:down:dev` | Stop dev Postgres container |
+| `npm run docker:up:dev` | Alias for `docker:up:test` — starts the shared `postgres-test` container |
+| `npm run docker:down:dev` | No-op (dev shares the test container; use `docker:down:test` deliberately instead) |
 | `npm run docker:up:test` | Start test containers (`postgres-test` + `redis-test`) |
 | `npm run docker:down:test` | Stop test containers |
 | `npm run migrate:dev` | Run Prisma migrations (dev) |
@@ -147,7 +170,7 @@ npm run migrate:reset:test
 
 ### ❌ DON'T:
 - Use production database for testing
-- Use development database for e2e tests
+- Point e2e tests at anything other than `my_next_test` (dev now shares this DB by design — see "Why dev shares the test DB" above — but production or an ad-hoc local DB must never be used)
 - Rely on database state between tests
 - Use SQLite for e2e tests (different behavior from production)
 

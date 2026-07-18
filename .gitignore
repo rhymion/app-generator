@@ -58,6 +58,7 @@ next-env.d.ts
 # hand-written PoC test files (not generated) — track these explicitly
 !/mobile/e2e/
 !/mobile/playwright.config.ts
+!/mobile/scripts/
 
 # database
 /prisma/dev.db

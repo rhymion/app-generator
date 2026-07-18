@@ -1,3 +1,13 @@
+# DEPRECATED (cmd_368/cmd_370): dev now reuses the postgres-test container
+# and its my_next_test DB (see docker-compose.test.yml, .env.development,
+# docs/knowledge/DATABASE_TESTING.md). `npm run docker:up:dev` /
+# `docker:down:dev` no longer invoke this file — they alias to the test
+# compose commands. This file is kept only for reference and is not started
+# by any npm script; starting it manually would create an empty, unused
+# `my_next_dev` DB and, since it defaults to the same port as
+# docker-compose.test.yml, may collide with an already-running test
+# container.
+#
 # Local development services (postgres only).
 # Redis is not needed for dev — the rate limiter falls back to in-memory
 # when REDIS_URL is unset (see lib/rate-limit/index.ts).

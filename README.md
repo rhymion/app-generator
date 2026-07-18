@@ -215,8 +215,15 @@ Or follow the step-by-step instructions below.
 ### Start the Development Database
 
 ```bash
-npm run docker:up:dev    # starts postgres-dev (port 5433, DB: my_next_dev)
+npm run docker:up:dev    # starts postgres-test (port 5433, DB: my_next_test) — shared with the test env
 ```
+
+Dev reuses the same Postgres container and database as the test environment
+(`my_next_test`) instead of a separate `my_next_dev`. This project provisions
+its schema via `prisma db push` during the PoC phase (no `prisma/migrations/`
+yet — see `docs/knowledge/migration-guide.md`), so there's no migration-file
+workflow for a separately-migrated dev DB to serve. See
+`docs/knowledge/DATABASE_TESTING.md` for details.
 
 ### Generate Code, Push Schema, and Seed
 
@@ -233,7 +240,7 @@ npm run dev              # Next.js dev server on port 3001
 Open [http://localhost:3001](http://localhost:3001) to see the application. After the server starts, visit [http://localhost:3001/docs](http://localhost:3001/docs) to browse generated entity documentation (English only).
 
 ```bash
-npm run docker:down:dev  # stop the database when done
+npm run docker:down:dev  # no-op — dev shares the test container; stop it explicitly with docker:down:test only when nothing else needs it
 ```
 
 ---
@@ -355,7 +362,7 @@ Next.js loads environment files automatically based on `NODE_ENV`:
 | File | Environment | Notes |
 |------|------------|-------|
 | `.env` | All | Common baseline (committed) |
-| `.env.development` | Development | PORT 3001, postgres-dev (port 5433) |
+| `.env.development` | Development | PORT 3001, shares the `postgres-test` container/DB with Test (`my_next_test`) — no separate dev DB |
 | `.env.test` | Test/E2E | PORT 3000, postgres-test (port 5432), redis-test (port 6379) |
 | `.env.production` | Production | Set variables in Vercel dashboard (gitignored) |
 | `.env.local` | Local secrets | Gitignored; created manually if needed |
@@ -365,7 +372,7 @@ Key variables:
 | Variable | Development | Test | Production |
 |----------|------------|------|-----------|
 | `PORT` | 3001 | 3000 | Vercel-assigned |
-| `DATABASE_URL` | `postgresql://…@localhost:5433/my_next_dev` | `postgresql://…@localhost:5432/my_next_test` | Vercel env var |
+| `DATABASE_URL` | same value as Test — `postgresql://…@localhost:<POSTGRES_PORT>/my_next_test` (dev has no DB of its own; keep `POSTGRES_PORT` in sync with `.env.test`) | `postgresql://…@localhost:5432/my_next_test` | Vercel env var |
 | `REDIS_URL` | not set (in-memory fallback) | `redis://localhost:6379` | managed |
 | `AUTH_SECRET` | set in `.env.development` | set in `.env.test` | set in Vercel |
 | `NEXTAUTH_URL` | `http://localhost:3001` | `http://localhost:3000` | production URL |

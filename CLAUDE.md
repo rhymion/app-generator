@@ -20,25 +20,32 @@ your change.
 - `docs/knowledge/appendix/approval-flow.md` - Approval Flow System detail
 - `docs/knowledge/appendix/comment-bridge.md` - Comment Bridge System detail
 - `docs/knowledge/virtual-resolver-guide.md` - virtual display columns の仕様
+- `docs/knowledge/mobile-poc-test-runbook.md` - mandatory real-browser verification gate for `mobile/` (Expo) PoC tasks
 - Other `docs/knowledge/*.md` - topical references (i18n, dark mode, datagrid, timezone, etc.)
 
 ## Docker Compose Setup
 
-Two separate Compose files manage local containers:
+One Compose file provides the local Postgres container that both dev and
+test use. `docker-compose.dev.yml` is deprecated (cmd_368/cmd_370) — dev no
+longer provisions its own `my_next_dev` DB, it reuses `postgres-test` /
+`my_next_test`. This project provisions its schema via `prisma db push`
+during the PoC phase (no `prisma/migrations/` yet), so there is no
+migration-file workflow for a separately-migrated dev DB to serve. See
+`docs/knowledge/DATABASE_TESTING.md` for the full reasoning.
 
 | File | Purpose | Containers |
 |------|---------|------------|
-| `docker-compose.dev.yml` | Development database | `postgres-dev` (port 5433, DB `my_next_dev`) |
-| `docker-compose.test.yml` | Test containers | `postgres-test` (port 5432) + `redis-test` (port 6379) |
+| `docker-compose.test.yml` | Postgres + Redis, used by both dev and test | `postgres-test` (port 5432) + `redis-test` (port 6379) |
+| `docker-compose.dev.yml` | Deprecated, unused by any npm script | — |
 
 ```bash
-# Development
-npm run docker:up:dev    # start postgres-dev
-npm run docker:down:dev  # stop postgres-dev
+# Development (aliases to the same container as Testing, below)
+npm run docker:up:dev    # start postgres-test (shared with test)
+npm run docker:down:dev  # no-op — see the script for why
 
 # Testing
 npm run docker:up:test   # start postgres-test + redis-test
-npm run docker:down:test # stop test containers
+npm run docker:down:test # stop test containers — only when nothing else needs them
 ```
 
 Dev environment sets no `REDIS_URL` in `.env.development`, so `getRateLimiter()` falls back to the in-memory rate limiter automatically. Redis is only required for E2E tests and Redis adapter unit tests.
