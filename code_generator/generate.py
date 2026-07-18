@@ -478,17 +478,22 @@ def generate_mobile_target(mobile_entities: list[str], schema_data: dict, output
     for tmpl_name, rel_out in scaffold_templates:
         _write(output_dir / rel_out, _render(env, f'mobile/{tmpl_name}', app_context))
 
+    # Screen templates live under a single entity-agnostic source directory
+    # (templates/mobile/app/(app)/_entity/) and are rendered once per entity
+    # into that entity's own output directory. The source path is fixed —
+    # only the output path varies by entity_name — so adding a new entity to
+    # mobile_entities never requires a matching on-disk template directory.
     for entity_name in mobile_entities:
         entity_ctx = {**app_context, **build_mobile_entity_context(entity_name, schema_data)}
         screen_dir = output_dir / 'app' / '(app)' / entity_name
         _write(screen_dir / '_layout.tsx',
-               _render(env, f'mobile/app/(app)/{entity_name}/_layout.tsx.jinja2', entity_ctx))
+               _render(env, 'mobile/app/(app)/_entity/_layout.tsx.jinja2', entity_ctx))
         _write(screen_dir / 'index.tsx',
-               _render(env, f'mobile/app/(app)/{entity_name}/index.tsx.jinja2', entity_ctx))
+               _render(env, 'mobile/app/(app)/_entity/index.tsx.jinja2', entity_ctx))
         _write(screen_dir / '[id].tsx',
-               _render(env, f'mobile/app/(app)/{entity_name}/[id].tsx.jinja2', entity_ctx))
+               _render(env, 'mobile/app/(app)/_entity/[id].tsx.jinja2', entity_ctx))
         _write(screen_dir / 'edit.tsx',
-               _render(env, f'mobile/app/(app)/{entity_name}/edit.tsx.jinja2', entity_ctx))
+               _render(env, 'mobile/app/(app)/_entity/edit.tsx.jinja2', entity_ctx))
         _write(output_dir / 'lib' / f'{entity_name}-api.ts',
                _render(env, 'mobile/lib/api-client.ts.jinja2', entity_ctx))
 

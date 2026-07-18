@@ -1,0 +1,125 @@
+import { useLocalSearchParams, router } from 'expo-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  StyleSheet,
+} from 'react-native';
+import { fetch{{ label }}ById, delete{{ label }} } from '@/lib/{{ snake_name }}-api';
+
+// react-native-web's Alert.alert() is a no-op stub (confirmed empty in
+// node_modules/react-native-web/src/exports/Alert) — it silently does
+// nothing on web, so a delete confirmation built on Alert.alert alone would
+// never prompt when the app runs via `expo start --web` or `expo export`'s
+// web bundle. window.confirm/alert cover the web target; Alert.alert stays
+// for iOS/Android, matching the existing Platform.OS branch in
+// lib/token-storage.ts.
+function notify(title: string, message: string): void {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}: ${message}`);
+    return;
+  }
+  Alert.alert(title, message);
+}
+
+export default function {{ label }}DetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const queryClient = useQueryClient();
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['{{ snake_name }}', id],
+    queryFn: () => fetch{{ label }}ById(id),
+    enabled: !!id,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => delete{{ label }}(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['{{ snake_name }}-list'] });
+      router.back();
+    },
+    onError: (error: unknown) => {
+      notify('Delete failed', error instanceof Error ? error.message : 'Something went wrong.');
+    },
+  });
+
+  const confirmMessage = 'Are you sure you want to delete this {{ label }}? This cannot be undone.';
+
+  const confirmDelete = () => {
+    if (Platform.OS === 'web') {
+      if (window.confirm(confirmMessage)) {
+        deleteMutation.mutate();
+      }
+      return;
+    }
+    Alert.alert('Delete {{ label }}', confirmMessage, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => deleteMutation.mutate() },
+    ]);
+  };
+
+  if (isLoading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (isError || !data) {
+    return (
+      <View style={styles.center}>
+        <Text>Failed to load {{ label }}.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.field}>
+        <Text style={styles.label}>Name</Text>
+        <Text style={styles.value}>{data.name ?? '—'}</Text>
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>Description</Text>
+        <Text style={styles.value}>{data.description ?? '—'}</Text>
+      </View>
+      <Pressable
+        style={styles.button}
+        onPress={() => router.push(`/(app)/{{ snake_name }}/edit?id=${id}`)}
+      >
+        <Text style={styles.buttonText}>Edit</Text>
+      </Pressable>
+      <Pressable
+        style={[styles.button, styles.deleteButton]}
+        onPress={confirmDelete}
+        disabled={deleteMutation.isPending}
+      >
+        <Text style={styles.buttonText}>{deleteMutation.isPending ? 'Deleting…' : 'Delete'}</Text>
+      </Pressable>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  content: { padding: 16, gap: 16 },
+  field: { gap: 4 },
+  label: { fontSize: 13, color: '#666' },
+  value: { fontSize: 16 },
+  button: {
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+    padding: 14,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  deleteButton: { backgroundColor: '#dc2626' },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+});
