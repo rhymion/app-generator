@@ -48,15 +48,21 @@ test.describe('Mobile role screens runtime smoke (cmd_359)', () => {
     await page.fill('[placeholder="Description"]', description);
     await page.click('text=Save');
 
-    // Save invalidates the role-list query and navigates back to the detail
-    // screen. Re-entering via the Roles tab (which resets that tab's stack)
-    // and the list row again forces a fresh mount/fetch of the detail screen
-    // — proving the edit actually persisted server-side, not just optimistic
-    // local state.
-    await expect(page.getByText('Name', { exact: true }).first()).toBeVisible({ timeout: 10000 });
-    await page.click('text=Roles');
-    await expect(page.getByText('Administrator').first()).toBeVisible({ timeout: 10000 });
-    await page.getByText('Administrator').first().click();
+    // Save navigates straight back to the role list (edit.tsx's
+    // onSuccess -> router.replace('/(app)/role/'), the cmd_376 "save-to-list
+    // nav" change — not to the detail screen this spec originally targeted
+    // at cmd_359). Re-opening the row from the list forces a fresh
+    // mount/fetch of the detail screen, proving the edit actually persisted
+    // server-side, not just optimistic local state.
+    //
+    // react-native-web's FlatList briefly renders extra off-screen/phantom
+    // copies of a row during the invalidateQueries re-fetch that follows
+    // Save (`.first()` is safe on the *initial* list render above, but not
+    // here); `.last()` is the copy FlatList actually laid out — same
+    // convention already used for this class of FlatList re-render in the
+    // (now-folded-into-FLOW_TYPE=edit-picker) role-picker-verify.js.
+    await expect(page.getByText('Administrator').last()).toBeVisible({ timeout: 10000 });
+    await page.getByText('Administrator').last().click();
     // react-native-web sometimes flattens adjacent <Text> into an
     // accessibility node whose own bounding box reads as non-visible to
     // Playwright even though the text is genuinely on screen (confirmed via
