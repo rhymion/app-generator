@@ -2817,14 +2817,18 @@ def api_spec_context(
         {**r, 'relation_name': r['prop_name'].removesuffix('_id')}
         for r in _api_parent_rels_raw
     ]
+    # cmd_382 (b): every parent relation now gets a CSV flatten column,
+    # regardless of labelField shape — build_context.py's x_relationships_list
+    # resolves composite/dotted labelField into a joined display string (with
+    # a guaranteed-to-resolve fallback on any path error), so cardinality here
+    # must match parent_rels 1:1 for the N6 expected-headers assertion to stay
+    # in sync with the actual generated CSV output.
     x_relationships_list = [
         {
             'field': r['relation_name'],
             'display_col': f"{r['relation_name']}_name",
-            'label_field': r['label_field'],
         }
         for r in _api_parent_rels
-        if '.' not in r['label_field']
     ]
 
     _EXPORT_SYSTEM_FIELDS = {
