@@ -3,7 +3,7 @@
 Tracks the migration described in `planning/cmd395-schema-restructuring-design.md`
 (cmd_395, Lord's ruling: proceed with Stages 1–4; Stage 5 CUID→UUID deferred).
 
-## Stage 1 (cmd_406, current) — `build_user_schema.py` added, not yet wired in
+## Stage 1 (cmd_406) — `build_user_schema.py` added, not yet wired in
 
 `code_generator/build_user_schema.py` exists as a standalone tool:
 
@@ -25,23 +25,42 @@ simplified (design doc §12 Stage 3).
 hand-edited, and rebuilt from source on every build (same policy as generated
 application code).
 
-## Stage 2 (future) — switch invocation to the intermediate schema
+## Stage 2 (cmd_407, current) — invocation switched to the intermediate schema
 
-Once Stage 2 lands, the build order becomes:
+`package.json`'s `generate-code` script now runs `build_user_schema.py` before
+`generate.py`, pointing `generate.py` at the intermediate schema instead of the
+user-authored file directly:
+
+```json
+"generate-code": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/generate.py code_generator/.generated/json_schema.yaml ./",
+```
+
+Build order:
 
 ```bash
 prisma generate                    # (unchanged)
-python3 code_generator/build_user_schema.py \
-  code_generator/json_schema.yaml prisma/schema.prisma \
-  --out code_generator/.generated/json_schema.yaml
-python3 code_generator/generate.py code_generator/.generated/json_schema.yaml ./
+npm run generate-code              # build_user_schema.py, then generate.py against
+                                    # code_generator/.generated/json_schema.yaml
 next build
 ```
 
-`package.json`'s `generate-code` script (currently
-`python3 code_generator/generate.py code_generator/json_schema.yaml ./`) and
-`prj:sync`/`vercel-build` chains will need the `build_user_schema.py` step
-inserted before `generate.py` at that point. Not done in Stage 1.
+No source-code change to `generate.py` was needed — it already read its schema
+path from `sys.argv[1]` (positional). `cleanup.py` / `check_generated.py` still
+point at `code_generator/json_schema.yaml` directly; they inspect entity
+definitions rather than drive the generator, and that file's content is
+unchanged by this stage, so no switch was needed there.
+
+Every script that reaches `generate.py` goes through the `generate-code` npm
+script (`setup`, `dev:full`, `build:full`, `test:e2e*`, `python-generate` →
+`vercel-build`), so this single edit covers the whole invocation surface;
+`.vscode/launch.json`'s standalone debug entry (a personal debugging
+convenience, not part of the build/CI pipeline) was left pointed at the
+legacy path and is out of scope.
+
+Golden diff verified zero two ways: byte-for-byte `diff -rq` across all 200
+generated files, and independent `.generated-manifest.json` sha256 hash-set
+comparison, both between the pre-switch (direct `json_schema.yaml`) and
+post-switch (`.generated/json_schema.yaml`) invocations.
 
 ## Stage 3+ — simplified user schema
 
