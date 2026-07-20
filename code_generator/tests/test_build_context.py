@@ -984,3 +984,111 @@ class TestXRelationshipsListCompositeExclusion:
                 f"x_relationships_list[field={rel['field']}].label_field must be str, "
                 f"got {type(rel['label_field']).__name__}: {rel['label_field']!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# DP-2a (cmd_394 §12): dotted x-import-key lookup_entity must resolve via
+# x-relationship.target, not the dotted-key property prefix. Regression for
+# the approval_flow.approver_role.name land mine (prisma.approver_role is
+# undefined; the real model is 'role').
+# ---------------------------------------------------------------------------
+
+class TestImportKeySpecsAliasedFkLookup:
+    """approval_flow has TWO FK properties (approver_role_id, requestor_role_id)
+    that both target model 'role' under different property-name prefixes — the
+    scenario that first exposed DP-2a (a single dotted key aliasing to 'role'
+    coincidentally worked before this fix only when prefix==target)."""
+
+    SCHEMA = {
+        "definitions": {
+            "role": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "approval_flow": {
+                "type": "object",
+                "required": ["id", "entity_name", "approver_role_id", "requestor_role_id"],
+                "x-import-key": ["entity_name", "approver_role.name", "requestor_role.name"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "entity_name": {"type": "string"},
+                    "approver_role_id": _fk_field("role", label="name"),
+                    "requestor_role_id": _fk_field("role", label="name"),
+                },
+            },
+        }
+    }
+
+    ENTITY = {
+        "parent": "approval_flow",
+        "model": "approval_flow",
+        "definition_key": "approval_flow",
+        "children": [],
+        "generate_config": {
+            "list": True, "view": True, "new": True, "edit": True,
+            "delete": True, "api": True, "test": False, "fields": None,
+        },
+    }
+
+    def _specs_by_raw(self):
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        return {s["raw"]: s for s in ctx["import_key_specs"] if s["is_dotted"]}
+
+    def test_lookup_entity_resolves_to_relationship_target_not_prefix(self):
+        specs = self._specs_by_raw()
+        assert specs["approver_role.name"]["lookup_entity"] == "role", (
+            "lookup_entity must come from x-relationship.target ('role'), "
+            "not the dotted-key prefix ('approver_role') — prisma.approver_role "
+            "does not exist and would crash at runtime"
+        )
+        assert specs["requestor_role.name"]["lookup_entity"] == "role"
+
+    def test_result_col_and_csv_col_unaffected_by_fix(self):
+        """Only lookup_entity changes — result_col/csv_col stay prefix-derived (correct already)."""
+        specs = self._specs_by_raw()
+        assert specs["approver_role.name"]["result_col"] == "approver_role_id"
+        assert specs["approver_role.name"]["csv_col"] == "approver_role_name"
+        assert specs["requestor_role.name"]["result_col"] == "requestor_role_id"
+        assert specs["requestor_role.name"]["csv_col"] == "requestor_role_name"
+
+    def test_var_prefix_stays_unique_when_lookup_entity_collides(self):
+        """Two dotted keys resolving to the SAME lookup_entity ('role') must keep
+        distinct var_prefix values, or the rendered template emits duplicate
+        `const _role_rows` / `const _role_csv_val` declarations (TS build error)."""
+        specs = self._specs_by_raw()
+        assert specs["approver_role.name"]["lookup_entity"] == specs["requestor_role.name"]["lookup_entity"]
+        assert specs["approver_role.name"]["var_prefix"] != specs["requestor_role.name"]["var_prefix"]
+        assert specs["approver_role.name"]["var_prefix"] == "approver_role"
+        assert specs["requestor_role.name"]["var_prefix"] == "requestor_role"
+
+    def test_non_aliased_dotted_key_unaffected(self):
+        """Non-regression: when the property prefix already matches the target
+        (e.g. role.name on a plain role_id FK), lookup_entity is unchanged."""
+        schema = {
+            "definitions": {
+                "role": self.SCHEMA["definitions"]["role"],
+                "permission": {
+                    "type": "object",
+                    "required": ["id", "name", "role_id"],
+                    "x-import-key": ["name", "role.name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "role_id": _fk_field("role", label="name"),
+                    },
+                },
+            }
+        }
+        entity = {
+            "parent": "permission", "model": "permission", "definition_key": "permission",
+            "children": [],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": True, "test": False, "fields": None,
+            },
+        }
+        ctx = build_context(entity, schema)
+        spec = next(s for s in ctx["import_key_specs"] if s["raw"] == "role.name")
+        assert spec["lookup_entity"] == "role"
+        assert spec["var_prefix"] == "role"

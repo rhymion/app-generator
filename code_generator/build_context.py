@@ -1096,12 +1096,20 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             if isinstance(_fk_types, str):
                 _fk_types = [_fk_types]
             _fk_nullable = 'null' in _fk_types
+            # DP-2a (cmd_394 §12): the Prisma model to query is the FK's
+            # x-relationship.target, NOT the dotted-key property prefix —
+            # they diverge whenever the relation uses an aliased FK name
+            # (e.g. approver_role_id targets model 'role', not 'approver_role').
+            # Falls back to the prefix when x-relationship/target is absent
+            # (keeps prior behavior for any not-yet-annotated schema).
+            _lookup_entity = _fk_prop.get('x-relationship', {}).get('target', _fk_entity)
             import_key_specs.append({
                 'raw':                  _raw,
                 'is_dotted':            True,
                 'csv_col':              f'{_fk_entity}_{_fk_field}',   # e.g. 'role_name'
-                'lookup_entity':        _fk_entity,                     # e.g. 'role'
-                'lookup_entity_pascal': to_pascal_case(_fk_entity),     # e.g. 'Role'
+                'var_prefix':           _fk_entity,                     # e.g. 'approver_role' — unique per key; drives generated var/error-message naming so two dotted keys resolving to the same lookup_entity (e.g. approver_role.name + requestor_role.name, both target 'role') don't collide on the same TS const name
+                'lookup_entity':        _lookup_entity,                 # e.g. 'role' — actual Prisma model name (x-relationship.target)
+                'lookup_entity_pascal': to_pascal_case(_lookup_entity),  # e.g. 'Role'
                 'lookup_field':         _fk_field,                      # e.g. 'name'
                 'result_col':           _fk_col,                        # e.g. 'role_id'
                 'fk_nullable':          _fk_nullable,

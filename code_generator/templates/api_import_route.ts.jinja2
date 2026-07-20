@@ -126,30 +126,30 @@ export async function POST(request: NextRequest) {
 {% if spec.is_dotted %}
       // Dotted FK: {{ spec.raw }} → lookup {{ spec.lookup_entity }} by {{ spec.lookup_field }}
       let _{{ spec.result_col }}: string | null = null;
-      const _{{ spec.lookup_entity }}_csv_val = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '');
+      const _{{ spec.var_prefix }}_csv_val = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '');
 {% if spec.fk_nullable %}
-      if (_{{ spec.lookup_entity }}_csv_val === '') {
+      if (_{{ spec.var_prefix }}_csv_val === '') {
         // Empty → FK = null (nullable FK is allowed to be unset)
         _{{ spec.result_col }} = null;
       } else {
 {% else %}
       {
 {% endif %}
-        const _{{ spec.lookup_entity }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
-          where: { {{ spec.lookup_field }}: _{{ spec.lookup_entity }}_csv_val },
+        const _{{ spec.var_prefix }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
+          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val },
           select: { id: true },
         });
-        if (_{{ spec.lookup_entity }}_rows.length === 0) {
+        if (_{{ spec.var_prefix }}_rows.length === 0) {
           errors.push({ row: rowNum, code: 'NOT_FOUND',
-            message: `Row ${rowNum}: no {{ spec.lookup_entity }} with {{ spec.lookup_field }}='${_{{ spec.lookup_entity }}_csv_val}'` });
+            message: `Row ${rowNum}: no {{ spec.lookup_entity }} with {{ spec.lookup_field }}='${_{{ spec.var_prefix }}_csv_val}'` });
           continue;
         }
-        if (_{{ spec.lookup_entity }}_rows.length > 1) {
+        if (_{{ spec.var_prefix }}_rows.length > 1) {
           errors.push({ row: rowNum, code: 'MULTI_MATCH',
-            message: `Row ${rowNum}: multiple {{ spec.lookup_entity }} match {{ spec.lookup_field }}='${_{{ spec.lookup_entity }}_csv_val}' — deduplicate first` });
+            message: `Row ${rowNum}: multiple {{ spec.lookup_entity }} match {{ spec.lookup_field }}='${_{{ spec.var_prefix }}_csv_val}' — deduplicate first` });
           continue;
         }
-        _{{ spec.result_col }} = _{{ spec.lookup_entity }}_rows[0].id;
+        _{{ spec.result_col }} = _{{ spec.var_prefix }}_rows[0].id;
       }
       keyWhere.{{ spec.result_col }} = _{{ spec.result_col }};
 {% else %}

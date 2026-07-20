@@ -857,19 +857,36 @@ def validate_schema(schema: dict) -> None:
         _entity_props = defn.get('properties', {})
         for _raw_key in _import_key_raw:
             if '.' in _raw_key:
-                # Dotted FK: e.g. "role.name" → look up 'role' entity, check 'name' field
-                _fk_ent, _fk_field = _raw_key.split('.', 1)
-                if _fk_ent not in defs:
+                # Dotted FK: e.g. "approver_role.name" → the entity to look up is
+                # the FK property's x-relationship.target, NOT the dotted-key
+                # prefix itself (DP-2a, cmd_394 §12).  These diverge whenever the
+                # FK uses an aliased property name — e.g. approver_role_id targets
+                # entity 'role', not a (nonexistent) 'approver_role' entity.
+                _fk_prefix, _fk_field = _raw_key.split('.', 1)
+                _fk_col = f'{_fk_prefix}_id'
+                _fk_prop = _entity_props.get(_fk_col)
+                if _fk_prop is None:
                     errors.append(
-                        f"Definition '{def_key}': x-import-key '{_raw_key}' references "
-                        f"entity '{_fk_ent}' which is not defined in the schema.  "
-                        f"Add a '{_fk_ent}' definition or correct the key."
+                        f"Definition '{def_key}': x-import-key '{_raw_key}' expects "
+                        f"a FK property '{_fk_col}' which does not exist on this "
+                        f"entity.  Correct the key prefix or add the '{_fk_col}' "
+                        f"property."
                     )
-                elif _fk_field not in defs[_fk_ent].get('properties', {}):
+                    continue
+                _fk_target = _fk_prop.get('x-relationship', {}).get('target', _fk_prefix)
+                if _fk_target not in defs:
+                    errors.append(
+                        f"Definition '{def_key}': x-import-key '{_raw_key}' resolves "
+                        f"(via '{_fk_col}'.x-relationship.target) to entity "
+                        f"'{_fk_target}' which is not defined in the schema.  Add a "
+                        f"'{_fk_target}' definition or correct the key."
+                    )
+                elif _fk_field not in defs[_fk_target].get('properties', {}):
                     errors.append(
                         f"Definition '{def_key}': x-import-key '{_raw_key}': field "
-                        f"'{_fk_field}' does not exist on entity '{_fk_ent}'.  "
-                        f"The dotted-FK lookup would fail at import time."
+                        f"'{_fk_field}' does not exist on entity '{_fk_target}' "
+                        f"(resolved via '{_fk_col}'.x-relationship.target).  The "
+                        f"dotted-FK lookup would fail at import time."
                     )
             else:
                 # Direct field: must exist in entity's properties
