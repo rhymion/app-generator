@@ -3005,15 +3005,32 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         if label_built['has_format']:
             uses_format_label_value = True
 
+        # DP-3 (cmd_377/379): forward callerEntity + selected sibling-field
+        # values into the target's autocomplete filter hook (context param
+        # on search{Target}Options), but only for FK fields that carry an
+        # 'x-autocomplete-context' annotation — every other FK's call site
+        # (the overwhelming majority) is byte-for-byte unchanged.
+        ctx_fields = r.get('autocomplete_context_fields') or []
+        if ctx_fields:
+            form_values_entries = ', '.join(f'{f}: {safe_var_name(f)}' for f in ctx_fields)
+            search_call_args = (
+                f"query, includeIds, 50, "
+                f"{{ callerEntity: '{parent}', formValues: {{ {form_values_entries} }} }}"
+            )
+            search_deps = ''.join(f', {safe_var_name(f)}' for f in ctx_fields)
+        else:
+            search_call_args = "query, includeIds"
+            search_deps = ''
+
         rel_opt_setups.append(
             f"  const {initial_var} = useMemo(() => ({prop_initial} ?? []).map((item) => ({{\n"
             f"    id: item.id,\n"
             f"    label: {label_built['expression']},\n"
             f"  }})), [{prop_initial}]);\n"
             f"  const {search_var} = useCallback(async (query: string, includeIds: string[]) => {{\n"
-            f"    const rows = (await {prop_search}?.(query, includeIds)) ?? [];\n"
+            f"    const rows = (await {prop_search}?.({search_call_args})) ?? [];\n"
             f"    return rows.map((item) => ({{ id: item.id, label: {label_built['expression']} }}));\n"
-            f"  }}, [{prop_search}]);\n"
+            f"  }}, [{prop_search}{search_deps}]);\n"
             f"  const {current_var} = useMemo(() => (\n"
             f"    src.{rel_name} ? {{ id: src.{rel_name}.id, label: {current_built['expression']} }} : null\n"
             f"  ), [src.{rel_name}]);"

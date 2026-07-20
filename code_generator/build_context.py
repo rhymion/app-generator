@@ -1016,17 +1016,45 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     import_key_fields = [f for f in _import_key_raw if '.' not in f]
     has_import_key = bool(_import_key_raw)
 
-    # x_relationships_list: m2o/o2o FK relations with a simple (non-dotted)
-    # labelField, used by the CSV export getter to flatten FK id → display value.
-    x_relationships_list = [
-        {
+    # x_relationships_list: m2o/o2o FK relations, used by the CSV export
+    # getter to flatten FK id -> display value. Every relation is included
+    # regardless of labelField shape (cmd_382): a composite (list) or dotted-
+    # path labelField previously caused the FK column to be silently dropped
+    # from CSV export entirely — it's excluded from export_scalar_fields
+    # (FK columns aren't scalars) AND was excluded here, so the column
+    # vanished with no error (real-world case: proj_c inventory_movement's
+    # from_inventory_id/to_inventory_id, whose target labelField is a
+    # composite [product.name, location.name, lot_number, expiration_date]).
+    # Each path segment is resolved via the same helper used elsewhere for
+    # labels (build_label_expression) and joined into one display string;
+    # the nested Prisma include it needs is already present in
+    # include_props_list (built below via the identical helper).
+    from helpers.label_field import build_label_expression as _xrl_build_label_expression
+    x_relationships_list = []
+    export_uses_format_label_value = False
+    for r in parent_rels:
+        try:
+            _xrl_built = _xrl_build_label_expression(
+                f"row.{r['relation_name']}", r['label_field'], r['target'], schema,
+            )
+        except ValueError:
+            # Malformed/unresolvable labelField path — never silently drop the
+            # column (that's the exact failure mode this fix exists for). Fall
+            # back to the target's own display-fallback chain (mirrors
+            # bridge_parent_options' AP-1-B fallback above); 'id' always
+            # exists, so this second attempt cannot itself raise.
+            _xrl_tprops = (schema.get('definitions', {}).get(r['target'], {}).get('properties') or {})
+            _xrl_fallback = next((f for f in ('name', 'title', 'label', 'id') if f in _xrl_tprops), 'id')
+            _xrl_built = _xrl_build_label_expression(
+                f"row.{r['relation_name']}", _xrl_fallback, r['target'], schema,
+            )
+        if _xrl_built['has_format']:
+            export_uses_format_label_value = True
+        x_relationships_list.append({
             'field': r['relation_name'],
             'display_col': f"{r['relation_name']}_name",
-            'label_field': r['label_field'],
-        }
-        for r in parent_rels
-        if '.' not in r['label_field']
-    ]
+            'label_expr': _xrl_built['expression'],
+        })
 
     # export_scalar_fields: explicit allowlist of CSV export columns (cmd_324 V1).
     # Replaces the former exclusion-list ('...rest' spread) design, which leaked
@@ -2001,6 +2029,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         import_key_fields=import_key_fields,
         has_import_key=has_import_key,
         x_relationships_list=x_relationships_list,
+        export_uses_format_label_value=export_uses_format_label_value,
         # CSV export (cmd_324 V1): explicit scalar-column allowlist
         export_scalar_fields=export_scalar_fields,
         export_import_key_fields=export_import_key_fields,
