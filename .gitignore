@@ -82,6 +82,11 @@ __pycache__/
 # it but it churns with generated content, so it's kept out of version control.
 .generated-manifest.json
 
+# intermediate schema (cmd_395 Stage 1) — build_user_schema.py output, rebuilt
+# from user_schema.yaml + prisma/schema.prisma on every build. Never hand-edited,
+# so it's a build artifact like the rest of the generated code, not a source file.
+code_generator/.generated/
+
 # sample data
 custom/
 memory/
