@@ -1,19 +1,17 @@
 """
-Tests for build_user_schema.py -- cmd_395 Stage 1 (identity transform).
+Tests for build_user_schema.py -- cmd_395 Stage 3 (Prisma-driven derivation).
 
-Stage 1's pass/fail gate (design doc Sec.9 "Stage 1 golden diff -- two
-levels"): the builder must reproduce code_generator/json_schema.yaml
-byte-for-byte as its output, given that file (unchanged format) as the
-user-authored schema.
-
-The committed json_schema.yaml has one pre-existing, purely-cosmetic
-artifact -- a trailing space after `requestor_role_id.type:` (a key
-immediately followed by a block-sequence value) -- that a round-trip YAML
-dump normalizes away. This is reported explicitly here per the AC ("differs
--> report + get a ruling, never silently allow") rather than swept under a
-loose comparison: the test pins down that this is the *only* line allowed
-to differ, and that the difference is whitespace-only, so any other
-regression in round-trip fidelity still fails the test.
+Stage 3's pass/fail gate (design doc Sec.9 "Validation gate: before any
+Stage N+1 PR is opened" / Sec.12 Stage 3): given the new simplified
+`user_schema.yaml` + `prisma/schema.prisma`, the builder must reconstruct
+an intermediate schema that is *semantically* identical to the Stage 2
+reference (the legacy fully-specified format this project used through
+Stage 2, snapshotted at `tests/fixtures/stage2_reference_json_schema.yaml`
+-- before Stage 3 replaced the live `json_schema.yaml` with the simplified
+format). "Semantically identical" -- not byte-identical, unlike Stage 1 --
+because reconstructed dict key order need not match for `generate.py`'s
+*output* to be byte-identical (verified separately, at the generate-code
+pipeline level, by the golden-diff harness this task's report documents).
 """
 from pathlib import Path
 
@@ -21,85 +19,58 @@ import pytest
 from ruamel.yaml import YAML
 
 from build_user_schema import build_user_schema
+from schema_deriver import SchemaDivergenceError
 
 SCHEMA_PATH = Path(__file__).parent.parent / "json_schema.yaml"
 PRISMA_SCHEMA_PATH = Path(__file__).parent.parent.parent / "prisma" / "schema.prisma"
+STAGE2_REFERENCE_PATH = Path(__file__).parent / "fixtures" / "stage2_reference_json_schema.yaml"
 
 
-def test_roundtrip_byte_for_byte_modulo_known_trailing_whitespace(tmp_path):
+def _load(path):
+    yaml = YAML(typ="safe")
+    with path.open(encoding="utf-8") as f:
+        return yaml.load(f)
+
+
+def _deep_diff(a, b, path=""):
+    diffs = []
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in a.keys() - b.keys():
+            diffs.append(f"{path}.{k}: missing in rebuilt (expected {a[k]!r})")
+        for k in b.keys() - a.keys():
+            diffs.append(f"{path}.{k}: unexpected in rebuilt ({b[k]!r})")
+        for k in a.keys() & b.keys():
+            diffs.extend(_deep_diff(a[k], b[k], f"{path}.{k}"))
+    elif isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            diffs.append(f"{path}: list length {len(a)} != {len(b)}")
+        else:
+            for i, (x, y) in enumerate(zip(a, b)):
+                diffs.extend(_deep_diff(x, y, f"{path}[{i}]"))
+    else:
+        if a != b:
+            diffs.append(f"{path}: {a!r} != {b!r}")
+    return diffs
+
+
+def test_stage3_derivation_matches_stage2_reference_semantically(tmp_path):
     out_path = tmp_path / ".generated" / "json_schema.yaml"
-
     build_user_schema(SCHEMA_PATH, PRISMA_SCHEMA_PATH, out_path)
 
-    original_text = SCHEMA_PATH.read_text(encoding="utf-8")
-    output_text = out_path.read_text(encoding="utf-8")
+    expected = _load(STAGE2_REFERENCE_PATH)
+    rebuilt = _load(out_path)
 
-    if output_text == original_text:
-        return
-
-    original_lines = original_text.splitlines()
-    output_lines = output_text.splitlines()
-    assert len(original_lines) == len(output_lines), (
-        "roundtrip changed the line count -- not a formatting-only diff"
-    )
-
-    diffs = [
-        (i, o, r)
-        for i, (o, r) in enumerate(zip(original_lines, output_lines))
-        if o != r
-    ]
-    assert len(diffs) == 1, f"unexpected roundtrip differences: {diffs}"
-
-    lineno, orig_line, out_line = diffs[0]
-    assert orig_line.rstrip() == out_line.rstrip(), (
-        f"non-whitespace roundtrip diff at line {lineno + 1}: "
-        f"{orig_line!r} vs {out_line!r}"
-    )
-    assert orig_line != orig_line.rstrip(), (
-        f"line {lineno + 1} differs but the original has no trailing "
-        f"whitespace to explain it: {orig_line!r} vs {out_line!r}"
-    )
+    diffs = _deep_diff(expected, rebuilt)
+    assert not diffs, "Stage 3 output diverges from the Stage 2 reference:\n" + "\n".join(diffs)
 
 
-def test_roundtrip_preserves_all_annotations_semantically():
-    """Every x-* annotation key/value survives the round trip verbatim.
-
-    Independent of the byte-level test above: parses both documents and
-    walks them recursively, so a future formatting-only change to the
-    dumper can't accidentally also start dropping annotation content.
-    """
-    import tempfile
-
-    yaml = YAML(typ="safe")
-    with SCHEMA_PATH.open(encoding="utf-8") as f:
-        original = yaml.load(f)
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        out_path = Path(tmpdir) / ".generated" / "json_schema.yaml"
-        build_user_schema(SCHEMA_PATH, PRISMA_SCHEMA_PATH, out_path)
-        with out_path.open(encoding="utf-8") as f:
-            rebuilt = yaml.load(f)
-
-    def collect_x_keys(node, path=""):
-        found = {}
-        if isinstance(node, dict):
-            for key, value in node.items():
-                sub_path = f"{path}.{key}" if path else str(key)
-                if isinstance(key, str) and key.startswith("x-"):
-                    found[sub_path] = value
-                found.update(collect_x_keys(value, sub_path))
-        elif isinstance(node, list):
-            for idx, item in enumerate(node):
-                found.update(collect_x_keys(item, f"{path}[{idx}]"))
-        return found
-
-    original_x = collect_x_keys(original)
-    rebuilt_x = collect_x_keys(rebuilt)
-
-    assert original_x.keys() == rebuilt_x.keys()
-    for key in original_x:
-        assert original_x[key] == rebuilt_x[key], f"annotation drifted: {key}"
-    assert len(original_x) > 0, "sanity check: fixture must contain x-* annotations"
+def test_stage3_user_schema_is_smaller_than_stage2_reference():
+    """Sec.4's core claim: raw-entity elimination measurably shrinks the file."""
+    original_lines = STAGE2_REFERENCE_PATH.read_text(encoding="utf-8").splitlines()
+    new_lines = SCHEMA_PATH.read_text(encoding="utf-8").splitlines()
+    assert len(new_lines) < len(original_lines)
+    reduction = 1 - (len(new_lines) / len(original_lines))
+    assert reduction > 0.30, f"expected a substantial reduction, got {reduction:.1%}"
 
 
 def test_missing_user_schema_raises():
@@ -118,3 +89,19 @@ def test_missing_prisma_schema_raises():
             Path("/nonexistent/schema.prisma"),
             Path("/tmp/does-not-matter.yaml"),
         )
+
+
+def test_unknown_field_name_raises_divergence(tmp_path):
+    """R5: a `fields:` entry naming a column that doesn't exist in Prisma
+    is a divergence, not a silently-empty property."""
+    user_schema_path = tmp_path / "user_schema.yaml"
+    user_schema_path.write_text(
+        "definitions:\n"
+        "  role_detail:\n"
+        "    x-generate: {list: true}\n"
+        "    fields:\n"
+        "      not_a_real_column: {}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(SchemaDivergenceError):
+        build_user_schema(user_schema_path, PRISMA_SCHEMA_PATH, tmp_path / "out.yaml")
