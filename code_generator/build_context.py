@@ -1018,10 +1018,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     # x_relationships_list: m2o/o2o FK relations with a simple (non-dotted)
     # labelField, used by the CSV export getter to flatten FK id → display value.
+    # DP-2 (cmd_394 §5, Option D): display_col names the actual labelField
+    # rather than always assuming "_name" — the two column-naming systems
+    # (export display_col vs. import csv_col, see import_key_specs below)
+    # must agree, or a dotted x-import-key can never find its column in the
+    # exported CSV (MISSING_COLUMN). No-op on any schema where every FK
+    # labelField is 'name' (true of all export-enabled entities as of cmd_394).
     x_relationships_list = [
         {
             'field': r['relation_name'],
-            'display_col': f"{r['relation_name']}_name",
+            'display_col': f"{r['relation_name']}_{r['label_field']}",
             'label_field': r['label_field'],
         }
         for r in parent_rels
@@ -1034,10 +1040,6 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # is derived from the same view-visible field set used elsewhere in this
     # function (x-generate.fields, falling back to all base-model properties),
     # restricted to actual scalar columns on the base model.
-    # NOTE: x-import-key natural-key UNION (Phase 2 import compatibility) is
-    # intentionally NOT applied here — see cmd_324 SA-1 (pending Lord's ruling
-    # on whether user.email should be exported). Once decided, a follow-up
-    # change can union in import-key scalars generically for all entities.
     _SYSTEM_FIELDS = {
         'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
         'organization_id', 'tenant_id',
@@ -1059,11 +1061,24 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         and _is_export_scalar(model_def['properties'][f])
     ]
 
-    # export_import_key_fields: the subset of import_key_fields that actually
-    # made it into export_scalar_fields. Since the x-import-key UNION is
-    # deferred (see note above), a natural-key field is no longer guaranteed
-    # to appear in export — this drives the N4 test's assertion list so it
-    # only asserts what the current allowlist actually guarantees.
+    # DP-1 (cmd_394 §3, Option B — conservative UNION): non-dotted x-import-key
+    # scalars are unioned into export_scalar_fields, but ONLY when already
+    # present in the view-visible allowlist (x-generate.fields, or all
+    # properties when unrestricted). A key hidden from the view (e.g. a
+    # candidate future user.email import key, SA-1 pending) is NEVER unioned
+    # in — the cmd_321/324 security ruling (DQ-1=A, view-visible wins) takes
+    # precedence over roundtrip convenience. Dotted FK keys are handled
+    # separately by x_relationships_list/DP-2 above.
+    _view_visible_fields = set(gen_cfg.get('fields') or model_def.get('properties', {}).keys())
+    for _f in import_key_fields:
+        if _f not in export_scalar_fields and _f in _view_visible_fields:
+            export_scalar_fields.append(_f)
+
+    # export_import_key_fields: the subset of import_key_fields that made it
+    # into export_scalar_fields (now including the DP-1 UNION above) — this
+    # drives the N4 test's assertion list so it only asserts what the
+    # allowlist actually guarantees (a key hidden from the view, per DQ-1=A,
+    # is still absent from export and thus absent here).
     export_import_key_fields = [f for f in import_key_fields if f in export_scalar_fields]
 
     # ────────────────────────────────────────────────────────────────
@@ -1130,11 +1145,27 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # import_key_specs (i.e., not a dotted-FK target) cannot be supplied on CREATE
     # (e.g., approval_flow.approver_role_id is a required FK outside export_scalar_fields
     # → CREATE would throw a Prisma "missing required argument" error → 500).
+    #
+    # DP-1b/1c (cmd_394 §10-11, Lord's ruling): only writes whose VALUE SOURCE is
+    # visible in the exported CSV may count toward CREATE feasibility.
+    #   Type 1 — direct scalar key (e.g. entity_name): already covered by
+    #            `- set(export_scalar_fields)` below (DP-1a guarantees visibility).
+    #   Type 2 — dotted-FK result_col (e.g. role_id, from role.name): the FK id
+    #            itself is never exported, but its VALUE SOURCE is the exported
+    #            display column (role_name) — permitted.
+    #   Forbidden — a dotted-FK key whose csv_col is NOT an exported display
+    #            column (invisible source). validate.py's E_IMPORT_KEY_INVISIBLE
+    #            gate (DP-1a) rejects such schemas outright; this guards
+    #            defense-in-depth for contexts that bypass that gate (e.g. tests).
     _SYSTEM_AND_AUTO_IDS = {
         'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
         'organization_id', 'tenant_id',
     }
-    _import_resolvable_cols = {spec['result_col'] for spec in import_key_specs}
+    _fk_display_col_names = {rel['display_col'] for rel in x_relationships_list}
+    _import_resolvable_cols = {
+        spec['result_col'] for spec in import_key_specs
+        if spec['is_dotted'] and spec['csv_col'] in _fk_display_col_names
+    }
     _required_by_schema     = set(model_def.get('required', []))
     _create_required_gaps   = (
         _required_by_schema

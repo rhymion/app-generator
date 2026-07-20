@@ -1092,3 +1092,202 @@ class TestImportKeySpecsAliasedFkLookup:
         spec = next(s for s in ctx["import_key_specs"] if s["raw"] == "role.name")
         assert spec["lookup_entity"] == "role"
         assert spec["var_prefix"] == "role"
+
+
+# ---------------------------------------------------------------------------
+# DP-2 (cmd_394 §5, Option D): export display_col names the actual labelField
+# instead of always assuming "_name". Zero-breaking-change on any schema where
+# every FK labelField happens to be 'name' (true of every currently
+# export-enabled entity, per cmd_394 §5 impact analysis).
+# ---------------------------------------------------------------------------
+
+class TestDP2ExportDisplayColNaming:
+    SCHEMA = {
+        "definitions": {
+            "role": {
+                "type": "object",
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "entity_b": {
+                "type": "object",
+                "properties": {"id": _base_props()["id"], "title": {"type": "string"}},
+            },
+            "widget": {
+                "type": "object",
+                "properties": {
+                    "id": _base_props()["id"],
+                    "role_id": _fk_field("role", label="name"),
+                    "entity_b_id": _fk_field("entity_b", nullable=True, label="title"),
+                },
+            },
+        }
+    }
+    ENTITY = _entity(model="widget")
+
+    def _rel_by_field(self, ctx, field):
+        return next(r for r in ctx["x_relationships_list"] if r["field"] == field)
+
+    def test_name_label_field_unchanged(self):
+        """labelField='name' → display_col stays '{relation}_name' (no-op case)."""
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        rel = self._rel_by_field(ctx, "role")
+        assert rel["display_col"] == "role_name"
+
+    def test_non_name_label_field_uses_actual_label(self):
+        """labelField='title' → display_col is '{relation}_title', not '{relation}_name'."""
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        rel = self._rel_by_field(ctx, "entity_b")
+        assert rel["display_col"] == "entity_b_title"
+
+    def test_approval_flow_style_aliased_fk_display_col(self):
+        """approval_flow-style aliased FK (prop prefix != target model, non-name
+        labelField): display_col must be prefix-derived + labelField-derived,
+        matching the dotted x-import-key csv_col so DP-1a visibility holds."""
+        schema = {
+            "definitions": {
+                "role": self.SCHEMA["definitions"]["role"],
+                "approval_flow": {
+                    "type": "object",
+                    "required": ["id", "entity_name", "approver_role_id"],
+                    "x-import-key": ["entity_name", "approver_role.name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "entity_name": {"type": "string"},
+                        "approver_role_id": _fk_field("role", label="name"),
+                    },
+                },
+            }
+        }
+        entity = {
+            "parent": "approval_flow", "model": "approval_flow", "definition_key": "approval_flow",
+            "children": [],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": True, "test": False, "fields": None,
+            },
+        }
+        ctx = build_context(entity, schema)
+        rel = next(r for r in ctx["x_relationships_list"] if r["field"] == "approver_role")
+        assert rel["display_col"] == "approver_role_name"
+        spec = next(s for s in ctx["import_key_specs"] if s["raw"] == "approver_role.name")
+        assert spec["csv_col"] == rel["display_col"], (
+            "import csv_col and export display_col must agree — this is the "
+            "invariant DP-1a's validate.py check enforces at the schema level"
+        )
+
+
+# ---------------------------------------------------------------------------
+# DP-1 (cmd_394 §3, Option B): non-dotted x-import-key scalars are unioned
+# into export_scalar_fields ONLY when already view-visible (x-generate.fields
+# allowlist). Fields hidden from the view are NEVER unioned in — cmd_321/324
+# security ruling (DQ-1=A) takes precedence.
+# ---------------------------------------------------------------------------
+
+class TestDP1ImportKeyUnion:
+    def _schema(self, extra_prop_type="string"):
+        return {
+            "definitions": {
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "code"],
+                    "x-import-key": ["code"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "code": {"type": extra_prop_type},
+                        "secret": {"type": "string"},
+                    },
+                },
+            }
+        }
+
+    def test_key_field_absent_from_restrictive_fields_allowlist_stays_out(self):
+        """gen_cfg.fields restricts to ['secret'] only (code not view-visible) →
+        DP-1 must NOT union 'code' into export_scalar_fields (DQ-1=A: view-visible
+        wins over roundtrip convenience)."""
+        schema = self._schema()
+        entity = _entity(model="widget", gen_cfg={
+            "list": True, "view": True, "new": True, "edit": True,
+            "delete": True, "api": True, "test": False, "fields": ["secret"],
+        })
+        ctx = build_context(entity, schema)
+        assert "code" not in ctx["export_scalar_fields"], (
+            "an import key hidden from the view allowlist must never be unioned "
+            "into export — DQ-1=A view-visible-wins ruling"
+        )
+        assert "code" not in ctx["export_import_key_fields"]
+
+    def test_key_field_present_in_fields_allowlist_is_unioned(self):
+        """gen_cfg.fields explicitly includes 'code' → union keeps it (this is
+        already true of the base export_scalar_fields computation, but exercises
+        the DP-1 union path directly and confirms export_import_key_fields agrees)."""
+        schema = self._schema()
+        entity = _entity(model="widget", gen_cfg={
+            "list": True, "view": True, "new": True, "edit": True,
+            "delete": True, "api": True, "test": False, "fields": ["code", "secret"],
+        })
+        ctx = build_context(entity, schema)
+        assert "code" in ctx["export_scalar_fields"]
+        assert "code" in ctx["export_import_key_fields"]
+
+    def test_unrestricted_fields_allowlist_unions_key(self):
+        """fields=None (unrestricted, falls back to all properties) → 'code' is
+        already view-visible by default and appears in export."""
+        schema = self._schema()
+        entity = _entity(model="widget")  # default gen_cfg has fields=None
+        ctx = build_context(entity, schema)
+        assert "code" in ctx["export_scalar_fields"]
+        assert "code" in ctx["export_import_key_fields"]
+
+
+# ---------------------------------------------------------------------------
+# DP-1b/1c (cmd_394 §10-11): CREATE feasibility only counts dotted-FK keys
+# whose csv_col is an actually-exported display column (visible source).
+# ---------------------------------------------------------------------------
+
+class TestDP1cVisibleSourceOnlyCreateFeasibility:
+    def _schema_with(self, label):
+        return {
+            "definitions": {
+                "role": {
+                    "type": "object",
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "code", "role_id"],
+                    "x-import-key": ["code", "role.name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "code": {"type": "string"},
+                        "role_id": _fk_field("role", label=label),
+                    },
+                },
+            }
+        }
+
+    def _entity(self):
+        return {
+            "parent": "widget", "model": "widget", "definition_key": "widget",
+            "children": [],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": True, "test": False, "fields": None,
+            },
+        }
+
+    def test_visible_dotted_source_counts_toward_create_feasibility(self):
+        """role.name dotted key, role's own labelField='name' → csv_col
+        'role_name' matches the exported display_col → CREATE feasible."""
+        schema = self._schema_with(label="name")
+        ctx = build_context(self._entity(), schema)
+        assert ctx["import_can_create"] is True
+
+    def test_invisible_dotted_source_does_not_count_toward_create_feasibility(self):
+        """role's FK labelField ('id') diverges from the dotted key's field
+        ('name') → display_col ('role_id') != csv_col ('role_name') → the
+        source is invisible → CREATE must be gated off even though a
+        structurally-shaped dotted key exists (DP-1a would reject this schema
+        outright; this is the build_context.py defense-in-depth layer)."""
+        schema = self._schema_with(label="id")
+        ctx = build_context(self._entity(), schema)
+        assert ctx["import_can_create"] is False
