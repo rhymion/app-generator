@@ -2821,11 +2821,11 @@ def api_spec_context(
     x_relationships_list = [
         {
             'field': r['relation_name'],
-            'display_col': f"{r['relation_name']}_name",
+            'display_col': f"{r['relation_name']}_{r['label_field']}",
             'label_field': r['label_field'],
         }
         for r in _api_parent_rels
-        if '.' not in r['label_field']
+        if isinstance(r['label_field'], str) and '.' not in r['label_field']
     ]
 
     _EXPORT_SYSTEM_FIELDS = {
