@@ -17,6 +17,9 @@ import { resolveVirtualColumns } from '@/lib/{{ parent }}/virtual_resolvers';
 {% if has_attachable %}
 import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
 {% endif %}
+{% if comment_has_mention %}
+import { decodeMentions, extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
+{% endif %}
 
 // Allow-lists for sort/filter — anything not in here is silently dropped at
 // request time so external input cannot pick arbitrary columns.
@@ -74,6 +77,22 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     return null;
   }
 
+{% if named_constants and has_commentable and comment_has_mention %}
+  // Resolve @[user_id:uuid] mentions to display names before this row crosses
+  // into FormView (client component) — the raw id must never reach the UI, and
+  // an unresolved id (anonymized/deleted user) falls back to a placeholder
+  // inside decodeMentions() itself (gdpr-design.md Section 4.2).
+  const _rawComments = {{ parent_camel }}.{{ commentable_rel_name }}?.comments ?? [];
+  const _mentionUserIds = new Set<string>();
+  for (const c of _rawComments) {
+    if (c.creator_id) _mentionUserIds.add(c.creator_id);
+    for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
+  }
+  const _mentionUsers = _mentionUserIds.size
+    ? await prisma.user.findMany({ where: { id: { in: [..._mentionUserIds] } }, select: { id: true, name: true } })
+    : [];
+  const _mentionUserContext: UserContext = Object.fromEntries(_mentionUsers.map((u) => [u.id, u.name]));
+{% endif %}
 {% if named_constants and has_commentable %}
   const _commentable = {{ parent_camel }}.{{ commentable_rel_name }} ? {
     ...{{ parent_camel }}.{{ commentable_rel_name }},
@@ -88,7 +107,11 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
         },
         [],
       );
+{% if comment_has_mention %}
+      return { ...rest, message: decodeMentions(rest.message, _mentionUserContext), reactionCounts, myReactionTypes: [] as number[] };
+{% else %}
       return { ...rest, reactionCounts, myReactionTypes: [] as number[] };
+{% endif %}
     }),
   } : {{ parent_camel }}.{{ commentable_rel_name }};
 {% endif %}
