@@ -1559,6 +1559,13 @@ def _build_approval_create_block_for_entity(
 
     Caller pre-fetches `flows_var` (approval_flow[] for the entity) and
     `role_ids_var` (creator's role ids) once, outside any per-approvable loop.
+
+    cmd_413 fix: notifies every approver-role holder for each created
+    approval_request via notifyApprovalRequestCreated (mirrors Trigger #2 in
+    service_after_create_stub.ts.jinja2, which only covers the top-level
+    single-entity afterCreate path — this shared block is the datagrid-child
+    / split-action path, which never had the notify call at all). Caller
+    must import notifyApprovalRequestCreated from '@/lib/_notifyApprovalRequest'.
     """
     return (
         f"{indent}let _hasFlow = false;\n"
@@ -1566,9 +1573,10 @@ def _build_approval_create_block_for_entity(
         f"{indent}  if (_flow.requestor_role_id && !{role_ids_var}.includes(_flow.requestor_role_id)) {{\n"
         f"{indent}    continue;\n"
         f"{indent}  }}\n"
-        f"{indent}  await {tx_var}.approval_request.create({{\n"
+        f"{indent}  const _apprReq = await {tx_var}.approval_request.create({{\n"
         f"{indent}    data: {{ approvable_id: {approvable_id_expr}, approval_flow_id: _flow.id, status: 0 }},\n"
         f"{indent}  }});\n"
+        f"{indent}  await notifyApprovalRequestCreated({tx_var}, _apprReq.id, {{ excludeUserId: {actor_id_expr} }});\n"
         f"{indent}  _hasFlow = true;\n"
         f"{indent}}}\n"
         f"{indent}if (_hasFlow) {{\n"
@@ -1643,6 +1651,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     child_params_for_add    = ctx['child_params_for_add']
     child_params_for_update = ctx['child_params_for_update']
     has_assignee_id         = ctx.get('has_assignee_id', False)
+    child_assignee_notify_create_code = ctx.get('child_assignee_notify_create_code', '')
+    child_assignee_notify_update_code = ctx.get('child_assignee_notify_update_code', '')
     is_audited              = ctx.get('is_audited', False)
     reservation_config      = ctx.get('reservation_config')
     has_reservation         = bool(reservation_config and reservation_config.get('mode') == 'count')
@@ -1983,7 +1993,10 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ validateOnAdd, validateOnUpdate{_validation_extras} }} from './service_validation';" if (can_create or can_update) else '')
         + (f"\nimport {{ assertNoDuplicateReservation }} from './service_validation';" if has_item_daterange and not (can_create or can_update) else '')
         + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '')
-        + (f"\nimport {{ notify }} from '@/lib/_notifier';" if has_assignee_id else '')
+        + (f"\nimport {{ notify }} from '@/lib/_notifier';"
+           if has_assignee_id or child_assignee_notify_create_code or child_assignee_notify_update_code else '')
+        + (f"\nimport {{ notifyApprovalRequestCreated }} from '@/lib/_notifyApprovalRequest';"
+           if approval_lines_post_create_code or approval_lines_post_update_code else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + insufficient_inventory_error_class +
         f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"

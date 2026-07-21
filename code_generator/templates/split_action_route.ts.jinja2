@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSession, handleApiError, ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
+{% if has_approvable %}
+import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
+{% endif %}
 
 const SPLIT_STATUS = {{ status_split_value }};
 const REJECTED_STATUS = {{ status_rejected_value }};

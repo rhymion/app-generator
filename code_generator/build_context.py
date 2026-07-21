@@ -250,6 +250,13 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         approval_indexed = prop_name in _parent_approval_lines
         approval_array_var = f'_{child_var}ApprIds' if approval_indexed else ''
 
+        # cmd_413: child rows carrying their own assignee_id (e.g.
+        # receiving_receipt_line under receiving_receipt) never got a
+        # Trigger #1 notify — the parent-level has_assignee_id gate only
+        # ever inspected the PARENT's own properties. See
+        # _build_child_assignee_notify_create_code/_update_code below.
+        child_has_assignee_id = 'assignee_id' in child_props_dict
+
         result.append({
             **child_raw,
             'child_var':        child_var,
@@ -266,6 +273,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             'field_map_create': field_map_create,
             'approval_indexed':   approval_indexed,
             'approval_array_var': approval_array_var,
+            'has_assignee_id':    child_has_assignee_id,
         })
     return result
 
@@ -367,6 +375,73 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
                 f"      }},"
             )
     return '\n'.join(lines)
+
+
+def _build_child_assignee_notify_create_code(children_data: list[dict], parent: str, parent_pascal: str) -> str:
+    """Trigger #1 (cmd_413 fix) for datagrid-child rows carrying their own
+    assignee_id (e.g. receiving_receipt_line.assignee_id under
+    receiving_receipt) — the parent-level has_assignee_id notify in
+    service.ts.jinja2 only ever inspected the PARENT's own properties, so
+    child-row assignment never fired a notification. Mirrors the parent
+    pattern: fires after the transaction has committed, self-assign
+    skipped. All items in the create-flow array are newly-created rows
+    (create-flow child param type carries no `id`), so no per-row diff is
+    needed here (contrast with the update-flow version below).
+    """
+    blocks = []
+    for c in children_data:
+        # use_connect children (many-to-many / self-referential) are passed
+        # as plain `{cv}Ids: string[]` — no per-item object, so no
+        # per-item assignee_id to read. Only embedded/nested-create
+        # children (own object with scalar fields) apply here.
+        if not c.get('has_assignee_id') or c['use_connect']:
+            continue
+        cv = c['child_var']
+        blocks.append(
+            f"  for (const f of {cv}Items) {{\n"
+            f"    if (f.assignee_id && f.assignee_id !== actorId) {{\n"
+            f"      notify(f.assignee_id, 'assigned', {{\n"
+            f"        title: 'You were assigned an item on {parent_pascal}',\n"
+            f"        href: `/{parent}/view/${{result.id}}`,\n"
+            f"        itemType: '{parent}',\n"
+            f"        itemId: result.id,\n"
+            f"      }});\n"
+            f"    }}\n"
+            f"  }}"
+        )
+    return '\n'.join(blocks)
+
+
+def _build_child_assignee_notify_update_code(children_data: list[dict], parent: str, parent_pascal: str) -> str:
+    """Update-flow counterpart of _build_child_assignee_notify_create_code.
+
+    Scope (cmd_413): only newly-added rows in the update call (no `id`) are
+    notified, matching the create-flow semantics. Detecting an assignee
+    *change* on an already-existing child row would require fetching each
+    row's prior assignee_id before the update lands — not implemented here;
+    flagged as a follow-up in the cmd_413 report rather than guessed at.
+    """
+    blocks = []
+    for c in children_data:
+        # See _build_child_assignee_notify_create_code: use_connect
+        # children have no per-item object to read assignee_id from.
+        if not c.get('has_assignee_id') or c['use_connect']:
+            continue
+        cv = c['child_var']
+        blocks.append(
+            f"  for (const f of {cv}Items) {{\n"
+            f"    if (f.id) continue;\n"
+            f"    if (f.assignee_id && f.assignee_id !== actorId) {{\n"
+            f"      notify(f.assignee_id, 'assigned', {{\n"
+            f"        title: 'You were assigned an item on {parent_pascal}',\n"
+            f"        href: `/{parent}/view/${{id}}`,\n"
+            f"        itemType: '{parent}',\n"
+            f"        itemId: id,\n"
+            f"      }});\n"
+            f"    }}\n"
+            f"  }}"
+        )
+    return '\n'.join(blocks)
 
 
 def _build_comment_actions(comment_children: list[dict], parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False) -> str:
@@ -1397,6 +1472,12 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     child_nested_create = _build_child_nested_create(embedded_ch)
     child_nested_update = _build_child_nested_update(embedded_ch)
+    child_assignee_notify_create_code = _build_child_assignee_notify_create_code(
+        embedded_ch, parent, to_pascal_case(parent)
+    )
+    child_assignee_notify_update_code = _build_child_assignee_notify_update_code(
+        embedded_ch, parent, to_pascal_case(parent)
+    )
 
     # Self-parent relationship (for tree structures)
     self_parent_rel  = next((r for r in parent_rels_raw if r['target'] == model), None)
@@ -2111,6 +2192,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         child_args_for_call=child_args_for_call,
         child_nested_create=child_nested_create,
         child_nested_update=child_nested_update,
+        child_assignee_notify_create_code=child_assignee_notify_create_code,
+        child_assignee_notify_update_code=child_assignee_notify_update_code,
         comment_actions_code=comment_actions_code,
         # FormData
         form_data_gets=form_data_gets,
