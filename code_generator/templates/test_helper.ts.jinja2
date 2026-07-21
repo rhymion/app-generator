@@ -676,6 +676,13 @@ export async function setup{{ pascal }}ApprovalFlow() {
   const approverRole = await prisma.role.create({
     data: { name: 'Test {{ title }} Approver Role', creator_id: testUser.id, updater_id: testUser.id },
   });
+  // Second, distinct approver role for the ungated flow below: approval_flow has
+  // @@unique([entity_name, approver_role_id]), so flowWithRole and flowWithoutRole
+  // (same entity_name) cannot share approver_role_id without a unique-constraint
+  // violation on create.
+  const approverRole2 = await prisma.role.create({
+    data: { name: 'Test {{ title }} Approver Role 2', creator_id: testUser.id, updater_id: testUser.id },
+  });
   // noRoleUser needs entity permission to access {{ model_name }} but must NOT hold
   // requestorRole/approverRole (so the role-gated approval flow is skipped for them).
   const basicRole = await prisma.role.create({
@@ -685,7 +692,7 @@ export async function setup{{ pascal }}ApprovalFlow() {
   // Grant all entity permissions to each role so approval-flow users can access
   // the entity form and all FK-dependent autocompletes (authz uses default-deny).
   await Promise.all(
-    [requestorRole, approverRole, basicRole].flatMap(role =>
+    [requestorRole, approverRole, approverRole2, basicRole].flatMap(role =>
       ALL_ENTITIES.map(entity =>
         prisma.permission.create({
           data: {
@@ -753,7 +760,7 @@ export async function setup{{ pascal }}ApprovalFlow() {
     data: {
       entity_name: '{{ model_name }}',
       requestor_role_id: null,
-      approver_role_id: approverRole.id,
+      approver_role_id: approverRole2.id,
       creator_id: testUser.id,
       updater_id: testUser.id,
     },
@@ -762,6 +769,7 @@ export async function setup{{ pascal }}ApprovalFlow() {
   return JSON.parse(JSON.stringify({
     requestorRole,
     approverRole,
+    approverRole2,
     requestorUser,
     approverUser,
     noRoleUser,
