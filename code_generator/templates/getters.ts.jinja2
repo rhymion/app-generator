@@ -78,7 +78,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
   }
 
 {% if named_constants and has_commentable and comment_has_mention %}
-  // Resolve @[user_id:uuid] mentions to display names before this row crosses
+  // Resolve @[user_id:<id>] mentions to display names before this row crosses
   // into FormView (client component) — the raw id must never reach the UI, and
   // an unresolved id (anonymized/deleted user) falls back to a placeholder
   // inside decodeMentions() itself (gdpr-design.md Section 4.2).

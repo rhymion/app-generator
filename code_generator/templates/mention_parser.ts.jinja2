@@ -1,7 +1,11 @@
-// Mention parser utilities for @[user_id:uuid] syntax (GDPR-safe mention pattern).
+// Mention parser utilities for @[user_id:<id>] syntax (GDPR-safe mention pattern).
 // Stores user references as IDs, not plaintext names, to support right-to-erasure.
 
-const MENTION_PATTERN = /@\[user_id:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]/g;
+// Matches any non-`]` id payload rather than a fixed format (e.g. UUID) so it
+// works with the actual user.id scheme (cuid2, via @paralleldrive/cuid2's
+// createId()) without hardcoding its length/charset, and keeps working if the
+// id scheme changes again later.
+const MENTION_PATTERN = /@\[user_id:([^\]]+)\]/g;
 
 /** Maps display name (or @handle) to user id and name. */
 export type UserLookup = Record<string, { id: string; name: string }>;
@@ -14,7 +18,7 @@ function escapeRegExp(value: string): string {
 }
 
 /**
- * Converts @username patterns to @[user_id:uuid] storage format before saving to DB.
+ * Converts @username patterns to @[user_id:<id>] storage format before saving to DB.
  * Matches against the known display names in userLookup directly (rather than a
  * fixed [\w.]+ charset) so names containing non-ASCII characters (e.g. Japanese)
  * or spaces are recognized. Names are tried longest-first so a shorter name that
@@ -41,7 +45,7 @@ export function encodeMentions(text: string, userLookup: UserLookup): string {
 }
 
 /**
- * Converts @[user_id:uuid] storage format to display names for rendering.
+ * Converts @[user_id:<id>] storage format to display names for rendering.
  * If userId is absent from context (user anonymized/deleted), returns '@[削除済みユーザー]'.
  */
 export function decodeMentions(text: string, context: UserContext): string {
@@ -53,7 +57,7 @@ export function decodeMentions(text: string, context: UserContext): string {
 
 /**
  * Extracts all mentioned user IDs from a text string.
- * Returns deduplicated list of UUIDs.
+ * Returns deduplicated list of user ids.
  */
 export function extractMentionedUserIds(text: string): string[] {
   const ids: string[] = [];
