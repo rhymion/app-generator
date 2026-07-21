@@ -67,6 +67,7 @@ from helpers.schema_helpers import (
     get_flatten_rels,
     get_splittable_bridge_field,
     resolve_ledger_domain,
+    get_internal_bridge_fk_prop_names,
 )
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import (
@@ -2831,7 +2832,11 @@ def api_spec_context(
         'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
         'organization_id', 'tenant_id',
     }
-    _api_fk_prop_names = {r['prop_name'] for r in _api_parent_rels_raw}
+    # cmd_420: also exclude FKs to internal bridge models (approvable_id,
+    # inventory_transactionable_id, ...) — mirrors the build_context.py fix,
+    # see get_internal_bridge_fk_prop_names() docstring for why
+    # _api_parent_rels_raw alone misses them.
+    _api_fk_prop_names = {r['prop_name'] for r in _api_parent_rels_raw} | get_internal_bridge_fk_prop_names(model_def, schema)
     _export_candidates = gen_cfg.get('fields') or list(model_def.get('properties', {}).keys())
 
     def _is_export_scalar(_prop: dict) -> bool:

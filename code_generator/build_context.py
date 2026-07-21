@@ -16,6 +16,7 @@ from helpers.schema_helpers import (
     is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
     derive_text_fields, derive_searchable_relation_fields,
+    get_internal_bridge_fk_prop_names,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -1119,7 +1120,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
         'organization_id', 'tenant_id',
     }
-    _fk_prop_names = {r['prop_name'] for r in parent_rels_raw}
+    # cmd_420: parent_rels_raw alone misses FKs to internal bridge models
+    # (approvable_id, inventory_transactionable_id, ...) — see
+    # get_internal_bridge_fk_prop_names() docstring for why.
+    _fk_prop_names = {r['prop_name'] for r in parent_rels_raw} | get_internal_bridge_fk_prop_names(model_def, schema)
     _export_candidates = gen_cfg.get('fields') or list(model_def.get('properties', {}).keys())
 
     def _is_export_scalar(_prop: dict) -> bool:

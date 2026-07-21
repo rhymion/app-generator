@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from helpers.label_field import resolve_label_paths
-from helpers.schema_helpers import get_parent_relationships
+from helpers.schema_helpers import get_parent_relationships, get_internal_bridge_fk_prop_names
 
 _SNAKE_CASE = re.compile(r'^[a-z][a-z0-9_]*$')
 _ID_SUFFIX  = re.compile(r'_id$')
@@ -174,7 +174,10 @@ def _compute_export_visibility(def_key: str, defn: dict, defs: dict) -> tuple[se
     gen_cfg = defs.get(f'{def_key}_detail', {}).get('x-generate') or defn.get('x-generate') or {}
     props = defn.get('properties', {})
     parent_rels = get_parent_relationships(defn)
-    fk_prop_names = {r['prop_name'] for r in parent_rels}
+    # cmd_420: also exclude FKs to internal bridge models (approvable_id,
+    # inventory_transactionable_id, ...) — invisible to get_parent_relationships()
+    # alone, see get_internal_bridge_fk_prop_names() docstring.
+    fk_prop_names = {r['prop_name'] for r in parent_rels} | get_internal_bridge_fk_prop_names(defn, {'definitions': defs})
     candidates = gen_cfg.get('fields') or list(props.keys())
     view_visible = set(candidates)
     export_scalar_fields = {
