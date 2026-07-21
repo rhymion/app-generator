@@ -1241,7 +1241,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             if not child_text_fields:
                 continue  # no searchable text
             _append_no_page_child(
-                no_page_children, child_name, f'{parent}_id',
+                no_page_children, child_name, f'{model}_id',
                 child_text_fields, child_base_def
             )
 
@@ -1258,7 +1258,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             if not target_text_fields:
                 continue
             _append_no_page_child(
-                no_page_children, target, f'{parent}_id',
+                no_page_children, target, f'{model}_id',
                 target_text_fields, target_base_def
             )
 
