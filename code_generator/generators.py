@@ -188,8 +188,10 @@ def build_attachable_owners(schema: dict) -> list[dict]:
     call.
 
     Returns owner descriptors keyed on the Prisma model name (the back
-    reference on `attachable`, e.g. `attachable.resource`). Entries are
-    sorted by name for deterministic generator output.
+    reference on `attachable`, e.g. `attachable.resource`), plus
+    `has_assignee` (whether the owner declares an `assignee_id` property) so
+    the template can select it for item-level permission resolution. Entries
+    are sorted by name for deterministic generator output.
     """
     owners = []
     seen = set()
@@ -200,7 +202,8 @@ def build_attachable_owners(schema: dict) -> list[dict]:
             continue
         if entity_name in seen:
             continue
-        for prop_name, prop in (defn.get('properties') or {}).items():
+        properties = defn.get('properties') or {}
+        for prop_name, prop in properties.items():
             if prop_name != 'attachable_id':
                 continue
             rel = prop.get('x-relationship') or {}
@@ -208,7 +211,7 @@ def build_attachable_owners(schema: dict) -> list[dict]:
                 continue
             if rel.get('target') != 'attachable':
                 continue
-            owners.append({'name': entity_name})
+            owners.append({'name': entity_name, 'has_assignee': 'assignee_id' in properties})
             seen.add(entity_name)
             break
     owners.sort(key=lambda o: o['name'])
