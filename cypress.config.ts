@@ -220,6 +220,10 @@ export default defineConfig({
           return JSON.parse(JSON.stringify({ apiKey: creatorApiKey, ownedRoleId: ownedRole.id }));
         },
         ...getGeneratedTasks(),
+        async 'db:setupReceivingReceiptNotificationFixture'() {
+          const { setupReceivingReceiptNotificationFixture } = require('./cypress/support/receiving_receipt/notification_helper');
+          return await setupReceivingReceiptNotificationFixture();
+        },
         async 'db:seedReservationInventory'(params: { quantity: number }) {
           const { seedReservationInventory } = require('./cypress/support/purchase_order/reservation_helper');
           return await seedReservationInventory(params.quantity);

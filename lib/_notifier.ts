@@ -18,7 +18,19 @@ import { randomUUID } from 'node:crypto';
  *     can swap to Redis / a queue without touching callers.
  *
  * See performance-plan-session.md (notification design choice 2026-05-11).
+ *
+ * Operational note: because this store has no persistence, any notification
+ * written before a server restart (rebuild, redeploy, crash) is
+ * unrecoverable — there is no database row or queue entry to fall back to.
+ * The line below logs once per process start specifically so that gap is
+ * visible in server logs instead of silently reading as "no notification
+ * was ever generated" when the real cause is "the process that generated it
+ * is gone".
  */
+console.log(
+  `[_notifier] in-memory notification store initialized (pid=${process.pid}). ` +
+    'Notifications created before this point (previous process) are not recoverable.',
+);
 
 export type NotificationType =
   | 'assigned'

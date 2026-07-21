@@ -191,12 +191,18 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/user_import.cy.ts
 !cypress/e2e/api/import_batch2.cy.ts
 !cypress/e2e/api/round_trip.cy.ts
+!cypress/e2e/api/notification_approval.cy.ts
+!cypress/e2e/api/receiving_receipt_notification.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/
 !cypress/support/audit_log/
 cypress/support/audit_log/*
 !cypress/support/audit_log/helper.ts
+!cypress/support/receiving_receipt/
+cypress/support/receiving_receipt/*
+!cypress/support/receiving_receipt/receiving_receipt_line_helper.ts
+!cypress/support/receiving_receipt/notification_helper.ts
 
 # ── docs/generated/ ──
 docs/generated/
