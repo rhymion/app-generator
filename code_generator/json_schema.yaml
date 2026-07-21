@@ -61,7 +61,7 @@ x-import-key:
     Entities without x-import-key: export-only in Phase 1; import blocked in Phase 2.
 
 definitions:
-  user_detail:
+  user:
     x-generate:
       list: true
       view: true
@@ -162,7 +162,7 @@ definitions:
             items:
               $ref: "#/definitions/role"
 
-  role_detail:
+  role:
     x-generate:
       list: true
       view: true
@@ -194,7 +194,7 @@ definitions:
         items:
           $ref: "#/definitions/user"
 
-  organization_detail:
+  organization:
     x-generate:
       list: true
       view: true
@@ -228,7 +228,7 @@ definitions:
         items:
           $ref: "#/definitions/user"
 
-  permission_detail:
+  permission:
     x-generate:
       list: true
       view: true
@@ -265,7 +265,7 @@ definitions:
       role:
         $ref: "#/definitions/role"
 
-  approval_flow_detail:
+  approval_flow:
     x-generate:
       list: true
       view: true
@@ -346,7 +346,7 @@ definitions:
           - Approved
           - Rejected
 
-  approvable_detail:
+  approvable:
     x-generate:
       list: false
       view: false
@@ -368,7 +368,7 @@ definitions:
         items:
           $ref: "#/definitions/approval_request"
 
-  commentable_detail:
+  commentable:
     x-generate:
       list: false
       view: false
@@ -413,7 +413,7 @@ definitions:
       comment_id:
         x-relationship:
           labelField: id
-  attachable_detail:
+  attachable:
     x-generate:
       list: false
       view: false
@@ -490,7 +490,7 @@ definitions:
       filter_value: {}
       order:
         default: 0
-  dashboard_detail:
+  dashboard:
     x-generate:
       list: true
       view: true
