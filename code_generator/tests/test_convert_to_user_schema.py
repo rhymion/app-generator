@@ -64,12 +64,27 @@ def test_convert_then_build_reconstructs_legacy_schema(tmp_path):
     legacy = _yaml_load(LEGACY_SCHEMA_FIXTURE)
     converted = convert_to_user_schema(legacy, prisma_models)
 
-    # Category A eliminated: the raw `widget` entity must be gone from the
-    # converted (user-authored) schema -- it is now fully Prisma-derived.
-    assert "widget" not in converted["definitions"]
-    assert "widget_detail" in converted["definitions"]
+    # Stage 4 (cmd_409): the `_detail` suffix is retired from the
+    # user-authored schema -- the paired view takes the bare `widget` key
+    # directly, with no separate raw `widget` entry (Category A is fully
+    # Prisma-derived, and the synthesized raw entity is reconstructed onto
+    # the reserved `__widget` name by `build_intermediate_schema`).
+    assert "widget" in converted["definitions"]
+    assert "widget_detail" not in converted["definitions"]
 
     rebuilt = build_intermediate_schema(converted, prisma_models)
 
-    assert rebuilt["definitions"]["widget"] == legacy["definitions"]["widget"]
-    assert rebuilt["definitions"]["widget_detail"] == legacy["definitions"]["widget_detail"]
+    assert rebuilt["definitions"]["__widget"] == legacy["definitions"]["widget"]
+
+    # The only content difference Stage 4 intentionally introduces on a
+    # paired view: its `allOf[0].$ref` now points at the renamed raw entity
+    # (`__widget` instead of `widget`). Normalize that one field so the
+    # comparison proves true content equality, not just "looks different
+    # because the entity was renamed" (mirrors
+    # test_build_user_schema_roundtrip.py's `_normalize_legacy_view_self_ref`).
+    expected_view = dict(legacy["definitions"]["widget_detail"])
+    expected_view["allOf"] = [
+        {**item, "$ref": "#/definitions/__widget"} if item.get("$ref") == "#/definitions/widget" else item
+        for item in expected_view["allOf"]
+    ]
+    assert rebuilt["definitions"]["widget"] == expected_view

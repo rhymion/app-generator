@@ -204,7 +204,11 @@ def convert_to_user_schema(legacy_data: dict, prisma_models: dict) -> dict:
             base_name = key[: -len("_detail")]
             raw_entity = legacy_definitions[base_name]
             prisma_model = prisma_models.get(base_name)
-            new_definitions[key] = _convert_paired(entry, raw_entity, prisma_model)
+            # Stage 4 (cmd_409): the `_detail` suffix is retired from the
+            # user-authored schema -- the paired view now takes the bare
+            # `{base_name}` key directly (build_user_schema.py synthesizes
+            # the raw entity back onto the reserved `__{base_name}` name).
+            new_definitions[base_name] = _convert_paired(entry, raw_entity, prisma_model)
         elif entry.get("type") == "object" and "properties" in entry:
             prisma_model = prisma_models.get(key)
             new_definitions[key] = _convert_standalone(entry, prisma_model)
