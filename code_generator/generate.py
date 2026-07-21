@@ -59,7 +59,7 @@ from generators_test import (
     set_messages_namespaces,
 )
 from validation_context import build_validation_context
-from manifest import ManifestRecorder
+from manifest import ManifestRecorder, sha256_file, sha256_text
 
 
 # ---------------------------------------------------------------------------
@@ -236,11 +236,28 @@ def _write(path: Path, content: str) -> None:
 
 
 def _write_stub(path: Path, content: str) -> None:
-    """Write stub only if file does not already exist (user may have customized)."""
+    """Write stub only if file does not already exist (user may have customized).
+
+    Exception (cmd_413b): if the existing file's content matches a *past*
+    pristine render of this same stub (recorded across manifest runs — see
+    ManifestRecorder.is_stale_stub), it was never hand-edited — it was just
+    left behind by an earlier run before the schema grew a signal (e.g.
+    x-approval / an approvable relation) that changes what this stub should
+    contain. That case self-heals: we refresh it with today's render instead
+    of skipping it forever.
+    """
     # Record the pristine stub content whether or not we (re)write it, so cleanup
     # can delete the file iff it still matches a pristine stub (i.e. untouched).
     _manifest.record(path, content, 'stub')
     if path.exists():
+        existing_hash = sha256_file(path)
+        if existing_hash == sha256_text(content):
+            print(f'  Skipped (up to date) {path}')
+            return
+        if _manifest.is_stale_stub(path, existing_hash):
+            path.write_text(content, encoding='utf-8')
+            print(f'  Refreshed (stale stub, schema changed since it was first generated) {path}')
+            return
         print(f'  Skipped (exists) {path}')
         return
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -406,12 +423,12 @@ def generate(schema_path: str, output_dir: str) -> None:
         print('No entities found in schema', file=sys.stderr)
         return
 
+    out = Path(output_dir)
     global _manifest
-    _manifest = ManifestRecorder()
+    _manifest = ManifestRecorder(out=out)
     _handwritten_notices.clear()
 
     env = _make_env()
-    out = Path(output_dir)
 
     # Load messages/en.json Fields namespace for enum label translation in Cypress tests
     import json as _json

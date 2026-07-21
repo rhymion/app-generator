@@ -898,6 +898,56 @@ class TestVirtualResolverNonOverwrite:
         assert resolver_path.exists()
         assert resolver_path.read_text() == content
 
+    def test_write_stub_self_heals_stale_pristine_stub(self, tmp_path, monkeypatch):
+        """cmd_413b: a stub whose on-disk content matches a PAST pristine render
+        (recorded in a prior manifest — e.g. the entity gained x-approval after its
+        stub was already generated) is refreshed, not skipped forever. This is what
+        unblocked leave_request's approval_request generation."""
+        import generate as generate_module
+        from manifest import ManifestRecorder
+
+        out = tmp_path
+        stub_path = out / "lib" / "leave_request" / "service_after_create.ts"
+        stub_path.parent.mkdir(parents=True)
+        old_render = "export async function afterCreate(_tx, _created, _data) {}"
+        stub_path.write_text(old_render)
+
+        # Simulate a prior run's manifest recording `old_render` as the pristine stub.
+        first_manifest = ManifestRecorder(out=out)
+        first_manifest.record(stub_path, old_render, 'stub')
+        first_manifest.write(out, 'json_schema.yaml')
+
+        # This run's schema now calls for the populated (approval-matching) body.
+        new_render = "export async function afterCreate(tx, created, _data) { /* approval logic */ }"
+        monkeypatch.setattr(generate_module, '_manifest', ManifestRecorder(out=out))
+        generate_module._write_stub(stub_path, new_render)
+
+        assert stub_path.read_text() == new_render
+
+    def test_write_stub_preserves_genuine_hand_edit(self, tmp_path, monkeypatch):
+        """A file whose content never matches any generator-produced render (i.e. a
+        real hand customization) must never be overwritten, even across manifest
+        runs — only *provably pristine, just-outdated* renders self-heal."""
+        import generate as generate_module
+        from manifest import ManifestRecorder
+
+        out = tmp_path
+        stub_path = out / "lib" / "leave_request" / "service_after_create.ts"
+        stub_path.parent.mkdir(parents=True)
+        hand_written = "export async function afterCreate(_tx, _created, _data) { /* my custom logic */ }"
+        stub_path.write_text(hand_written)
+
+        first_render = "export async function afterCreate(_tx, _created, _data) {}"
+        first_manifest = ManifestRecorder(out=out)
+        first_manifest.record(stub_path, first_render, 'stub')
+        first_manifest.write(out, 'json_schema.yaml')
+
+        new_render = "export async function afterCreate(tx, created, _data) { /* approval logic */ }"
+        monkeypatch.setattr(generate_module, '_manifest', ManifestRecorder(out=out))
+        generate_module._write_stub(stub_path, new_render)
+
+        assert stub_path.read_text() == hand_written
+
 
 # ---------------------------------------------------------------------------
 # x_relationships_list — composite (list) labelField exclusion (cmd_351)
