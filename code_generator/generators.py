@@ -18,7 +18,18 @@ from helpers.schema_helpers import (
     get_detail_properties,
     get_approval_lines_props,
     resolve_ledger_domain,
+    get_entity_properties,
 )
+
+
+def _raw_def(entity_name: str, schema: dict) -> dict:
+    """Resolve a bare/view model name to its raw entity dict — scalar/FK
+    properties, x-readonly-fields, x-gdpr-mode, x-display etc. all live on
+    the raw ('__'-prefixed) entity, not the view. Falls back to the bare
+    view for entities with no raw counterpart (e.g. 'setting', which
+    proxies the 'user' view instead of having its own raw twin)."""
+    defs = schema.get('definitions', {})
+    return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
 from helpers.label_field import (
     build_label_expression,
     first_label_format,
@@ -70,8 +81,9 @@ def _enum_value_literal(defn: dict, label) -> str:
 
 def _status_prop_defn(schema: dict | None, entity: str, field: str) -> dict:
     """Look up the property definition for <entity>.<field> (empty dict if absent)."""
-    return (((schema or {}).get('definitions', {}).get(entity, {}) or {})
-            .get('properties', {}) or {}).get(field) or {}
+    if not schema:
+        return {}
+    return (_raw_def(entity, schema).get('properties', {}) or {}).get(field) or {}
 
 
 def _has_string_labels(enum_values) -> bool:
@@ -110,8 +122,9 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
     from helpers.naming import to_title_case
     catalog = []
     for entity_name, defn in schema['definitions'].items():
-        if entity_name.endswith('_detail') or entity_name.endswith('_input'):
+        if not entity_name.startswith('__') or entity_name.endswith('_input'):
             continue
+        entity_name = entity_name[2:]
         xdisplay = defn.get('x-display') or {}
         if not (isinstance(xdisplay, dict) and xdisplay.get('dashboard')):
             continue
@@ -194,10 +207,11 @@ def build_attachable_owners(schema: dict) -> list[dict]:
     owners = []
     seen = set()
     for entity_name, defn in (schema.get('definitions') or {}).items():
-        # Detail / input variants aren't owners — only the base entity holds
-        # the FK field. Walking the bases is enough.
-        if entity_name.endswith('_detail') or entity_name.endswith('_input'):
+        # View / input variants aren't owners — only the raw entity holds
+        # the FK field. Walking the raw entities is enough.
+        if not entity_name.startswith('__') or entity_name.endswith('_input'):
             continue
+        entity_name = entity_name[2:]
         if entity_name in seen:
             continue
         for prop_name, prop in (defn.get('properties') or {}).items():
@@ -1629,7 +1643,7 @@ def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema:
 
 def service_context(ctx: dict, schema: dict | None = None) -> dict:
     parent                  = ctx['parent']
-    parent_def              = (schema or {}).get('definitions', {}).get(parent, {})
+    parent_def              = _raw_def(parent, schema) if schema else {}
     model                   = ctx['model']
     parent_pascal           = ctx['parent_pascal']
     can_create              = ctx['can_create']
@@ -1675,25 +1689,16 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         return f'string{sfx}'
 
     def _resolve_flatten_base_model(target: str) -> str:
-        """Strip `_detail` from a flatten target when the schema confirms
-        it's an allOf-with-base-$ref view of an existing entity.
+        """Return the Prisma model name backing a flatten target.
 
-        The Prisma client only exposes the base table (`prisma.pre_check`),
-        not the `_detail` extension — generating `tx.pre_check_detail.create`
-        produces a type error. When the schema looks like
-        `pre_check_detail: allOf: [$ref: pre_check, {properties: …}]`,
-        return the base entity name; otherwise return the target as-is so
-        plain-target flatten refs keep working.
+        Flatten $ref targets are always the bare view entity key, which IS
+        the Prisma model name directly — the raw entity's '__' prefix is a
+        purely internal JSON-schema bookkeeping artifact that never reaches
+        schema.prisma. No stripping needed; this used to strip a literal
+        `_detail` suffix pre-Stage4 (e.g. `pre_check_detail` -> `pre_check`)
+        when the flatten $ref pointed at the view rather than the base —
+        that distinction no longer exists now that the view IS the bare key.
         """
-        if not schema:
-            return target
-        defn = schema.get('definitions', {}).get(target, {})
-        for item in defn.get('allOf', []):
-            if '$ref' in item:
-                base = item['$ref'].split('/')[-1]
-                if base in schema.get('definitions', {}):
-                    return base
-                break
         return target
 
     flatten_update_params_parts: list[str] = []
@@ -1724,7 +1729,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         # optional, "remove" means unlink (set to null and keep the row); when
         # it's required, "remove" means delete. The inline-create path is the
         # same in both cases.
-        _target_def = (schema or {}).get('definitions', {}).get(_target, {}) if schema else {}
+        _target_def = _raw_def(_target, schema) if schema else {}
         _target_props = _target_def.get('properties', {})
         _fk_prop = _target_props.get(_fk_field, {})
         _fk_type = _fk_prop.get('type')
@@ -1831,7 +1836,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                 _af_name = _af['name']
                 _af_var  = f"{to_camel_case(_prop)}{to_pascal_case(_af_name)}"
                 _item_target = _af.get('item_target', '')
-                _item_props  = (schema or {}).get('definitions', {}).get(_item_target, {}).get('properties', {})
+                _item_props  = _raw_def(_item_target, schema).get('properties', {}) if schema else {}
                 _item_label  = 'name' if 'name' in _item_props else 'id'
                 _array_relation_create_parts.append(
                     f"...({_af_var}.length > 0 ? {{ {_af_name}: {{ create: {_af_var}.map((v: string) => ({{ {_item_label}: v }})) }} }} : {{}})"
@@ -1850,7 +1855,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                 _af_name = _af['name']
                 _af_var  = f"{to_camel_case(_prop)}{to_pascal_case(_af_name)}"
                 _item_target = _af.get('item_target', '')
-                _item_props  = (schema or {}).get('definitions', {}).get(_item_target, {}).get('properties', {})
+                _item_props  = _raw_def(_item_target, schema).get('properties', {}) if schema else {}
                 _item_label  = 'name' if 'name' in _item_props else 'id'
                 _row_var = f"{to_camel_case(_target)}Row"
                 _array_post_upsert.append(
@@ -2042,7 +2047,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
     for child_raw in non_comment_ch:
         child_name = child_raw['name']
         prop_name  = child_raw['property_name']
-        child_def  = schema['definitions'].get(child_name, {})
+        child_def  = _raw_def(child_name, schema)
         child_props = child_def.get('properties', {})
 
         if not child_props:
@@ -2439,7 +2444,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 # carry the nested array shape (it's typed as the bare
                 # target's properties, not the _detail's extension).
                 _item_target = _field.get('item_target', '')
-                _item_props  = schema['definitions'].get(_item_target, {}).get('properties', {})
+                _item_props  = _raw_def(_item_target, schema).get('properties', {})
                 _item_label  = 'name' if 'name' in _item_props else 'id'
                 has_flatten_array = True
                 _inner.append(
@@ -3197,7 +3202,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # Ordered children detection
     has_ordered_ch = any(
-        'order' in (schema['definitions'].get(c['name'], {}).get('properties') or {})
+        'order' in (_raw_def(c['name'], schema).get('properties') or {})
         for c in non_comment_ch
     )
     # Flatten arrays (e.g., pre_check_detail.symptoms) need EditableListWrapper
@@ -3215,7 +3220,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     )
     has_ordered_list_ch = any(
         c.get('output_type') == 'list' and (c.get('relationship') or {}).get('type') != 'many-to-many'
-        and 'order' in (schema['definitions'].get(c['name'], {}).get('properties') or {})
+        and 'order' in (_raw_def(c['name'], schema).get('properties') or {})
         for c in non_comment_ch
     )
 
@@ -3268,7 +3273,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         prop_name  = c['property_name']
         child_var  = safe_var_name(prop_name)
         child_pascal = to_pascal_case(prop_name)
-        child_def  = schema['definitions'].get(child_name, {})
+        child_def  = _raw_def(child_name, schema)
         child_props_dict = child_def.get('properties', {})
         is_m2m     = (c.get('relationship') or {}).get('type') == 'many-to-many'
         is_list    = c.get('output_type') == 'list'
@@ -3404,7 +3409,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     for c in non_comment_ch:
         if c.get('output_type') == 'list' or (c.get('relationship') or {}).get('type') == 'many-to-many':
             continue
-        cdef = schema['definitions'].get(c['name'], {})
+        cdef = _raw_def(c['name'], schema)
         parent_fk_props_cdef = get_parent_fk_props(cdef, model)
         child_prop_name = c['property_name']
         for r in get_parent_relationships(cdef):
@@ -3467,7 +3472,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         prop_name  = c['property_name']
         child_var  = safe_var_name(prop_name)
         form_key   = singularize(prop_name)
-        child_def  = schema['definitions'].get(child_name, {})
+        child_def  = _raw_def(child_name, schema)
         child_props_dict = child_def.get('properties', {})
         is_m2m = (c.get('relationship') or {}).get('type') == 'many-to-many'
         is_list = c.get('output_type') == 'list'
@@ -3555,7 +3560,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         child_var  = safe_var_name(prop_name)
         child_pascal = to_pascal_case(prop_name)
         child_title_label = ' '.join(w.capitalize() for w in prop_name.split('_'))
-        child_def  = schema['definitions'].get(child_name, {})
+        child_def  = _raw_def(child_name, schema)
         child_props_dict_v = child_def.get('properties', {})
         is_list = c.get('output_type') == 'list'
         is_m2m  = (c.get('relationship') or {}).get('type') == 'many-to-many'
@@ -3597,7 +3602,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         child_pascal = to_pascal_case(prop_name)
         child_camel  = to_camel_case(prop_name)
         child_title_label = ' '.join(w.capitalize() for w in prop_name.split('_'))
-        child_def    = schema['definitions'].get(child_name, {})
+        child_def    = _raw_def(child_name, schema)
         child_props_dict = child_def.get('properties', {})
         is_m2m = (c.get('relationship') or {}).get('type') == 'many-to-many'
         is_list = c.get('output_type') == 'list'
@@ -3911,7 +3916,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         _target = _flat['target']
         _fields = _flat['fields']
         _rel_camel = to_camel_case(_prop)
-        _target_props = schema['definitions'].get(_target, {}).get('properties', {})
+        _target_props = _raw_def(_target, schema).get('properties', {})
 
         _accordion_fields_jsx: list[str] = []
         _rel_fds_lines: list[str] = []
@@ -3933,7 +3938,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 _fname        = _f['name']
                 _fcamel_label = to_camel_case(_fname)
                 _item_target  = _f.get('item_target', '')
-                _item_props   = schema['definitions'].get(_item_target, {}).get('properties', {})
+                _item_props   = _raw_def(_item_target, schema).get('properties', {})
                 _item_label   = 'name' if 'name' in _item_props else 'id'
                 _title_field  = to_title_case(_fname)
                 _ref_var      = safe_var_name(f'{_prop}_{_fname}') + 'Ref'

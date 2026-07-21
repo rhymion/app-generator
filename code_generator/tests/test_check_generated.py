@@ -21,7 +21,7 @@ from check_generated import check
 _MIN_SCHEMA = dedent("""
     $schema: "http://json-schema.org/draft-07/schema#"
     definitions:
-      widget:
+      __widget:
         type: object
         required: [id, name]
         properties:

@@ -21,6 +21,7 @@ import yaml
 from jinja2 import Environment, FileSystemLoader
 
 from helpers.naming import to_pascal_case, to_camel_case
+from helpers.schema_helpers import get_entity_properties
 from context import build_entity_context
 
 
@@ -83,9 +84,12 @@ def extract_entities(schema: dict) -> list[dict]:
     """Port of extractEntities() from generate.ts."""
     defs = schema['definitions']
 
+    # Raw entities carry the '__' prefix (e.g. '__role') and hold the actual
+    # properties; the bare key ('role') is the view/generate-config entity —
+    # see docs/knowledge/ for the Stage4 _detail-suffix retirement.
     base_models = {
         key for key, defn in defs.items()
-        if not key.endswith('_detail')
+        if key.startswith('__')
         and not key.endswith('_input')
         and (defn.get('properties') or {}).get('id') is not None
     }
@@ -94,35 +98,55 @@ def extract_entities(schema: dict) -> list[dict]:
     child_to_parents: dict[str, list[str]] = {}
     results = []
 
+    def _resolve_raw_key(key: str, _seen: frozenset = frozenset()) -> str | None:
+        """Walk allOf $ref chains to the raw entity ultimately backing `key`.
+
+        Usually one hop (view -> raw, e.g. 'role' -> '__role'). A proxy view
+        with no raw twin of its own (e.g. 'setting', whose allOf $ref targets
+        the 'user' VIEW instead) needs a second hop ('user' -> '__user').
+        """
+        if key in base_models:
+            return key
+        if key in _seen:
+            return None  # cycle guard
+        for item in defs.get(key, {}).get('allOf', []):
+            ref = item.get('$ref')
+            if ref:
+                found = _resolve_raw_key(ref.split('/')[-1], _seen | {key})
+                if found:
+                    return found
+        return None
+
     for def_key, defn in defs.items():
-        # Resolve modelName from allOf $ref
-        model_name = None
-        for item in defn.get('allOf', []):
-            ref_target = (item.get('$ref') or '').split('/')[-1]
-            if ref_target in base_models:
-                model_name = ref_target
-                break
+        raw_key = _resolve_raw_key(def_key)
 
         # Skip x-internal entities — no pages, no embedding, custom API only
-        x_internal = defn.get('x-internal') or (model_name and defs.get(model_name, {}).get('x-internal'))
+        x_internal = defn.get('x-internal') or (raw_key and defs.get(raw_key, {}).get('x-internal'))
         if x_internal:
             continue
 
-        # Find x-generate: on this def, on the base model (for _detail keys), or on base model directly
+        # Find x-generate: on this def (the normal case — view entities carry
+        # x-generate directly), on the raw entity as a fallback (a view
+        # without its own x-generate but whose raw sibling has one), or on
+        # the raw entity directly when it has no view sibling at all (a
+        # schema not yet migrated through the raw/view split).
         x_generate = (
             defn.get('x-generate')
-            or (def_key.endswith('_detail') and model_name and defs.get(model_name, {}).get('x-generate'))
+            or (not def_key.startswith('__') and raw_key and defs.get(raw_key, {}).get('x-generate'))
             or (def_key in base_models and defs[def_key].get('x-generate'))
         )
 
         if not x_generate:
             continue
-        if not model_name and def_key not in base_models:
+        if not raw_key and def_key not in base_models:
             continue
 
-        entity_name = re.sub(r'_detail$', '', def_key) if def_key.endswith('_detail') else def_key
-        if not model_name:
-            model_name = entity_name
+        # P3: the view entity's own key IS the parent/URL name — no suffix to
+        # strip. `model` is the actual Prisma model name, resolved via the
+        # raw-entity chain — usually identical to entity_name, but a proxy
+        # view like 'setting' resolves to a different model ('user').
+        entity_name = def_key[2:] if def_key.startswith('__') else def_key
+        model_name = raw_key[2:] if raw_key else entity_name
 
         children = _extract_children(defn, schema)
 
@@ -185,12 +209,12 @@ def extract_entities(schema: dict) -> list[dict]:
                 )
 
     # Filter out entities that are pure children (not in any m2m pair),
-    # unless they have an explicit _detail definition (which opts them in to standalone generation)
+    # unless they have an explicit view definition (which opts them in to standalone generation)
     def _should_include(entity: dict) -> bool:
         m = entity['model']
         if m not in all_children:
             return True
-        if entity['definition_key'].endswith('_detail'):
+        if not entity['definition_key'].startswith('__'):
             return True
         return any(m in pair.split('<->') for pair in m2m_pairs)
 
@@ -238,13 +262,13 @@ def extract_named_constants(schema: dict) -> list[dict]:
     constants = []
 
     for entity_name, defn in defs.items():
-        if entity_name.endswith('_detail') or entity_name.endswith('_input'):
+        if entity_name.startswith('__') or entity_name.endswith('_input'):
             continue
         x_internal = defn.get('x-internal')
         if not x_internal:
             continue
 
-        props = defn.get('properties', {})
+        props = get_entity_properties(entity_name, schema)
 
         # Derive parent prefix from the first non-user many-to-one FK
         parent_name = None
