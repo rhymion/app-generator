@@ -147,6 +147,14 @@ class TestCompositeKeyAmbiguousLabel:
                         'approval_flow_id': _fk_field('approval_flow', label=request_label),
                     },
                 },
+                # Import-eligible (cmd_426 E_IMPORT_KEY_NOT_ELIGIBLE): this
+                # class exercises E_COMPOSITE_KEY_AMBIGUOUS_LABEL specifically,
+                # so approval_flow must otherwise be a valid create/edit-able
+                # primary entity — same shape as the real json_schema.yaml.
+                'approval_flow_detail': {
+                    'x-generate': {'list': True, 'view': True, 'new': True, 'edit': True, 'api': True},
+                    'allOf': [{'$ref': '#/definitions/approval_flow'}],
+                },
             }
         }
 

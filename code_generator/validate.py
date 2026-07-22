@@ -1063,6 +1063,116 @@ def validate_schema(schema: dict) -> None:
                     )
 
     # -----------------------------------------------------------------------
+    # 12. Contradictory import configuration (E_IMPORT_KEY_NOT_ELIGIBLE,
+    #     cmd_426): a base entity that declares x-import-key with the import
+    #     route left on (x-generate.import: true, the default) must actually
+    #     be reachable as a primary, create-or-edit-able entity — otherwise
+    #     x-import-key advertises an import path that build_context.py's
+    #     import_eligible gate (§ "Import eligibility — SINGLE PLACE",
+    #     cmd_328/330) silently disables, and nothing ever tells the schema
+    #     author why.
+    #
+    #     Structural condition mirrored 1:1 from build_context.py's
+    #     import_eligible formula (no entity names hardcoded — this walks
+    #     every base model definition uniformly):
+    #       has_import_key AND import_flag(default True) AND
+    #       NOT(is_primary_entity AND (can_create OR can_update))
+    #
+    #     The doc comment on x-import-key (top of this schema) already names
+    #     the sanctioned way to keep x-import-key for export/dotted-FK-target
+    #     purposes while opting out of the entity's own import route:
+    #     x-generate.import: false. That case is intentionally NOT an error
+    #     here — only entities where the import flag is (still) true but the
+    #     structural precondition for import can never be met are rejected.
+    # -----------------------------------------------------------------------
+    _base_model_keys = {
+        key for key, d in defs.items()
+        if isinstance(d, dict)
+        and not key.endswith('_detail') and not key.endswith('_input')
+        and (d.get('properties') or {}).get('id') is not None
+    }
+
+    def _resolved_model_name(d: dict) -> str | None:
+        """Mirrors generate_types.py's extract_entities() model-name resolution
+        (allOf $ref → a base model), without that function's cross-entity
+        child/m2m validation — this check only needs model identity."""
+        for item in d.get('allOf', []) or []:
+            ref = (item.get('$ref') or '').split('/')[-1]
+            if ref in _base_model_keys:
+                return ref
+        return None
+
+    for _model_key, _model_defn in defs.items():
+        if not _SNAKE_CASE.match(_model_key) or _model_key not in _base_model_keys:
+            continue
+        _ik_raw = _model_defn.get('x-import-key') or []
+        if not _ik_raw:
+            continue
+
+        # Find every definition generated *as this model* (parent == model —
+        # i.e. `_model_key` itself or `{_model_key}_detail`, not an aliased
+        # entity like 'setting' → 'user'), and collect whichever x-generate
+        # block actually governs it (own block, else the base model's block —
+        # same fallback chain as extract_entities()).
+        _primary_gen_cfgs = []
+        for _k, _d in defs.items():
+            if not isinstance(_d, dict):
+                continue
+            _resolved = _resolved_model_name(_d)
+            if _resolved is None and _k in _base_model_keys:
+                _resolved = _k
+            if _resolved != _model_key:
+                continue
+            _entity_name = _k[:-len('_detail')] if _k.endswith('_detail') else _k
+            if _entity_name != _resolved:
+                continue  # alias entity (parent != model) — never import-eligible
+            _gen_cfg = (
+                _d.get('x-generate')
+                or (_k.endswith('_detail') and defs.get(_resolved, {}).get('x-generate'))
+                or (_k in _base_model_keys and defs.get(_k, {}).get('x-generate'))
+            )
+            if _gen_cfg:
+                _primary_gen_cfgs.append(_gen_cfg)
+
+        _eligible = any(
+            (cfg.get('import', True) is not False)
+            and (cfg.get('new', True) is not False or cfg.get('edit', True) is not False)
+            for cfg in _primary_gen_cfgs
+        )
+        if _eligible:
+            continue
+        _import_explicitly_off = bool(_primary_gen_cfgs) and all(
+            cfg.get('import', True) is False for cfg in _primary_gen_cfgs
+        )
+        if _import_explicitly_off:
+            continue  # sanctioned export/dotted-FK-target-only opt-out
+
+        if not _primary_gen_cfgs:
+            _reason = (
+                f"'{_model_key}' is never generated as a primary entity of its "
+                f"own model (no '{_model_key}' or '{_model_key}_detail' "
+                f"definition carries an x-generate block) — there is no create "
+                f"or edit route to receive imported rows"
+            )
+        else:
+            _reason = (
+                f"'{_model_key}'s primary x-generate configuration has both "
+                f"'new' and 'edit' disabled — there is no create or edit route "
+                f"to receive imported rows"
+            )
+        errors.append(
+            f"Definition '{_model_key}' (E_IMPORT_KEY_NOT_ELIGIBLE): declares "
+            f"x-import-key {_ik_raw!r} with import left enabled (x-generate."
+            f"import is not false), but {_reason}. Fix by either (a) making "
+            f"'{_model_key}' a primary create-or-edit-able entity (add/adjust "
+            f"a '{_model_key}_detail' x-generate block with new: true or "
+            f"edit: true), or (b) if x-import-key is only needed for CSV "
+            f"export / as a dotted-FK natural-key target for other entities, "
+            f"set x-generate.import: false on '{_model_key}' to make the "
+            f"opt-out explicit."
+        )
+
+    # -----------------------------------------------------------------------
     # Report
     # -----------------------------------------------------------------------
     if errors:
