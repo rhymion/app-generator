@@ -41,21 +41,21 @@ def _bridge_schema(
     defs: dict = {}
 
     # Bridge model (id only, x-generate all false)
-    defs[bridge_name] = {
+    defs[f'__{bridge_name}'] = {
         'type': 'object',
         'required': ['id'],
         'properties': {'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'}},
     }
-    defs[f'{bridge_name}_detail'] = {
+    defs[bridge_name] = {
         'x-generate': {
             'list': False, 'view': False, 'new': False, 'edit': False,
             'delete': False, 'api': False, 'test': False,
         },
-        'allOf': [{'$ref': f'#/definitions/{bridge_name}'}],
+        'allOf': [{'$ref': f'#/definitions/__{bridge_name}'}],
     }
 
-    # Child entity with new-form x-bridge
-    defs[child_name] = {
+    # Child entity with new-form x-bridge — x-bridge lives on the raw entity.
+    defs[f'__{child_name}'] = {
         'type': 'object',
         'required': ['id', 'name'],
         'x-bridge': {
@@ -72,17 +72,17 @@ def _bridge_schema(
             'name': {'type': 'string', 'minLength': 1},
         },
     }
-    defs[f'{child_name}_detail'] = {
+    defs[child_name] = {
         'x-generate': {
             'list': True, 'view': True, 'new': True, 'edit': True,
             'delete': True, 'api': True, 'test': True,
         },
-        'allOf': [{'$ref': f'#/definitions/{child_name}'}],
+        'allOf': [{'$ref': f'#/definitions/__{child_name}'}],
     }
 
     # Parent entities (minimal)
     for p in parent_names:
-        defs[p] = {
+        defs[f'__{p}'] = {
             'type': 'object',
             'required': ['id', 'name'],
             'properties': {
@@ -90,12 +90,12 @@ def _bridge_schema(
                 'name': {'type': 'string', 'minLength': 1},
             },
         }
-        defs[f'{p}_detail'] = {
+        defs[p] = {
             'x-generate': {
                 'list': True, 'view': True, 'new': True, 'edit': True,
                 'delete': True, 'api': True, 'test': True,
             },
-            'allOf': [{'$ref': f'#/definitions/{p}'}],
+            'allOf': [{'$ref': f'#/definitions/__{p}'}],
         }
 
     return {'definitions': defs}
@@ -105,7 +105,7 @@ def _entity(model: str) -> dict:
     return {
         'parent': model,
         'model': model,
-        'definition_key': f'{model}_detail',
+        'definition_key': model,
         'children': [],
         'generate_config': {
             'list': True, 'view': True, 'new': True, 'edit': True,
@@ -511,7 +511,7 @@ def test_collect_parent_bridge_children_empty_for_non_parent():
 
 def test_collect_parent_bridge_children_columns_from_x_display():
     schema = _bridge_schema(parent_names=['work'])
-    schema['definitions']['channel']['x-display'] = {
+    schema['definitions']['__channel']['x-display'] = {
         'table': [{'name': {'primary': True}}, {'kind': {}}]
     }
     kids = collect_parent_bridge_children('work', schema)

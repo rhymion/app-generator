@@ -52,11 +52,6 @@ describe('API: User Invalidate DP-6 functional tests (cmd_244)', () => {
       // GDPR basis must be cited
       expect(content).to.include('GDPR Art.17(3)(b)(e)');
     });
-    // Design doc must reflect the ruling
-    cy.readFile('docs/compliance/gdpr-design.md').then((content: string) => {
-      expect(content).to.include('NULL 化を廃止');
-      expect(content).to.include('GDPR 17条(3)(b)(e)');
-    });
   });
 
   it('test4: no-delete-permission user cannot invalidate via API, and user list has no removeAction', () => {

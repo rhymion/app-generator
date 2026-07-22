@@ -31,6 +31,7 @@ from helpers.label_field import build_label_expression
 from helpers.schema_helpers import derive_text_fields as _derive_text_fields
 from helpers.schema_helpers import get_splittable_bridge_field
 from helpers.schema_helpers import resolve_ledger_domain
+from helpers.schema_helpers import get_entity_properties
 from generators import (
     chart_context,
     page_list_context,
@@ -89,7 +90,7 @@ def _collect_bridges(schema: dict) -> dict[str, dict]:
     defs = schema.get('definitions', {})
     bridges: dict[str, dict] = {}
     for entity_name, entity_def in defs.items():
-        if entity_name.endswith('_detail') or not isinstance(entity_def, dict):
+        if not entity_name.startswith('__') or not isinstance(entity_def, dict):
             continue
         bridge = get_new_form_bridge(entity_def)
         if bridge:
@@ -766,11 +767,15 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     _splittable_defs = schema.get('definitions', {})
     for _def_key, _def_val in _splittable_defs.items():
-        if _def_key.endswith('_detail'):
+        if not _def_key.startswith('__'):
             continue
         _split_cfg = _def_val.get('x-splittable')
         if not _split_cfg:
             continue
+        # x-splittable stays on the raw entity (_def_key, '__'-prefixed); every
+        # downstream use — file paths, TS identifiers, template context, FK
+        # target comparisons — needs the bare model name.
+        _def_key = _def_key[2:]
         _split_entity_props = _def_val.get('properties', {})
         _split_status_enum = (_split_entity_props.get('status') or {}).get('enum') or []
 
@@ -1038,7 +1043,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     defs = schema.get('definitions', {})
     approvable_entities = []
     for def_key, def_val in defs.items():
-        if def_key.endswith('_detail'):
+        if not def_key.startswith('__'):
             continue
         x_approval = def_val.get('x-approval')
         if not x_approval:
@@ -1046,6 +1051,9 @@ def generate(schema_path: str, output_dir: str) -> None:
         on_approved = x_approval.get('on_approved', {})
         if not on_approved:
             continue
+        # x-approval stays on the raw entity (def_key, '__'-prefixed); template
+        # context (snake_name/pascal_name/lib path) needs the bare model name.
+        def_key = def_key[2:]
         x_ledger_source = def_val.get('x-ledger-source', {})
         x_splittable = def_val.get('x-splittable', {})
         entity_props = def_val.get('properties', {})
@@ -1125,7 +1133,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     # dispatch module and per-entity service_after_reject once-stubs (emit_hook only).
     rejectable_entities = []
     for def_key, def_val in defs.items():
-        if def_key.endswith('_detail'):
+        if not def_key.startswith('__'):
             continue
         x_approval = def_val.get('x-approval')
         if not x_approval:
@@ -1133,6 +1141,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         on_rejected = x_approval.get('on_rejected', {})
         if not on_rejected:
             continue
+        def_key = def_key[2:]
         entity_props = def_val.get('properties', {})
         resolved_sf = _resolve_set_fields(entity_props, on_rejected.get('set_fields') or {})
         rejectable_entities.append({
@@ -1168,7 +1177,11 @@ def generate(schema_path: str, output_dir: str) -> None:
         def_key    = entity['definition_key']
         gen_cfg    = entity.get('generate_config', {})
         detail_def = schema['definitions'].get(def_key, {}) or {}
-        base_def   = schema['definitions'].get(model, {}) or {}
+        # base_def: the raw entity backing `model` (properties/x-display/x-audit
+        # live here). Prefer the '__'-prefixed raw form; fall back to the bare
+        # view for entities with no raw counterpart (e.g. 'setting', which
+        # proxies the 'user' view instead of having its own raw twin).
+        base_def   = schema['definitions'].get(f'__{model}', {}) or schema['definitions'].get(model, {}) or {}
 
         # Determine if this entity is search-enabled per DP-3 logic
         # generate_config only contains the standard keys; read 'search' from raw x-generate
@@ -1271,13 +1284,17 @@ def generate(schema_path: str, output_dir: str) -> None:
                 continue
             # skip children with independent detail pages
             child_has_detail = bool(
-                schema['definitions'].get(f'{child_name}_detail', {}).get('x-generate')
+                schema['definitions'].get(child_name, {}).get('x-generate')
             )
             if child_output_type == 'list' and child_has_detail:
                 continue  # managed on its own page
-            # derive text fields
-            child_base_def   = schema['definitions'].get(child_name, {})
-            child_base_props = child_base_def.get('properties', {})
+            # derive text fields — x-display lives on the raw entity, so prefer
+            # that; properties are resolved via the merged (raw+view) helper.
+            child_base_def   = (
+                schema['definitions'].get(f'__{child_name}', {})
+                or schema['definitions'].get(child_name, {})
+            )
+            child_base_props = get_entity_properties(child_name, schema)
             child_text_fields = _derive_text_fields(child_base_props)
             if not child_text_fields:
                 continue  # no searchable text
@@ -1291,10 +1308,13 @@ def generate(schema_path: str, output_dir: str) -> None:
             if fr['is_m2o']:
                 continue  # m2o flatten: FK in parent → skip (Phase3)
             target = fr['target']
-            if bool(schema['definitions'].get(f'{target}_detail', {}).get('x-generate')):
+            if bool(schema['definitions'].get(target, {}).get('x-generate')):
                 continue  # target has own page
-            target_base_def   = schema['definitions'].get(target, {})
-            target_base_props = target_base_def.get('properties', {})
+            target_base_def   = (
+                schema['definitions'].get(f'__{target}', {})
+                or schema['definitions'].get(target, {})
+            )
+            target_base_props = get_entity_properties(target, schema)
             target_text_fields = _derive_text_fields(target_base_props)
             if not target_text_fields:
                 continue

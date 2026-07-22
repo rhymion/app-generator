@@ -22,6 +22,9 @@ import { decodeMentions, extractMentionedUserIds, type UserContext } from '@/lib
 {% endif %}
 import { filterAutocompleteOptions, type AutocompleteFilterContext } from '@/lib/{{ parent }}/autocomplete_filter';
 import { filterListQuery } from '@/lib/{{ parent }}/list_filter';
+{% if export_uses_format_label_value %}
+import { formatLabelValue } from '@/lib/_format';
+{% endif %}
 
 // Allow-lists for sort/filter — anything not in here is silently dropped at
 // request time so external input cannot pick arbitrary columns.
@@ -473,13 +476,10 @@ export async function get{{ parent_pascal }}ChunkForExport(
 {% endfor %}
     };
 {% for rel in x_relationships_list %}
-    // Flatten {{ rel.field }}_id → display value via {{ rel.label_field }}.
-    // Always set (null when the FK is unset) so the CSV header stays stable
-    // across chunks regardless of which row happens to come first.
-    const _{{ rel.field }}Obj = (row as Record<string, unknown>)['{{ rel.field }}'];
-    result['{{ rel.display_col }}'] = (_{{ rel.field }}Obj && typeof _{{ rel.field }}Obj === 'object')
-      ? (_{{ rel.field }}Obj as Record<string, unknown>)['{{ rel.label_field }}']
-      : null;
+    // Flatten {{ rel.field }}_id → display value (joined across all labelField
+    // segments when composite/dotted). Always set so the CSV header stays
+    // stable across chunks regardless of which row happens to come first.
+    result['{{ rel.display_col }}'] = {{ rel.label_expr }};
 {% endfor %}
     return result;
   });

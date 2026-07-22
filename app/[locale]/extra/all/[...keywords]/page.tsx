@@ -4,5 +4,5 @@ type ParamAllPageProps = {
 
 export default async function ParamAllPage({ params }: ParamAllPageProps) {
   const { keywords } = await params;
-  return <p>渡されたキーワード：{keywords.join()}</p>;
+  return <p>Keywords passed: {keywords.join()}</p>;
 }

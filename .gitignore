@@ -82,6 +82,11 @@ __pycache__/
 # it but it churns with generated content, so it's kept out of version control.
 .generated-manifest.json
 
+# intermediate schema (cmd_395 Stage 1) — build_user_schema.py output, rebuilt
+# from user_schema.yaml + prisma/schema.prisma on every build. Never hand-edited,
+# so it's a build artifact like the rest of the generated code, not a source file.
+code_generator/.generated/
+
 # sample data
 custom/
 memory/
@@ -152,7 +157,7 @@ app/api/*/
 # app/api/upload/route.ts is a full generate-code target in both modes
 # (generate.py: base emits the Vercel Blob version, x-cloud:gcp overwrites it
 # with the GCS version), so it is intentionally NOT negated here — it stays
-# ignored to avoid generated-vs-VCS drift (cmd_269/cmd_272, 殿 ruling 2026-07-04).
+# ignored to avoid generated-vs-VCS drift (cmd_269/cmd_272, Lord ruling 2026-07-04).
 !app/api/uploads/
 !app/api/uploads/**
 !app/api/approval_request/

@@ -81,7 +81,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     {% endif %}
 
     await prisma.$transaction(async (tx) => {
-      // 1. Set parent status = split. approvable_id is mandatory (殿裁定B) — it is
+      // 1. Set parent status = split. approvable_id is mandatory (per cmd_296 ruling) — it is
       // never null'd and the approvable record is never deleted (history/audit
       // trail preserved). Only the still-pending approval_requests are removed
       // so the invalidated parent no longer shows as awaiting approval.

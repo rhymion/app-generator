@@ -81,14 +81,24 @@ def derive_searchable_relation_fields(properties: dict) -> list[dict]:
 
 
 def _get_entity_base_props(entity: str, schema: dict) -> dict:
-    """Returns the base (non-detail) properties for an entity, resolving allOf if needed."""
+    """Returns the base (raw-entity) properties for an entity, resolving allOf if needed.
+
+    A view entity (`role`) has no properties of its own — its allOf[0] $ref
+    points at the raw entity (`__role`) that actually carries them. Most
+    chains are one hop, but a proxy view like `setting` (allOf $ref -> the
+    `user` VIEW, not `__user`) is two hops, so this walks the $ref chain
+    until it lands on a definition with direct properties rather than
+    resolving only one level.
+    """
     defn = schema['definitions'].get(entity, {})
-    if 'properties' in defn:
-        return defn['properties']
-    for item in defn.get('allOf', []):
-        if 'properties' in item:
-            return item['properties']
-    return {}
+    seen = set()
+    while 'properties' not in defn:
+        ref = next((item.get('$ref') for item in defn.get('allOf', []) if item.get('$ref')), None)
+        if not ref or ref in seen:
+            return {}
+        seen.add(ref)
+        defn = schema['definitions'].get(ref.split('/')[-1], {})
+    return defn['properties']
 
 
 def _label_field_is_date(label_field, target: str, schema: dict) -> bool:
@@ -107,7 +117,7 @@ def _label_field_is_date(label_field, target: str, schema: dict) -> bool:
 
 
 def get_detail_properties(parent: str, schema: dict, detail_key: str | None = None) -> dict | None:
-    key = detail_key or f'{parent}_detail'
+    key = detail_key or parent
     defn = schema['definitions'].get(key)
     if not defn:
         return None
@@ -301,7 +311,7 @@ def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
         # own pages and uses regular m2o/list rendering.
         children = []
         if not is_selector:
-            target_detail = schema['definitions'].get(f'{target}_detail', {})
+            target_detail = schema['definitions'].get(target, {})
             target_detail_props = {}
             if 'properties' in target_detail:
                 target_detail_props = target_detail['properties']
@@ -449,7 +459,7 @@ def _extract_flatten_fields(target_props: dict, parent_model: str) -> list[dict]
         # are self-evident in the parent's form. Skip them.
         if '$ref' in prop and not prop_type:
             ref_target = prop['$ref'].split('/')[-1]
-            if ref_target == parent_model or ref_target == f'{parent_model}_detail':
+            if ref_target == parent_model or ref_target == f'__{parent_model}':
                 continue
             # Forward-reference to a different entity inside a detail
             # extension — out of scope for inline accordion rendering today.
@@ -496,43 +506,79 @@ def _extract_flatten_fields(target_props: dict, parent_model: str) -> list[dict]
     return fields
 
 
-def _get_flatten_target_props(target: str, schema: dict) -> dict:
-    """Return displayable properties for a flatten target.
-
-    Plain entity (`pre_check`): returns `properties`.
-    Detail entity (`pre_check_detail` = allOf[base $ref, {properties}]):
-        returns the *merge* of base.properties and the extension's
-        properties so flatten rendering sees both the inherited fields
-        (e.g., `ams_score` from `pre_check`) and the extension's added
-        ones (e.g., `symptoms` array, `checkup` back-ref).
-
-    Order in the merge: base first, then extension overrides — extension
-    properties shadow same-name base properties, mirroring JSON Schema
-    semantics for allOf merging.
-
-    Compare with `_get_entity_base_props`, which only returns one block at
-    a time (the first one it finds). That helper has callers that
-    *deliberately* want just the base — keep it; flatten uses this one.
-    """
-    defn = schema['definitions'].get(target, {})
+def _merge_allof_properties(defn: dict, schema: dict) -> dict:
+    """Recursively merge a definition's own properties with every allOf
+    ancestor's properties (base first, so extensions shadow same-name base
+    fields). Walks $ref chains of any depth — e.g. `setting` -> `user`
+    (view, no properties of its own) -> `__user` (raw) is two hops, not
+    the one hop every raw/view pair normally is."""
     if 'properties' in defn:
         return defn['properties']
 
     merged: dict = {}
     for item in defn.get('allOf', []):
         if '$ref' in item:
-            base_target = item['$ref'].split('/')[-1]
-            base_def = schema['definitions'].get(base_target, {})
-            if 'properties' in base_def:
-                merged = {**merged, **base_def['properties']}
-            else:
-                # Nested allOf (rare) — recurse one level.
-                for nested in base_def.get('allOf', []):
-                    if 'properties' in nested:
-                        merged = {**merged, **nested['properties']}
+            ref_def = schema['definitions'].get(item['$ref'].split('/')[-1], {})
+            merged = {**merged, **_merge_allof_properties(ref_def, schema)}
         elif 'properties' in item:
             merged = {**merged, **item['properties']}
     return merged
+
+
+def _get_flatten_target_props(target: str, schema: dict) -> dict:
+    """Return displayable properties for a flatten target.
+
+    Plain entity (`pre_check`): returns `properties`.
+    View entity (`pre_check` = allOf[raw $ref, {properties}]):
+        returns the *merge* of the raw entity's properties and the view's
+        own extension properties (recursively, through any indirection —
+        see `_merge_allof_properties`) so flatten rendering sees both the
+        inherited fields (e.g., `ams_score` from the raw entity) and the
+        extension's added ones (e.g., `symptoms` array, `checkup` back-ref).
+
+    Order in the merge: base first, then extension overrides — extension
+    properties shadow same-name base properties, mirroring JSON Schema
+    semantics for allOf merging.
+
+    Compare with `_get_entity_base_props`, which only returns the raw
+    ancestor's own properties (walks to the end of the chain, no merge).
+    That helper has callers that *deliberately* want just the base — keep
+    it; flatten uses this one.
+    """
+    defn = schema['definitions'].get(target, {})
+    return _merge_allof_properties(defn, schema)
+
+
+def get_entity_properties(entity: str, schema: dict) -> dict:
+    """Public merged-properties lookup for any entity key (raw `__x` or view `x`).
+
+    Thin wrapper around `_get_flatten_target_props` — cross-file callers (e.g.
+    validate.py) that need "does entity E have field F" for a bare model name
+    should use this rather than a direct `defs[E].get('properties', {})`,
+    since a view entity (`role`) carries no properties of its own; its fields
+    live on the raw entity (`__role`) referenced via allOf[0].$ref.
+    """
+    return _get_flatten_target_props(entity, schema)
+
+
+def _merge_allof_required(defn: dict, schema: dict) -> set:
+    """Recursive counterpart to `_merge_allof_properties` for the 'required' list —
+    JSON Schema allOf semantics union every branch's required fields."""
+    merged = set(defn.get('required') or [])
+    for item in defn.get('allOf', []):
+        if '$ref' in item:
+            ref_def = schema['definitions'].get(item['$ref'].split('/')[-1], {})
+            merged |= _merge_allof_required(ref_def, schema)
+        else:
+            merged |= set(item.get('required') or [])
+    return merged
+
+
+def get_entity_required(entity: str, schema: dict) -> set:
+    """Public merged-required lookup for any entity key (raw `__x` or view `x`).
+    See `get_entity_properties` — same raw/view resolution problem, for 'required'."""
+    defn = schema['definitions'].get(entity, {})
+    return _merge_allof_required(defn, schema)
 
 
 def get_flatten_rels(parent: str, parent_def: dict, schema: dict) -> list[dict]:
@@ -683,9 +729,13 @@ def find_fk_derivation_path(parent: str, parent_def: dict, target_q: str, schema
                 'intermediate_fk': None,
             }
 
-    # One-hop path — parent → X → target_q.
+    # One-hop path — parent → X → target_q. rel['target'] is the bare/view
+    # name; its m2o/o2o FK annotations live on the raw entity.
     for rel in parent_rels:
-        x_def = schema['definitions'].get(rel['target'], {})
+        x_def = (
+            schema['definitions'].get(f"__{rel['target']}", {})
+            or schema['definitions'].get(rel['target'], {})
+        )
         if not x_def:
             continue
         for x_rel in get_parent_relationships(x_def, schema):

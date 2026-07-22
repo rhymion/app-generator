@@ -950,90 +950,101 @@ class TestVirtualResolverNonOverwrite:
 
 
 # ---------------------------------------------------------------------------
-# x_relationships_list — composite (list) labelField exclusion (cmd_351)
+# x_relationships_list — composite/dotted labelField join-display (cmd_382)
+#
+# Policy history: an isinstance(str) guard dropped composite/dotted labelField
+# relations from x_relationships_list. Restoring that guard (policy (a)) was
+# tried first, but the Lord found the real-world fallout on proj_c: those FK
+# columns (e.g. inventory_movement.from_inventory_id/to_inventory_id, whose
+# target's labelField is composite) are ALSO excluded from export_scalar_fields
+# (FK columns aren't scalars) — so excluding them from x_relationships_list too
+# means the column vanishes from CSV export entirely, silently. Policy (b)
+# (final): every parent relation gets a CSV column; composite/dotted labelField
+# segments are resolved and joined into one display string via the same
+# helper (build_label_expression) already used for autocomplete/list labels.
+#
+# cmd_432 merge note: this policy supersedes cmd_351's exclusion guard
+# (doreen/import branch only, 2026-07-17), which predates and was never
+# updated to incorporate this later (2026-07-19) Lord-ruled reversal from
+# main. DP-2's display_col naming (next section) composes with this policy
+# unchanged: composite/dotted relations fall back to a `_name`-suffixed
+# display_col since no single field name exists to name it after.
 # ---------------------------------------------------------------------------
 
-class TestXRelationshipsListCompositeExclusion:
-    """x_relationships_list が composite (list) labelField の FK を除外することを検証。
+class TestXRelationshipsListCompositeLabelField:
+    """Composite (list) / dotted-path labelField FK relations must still reach
+    x_relationships_list — as a joined human-readable display string — rather
+    than silently vanishing from CSV export (the real proj_c incident)."""
 
-    回帰テスト: build_context.py の x_relationships_list filter が
-    list 型 label_field に対して '.' not in list → True (buggy) と評価し、
-    無効 TS を生成するバグの再発を防ぐ (cmd_351)。
-    """
-
-    # minimal schema: entity "item" has 3 FKs exercising each labelField shape.
-    # Uses this module's _entity()/_fk_field() helpers (see top of file) since
-    # build_context() expects a pre-resolved entity dict (parent/model/
-    # definition_key/children/generate_config), not a raw schema definition.
-    SCHEMA = {
-        "definitions": {
-            "item": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
-                    "stock_id": _fk_field("stock", nullable=True, label=["product_name", "lot_number"]),
-                    "simple_cat_id": _fk_field("category", nullable=True, label="name"),
-                    "dotted_ref_id": _fk_field("category", nullable=True, label="parent.name"),
-                },
-            },
-            "stock": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "product_name": {"type": "string"},
-                    "lot_number": {"type": "string"},
-                },
-            },
-            "category": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "name": {"type": "string"},
-                    "parent_id": {
-                        "type": ["string", "null"],
-                        "x-relationship": {"type": "many-to-one", "target": "category"},
+    def _schema(self, movement_label):
+        return {
+            "definitions": {
+                "product": {"type": "object", "properties": _base_props()},
+                "location": {"type": "object", "properties": _base_props()},
+                "inventory": {
+                    "type": "object",
+                    "properties": {
+                        **_base_props(),
+                        "product_id": _fk_field("product", label="name"),
+                        "location_id": _fk_field("location", label="name"),
+                        "lot_number": {"type": "string"},
+                        "expiration_date": {"type": "string", "format": "date"},
                     },
                 },
-            },
+                "inventory_movement": {
+                    "type": "object",
+                    "properties": {
+                        **_base_props(),
+                        "from_inventory_id": _fk_field("inventory", label=movement_label),
+                        "to_inventory_id": _fk_field("inventory", label=movement_label),
+                    },
+                },
+            }
         }
-    }
 
-    ENTITY = _entity(model="item")
+    def test_composite_label_field_produces_joined_display_column(self):
+        """The real proj_c case: composite labelField
+        [product.name, location.name, lot_number, expiration_date] resolved
+        from the FK's target ('inventory') must appear as a joined-string
+        column — not be dropped from x_relationships_list."""
+        schema = self._schema(["product.name", "location.name", "lot_number", "expiration_date"])
+        ctx = build_context(_entity(model="inventory_movement"), schema)
+        by_field = {r["field"]: r for r in ctx["x_relationships_list"]}
+        assert "from_inventory" in by_field
+        assert "to_inventory" in by_field
+        expr = by_field["from_inventory"]["label_expr"]
+        assert "row.from_inventory?.product?.name" in expr
+        assert "row.from_inventory?.location?.name" in expr
+        assert "row.from_inventory?.lot_number" in expr
+        assert "formatLabelValue(row.from_inventory?.expiration_date, 'date')" in expr
+        assert ctx["export_uses_format_label_value"] is True
 
-    def test_composite_label_field_excluded_from_x_relationships_list(self):
-        """FK with list-form labelField must NOT appear in x_relationships_list."""
-        ctx = build_context(self.ENTITY, self.SCHEMA)
-        rel_fields = [r["field"] for r in ctx.get("x_relationships_list", [])]
-        # composite labelField ['product_name', 'lot_number'] → must be excluded
-        assert "stock" not in rel_fields, (
-            "composite labelField (list) must be excluded from x_relationships_list; "
-            "found 'stock' entry which would produce invalid TS bracket-access"
-        )
+    def test_simple_label_field_still_a_single_field_access(self):
+        """Plain (non-dotted, string) labelField relations render a single
+        optional-chained field access, not a multi-segment join."""
+        schema = self._schema("name")
+        ctx = build_context(_entity(model="inventory_movement"), schema)
+        by_field = {r["field"]: r for r in ctx["x_relationships_list"]}
+        assert by_field["from_inventory"]["label_expr"] == "(row.from_inventory?.name ?? '')"
 
-    def test_simple_label_field_still_in_x_relationships_list(self):
-        """FK with simple string labelField ('name') must still be included."""
-        ctx = build_context(self.ENTITY, self.SCHEMA)
-        rel_fields = [r["field"] for r in ctx.get("x_relationships_list", [])]
-        assert "simple_cat" in rel_fields, (
-            "simple string labelField ('name', no dot) should remain in x_relationships_list"
-        )
+    def test_dotted_string_label_field_also_included(self):
+        """Dotted-path string labelField (single string, e.g. 'product.name')
+        is no longer excluded either — same silent-drop failure mode as a
+        list, just with one segment."""
+        schema = self._schema("product.name")
+        ctx = build_context(_entity(model="inventory_movement"), schema)
+        by_field = {r["field"]: r for r in ctx["x_relationships_list"]}
+        assert by_field["from_inventory"]["label_expr"] == "(row.from_inventory?.product?.name ?? '')"
 
-    def test_dotted_label_field_still_excluded(self):
-        """FK with dotted string labelField ('parent.name') must still be excluded."""
-        ctx = build_context(self.ENTITY, self.SCHEMA)
-        rel_fields = [r["field"] for r in ctx.get("x_relationships_list", [])]
-        assert "dotted_ref" not in rel_fields, (
-            "dotted string labelField ('parent.name') must be excluded (existing behavior)"
-        )
-
-    def test_no_list_str_in_label_field_values(self):
-        """label_field values in x_relationships_list must never be a Python list."""
-        ctx = build_context(self.ENTITY, self.SCHEMA)
-        for rel in ctx.get("x_relationships_list", []):
-            assert isinstance(rel["label_field"], str), (
-                f"x_relationships_list[field={rel['field']}].label_field must be str, "
-                f"got {type(rel['label_field']).__name__}: {rel['label_field']!r}"
-            )
+    def test_unresolvable_label_field_path_falls_back_instead_of_dropping(self):
+        """A labelField path that doesn't resolve (typo'd segment) must not
+        silently drop the column either — it falls back to the target's own
+        id/name rather than raising and disappearing."""
+        schema = self._schema("nonexistent_field")
+        ctx = build_context(_entity(model="inventory_movement"), schema)
+        by_field = {r["field"]: r for r in ctx["x_relationships_list"]}
+        assert "from_inventory" in by_field
+        assert "row.from_inventory?.name" in by_field["from_inventory"]["label_expr"]
 
 
 # ---------------------------------------------------------------------------

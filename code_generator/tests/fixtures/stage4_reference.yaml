@@ -1,0 +1,779 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 2.0
+x-generator:
+  search:
+    default_scope: all
+
+# PII and Privacy Annotations
+x-pii:
+  type: string
+  enum:
+    - direct    # Directly identifies a person (name, email)
+    - indirect  # Can identify when combined (image, emailVerified)
+    - sensitive # Special category (GDPR Art.9) or confidential auth data
+    - none      # No PII
+  description: |
+    PII classification for GDPR/APPI compliance.
+    Used by the anonymize_user() function to determine which fields to scrub.
+    Required on all user-facing fields in generated apps.
+
+x-retention:
+  type: string
+  description: |
+    Data retention policy for this field.
+    Examples: "account_lifetime", "7_years", "30_days_after_deletion"
+    Used to generate retention enforcement logic in future phases.
+
+x-mention:
+  type: boolean
+  default: false
+  description: |
+    When true, the field supports @[user_id:uuid] mention syntax.
+    The generator will include mention-parser utilities for this field.
+    On render: @[user_id:xxx] is resolved to user.name (or '[deleted]' after anonymization).
+    On save: @username patterns are converted to @[user_id:xxx] format.
+
+x-gdpr-mode:
+  type: string
+  enum:
+    - internal   # Applies to employee/internal user data only
+    - consumer   # Applies to general consumer data only
+    - both       # Applies to both internal and consumer data
+  default: both
+  description: |
+    Specifies the data subject scope this model/field applies to.
+    internal: employee data only
+    consumer: general consumer data only
+    both: applies to both scopes
+
+x-import-key:
+  type: array
+  items:
+    type: string
+  description: |
+    Natural key fields that uniquely identify a record for import (Phase 2).
+    Also guarantees these columns appear in Phase 1 CSV exports when export:true (the default).
+    Dual purpose: (a) own import key — suppressed by x-generate.import:false;
+    (b) natural-key target for other entities' dotted-FK imports — always active.
+    Single field: [name]
+    Composite: [name, tenant_id]
+    Dotted FK path for Phase 2: [name, role.name] (role_id resolved via role.name)
+    Entities without x-import-key: export-only in Phase 1; import blocked in Phase 2.
+
+definitions:
+  __user:
+    type: object
+    required:
+      - id
+      - name
+      - email
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      name:
+        type: string
+        minLength: 1
+        x-pii: direct
+      email:
+        type: string
+        x-pii: direct
+      password:
+        type:
+          - string
+          - 'null'
+        x-pii: sensitive
+        x-custom-component:
+          target:
+            - upsert
+      api_key:
+        type:
+          - string
+          - 'null'
+        x-pii: sensitive
+        x-custom-component:
+          target:
+            - upsert
+      image:
+        type:
+          - string
+          - 'null'
+        format: uri
+        x-pii: indirect
+      mfa_enabled:
+        type: boolean
+        default: false
+        x-pii: sensitive
+        x-custom-component:
+          target:
+            - upsert
+
+    x-import-key: [name]
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 150
+  user:
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: true
+      delete: false
+      invalidate:
+        enabled: true
+        handler: anonymizeUser
+        module: lib/compliance/anonymize_user
+      api: true
+      test: true
+      search: false
+      fields:
+        - name
+        - image
+        - roles
+    x-relationships:
+      roles:
+        type: many-to-many
+        target: role
+    x-custom-components:
+      - name: MfaToggle
+        path: "@/components/_standard/MfaToggle"
+        target:
+          - view
+    allOf:
+      - $ref: '#/definitions/__user'
+      - type: object
+        required:
+          - roles
+        properties:
+          roles:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/role"
+
+  setting:
+    x-generate:
+      list: false
+      view: true
+      new: false
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      search: false
+      fields:
+        - name
+        - email
+        - image
+        - password
+        - api_key
+        - mfa_enabled
+    x-relationships:
+      roles:
+        type: many-to-many
+        target: role
+    allOf:
+      - $ref: "#/definitions/user"
+      - type: object
+        required:
+          - roles
+        properties:
+          roles:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/role"
+
+  __role:
+    type: object
+    required:
+      - id
+      - name
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      name:
+        type: string
+        minLength: 1
+      description:
+        type:
+          - string
+          - 'null'
+    x-import-key: [name]
+  role:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+      search: true
+    # Security-sensitive entity: every create/update/delete is recorded in
+    # the audit_log table by the generated service layer.
+    x-audit: true
+    x-relationships:
+      users:
+        type: many-to-many
+        target: user
+    allOf:
+      - $ref: '#/definitions/__role'
+      - type: object
+        required:
+          - users
+        properties:
+          users:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/user"
+
+  __organization:
+    type: object
+    required:
+      - id
+      - name
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      name:
+        type: string
+        minLength: 1
+      description:
+        type:
+          - string
+          - 'null'
+        x-ui:
+          width: 8
+
+    x-import-key: [name]
+  organization:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+      search: true
+    x-relationships:
+      users:
+        type: many-to-many
+        target: user
+    x-search:
+      org_id_field: id
+    allOf:
+      - $ref: '#/definitions/__organization'
+      - type: object
+        required:
+          - users
+        properties:
+          users:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/user"
+
+  __permission:
+    type: object
+    required:
+      - id
+      - name
+      - create
+      - read
+      - update
+      - delete
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      name:
+        type: string
+        minLength: 1
+        x-entity-select: true
+      create:
+        type: boolean
+      read:
+        type: boolean
+      update:
+        type: boolean
+      delete:
+        type: boolean
+      import:
+        type: boolean
+        default: false
+      role_id:
+        type:
+          - string
+          - 'null'
+        pattern: ^c[a-z0-9]{24,}$
+        x-relationship:
+          type: many-to-one
+          target: role
+          labelField: name
+    x-import-key: [name, role.name]
+    x-display:
+      table:
+        - name:
+            width: 200
+        - role:
+            width: 200
+  permission:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+      search: false
+    # Security-sensitive entity: every create/update/delete is recorded in
+    # the audit_log table by the generated service layer.
+    x-audit: true
+    allOf:
+      - $ref: '#/definitions/__permission'
+      - type: object
+        properties:
+          role:
+            $ref: "#/definitions/role"
+
+  __approval_flow:
+    type: object
+    required:
+      - id
+      - entity_name
+      - approver_role_id
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      entity_name:
+        type: string
+        minLength: 1
+        x-entity-select: true
+      requestor_role_id:
+        type:
+          - string
+          - 'null'
+        pattern: ^c[a-z0-9]{24,}$
+        x-relationship:
+          type: many-to-one
+          target: role
+          labelField: name
+      approver_role_id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+        x-relationship:
+          type: many-to-one
+          target: role
+          labelField: name
+    x-import-key: [entity_name]
+    x-display:
+      table:
+        - entity_name:
+            primary: true
+            width: 200
+        - requestor_role:
+            width: 150
+        - approver_role:
+            width: 150
+  approval_flow:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+      search: false
+    x-relationships:
+      preceded_by:
+        type: many-to-many
+        target: approval_flow
+        labelField: entity_name
+        secondaryLabelField: approver_role.name
+      followed_by:
+        type: many-to-many
+        target: approval_flow
+        labelField: entity_name
+        secondaryLabelField: approver_role.name
+    allOf:
+      - $ref: '#/definitions/__approval_flow'
+      - type: object
+        required:
+          - approver_role
+          - preceding_transitions
+        properties:
+          requestor_role:
+            $ref: "#/definitions/role"
+          approver_role:
+            $ref: "#/definitions/role"
+          preceded_by:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/approval_flow"
+          followed_by:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/approval_flow"
+
+  approval_request:
+    type: object
+    required:
+      - id
+      - approvable_id
+      - approval_flow_id
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      approvable_id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+        x-relationship:
+          type: many-to-one
+          target: approvable
+          labelField: id
+      approval_flow_id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+        x-relationship:
+          type: many-to-one
+          target: approval_flow
+          labelField: entity_name
+      status:
+        type: integer
+        minimum: 0
+        maximum: 2
+        enum:
+          - Pending
+          - Approved
+          - Rejected
+
+    x-display:
+      table:
+        - approval_flow:
+            width: 200
+        - status:
+            width: 100
+  __approvable:
+    type: object
+    required:
+      - id
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      approved_at:
+        type: string
+        nullable: true
+        format: date-time
+  approvable:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    allOf:
+      - $ref: '#/definitions/__approvable'
+      - type: object
+        required:
+          - approval_requests
+        properties:
+          approval_requests:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/approval_request"
+
+  __commentable:
+    type: object
+    required:
+      - id
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+  commentable:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    allOf:
+      - $ref: '#/definitions/__commentable'
+      - type: object
+        required:
+          - comments
+        properties:
+          comments:
+            type: array
+            x-outputType: comments
+            items:
+              $ref: "#/definitions/comment"
+
+  comment:
+    type: object
+    required:
+      - id
+      - message
+      - commentable_id
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      message:
+        type: string
+        minLength: 1
+        x-mention: true
+      commentable_id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+  reaction:
+    type: object
+    required:
+      - id
+      - type
+      - user_id
+      - comment_id
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      type:
+        type: integer
+        minimum: 0
+        maximum: 4
+        enum:
+          - Like
+          - Love
+          - Laugh
+          - Surprised
+          - Sad
+      user_id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+        x-relationship:
+          type: many-to-one
+          target: user
+          labelField: name
+      comment_id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+        x-relationship:
+          type: many-to-one
+          target: comment
+          labelField: id
+    x-internal:
+      page: false
+      embed: false
+      api: custom
+  __attachable:
+    type: object
+    required:
+      - id
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+  attachable:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    allOf:
+      - $ref: '#/definitions/__attachable'
+      - type: object
+        required:
+          - attachments
+        properties:
+          attachments:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/attachment"
+
+  attachment:
+    type: object
+    required:
+      - id
+      - type
+      - name
+      - path
+      - attachable_id
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      type:
+        type: integer
+        minimum: 0
+        maximum: 3
+        enum:
+          - image
+          - file
+          - video
+          - audio
+      order:
+        type: integer
+        default: 0
+      name:
+        type: string
+        minLength: 1
+      path:
+        type: string
+        format: uri
+      attachable_id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+  dashboard_widget:
+    type: object
+    required:
+      - id
+      - dashboard_id
+      - name
+      - entity_name
+      - chart_type
+      - group_by_field
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      dashboard_id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+        x-relationship:
+          type: many-to-one
+          target: dashboard
+          labelField: name
+      name:
+        type: string
+        minLength: 1
+      entity_name:
+        type: string
+        minLength: 1
+      chart_type:
+        type: integer
+        default: 1
+        minimum: 0
+        maximum: 3
+        enum:
+          - pie
+          - column
+          - bar
+          - line
+      stack_mode:
+        type:
+          - integer
+          - 'null'
+        minimum: 0
+        maximum: 2
+        enum:
+          - grouped
+          - stacked
+          - standardized
+      series_field:
+        type:
+          - string
+          - 'null'
+      group_by_bucket:
+        type:
+          - integer
+          - 'null'
+        minimum: 0
+        maximum: 4
+        enum:
+          - day
+          - week
+          - month
+          - quarter
+          - year
+      group_by_field:
+        type: string
+        minLength: 1
+      filter_field:
+        type:
+          - string
+          - 'null'
+      filter_value:
+        type:
+          - string
+          - 'null'
+      order:
+        type: integer
+        default: 0
+  __dashboard:
+    type: object
+    required:
+      - id
+      - name
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      name:
+        type: string
+        minLength: 1
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 200
+  dashboard:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+      search: true
+    x-search:
+      text_fields: [name]
+      snippet_field: name
+      bigm_fields: [name]
+    x-custom-components:
+      - name: DashboardView
+        path: "@/components/_standard/DashboardView"
+        target:
+          - view
+    allOf:
+      - $ref: '#/definitions/__dashboard'
+      - type: object
+        required:
+          - widgets
+        properties:
+          widgets:
+            type: array
+            items:
+              $ref: "#/definitions/dashboard_widget"
+

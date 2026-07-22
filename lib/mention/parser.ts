@@ -45,13 +45,16 @@ export function encodeMentions(text: string, userLookup: UserLookup): string {
 }
 
 /**
- * Converts @[user_id:<id>] storage format to display names for rendering.
- * If userId is absent from context (user anonymized/deleted), returns '@[削除済みユーザー]'.
+ * Converts @[user_id:uuid] storage format to display names for rendering.
+ * If userId is absent from context (user anonymized/deleted), falls back to
+ * deletedUserLabel — pass the translated value of the `Common.deletedUser`
+ * i18n key (e.g. `t('deletedUser')` from `useTranslations('Common')` or
+ * `getTranslations('Common')`, depending on the caller's component type).
  */
-export function decodeMentions(text: string, context: UserContext): string {
+export function decodeMentions(text: string, context: UserContext, deletedUserLabel: string): string {
   return text.replace(MENTION_PATTERN, (_, userId) => {
     const name = context[userId];
-    return name ? `@${name}` : '@[削除済みユーザー]';
+    return `@${name ?? deletedUserLabel}`;
   });
 }
 

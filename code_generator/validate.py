@@ -12,9 +12,12 @@ import re
 from pathlib import Path
 
 from helpers.label_field import resolve_label_paths
-from helpers.schema_helpers import get_parent_relationships, get_internal_bridge_fk_prop_names
+from helpers.schema_helpers import (
+    get_parent_relationships, get_internal_bridge_fk_prop_names,
+    get_entity_properties, get_entity_required,
+)
 
-_SNAKE_CASE = re.compile(r'^[a-z][a-z0-9_]*$')
+_SNAKE_CASE = re.compile(r'^(__)?[a-z][a-z0-9_]*$')
 _ID_SUFFIX  = re.compile(r'_id$')
 
 # Columns that MUST be indexed (leftmost column of some @@index) when present
@@ -265,7 +268,7 @@ def validate_schema(schema: dict) -> None:
             if not target:
                 continue
 
-            target_props = defs[target].get('properties', {})
+            target_props = get_entity_properties(target, schema)
 
             # 2c. labelField (string | dotted path | list of either) must
             # resolve through the target's properties / outbound relations.
@@ -327,7 +330,7 @@ def validate_schema(schema: dict) -> None:
             label_field = rel_info.get('labelField')
             if not target or target not in defs:
                 continue
-            target_props = defs[target].get('properties', {})
+            target_props = get_entity_properties(target, schema)
             if label_field:
                 try:
                     resolve_label_paths(label_field, target, schema)
@@ -355,8 +358,11 @@ def validate_schema(schema: dict) -> None:
 
     for entity in entities:
         model     = entity['model']
-        model_def = defs.get(model, {})
-        props     = model_def.get('properties', {})
+        # x-display lives on the raw entity (__model); fall back to the bare
+        # key for special pass-through entities with no raw counterpart
+        # (e.g. 'setting', whose allOf proxies the 'user' view directly).
+        model_def = defs.get(f'__{model}', defs.get(model, {}))
+        props     = get_entity_properties(model, schema)
 
         # 4a. Chart requires start/end fields to exist
         xdisplay  = model_def.get('x-display') or {}
@@ -383,8 +389,7 @@ def validate_schema(schema: dict) -> None:
         for child in entity.get('children', []):
             if child.get('output_type') != 'comments':
                 continue
-            child_def   = defs.get(child['name'], {})
-            child_props = child_def.get('properties', {})
+            child_props = get_entity_properties(child['name'], schema)
             if 'message' not in child_props:
                 errors.append(
                     f"Entity '{model}': child '{child['name']}' uses "
@@ -518,7 +523,7 @@ def validate_schema(schema: dict) -> None:
                     _valid_act_types = ('ship', 'release', 'cancel')
                     _pool_ent_name = pool.get('entity')
                     _pool_ent_props = (
-                        defs.get(_pool_ent_name, {}).get('properties', {})
+                        get_entity_properties(_pool_ent_name, schema)
                         if _pool_ent_name else {}
                     )
                     _pool_qty_f = pool.get('quantityField')
@@ -567,7 +572,7 @@ def validate_schema(schema: dict) -> None:
                                 f"allocationEntity '{_alloc_ent_act}' is not defined in the schema."
                             )
                         else:
-                            _alloc_props_act = defs[_alloc_ent_act].get('properties', {})
+                            _alloc_props_act = get_entity_properties(_alloc_ent_act, schema)
                             _rem_f = _adef.get('remainingField', 'remaining_quantity')
                             _stat_f = _adef.get('statusField', 'status')
                             if _rem_f not in _alloc_props_act:
@@ -638,7 +643,7 @@ def validate_schema(schema: dict) -> None:
                         f"'{lines_entity_name}' is not defined in the schema."
                     )
                 elif lines_field_name:
-                    lines_entity_props = defs[lines_entity_name].get('properties', {})
+                    lines_entity_props = get_entity_properties(lines_entity_name, schema)
                     if lines_field_name not in lines_entity_props:
                         errors.append(
                             f"Definition '{def_key}': x-reservation.lines.field "
@@ -659,9 +664,9 @@ def validate_schema(schema: dict) -> None:
 
     for entity in entities:
         model     = entity['model']
-        model_def = defs.get(model, {})
-        props     = model_def.get('properties', {})
-        req_set   = set(model_def.get('required') or [])
+        model_def = defs.get(f'__{model}', defs.get(model, {}))
+        props     = get_entity_properties(model, schema)
+        req_set   = get_entity_required(model, schema)
 
         xdisplay = model_def.get('x-display') or {}
         if isinstance(xdisplay, list):
@@ -720,9 +725,8 @@ def validate_schema(schema: dict) -> None:
                 cursor   = target
 
                 for i, seg in enumerate(segments):
-                    cursor_def   = defs.get(cursor, {})
-                    cursor_props = cursor_def.get('properties', {}) or {}
-                    cursor_req   = set(cursor_def.get('required') or [])
+                    cursor_props = get_entity_properties(cursor, schema)
+                    cursor_req   = get_entity_required(cursor, schema)
                     is_last      = (i == len(segments) - 1)
 
                     if is_last:
@@ -969,7 +973,10 @@ def validate_schema(schema: dict) -> None:
                         f"'{_fk_target}' definition or correct the key."
                     )
                     continue
-                if _fk_field not in defs[_fk_target].get('properties', {}):
+                # get_entity_properties resolves raw (__x) vs view (x) property
+                # location correctly, unlike a direct defs[_fk_target]['properties']
+                # lookup — required when _fk_target is a bare view entity name.
+                if _fk_field not in get_entity_properties(_fk_target, schema):
                     errors.append(
                         f"Definition '{def_key}': x-import-key '{_raw_key}': field "
                         f"'{_fk_field}' does not exist on entity '{_fk_target}' "

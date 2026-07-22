@@ -17,6 +17,7 @@ from helpers.schema_helpers import (
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
     derive_text_fields, derive_searchable_relation_fields,
     get_internal_bridge_fk_prop_names,
+    get_entity_properties,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -32,6 +33,16 @@ import warnings
 _EXCLUDE_FIELDS = {'created_at', 'updated_at'}
 _EXCLUDE_ID_TS  = {'id', 'created_at', 'updated_at', 'creator_id'}
 _SCALAR_TYPES   = {'string', 'integer', 'number', 'boolean'}
+
+
+def _raw_def(entity_name: str, schema: dict) -> dict:
+    """Resolve a bare/view model name to its raw entity dict — scalar/FK
+    properties, x-readonly-fields, x-gdpr-mode, x-display etc. all live on
+    the raw ('__'-prefixed) entity, not the view. Falls back to the bare
+    view for entities with no raw counterpart (e.g. 'setting', which
+    proxies the 'user' view instead of having its own raw twin)."""
+    defs = schema.get('definitions', {})
+    return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
 
 
 def _is_scalar_prop(prop: dict) -> bool:
@@ -144,7 +155,7 @@ def _get_child_parent_id_props(child_name: str, model: str, parent_rels_raw: lis
     """
     if child_name == model:
         return {r['prop_name'] for r in parent_rels_raw if r['target'] == model}
-    child_def = schema.get('definitions', {}).get(child_name, {})
+    child_def = _raw_def(child_name, schema)
     return get_parent_fk_props(child_def, model)
 
 
@@ -159,7 +170,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
 
         is_many_to_many = relationship.get('type') == 'many-to-many'
 
-        child_def  = schema['definitions'].get(child_name, {})
+        child_def  = _raw_def(child_name, schema)
 
         # Optional FK list: non-m2m list child whose FK to parent is nullable.
         # Treat like m2m (connect/set) — add/remove existing entities, no inline create.
@@ -168,11 +179,11 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             and is_optional_fk_to_parent(child_def, model)
         )
         use_connect = is_many_to_many or child_name == model or is_optional_fk_list
-        # Independent list child: has its own _detail definition with x-generate.
+        # Independent list child: has its own view definition with x-generate.
         # These are managed on their own pages; the parent form shows them read-only.
         is_independent = (
             output_type == 'list' and not is_many_to_many
-            and bool(schema['definitions'].get(f'{child_name}_detail', {}).get('x-generate'))
+            and bool(schema['definitions'].get(child_name, {}).get('x-generate'))
         )
         child_props_dict = child_def.get('properties', {})
 
@@ -189,7 +200,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             k for k, v in child_props_dict.items()
             if isinstance(v, dict) and (v.get('x-relationship') or {}).get('type') == 'one-to-one_bridge'
         }
-        _parent_xres = schema['definitions'].get(model, {}).get('x-reservation') or {}
+        _parent_xres = _raw_def(model, schema).get('x-reservation') or {}
         if (
             (_parent_xres.get('transaction') or {}).get('strategy') == 'ledger_transaction'
             and _parent_xres.get('lines') == prop_name
@@ -247,7 +258,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         # approvable_id itself stays in _child_bridge_excludes above (still
         # not client-writable) — _build_child_nested_create/_update append it
         # explicitly using approval_array_var.
-        _parent_approval_lines = set(get_approval_lines_props(schema['definitions'].get(model, {}), model, schema))
+        _parent_approval_lines = set(get_approval_lines_props(_raw_def(model, schema), model, schema))
         approval_indexed = prop_name in _parent_approval_lines
         approval_array_var = f'_{child_var}ApprIds' if approval_indexed else ''
 
@@ -585,7 +596,7 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
 
 def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict],
                            schema: dict, model: str = '') -> list[str]:
-    model_props = schema['definitions'].get(model, {}).get('properties', {})
+    model_props = _raw_def(model, schema).get('properties', {})
     m2m_targets = [
         c['relationship']['target']
         for c in children_raw
@@ -595,7 +606,7 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
         c['name'] for c in children_raw
         if (c.get('output_type') == 'list'
             and (c.get('relationship') or {}).get('type') != 'many-to-many'
-            and is_optional_fk_to_parent(schema['definitions'].get(c['name'], {}), model))
+            and is_optional_fk_to_parent(_raw_def(c['name'], schema), model))
     ]
     many_to_one_targets = [
         r['target']
@@ -609,7 +620,7 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
         relationship = child_raw.get('relationship') or {}
         if output_type in ('list', 'comments') or relationship.get('type') == 'many-to-many':
             continue
-        child_def = schema['definitions'].get(child_raw['name'], {})
+        child_def = _raw_def(child_raw['name'], schema)
         if child_def.get('properties'):
             parent_fk_props = get_parent_fk_props(child_def, model)
             child_entity_rel_targets.extend(
@@ -794,7 +805,7 @@ def build_anonymize_user_context(schema: dict) -> dict:
         pii_data_block: str — pre-formatted TypeScript lines for the data block.
         pii_fields: list — [{name, pii_type, field_type, scrub_value}] for each x-pii field.
     """
-    user_def = schema.get('definitions', {}).get('user', {})
+    user_def = _raw_def('user', schema)
     if not isinstance(user_def, dict):
         return {'has_pii_user': False, 'pii_data_block': '', 'pii_fields': []}
 
@@ -867,8 +878,12 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     parent_pascal = to_pascal_case(parent)
     parent_camel  = to_camel_case(parent)
 
+    # model_def is the raw entity backing `model` — scalar/FK properties,
+    # x-readonly-fields, x-gdpr-mode etc. all live there. Prefer the
+    # '__'-prefixed raw form; fall back to the bare view for entities with
+    # no raw counterpart (e.g. 'setting', which proxies the 'user' view).
     model_def      = canonicalize_bridges(
-        schema['definitions'].get(model, {}),
+        schema['definitions'].get(f'__{model}', {}) or schema['definitions'].get(model, {}),
         schema.get('definitions', {}),
     )
     # Inject parent-side bridge FK props synthesized from new-form x-bridge declarations
@@ -949,7 +964,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # Bridge child IR: new-form x-bridge on this entity (as child), with parent targets.
     # Used by child forms to render parent-entity autocomplete and by service to
     # resolve parent → <child>able_id.
-    bridge_child_ir = get_new_form_bridge(schema.get('definitions', {}).get(model, {}))
+    bridge_child_ir = get_new_form_bridge(_raw_def(model, schema))
 
     # Bridge child service context: extended vars for service template
     # (parent resolution code and FK data line).
@@ -988,7 +1003,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             _bpo_lf = _bpo.get('labelField')  # AP-1-A: schema-specified per-parent labelField
             if not _bpo_lf:
                 # AP-1-B fallback: target entity's x-display.table primary field
-                _bpo_tdef = schema.get('definitions', {}).get(_bpo_target, {})
+                _bpo_tdef = _raw_def(_bpo_target, schema)
                 _bpo_xdisp = _bpo_tdef.get('x-display') or {}
                 _bpo_table = (
                     _bpo_xdisp if isinstance(_bpo_xdisp, list)
@@ -1004,7 +1019,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                             break
             if not _bpo_lf:
                 # Final fallback: name → title → label → id
-                _bpo_tprops = (schema.get('definitions', {}).get(_bpo_target, {}).get('properties') or {})
+                _bpo_tprops = _raw_def(_bpo_target, schema).get('properties') or {}
                 _bpo_lf = next(
                     (f for f in ('name', 'title', 'label', 'id') if f in _bpo_tprops), 'id'
                 )
@@ -1029,7 +1044,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # Collect bridge targets from new-form x-bridge declarations in the schema.
     _new_form_bridge_targets: set[str] = set()
     for _ename, _edef in schema.get('definitions', {}).items():
-        if _ename.endswith('_detail') or not isinstance(_edef, dict):
+        if not _ename.startswith('__') or not isinstance(_edef, dict):
             continue
         _bridge_ir = get_new_form_bridge(_edef)
         if _bridge_ir:
@@ -1092,23 +1107,63 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     import_key_fields = [f for f in _import_key_raw if '.' not in f]
     has_import_key = bool(_import_key_raw)
 
-    # x_relationships_list: m2o/o2o FK relations with a simple (non-dotted)
-    # labelField, used by the CSV export getter to flatten FK id → display value.
-    # DP-2 (cmd_394 §5, Option D): display_col names the actual labelField
-    # rather than always assuming "_name" — the two column-naming systems
-    # (export display_col vs. import csv_col, see import_key_specs below)
-    # must agree, or a dotted x-import-key can never find its column in the
-    # exported CSV (MISSING_COLUMN). No-op on any schema where every FK
-    # labelField is 'name' (true of all export-enabled entities as of cmd_394).
-    x_relationships_list = [
-        {
+    # x_relationships_list: m2o/o2o FK relations, used by the CSV export
+    # getter to flatten FK id -> display value. Every relation is included
+    # regardless of labelField shape (cmd_382, Lord-ruled 2026-07-19,
+    # postdating and superseding cmd_351's 2026-07-17 exclusion guard — see
+    # cmd_432 merge report for the cross-branch history check): a composite
+    # (list) or dotted-path labelField previously caused the FK column to be
+    # silently dropped from CSV export entirely — it's excluded from
+    # export_scalar_fields (FK columns aren't scalars) AND was excluded here,
+    # so the column vanished with no error (real-world case: proj_c
+    # inventory_movement's from_inventory_id/to_inventory_id, whose target
+    # labelField is a composite [product.name, location.name, lot_number,
+    # expiration_date]). Each path segment is resolved via the same helper
+    # used elsewhere for labels (build_label_expression) and joined into one
+    # display string; the nested Prisma include it needs is already present
+    # in include_props_list (built below via the identical helper).
+    #
+    # display_col naming (DP-2, cmd_394 §5, Option D): when the target's
+    # labelField is a simple (non-dotted) string, display_col names the
+    # actual labelField rather than always assuming "_name" — the two
+    # column-naming systems (export display_col vs. import csv_col, see
+    # import_key_specs below) must agree, or a dotted x-import-key can never
+    # find its column in the exported CSV (MISSING_COLUMN). Composite/dotted
+    # labelFields (no single field name to name the column after) fall back
+    # to the "_name" suffix — those are not expected to serve as dotted
+    # x-import-key sources.
+    from helpers.label_field import build_label_expression as _xrl_build_label_expression
+    x_relationships_list = []
+    export_uses_format_label_value = False
+    for r in parent_rels:
+        _xrl_simple_label = (
+            r['label_field'] if isinstance(r['label_field'], str) and '.' not in r['label_field'] else None
+        )
+        try:
+            _xrl_built = _xrl_build_label_expression(
+                f"row.{r['relation_name']}", r['label_field'], r['target'], schema,
+            )
+        except ValueError:
+            # Malformed/unresolvable labelField path — never silently drop the
+            # column (that's the exact failure mode this fix exists for). Fall
+            # back to the target's own display-fallback chain (mirrors
+            # bridge_parent_options' AP-1-B fallback above); 'id' always
+            # exists, so this second attempt cannot itself raise.
+            _xrl_tprops = _raw_def(r['target'], schema).get('properties') or {}
+            _xrl_fallback = next((f for f in ('name', 'title', 'label', 'id') if f in _xrl_tprops), 'id')
+            _xrl_built = _xrl_build_label_expression(
+                f"row.{r['relation_name']}", _xrl_fallback, r['target'], schema,
+            )
+        if _xrl_built['has_format']:
+            export_uses_format_label_value = True
+        x_relationships_list.append({
             'field': r['relation_name'],
-            'display_col': f"{r['relation_name']}_{r['label_field']}",
-            'label_field': r['label_field'],
-        }
-        for r in parent_rels
-        if isinstance(r['label_field'], str) and '.' not in r['label_field']
-    ]
+            'display_col': (
+                f"{r['relation_name']}_{_xrl_simple_label}" if _xrl_simple_label
+                else f"{r['relation_name']}_name"
+            ),
+            'label_expr': _xrl_built['expression'],
+        })
 
     # export_scalar_fields: explicit allowlist of CSV export columns (cmd_324 V1).
     # Replaces the former exclusion-list ('...rest' spread) design, which leaked
@@ -1161,7 +1216,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     export_import_key_fields = [f for f in import_key_fields if f in export_scalar_fields]
 
     # ────────────────────────────────────────────────────────────────
-    # Import eligibility — SINGLE PLACE (殿留保 cmd_328; cmd_330 adds import: flag).
+    # Import eligibility — SINGLE PLACE (deliberately left open in cmd_328; cmd_330 adds import: flag).
     # Rule: primary entity AND x-import-key AND import:true AND (new:true OR edit:true).
     # import:false suppresses (a) own import route/UI/test only.
     # (b) dotted-FK lookups by other entities are unaffected —
@@ -1169,7 +1224,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # ────────────────────────────────────────────────────────────────
     # Import eligibility requires the entity to be a primary entity (not an alias/view).
     # e.g., 'setting' (parent) maps to 'user' (model) — only 'user' should be import-eligible.
-    # This satisfies 殿留保: "x-import-keyを持つ=import可を硬く焼き付けるな".
+    # This satisfies the cmd_328 guidance: "having x-import-key must not be hardcoded to imply import-eligible".
     _is_primary_entity = (parent == model)
     _import_flag       = gen_cfg.get('import', True)          # x-generate.import (cmd_330)
     import_eligible    = _is_primary_entity and has_import_key and _import_flag and (can_create or can_update)
@@ -1293,7 +1348,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # adding a new protected entity is a schema-only change. Fallback to the
     # base entity for symmetry with x-generate/x-display.
     _detail_for_audit = schema['definitions'].get(def_key, {}) or {}
-    _base_for_audit = schema['definitions'].get(model, {}) or {}
+    _base_for_audit = _raw_def(model, schema)
     is_audited = bool(
         _detail_for_audit.get('x-audit') is True
         or _base_for_audit.get('x-audit') is True
@@ -1488,7 +1543,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     self_parent_prop = self_parent_rel['prop_name'] if self_parent_rel else None
 
     # Detect mention fields on the shared comment entity (P2-1: encodeMentions on save).
-    _comment_def = schema.get('definitions', {}).get('comment', {})
+    _comment_def = _raw_def('comment', schema)
     comment_has_mention = bool(commentable_rel or comment_children) and any(
         isinstance(fp, dict) and fp.get('x-mention') is True
         for fp in (_comment_def.get('properties') or {}).values()
@@ -1875,7 +1930,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         cn       = c['name']
         prop     = c['property_name']
         out_type = c.get('output_type')
-        cdef     = schema['definitions'].get(cn, {})
+        cdef     = _raw_def(cn, schema)
         if out_type == 'comments':
             child_include_entries.append(
                 f"{prop}: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }},"
@@ -1955,7 +2010,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                     sub_parts = []
                     for cr in forward_rels:
                         rel_name = cr['prop_name'].removesuffix('_id')
-                        sub_target_def = schema['definitions'].get(cr['target'], {})
+                        sub_target_def = _raw_def(cr['target'], schema)
                         sub_target_rels = get_parent_relationships(sub_target_def)
                         if sub_target_rels:
                             sub_sub = ', '.join(
@@ -2152,6 +2207,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         import_key_fields=import_key_fields,
         has_import_key=has_import_key,
         x_relationships_list=x_relationships_list,
+        export_uses_format_label_value=export_uses_format_label_value,
         # CSV export (cmd_324 V1): explicit scalar-column allowlist
         export_scalar_fields=export_scalar_fields,
         export_import_key_fields=export_import_key_fields,
