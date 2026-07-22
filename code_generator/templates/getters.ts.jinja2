@@ -20,6 +20,8 @@ import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
 {% if comment_has_mention %}
 import { decodeMentions, extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
 {% endif %}
+import { filterAutocompleteOptions, type AutocompleteFilterContext } from '@/lib/{{ parent }}/autocomplete_filter';
+import { filterListQuery } from '@/lib/{{ parent }}/list_filter';
 
 // Allow-lists for sort/filter — anything not in here is silently dropped at
 // request time so external input cannot pick arbitrary columns.
@@ -222,7 +224,14 @@ export async function get{{ parent_pascal }}Page(
 {% endif %}
   const accessAnd = build{{ parent_pascal }}AccessWhere(perms, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
   const filterAnd = buildFilter(opts.filter, FILTERABLE_FIELDS);
-  const where = { AND: [...accessAnd, ...filterAnd] };
+  const customWhere = filterListQuery(opts.filter ?? {});
+  const where = {
+    AND: [
+      ...accessAnd,
+      ...filterAnd,
+      ...(customWhere && Object.keys(customWhere).length > 0 ? [customWhere] : []),
+    ],
+  };
   const orderBy = buildOrderBy(opts.sort, SORTABLE_FIELDS);
 
   const [rowsRaw, total] = await prisma.$transaction([
@@ -302,6 +311,7 @@ export async function search{{ parent_pascal }}Options(
   query: string,
   includeIds: string[] = [],
   limit: number = 50,
+  context: AutocompleteFilterContext = {},
 ): Promise<{{ parent_pascal }}[]> {
 {% if should_filter_by_org %}
   const userId = await getSessionUserIdOrThrow();
@@ -345,10 +355,12 @@ export async function search{{ parent_pascal }}Options(
     // selected option outside the search results still resolves by id.
     matchOr.push({ id: { in: includeIds } });
   }
+  const customWhere = filterAutocompleteOptions(context);
   const where = {
     AND: [
       ...accessAnd,
       ...(matchOr.length > 0 ? [{ OR: matchOr }] : []),
+      ...(customWhere && Object.keys(customWhere).length > 0 ? [customWhere] : []),
     ],
   };
   const safeLimit = Math.min(Math.max(Math.floor(limit) || 50, 1), 200);

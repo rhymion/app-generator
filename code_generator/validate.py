@@ -289,6 +289,28 @@ def validate_schema(schema: dict) -> None:
                     f"or set labelField to the correct display field."
                 )
 
+            # 2e. x-autocomplete-context (DP-5, cmd_377/379): field names must
+            # exist on THIS entity. formValues are pulled from the form
+            # instance that holds this FK field (the caller), not from the
+            # relationship target — see the autocomplete filter hook design.
+            actx = prop_def.get('x-autocomplete-context')
+            if actx is not None:
+                if not isinstance(actx, list) or not all(isinstance(f, str) for f in actx):
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': "
+                        f"x-autocomplete-context must be a list of field name strings."
+                    )
+                else:
+                    for field_name in actx:
+                        if field_name not in props:
+                            errors.append(
+                                f"Definition '{def_key}', property '{prop_name}': "
+                                f"x-autocomplete-context references field '{field_name}', "
+                                f"which is not a property of '{def_key}'.  "
+                                f"formValues are pulled from this entity's own form state, "
+                                f"not from the relationship target '{target}'."
+                            )
+
     # -----------------------------------------------------------------------
     # 3. Many-to-many x-relationships labelField checks
     # -----------------------------------------------------------------------
