@@ -10,17 +10,17 @@ def _make_schema(extra_defs: dict) -> dict:
 
 def _entity_schema(model: str, props: dict, required: list, xdisplay: dict,
                    extra_defs: dict | None = None) -> dict:
-    """Build a schema containing one entity with x-generate on its _detail."""
+    """Build a schema containing one entity with x-generate on its view."""
     defs: dict = {
-        model: {
+        f'__{model}': {
             'type': 'object',
             'required': required,
             'properties': props,
             'x-display': xdisplay,
         },
-        f'{model}_detail': {
+        model: {
             'x-generate': {'list': True},
-            'allOf': [{'$ref': f'#/definitions/{model}'}],
+            'allOf': [{'$ref': f'#/definitions/__{model}'}],
         },
     }
     if extra_defs:

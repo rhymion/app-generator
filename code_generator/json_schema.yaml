@@ -1,26 +1,5 @@
 $schema: "http://json-schema.org/draft-07/schema#"
-
-# Support multi-tenancy
 format-version: 2.0
-
-# x-cloud: GCP Cloud Run opt-in (uncomment to use)
-# x-cloud:
-#   enabled: true
-#   provider: gcp
-#   service: cloud_run
-#   region: asia-northeast1
-
-# Generator configuration (DP-3: search opt-in vs all-entity default)
-# search.default_scope: 'opt_in' — only entities with x-generate.search: true are searchable
-# search.default_scope: 'all'    — all entities are searchable; exclude with x-generate.search: false
-
-# x-generate per-entity flags (cmd_330):
-#   import: true (default) — generate /api/{entity}/import route + ImportModal UI + test
-#   import: false          — suppress own import route/UI/test;
-#                            x-import-key (b) dotted-FK resolution by other entities
-#                            continues to work (e.g. role.name lookup in permission import)
-#   export: true (default) — generate /api/{entity}/export route + ExportCsvButton + N1-N8 test
-#   export: false          — suppress export route, ExportCsvButton, N1-N8 export tests
 x-generator:
   search:
     default_scope: all
@@ -82,86 +61,7 @@ x-import-key:
     Entities without x-import-key: export-only in Phase 1; import blocked in Phase 2.
 
 definitions:
-  # ============================================================
-  # System entities (required by all apps — see §1.1)
-  # Keep these definitions intact when creating a new app.
-  # ============================================================
-
   user:
-    type: object
-    required:
-      - id
-      - name
-      - email
-    x-import-key: [name]
-    x-display:
-      table:
-        - name:
-            primary: true
-            width: 150
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-      name:
-        type: string
-        minLength: 1
-        x-pii: direct
-      email:
-        type: string
-        x-pii: direct
-      # Nullable so SSO-provisioned users (Google, etc.) can exist without a
-      # bcrypt hash. Credentials sign-in still requires a non-null password —
-      # auth.ts authorize() rejects accounts with password === null.
-      password:
-        type:
-          - string
-          - "null"
-        x-pii: sensitive
-        x-custom-component:
-          target:
-            - upsert
-      api_key:
-        type:
-          - string
-          - "null"
-        x-pii: sensitive
-        x-custom-component:
-          target:
-            - upsert
-      image:
-        type:
-          - string
-          - "null"
-        format: uri
-        x-pii: indirect
-      mfa_enabled:
-        type: boolean
-        default: false
-        x-pii: sensitive
-        x-custom-component:
-          target:
-            - upsert
-
-  role:
-    type: object
-    required:
-      - id
-      - name
-    x-import-key: [name]
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-      name:
-        type: string
-        minLength: 1
-      description:
-        type:
-          - string
-          - "null"
-
-  user_detail:
     x-generate:
       list: true
       view: true
@@ -179,26 +79,55 @@ definitions:
         - name
         - image
         - roles
+    x-relationships:
+      roles:
+        type: many-to-many
+        target: role
     x-custom-components:
       - name: MfaToggle
         path: "@/components/_standard/MfaToggle"
         target:
           - view
-    x-relationships:
+    x-import-key: [name]
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 150
+    fields:
+      name:
+        minLength: 1
+        x-pii: direct
+      email:
+        x-pii: direct
+      password:
+        x-pii: sensitive
+        x-custom-component:
+          target:
+            - upsert
+      api_key:
+        x-pii: sensitive
+        x-custom-component:
+          target:
+            - upsert
+      image:
+        format: uri
+        x-pii: indirect
+      mfa_enabled:
+        default: false
+        x-pii: sensitive
+        x-custom-component:
+          target:
+            - upsert
+
+    required:
+      - roles
+    properties:
       roles:
-        type: many-to-many
-        target: role
-    allOf:
-      - $ref: "#/definitions/user"
-      - type: object
-        required:
-          - roles
-        properties:
-          roles:
-            type: array
-            x-outputType: list
-            items:
-              $ref: "#/definitions/role"
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/role"
 
   setting:
     x-generate:
@@ -233,7 +162,7 @@ definitions:
             items:
               $ref: "#/definitions/role"
 
-  role_detail:
+  role:
     x-generate:
       list: true
       view: true
@@ -251,39 +180,21 @@ definitions:
       users:
         type: many-to-many
         target: user
-    allOf:
-      - $ref: "#/definitions/role"
-      - type: object
-        required:
-          - users
-        properties:
-          users:
-            type: array
-            x-outputType: list
-            items:
-              $ref: "#/definitions/user"
+    x-import-key: [name]
+    fields:
+      name:
+        minLength: 1
+      description: {}
+    required:
+      - users
+    properties:
+      users:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/user"
 
   organization:
-    type: object
-    required:
-      - id
-      - name
-    x-import-key: [name]
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-      name:
-        type: string
-        minLength: 1
-      description:
-        type:
-          - string
-          - "null"
-        x-ui:
-          width: 8
-
-  organization_detail:
     x-generate:
       list: true
       view: true
@@ -294,70 +205,30 @@ definitions:
       api: true
       test: true
       search: true
-    x-search:
-      org_id_field: id
     x-relationships:
       users:
         type: many-to-many
         target: user
-    allOf:
-      - $ref: "#/definitions/organization"
-      - type: object
-        required:
-          - users
-        properties:
-          users:
-            type: array
-            x-outputType: list
-            items:
-              $ref: "#/definitions/user"
+    x-search:
+      org_id_field: id
+    x-import-key: [name]
+    fields:
+      name:
+        minLength: 1
+      description:
+        x-ui:
+          width: 8
+
+    required:
+      - users
+    properties:
+      users:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/user"
 
   permission:
-    type: object
-    required:
-      - id
-      - name
-      - create
-      - read
-      - update
-      - delete
-    x-import-key: [name, role.name]
-    x-display:
-      table:
-        - name:
-            width: 200
-        - role:
-            width: 200
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-      name:
-        type: string
-        minLength: 1
-        x-entity-select: true
-      create:
-        type: boolean
-      read:
-        type: boolean
-      update:
-        type: boolean
-      delete:
-        type: boolean
-      import:
-        type: boolean
-        default: false
-      role_id:
-        type:
-          - string
-          - "null"
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: role
-          labelField: name
-
-  permission_detail:
     x-generate:
       list: true
       view: true
@@ -371,55 +242,30 @@ definitions:
     # Security-sensitive entity: every create/update/delete is recorded in
     # the audit_log table by the generated service layer.
     x-audit: true
-    allOf:
-      - $ref: "#/definitions/permission"
-      - type: object
-        properties:
-          role:
-            $ref: "#/definitions/role"
-
-  approval_flow:
-    type: object
-    required:
-      - id
-      - entity_name
-      - approver_role_id
-    x-import-key: [entity_name]
+    x-import-key: [name, role.name]
     x-display:
       table:
-        - entity_name:
-            primary: true
+        - name:
             width: 200
-        - requestor_role:
-            width: 150
-        - approver_role:
-            width: 150
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-      entity_name:
-        type: string
+        - role:
+            width: 200
+    fields:
+      name:
         minLength: 1
         x-entity-select: true
-      requestor_role_id:
-        type: 
-          - string
-          - "null"
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: role
-          labelField: name
-      approver_role_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: role
-          labelField: name
+      create: {}
+      read: {}
+      update: {}
+      delete: {}
+      import:
+        default: false
+      role_id:
+        x-relationship: {}
+    properties:
+      role:
+        $ref: "#/definitions/role"
 
-  approval_flow_detail:
+  approval_flow:
     x-generate:
       list: true
       view: true
@@ -441,60 +287,58 @@ definitions:
         target: approval_flow
         labelField: entity_name
         secondaryLabelField: approver_role.name
-    allOf:
-      - $ref: "#/definitions/approval_flow"
-      - type: object
-        required:
-          - approver_role
-          - preceding_transitions
-        properties:
-          requestor_role:
-            $ref: "#/definitions/role"
-          approver_role:
-            $ref: "#/definitions/role"
-          preceded_by:
-            type: array
-            x-outputType: list
-            items:
-              $ref: "#/definitions/approval_flow"
-          followed_by:
-            type: array
-            x-outputType: list
-            items:
-              $ref: "#/definitions/approval_flow"
+    x-import-key: [entity_name]
+    x-display:
+      table:
+        - entity_name:
+            primary: true
+            width: 200
+        - requestor_role:
+            width: 150
+        - approver_role:
+            width: 150
+    fields:
+      entity_name:
+        minLength: 1
+        x-entity-select: true
+      requestor_role_id:
+        x-relationship: {}
+      approver_role_id:
+        x-relationship: {}
+    required:
+      - approver_role
+      - preceding_transitions
+    properties:
+      requestor_role:
+        $ref: "#/definitions/role"
+      approver_role:
+        $ref: "#/definitions/role"
+      preceded_by:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/approval_flow"
+      followed_by:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/approval_flow"
 
   approval_request:
-    type: object
-    required:
-      - id
-      - approvable_id
-      - approval_flow_id
     x-display:
       table:
         - approval_flow:
             width: 200
         - status:
             width: 100
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
+    fields:
       approvable_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
-          type: many-to-one
-          target: approvable
           labelField: id
       approval_flow_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
-          type: many-to-one
-          target: approval_flow
           labelField: entity_name
       status:
-        type: integer
         minimum: 0
         maximum: 2
         enum:
@@ -503,19 +347,6 @@ definitions:
           - Rejected
 
   approvable:
-    type: object
-    required:
-      - id
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-      approved_at:
-        type: string
-        format: date-time
-        nullable: true
-
-  approvable_detail:
     x-generate:
       list: false
       view: false
@@ -525,28 +356,19 @@ definitions:
       invalidate: false
       api: false
       test: false
-    allOf:
-      - $ref: "#/definitions/approvable"
-      - type: object
-        required:
-          - approval_requests
-        properties:
-          approval_requests:
-            type: array
-            x-outputType: list
-            items:
-              $ref: "#/definitions/approval_request"
+    fields:
+      approved_at:
+        _legacy_nullable_style: true
+    required:
+      - approval_requests
+    properties:
+      approval_requests:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/approval_request"
 
   commentable:
-    type: object
-    required:
-      - id
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-
-  commentable_detail:
     x-generate:
       list: false
       view: false
@@ -556,53 +378,28 @@ definitions:
       invalidate: false
       api: false
       test: false
-    allOf:
-      - $ref: "#/definitions/commentable"
-      - type: object
-        required:
-          - comments
-        properties:
-          comments:
-            type: array
-            x-outputType: comments
-            items:
-              $ref: "#/definitions/comment"
+    required:
+      - comments
+    properties:
+      comments:
+        type: array
+        x-outputType: comments
+        items:
+          $ref: "#/definitions/comment"
 
   comment:
-    type: object
-    required:
-      - id
-      - message
-      - commentable_id
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
+    fields:
       message:
-        type: string
         minLength: 1
         x-mention: true
-      commentable_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-
+      commentable_id: {}
   reaction:
-    type: object
-    required:
-      - id
-      - type
-      - user_id
-      - comment_id
     x-internal:
       page: false
       embed: false
       api: custom
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
+    fields:
       type:
-        type: integer
         minimum: 0
         maximum: 4
         enum:
@@ -612,30 +409,11 @@ definitions:
           - Surprised
           - Sad
       user_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: user
-          labelField: name
+        x-relationship: {}
       comment_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
         x-relationship:
-          type: many-to-one
-          target: comment
           labelField: id
-
   attachable:
-    type: object
-    required:
-      - id
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-
-  attachable_detail:
     x-generate:
       list: false
       view: false
@@ -645,32 +423,18 @@ definitions:
       invalidate: false
       api: false
       test: false
-    allOf:
-      - $ref: "#/definitions/attachable"
-      - type: object
-        required:
-          - attachments
-        properties:
-          attachments:
-            type: array
-            x-outputType: list
-            items:
-              $ref: "#/definitions/attachment"
+    required:
+      - attachments
+    properties:
+      attachments:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/attachment"
 
   attachment:
-    type: object
-    required:
-      - id
-      - type
-      - name
-      - path
-      - attachable_id
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
+    fields:
       type:
-        type: integer
         minimum: 0
         maximum: 3
         enum:
@@ -678,65 +442,23 @@ definitions:
           - file
           - video
           - audio
+        _required: true
       order:
-        type: integer
         default: 0
       name:
-        type: string
         minLength: 1
       path:
-        type: string
         format: uri
-      attachable_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-
-  dashboard:
-    type: object
-    required:
-      - id
-      - name
-    x-display:
-      table:
-        - name:
-            primary: true
-            width: 200
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-      name:
-        type: string
-        minLength: 1
-
+      attachable_id: {}
   dashboard_widget:
-    type: object
-    required:
-      - id
-      - dashboard_id
-      - name
-      - entity_name
-      - chart_type
-      - group_by_field
-    properties:
-      id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
+    fields:
       dashboard_id:
-        type: string
-        pattern: "^c[a-z0-9]{24,}$"
-        x-relationship:
-          type: many-to-one
-          target: dashboard
-          labelField: name
+        x-relationship: {}
       name:
-        type: string
         minLength: 1
       entity_name:
-        type: string
         minLength: 1
       chart_type:
-        type: integer
         minimum: 0
         maximum: 3
         enum:
@@ -746,23 +468,14 @@ definitions:
           - line
         default: 1
       stack_mode:
-        type:
-          - integer
-          - "null"
         minimum: 0
         maximum: 2
         enum:
           - grouped
           - stacked
           - standardized
-      series_field:
-        type:
-          - string
-          - "null"
+      series_field: {}
       group_by_bucket:
-        type:
-          - integer
-          - "null"
         minimum: 0
         maximum: 4
         enum:
@@ -772,21 +485,12 @@ definitions:
           - quarter
           - year
       group_by_field:
-        type: string
         minLength: 1
-      filter_field:
-        type:
-          - string
-          - "null"
-      filter_value:
-        type:
-          - string
-          - "null"
+      filter_field: {}
+      filter_value: {}
       order:
-        type: integer
         default: 0
-
-  dashboard_detail:
+  dashboard:
     x-generate:
       list: true
       view: true
@@ -806,14 +510,19 @@ definitions:
         path: "@/components/_standard/DashboardView"
         target:
           - view
-    allOf:
-      - $ref: "#/definitions/dashboard"
-      - type: object
-        required:
-          - widgets
-        properties:
-          widgets:
-            type: array
-            items:
-              $ref: "#/definitions/dashboard_widget"
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 200
+    fields:
+      name:
+        minLength: 1
+    required:
+      - widgets
+    properties:
+      widgets:
+        type: array
+        items:
+          $ref: "#/definitions/dashboard_widget"
 

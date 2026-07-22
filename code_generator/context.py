@@ -16,7 +16,18 @@ from helpers.schema_helpers import (
     get_one_to_one_rels,
     get_detail_ref_rels,
     get_flatten_rels,
+    get_entity_properties,
 )
+
+
+def _raw_def(entity_name: str, schema: dict) -> dict:
+    """Resolve a bare/view model name to its raw entity dict — scalar/FK
+    properties, x-readonly-fields, x-gdpr-mode, x-display, x-bridge etc. all
+    live on the raw ('__'-prefixed) entity, not the view. Falls back to the
+    bare view for entities with no raw counterpart (e.g. 'setting', which
+    proxies the 'user' view instead of having its own raw twin)."""
+    defs = schema.get('definitions', {})
+    return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +136,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     generate_config = entity.get('generate_config', {})
     children_raw = entity.get('children', [])
 
-    model_def = schema['definitions'].get(model, {})
+    model_def = _raw_def(model, schema)
     filtered_props = filter_fields(
         model_def.get('properties', {}),
         generate_config.get('fields'),
@@ -224,14 +235,14 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     for child_raw in children_raw:
         if child_raw.get('output_type') == 'list':
             continue
-        child_def = schema['definitions'].get(child_raw['name'], {})
+        child_def = _raw_def(child_raw['name'], schema)
         if child_def.get('properties'):
             child_rels_early.extend(get_parent_relationships(child_def))
 
     # Only import auto-create OTO child rel targets that have their own generated types
     def _has_generated_types(target: str) -> bool:
-        detail = schema['definitions'].get(f'{target}_detail', {})
-        gen = detail.get('x-generate') or {}
+        view = schema['definitions'].get(target, {})
+        gen = view.get('x-generate') or {}
         return any(gen.get(k) for k in ('list', 'view', 'new', 'edit', 'delete', 'api'))
 
     oto_child_rel_targets = [
@@ -254,25 +265,27 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     # Reverse OTO rels (FK lives in target, not in this model) — display-only in detail view
     _reverse_oto_early = get_detail_ref_rels(parent, {**model_def, 'properties': filtered_props}, schema)
 
-    # Flatten rels (x-outputType: flatten on non-array $ref in _detail)
+    # Flatten rels (x-outputType: flatten on non-array $ref, view extension)
     _flatten_rels_raw = get_flatten_rels(parent, {**model_def, 'properties': filtered_props}, schema)
     # Only non-m2o flatten rels need new type imports (m2o targets are already in parent_rels)
     _flatten_non_m2o_targets = [r['target'] for r in _flatten_rels_raw if not r['is_m2o']]
     # Each flatten target falls into one of three buckets:
-    #   1. `_detail` target with a base entity (e.g. `pre_check_detail` → import
-    #      `PreCheckDetail` from `lib/pre_check/types`). Handled via
-    #      `flatten_detail_imports`.
-    #   2. Plain target that has its own generated module (own page or API).
-    #      Imported normally via `import_targets`.
-    #   3. Plain target with NO generated module (embedded one-to-one with no
-    #      `x-generate` anywhere, e.g. `checkup_result`). There is no
+    #   1. $ref explicitly targets the raw ('__'-prefixed) form of an entity
+    #      that also has its own view (was a '_detail'-suffixed $ref
+    #      pre-Stage4) → import via the view's module, `flatten_detail_imports`.
+    #   2. Bare target that has its own generated module (own page or API) —
+    #      either the view itself carries x-generate, or (schema not yet
+    #      migrated through the raw/view split) the raw form carries
+    #      x-generate directly. Imported normally via `import_targets`.
+    #   3. Bare target with NO generated module anywhere (embedded one-to-one
+    #      with no x-generate at all, e.g. `checkup_result`). There is no
     #      `lib/<target>/types.ts` to import from, so declare the type inline
     #      in this entity's `types.ts`.
     _USER_GENERATE_FLAGS = ('list', 'view', 'new', 'edit', 'delete', 'api')
 
     def _target_has_module(t: str) -> bool:
         defs = schema.get('definitions', {})
-        for key in (t, f'{t}_detail'):
+        for key in (t, f'__{t}'):
             defn = defs.get(key)
             if not isinstance(defn, dict):
                 continue
@@ -285,13 +298,13 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
                 return True
         return False
 
-    _detail_suffix = '_detail'
     _flatten_detail_imports: list[tuple[str, str]] = []
     _flatten_non_detail_targets: list[str] = []
     _inline_flatten_targets: list[str] = []
     for _t in _flatten_non_m2o_targets:
-        if _t.endswith(_detail_suffix) and _t[:-len(_detail_suffix)] in schema.get('definitions', {}):
-            _flatten_detail_imports.append((_t, _t[:-len(_detail_suffix)]))
+        if _t.startswith('__') and _t[2:] in schema.get('definitions', {}):
+            _bare = _t[2:]
+            _flatten_detail_imports.append((_bare, _bare))
         elif _target_has_module(_t):
             _flatten_non_detail_targets.append(_t)
         else:
@@ -338,23 +351,24 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
 
     for child_raw in children_raw:
         child_name = child_raw['name']
-        child_def = schema['definitions'].get(child_name, {})
+        child_def = _raw_def(child_name, schema)
         if not child_def.get('properties'):
             continue
 
-        # Independent entity: a list child (not m2m) that has its own _detail with x-generate.
-        # Its type is declared in its own module — import it rather than redeclaring inline.
+        # Independent entity: a list child (not m2m) that has its own view
+        # definition with x-generate. Its type is declared in its own
+        # module — import it rather than redeclaring inline.
         is_independent = (
             child_raw.get('output_type') == 'list'
             and (child_raw.get('relationship') or {}).get('type') != 'many-to-many'
-            and bool(schema['definitions'].get(f'{child_name}_detail', {}).get('x-generate'))
+            and bool(schema['definitions'].get(child_name, {}).get('x-generate'))
         )
         if is_independent:
             if child_name not in import_targets and child_name != model:
                 import_targets.append(child_name)
 
-        # Respect field filtering from child's own detail definition
-        child_detail_def = schema['definitions'].get(f'{child_name}_detail', {})
+        # Respect field filtering from child's own view definition
+        child_detail_def = schema['definitions'].get(child_name, {})
         child_fields_whitelist = (child_detail_def.get('x-generate') or {}).get('fields')
         filtered_child_props = filter_fields(child_def['properties'], child_fields_whitelist)
 

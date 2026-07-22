@@ -67,7 +67,8 @@ def _non_owner() -> dict:
 
 
 def _schema(*owner_names: str, extras: dict | None = None) -> dict:
-    defs = {name: _attachable_owner(name) for name in owner_names}
+    # x-relationship (attachable_id) lives on the raw entity — '__'-prefixed.
+    defs = {f'__{name}': _attachable_owner(name) for name in owner_names}
     if extras:
         defs.update(extras)
     return {'definitions': defs}
@@ -92,12 +93,12 @@ def test_build_attachable_owners_sorts_by_name():
     assert build_attachable_owners(schema) == [{'name': 'product'}, {'name': 'resource'}]
 
 
-def test_build_attachable_owners_skips_detail_definitions():
-    """`<entity>_detail` carries x-generate flags but never the FK itself —
-    walking the bases is enough, and including detail variants would
-    double-count owners under their generated alias."""
+def test_build_attachable_owners_skips_view_definitions():
+    """The bare view (`resource`) carries x-generate flags but never the FK
+    itself — walking the raw ('__'-prefixed) entities is enough, and
+    including the view too would double-count owners under the same name."""
     schema = _schema('resource', extras={
-        'resource_detail': _attachable_owner('resource_detail'),
+        'resource': _attachable_owner('resource'),
     })
     assert build_attachable_owners(schema) == [{'name': 'resource'}]
 
@@ -105,7 +106,7 @@ def test_build_attachable_owners_skips_detail_definitions():
 def test_build_attachable_owners_ignores_wrong_target():
     """A field named `attachable_id` pointing at a different model is not
     an owner — only the actual bridge relationship counts."""
-    schema = _schema(extras={'misnamed': _non_owner()})
+    schema = _schema(extras={'__misnamed': _non_owner()})
     assert build_attachable_owners(schema) == []
 
 
@@ -182,15 +183,15 @@ def test_cleanup_deletes_generated_catalogs(tmp_path: Path):
     schema_path = tmp_path / 'schema.yaml'
     schema_path.write_text(
         'definitions:\n'
-        '  thing:\n'
+        '  __thing:\n'
         '    type: object\n'
         '    properties:\n'
         '      id: {type: string}\n'
         '      name: {type: string}\n'
-        '  thing_detail:\n'
+        '  thing:\n'
         '    x-generate: {list: true, view: true, new: true, edit: true,'
         ' delete: true, api: true, test: false}\n'
-        '    allOf: [{$ref: "#/definitions/thing"}]\n'
+        '    allOf: [{$ref: "#/definitions/__thing"}]\n'
     )
 
     cleanup(str(schema_path), str(out))

@@ -53,7 +53,7 @@ def _entity(model: str, children: list = None) -> dict:
     return {
         "parent": model,
         "model": model,
-        "definition_key": f"{model}_detail",
+        "definition_key": model,
         "children": children or [],
         "generate_config": {
             "list": True, "view": True, "new": True, "edit": True,
@@ -85,7 +85,7 @@ class TestMandatoryFKListChild:
                     "required": ["id", "name"],
                     "properties": _base_props(),
                 },
-                "user_story": {
+                "__user_story": {
                     "type": "object",
                     "required": ["id", "name", "feature_id"],
                     "properties": {
@@ -94,10 +94,10 @@ class TestMandatoryFKListChild:
                     },
                 },
                 # user_story HAS its own page → independent → read-only in parent form
-                "user_story_detail": {
+                "user_story": {
                     "x-generate": {"list": True, "view": True, "new": True, "edit": True,
                                    "delete": True, "api": False, "test": False},
-                    "allOf": [{"$ref": "#/definitions/user_story"}],
+                    "allOf": [{"$ref": "#/definitions/__user_story"}],
                 },
             }
         }
@@ -356,7 +356,7 @@ class TestXGenerateFlagsEffect:
         entity = {
             "parent": "resource",
             "model": "resource",
-            "definition_key": "resource_detail",
+            "definition_key": "resource",
             "children": [],
             "generate_config": gen_cfg,
         }
@@ -458,18 +458,18 @@ class TestSelectorOTOMandatory:
     def _schema(self) -> dict:
         return {
             "definitions": {
-                "checkup": {
+                "__checkup": {
                     "type": "object",
                     "required": ["id"],
                     "properties": {"id": {"type": "string"}, "checkup_date": {"type": "string"}},
                 },
-                "checkup_detail": {
+                "checkup": {
                     # Has own pages → is_selector = True
                     "x-generate": {"list": True, "view": True, "new": True, "edit": True,
                                    "delete": True, "api": False},
-                    "allOf": [{"$ref": "#/definitions/checkup"}],
+                    "allOf": [{"$ref": "#/definitions/__checkup"}],
                 },
-                "pre_check": {
+                "__pre_check": {
                     "type": "object",
                     "required": ["id", "checkup_id"],
                     "properties": {
@@ -478,10 +478,10 @@ class TestSelectorOTOMandatory:
                                                        label_field="checkup_date"),
                     },
                 },
-                "pre_check_detail": {
+                "pre_check": {
                     "x-generate": {"list": True, "view": True, "new": True, "edit": True,
                                    "delete": True, "api": False},
-                    "allOf": [{"$ref": "#/definitions/pre_check"}],
+                    "allOf": [{"$ref": "#/definitions/__pre_check"}],
                 },
             }
         }
@@ -567,17 +567,17 @@ class TestSelectorOTOOptional:
     def _schema(self) -> dict:
         return {
             "definitions": {
-                "user_account": {
+                "__user_account": {
                     "type": "object",
                     "required": ["id", "name"],
                     "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
                 },
-                "user_account_detail": {
+                "user_account": {
                     "x-generate": {"list": True, "view": True, "new": True, "edit": True,
                                    "delete": True, "api": False},
-                    "allOf": [{"$ref": "#/definitions/user_account"}],
+                    "allOf": [{"$ref": "#/definitions/__user_account"}],
                 },
-                "patient": {
+                "__patient": {
                     "type": "object",
                     "required": ["id", "name"],
                     "properties": {
@@ -586,10 +586,10 @@ class TestSelectorOTOOptional:
                         "user_account_id": self._oto_field_nullable("user_account"),
                     },
                 },
-                "patient_detail": {
+                "patient": {
                     "x-generate": {"list": True, "view": True, "new": True, "edit": True,
                                    "delete": True, "api": False},
-                    "allOf": [{"$ref": "#/definitions/patient"}],
+                    "allOf": [{"$ref": "#/definitions/__patient"}],
                 },
             }
         }
@@ -641,7 +641,7 @@ class TestStringEnumField:
     def _schema(self) -> dict:
         return {
             "definitions": {
-                "widget": {
+                "__widget": {
                     "type": "object",
                     "required": ["id", "name", "chart_type"],
                     "properties": {
@@ -654,10 +654,10 @@ class TestStringEnumField:
                         },
                     },
                 },
-                "widget_detail": {
+                "widget": {
                     "x-generate": {"list": True, "view": True, "new": True, "edit": True,
                                    "delete": True, "api": False, "test": False},
-                    "allOf": [{"$ref": "#/definitions/widget"}],
+                    "allOf": [{"$ref": "#/definitions/__widget"}],
                 },
             }
         }
@@ -709,7 +709,7 @@ class TestChildGridCreateNewIntegerDefault:
     def _schema(self) -> dict:
         return {
             "definitions": {
-                "dashboard": {
+                "__dashboard": {
                     "type": "object",
                     "required": ["id", "name"],
                     "properties": {
@@ -717,12 +717,12 @@ class TestChildGridCreateNewIntegerDefault:
                         "name": {"type": "string"},
                     },
                 },
-                "dashboard_detail": {
+                "dashboard": {
                     "x-generate": {"list": True, "view": True, "new": True, "edit": True,
                                    "delete": True, "api": False, "test": False},
-                    "allOf": [{"$ref": "#/definitions/dashboard"}],
+                    "allOf": [{"$ref": "#/definitions/__dashboard"}],
                 },
-                "widget": {
+                "__widget": {
                     "type": "object",
                     "required": ["id", "chart_type", "dashboard_id"],
                     "properties": {
@@ -751,10 +751,10 @@ class TestChildGridCreateNewIntegerDefault:
                         },
                     },
                 },
-                "widget_detail": {
+                "widget": {
                     "x-generate": {"list": True, "view": True, "new": True, "edit": True,
                                    "delete": True, "api": False, "test": False},
-                    "allOf": [{"$ref": "#/definitions/widget"}],
+                    "allOf": [{"$ref": "#/definitions/__widget"}],
                 },
             }
         }

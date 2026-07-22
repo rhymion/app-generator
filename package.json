@@ -22,7 +22,7 @@
     "docker:down:test": "docker compose --env-file .env.test -f docker-compose.test.yml down",
     "docker:up:prod": "docker compose --env-file .env.production -f docker-compose.prod.yml up -d",
     "docker:down:prod": "docker compose --env-file .env.production -f docker-compose.prod.yml down",
-    "generate-code": "python3 code_generator/generate.py code_generator/json_schema.yaml ./",
+    "generate-code": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/generate.py code_generator/.generated/json_schema.yaml ./",
     "migrate:dev": "prisma migrate dev",
     "migrate:dev:create-only": "prisma migrate dev --create-only",
     "migrate:deploy": "prisma migrate deploy",

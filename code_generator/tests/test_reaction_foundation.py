@@ -82,7 +82,7 @@ def _parent_with_comment_child_schema() -> dict:
             "user": _user_defn(),
             "comment": _comment_defn(),
             "reaction": _reaction_defn(),
-            "parent": {
+            "__parent": {
                 "type": "object",
                 "required": ["id", "name"],
                 "properties": {
@@ -90,13 +90,13 @@ def _parent_with_comment_child_schema() -> dict:
                     "name": {"type": "string"},
                 },
             },
-            "parent_detail": {
+            "parent": {
                 "x-generate": {
                     "list": True, "view": True, "new": True, "edit": True,
                     "delete": True, "api": False, "test": False,
                 },
                 "allOf": [
-                    {"$ref": "#/definitions/parent"},
+                    {"$ref": "#/definitions/__parent"},
                     {"type": "object", "properties": {
                         "comments": {
                             "type": "array",
@@ -120,14 +120,14 @@ class TestXInternalExcludedFromExtractEntities:
         schema = {
             "definitions": {
                 "user": _user_defn(),
-                "comment": _comment_defn(),
+                "__comment": _comment_defn(),
                 "reaction": _reaction_defn(),
-                "comment_detail": {
+                "comment": {
                     "x-generate": {
                         "list": True, "view": True, "new": True, "edit": True,
                         "delete": True, "api": False, "test": False,
                     },
-                    "allOf": [{"$ref": "#/definitions/comment"}],
+                    "allOf": [{"$ref": "#/definitions/__comment"}],
                 },
             }
         }
@@ -140,14 +140,14 @@ class TestXInternalExcludedFromExtractEntities:
         schema = {
             "definitions": {
                 "user": _user_defn(),
-                "comment": _comment_defn(),
+                "__comment": _comment_defn(),
                 "reaction": _reaction_defn(),
-                "comment_detail": {
+                "comment": {
                     "x-generate": {
                         "list": True, "view": True, "new": True, "edit": True,
                         "delete": True, "api": False, "test": False,
                     },
-                    "allOf": [{"$ref": "#/definitions/comment"}],
+                    "allOf": [{"$ref": "#/definitions/__comment"}],
                 },
             }
         }
@@ -385,7 +385,7 @@ class TestBuildContextReactionBatchQuery:
         schema = {
             "definitions": {
                 "user": _user_defn(),
-                "task": {
+                "__task": {
                     "type": "object",
                     "required": ["id", "name"],
                     "properties": {
@@ -393,12 +393,12 @@ class TestBuildContextReactionBatchQuery:
                         "name": {"type": "string"},
                     },
                 },
-                "task_detail": {
+                "task": {
                     "x-generate": {
                         "list": True, "view": True, "new": True, "edit": True,
                         "delete": True, "api": False, "test": False,
                     },
-                    "allOf": [{"$ref": "#/definitions/task"}],
+                    "allOf": [{"$ref": "#/definitions/__task"}],
                 },
             }
         }

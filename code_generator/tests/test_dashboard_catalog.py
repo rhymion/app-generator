@@ -32,7 +32,7 @@ def _entity(props: dict, dashboard: bool = True) -> dict:
 
 def test_boolean_field_produces_boolean_kind():
     schema = _schema({
-        'task': _entity({'is_done': {'type': 'boolean'}}),
+        '__task': _entity({'is_done': {'type': 'boolean'}}),
     })
     catalog = build_dashboard_catalog(schema)
     assert len(catalog) == 1
@@ -43,7 +43,7 @@ def test_boolean_field_produces_boolean_kind():
 
 def test_integer_with_enum_produces_enum_kind():
     schema = _schema({
-        'task': _entity({'status': {'type': 'integer', 'enum': [0, 1, 2]}}),
+        '__task': _entity({'status': {'type': 'integer', 'enum': [0, 1, 2]}}),
     })
     catalog = build_dashboard_catalog(schema)
     field = catalog[0]['groupable_fields'][0]
@@ -53,7 +53,7 @@ def test_integer_with_enum_produces_enum_kind():
 
 def test_fk_field_produces_fk_kind():
     schema = _schema({
-        'booking': _entity({
+        '__booking': _entity({
             'user_id': {
                 'type': 'string',
                 'x-relationship': {'type': 'many-to-one', 'target': 'user', 'labelField': 'name'},
@@ -73,7 +73,7 @@ def test_fk_field_produces_fk_kind():
 
 def test_integer_without_enum_produces_number_kind():
     schema = _schema({
-        'product': _entity({'price': {'type': 'integer'}}),
+        '__product': _entity({'price': {'type': 'integer'}}),
     })
     catalog = build_dashboard_catalog(schema)
     assert len(catalog) == 1
@@ -85,7 +85,7 @@ def test_integer_without_enum_produces_number_kind():
 
 def test_number_type_without_enum_produces_number_kind():
     schema = _schema({
-        'metric': _entity({'score': {'type': 'number'}}),
+        '__metric': _entity({'score': {'type': 'number'}}),
     })
     catalog = build_dashboard_catalog(schema)
     field = catalog[0]['groupable_fields'][0]
@@ -94,7 +94,7 @@ def test_number_type_without_enum_produces_number_kind():
 
 def test_string_with_date_format_produces_datetime_kind():
     schema = _schema({
-        'leave_request': _entity({'start_date': {'type': 'string', 'format': 'date'}}),
+        '__leave_request': _entity({'start_date': {'type': 'string', 'format': 'date'}}),
     })
     catalog = build_dashboard_catalog(schema)
     field = catalog[0]['groupable_fields'][0]
@@ -105,7 +105,7 @@ def test_string_with_date_format_produces_datetime_kind():
 
 def test_string_with_datetime_format_produces_datetime_kind():
     schema = _schema({
-        'booking': _entity({'start_time': {'type': 'string', 'format': 'date-time'}}),
+        '__booking': _entity({'start_time': {'type': 'string', 'format': 'date-time'}}),
     })
     catalog = build_dashboard_catalog(schema)
     field = catalog[0]['groupable_fields'][0]
@@ -119,7 +119,7 @@ def test_plain_string_field_excluded():
     are always appended for every dashboardable entity.
     """
     schema = _schema({
-        'resource': _entity({'name': {'type': 'string'}}),
+        '__resource': _entity({'name': {'type': 'string'}}),
     })
     catalog = build_dashboard_catalog(schema)
     # Entity is present due to audit FK fields always being added.
@@ -136,16 +136,19 @@ def test_plain_string_field_excluded():
 
 def test_entity_without_dashboard_flag_excluded():
     schema = _schema({
-        'hidden': _entity({'price': {'type': 'integer'}}, dashboard=False),
+        '__hidden': _entity({'price': {'type': 'integer'}}, dashboard=False),
     })
     assert build_dashboard_catalog(schema) == []
 
 
-def test_detail_and_input_variants_excluded():
+def test_view_and_input_variants_excluded():
+    """Only the raw ('__'-prefixed) entity is catalogued — the bare view
+    (x-display lives on the raw entity, not the view) and any '_input'
+    variant are excluded."""
     schema = _schema({
-        'task_detail': _entity({'is_done': {'type': 'boolean'}}),
-        'task_input': _entity({'is_done': {'type': 'boolean'}}),
         'task': _entity({'is_done': {'type': 'boolean'}}),
+        'task_input': _entity({'is_done': {'type': 'boolean'}}),
+        '__task': _entity({'is_done': {'type': 'boolean'}}),
     })
     catalog = build_dashboard_catalog(schema)
     assert len(catalog) == 1
@@ -157,7 +160,7 @@ def test_system_fields_excluded():
     creator_id/updater_id appear as audit FK entries (explicitly appended, not from schema props).
     """
     schema = _schema({
-        'task': _entity({
+        '__task': _entity({
             'created_at': {'type': 'string', 'format': 'date-time'},
             'updated_at': {'type': 'string', 'format': 'date-time'},
             'creator_id': {'type': 'string'},
@@ -185,12 +188,12 @@ def test_system_fields_excluded():
 def test_sample_entities_number_and_datetime_kinds():
     """product.price → number kind; booking.start_time → datetime kind."""
     schema = _schema({
-        'product': _entity({'price': {'type': 'integer'}}),
-        'booking': _entity({
+        '__product': _entity({'price': {'type': 'integer'}}),
+        '__booking': _entity({
             'start_time': {'type': 'string', 'format': 'date-time'},
             'end_time': {'type': 'string', 'format': 'date-time'},
         }),
-        'leave_request': _entity({'start_date': {'type': 'string', 'format': 'date'}}),
+        '__leave_request': _entity({'start_date': {'type': 'string', 'format': 'date'}}),
     })
 
     catalog = build_dashboard_catalog(schema)

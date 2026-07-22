@@ -67,13 +67,15 @@ from helpers.schema_helpers import (
     get_flatten_rels,
     get_splittable_bridge_field,
     resolve_ledger_domain,
+    get_entity_properties,
+    get_entity_required,
 )
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import (
     build_label_expression, render_prisma_include, resolve_label_paths, relation_chain_targets,
     build_string_only_label_expression,
 )
-from build_context import _get_entity_options
+from build_context import _get_entity_options, _raw_def
 from generate_types import extract_entities
 
 
@@ -136,13 +138,31 @@ def _get_primary_display_field_name(model_def: dict) -> str | None:
     return None
 
 
-def _get_base_properties(defn: dict) -> dict:
+def _get_base_properties(defn: dict, schema: dict | None = None) -> dict:
+    """Raw-entity properties for a view def, walking the allOf $ref chain.
+
+    Most chains are one hop (view -> raw, e.g. 'role' -> '__role'), but a
+    proxy view with no raw twin of its own (e.g. 'setting', whose allOf
+    $ref targets the 'user' VIEW rather than a '__'-prefixed raw sibling)
+    is two hops — so this walks the chain rather than resolving one level.
+    `schema` is required to follow the chain; without it only an inline
+    `properties` block on `defn` itself is visible (legacy one-arg callers).
+    """
     if 'properties' in defn:
         return defn['properties']
-    for item in defn.get('allOf', []):
-        if 'properties' in item:
-            return item['properties']
-    return {}
+    if schema is None:
+        for item in defn.get('allOf', []):
+            if 'properties' in item:
+                return item['properties']
+        return {}
+    seen: set = set()
+    while 'properties' not in defn:
+        ref = next((item.get('$ref') for item in defn.get('allOf', []) if item.get('$ref')), None)
+        if not ref or ref in seen:
+            return {}
+        seen.add(ref)
+        defn = schema['definitions'].get(ref.split('/')[-1], {})
+    return defn['properties']
 
 
 def _seed_relation_label_value(
@@ -206,7 +226,7 @@ def _seed_path_part(
     cursor_entity = target
     for seg in segments[:-1]:
         rels = {}
-        for prop_name, prop in _get_base_properties(schema['definitions'].get(cursor_entity, {})).items():
+        for prop_name, prop in _get_base_properties(schema['definitions'].get(cursor_entity, {}), schema).items():
             if not isinstance(prop, dict):
                 continue
             rel = prop.get('x-relationship') or {}
@@ -216,13 +236,13 @@ def _seed_path_part(
         cursor_entity = rels.get(seg) or cursor_entity
     final_field = segments[-1]
     leaf_def = schema['definitions'].get(cursor_entity, {})
-    label_prop = _get_base_properties(leaf_def).get(final_field, {})
+    label_prop = _get_base_properties(leaf_def, schema).get(final_field, {})
 
     # nullable non-required field → not set by fixture → null → '' in UI.
     # Must run BEFORE format-specific early returns so nullable date fields
     # (e.g. expiration_date: type=[string,null], format=date, not in required)
     # return '' rather than a fabricated date string.
-    leaf_required = set(leaf_def.get('required') or [])
+    leaf_required = get_entity_required(cursor_entity, schema)
     if final_field not in leaf_required:
         _ptype_raw = label_prop.get('type')
         _ptypes = _ptype_raw if isinstance(_ptype_raw, list) else ([_ptype_raw] if _ptype_raw else [])
@@ -269,7 +289,7 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             {'prop_name': 'email', 'prisma_val': f'`test-{var_name}-${{Date.now()}}@example.com`', 'prisma_val_unique': f'`test-{var_name}-${{Date.now()}}-${{i}}@example.com`', 'prisma_val_second': f'`test-{var_name}-${{Date.now()}}-2@example.com`'},
             {'prop_name': 'password', 'prisma_val': "'test-password'", 'prisma_val_unique': "'test-password'", 'prisma_val_second': "'test-password'"},
         ]
-    dep_def = schema['definitions'].get(target)
+    dep_def = _raw_def(target, schema)
     if not dep_def:
         return []
     props = dep_def.get('properties', {})
@@ -287,7 +307,7 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             continue
         _it = _pn[:-3]
         if _it in (schema.get('definitions') or {}):
-            _dtl = (schema.get('definitions') or {}).get(f'{_it}_detail', {})
+            _dtl = (schema.get('definitions') or {}).get(_it, {})
             _g = _dtl.get('x-generate') or {}
             if _g and not any(_g.get(k) for k in ('api', 'test', 'list', 'view', 'new', 'edit', 'delete')):
                 _inferred_internal.add(_pn)
@@ -350,7 +370,7 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
     Used to emit extra required fields (e.g. code, price for product) when
     creating the dep record in populateDependencies().
     """
-    dep_def = schema['definitions'].get(dep_target)
+    dep_def = _raw_def(dep_target, schema)
     if not dep_def:
         return []
     props = dep_def.get('properties', {})
@@ -417,7 +437,7 @@ def resolve_dependencies(model_name: str, schema: dict) -> list[dict]:
             return
         visited.add(model)
 
-        model_def = schema['definitions'].get(model)
+        model_def = _raw_def(model, schema)
         if not model_def or not model_def.get('properties'):
             return
 
@@ -472,7 +492,7 @@ def get_entity_fk_deps(model_name: str, schema: dict, deps: list[dict]) -> list[
 
     Returns the direct FK deps of model_name that appear in the resolved deps list.
     """
-    model_def = schema['definitions'].get(model_name)
+    model_def = _raw_def(model_name, schema)
     if not model_def:
         return []
 
@@ -495,7 +515,7 @@ def _entity_has_updater_id(entity_name: str, schema: dict) -> bool:
     or no x-generate = default all true) have updater_id. Leaf entities like
     `comment` (no _detail) or internal bridges (all x-generate false) do not.
     """
-    detail_def = (schema.get('definitions') or {}).get(f'{entity_name}_detail', {})
+    detail_def = (schema.get('definitions') or {}).get(entity_name, {})
     if not detail_def:
         return False
     gen = detail_def.get('x-generate') or {}
@@ -510,7 +530,7 @@ def get_internal_one_to_one_fks(model_name: str, schema: dict) -> list[dict]:
     the service creates automatically — test helpers must create these
     records directly rather than treating them as user-facing fields.
     """
-    model_def = schema['definitions'].get(model_name, {})
+    model_def = _raw_def(model_name, schema)
     props = model_def.get('properties', {})
     required_fields = set(model_def.get('required', []))
     result = []
@@ -550,7 +570,7 @@ def get_all_internal_fk_deps(model_name: str, schema: dict) -> list[dict]:
     deps = list(get_internal_one_to_one_fks(model_name, schema))
     existing_props = {d['prop_name'] for d in deps}
 
-    entity_def = schema.get('definitions', {}).get(model_name, {})
+    entity_def = _raw_def(model_name, schema)
     # Bridge-child: x-bridge on the entity itself
     bridge = entity_def.get('x-bridge')
     if isinstance(bridge, dict) and bridge.get('name'):
@@ -595,7 +615,7 @@ def get_all_internal_fk_deps(model_name: str, schema: dict) -> list[dict]:
         _inf_target = _prop_name[:-3]
         if _inf_target not in (schema.get('definitions') or {}):
             continue
-        _detail = (schema.get('definitions') or {}).get(f'{_inf_target}_detail', {})
+        _detail = (schema.get('definitions') or {}).get(_inf_target, {})
         _gen = _detail.get('x-generate') or {}
         if _gen and not any(_gen.get(k) for k in ('api', 'test', 'list', 'view', 'new', 'edit', 'delete')):
             deps.append({'prop_name': _prop_name, 'target': _inf_target,
@@ -748,7 +768,7 @@ def get_child_render_type(child: dict, schema: dict = None, parent_model_name: s
     if child.get('output_type') == 'list':
         # Optional-FK reverse lists (e.g. children → parent_id) use connect semantics: autocomplete
         if schema is not None:
-            child_def = schema['definitions'].get(child['name'], {})
+            child_def = _raw_def(child['name'], schema)
             if is_optional_fk_to_parent(child_def, parent_model_name):
                 return 'editable-list-autocomplete'
         return 'editable-list-text'
@@ -798,7 +818,7 @@ def analyze_children(children: list, schema: dict, parent_model_name: str) -> li
         if render_type == 'file':
             continue
 
-        child_def = schema['definitions'].get(child['name'])
+        child_def = _raw_def(child['name'], schema)
         if not child_def or not child_def.get('properties'):
             continue
 
@@ -1265,7 +1285,7 @@ def _compute_flatten_test_rels(parent: str, pascal: str, definition_key: str, sc
     Each entry contains Cypress fill/clear/assert commands and Prisma data for
     creating the child record in populate helpers.
     """
-    parent_def = schema['definitions'].get(parent, {})
+    parent_def = _raw_def(parent, schema)
     flatten_rels_all = get_flatten_rels(parent, parent_def, schema)
     non_m2o_flatten = [r for r in flatten_rels_all if not r['is_m2o']]
     indent = '      '
@@ -1288,7 +1308,7 @@ def _compute_flatten_test_rels(parent: str, pascal: str, definition_key: str, sc
         # generated for ALL of them.
         _can_create_inline = True
 
-        _target_def = schema['definitions'].get(_target, {})
+        _target_def = _raw_def(_target, schema)
         # _is_optional_parent_fk is no longer used for test description wording
         # (we render a single phrase regardless), but the rel data still carries
         # it so future templates can branch if needed.
@@ -1411,7 +1431,7 @@ def helper_context(
     definition_key: str,
     generate_config: dict,
 ) -> dict:
-    parent_def = schema['definitions'].get(model_name)
+    parent_def = _raw_def(model_name, schema)
     if not parent_def or not parent_def.get('properties'):
         return {}
 
@@ -1453,7 +1473,7 @@ def helper_context(
             # Wire the parent's own required FKs (e.g. room.room_type_id) to the deps
             # just created above, and seed its required scalars — otherwise the parent
             # create in populateXxxDependencies omits mandatory columns.
-            _h_bp_def = schema['definitions'].get(_h_bp_target, {})
+            _h_bp_def = _raw_def(_h_bp_target, schema)
             _h_bp_fk_deps = [
                 {'prop_name': r['prop_name'], 'dep_var_name': to_camel_case(r['target'])}
                 for r in get_parent_relationships(_h_bp_def, schema)
@@ -1482,7 +1502,7 @@ def helper_context(
             continue
         if prop_name in existing_fk_props:
             continue
-        oto_target_def = schema['definitions'].get(oto_target, {})
+        oto_target_def = _raw_def(oto_target, schema)
         # Add transitive deps of this target first
         for td in resolve_dependencies(oto_target, schema):
             if not any(d['target'] == td['target'] for d in deps):
@@ -1596,7 +1616,7 @@ def helper_context(
                     for td in resolve_dependencies(target, schema):
                         if not any(d['target'] == td['target'] for d in deps):
                             deps.append(td)
-                    target_def = schema['definitions'].get(target, {})
+                    target_def = _raw_def(target, schema)
                     target_fk_deps = [
                         {'prop_name': r['prop_name'], 'dep_var_name': to_camel_case(r['target'])}
                         for r in get_parent_relationships(target_def, schema)
@@ -1691,7 +1711,7 @@ def helper_context(
     for dep in deps:
         is_direct = 'title' in dep  # UA / self-ref / m2m deps added directly
         title_str = dep.get('_title_override') or dep.get('title') or to_title_case(dep['target'])
-        dep_def = schema['definitions'].get(dep['target'] + '_detail', {})
+        dep_def = schema['definitions'].get(dep['target'], {})
         x_rels = dep_def.get('x-relationships', {})
         dep_label_info = dep_label_info_by_var.get(dep['var_name'])
         extra_required_fields = _get_dep_populate_fields(dep['target'], dep['var_name'], title_str, schema)
@@ -1847,7 +1867,7 @@ def helper_context(
         child_name = child_meta['child']['name']
         child_pascal = to_pascal_case(child_name)
         child_title = to_title_case(child_name)
-        child_def = schema['definitions'].get(child_name, {})
+        child_def = _raw_def(child_name, schema)
         has_fk_deps = False
         child_fields_prisma = []
         for f in child_meta['fields']:
@@ -2000,7 +2020,7 @@ def helper_context(
         _criteria_h = _request_cfg_h.get('criteria', {})
         _crit_pool_field_h = next(iter(_criteria_h.keys()), None)
         if _pool_entity_h and _crit_pool_field_h:
-            _pool_def_h = schema.get('definitions', {}).get(_pool_entity_h, {})
+            _pool_def_h = _raw_def(_pool_entity_h, schema)
             _pool_crit_prop_h = _pool_def_h.get('properties', {}).get(_crit_pool_field_h, {})
             _pool_fk_target_h = (_pool_crit_prop_h.get('x-relationship') or {}).get('target', '')
             _pool_fk_dep_var_h = next(
@@ -2025,7 +2045,7 @@ def helper_context(
         _pool_entity_nolines = _pool_cfg_nolines.get('entity')
         _pool_qty_nolines = _pool_cfg_nolines.get('quantityField', 'quantity')
         if _pool_entity_nolines:
-            _pool_def_nolines = schema.get('definitions', {}).get(_pool_entity_nolines, {})
+            _pool_def_nolines = _raw_def(_pool_entity_nolines, schema)
             _pool_has_name_nolines = 'name' in (_pool_def_nolines.get('properties') or {})
             reservation_nolines_pool_seed = {
                 'pool_entity': _pool_entity_nolines,
@@ -2076,7 +2096,7 @@ def spec_context(
     generate_config: dict,
     test_entity_count: int | None = None,
 ) -> dict:
-    parent_def = schema['definitions'].get(model_name)
+    parent_def = _raw_def(model_name, schema)
     if not parent_def or not parent_def.get('properties'):
         return {}
 
@@ -2716,7 +2736,7 @@ def spec_context(
         'has_approvable': any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model_name, schema)),
         'flatten_test_rels': _compute_flatten_test_rels(parent, pascal, definition_key, schema),
         'seed_count': seed_count,
-        'bridge_child_ir': get_new_form_bridge(schema.get('definitions', {}).get(model_name, {})),
+        'bridge_child_ir': get_new_form_bridge(_raw_def(model_name, schema)),
     }
 
 
@@ -2748,9 +2768,9 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
             d['target'] == 'approvable'
             for d in get_internal_one_to_one_fks(entity['model_name'], schema)
         )
-        definition_key = entity.get('definition_key', f'{parent}_detail')
+        definition_key = entity.get('definition_key', parent)
         flatten_test_rels = _compute_flatten_test_rels(parent, pascal, definition_key, schema)
-        _xres = (schema.get('definitions', {}).get(parent) or {}).get('x-reservation', {})
+        _xres = _raw_def(parent, schema).get('x-reservation', {})
         has_reservation = bool(_xres and _xres.get('mode') == 'count')
         enriched_entities.append({
             'parent': parent,
@@ -2788,7 +2808,7 @@ def api_spec_context(
     title = to_title_case(parent)
     api_path = f'/api/{parent}'
 
-    model_def = schema['definitions'].get(model)
+    model_def = _raw_def(model, schema)
     if not model_def:
         return {}
 
@@ -2921,7 +2941,7 @@ def api_spec_context(
 
     # Bridge-child entity: detect x-bridge so we can inject selectedParentType/Id
     # into API test POST bodies. The first bridge parent is used as the dep.
-    _api_model_def_raw = schema['definitions'].get(model, {})
+    _api_model_def_raw = _raw_def(model, schema)
     _api_bridge_cfg = _api_model_def_raw.get('x-bridge')
     _api_bridge_first_parent: str | None = None
     if isinstance(_api_bridge_cfg, dict) and _api_bridge_cfg.get('parents'):
@@ -3235,14 +3255,21 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
             xbridge_table_names.add(bridge_name)
 
     # --- Collect base entities ---
+    # A "base" entity is anything that owns its 'id' property directly: a
+    # '__'-prefixed raw entity (split off because it has a view/x-generate),
+    # or a bare entity that was never split at all (a pure internal/child
+    # entity with no view annotations, e.g. 'comment', 'attachment') — a
+    # view entity (bare, allOf-only, no direct properties) fails this check
+    # either way, so no separate prefix filter is needed.
     base_entities: dict[str, dict] = {}
     for key, defn in defs.items():
-        if key.endswith('_detail') or key.endswith('_input'):
+        if key.endswith('_input'):
             continue
-        if key in xbridge_table_names:
+        bare_key = key[2:] if key.startswith('__') else key
+        if bare_key in xbridge_table_names:
             continue
         if defn.get('type') == 'object' and 'id' in defn.get('properties', {}):
-            base_entities[key] = defn
+            base_entities[bare_key] = defn
 
     # --- Build FK dependency graph (entity -> set of entities it references) ---
     deps: dict[str, set[str]] = {}
@@ -3323,7 +3350,7 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
     # `location.name`). Those hops need read permission at runtime even though
     # they're never the primary subject of a generated spec.
     def _has_api(entity: str) -> bool:
-        gen_defn = defs.get(f'{entity}_detail', defs.get(entity, {}))
+        gen_defn = defs.get(entity, {})
         return bool(gen_defn.get('x-generate', {}).get('api'))
 
     labelfield_entities: set[str] = set()
@@ -3360,7 +3387,7 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
 def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
     """Extract base reservation context from x-reservation config. Returns None if not count mode."""
     defs = schema.get('definitions', {})
-    entity_def = defs.get(entity, {})
+    entity_def = _raw_def(entity, schema)
     x_res = entity_def.get('x-reservation', {})
     if not x_res or x_res.get('mode') != 'count' or not x_res.get('lines'):
         return None
@@ -3378,7 +3405,7 @@ def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
         _domain_key = (x_res.get('transaction') or {}).get('ledgerDomain')
         if _domain_key:
             pool_entity = resolve_ledger_domain(schema, _domain_key)['pool']
-    pool_def    = defs.get(pool_entity, {})
+    pool_def    = _raw_def(pool_entity, schema)
     pool_props  = pool_def.get('properties', {})
 
     # criteria (first entry only for Phase 1)

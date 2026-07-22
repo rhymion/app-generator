@@ -24,7 +24,7 @@ def _entity(model: str) -> dict:
     return {
         "parent": model,
         "model": model,
-        "definition_key": f"{model}_detail",
+        "definition_key": model,
         "children": [],
         "generate_config": {
             "list": True, "view": True, "new": True, "edit": True,
@@ -46,13 +46,17 @@ def _schema_with_flatten(target_has_module: bool, target_via_detail: bool = Fals
     module via `embedded_detail` (the more common pattern). Otherwise put
     `x-generate` directly on the base.
     """
+    # 'embedded' only exists bare (unsplit, no view) when it has no module at
+    # all; once it has a module (either form) its properties live on the
+    # raw '__embedded' twin, matching every other split entity.
+    embedded_key = "__embedded" if target_has_module else "embedded"
     defs: dict = {
-        "parent": {
+        "__parent": {
             "type": "object",
             "required": ["id"],
             "properties": {"id": _id_prop(), "name": {"type": "string"}},
         },
-        "embedded": {
+        embedded_key: {
             "type": "object",
             "required": ["id", "parent_id"],
             "properties": {
@@ -66,11 +70,11 @@ def _schema_with_flatten(target_has_module: bool, target_via_detail: bool = Fals
                 "comment": {"type": ["string", "null"]},
             },
         },
-        "parent_detail": {
+        "parent": {
             "x-generate": {"list": True, "view": True, "new": True, "edit": True,
                            "delete": True, "api": True, "test": True},
             "allOf": [
-                {"$ref": "#/definitions/parent"},
+                {"$ref": "#/definitions/__parent"},
                 {
                     "type": "object",
                     "properties": {
@@ -85,13 +89,13 @@ def _schema_with_flatten(target_has_module: bool, target_via_detail: bool = Fals
     }
     if target_has_module:
         if target_via_detail:
-            defs["embedded_detail"] = {
+            defs["embedded"] = {
                 "x-generate": {"list": True, "view": True, "new": True, "edit": True,
                                "delete": True, "api": True, "test": True},
-                "allOf": [{"$ref": "#/definitions/embedded"}],
+                "allOf": [{"$ref": "#/definitions/__embedded"}],
             }
         else:
-            defs["embedded"]["x-generate"] = {"list": True, "view": True}
+            defs["__embedded"]["x-generate"] = {"list": True, "view": True}
     return {"definitions": defs}
 
 
@@ -174,7 +178,7 @@ def _checkup_schema() -> dict:
     `_detail` variant so no module is ever emitted for it."""
     return {
         "definitions": {
-            "checkup": {
+            "__checkup": {
                 "type": "object",
                 "required": ["id"],
                 "properties": {"id": _id_prop(), "name": {"type": "string"}},
@@ -193,11 +197,11 @@ def _checkup_schema() -> dict:
                     "note": {"type": ["string", "null"]},
                 },
             },
-            "checkup_detail": {
+            "checkup": {
                 "x-generate": {"list": True, "view": True, "new": True, "edit": True,
                                "delete": True, "api": True, "test": True},
                 "allOf": [
-                    {"$ref": "#/definitions/checkup"},
+                    {"$ref": "#/definitions/__checkup"},
                     {
                         "type": "object",
                         "properties": {

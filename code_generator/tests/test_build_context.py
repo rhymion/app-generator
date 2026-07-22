@@ -191,14 +191,17 @@ class TestEmbeddedChFiltering:
             "required": ["id", "name", fk_prop],
             "properties": {**_base_props(), fk_prop: _fk_field(parent_name, nullable=False)},
         }
+        # With its own page, the child is split raw/view (x-generate lives on
+        # the bare view); without one, it stays a plain unsplit entity.
+        child_key = f"__{child_name}" if with_own_page else child_name
         defs = {
             parent_name: {"type": "object", "required": ["id", "name"], "properties": _base_props()},
-            child_name: child_def,
+            child_key: child_def,
         }
         if with_own_page:
-            defs[f"{child_name}_detail"] = {
+            defs[child_name] = {
                 "x-generate": {"list": True, "view": True, "new": True, "edit": True, "delete": True, "api": False, "test": False},
-                "allOf": [{"$ref": f"#/definitions/{child_name}"}],
+                "allOf": [{"$ref": f"#/definitions/__{child_name}"}],
             }
         entity = _entity(
             model=parent_name,
