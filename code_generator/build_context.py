@@ -1670,8 +1670,23 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     split_config = None
     if isinstance(_xsplit, dict) and _xsplit.get('quantityField'):
         is_splittable = True
+        # DP-B (cmd_424): forward sibling scalar field values into
+        # SplitActionSection so its per-part autocomplete pickers can reach
+        # them as context. Driven purely by the same 'x-autocomplete-context'
+        # annotation on perPartRequired FK fields that generate.py's split UI
+        # block reads (schema-structure signal, not an entity-name check —
+        # see cmd_420 convention) — empty (byte-identical view render) unless
+        # a perPartRequired relation field actually carries the annotation.
+        _split_props = model_def.get('properties', {})
+        _split_per_part = list(_xsplit.get('perPartRequired') or [])
+        _split_context_fields = []
+        for _pf in _split_per_part:
+            for _cf in (_split_props.get(_pf, {}).get('x-autocomplete-context') or []):
+                if _cf not in _split_context_fields:
+                    _split_context_fields.append(_cf)
         split_config = {
             'quantity_field': _xsplit.get('quantityField'),
+            'context_fields': _split_context_fields,
         }
 
     # Chart config

@@ -896,25 +896,43 @@ def generate(schema_path: str, output_dir: str) -> None:
             _split_ui_parts = []
             _split_uses_format_label_value = False
             _split_has_relation_field = False
+            # DP-B (cmd_424): give SplitActionSection's per-part autocomplete
+            # pickers access to sibling scalar field values (e.g. the parent's
+            # product_id, to narrow inventory_id candidates), reusing the same
+            # 'x-autocomplete-context' annotation DP-5 defined for FormUpsert
+            # relation fields (schema_helpers.get_parent_relationships) —
+            # applied here to whichever perPartRequired FK field carries it.
+            # Purely schema-structure-driven (cmd_420 convention: no entity-
+            # name check), so every other split entity's generated UI is
+            # byte-identical unless it declares this annotation itself.
+            _split_has_context_field = False
+            _section_context_fields = []
             for _f in _per_part_req:
                 _f_def = _split_entity_props.get(_f, {})
                 _f_rel = (_f_def or {}).get('x-relationship') or {}
                 _f_target = _f_rel.get('target')
                 if not _f_target:
                     # No FK relation declared for this field — plain text input.
-                    _split_ui_parts.append({'field': _f, 'is_relation': False})
+                    _split_ui_parts.append({'field': _f, 'is_relation': False, 'context_fields': []})
                     continue
                 _f_label_field = _f_rel.get('labelField', 'id')
                 _f_built = build_label_expression('item', _f_label_field, _f_target, schema)
                 if _f_built['has_format']:
                     _split_uses_format_label_value = True
                 _split_has_relation_field = True
+                _f_ctx_fields = list(_f_def.get('x-autocomplete-context') or [])
+                if _f_ctx_fields:
+                    _split_has_context_field = True
+                    for _cf in _f_ctx_fields:
+                        if _cf not in _section_context_fields:
+                            _section_context_fields.append(_cf)
                 _split_ui_parts.append({
                     'field': _f,
                     'is_relation': True,
                     'target': _f_target,
                     'target_pascal': to_pascal_case(_f_target),
                     'label_expr': _f_built['expression'],
+                    'context_fields': _f_ctx_fields,
                 })
             _split_ui_ctx = {
                 'entity_name': _def_key,
@@ -923,6 +941,8 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'per_part_required': _split_ui_parts,
                 'split_uses_format_label_value': _split_uses_format_label_value,
                 'split_has_relation_field': _split_has_relation_field,
+                'split_has_context_field': _split_has_context_field,
+                'section_context_fields': _section_context_fields,
             }
             _split_ui_dir = out / 'components' / _def_key
             _write(_split_ui_dir / 'SplitActionSection.tsx', _render(env, 'split_action_section.tsx.jinja2', _split_ui_ctx))

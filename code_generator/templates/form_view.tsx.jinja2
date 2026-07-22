@@ -102,6 +102,9 @@ export default function FormView({ src, permissions{% if entity_view_components 
       <SplitActionSection
         id={src.id}
         {{ split_config.quantity_field }}={(src as Record<string, unknown>).{{ split_config.quantity_field }} as number}
+        {% for cf in split_config.context_fields %}
+        {{ cf }}={(src as Record<string, unknown>).{{ cf }}}
+        {% endfor %}
         onSuccess={() => router.refresh()}
       />
 {% endif %}
