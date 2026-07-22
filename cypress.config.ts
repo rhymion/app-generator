@@ -104,6 +104,26 @@ export default defineConfig({
           });
           return JSON.parse(JSON.stringify(record));
         },
+        // subtask_421f (cmd_421 Batch4): resource/product attachment
+        // view/edit-boundary + permission + org-scope regression spec.
+        async 'db:addUserToOrganizationByEmail'(params: { email: string; organizationId: string }) {
+          const { addUserToOrganizationByEmail } = require('./cypress/support/attachment/helper');
+          await addUserToOrganizationByEmail(params.email, params.organizationId);
+          return null;
+        },
+        async 'db:getAttachableAttachments'(params: { attachableId: string }) {
+          const { getAttachableAttachments } = require('./cypress/support/attachment/helper');
+          return await getAttachableAttachments(params.attachableId);
+        },
+        async 'db:seedAttachment'(params: { attachableId: string; type: number; name: string; path: string; order?: number }) {
+          const { seedAttachment } = require('./cypress/support/attachment/helper');
+          return await seedAttachment(params);
+        },
+        async 'db:grantAdditionalEntityPermission'(params: { email: string; entityName: string; flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean } }) {
+          const { grantAdditionalEntityPermission } = require('./cypress/support/attachment/helper');
+          await grantAdditionalEntityPermission(params.email, params.entityName, params.flags);
+          return null;
+        },
         async 'db:createSecondUser'() {
           const { prisma } = require('./cypress/support/db-helpers');
           const { createId } = require('@paralleldrive/cuid2');
