@@ -34,6 +34,12 @@ export function getGeneratedTasks() {
       return await populate{{ entity.pascal }}With{{ rel.pascal }}Data(length);
     },
 {% endfor %}
+{% if entity.has_mention_comments %}
+    async 'db:populate{{ entity.pascal }}WithMentionUser'() {
+      const { populate{{ entity.pascal }}WithMentionUser } = require('{{ entity.helper_path }}');
+      return await populate{{ entity.pascal }}WithMentionUser();
+    },
+{% endif %}
 {% if entity.has_approvable %}
     async 'db:setup{{ entity.pascal }}ApprovalFlow'() {
       const { setup{{ entity.pascal }}ApprovalFlow } = require('{{ entity.helper_path }}');

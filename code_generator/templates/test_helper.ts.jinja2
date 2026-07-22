@@ -474,6 +474,39 @@ export async function populate{{ pascal }}Data(length: number) {
   return JSON.parse(JSON.stringify(records));
 }
 
+{% if has_mention_comments %}
+// cmd_421 Domain 4 (M1): creates one {{ pascal }} row plus a comment on it
+// that mentions a freshly-created user, so the API e2e spec can verify the
+// mention marker resolves to that user's name on the detail GET response.
+export async function populate{{ pascal }}WithMentionUser() {
+  const testUser = await getTestUser();
+  const mentionedUser = await prisma.user.create({
+    data: {
+      name: `Mentioned User ${Date.now()}`,
+      email: `mentioned-user-${Date.now()}-${Math.random()}@example.com`,
+      password: 'test-password',
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+  // populate{{ pascal }}Data already JSON-round-trips its records, so `record`
+  // below is plain JSON (dates as ISO strings), not a live Prisma object.
+  const [record] = await populate{{ pascal }}Data(1);
+  const comment = await prisma.comment.create({
+    data: {
+      message: `@[user_id:${mentionedUser.id}]`,
+      {{ commentable_fk_prop }}: record.{{ commentable_fk_prop }},
+      creator_id: testUser.id,
+    },
+  });
+  return {
+    record,
+    mentionedUser: JSON.parse(JSON.stringify(mentionedUser)),
+    comment: JSON.parse(JSON.stringify(comment)),
+  };
+}
+{% endif %}
+
 {% if has_optional %}
 export async function populate{{ pascal }}FullData(length: number) {
   const testUser = await getTestUser();

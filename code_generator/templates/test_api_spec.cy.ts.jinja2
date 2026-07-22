@@ -1148,4 +1148,20 @@ describe('API: {{ title }}', () => {
     });
   });
 {% endif %}
+{% if can_view and has_mention_comments %}
+
+  describe('Mention field name resolution (GET {{ api_path }}/:id)', () => {
+    it('M1 saves a mention and returns the resolved user name in the response', () => {
+      cy.task<{ record: any; mentionedUser: any }>('db:populate{{ pascal }}WithMentionUser').then((result) => {
+        cy.request({ url: `${API_BASE}/${result.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+          .then((res) => {
+            expect(res.status).to.eq(200);
+            const messages = (res.body.{{ commentable_rel_name }}.comments as Array<{ {{ mention_field_name }}: string }>)
+              .map((c) => c.{{ mention_field_name }});
+            expect(messages.some((m) => m.includes(result.mentionedUser.name))).to.eq(true);
+          });
+      });
+    });
+  });
+{% endif %}
 });

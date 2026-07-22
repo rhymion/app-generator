@@ -1430,6 +1430,23 @@ def helper_context(
     internal_fk_deps = get_all_internal_fk_deps(model_name, schema)
     internal_fk_prop_names = {d['prop_name'] for d in internal_fk_deps}
     fields = [f for f in fields if f['prop_name'] not in internal_fk_prop_names]
+
+    # cmd_421 Domain 4 (M1, subtask_421i): mention field name resolution. Only
+    # the commentable-bridge shape is supported here (comment_children direct-FK
+    # shape has no populate helper of its own yet — see build_context.py's
+    # _build_comment_actions/_build_comment_actions_bridge split for the two
+    # shapes). Mirrors build_context.py's comment_has_mention detection: the
+    # shared 'comment' model has an x-mention: true field AND this entity has
+    # a one-to-one_bridge FK to 'commentable'.
+    _h_commentable_fk = next((d for d in internal_fk_deps if d['target'] == 'commentable'), None)
+    _h_comment_def = schema.get('definitions', {}).get('comment', {}) or {}
+    _h_comment_mention_fields = [
+        fn for fn, fp in (_h_comment_def.get('properties') or {}).items()
+        if isinstance(fp, dict) and fp.get('x-mention') is True
+    ]
+    has_mention_comments = bool(_h_commentable_fk) and bool(_h_comment_mention_fields)
+    commentable_fk_prop = _h_commentable_fk['prop_name'] if _h_commentable_fk else None
+    mention_field_name = _h_comment_mention_fields[0] if _h_comment_mention_fields else None
     # Mark read-only fields: they stay in `fields` (so seed/prisma data still sets
     # required values) but UI fill/clear/assert commands skip them — the form renders
     # them non-editable, so typing into them would fail.
@@ -2116,6 +2133,10 @@ def helper_context(
         'needs_format_label_value': any(d.get('label_has_format') for d in enriched_deps),
         'reservation_lines_pool_seed': reservation_lines_pool_seed,
         'reservation_nolines_pool_seed': reservation_nolines_pool_seed,
+        # cmd_421 Domain 4 (M1)
+        'has_mention_comments': has_mention_comments,
+        'commentable_fk_prop': commentable_fk_prop,
+        'mention_field_name': mention_field_name,
     }
 
 
@@ -2785,6 +2806,14 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
     # the hardcoded one too would produce a duplicate-identifier TS error.
     user_in_entities = any(e.get('parent') == 'user' for e in entities)
     has_user_account_populate = False
+    # cmd_421 Domain 4 (M1): schema-wide constant — does the shared 'comment'
+    # model have an x-mention: true field at all. Combined per-entity below
+    # with a one-to-one_bridge FK to 'commentable' (mirrors helper_context).
+    _reg_comment_def = schema.get('definitions', {}).get('comment', {}) or {}
+    _reg_comment_has_mention_field = any(
+        isinstance(fp, dict) and fp.get('x-mention') is True
+        for fp in (_reg_comment_def.get('properties') or {}).values()
+    )
     for entity in entities:
         parent = entity['parent']
         pascal = to_pascal_case(parent)
@@ -2804,6 +2833,10 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
         flatten_test_rels = _compute_flatten_test_rels(parent, pascal, definition_key, schema)
         _xres = (schema.get('definitions', {}).get(parent) or {}).get('x-reservation', {})
         has_reservation = bool(_xres and _xres.get('mode') == 'count')
+        has_mention_comments = _reg_comment_has_mention_field and any(
+            d['target'] == 'commentable'
+            for d in get_internal_one_to_one_fks(entity['model_name'], schema)
+        )
         enriched_entities.append({
             'parent': parent,
             'pascal': pascal,
@@ -2819,6 +2852,7 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
             ],
             'has_approvable': has_approvable,
             'has_reservation': has_reservation,
+            'has_mention_comments': has_mention_comments,
             'flatten_test_rels': flatten_test_rels,
         })
     if user_in_entities:
@@ -2974,6 +3008,27 @@ def api_spec_context(
     # implicitly via the N6 allowlist-equality check.
     exportable_bridge_fk_names = sorted(_api_internal_bridge_fk_names)
     has_exportable_bridge_fks = bool(exportable_bridge_fk_names)
+
+    # cmd_421 Domain 4 (M1, subtask_421i): x-mention name resolution after
+    # save. Mirrors build_context.py's comment_has_mention detection exactly
+    # (the shared 'comment' model has an x-mention: true field AND this
+    # entity has a one-to-one_bridge FK to 'commentable') — this test context
+    # is built by a separate function so it must be re-derived here rather
+    # than reused. Only the commentable-bridge shape is covered: the
+    # comment_children direct-FK shape has no test populate helper of its
+    # own yet (helper_context has the same scope note).
+    _api_commentable_fk = next(
+        (d for d in get_internal_one_to_one_fks(model, schema) if d['target'] == 'commentable'),
+        None,
+    )
+    _api_comment_def = schema.get('definitions', {}).get('comment', {}) or {}
+    _api_comment_mention_fields = [
+        fn for fn, fp in (_api_comment_def.get('properties') or {}).items()
+        if isinstance(fp, dict) and fp.get('x-mention') is True
+    ]
+    has_mention_comments = bool(_api_commentable_fk) and bool(_api_comment_mention_fields)
+    commentable_rel_name = _api_commentable_fk['var_name'] if _api_commentable_fk else None
+    mention_field_name = _api_comment_mention_fields[0] if _api_comment_mention_fields else None
 
     def _is_export_scalar(_prop: dict) -> bool:
         _ptype = _prop.get('type')
@@ -3342,6 +3397,10 @@ def api_spec_context(
         'is_searchable': is_searchable,
         'search_sample_field': search_sample_field,
         'search_sample_field_required': search_sample_field_required,
+        # Mention field name resolution (cmd_421 Domain 4, M1)
+        'has_mention_comments': has_mention_comments,
+        'commentable_rel_name': commentable_rel_name,
+        'mention_field_name': mention_field_name,
     }
 
 
