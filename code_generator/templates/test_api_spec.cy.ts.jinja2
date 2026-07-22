@@ -1044,6 +1044,43 @@ describe('API: {{ title }}', () => {
       });
     });
 {% endif %}
+{% if has_exportable_bridge_fks %}
+
+    it('N9 CSV export excludes internal bridge FK columns', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: `{{ api_path }}/export` })
+        .then((res) => {
+          expect(res.status).to.eq(200);
+          const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
+          const headers = headerLine.split(',');
+{% for fk in exportable_bridge_fk_names %}
+          expect(headers).to.not.include('{{ fk }}');
+{% endfor %}
+        });
+    });
+{% endif %}
+  });
+{% endif %}
+{% if is_searchable %}
+
+  describe('Search coverage (GET /api/search)', () => {
+    beforeEach(() => {
+      Cypress.session.clearAllSavedSessions();
+      cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+    });
+
+    it('N10 per-entity data surfaces in global search results', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        const q = records[0].{{ search_sample_field }} as string;
+        cy.request({ url: `/api/search?q=${encodeURIComponent(q)}` })
+          .then((res) => {
+            expect(res.status).to.eq(200);
+            expect(
+              res.body.results.some((r: { entity_type: string }) => r.entity_type === '{{ parent }}')
+            ).to.eq(true);
+          });
+      });
+    });
   });
 {% endif %}
 });

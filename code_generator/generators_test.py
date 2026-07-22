@@ -68,6 +68,7 @@ from helpers.schema_helpers import (
     get_splittable_bridge_field,
     resolve_ledger_domain,
     get_internal_bridge_fk_prop_names,
+    derive_text_fields,
 )
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import (
@@ -2847,6 +2848,40 @@ def api_spec_context(
     filtered_props = filter_fields(model_def.get('properties') or {}, gen_cfg.get('fields'))
     relationships = get_parent_relationships({**model_def, 'properties': filtered_props}, schema)
 
+    # is_searchable (cmd_421 Domain 5): whether this entity actually participates
+    # in the global full-text search index (lib/search/helpers.ts), so the API
+    # e2e template can assert per-entity data surfaces via /api/search. Mirrors
+    # the is_search + text_fields derivation in generate.py's search_entities
+    # loop exactly — same x-generator.search.default_scope / x-audit / explicit
+    # x-generate.search precedence, and the same "no derivable text_fields ⇒
+    # not searchable" fallback — so this flag never claims searchability that
+    # generate.py's search-context build would itself skip.
+    _api_detail_def = schema['definitions'].get(definition_key or f'{parent}_detail', {}) or {}
+    _api_is_audited = bool(
+        _api_detail_def.get('x-audit') is True
+        or model_def.get('x-audit') is True
+    )
+    _api_search_default_scope = (schema.get('x-generator', {}).get('search', {}) or {}).get(
+        'default_scope', 'opt_in'
+    )
+    _api_x_generate_raw = _api_detail_def.get('x-generate') or model_def.get('x-generate') or {}
+    _api_explicit_search = _api_x_generate_raw.get('search')
+    if _api_search_default_scope == 'all':
+        if _api_is_audited and _api_explicit_search is None:
+            is_searchable = False
+        else:
+            is_searchable = _api_explicit_search is not False
+    else:  # opt_in
+        is_searchable = _api_explicit_search is True
+    search_sample_field = None
+    if is_searchable:
+        _api_xsearch = _api_detail_def.get('x-search') or {}
+        _api_text_fields = _api_xsearch.get('text_fields') or derive_text_fields(model_def.get('properties') or {})
+        if not _api_text_fields:
+            is_searchable = False
+        else:
+            search_sample_field = _api_text_fields[0]
+
     # CSV Export (Phase 1) test context: org-scoping + x-import-key column presence.
     has_org_rel = any(r['target'] == 'organization' for r in relationships)
     should_filter_by_org = has_org_rel and model not in ('organization', 'user')
@@ -2886,8 +2921,17 @@ def api_spec_context(
     # inventory_transactionable_id, ...) — mirrors the build_context.py fix,
     # see get_internal_bridge_fk_prop_names() docstring for why
     # _api_parent_rels_raw alone misses them.
-    _api_fk_prop_names = {r['prop_name'] for r in _api_parent_rels_raw} | get_internal_bridge_fk_prop_names(model_def, schema)
+    _api_internal_bridge_fk_names = get_internal_bridge_fk_prop_names(model_def, schema)
+    _api_fk_prop_names = {r['prop_name'] for r in _api_parent_rels_raw} | _api_internal_bridge_fk_names
     _export_candidates = gen_cfg.get('fields') or list(model_def.get('properties', {}).keys())
+
+    # cmd_421 N9: the internal-bridge-FK subset of _api_fk_prop_names — these
+    # columns are excluded from export_scalar_fields below precisely because
+    # they're internal plumbing (approvable_id, inventory_transactionable_id,
+    # ...), and N9 asserts that exclusion explicitly rather than only
+    # implicitly via the N6 allowlist-equality check.
+    exportable_bridge_fk_names = sorted(_api_internal_bridge_fk_names)
+    has_exportable_bridge_fks = bool(exportable_bridge_fk_names)
 
     def _is_export_scalar(_prop: dict) -> bool:
         _ptype = _prop.get('type')
@@ -3246,6 +3290,12 @@ def api_spec_context(
         'x_relationships_list': x_relationships_list,
         'readonly_fields': readonly_fields,
         'put_body_readonly_zero': _put_body_ro_zero_impl('            '),
+        # CSV Export (cmd_421 N9): internal bridge FK exclusion
+        'has_exportable_bridge_fks': has_exportable_bridge_fks,
+        'exportable_bridge_fk_names': exportable_bridge_fk_names,
+        # Search coverage (cmd_421 Domain 5)
+        'is_searchable': is_searchable,
+        'search_sample_field': search_sample_field,
     }
 
 
