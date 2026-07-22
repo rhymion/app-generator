@@ -191,15 +191,18 @@ class TestEmbeddedChFiltering:
             "required": ["id", "name", fk_prop],
             "properties": {**_base_props(), fk_prop: _fk_field(parent_name, nullable=False)},
         }
+        if with_own_page:
+            # is_independent (build_context.py) checks x-generate directly on
+            # the bare child entity — no separate `_detail` sibling (Stage 4,
+            # cmd406-409 retired that convention).
+            child_def["x-generate"] = {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": False, "test": False,
+            }
         defs = {
             parent_name: {"type": "object", "required": ["id", "name"], "properties": _base_props()},
             child_name: child_def,
         }
-        if with_own_page:
-            defs[f"{child_name}_detail"] = {
-                "x-generate": {"list": True, "view": True, "new": True, "edit": True, "delete": True, "api": False, "test": False},
-                "allOf": [{"$ref": f"#/definitions/{child_name}"}],
-            }
         entity = _entity(
             model=parent_name,
             children=[_child_entry(child_name, f"{child_name}s", output_type="list")],

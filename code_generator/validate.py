@@ -1131,7 +1131,13 @@ def validate_schema(schema: dict) -> None:
             if _resolved != _model_key:
                 continue
             _entity_name = _k[:-len('_detail')] if _k.endswith('_detail') else _k
-            if _entity_name != _resolved:
+            # _entity_name is never '__'-prefixed (only a '_detail' suffix is
+            # ever stripped above), but _resolved is a base_model_keys entry —
+            # '__'-prefixed under Stage 4 (cmd406-409). Strip that prefix
+            # before comparing, or every Stage-4 primary view (e.g. 'user'
+            # resolving to '__user') would wrongly be treated as an alias.
+            _resolved_bare = _resolved[2:] if _resolved.startswith('__') else _resolved
+            if _entity_name != _resolved_bare:
                 continue  # alias entity (parent != model) — never import-eligible
             _gen_cfg = (
                 _d.get('x-generate')
