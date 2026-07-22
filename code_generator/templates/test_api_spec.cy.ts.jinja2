@@ -1070,7 +1070,7 @@ describe('API: {{ title }}', () => {
     });
 
     it('N10 per-entity data surfaces in global search results', () => {
-      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+      cy.task<any[]>('db:populate{{ pascal }}{% if not search_sample_field_required %}Full{% endif %}', 1).then((records) => {
         const q = records[0].{{ search_sample_field }} as string;
         cy.request({ url: `/api/search?q=${encodeURIComponent(q)}` })
           .then((res) => {

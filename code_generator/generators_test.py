@@ -2874,6 +2874,7 @@ def api_spec_context(
     else:  # opt_in
         is_searchable = _api_explicit_search is True
     search_sample_field = None
+    search_sample_field_required = False
     if is_searchable:
         _api_xsearch = _api_detail_def.get('x-search') or {}
         _api_text_fields = _api_xsearch.get('text_fields') or derive_text_fields(model_def.get('properties') or {})
@@ -2889,6 +2890,18 @@ def api_spec_context(
             is_searchable = False
         else:
             search_sample_field = _api_text_fields[0]
+            # db:populate<Entity> (the base task, used everywhere else in this
+            # file) only sets required fields. When the chosen text field is
+            # optional, that task leaves it null, so `records[0].<field>` is
+            # null and the search query becomes a nonsense "null" string —
+            # N10 fails by fixture-incompleteness, not a real coverage gap
+            # (found on inventory/inventory_adjustment against the true
+            # 94-entity schema: lot_number/reason are both optional and left
+            # unset by the base populate helper). db:populate<Entity>Full
+            # always sets every field (required + optional — see
+            # ua_dep_fields_full above), so fall back to it here whenever the
+            # sample field isn't required.
+            search_sample_field_required = search_sample_field in (model_def.get('required') or [])
 
     # CSV Export (Phase 1) test context: org-scoping + x-import-key column presence.
     has_org_rel = any(r['target'] == 'organization' for r in relationships)
@@ -3304,6 +3317,7 @@ def api_spec_context(
         # Search coverage (cmd_421 Domain 5)
         'is_searchable': is_searchable,
         'search_sample_field': search_sample_field,
+        'search_sample_field_required': search_sample_field_required,
     }
 
 
