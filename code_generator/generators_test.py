@@ -1808,6 +1808,55 @@ def helper_context(
     self_ref_deps = [d for d in enriched_deps if d['target'] == model_name]
     has_self_ref_deps = bool(self_ref_deps)
 
+    # When a self-ref record's uniqueness is keyed partly on a required fk_dep
+    # (e.g. approval_flow's @@unique([entity_name, approver_role_id])), 2+
+    # self-ref deps (e.g. precededBy/followedBy) that reference the SAME
+    # non-self dep instance for that fk collide on create(). Give every
+    # self-ref dep after the first its own distinct instance of any fk_dep it
+    # shares with an earlier self-ref dep, reusing the existing needs_second
+    # ('{{var_name}}2') mechanism (mirrors fce403d's approverRole/approverRole2
+    # split for setup{{pascal}}ApprovalFlow).
+    non_self_deps_by_var = {d['var_name']: d for d in non_self_deps}
+    seen_self_ref_fk_vars = set()
+    for s_dep in self_ref_deps:
+        for fk in s_dep['fk_deps']:
+            dep_var = fk['dep_var_name']
+            if dep_var in seen_self_ref_fk_vars:
+                fk['dep_var_name'] = f'{dep_var}2'
+                nd = non_self_deps_by_var.get(dep_var)
+                if nd is not None:
+                    nd['needs_second'] = True
+            else:
+                seen_self_ref_fk_vars.add(dep_var)
+
+    # A multi-FK-target alias (e.g. `role: approverRole`, built below purely so
+    # API/UI test bodies can write `deps.role.id`) must never resolve to a dep
+    # already consumed above by a self-ref record: a test body that creates its
+    # OWN new record via the alias would then collide with that self-ref
+    # record's identical unique-key value. Give the alias its own always-fresh,
+    # never-self-ref-consumed instance instead of reusing one.
+    alias_fresh_var_map = {}
+    for _target, _fk_rels in multi_fk_targets.items():
+        _req_rel = next((r for r in _fk_rels if r.get('required')), _fk_rels[0])
+        _alias_var = to_camel_case(re.sub(r'_id$', '', _req_rel['prop_name']))
+        if _alias_var in seen_self_ref_fk_vars and _alias_var in non_self_deps_by_var:
+            _src_dep = non_self_deps_by_var[_alias_var]
+            _fresh_var = f'{_alias_var}Alias'
+            _fresh_title = f"{_src_dep['title']} Alias"
+            _fresh_dep = {
+                **_src_dep,
+                'var_name': _fresh_var,
+                'title': _fresh_title,
+                'needs_second': False,
+                'extra_required_fields': _get_dep_populate_fields(_target, _fresh_var, _fresh_title, schema),
+                'lookup_value': f"'Test {_fresh_title}'",
+                'lookup_value_second': f"'Test {_fresh_title} 2'",
+            }
+            non_self_deps.append(_fresh_dep)
+            enriched_deps.append(_fresh_dep)
+            non_self_deps_by_var[_fresh_var] = _fresh_dep
+            alias_fresh_var_map[_alias_var] = _fresh_var
+
     # Compute deps_return including second instances for FK primary deps.
     # For non_self_deps_return (used in _createBaseDeps return), also include target-name aliases
     # for any multi-FK-target split (e.g. role: approverRole) so API tests using deps.role.id still work.
@@ -1827,6 +1876,7 @@ def helper_context(
         # Use the first required rel's prop-stem as the alias value, or first rel if none required
         req_rel = next((r for r in fk_rels if r.get('required')), fk_rels[0])
         alias_var = to_camel_case(re.sub(r'_id$', '', req_rel['prop_name']))
+        alias_var = alias_fresh_var_map.get(alias_var, alias_var)
         if alias_key != alias_var:
             if alias_key not in non_self_deps_return_parts:
                 non_self_deps_return_parts.append(f'{alias_key}: {alias_var}')
