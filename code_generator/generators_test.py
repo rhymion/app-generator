@@ -2910,6 +2910,27 @@ def api_spec_context(
     import_key_fields = [f for f in _import_key_raw if '.' not in f]
     has_import_key = bool(_import_key_raw)
 
+    # cmd_421 N11-N13: import eligibility gate for the CSV import round-trip
+    # tests. Mirrors build_context.py's "single place" gate (殿留保 cmd_328)
+    # exactly — is_primary_entity AND has_import_key AND import:true AND
+    # (new:true OR edit:true) — since this test context is built by a
+    # separate function and must re-derive the flag rather than reuse it.
+    # import_can_update alone (not import_eligible) gates N11-N13 because the
+    # round-trip technique (export an existing row, re-import it) always
+    # re-matches that row by its natural key and so always exercises the
+    # UPDATE branch, never CREATE — an import_eligible-but-create-only entity
+    # (edit:false) would fail these tests for a structural reason unrelated
+    # to any real defect.
+    _api_is_primary_entity = (parent == model)
+    _api_import_flag = gen_cfg.get('import', True)
+    _api_can_create = gen_cfg.get('new', True) is not False
+    _api_can_update = gen_cfg.get('edit', True) is not False
+    import_eligible = (
+        _api_is_primary_entity and has_import_key and _api_import_flag
+        and (_api_can_create or _api_can_update)
+    )
+    import_can_update = import_eligible and _api_can_update
+
     # cmd_324 V1: explicit export-column allowlist + FK flatten metadata for
     # the CSV export tests (N4/N6/N7). Mirrors the equivalent computation in
     # build_context.py (used by getters.ts.jinja2 / api_export_route.ts.jinja2)
@@ -3305,6 +3326,9 @@ def api_spec_context(
         'should_filter_by_org': should_filter_by_org,
         'has_import_key': has_import_key,
         'import_key_fields': import_key_fields,
+        # CSV Import round-trip (cmd_421 N11-N13)
+        'import_eligible': import_eligible,
+        'import_can_update': import_can_update,
         # CSV Export (cmd_324 V1) test context
         'export_scalar_fields': export_scalar_fields,
         'export_import_key_fields': export_import_key_fields,

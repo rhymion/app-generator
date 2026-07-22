@@ -1341,3 +1341,79 @@ class TestDP1cVisibleSourceOnlyCreateFeasibility:
         schema = self._schema_with(label="id")
         ctx = build_context(self._entity(), schema)
         assert ctx["import_can_create"] is False
+
+
+# ---------------------------------------------------------------------------
+# cmd_421 Batch3: CSV import of an entity with a required internal bridge FK
+# (raised previously for inventory_movement's approvable_id — DP-B "確認"
+# item). No entity-specific handling exists anywhere in build_context.py for
+# this; the same generic _create_feasible gap-check (required field not in
+# export_scalar_fields and not import-resolvable) already excludes bridge FKs
+# because get_internal_bridge_fk_prop_names() is unioned into the export
+# exclusion set. This test proves that generic mechanism actually produces
+# the correct, safe outcome for import (CREATE gated off, UPDATE still
+# available) rather than a broken route or a 500 at runtime — it is
+# structural verification, not new behavior.
+# ---------------------------------------------------------------------------
+
+class TestRequiredInternalBridgeFkImportFeasibility:
+    def _schema(self):
+        return {
+            "definitions": {
+                # Internal bridge target: zero true x-generate flags anywhere
+                # across its variants → get_internal_bridge_fk_prop_names()
+                # classifies any FK pointing at it as internal plumbing.
+                "approvable": {
+                    "type": "object",
+                    "properties": {"id": _base_props()["id"]},
+                },
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "code", "approvable_id"],
+                    "x-import-key": ["code"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "code": {"type": "string"},
+                        "approvable_id": {
+                            "type": "string",
+                            "pattern": "^c[a-z0-9]{24,}$",
+                            "x-relationship": {
+                                "type": "one-to-one_bridge",
+                                "target": "approvable",
+                                "labelField": "id",
+                            },
+                        },
+                    },
+                },
+            }
+        }
+
+    def _entity(self):
+        return {
+            "parent": "widget", "model": "widget", "definition_key": "widget",
+            "children": [],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": True, "test": False, "fields": None,
+            },
+        }
+
+    def test_bridge_fk_excluded_from_export_and_import_field_specs(self):
+        schema = self._schema()
+        ctx = build_context(self._entity(), schema)
+        assert "approvable_id" not in ctx["export_scalar_fields"]
+        assert all(spec["name"] != "approvable_id" for spec in ctx["import_field_specs"])
+
+    def test_required_bridge_fk_gates_off_create_but_not_update(self):
+        schema = self._schema()
+        ctx = build_context(self._entity(), schema)
+        assert ctx["import_eligible"] is True
+        assert ctx["import_can_create"] is False, (
+            "approvable_id is required but has no visible CSV source (bridge "
+            "FK) — CREATE must be infeasible, matching the generic "
+            "_create_feasible gap-check, not a broken/500-producing route"
+        )
+        assert ctx["import_can_update"] is True, (
+            "UPDATE never needs to supply approvable_id, so it stays "
+            "available even though CREATE is gated off"
+        )

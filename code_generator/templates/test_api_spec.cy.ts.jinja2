@@ -1059,6 +1059,71 @@ describe('API: {{ title }}', () => {
         });
     });
 {% endif %}
+{% if import_can_update %}
+
+    it('N11 CSV import round-trip: re-importing an exported row matches it via the natural key with zero errors (dry run)', () => {
+      cy.task('db:populate{{ pascal }}', 1).then(() => {
+        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+          expect(exportRes.status).to.eq(200);
+          const csv = exportRes.body as string;
+          cy.request({
+            method: 'POST',
+            url: `{{ api_path }}/import`,
+            body: { csv, dryRun: true },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            expect(res.body.errors).to.have.length(0);
+            expect(res.body.summary.failed).to.eq(0);
+            expect(res.body.summary.total).to.be.greaterThan(0);
+            expect(res.body.summary.succeeded).to.eq(res.body.summary.total);
+            expect(res.body.confirmToken).to.be.a('string');
+          });
+        });
+      });
+    });
+
+    it('N12 CSV import round-trip: confirming the dry run (dryRun=false) commits with zero write failures', () => {
+      cy.task('db:populate{{ pascal }}', 1).then(() => {
+        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+          const csv = exportRes.body as string;
+          cy.request({
+            method: 'POST',
+            url: `{{ api_path }}/import`,
+            body: { csv, dryRun: true },
+          }).then((dryRunRes) => {
+            const confirmToken = dryRunRes.body.confirmToken as string;
+            cy.request({
+              method: 'POST',
+              url: `{{ api_path }}/import`,
+              body: { csv, dryRun: false, confirmToken },
+            }).then((commitRes) => {
+              expect(commitRes.status).to.eq(200);
+              expect(commitRes.body.errors).to.have.length(0);
+              expect(commitRes.body.summary.failed).to.eq(0);
+              expect(commitRes.body.summary.succeeded).to.be.greaterThan(0);
+            });
+          });
+        });
+      });
+    });
+
+    it('N13 CSV import rejects an unconfirmed commit (dryRun=false without a valid confirmToken)', () => {
+      cy.task('db:populate{{ pascal }}', 1).then(() => {
+        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+          const csv = exportRes.body as string;
+          cy.request({
+            method: 'POST',
+            url: `{{ api_path }}/import`,
+            body: { csv, dryRun: false },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(400);
+            expect(res.body.errors[0].code).to.eq('INVALID_CONFIRM_TOKEN');
+          });
+        });
+      });
+    });
+{% endif %}
   });
 {% endif %}
 {% if is_searchable %}
