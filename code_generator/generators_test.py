@@ -2879,6 +2879,14 @@ def api_spec_context(
         _api_text_fields = _api_xsearch.get('text_fields') or derive_text_fields(model_def.get('properties') or {})
         if not _api_text_fields:
             is_searchable = False
+        elif _api_xsearch.get('org_id_field') == 'id':
+            # Self-referential org scope (e.g. the organization entity itself):
+            # a freshly created row via db:populate<Entity> belongs to a
+            # different org than the test user's own, so it structurally can
+            # never surface in that user's search results regardless of the
+            # search feature working correctly — N10 would fail by
+            # construction rather than signal a real coverage gap.
+            is_searchable = False
         else:
             search_sample_field = _api_text_fields[0]
 
