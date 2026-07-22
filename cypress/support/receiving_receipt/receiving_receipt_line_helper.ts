@@ -59,7 +59,7 @@ export async function setupReceivingReceiptLineSingleApprovalFlow() {
 export async function populateReceivingReceiptLineSingleApproval(
   creatorId: string,
   approvalFlowIds: string[],
-  opts?: { inventoryId?: string | null; productId?: string },
+  opts?: { inventoryId?: string | null; productId?: string; receiptQuantity?: number },
 ) {
   const testUser = await getTestUser();
   // item3: callers that need the line's product to match a specific
@@ -96,7 +96,7 @@ export async function populateReceivingReceiptLineSingleApproval(
     data: {
       receiving_receipt_id: receipt.id,
       product_id: product.id,
-      receipt_quantity: 5,
+      receipt_quantity: opts?.receiptQuantity ?? 5,
       status: 0,
       inventory_id: opts?.inventoryId ?? null,
       approvable_id: approvableItem.id,

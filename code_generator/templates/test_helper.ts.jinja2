@@ -931,7 +931,7 @@ export async function populate{{ pascal }}WithTerminalRejectedApproval(creatorId
   return JSON.parse(JSON.stringify({ record, approvalRequests }));
 }
 
-export async function populate{{ pascal }}WithApproval(creatorId: string, approvalFlowIds: string[]) {
+export async function populate{{ pascal }}WithApproval(creatorId: string, approvalFlowIds: string[], overrides: Record<string, any> = {}) {
   const testUser = await getTestUser();
 {% if needs_deps_in_populate %}
   const deps = await populate{{ pascal }}Dependencies();
@@ -957,6 +957,7 @@ export async function populate{{ pascal }}WithApproval(creatorId: string, approv
 {% endfor %}
       creator_id: creatorId,
       updater_id: creatorId,
+      ...overrides,
     },
   });
   const approvalRequests = [];

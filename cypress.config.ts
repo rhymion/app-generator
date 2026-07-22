@@ -272,6 +272,26 @@ export default defineConfig({
           const { getInventoryTransactionsByBridge } = require('./cypress/support/approval_test_helpers');
           return await getInventoryTransactionsByBridge(params.inventory_transactionable_id);
         },
+        async 'db:countAllInventoryTransactions'() {
+          const { countAllInventoryTransactions } = require('./cypress/support/approval_test_helpers');
+          return await countAllInventoryTransactions();
+        },
+        async 'db:getReceivingReceiptLineById'(params: { id: string }) {
+          const { getReceivingReceiptLineById } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
+          return await getReceivingReceiptLineById(params.id);
+        },
+        async 'db:getReceivingReceiptLineChildren'(params: { parentId: string }) {
+          const { getReceivingReceiptLineChildren } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
+          return await getReceivingReceiptLineChildren(params.parentId);
+        },
+        async 'db:setupReceivingReceiptLineSingleApprovalFlow'() {
+          const { setupReceivingReceiptLineSingleApprovalFlow } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
+          return await setupReceivingReceiptLineSingleApprovalFlow();
+        },
+        async 'db:populateReceivingReceiptLineSingleApproval'(params: { creatorId: string; approvalFlowIds: string[]; inventoryId?: string | null; productId?: string; receiptQuantity?: number }) {
+          const { populateReceivingReceiptLineSingleApproval } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
+          return await populateReceivingReceiptLineSingleApproval(params.creatorId, params.approvalFlowIds, { inventoryId: params.inventoryId, productId: params.productId, receiptQuantity: params.receiptQuantity });
+        },
         async 'db:populateAuditLog'(length: number) {
           const { populateAuditLogData } = require('./cypress/support/audit_log/helper');
           return await populateAuditLogData(length);
