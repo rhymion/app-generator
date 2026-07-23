@@ -15,6 +15,22 @@ export default defineConfig({
     setupNodeEvents(on, config) {
       config.defaultCommandTimeout = 10000; // Increase default command timeout to 10 seconds
 
+      // Load project-specific task registrations if present.
+      // prj:sync copies prj/cypress/support/project-tasks.ts here.
+      // Falls back to empty object when no project-tasks.ts exists (base template).
+      let projectTasks: Record<string, (...args: any[]) => any> = {};
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const mod = require('./cypress/support/project-tasks') as {
+          getProjectTasks?: () => Record<string, (...args: any[]) => any>;
+        };
+        if (typeof mod.getProjectTasks === 'function') {
+          projectTasks = mod.getProjectTasks();
+        }
+      } catch {
+        // No project-specific tasks file — base generator default
+      }
+
       // Task to reset and seed database before tests
       on('task', {
         async 'db:reset'() {
@@ -240,10 +256,6 @@ export default defineConfig({
           return JSON.parse(JSON.stringify({ apiKey: creatorApiKey, ownedRoleId: ownedRole.id }));
         },
         ...getGeneratedTasks(),
-        async 'db:setupReceivingReceiptNotificationFixture'() {
-          const { setupReceivingReceiptNotificationFixture } = require('./cypress/support/receiving_receipt/notification_helper');
-          return await setupReceivingReceiptNotificationFixture();
-        },
         async 'db:seedReservationInventory'(params: { quantity: number }) {
           const { seedReservationInventory } = require('./cypress/support/purchase_order/reservation_helper');
           return await seedReservationInventory(params.quantity);
@@ -288,30 +300,6 @@ export default defineConfig({
           const { getPendingApprovalRequest } = require('./cypress/support/approval_test_helpers');
           return await getPendingApprovalRequest(params.approvable_id);
         },
-        async 'db:getInventoryTransactionsByBridge'(params: { inventory_transactionable_id: string }) {
-          const { getInventoryTransactionsByBridge } = require('./cypress/support/approval_test_helpers');
-          return await getInventoryTransactionsByBridge(params.inventory_transactionable_id);
-        },
-        async 'db:countAllInventoryTransactions'() {
-          const { countAllInventoryTransactions } = require('./cypress/support/approval_test_helpers');
-          return await countAllInventoryTransactions();
-        },
-        async 'db:getReceivingReceiptLineById'(params: { id: string }) {
-          const { getReceivingReceiptLineById } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
-          return await getReceivingReceiptLineById(params.id);
-        },
-        async 'db:getReceivingReceiptLineChildren'(params: { parentId: string }) {
-          const { getReceivingReceiptLineChildren } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
-          return await getReceivingReceiptLineChildren(params.parentId);
-        },
-        async 'db:setupReceivingReceiptLineSingleApprovalFlow'() {
-          const { setupReceivingReceiptLineSingleApprovalFlow } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
-          return await setupReceivingReceiptLineSingleApprovalFlow();
-        },
-        async 'db:populateReceivingReceiptLineSingleApproval'(params: { creatorId: string; approvalFlowIds: string[]; inventoryId?: string | null; productId?: string; receiptQuantity?: number }) {
-          const { populateReceivingReceiptLineSingleApproval } = require('./cypress/support/receiving_receipt/receiving_receipt_line_helper');
-          return await populateReceivingReceiptLineSingleApproval(params.creatorId, params.approvalFlowIds, { inventoryId: params.inventoryId, productId: params.productId, receiptQuantity: params.receiptQuantity });
-        },
         async 'db:populateAuditLog'(length: number) {
           const { populateAuditLogData } = require('./cypress/support/audit_log/helper');
           return await populateAuditLogData(length);
@@ -344,6 +332,7 @@ export default defineConfig({
           const result = await anonymizeUser(userId);
           return JSON.parse(JSON.stringify(result));
         },
+        ...projectTasks,
       });
 
       return config;

@@ -29,7 +29,7 @@ covers the core paths: multi-item allocation, insufficient-stock rollback,
 It does **not** cover scenario-specific edge cases such as true concurrency
 (two simultaneous requests for the last unit) or the update/delete mutation
 guards. Those go in a hand-written supplemental spec — see
-`purchase_order_reservation.cy.ts` for a worked example.
+`<entity>_reservation.cy.ts` for a worked example.
 
 ## Adding a hand-written supplemental spec
 
