@@ -42,7 +42,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const parent = await prisma.{{ entity_name }}.findUnique({
       where: { id },
       {% if has_approvable %}
-      include: { approvable: true },
+      // cmd_439 F1: approval_requests included so split children can inherit
+      // the parent's flow IDs (Option A — see _parentARFlowIds below).
+      include: { approvable: { include: { approval_requests: true } } },
       {% endif %}
     });
     if (!parent) throw new ApiError(404, 'Not found');
@@ -147,16 +149,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
       // 3. Create child records — inherit parent fields, override with part-specific values
       {% if has_approvable %}
-      // Pre-fetch approval metadata once (shared inner block with cmd_295's
-      // x-approval-lines — see generators.py:_build_approval_create_block_for_entity).
-      const _splitCreator = await tx.user.findUnique({
-        where: { id: userId },
-        select: { roles: { select: { id: true } } },
-      });
-      const _splitCreatorRoleIds = _splitCreator?.roles.map((r) => r.id) ?? [];
-      const _splitApprovalFlows = await tx.approval_flow.findMany({
-        where: { entity_name: '{{ entity_name }}' },
-      });
+      // cmd_439 F1 (Option A): split children inherit the parent's existing
+      // approval_request flow IDs unconditionally — the split actor's role
+      // is irrelevant, the child continues whatever approval flow the
+      // parent was already subject to.
+      const _parentARFlowIds = (parent.approvable?.approval_requests ?? []).map(
+        (r: { approval_flow_id: string }) => r.approval_flow_id
+      );
       {% endif %}
       for (const part of parts) {
         {% if has_approvable %}

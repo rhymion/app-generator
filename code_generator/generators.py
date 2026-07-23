@@ -1605,6 +1605,40 @@ def _build_approval_create_block_for_entity(
     )
 
 
+def _build_split_approval_inherit_block(indent: str = '  ') -> str:
+    """Create approval_request(s) for ONE split child, inheriting the flow IDs
+    from the parent's own (pre-split) approval_request rows — unconditionally,
+    with no requestor-role filter.
+
+    cmd_439 F1 (殿裁定 Option A): a split child continues whatever approval
+    flow the parent was already subject to, regardless of which role the
+    split actor holds. This replaces the old creator-role-filtered lookup
+    (_build_approval_create_block_for_entity) for the split path only —
+    that function is still used unchanged for x-approval-lines
+    (_build_approval_lines_post_create_code), where filtering by the
+    creator's role remains correct.
+
+    Caller must define `_parentARFlowIds` (the parent's approval_request
+    approval_flow_id list) once, outside the per-part loop, and a
+    `childApprovable` var inside it. Caller must import
+    notifyApprovalRequestCreated from '@/lib/_notifyApprovalRequest'.
+    """
+    return (
+        f"{indent}for (const _flowId of _parentARFlowIds) {{\n"
+        f"{indent}  const _apprReq = await tx.approval_request.create({{\n"
+        f"{indent}    data: {{ approvable_id: childApprovable.id, approval_flow_id: _flowId, status: 0 }},\n"
+        f"{indent}  }});\n"
+        f"{indent}  await notifyApprovalRequestCreated(tx, _apprReq.id, {{ excludeUserId: userId }});\n"
+        f"{indent}}}\n"
+        f"{indent}if (_parentARFlowIds.length > 0) {{\n"
+        f"{indent}  await tx.approvable.update({{\n"
+        f"{indent}    where: {{ id: childApprovable.id }},\n"
+        f"{indent}    data: {{ creator_id: userId }},\n"
+        f"{indent}  }});\n"
+        f"{indent}}}"
+    )
+
+
 def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema: dict) -> str:
     """Create approval_request(s) for each pre-created line approvable.
 

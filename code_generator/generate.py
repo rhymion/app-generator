@@ -44,6 +44,7 @@ from generators import (
     build_attachable_owners,
     get_reservation_action_routes,
     _build_approval_create_block_for_entity,
+    _build_split_approval_inherit_block,
 )
 from generators_i18n import update_i18n_and_config
 from validate import validate_schema, validate_prisma_indexes, SchemaValidationError
@@ -860,18 +861,15 @@ def generate(schema_path: str, output_dir: str) -> None:
         _split_has_approvable = 'approvable_id' in _split_entity_props
         # cmd_296 Phase2: one approvable per part, created directly in the
         # per-part loop (no pre-create array — unlike cmd_295's x-approval-lines
-        # batch). Shares its inner block with _build_approval_lines_post_create_code
-        # via generators.py:_build_approval_create_block_for_entity (see
-        # docs/split-generalization-design.md §4.2).
+        # batch).
+        # cmd_439 F1 (殿裁定 Option A): split children inherit the parent's
+        # existing approval_request flow IDs unconditionally — no
+        # requestor-role filter. This is a different rule from
+        # x-approval-lines' creator-role-filtered flow lookup, so split no
+        # longer shares _build_approval_create_block_for_entity; that
+        # function remains unchanged for _build_approval_lines_post_create_code.
         _split_approval_create_block = (
-            _build_approval_create_block_for_entity(
-                approvable_id_expr='childApprovable.id',
-                actor_id_expr='userId',
-                flows_var='_splitApprovalFlows',
-                role_ids_var='_splitCreatorRoleIds',
-                tx_var='tx',
-                indent='        ',
-            )
+            _build_split_approval_inherit_block(indent='        ')
             if _split_has_approvable else ''
         )
 
