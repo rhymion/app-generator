@@ -835,15 +835,19 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'pool_fk_field': _pool_fk_field,
             }
 
-        # perPartRequired fields are enforced as mandatory (every part must
-        # supply a truthy value) only when they're also in the entity's own
-        # top-level `required:` list. purchase_per_item.inventory_id is in
-        # perPartRequired (per-part lot override) but is schema-optional —
-        # split falls back to auto-allocate when a part omits it (cmd_305
-        # FIX-B, DP-B1). receiving_receipt_line.inventory_id is genuinely
-        # required, so its mandatory check is unaffected.
+        # perPartRequired mandatory validation:
+        #   receive-type entities (not split_reserves_inventory): ALL perPartRequired fields
+        #     are mandatory — a part without the lot id cannot be ledger-reconciled at
+        #     approval time (no auto-allocate fallback for receive-type).
+        #   reserve-type entities (split_reserves_inventory=True): only schema-required
+        #     fields are mandatory; others fall back to auto-allocate
+        #     (purchase_per_item.inventory_id, cmd_305 FIX-B DP-B1).
         _entity_required = set(_def_val.get('required') or [])
-        _per_part_req_mandatory = [f for f in _per_part_req if f in _entity_required]
+        _per_part_req_mandatory = (
+            _per_part_req
+            if _has_inventory_bridge and not _split_reserves_inventory
+            else [f for f in _per_part_req if f in _entity_required]
+        )
 
         _always_exclude = {
             'id', 'status', 'approvable_id', _bridge_field,
