@@ -1418,12 +1418,12 @@ def generate(schema_path: str, output_dir: str) -> None:
     _test_entity_names = sorted(e['parent'] for e in test_entities)
     db_ctx = db_helpers_context(schema, test_entity_names=_test_entity_names)
     _test_entity_count = len(db_ctx['test_entity_names'])
+    cypress_support = out / 'cypress' / 'support'
+    cypress_e2e    = out / 'cypress' / 'e2e'
+    registry_infos = []
+
     if test_entities:
         print('\nGenerating Cypress tests...')
-        cypress_support = out / 'cypress' / 'support'
-        cypress_e2e    = out / 'cypress' / 'e2e'
-
-        registry_infos = []
         for entity in test_entities:
             parent     = entity['parent']
             model      = entity['model']
@@ -1474,10 +1474,12 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'definition_key': def_key,
             })
 
-        # Task registry (covers all test-enabled entities)
-        registry_ctx = tasks_registry_context(registry_infos, schema)
-        _write(cypress_support / 'generated-tasks.ts',
-               _render(env, 'test_tasks_registry.ts.jinja2', registry_ctx))
+    # Task registry (always generated — empty registry when test_entities is
+    # empty is still valid TypeScript, keeping cypress.config.ts's import
+    # resolvable regardless of schema test coverage).
+    registry_ctx = tasks_registry_context(registry_infos, schema)
+    _write(cypress_support / 'generated-tasks.ts',
+           _render(env, 'test_tasks_registry.ts.jinja2', registry_ctx))
 
     # --- db-helpers.ts (always generated, not gated on test_entities) ---
     print('\nGenerating db-helpers.ts...')
