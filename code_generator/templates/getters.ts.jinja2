@@ -19,6 +19,7 @@ import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
 {% endif %}
 {% if comment_has_mention %}
 import { decodeMentions, extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
+import { getTranslations } from 'next-intl/server';
 {% endif %}
 import { filterAutocompleteOptions, type AutocompleteFilterContext } from '@/lib/{{ parent }}/autocomplete_filter';
 import { filterListQuery } from '@/lib/{{ parent }}/list_filter';
@@ -97,6 +98,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     ? await prisma.user.findMany({ where: { id: { in: [..._mentionUserIds] } }, select: { id: true, name: true } })
     : [];
   const _mentionUserContext: UserContext = Object.fromEntries(_mentionUsers.map((u) => [u.id, u.name]));
+  const _tCommon = await getTranslations('Common');
 {% endif %}
 {% if named_constants and has_commentable %}
   const _commentable = {{ parent_camel }}.{{ commentable_rel_name }} ? {
@@ -113,7 +115,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
         [],
       );
 {% if comment_has_mention %}
-      return { ...rest, message: decodeMentions(rest.message, _mentionUserContext), reactionCounts, myReactionTypes: [] as number[] };
+      return { ...rest, message: decodeMentions(rest.message, _mentionUserContext, _tCommon('deletedUser')), reactionCounts, myReactionTypes: [] as number[] };
 {% else %}
       return { ...rest, reactionCounts, myReactionTypes: [] as number[] };
 {% endif %}
