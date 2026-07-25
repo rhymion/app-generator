@@ -7,7 +7,7 @@ them otherwise (the platform default is `iad1`, US East). If that region does
 not match the region of the Postgres database the app connects to, every
 query pays a cross-region network round trip.
 
-Measured on this project (2026-07-24, Lord's manual test): moving the
+Measured on this project (2026-07-24): moving the
 function region from `iad1` (US East) to `sin1` (Singapore, matching the
 Neon project's `ap-southeast-1` region) took per-query latency from ~216ms to
 ~4ms — roughly a 54x improvement. The fix is placement, not code: same
