@@ -285,6 +285,15 @@ def derive_property(
     if pf.prisma_type == "DateTime":
         prop["format"] = "date-time"
 
+    if prisma_enums and pf.prisma_type in prisma_enums:
+        # Internal marker (not a real JSON schema keyword, stripped before
+        # any client-facing output): lets downstream TS codegen (get_ts_type)
+        # emit the exact string-literal union Prisma generates for this
+        # nativeEnum, instead of a generic `string`, so values assigned into
+        # a Prisma `data: {...}` write are structurally typed. The exposed
+        # `type` stays "string" above (Class B: API/JSON shape unchanged).
+        prop["_prisma_native_enum_type"] = pf.prisma_type
+
     fk_target = model.fk_target(field_name)
     if fk_target is not None and not user_field_overrides.get("_no_fk_pattern"):
         prop["pattern"] = _CUID_PATTERN
