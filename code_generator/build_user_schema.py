@@ -179,13 +179,37 @@ def _validate_entity_names(user_definitions: dict, prisma_models: dict) -> None:
             )
 
 
+def _auto_infer_fk_fields(entry: dict, model: "PrismaModel") -> dict:
+    """Infer FK scalar fields from relation object declarations in properties:.
+
+    When the user schema declares a relation object in properties: (e.g.
+    'role: {$ref: "#/definitions/role"}') and omits the corresponding FK
+    scalar from fields: (e.g. 'role_id'), this function reads the Prisma
+    model's relation_fk_fields to auto-add the missing FK scalars with a
+    default 'x-relationship: {}' annotation.
+
+    Only adds columns NOT already present in fields:, so explicit
+    overrides in fields: always take precedence (e.g. role_id with
+    x-ui width annotation can still be declared explicitly).
+    """
+    fields_spec: dict = dict(entry.get("fields") or {})
+    for prop_name in (entry.get("properties") or {}):
+        pf = model.fields.get(prop_name)
+        if pf is None or not pf.is_relation_object:
+            continue
+        for fk_col in pf.relation_fk_fields:
+            if fk_col not in fields_spec:
+                fields_spec[fk_col] = {"x-relationship": {}}
+    return fields_spec
+
+
 def _build_raw_and_view(
     entity_key: str,
     entry: dict,
     prisma_models: dict,
     prisma_enums: dict | None = None,
 ):
-    fields_spec = entry.get("fields") or {}
+    fields_spec = _auto_infer_fk_fields(entry, prisma_models[entity_key])
     raw = derive_raw_entity(prisma_models[entity_key], fields_spec, prisma_enums)
 
     for key in _ENTITY_LEVEL_DATA_KEYS:
@@ -216,7 +240,7 @@ def _build_standalone_raw(
     prisma_models: dict,
     prisma_enums: dict | None = None,
 ) -> dict:
-    fields_spec = entry.get("fields") or {}
+    fields_spec = _auto_infer_fk_fields(entry, prisma_models[entity_key])
     raw = derive_raw_entity(prisma_models[entity_key], fields_spec, prisma_enums)
     for key, value in entry.items():
         if key == "fields":

@@ -259,8 +259,6 @@ definitions:
       delete: {}
       import:
         default: false
-      role_id:
-        x-relationship: {}
     properties:
       role:
         $ref: "#/definitions/role"
