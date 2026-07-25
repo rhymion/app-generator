@@ -497,6 +497,7 @@ def actions_context(ctx: dict) -> dict:
     has_children  = bool(non_comment_ch)
     reservation_config = ctx.get('reservation_config')
     has_reservation = bool(reservation_config and reservation_config.get('mode') == 'count')
+    should_filter_by_org = bool(ctx.get('should_filter_by_org'))
 
     sep = ', ' if (parent_params and child_args) else ''
     full_child_args = f'{sep}{child_args}' if child_args else ''
@@ -577,6 +578,20 @@ def actions_context(ctx: dict) -> dict:
     flatten_extractions_code = '\n'.join(flatten_extractions_lines)
     flatten_args_str = (', ' + ', '.join(flatten_update_var_names)) if flatten_update_var_names else ''
 
+    def _existing_fetch_lines(indent: str) -> str:
+        # GAP-2 fix (cmd_452): org-scoped entities must re-fetch the target row through an
+        # org-filtered findFirst, not a global findUnique — otherwise requirePermission()
+        # can only see creator_id/assignee_id and a user with general.update can edit any
+        # org's record by id. Applied to every findUnique-before-update site in this
+        # function (not only the audited line) since they share the identical gap.
+        if should_filter_by_org:
+            return (
+                f"{indent}const _orgs = await getAssociatedOrganizations(actorId);\n"
+                f"{indent}const _orgIds = _orgs.map((o) => o.id);\n"
+                f"{indent}const existing = await prisma.{model}.findFirst({{ where: {{ id, organization_id: {{ in: _orgIds }} }}, select: {item_context_select} }});\n"
+            )
+        return f"{indent}const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
+
     def _upsert_body(has_ch: bool) -> str:
         _flatten_block = (f"{flatten_extractions_code}\n" if flatten_extractions_code else "")
         if can_create and can_update:
@@ -586,8 +601,9 @@ def actions_context(ctx: dict) -> dict:
                 return (
                     f"  const id = data.get('id') as string | null;\n"
                     f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                    f"  const actorId = await getSessionUserIdOrThrow();\n"
                     f"  if (id) {{\n"
-                    f"    const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
+                    + _existing_fetch_lines("    ") +
                     f"    await requirePermission('{parent}', 'update', existing);\n"
                     f"  }} else {{\n"
                     f"    await requirePermission('{parent}', 'create');\n"
@@ -595,8 +611,7 @@ def actions_context(ctx: dict) -> dict:
                     f"{form_data_gets}\n"
                     + (f"{child_form_data_extractions}\n" if has_ch else "")
                     + _flatten_block +
-                    f"  const actorId = await getSessionUserIdOrThrow();\n\n"
-                    f"  let _serviceError: string | null = null;\n"
+                    f"\n  let _serviceError: string | null = null;\n"
                     f"  if (id) {{\n"
                     f"    try {{\n"
                     f"      {update_call}\n"
@@ -625,8 +640,9 @@ def actions_context(ctx: dict) -> dict:
             return (
                 f"  const id = data.get('id') as string | null;\n"
                 f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                f"  const actorId = await getSessionUserIdOrThrow();\n"
                 f"  if (id) {{\n"
-                f"    const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
+                + _existing_fetch_lines("    ") +
                 f"    await requirePermission('{parent}', 'update', existing);\n"
                 f"  }} else {{\n"
                 f"    await requirePermission('{parent}', 'create');\n"
@@ -634,8 +650,7 @@ def actions_context(ctx: dict) -> dict:
                 f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _flatten_block +
-                f"  const actorId = await getSessionUserIdOrThrow();\n\n"
-                f"  if (id) {{\n"
+                f"\n  if (id) {{\n"
                 f"    {update_call}\n"
                 f"  }} else {{\n"
                 f"    {create_call}\n"
@@ -646,13 +661,13 @@ def actions_context(ctx: dict) -> dict:
                 f"  const id = data.get('id') as string | null;\n"
                 f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
                 f"  if (!id) throw new Error('Create not supported');\n"
-                f"  const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
+                f"  const actorId = await getSessionUserIdOrThrow();\n"
+                + _existing_fetch_lines("  ") +
                 f"  await requirePermission('{parent}', 'update', existing);\n"
                 f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _flatten_block +
-                f"\n  const actorId = await getSessionUserIdOrThrow();\n"
-                f"  await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
+                f"\n  await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
             )
         else:  # create only
             return (

@@ -15,6 +15,9 @@ import type { CommentReactionSummary } from './types';
 {% if service_imports %}
 import { {{ service_imports }} } from './service';
 {% endif %}
+{% if should_filter_by_org and (can_create or can_update or can_delete) %}
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}
 {% if can_create or can_update %}
 export async function upsert{{ parent_pascal }}(data: FormData) {
 {{ upsert_body }}
@@ -24,10 +27,17 @@ export async function upsert{{ parent_pascal }}(data: FormData) {
 {% endif %}
 {% if can_delete %}
 export async function remove{{ parent_pascal }}(ids: string[]) {
-  const [{ permissions: userPermissions, userId }, {{ parent_camel }}s] = await Promise.all([
-    getModelPermissions('{{ parent }}'),
-    await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
-  ]);
+  const { permissions: userPermissions, userId } = await getModelPermissions('{{ parent }}');
+{% if should_filter_by_org %}
+  const _assocOrgs = await getAssociatedOrganizations(userId);
+  const _assocOrgIds = _assocOrgs.map((o) => o.id);
+  const {{ parent_camel }}s = await prisma.{{ model }}.findMany({
+    where: { id: { in: ids }, organization_id: { in: _assocOrgIds } },
+    select: { id: true, creator_id: true },
+  });
+{% else %}
+  const {{ parent_camel }}s = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } });
+{% endif %}
   const filtered{{ parent_pascal }}s = userPermissions.general.delete
     ? {{ parent_camel }}s
     : {{ parent_camel }}s.filter(item =>
