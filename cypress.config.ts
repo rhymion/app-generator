@@ -71,6 +71,17 @@ export default defineConfig({
           const { createSessionUserWithPermission } = require('./cypress/support/db-helpers');
           return await createSessionUserWithPermission(params.entityName, params.flags, params.label);
         },
+        // cmd_452: X-API-Key-bearing actor with a custom permission set, NOT
+        // enrolled in any organization — the org-isolation IDOR fixture for
+        // API-route tests (detail GET/PUT/DELETE, list, export).
+        async 'db:createApiUserWithPermission'(params: {
+          entityName: string;
+          flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean };
+          label?: string;
+        }) {
+          const { createApiUserWithPermission } = require('./cypress/support/db-helpers');
+          return await createApiUserWithPermission(params.entityName, params.flags, params.label);
+        },
         async 'db:seedMfaUser'() {
           const { seedMfaTestUser } = require('./cypress/support/mfa-helpers');
           return await seedMfaTestUser();
