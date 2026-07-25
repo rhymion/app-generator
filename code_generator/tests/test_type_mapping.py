@@ -82,3 +82,37 @@ class TestUriFormat:
     def test_uri_is_plain_string(self):
         # uri format does not map to a special TS type — stays as string
         assert get_ts_type({"type": "string", "format": "uri"}) == "string"
+
+
+class TestPrismaNativeEnumUnion:
+    """cmd_446 pilot: a Prisma nativeEnum-backed field (schema_deriver's
+    `_prisma_native_enum_type` marker) emits a string-literal union matching
+    Prisma's generated client type, instead of plain `string`."""
+
+    def test_native_enum_emits_literal_union(self):
+        prop = {
+            "type": "string",
+            "enum": ["pending", "rejected"],
+            "_prisma_native_enum_type": "InventoryMovementStatus",
+        }
+        assert get_ts_type(prop) == "'pending' | 'rejected'"
+
+    def test_native_enum_for_view_props_is_nullable_union(self):
+        prop = {
+            "type": "string",
+            "enum": ["pending", "rejected"],
+            "_prisma_native_enum_type": "InventoryMovementStatus",
+        }
+        assert get_ts_type(prop, for_view_props=True) == "'pending' | 'rejected' | null"
+
+    def test_enum_without_native_marker_stays_plain_string(self):
+        # A json-schema `enum:` constraint alone (no Prisma nativeEnum
+        # backing) must NOT change the emitted type -- this keeps every
+        # other entity's generated output byte-identical (golden diff = 0
+        # outside inventory_movement.status).
+        prop = {"type": "string", "enum": ["pending", "rejected"]}
+        assert get_ts_type(prop) == "string"
+
+    def test_native_enum_marker_without_enum_key_stays_plain_string(self):
+        prop = {"type": "string", "_prisma_native_enum_type": "InventoryMovementStatus"}
+        assert get_ts_type(prop) == "string"

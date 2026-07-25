@@ -206,7 +206,41 @@ def parse_prisma_schema(path: Path) -> dict:
     return models
 
 
-def _json_type_for(prisma_field: PrismaField) -> str:
+def parse_prisma_enums(path: Path) -> dict:
+    """Parse Prisma ``enum`` blocks from schema.prisma.
+    Returns {EnumName: ['member1', 'member2', ...]}."""
+    text = path.read_text(encoding="utf-8")
+    enums: dict = {}
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        m = re.match(r'^\s*enum\s+(\w+)\s*\{\s*$', lines[i])
+        if not m:
+            i += 1
+            continue
+        enum_name = m.group(1)
+        depth = 1
+        i += 1
+        members: list = []
+        while i < len(lines) and depth > 0:
+            depth += lines[i].count("{") - lines[i].count("}")
+            if depth > 0:
+                stripped = lines[i].strip().split("//", 1)[0].strip()
+                if stripped and not stripped.startswith("@@"):
+                    token = stripped.split()[0]
+                    if token:
+                        members.append(token)
+            i += 1
+        enums[enum_name] = members
+    return enums
+
+
+def _json_type_for(
+    prisma_field: PrismaField,
+    prisma_enums: dict | None = None,
+) -> str:
+    if prisma_enums and prisma_field.prisma_type in prisma_enums:
+        return "string"  # Prisma nativeEnum maps to JSON string type
     if prisma_field.prisma_type not in _SCALAR_JSON_TYPE:
         raise SchemaDivergenceError(
             f"field '{prisma_field.name}': unsupported Prisma scalar type "
@@ -219,6 +253,7 @@ def derive_property(
     model: PrismaModel,
     field_name: str,
     user_field_overrides: dict,
+    prisma_enums: dict | None = None,
 ) -> dict:
     """Derive one property dict for `field_name` on `model` (Category A/B),
     then layer the user schema's Category C overrides (`user_field_overrides`)
@@ -230,7 +265,7 @@ def derive_property(
             f"but no such column exists in the Prisma model"
         )
     pf = model.fields[field_name]
-    base_type = _json_type_for(pf)
+    base_type = _json_type_for(pf, prisma_enums)
 
     prop: dict = {}
     legacy_nullable_style = bool(user_field_overrides.get("_legacy_nullable_style"))
@@ -249,6 +284,15 @@ def derive_property(
 
     if pf.prisma_type == "DateTime":
         prop["format"] = "date-time"
+
+    if prisma_enums and pf.prisma_type in prisma_enums:
+        # Internal marker (not a real JSON schema keyword, stripped before
+        # any client-facing output): lets downstream TS codegen (get_ts_type)
+        # emit the exact string-literal union Prisma generates for this
+        # nativeEnum, instead of a generic `string`, so values assigned into
+        # a Prisma `data: {...}` write are structurally typed. The exposed
+        # `type` stays "string" above (Class B: API/JSON shape unchanged).
+        prop["_prisma_native_enum_type"] = pf.prisma_type
 
     fk_target = model.fk_target(field_name)
     if fk_target is not None and not user_field_overrides.get("_no_fk_pattern"):
@@ -312,7 +356,11 @@ def _derive_relationship(model: PrismaModel, field_name: str, fk_target, user_re
     return rel
 
 
-def derive_raw_entity(model: PrismaModel, fields_spec: dict) -> dict:
+def derive_raw_entity(
+    model: PrismaModel,
+    fields_spec: dict,
+    prisma_enums: dict | None = None,
+) -> dict:
     """Reconstruct the legacy raw-entity dict for `model`.
 
     `fields_spec` is the new user_schema.yaml entity's `fields:` map (dict
@@ -327,7 +375,7 @@ def derive_raw_entity(model: PrismaModel, fields_spec: dict) -> dict:
     required = ["id"]
 
     for field_name, overrides in fields_spec.items():
-        prop = derive_property(model, field_name, overrides or {})
+        prop = derive_property(model, field_name, overrides or {}, prisma_enums)
         properties[field_name] = prop
         pf = model.fields[field_name]
         # A field with a Prisma-declared default is usually not "required"

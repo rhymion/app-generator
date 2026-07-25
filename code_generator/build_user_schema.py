@@ -75,7 +75,12 @@ from pathlib import Path
 
 from ruamel.yaml import YAML
 
-from schema_deriver import SchemaDivergenceError, derive_raw_entity, parse_prisma_schema
+from schema_deriver import (
+    SchemaDivergenceError,
+    derive_raw_entity,
+    parse_prisma_enums,
+    parse_prisma_schema,
+)
 
 # Reserved prefix for machine-generated raw entities (Stage 4).
 _RESERVED_RAW_PREFIX = "__"
@@ -174,9 +179,14 @@ def _validate_entity_names(user_definitions: dict, prisma_models: dict) -> None:
             )
 
 
-def _build_raw_and_view(entity_key: str, entry: dict, prisma_models: dict):
+def _build_raw_and_view(
+    entity_key: str,
+    entry: dict,
+    prisma_models: dict,
+    prisma_enums: dict | None = None,
+):
     fields_spec = entry.get("fields") or {}
-    raw = derive_raw_entity(prisma_models[entity_key], fields_spec)
+    raw = derive_raw_entity(prisma_models[entity_key], fields_spec, prisma_enums)
 
     for key in _ENTITY_LEVEL_DATA_KEYS:
         if key in entry:
@@ -200,9 +210,14 @@ def _build_raw_and_view(entity_key: str, entry: dict, prisma_models: dict):
     return raw, view
 
 
-def _build_standalone_raw(entity_key: str, entry: dict, prisma_models: dict) -> dict:
+def _build_standalone_raw(
+    entity_key: str,
+    entry: dict,
+    prisma_models: dict,
+    prisma_enums: dict | None = None,
+) -> dict:
     fields_spec = entry.get("fields") or {}
-    raw = derive_raw_entity(prisma_models[entity_key], fields_spec)
+    raw = derive_raw_entity(prisma_models[entity_key], fields_spec, prisma_enums)
     for key, value in entry.items():
         if key == "fields":
             continue
@@ -210,7 +225,11 @@ def _build_standalone_raw(entity_key: str, entry: dict, prisma_models: dict) -> 
     return raw
 
 
-def build_intermediate_schema(user_schema: dict, prisma_models: dict) -> dict:
+def build_intermediate_schema(
+    user_schema: dict,
+    prisma_models: dict,
+    prisma_enums: dict | None = None,
+) -> dict:
     """Reconstruct the legacy-shape intermediate schema dict (Sec.5 R2)."""
     out: dict = {}
     for top_key, top_value in user_schema.items():
@@ -226,12 +245,12 @@ def build_intermediate_schema(user_schema: dict, prisma_models: dict) -> dict:
         entry = raw_entry or {}
         try:
             if entity_key in prisma_models and _has_view_level_config(entry):
-                raw, view = _build_raw_and_view(entity_key, entry, prisma_models)
+                raw, view = _build_raw_and_view(entity_key, entry, prisma_models, prisma_enums)
                 out["definitions"][f"{_RESERVED_RAW_PREFIX}{entity_key}"] = raw
                 out["definitions"][entity_key] = view
             elif entity_key in prisma_models:
                 out["definitions"][entity_key] = _build_standalone_raw(
-                    entity_key, entry, prisma_models
+                    entity_key, entry, prisma_models, prisma_enums
                 )
             else:
                 # Pass-through: e.g. `setting`, a second view of `user`
@@ -265,7 +284,8 @@ def build_user_schema(
         user_schema = yaml.load(f)
 
     prisma_models = parse_prisma_schema(prisma_schema_path)
-    intermediate = build_intermediate_schema(user_schema, prisma_models)
+    prisma_enums = parse_prisma_enums(prisma_schema_path)
+    intermediate = build_intermediate_schema(user_schema, prisma_models, prisma_enums)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:

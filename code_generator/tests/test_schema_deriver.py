@@ -16,6 +16,7 @@ from schema_deriver import (
     SchemaDivergenceError,
     derive_property,
     derive_raw_entity,
+    parse_prisma_enums,
     parse_prisma_schema,
 )
 
@@ -114,3 +115,56 @@ def test_r5_red_unknown_field_name_raises(prisma_models):
     """RED: a `fields:` entry naming a column that doesn't exist in Prisma at all."""
     with pytest.raises(SchemaDivergenceError):
         derive_raw_entity(prisma_models["permission"], {"nonexistent_column": {}})
+
+
+# ---------------------------------------------------------------------------
+# parse_prisma_enums() / Prisma nativeEnum threading (cmd_446 pilot)
+# ---------------------------------------------------------------------------
+
+ENUM_PRISMA_FIXTURE = dedent(
+    """
+    enum InventoryMovementStatus {
+      pending
+      rejected
+    }
+
+    model inventory_movement {
+      id     String                   @id @default(cuid())
+      status InventoryMovementStatus  @default(pending)
+    }
+    """
+)
+
+
+def test_parse_prisma_enums_returns_members(tmp_path):
+    path = tmp_path / "schema.prisma"
+    path.write_text(ENUM_PRISMA_FIXTURE, encoding="utf-8")
+    enums = parse_prisma_enums(path)
+    assert enums == {"InventoryMovementStatus": ["pending", "rejected"]}
+
+
+def test_parse_prisma_enums_returns_empty_dict_when_no_enum_block(tmp_path):
+    path = tmp_path / "schema.prisma"
+    path.write_text(PRISMA_FIXTURE, encoding="utf-8")
+    assert parse_prisma_enums(path) == {}
+
+
+def test_derive_raw_entity_resolves_native_enum_as_string_type(tmp_path):
+    path = tmp_path / "schema.prisma"
+    path.write_text(ENUM_PRISMA_FIXTURE, encoding="utf-8")
+    models = parse_prisma_schema(path)
+    enums = parse_prisma_enums(path)
+
+    raw = derive_raw_entity(models["inventory_movement"], {"status": {}}, enums)
+    assert raw["properties"]["status"]["type"] == "string"
+
+
+def test_derive_property_without_prisma_enums_raises_on_native_enum_type(tmp_path):
+    """A Prisma nativeEnum field is unrecognized without the `prisma_enums`
+    map (i.e. the pre-cmd_446 behavior for a caller that doesn't pass it)."""
+    path = tmp_path / "schema.prisma"
+    path.write_text(ENUM_PRISMA_FIXTURE, encoding="utf-8")
+    models = parse_prisma_schema(path)
+
+    with pytest.raises(SchemaDivergenceError):
+        derive_property(models["inventory_movement"], "status", {})
