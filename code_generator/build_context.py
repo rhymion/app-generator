@@ -1597,8 +1597,11 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             # Prisma nativeEnum-backed field: '' is not a member of the
             # literal union Prisma's client type expects, so the "new" form
             # must seed it with the schema's actual default (cmd_446 pilot).
+            # `as const` prevents TS from widening the object-literal
+            # property back to plain `string`, which would fail assignment
+            # to the union-typed FormUpsert `src` prop.
             if defn.get('_prisma_native_enum_type') and 'default' in defn:
-                return f"'{defn['default']}'"
+                return f"'{defn['default']}' as const"
             return "''"
         if actual == 'boolean':
             return 'false'

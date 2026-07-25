@@ -1468,3 +1468,35 @@ class TestFormDataGetsPrismaNativeEnum:
         defn = {"type": "string", "enum": ["pending", "rejected"]}
         result = _build_form_data_gets([self._prop_info(defn)])
         assert result == "  const status = data.get('status') as string;"
+
+
+class TestDefaultPropsPrismaNativeEnum:
+    """cmd_446 pilot: a Prisma nativeEnum-backed field's "new" page default
+    must seed the schema's actual `default:` value (not '') and pin it with
+    `as const` so TS doesn't widen it back to plain `string` in the object
+    literal (would fail assignment to the union-typed FormUpsert `src` prop)."""
+
+    def _schema(self, status_defn: dict) -> dict:
+        return {
+            "definitions": {
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": {**_base_props(), "status": status_defn},
+                },
+            }
+        }
+
+    def test_native_enum_default_uses_schema_default_as_const(self):
+        status_defn = {
+            "type": "string",
+            "enum": ["pending", "rejected"],
+            "default": "pending",
+            "_prisma_native_enum_type": "WidgetStatus",
+        }
+        ctx = build_context(_entity("widget"), self._schema(status_defn))
+        assert "status: 'pending' as const," in ctx["parent_default_props"]
+
+    def test_plain_string_field_default_is_empty_string(self):
+        ctx = build_context(_entity("widget"), self._schema({"type": "string"}))
+        assert "status: '',"  in ctx["parent_default_props"]
