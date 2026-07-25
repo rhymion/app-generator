@@ -111,7 +111,8 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
     `x-display.dashboard: true`. A field is groupable when it is one of:
       - a many-to-one FK (each FK value becomes a series, labelled via
         the relationship's labelField on the target);
-      - an integer with an `enum` (each enum label is a category);
+      - an integer or string with an `enum` (each enum label is a category —
+        covers both legacy int-enum and Prisma nativeEnum string fields);
       - a boolean (Yes / No);
       - an integer or number without enum (numeric filter range);
       - a string with format 'date' or 'date-time' (datetime range filter).
@@ -154,7 +155,7 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
                     'label': to_title_case(prop_name),
                     'kind': 'boolean',
                 })
-            elif actual == 'integer' and isinstance(prop.get('enum'), list):
+            elif actual in ('integer', 'string') and isinstance(prop.get('enum'), list):
                 groupable.append({
                     'name': prop_name,
                     'label': to_title_case(prop_name),
