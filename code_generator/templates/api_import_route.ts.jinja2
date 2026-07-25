@@ -177,15 +177,14 @@ export async function POST(request: NextRequest) {
       }
       if (rowHasError) continue;
 
-      const matches = await prisma.{{ model }}.findMany({
-        where: {
-          ...keyWhere,
 {% if should_filter_by_org %}
-          organization_id: { in: _importOrgIds },
-{% endif %}
-        },
+      const matches = await prisma.{{ model }}.findMany({
+        where: { ...keyWhere, organization_id: { in: _importOrgIds } },
         select: {{ item_context_select }},
       });
+{% else %}
+      const matches = await prisma.{{ model }}.findMany({ where: keyWhere, select: {{ item_context_select }} });
+{% endif %}
 
       if (matches.length > 1) {
         errors.push({ row: rowNum, code: 'MULTI_MATCH', message: 'Multiple existing rows match the import key' });

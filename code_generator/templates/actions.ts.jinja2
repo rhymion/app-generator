@@ -39,10 +39,7 @@ export async function remove{{ parent_pascal }}(ids: string[]) {
 {% else %}
   const [{ permissions: userPermissions, userId }, {{ parent_camel }}s] = await Promise.all([
     getModelPermissions('{{ parent }}'),
-    await prisma.{{ model }}.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, creator_id: true }
-    }),
+    await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
   ]);
 {% endif %}
   const filtered{{ parent_pascal }}s = userPermissions.general.delete
