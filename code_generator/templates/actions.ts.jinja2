@@ -29,6 +29,7 @@ export async function upsert{{ parent_pascal }}(data: FormData) {
 export async function remove{{ parent_pascal }}(ids: string[]) {
   const { permissions: userPermissions, userId } = await getModelPermissions('{{ parent }}');
 {% if should_filter_by_org %}
+  if (!userId) throw new Error('No permission to delete');
   const _assocOrgs = await getAssociatedOrganizations(userId);
   const _assocOrgIds = _assocOrgs.map((o) => o.id);
   const {{ parent_camel }}s = await prisma.{{ model }}.findMany({
