@@ -39,6 +39,7 @@
     "test:e2e:dev:run": "cross-env NODE_ENV=test run-s docker:up:test generate-code db:push db:generate db:seed-tenant test:e2e:cy:dev",
     "test:e2e:build:only": "cross-env NODE_ENV=test next build",
     "test:e2e:cy:dev": "cross-env NODE_ENV=test node scripts/run-e2e.js dev 'cypress run --browser chromium'",
+    "pretest:e2e:cy:api": "cross-env NODE_ENV=test bash -c 'docker compose --env-file .env.test -f docker-compose.test.yml up -d --wait && npm run db:push && npm run db:generate && npm run db:seed-tenant'",
     "test:e2e:cy:api": "cross-env NODE_ENV=test node scripts/run-e2e.js test:e2e:start 'cypress run --browser chromium --spec \"cypress/e2e/api/**\"'",
     "test:e2e:cy:ui": "cross-env NODE_ENV=test node scripts/run-e2e.js test:e2e:start 'cypress run --browser chromium --spec \"cypress/e2e/*.cy.ts,cypress/e2e/mobile/*.cy.ts\"'",
     "test:e2e:cy:start": "cross-env NODE_ENV=test node scripts/run-e2e.js test:e2e:start 'cypress run --browser chromium'",
