@@ -1,0 +1,94 @@
+# Framework-internal bridge entities.
+#
+# This file is auto-included by build_user_schema.py (Stage 4 pipeline):
+# entities defined here are merged into the user schema's `definitions`
+# at build time, entity-level (not field-level). If your json_schema.yaml
+# defines an entity with the same name, YOUR definition wins — this file
+# only fills in entities you have not defined yourself.
+#
+# approvable / commentable / attachable are pure Prisma-bridge-table
+# injection sources (x-generate all false: no UI/API is generated from
+# them directly). Most projects never need to touch these — enabling the
+# approval/comment/attachment workflow on a business entity requires no
+# change here. To customize (e.g. add a field, flip an x-generate flag),
+# copy the entity's definition into your own json_schema.yaml; your copy
+# will override this file's version entirely (whole-entity override, not
+# a deep merge).
+#
+# x-schema-visibility (below) is metadata only: it documents that these
+# entities are not meant for end-user editing. It is NOT read by
+# build_user_schema.py/generate.py — it never reaches the intermediate
+# schema — so its presence here cannot affect generated output or the
+# golden-diff guarantee. It deliberately does NOT reuse the `x-internal`
+# key already used elsewhere in this schema (see e.g. `reaction`): that
+# key has real generator semantics (validate.py requires page/embed/api;
+# generate_types.py special-cases it for TS type generation), which would
+# collide badly with an unrelated "not user-editable" annotation.
+x-schema-visibility:
+  approvable:
+    user_editable: false
+  commentable:
+    user_editable: false
+  attachable:
+    user_editable: false
+
+definitions:
+  approvable:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      approved_at:
+        _legacy_nullable_style: true
+    required:
+      - approval_requests
+    properties:
+      approval_requests:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/approval_request"
+
+  commentable:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    required:
+      - comments
+    properties:
+      comments:
+        type: array
+        x-outputType: comments
+        items:
+          $ref: "#/definitions/comment"
+
+  attachable:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    required:
+      - attachments
+    properties:
+      attachments:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/attachment"

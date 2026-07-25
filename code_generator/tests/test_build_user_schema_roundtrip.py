@@ -20,7 +20,13 @@ from pathlib import Path
 import pytest
 from ruamel.yaml import YAML
 
-from build_user_schema import UserSchemaError, build_intermediate_schema, build_user_schema
+from build_user_schema import (
+    UserSchemaError,
+    _make_yaml,
+    _merge_internal_definitions,
+    build_intermediate_schema,
+    build_user_schema,
+)
 from schema_deriver import SchemaDivergenceError, parse_prisma_schema
 
 SCHEMA_PATH = Path(__file__).parent.parent / "json_schema.yaml"
@@ -218,3 +224,69 @@ def test_phase_a_golden_diff_zero(tmp_path):
     )
 
     assert not diffs, "Phase A golden diff non-zero:\n" + "\n".join(diffs)
+
+
+# ---------------------------------------------------------------------------
+# json_schema_internal.yaml merge (cmd_438 Batch3, subtask_438i)
+# ---------------------------------------------------------------------------
+
+def test_merge_internal_definitions_fills_missing_entity(tmp_path):
+    """An entity absent from the user schema, but present in the sibling
+    json_schema_internal.yaml, is filled in from the internal file."""
+    (tmp_path / "json_schema_internal.yaml").write_text(
+        "definitions:\n"
+        "  attachable:\n"
+        "    x-generate: {list: false}\n",
+        encoding="utf-8",
+    )
+    user_schema_path = tmp_path / "json_schema.yaml"  # need not exist on disk
+    user_schema = {"definitions": {"role": {"fields": {}}}}
+
+    _merge_internal_definitions(user_schema, user_schema_path, _make_yaml())
+
+    assert user_schema["definitions"]["attachable"] == {"x-generate": {"list": False}}
+    assert user_schema["definitions"]["role"] == {"fields": {}}
+
+
+def test_merge_internal_definitions_user_definition_wins(tmp_path):
+    """An entity the user schema already defines is never overwritten by
+    the internal file, even if both define the same entity name."""
+    (tmp_path / "json_schema_internal.yaml").write_text(
+        "definitions:\n"
+        "  attachable:\n"
+        "    x-generate: {list: false}\n",
+        encoding="utf-8",
+    )
+    user_schema_path = tmp_path / "json_schema.yaml"
+    user_schema = {"definitions": {"attachable": {"x-generate": {"list": True}}}}
+
+    _merge_internal_definitions(user_schema, user_schema_path, _make_yaml())
+
+    assert user_schema["definitions"]["attachable"] == {"x-generate": {"list": True}}
+
+
+def test_merge_internal_definitions_missing_file_is_noop(tmp_path):
+    """No json_schema_internal.yaml next to the user schema (e.g. an
+    existing, pre-cmd_438i project) leaves the user schema untouched."""
+    user_schema_path = tmp_path / "json_schema.yaml"
+    user_schema = {"definitions": {"role": {"fields": {}}}}
+
+    _merge_internal_definitions(user_schema, user_schema_path, _make_yaml())
+
+    assert user_schema["definitions"] == {"role": {"fields": {}}}
+
+
+def test_default_schema_bridge_entities_are_unaffected_by_internal_file(tmp_path):
+    """The framework's own json_schema.yaml still defines approvable /
+    commentable / attachable itself; the sibling json_schema_internal.yaml
+    (real file, not a fixture) must not change its Stage 4 output at all
+    (user-always-wins) -- regression guard for the file this ships next to
+    SCHEMA_PATH in code_generator/."""
+    out_path = tmp_path / ".generated" / "json_schema.yaml"
+    build_user_schema(SCHEMA_PATH, PRISMA_SCHEMA_PATH, out_path)
+
+    expected = _load(STAGE4_REFERENCE_PATH)
+    rebuilt = _load(out_path)
+
+    diffs = _deep_diff(expected, rebuilt)
+    assert not diffs, "json_schema_internal.yaml changed default schema output:\n" + "\n".join(diffs)
