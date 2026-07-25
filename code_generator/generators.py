@@ -584,11 +584,21 @@ def actions_context(ctx: dict) -> dict:
         # can only see creator_id/assignee_id and a user with general.update can edit any
         # org's record by id. Applied to every findUnique-before-update site in this
         # function (not only the audited line) since they share the identical gap.
+        #
+        # The explicit `if (!existing) throw` below is NOT optional: requirePermission()
+        # falls back to the top-level (general | creator | assignee) union whenever its
+        # item argument is falsy (lib/authz.ts requirePermission — `item && resolvedUserId
+        # ? resolvePermissions(...) : permissions`), so a general.update=true caller would
+        # still pass the check on a null `existing`, and the subsequent update<Parent>()
+        # call would then write to `id` unconditionally — the org-scoped findFirst above
+        # would filter the *read* but have zero effect on the *write*. Denying immediately
+        # on a null `existing` is what actually stops the cross-org mutation.
         if should_filter_by_org:
             return (
                 f"{indent}const _orgs = await getAssociatedOrganizations(actorId);\n"
                 f"{indent}const _orgIds = _orgs.map((o) => o.id);\n"
                 f"{indent}const existing = await prisma.{model}.findFirst({{ where: {{ id, organization_id: {{ in: _orgIds }} }}, select: {item_context_select} }});\n"
+                f"{indent}if (!existing) throw new Error('Not found');\n"
             )
         return f"{indent}const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
 
