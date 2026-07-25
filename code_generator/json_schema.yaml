@@ -183,8 +183,6 @@ definitions:
     fields:
       name: {}
       description: {}
-    required:
-      - users
     properties:
       users:
         type: array
@@ -216,8 +214,6 @@ definitions:
         x-ui:
           width: 8
 
-    required:
-      - users
     properties:
       users:
         type: array
