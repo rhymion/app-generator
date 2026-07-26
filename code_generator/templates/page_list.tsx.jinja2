@@ -66,11 +66,19 @@ async function {{ parent_pascal }}ListContent({
 {% endfor %}
   ]);
 {% for ns in enum_ns_list %}
+{% if ns.is_native_enum %}
+  const {{ ns.var_name }}: Record<string, string> = {
+{% for entry in ns['entries'] %}
+    '{{ entry[0] }}': {{ ns.var_name }}T('{{ entry[1] }}'),
+{% endfor %}
+  };
+{% else %}
   const {{ ns.var_name }}: Record<number, string> = {
 {% for entry in ns['entries'] %}
     {{ entry[0] }}: {{ ns.var_name }}T('{{ entry[1] }}'),
 {% endfor %}
   };
+{% endif %}
 {% endfor %}
   const { {{ parent_camel }}Page, userPermissions } = await get{{ parent_pascal }}PagedData({
     page: Number.isFinite(pageNum) ? pageNum : 0,
@@ -89,11 +97,19 @@ async function {{ parent_pascal }}ListContent({
     const raw = await fetch{{ parent_pascal }}Page(opts);
 {% for ns in enum_ns_list %}
     const {{ ns.var_name }}T = await getTranslations('{{ ns.ns }}');
+{% if ns.is_native_enum %}
+    const {{ ns.var_name }}: Record<string, string> = {
+{% for entry in ns['entries'] %}
+      '{{ entry[0] }}': {{ ns.var_name }}T('{{ entry[1] }}'),
+{% endfor %}
+    };
+{% else %}
     const {{ ns.var_name }}: Record<number, string> = {
 {% for entry in ns['entries'] %}
       {{ entry[0] }}: {{ ns.var_name }}T('{{ entry[1] }}'),
 {% endfor %}
     };
+{% endif %}
 {% endfor %}
     return {
       ...raw,

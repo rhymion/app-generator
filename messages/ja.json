@@ -197,5 +197,42 @@
     "errorLastSignInMethod": "解除できません: サインイン方法が無くなります。",
     "errorNotFound": "連携アカウントが見つかりません。",
     "errorUnknown": "問題が発生しました。再度お試しください。"
+  },
+  "ApprovalRequestStatus": {
+    "approved": "承認済み",
+    "pending": "承認待ち",
+    "rejected": "否決",
+    "terminalRejected": "最終否決"
+  },
+  "ReactionType": {
+    "laugh": "笑える",
+    "like": "いいね",
+    "love": "大好き",
+    "sad": "悲しい",
+    "surprised": "びっくり"
+  },
+  "AttachmentType": {
+    "audio": "音声",
+    "file": "ファイル",
+    "image": "画像",
+    "video": "動画"
+  },
+  "DashboardWidgetChartType": {
+    "bar": "横棒グラフ",
+    "column": "縦棒グラフ",
+    "line": "折れ線グラフ",
+    "pie": "円グラフ"
+  },
+  "DashboardWidgetStackMode": {
+    "grouped": "グループ",
+    "stacked": "積み上げ",
+    "standardized": "正規化"
+  },
+  "DashboardWidgetGroupByBucket": {
+    "day": "日",
+    "month": "月",
+    "quarter": "四半期",
+    "week": "週",
+    "year": "年"
   }
 }
