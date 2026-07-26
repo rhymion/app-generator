@@ -3,7 +3,7 @@ import { ApiError } from '@/lib/api-auth';
 
 /**
  * Assert that all preceding approval flows for the given approval_request
- * have been approved (status=1) on the same approvable.
+ * have been approved (status='Approved') on the same approvable.
  * Throws ApiError(400) if the ordering constraint is not satisfied.
  */
 export async function assertApprovalOrder(id: string): Promise<void> {
@@ -25,7 +25,7 @@ export async function assertApprovalOrder(id: string): Promise<void> {
   });
 
   const allApproved = precedingFlowIds.every((fid) =>
-    siblings.some((s) => s.approval_flow_id === fid && s.status === 1),
+    siblings.some((s) => s.approval_flow_id === fid && s.status === 'Approved'),
   );
   if (!allApproved) {
     throw new ApiError(400, 'Preceding approval requests must be approved first');

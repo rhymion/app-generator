@@ -25,7 +25,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     await assertApprovalOrder(id);
 
     const terminal = isTerminalReject(req.approval_flow.entity_name);
-    const newStatus = terminal ? 3 : 2;
+    const newStatus = terminal ? 'TerminalRejected' : 'Rejected';
+    // approval_history.post_status is a separate legacy Int snapshot column (out of scope).
+    const newStatusOrdinal = terminal ? 3 : 2;
 
     const body = await request.json().catch(() => ({}));
     const message: string | undefined = body?.message || undefined;
@@ -45,7 +47,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         },
       });
       await tx.approval_history.create({
-        data: { approval_request_id: id, pre_status: 0, post_status: newStatus, message: message ?? null, creator_id: userId, reason_kind: reasonKind ?? null },
+        data: { approval_request_id: id, pre_status: 0, post_status: newStatusOrdinal, message: message ?? null, creator_id: userId, reason_kind: reasonKind ?? null },
       });
 
       // on_rejected dispatch

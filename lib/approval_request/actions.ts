@@ -7,6 +7,14 @@ import { notify } from '@/lib/_notifier';
 import { dispatchOnApproved } from '@/lib/approval_request/on_approved_dispatch';
 import { isTerminalReject, dispatchOnRejected } from '@/lib/approval_request/on_rejected_dispatch';
 
+// approval_history.pre_status/post_status are separate legacy Int columns
+// (ordinal snapshot, out of Class A Batch A1 scope) — this maps the
+// ApprovalRequestStatus enum back to its historical ordinal index.
+const APPROVAL_REQUEST_STATUS_ORDER = ['Pending', 'Approved', 'Rejected', 'TerminalRejected'] as const;
+function statusOrdinal(status: string): number {
+  return APPROVAL_REQUEST_STATUS_ORDER.indexOf(status as (typeof APPROVAL_REQUEST_STATUS_ORDER)[number]);
+}
+
 /**
  * Look up the user who created the entity behind an approval_request so the
  * approve/reject paths can notify them. Returns null when the request has no
@@ -52,7 +60,7 @@ async function assertResubmitPermission(id: string): Promise<void> {
     },
   });
   if (!req) throw new Error('Approval request not found');
-  if (req.status !== 2) throw new Error('Only rejected requests can be re-submitted');
+  if (req.status !== 'Rejected') throw new Error('Only rejected requests can be re-submitted');
 
   const userId = await getSessionUserIdOrThrow();
   const entityCreatorId = req.approvable?.creator_id;
@@ -73,7 +81,7 @@ export async function approveApprovalRequest(id: string, message?: string): Prom
   await prisma.$transaction(async (tx) => {
     const req = await tx.approval_request.update({
       where: { id },
-      data: { status: 1 },
+      data: { status: 'Approved' },
       select: {
         status: true,
         approvable_id: true,
@@ -84,7 +92,7 @@ export async function approveApprovalRequest(id: string, message?: string): Prom
       data: {
         approval_request_id: id,
         pre_status: 0,
-        post_status: req.status,
+        post_status: statusOrdinal(req.status),
         message: message ?? null,
         creator_id: userId,
       },
@@ -98,7 +106,7 @@ export async function approveApprovalRequest(id: string, message?: string): Prom
         approval_requests: { select: { status: true } },
       },
     });
-    const allApproved = approvableData?.approval_requests.every((r) => r.status === 1) ?? false;
+    const allApproved = approvableData?.approval_requests.every((r) => r.status === 'Approved') ?? false;
     const alreadyFired = approvableData?.approved_at != null;
     if (allApproved && !alreadyFired && approvableData) {
       // Set approved_at first (idempotency flag — prevents double-fire on concurrent requests)
@@ -139,7 +147,7 @@ export async function rejectApprovalRequest(
     if (!req?.approval_flow) throw new Error('Approval request not found');
 
     const terminal = isTerminalReject(req.approval_flow.entity_name);
-    const newStatus = terminal ? 3 : 2;
+    const newStatus = terminal ? 'TerminalRejected' : 'Rejected';
 
     const result = await tx.approval_request.update({
       where: { id },
@@ -150,7 +158,7 @@ export async function rejectApprovalRequest(
       data: {
         approval_request_id: id,
         pre_status: 0,
-        post_status: newStatus,
+        post_status: statusOrdinal(newStatus),
         message: message ?? null,
         creator_id: userId,
         reason_kind: options?.reasonKind ?? null,
@@ -205,12 +213,12 @@ export async function resubmitApprovalRequest(id: string, message?: string): Pro
     });
     await tx.approval_request.update({
       where: { id },
-      data: { status: 0 },
+      data: { status: 'Pending' },
     });
     await tx.approval_history.create({
       data: {
         approval_request_id: id,
-        pre_status: prev?.status ?? 2,
+        pre_status: prev ? statusOrdinal(prev.status) : 2,
         post_status: 0,
         message: message ?? null,
         creator_id: userId,

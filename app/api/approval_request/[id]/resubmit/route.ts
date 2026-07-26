@@ -18,8 +18,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       },
     });
     if (!req) throw new ApiError(404, 'Approval request not found');
-    if (req.status === 3) throw new ApiError(400, 'Terminal rejected requests cannot be re-submitted');
-    if (req.status !== 2) throw new ApiError(400, 'Only rejected requests can be re-submitted');
+    if (req.status === 'TerminalRejected') throw new ApiError(400, 'Terminal rejected requests cannot be re-submitted');
+    if (req.status !== 'Rejected') throw new ApiError(400, 'Only rejected requests can be re-submitted');
 
     // Authorize: entity creator or user in requestor_role
     const entityCreatorId = req.approvable?.creator_id;
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const message: string | undefined = body?.message || undefined;
 
     const updated = await prisma.$transaction(async (tx) => {
-      const result = await tx.approval_request.update({ where: { id }, data: { status: 0 } });
+      const result = await tx.approval_request.update({ where: { id }, data: { status: 'Pending' } });
       await tx.approval_history.create({
         data: { approval_request_id: id, pre_status: 2, post_status: 0, message: message ?? null, creator_id: userId },
       });
