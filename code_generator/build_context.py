@@ -135,6 +135,12 @@ def _build_form_data_gets(prop_infos: list[dict]) -> str:
             lines.append(f"  const {var_name} = Number(data.get('{prop}'));")
         elif actual == 'string' and (pattern == '^c[a-z0-9]{24,}$' or defn.get('x-relationship')) and nullable:
             lines.append(f"  const {var_name} = (data.get('{prop}') as string | null) || null;")
+        elif actual == 'string' and defn.get('_prisma_native_enum_type') and defn.get('enum'):
+            # Prisma nativeEnum-backed field: cast the raw FormData string to
+            # the literal union get_ts_type() derives, matching the
+            # narrower type the service layer now expects (cmd_446 pilot).
+            suffix = ' | null' if nullable else ''
+            lines.append(f"  const {var_name} = data.get('{prop}') as {get_ts_type(defn)}{suffix};")
         else:
             suffix = ' | null' if nullable else ''
             lines.append(f"  const {var_name} = data.get('{prop}') as string{suffix};")
@@ -1588,6 +1594,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         if actual in ('integer', 'number'):
             return 'null'
         if actual == 'string':
+            # Prisma nativeEnum-backed field: '' is not a member of the
+            # literal union Prisma's client type expects, so the "new" form
+            # must seed it with the schema's actual default (cmd_446 pilot).
+            # `as const` prevents TS from widening the object-literal
+            # property back to plain `string`, which would fail assignment
+            # to the union-typed FormUpsert `src` prop.
+            if defn.get('_prisma_native_enum_type') and 'default' in defn:
+                return f"'{defn['default']}' as const"
             return "''"
         if actual == 'boolean':
             return 'false'

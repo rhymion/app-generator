@@ -11,6 +11,16 @@ def get_ts_type(prop: dict, for_view_props: bool = False) -> str:
     is_date = fmt in ('date', 'date-time', 'time')
     prop_type = prop.get('type')
 
+    # A Prisma nativeEnum-backed field (schema_deriver._prisma_native_enum_type
+    # marker) has a concrete string-literal-union type on the Prisma client
+    # side (e.g. 'pending' | 'rejected'), narrower than plain `string`. Emit
+    # that literal union so values assigned into a Prisma `data: {...}` write
+    # type-check without a cast. The exposed JSON `type` is unaffected
+    # (still "string" -- Class B: API/JSON shape unchanged).
+    if prop.get('_prisma_native_enum_type') and prop.get('enum') and prop_type == 'string':
+        union = ' | '.join(f"'{v}'" for v in prop['enum'])
+        return f"{union} | null" if for_view_props else union
+
     if isinstance(prop_type, list):
         if is_date:
             return 'Date | null' if ('null' in prop_type or for_view_props) else 'Date'

@@ -259,8 +259,6 @@ definitions:
       delete: {}
       import:
         default: false
-      role_id:
-        x-relationship: {}
     properties:
       role:
         $ref: "#/definitions/role"
@@ -301,10 +299,6 @@ definitions:
       entity_name:
         minLength: 1
         x-entity-select: true
-      requestor_role_id:
-        x-relationship: {}
-      approver_role_id:
-        x-relationship: {}
     required:
       - approver_role
       - preceding_transitions
