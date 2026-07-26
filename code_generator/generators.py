@@ -90,6 +90,23 @@ def _has_string_labels(enum_values) -> bool:
     return any(isinstance(v, str) and not str(v).lstrip('-').isdigit() for v in (enum_values or []))
 
 
+def _native_enum_ns(prop: dict) -> str | None:
+    """i18n namespace for a nativeEnum (`_prisma_native_enum_type`) field:
+    x-enum-namespace if set, else the Prisma enum block name itself."""
+    native_type = prop.get('_prisma_native_enum_type')
+    if not native_type:
+        return None
+    return prop.get('x-enum-namespace') or native_type
+
+
+def _native_enum_key(v) -> str:
+    """camelCase message key for a nativeEnum value. Prisma enum members are
+    PascalCase (e.g. 'TerminalRejected'), so this lowercases only the first
+    character, mirroring the existing x-enum-namespace int-enum convention."""
+    s = str(v)
+    return s[0].lower() + s[1:] if s else s
+
+
 def _int_enum_option(v, i: int) -> str:
     if isinstance(v, (int, float)):
         return f"{{ value: {int(v)}, label: '{v}' }}"
@@ -435,8 +452,15 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                 actual   = _get_actual_type(prop)
                 enum_vals = prop.get('enum')
                 enum_ns  = prop.get('x-enum-namespace')
+                native_ns = _native_enum_ns(prop)
 
-                if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+                if native_ns and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+                    var_name = f'{to_camel_case(field_name)}Labels'
+                    entries = [(v, _native_enum_key(v)) for v in enum_vals]
+                    if not any(e['var_name'] == var_name for e in enum_ns_list):
+                        enum_ns_list.append({'var_name': var_name, 'ns': native_ns, 'entries': entries, 'is_native_enum': True})
+                    add_formatting(field_name, f"{var_name}[item.{field_name} as string] ?? item.{field_name}")
+                elif actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
                     var_name = f'{to_camel_case(field_name)}Labels'
                     ns_to_use = enum_ns or 'Fields'
                     entries = [
@@ -447,7 +471,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                     ]
                     # avoid duplicates
                     if not any(e['var_name'] == var_name for e in enum_ns_list):
-                        enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries})
+                        enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries, 'is_native_enum': False})
                     add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
 
             if config.get('primary'):
@@ -472,7 +496,14 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
             actual = _get_actual_type(prop)
             enum_vals = prop.get('enum')
             enum_ns = prop.get('x-enum-namespace')
-            if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+            native_ns = _native_enum_ns(prop)
+            if native_ns and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+                var_name = f'{to_camel_case(field_name)}Labels'
+                entries = [(v, _native_enum_key(v)) for v in enum_vals]
+                if not any(e['var_name'] == var_name for e in enum_ns_list):
+                    enum_ns_list.append({'var_name': var_name, 'ns': native_ns, 'entries': entries, 'is_native_enum': True})
+                add_formatting(field_name, f"{var_name}[item.{field_name} as string] ?? item.{field_name}")
+            elif actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
                 var_name = f'{to_camel_case(field_name)}Labels'
                 ns_to_use = enum_ns or 'Fields'
                 entries = [
@@ -482,7 +513,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                     for i, v in enumerate(enum_vals)
                 ]
                 if not any(e['var_name'] == var_name for e in enum_ns_list):
-                    enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries})
+                    enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries, 'is_native_enum': False})
                 add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
 
     needs_formatting = bool(formatting_entries)
@@ -2256,6 +2287,8 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                 rel_params.append(f"{param_camel}Config?: EntityAutocompleteCellConfig")
 
         columns = []
+        col_ns_hooks: list[str] = []
+        col_seen_ns: set[str] = set()
         for key, prop in child_props.items():
             if key in ('id', f'{model}_id', 'created_at', 'updated_at', 'creator_id'):
                 continue
@@ -2348,13 +2381,35 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                     f"      }},\n"
                     f"    }},"
                 )
+            elif actual == 'string' and isinstance(enum_vals, list) and _native_enum_ns(prop):
+                native_ns = _native_enum_ns(prop)
+                is_nullable = isinstance(prop_type_raw, list) and 'null' in prop_type_raw
+                if native_ns not in col_seen_ns:
+                    col_seen_ns.add(native_ns)
+                    col_ns_hooks.append(f"  const t{native_ns} = useTranslations('{native_ns}');")
+                opts = ', '.join(
+                    f"{{ value: '{v}', label: t{native_ns}('{_native_enum_key(v)}') }}"
+                    for v in enum_vals
+                )
+                null_opt = "{ value: '' as const, label: '-- None --' }"
+                value_opts = f'{null_opt}, {opts}' if is_nullable else opts
+                extra = ''
+                if is_nullable:
+                    extra = (
+                        f",\n      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
+                        f"      valueGetter: (value: any) => value ?? '',\n"
+                        f"      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
+                        f"      valueSetter: (value: any, row: any) => ({{ ...row, {key}: value === '' ? null : value }})"
+                    )
+                columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: 150, editable: editable, type: 'singleSelect' as const, valueOptions: [{value_opts}]{extra} }},")
             else:
                 columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: {width}, editable: editable }},")
 
         rel_params_str = (', ' + ', '.join(rel_params)) if rel_params else ''
+        _col_ns_hooks_str = ('\n' + '\n'.join(col_ns_hooks)) if col_ns_hooks else ''
         fn_code = (
             f"export function use{to_pascal_case(prop_name)}Columns(editable: boolean = false{rel_params_str}): GridColDef[] {{\n"
-            f"  const t = useTranslations('Fields');\n"
+            f"  const t = useTranslations('Fields');{_col_ns_hooks_str}\n"
             f"  return [\n"
             + '\n'.join(columns) +
             f"\n  ];\n"
@@ -2426,6 +2481,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     image_flds         = []
     boolean_flds       = []
     enum_integer_flds  = []
+    enum_native_flds   = []
     other_flds         = []
 
     for p in parent_props:
@@ -2442,6 +2498,8 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             boolean_flds.append(p)
         elif actual in ('integer', 'number') and isinstance(prop.get('enum'), list):
             enum_integer_flds.append(p)
+        elif _native_enum_ns(prop) and isinstance(prop.get('enum'), list):
+            enum_native_flds.append(p)
         else:
             other_flds.append(p)
 
@@ -2565,6 +2623,28 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             f"        readOnly\n      />"
         )
 
+    # Enum nativeEnum fields (string-backed Prisma enum, always translated)
+    enum_native_jsxs = []
+    for p in enum_native_flds:
+        prop       = filtered_props[p]
+        state_name = safe_var_name(p)
+        enum_vals  = prop.get('enum', [])
+        ns         = _native_enum_ns(prop)
+        if ns not in seen_ns:
+            seen_ns.add(ns)
+            enum_ns_hooks.append(f"  const t{ns} = useTranslations('{ns}');")
+        opts = ', '.join(
+            f"{{ value: '{v}', label: t{ns}('{_native_enum_key(v)}') }}"
+            for v in enum_vals
+        )
+        enum_opt_setups.append(f"  const {state_name}Options = [{opts}];")
+        fk = _tf(p)
+        enum_native_jsxs.append(
+            f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
+            f"        value={{{state_name}Options.find(o => o.value === src.{p})?.label ?? ''}}\n"
+            f"        readOnly\n      />"
+        )
+
     # Custom view fields
     custom_jsxs = [
         f"      <{to_pascal_case(p)} value={{src.{safe_var_name(p)}}} />"
@@ -2577,6 +2657,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     all_parent_fields = '\n'.join(filter(None, [
         '\n'.join(text_jsxs),
         '\n'.join(enum_int_jsxs),
+        '\n'.join(enum_native_jsxs),
         '\n'.join(bool_jsxs),
         '\n'.join(dt_jsxs),
         '\n'.join(img_jsxs),
@@ -3154,8 +3235,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         opts_var  = f'{sn}Options'
         enum_vals = prop.get('enum', [])
         req       = p in (model_def.get('required') or [])
+        native_ns = _native_enum_ns(prop)
 
-        opts = ', '.join(f"{{ value: '{v}', label: '{v}' }}" for v in enum_vals)
+        if native_ns:
+            if native_ns not in enum_ns_set:
+                enum_ns_set.add(native_ns)
+                enum_ns_hooks.append(f"  const t{native_ns} = useTranslations('{native_ns}');")
+            opts = ', '.join(
+                f"{{ value: '{v}', label: t{native_ns}('{_native_enum_key(v)}') }}"
+                for v in enum_vals
+            )
+        else:
+            opts = ', '.join(f"{{ value: '{v}', label: '{v}' }}" for v in enum_vals)
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
         _enum_str_width_cols = _ui_width_cols(prop)

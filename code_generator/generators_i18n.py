@@ -5,7 +5,7 @@ Called once after all entities are generated. Only adds missing keys — never
 removes or overwrites existing values so manual translations are preserved.
 
 Updates:
-  messages/en.json         Nav, EntityLabel, Fields sections
+  messages/en.json         Nav, EntityLabel, Fields, <nativeEnum namespace> sections
   messages/ja.json         same (placeholder values for manual translation)
   lib/site-config.ts       navLinks array
   app/[locale]/@sidebar/page.tsx  navTranslationKeys object
@@ -16,6 +16,56 @@ from pathlib import Path
 
 from helpers.naming import to_camel_case, to_title_case
 from helpers.schema_helpers import filter_fields
+
+
+def _raw_def(entity_name: str, schema: dict) -> dict:
+    """Resolve a bare/view model name to its raw entity dict (mirrors
+    generators.py's `_raw_def` — duplicated locally to avoid a cross-module
+    import for one helper)."""
+    defs = schema.get('definitions', {})
+    return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
+
+
+def _native_enum_key(v) -> str:
+    """camelCase message key for a nativeEnum value (Prisma enum members are
+    PascalCase, e.g. 'TerminalRejected' -> 'terminalRejected')."""
+    s = str(v)
+    return s[0].lower() + s[1:] if s else s
+
+
+def _humanize_enum_value(v) -> str:
+    """'TerminalRejected' -> 'Terminal Rejected' (split PascalCase words).
+    Placeholder text only — same convention as _collect_field_keys, whose
+    English label is written into every language file pending translation."""
+    s = str(v)
+    return re.sub(r'(?<=[a-z0-9])(?=[A-Z])', ' ', s).strip() or s
+
+
+def _collect_native_enum_namespaces(schema: dict) -> dict[str, dict[str, str]]:
+    """Return {namespace: {camelKey: 'Humanized Label'}} for every nativeEnum
+    field (`_prisma_native_enum_type`) across all entities — regardless of
+    whether the entity has generated list/view/upsert pages, since a
+    hand-written component (or a future x-generate flip) may still need the
+    translation. Namespace defaults to the Prisma enum block name;
+    `x-enum-namespace` overrides it when set (mirrors generators.py)."""
+    result: dict[str, dict[str, str]] = {}
+    seen_bases = set()
+    for def_key in schema.get('definitions', {}):
+        base = def_key[2:] if def_key.startswith('__') else def_key
+        if base in seen_bases:
+            continue
+        seen_bases.add(base)
+        props = _raw_def(base, schema).get('properties', {})
+        for prop in props.values():
+            native_type = prop.get('_prisma_native_enum_type')
+            enum_vals = prop.get('enum')
+            if not native_type or not isinstance(enum_vals, list):
+                continue
+            ns = prop.get('x-enum-namespace') or native_type
+            ns_entries = result.setdefault(ns, {})
+            for v in enum_vals:
+                ns_entries.setdefault(_native_enum_key(v), _humanize_enum_value(v))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +303,9 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     # Field keys across all entities
     field_keys = _collect_field_keys(entities, schema)
 
+    # nativeEnum option keys (one section per Prisma enum / x-enum-namespace)
+    native_enum_ns = _collect_native_enum_namespaces(schema)
+
     # --- messages/*.json ---
     messages_dir = output_dir / 'messages'
     for lang_file in sorted(messages_dir.glob('*.json')):
@@ -260,6 +313,7 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
             'EntityLabel': entity_label_entries,
             'Nav': nav_entries,
             'Fields': field_keys,
+            **native_enum_ns,
         }
         changed = _update_json(lang_file, additions)
         status = 'Updated' if changed else 'No changes'
