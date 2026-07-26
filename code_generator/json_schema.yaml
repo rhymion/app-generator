@@ -422,8 +422,6 @@ definitions:
   attachment:
     fields:
       type:
-        minimum: 0
-        maximum: 3
         enum:
           - image
           - file

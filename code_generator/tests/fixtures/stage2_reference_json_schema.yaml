@@ -664,9 +664,8 @@ definitions:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
       type:
-        type: integer
-        minimum: 0
-        maximum: 3
+        type: string
+        _prisma_native_enum_type: AttachmentType
         enum:
           - image
           - file

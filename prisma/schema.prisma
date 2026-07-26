@@ -273,10 +273,17 @@ model attachable {
   attachments attachment[]
 }
 
+enum AttachmentType {
+  image
+  file
+  video
+  audio
+}
+
 model attachment {
-  id                     String     @id @default(cuid())
-  type                   Int        @default(0)
-  order                  Int        @default(0)
+  id                     String         @id @default(cuid())
+  type                   AttachmentType @default(image)
+  order                  Int            @default(0)
   name                   String
   path                   String
   encrypted_original_name String?
