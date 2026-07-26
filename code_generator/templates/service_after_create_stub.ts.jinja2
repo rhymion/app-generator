@@ -37,7 +37,7 @@ export async function afterCreate(
       data: {
         approvable_id: approvable.id,
         approval_flow_id: flow.id,
-        status: 0,
+        status: 'Pending',
       },
     });
     createdRequestIds.push(req.id);

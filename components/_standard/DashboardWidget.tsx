@@ -19,38 +19,31 @@ export type WidgetConfig = {
   name: string;
   order: number;
   entity_name: string;
-  chart_type: number;
+  chart_type: ChartType;
   group_by_field: string;
   // Legacy single-field filter (back-compat: treated as 'equals' condition).
   filter_field?: string | null;
   filter_value?: string | null;
   // New typed multi-condition filter (takes precedence over filter_field/filter_value).
   conditions?: FilterCondition[] | null;
-  stack_mode?: number | null;
+  stack_mode?: StackMode | null;
   series_field?: string | null;        // required when stack_mode is set
-  group_by_bucket?: number | null;
+  group_by_bucket?: BucketGranularity | null;
 };
 
-// Integer → string label lookup tables (integer enum from DB → label for chart rendering).
-const CHART_TYPE_LABELS: ChartType[] = ['pie', 'column', 'bar', 'line'];
-const STACK_MODE_LABELS: StackMode[] = ['grouped', 'stacked', 'standardized'];
-const BUCKET_LABELS: BucketGranularity[] = ['day', 'week', 'month', 'quarter', 'year'];
-
-function normalizeChartType(raw: number): ChartType {
-  if (raw >= 0 && raw < CHART_TYPE_LABELS.length) return CHART_TYPE_LABELS[raw];
-  return 'column';
+// chart_type/stack_mode/group_by_bucket are Prisma nativeEnum columns (cmd_446 Class A) —
+// the DB value already IS the label ('pie', 'grouped', 'week', ...), so these are just
+// null-coalescing passthroughs, not index-to-label lookups.
+function normalizeChartType(raw: ChartType): ChartType {
+  return raw;
 }
 
-function normalizeStackMode(raw: number | null | undefined): StackMode | undefined {
-  if (raw == null) return undefined;
-  if (raw >= 0 && raw < STACK_MODE_LABELS.length) return STACK_MODE_LABELS[raw];
-  return undefined;
+function normalizeStackMode(raw: StackMode | null | undefined): StackMode | undefined {
+  return raw ?? undefined;
 }
 
-function normalizeBucketGranularity(raw: number | null | undefined): BucketGranularity | undefined {
-  if (raw == null) return undefined;
-  if (raw >= 0 && raw < BUCKET_LABELS.length) return BUCKET_LABELS[raw];
-  return undefined;
+function normalizeBucketGranularity(raw: BucketGranularity | null | undefined): BucketGranularity | undefined {
+  return raw ?? undefined;
 }
 
 // Validation: config consistency checks.

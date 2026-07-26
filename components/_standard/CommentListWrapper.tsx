@@ -30,8 +30,8 @@ export type CommentItem = {
     name: string;
     image?: string | null;
   } | null;
-  reactionCounts?: Array<{ type: number; count: number }>;
-  myReactionTypes?: number[];
+  reactionCounts?: Array<{ type: string | number; count: number }>;
+  myReactionTypes?: (string | number)[];
 };
 
 interface CommentListWrapperProps {
@@ -45,7 +45,7 @@ interface CommentListWrapperProps {
   onUpdateComment?: (id: string, message: string) => Promise<void>;
   onDeleteComment?: (id: string) => Promise<void>;
   reactionTypes?: ReactionType[];
-  onToggleReaction?: (commentId: string, type: number) => Promise<CommentReactionSummary>;
+  onToggleReaction?: (commentId: string, type: string | number) => Promise<CommentReactionSummary>;
 }
 
 function getInitials(name: string): string {
@@ -68,7 +68,7 @@ interface CommentItemComponentProps {
   onUpdate?: (id: string, message: string) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
   reactionTypes?: ReactionType[];
-  onToggleReaction?: (commentId: string, type: number) => Promise<CommentReactionSummary>;
+  onToggleReaction?: (commentId: string, type: string | number) => Promise<CommentReactionSummary>;
 }
 
 function CommentItemComponent({ comment, canDelete, onUpdate, onDelete, reactionTypes, onToggleReaction }: CommentItemComponentProps) {

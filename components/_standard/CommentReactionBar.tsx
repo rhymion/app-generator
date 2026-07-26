@@ -5,21 +5,21 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
 
-export type CommentReactionCount = { type: number; count: number };
+export type CommentReactionCount = { type: string | number; count: number };
 export type CommentReactionSummary = {
   commentId: string;
-  type: number;
+  type: string | number;
   active: boolean;
   counts: CommentReactionCount[];
-  myTypes: number[];
+  myTypes: (string | number)[];
 };
-export type ReactionType = { value: number; label: string };
+export type ReactionType = { value: string | number; label: string };
 
 interface CommentReactionBarProps {
   commentId: string;
   counts: CommentReactionCount[];
-  myTypes: number[];
-  onToggle: (type: number) => Promise<CommentReactionSummary>;
+  myTypes: (string | number)[];
+  onToggle: (type: string | number) => Promise<CommentReactionSummary>;
   types: ReactionType[];
 }
 
@@ -31,12 +31,12 @@ export default function CommentReactionBar({
   types,
 }: CommentReactionBarProps) {
   const [counts, setCounts] = useState<CommentReactionCount[]>(initialCounts);
-  const [myTypes, setMyTypes] = useState<number[]>(initialMyTypes);
-  const [pendingType, setPendingType] = useState<number | null>(null);
+  const [myTypes, setMyTypes] = useState<(string | number)[]>(initialMyTypes);
+  const [pendingType, setPendingType] = useState<string | number | null>(null);
 
-  const getCount = (type: number) => counts.find((c) => c.type === type)?.count ?? 0;
+  const getCount = (type: string | number) => counts.find((c) => c.type === type)?.count ?? 0;
 
-  const handleToggle = async (type: number) => {
+  const handleToggle = async (type: string | number) => {
     if (pendingType !== null) return;
     const prevCounts = counts;
     const prevMyTypes = myTypes;

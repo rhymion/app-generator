@@ -109,6 +109,7 @@ class EntityContext:
     entity_view_components: list[dict] = ()    # custom components rendered in FormView; [{name, path?}]
     entity_edit_components: list[dict] = ()    # custom components rendered in FormUpsert; [{name, path?}]
     is_bridge_child: bool = False              # entity declares new-form x-bridge (parent-context create)
+    reaction_value_type: str = 'number'        # runtime type of the reaction 'type' constant (see generate_types.extract_named_constants)
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +142,13 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         model_def.get('properties', {}),
         generate_config.get('fields'),
     )
+
+    # TS type of the comment-reactions `type` value (plain `number` for legacy
+    # Int-with-magic-numbers x-internal fields, or the nativeEnum literal union
+    # once reaction.type has been migrated to a Prisma enum — cmd_446 Class A).
+    # Needed by types.ts.jinja2's CommentReactionSummary/reactionCounts/myReactionTypes.
+    from generators import reaction_type_ts
+    _reaction_value_type = reaction_type_ts(schema)
 
     # Many-to-one relationships on parent (using filtered props)
     merged_def = {**model_def, 'properties': filtered_props}
@@ -522,4 +530,5 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         entity_view_components=entity_view_components,
         entity_edit_components=entity_edit_components,
         is_bridge_child=isinstance(_x_bridge, dict),
+        reaction_value_type=_reaction_value_type,
     )

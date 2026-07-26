@@ -11,12 +11,12 @@ import OrderedEditableListWrapper from './OrderedEditableListWrapper';
 import { setAttachmentsForBridge } from '@/lib/attachment/actions';
 import type { ModelPermissions } from '@/lib/authz';
 
-const TYPE_IMAGE = 0;
-const TYPE_FILE = 1;
+const TYPE_IMAGE = 'image';
+const TYPE_FILE = 'file';
 
 type Attachment = {
   id: string;
-  type: number;
+  type: 'image' | 'file' | 'video' | 'audio';
   order: number;
   name: string;
   path: string;

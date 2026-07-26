@@ -79,10 +79,10 @@ export async function invalidate{{ parent_pascal }}(id: string): Promise<void> {
 
 export async function toggle{{ parent_pascal }}CommentReaction(
   commentId: string,
-  type: number
+  type: {{ reaction_value_type }}
 ): Promise<CommentReactionSummary> {
   const userId = await getSessionUserIdOrThrow();
-  const validTypes: number[] = COMMENT_REACTION_TYPES.map((t) => t.value);
+  const validTypes: ({{ reaction_value_type }})[] = COMMENT_REACTION_TYPES.map((t) => t.value);
   if (!validTypes.includes(type)) {
     throw new Error(`Invalid reaction type: ${type}`);
   }

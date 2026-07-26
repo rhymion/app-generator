@@ -66,7 +66,7 @@ function revalidateForBridge(attachable_id: string): Promise<void> {
 
 export async function setAttachmentsForBridge(
   attachable_id: string,
-  type: number,
+  type: {{ type_ts }},
   items: AttachmentItemInput[],
 ): Promise<void> {
   await assertCanEditBridge(attachable_id);

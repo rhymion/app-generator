@@ -111,7 +111,8 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
     `x-display.dashboard: true`. A field is groupable when it is one of:
       - a many-to-one FK (each FK value becomes a series, labelled via
         the relationship's labelField on the target);
-      - an integer with an `enum` (each enum label is a category);
+      - an integer or string with an `enum` (each enum label is a category —
+        covers both legacy int-enum and Prisma nativeEnum string fields);
       - a boolean (Yes / No);
       - an integer or number without enum (numeric filter range);
       - a string with format 'date' or 'date-time' (datetime range filter).
@@ -154,7 +155,7 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
                     'label': to_title_case(prop_name),
                     'kind': 'boolean',
                 })
-            elif actual == 'integer' and isinstance(prop.get('enum'), list):
+            elif actual in ('integer', 'string') and isinstance(prop.get('enum'), list):
                 groupable.append({
                     'name': prop_name,
                     'label': to_title_case(prop_name),
@@ -230,6 +231,34 @@ def build_attachable_owners(schema: dict) -> list[dict]:
             break
     owners.sort(key=lambda o: o['name'])
     return owners
+
+
+def attachment_type_ts(schema: dict) -> str:
+    """TS type for the `type` param of lib/attachment/actions.ts's
+    setAttachmentsForBridge(). Mirrors attachment.type's actual field type
+    (plain `number` by default, or the nativeEnum literal union once
+    attachment.type has been migrated to a Prisma enum) so the hand-off
+    from the generic bridge action to `prisma.attachment.create/findMany`
+    type-checks without a cast.
+    """
+    prop = ((schema.get('definitions') or {}).get('attachment') or {}).get('properties', {}).get('type')
+    if not prop:
+        return 'number'
+    return get_ts_type(prop)
+
+
+def reaction_type_ts(schema: dict) -> str:
+    """TS type for the `type` param threaded through the comment-reactions
+    feature (toggle server action, toggle API route, CommentReactionSummary /
+    reactionCounts / myReactionTypes). Mirrors reaction.type's actual field
+    type (plain `number` by default, or the nativeEnum literal union once
+    reaction.type has been migrated to a Prisma enum) so hand-offs to
+    prisma.reaction.create/findUnique/groupBy type-check without a cast.
+    """
+    prop = ((schema.get('definitions') or {}).get('reaction') or {}).get('properties', {}).get('type')
+    if not prop:
+        return 'number'
+    return get_ts_type(prop)
 
 
 def chart_context(ctx: dict, schema: dict) -> dict:
@@ -1006,7 +1035,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"          continue;\n"
         f"        }}\n"
         f"        await tx.approval_request.create({{\n"
-        f"          data: {{ approvable_id: approvable.id, approval_flow_id: flow.id, status: 0 }},\n"
+        f"          data: {{ approvable_id: approvable.id, approval_flow_id: flow.id, status: 'Pending' }},\n"
         f"        }});\n"
         f"        _hasFlow = true;\n"
         f"      }}\n"
@@ -1697,7 +1726,7 @@ def _build_approval_create_block_for_entity(
         f"{indent}    continue;\n"
         f"{indent}  }}\n"
         f"{indent}  const _apprReq = await {tx_var}.approval_request.create({{\n"
-        f"{indent}    data: {{ approvable_id: {approvable_id_expr}, approval_flow_id: _flow.id, status: 0 }},\n"
+        f"{indent}    data: {{ approvable_id: {approvable_id_expr}, approval_flow_id: _flow.id, status: 'Pending' }},\n"
         f"{indent}  }});\n"
         f"{indent}  await notifyApprovalRequestCreated({tx_var}, _apprReq.id, {{ excludeUserId: {actor_id_expr} }});\n"
         f"{indent}  _hasFlow = true;\n"
@@ -1732,7 +1761,7 @@ def _build_split_approval_inherit_block(indent: str = '  ') -> str:
     return (
         f"{indent}for (const _flowId of _parentARFlowIds) {{\n"
         f"{indent}  const _apprReq = await tx.approval_request.create({{\n"
-        f"{indent}    data: {{ approvable_id: childApprovable.id, approval_flow_id: _flowId, status: 0 }},\n"
+        f"{indent}    data: {{ approvable_id: childApprovable.id, approval_flow_id: _flowId, status: 'Pending' }},\n"
         f"{indent}  }});\n"
         f"{indent}  await notifyApprovalRequestCreated(tx, _apprReq.id, {{ excludeUserId: userId }});\n"
         f"{indent}}}\n"
@@ -3990,9 +4019,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     comment_jsx_parts = []
     comment_add_id_expr = 'src.id'  # default: old pattern uses parent entity id
     has_reactions = bool(ctx.get('named_constants'))
+    # toggle{Parent}CommentReaction's `type` param is the precise reaction-enum
+    # literal union (see generators.reaction_type_ts) — narrower than the shared
+    # CommentListWrapper's `string | number` callback signature. TS's strict
+    # (contravariant) function-parameter checking rejects the plain function
+    # reference here even though it's runtime-safe (the UI only ever forwards
+    # values that already came from COMMENT_REACTION_TYPES), hence the cast.
     _reaction_props = (
         f"          reactionTypes={{[...COMMENT_REACTION_TYPES]}}\n"
-        f"          onToggleReaction={{toggle{parent_pascal}CommentReaction}}\n"
+        f"          onToggleReaction={{toggle{parent_pascal}CommentReaction as (commentId: string, type: string | number) => Promise<CommentReactionSummary>}}\n"
         if has_reactions else ""
     )
     for c in comment_children:

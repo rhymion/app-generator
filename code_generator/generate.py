@@ -42,6 +42,8 @@ from generators import (
     form_upsert_context,
     build_dashboard_catalog,
     build_attachable_owners,
+    attachment_type_ts,
+    reaction_type_ts,
     get_reservation_action_routes,
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
@@ -876,8 +878,8 @@ def generate(schema_path: str, output_dir: str) -> None:
         _split_ctx = {
             'entity_name': _def_key,
             'pascal_name': to_pascal_case(_def_key),
-            'status_split_value': _split_status_enum.index('split') if 'split' in _split_status_enum else 1,
-            'status_rejected_value': _split_status_enum.index('rejected') if 'rejected' in _split_status_enum else 2,
+            'status_split_value': next((v for v in _split_status_enum if str(v).lower() == 'split'), 'split'),
+            'status_rejected_value': next((v for v in _split_status_enum if str(v).lower() == 'rejected'), 'rejected'),
             'has_approvable': _split_has_approvable,
             'approval_create_block': _split_approval_create_block,
             'has_quantity_check': bool(_qty_field),
@@ -986,7 +988,10 @@ def generate(schema_path: str, output_dir: str) -> None:
     if True:
         _write(
             out / 'lib' / 'attachment' / 'actions.ts',
-            _render(env, 'attachment_actions.ts.jinja2', {'owners': attachable_owners}),
+            _render(env, 'attachment_actions.ts.jinja2', {
+                'owners': attachable_owners,
+                'type_ts': attachment_type_ts(schema),
+            }),
         )
         print(f'  Attachment bridge actions → lib/attachment/actions.ts ({len(attachable_owners)} owners)')
 
@@ -1028,12 +1033,16 @@ def generate(schema_path: str, output_dir: str) -> None:
         print('  Mention parser → lib/mention/parser.ts')
 
     # --- Comment reactions API route (app/api/comment/[commentId]/reactions/toggle/route.ts) ---
-    # Emitted whenever x-internal integer enum entities exist (i.e., reactions are enabled).
+    # Emitted whenever x-internal enum entities exist (i.e., reactions are enabled).
     # D3=A: toggle endpoint is POST /api/comment/[commentId]/reactions/toggle
     if named_constants:
+        _reaction_const = next((c for c in named_constants if c['entity_name'] == 'reaction'), None)
         _write(
             out / 'app' / 'api' / 'comment' / '[commentId]' / 'reactions' / 'toggle' / 'route.ts',
-            _render(env, 'comment_reactions_api_route.ts.jinja2', {}),
+            _render(env, 'comment_reactions_api_route.ts.jinja2', {
+                'value_type': reaction_type_ts(schema),
+                'runtime_type': _reaction_const['value_type'] if _reaction_const else 'number',
+            }),
         )
         print('  Comment reactions API route → app/api/comment/[commentId]/reactions/toggle/route.ts')
 

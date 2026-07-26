@@ -1515,6 +1515,12 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             (c['property_name'] for c in attachable_rel['children'] if c['child_name'] == 'attachment'),
             None,
         )
+    # attachment.type's own TS type (plain `number` by default, or the
+    # nativeEnum literal union once attachment.type has been migrated to a
+    # Prisma enum) -- mirrors the field's real type in the decrypt/strip
+    # cast above so it doesn't silently drift from lib/attachment/actions.ts.
+    attachment_type_prop = ((schema.get('definitions') or {}).get('attachment') or {}).get('properties', {}).get('type')
+    attachment_type_ts = get_ts_type(attachment_type_prop) if attachment_type_prop else 'number'
     # Embedded children: exclude independent list children (have own pages; shown read-only here).
     # Non-independent mandatory-FK list children (no own page) are embedded with full CRUD.
     # Many-to-many and optional-FK list children (use_connect=True) use connect/set.
@@ -1602,6 +1608,11 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             # to the union-typed FormUpsert `src` prop.
             if defn.get('_prisma_native_enum_type') and 'default' in defn:
                 return f"'{defn['default']}' as const"
+            if defn.get('_prisma_native_enum_type') and isinstance(defn.get('enum'), list) and defn['enum']:
+                # No schema default (e.g. shift.status) — seed the "new" form
+                # with the first declared enum member so it still typechecks
+                # against the nativeEnum literal union.
+                return f"'{defn['enum'][0]}' as const"
             return "''"
         if actual == 'boolean':
             return 'false'
@@ -2178,7 +2189,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     # Named constants for x-internal entities (e.g. COMMENT_REACTION_TYPES)
     from generate_types import extract_named_constants
+    from generators import reaction_type_ts
     _all_named_constants = extract_named_constants(schema)
+    reaction_value_type = reaction_type_ts(schema)
 
     # Batched groupBy context for getCommentReactions — consumed by service/132b templates
     reaction_batch_query = (
@@ -2259,6 +2272,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         non_comment_ch=embedded_ch,
         comment_children=comment_children,
         named_constants=_all_named_constants,
+        reaction_value_type=reaction_value_type,
         reaction_batch_query=reaction_batch_query,
         bridge_parent_options=bridge_parent_options,
         bridge_child_ir=bridge_child_ir,
@@ -2274,6 +2288,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         has_attachable=bool(attachable_rel and attachable_attachments_prop),
         attachable_rel_name=attachable_rel['relation_name'] if attachable_rel else None,
         attachable_attachments_prop=attachable_attachments_prop,
+        attachment_type_ts=attachment_type_ts,
         child_mappings=child_mappings,
         child_form_data_extractions=child_form_data_extractions,
         child_params_for_add=child_params_for_add,
