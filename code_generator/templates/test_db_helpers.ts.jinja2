@@ -1,4 +1,4 @@
-// AUTO-GENERATED - DO NOT EDIT (hand-edited sections: grantAllEntityPermissions, createLimitedApiUser, createSessionUserWithPermission)
+// AUTO-GENERATED - DO NOT EDIT (hand-edited sections: grantAllEntityPermissions, createLimitedApiUser, createSessionUserWithPermission, createApiUserWithPermission)
 import 'dotenv/config'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/app/generated/prisma/client';
@@ -186,6 +186,66 @@ export async function createLimitedApiUser(entityName: string): Promise<string> 
   });
 
   return limitedApiKey;
+}
+
+/**
+ * Create an API-key-bearing user with a custom permission set for a given model,
+ * NOT enrolled in any organization. Needed for cmd_452 org-isolation X-API-Key
+ * route tests (detail GET/PUT/DELETE, list, export): createLimitedApiUser only
+ * covers the all-false explicit-deny case, and createSessionUserWithPermission
+ * issues no api_key (session-only). This is the "has the RBAC role but is a
+ * different org" IDOR fixture — analogous to attachment/helper.ts's
+ * addUserToOrganizationByEmail, but deliberately the negative (non-member) case.
+ */
+export async function createApiUserWithPermission(
+  entityName: string,
+  flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean },
+  label = 'custom',
+): Promise<string> {
+  const testUser = await prisma.user.findUnique({
+    where: { email: TEST_CREDENTIALS.email },
+  });
+  if (!testUser) throw new Error('Test user not found. Run db:seed first.');
+
+  const newUserId = createId();
+  const apiKey = `test_mk_${label}_${entityName}_${newUserId}`;
+
+  const customRole = await prisma.role.create({
+    data: {
+      name: `ApiRole_${label}_${entityName}_${newUserId}`,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+
+  await prisma.permission.create({
+    data: {
+      name: entityName,
+      role_id: customRole.id,
+      create: flags.create ?? false,
+      read: flags.read ?? false,
+      update: flags.update ?? false,
+      delete: flags.delete ?? false,
+      import: flags.import ?? false,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+
+  await prisma.user.create({
+    data: {
+      id: newUserId,
+      creator_id: newUserId,
+      updater_id: newUserId,
+      email: `api_${label}_${entityName}@example.com`,
+      name: `API User (${label}/${entityName})`,
+      password: 'not_needed',
+      api_key: apiKey,
+      roles: { connect: [{ id: customRole.id }] },
+    },
+  });
+
+  return apiKey;
 }
 
 /**

@@ -6,6 +6,9 @@ import { getModelPermissions, assertPermission, canAccess{% if should_filter_by_
 import { handleApiError } from '@/lib/api-auth';
 import { unescapeImportValue } from '@/lib/_csv';
 import { generateImportToken, verifyImportToken } from '@/lib/_import';
+{% if should_filter_by_org %}
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}
 
 const MAX_IMPORT_ROWS = 5_000;
 const MAX_IMPORT_BYTES = 10 * 1024 * 1024; // 10MB
@@ -116,6 +119,10 @@ export async function POST(request: NextRequest) {
 
     const errors: ImportRowError[] = [];
     const actions: PendingAction[] = [];
+{% if should_filter_by_org %}
+    const _importAssocOrgs = await getAssociatedOrganizations(actorId);
+    const _importOrgIds = _importAssocOrgs.map((o) => o.id);
+{% endif %}
 
     for (let i = 0; i < rows.length; i++) {
       const rowNum = i + 2; // 1-indexed CSV row, +1 for the header row
@@ -170,7 +177,14 @@ export async function POST(request: NextRequest) {
       }
       if (rowHasError) continue;
 
+{% if should_filter_by_org %}
+      const matches = await prisma.{{ model }}.findMany({
+        where: { ...keyWhere, organization_id: { in: _importOrgIds } },
+        select: {{ item_context_select }},
+      });
+{% else %}
       const matches = await prisma.{{ model }}.findMany({ where: keyWhere, select: {{ item_context_select }} });
+{% endif %}
 
       if (matches.length > 1) {
         errors.push({ row: rowNum, code: 'MULTI_MATCH', message: 'Multiple existing rows match the import key' });
