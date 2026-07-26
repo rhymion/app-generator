@@ -42,6 +42,7 @@ from generators import (
     form_upsert_context,
     build_dashboard_catalog,
     build_attachable_owners,
+    attachment_type_ts,
     get_reservation_action_routes,
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
@@ -986,7 +987,10 @@ def generate(schema_path: str, output_dir: str) -> None:
     if True:
         _write(
             out / 'lib' / 'attachment' / 'actions.ts',
-            _render(env, 'attachment_actions.ts.jinja2', {'owners': attachable_owners}),
+            _render(env, 'attachment_actions.ts.jinja2', {
+                'owners': attachable_owners,
+                'type_ts': attachment_type_ts(schema),
+            }),
         )
         print(f'  Attachment bridge actions → lib/attachment/actions.ts ({len(attachable_owners)} owners)')
 

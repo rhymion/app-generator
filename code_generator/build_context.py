@@ -1515,6 +1515,12 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             (c['property_name'] for c in attachable_rel['children'] if c['child_name'] == 'attachment'),
             None,
         )
+    # attachment.type's own TS type (plain `number` by default, or the
+    # nativeEnum literal union once attachment.type has been migrated to a
+    # Prisma enum) -- mirrors the field's real type in the decrypt/strip
+    # cast above so it doesn't silently drift from lib/attachment/actions.ts.
+    attachment_type_prop = ((schema.get('definitions') or {}).get('attachment') or {}).get('properties', {}).get('type')
+    attachment_type_ts = get_ts_type(attachment_type_prop) if attachment_type_prop else 'number'
     # Embedded children: exclude independent list children (have own pages; shown read-only here).
     # Non-independent mandatory-FK list children (no own page) are embedded with full CRUD.
     # Many-to-many and optional-FK list children (use_connect=True) use connect/set.
@@ -2279,6 +2285,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         has_attachable=bool(attachable_rel and attachable_attachments_prop),
         attachable_rel_name=attachable_rel['relation_name'] if attachable_rel else None,
         attachable_attachments_prop=attachable_attachments_prop,
+        attachment_type_ts=attachment_type_ts,
         child_mappings=child_mappings,
         child_form_data_extractions=child_form_data_extractions,
         child_params_for_add=child_params_for_add,

@@ -131,7 +131,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     ...{{ parent_camel }}.{{ attachable_rel_name }},
     {{ attachable_attachments_prop }}: (
       {{ parent_camel }}.{{ attachable_rel_name }}.{{ attachable_attachments_prop }} as unknown as Array<
-        { id: string; type: number; order: number; name: string; path: string; attachable_id: string; encrypted_original_name?: string | null; name_iv?: string | null }
+        { id: string; type: {{ attachment_type_ts }}; order: number; name: string; path: string; attachable_id: string; encrypted_original_name?: string | null; name_iv?: string | null }
       >
     ).map((raw) => {
       const { encrypted_original_name, name_iv, ...rest } = raw;

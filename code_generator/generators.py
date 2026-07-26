@@ -233,6 +233,20 @@ def build_attachable_owners(schema: dict) -> list[dict]:
     return owners
 
 
+def attachment_type_ts(schema: dict) -> str:
+    """TS type for the `type` param of lib/attachment/actions.ts's
+    setAttachmentsForBridge(). Mirrors attachment.type's actual field type
+    (plain `number` by default, or the nativeEnum literal union once
+    attachment.type has been migrated to a Prisma enum) so the hand-off
+    from the generic bridge action to `prisma.attachment.create/findMany`
+    type-checks without a cast.
+    """
+    prop = ((schema.get('definitions') or {}).get('attachment') or {}).get('properties', {}).get('type')
+    if not prop:
+        return 'number'
+    return get_ts_type(prop)
+
+
 def chart_context(ctx: dict, schema: dict) -> dict:
     chart_cfg = ctx.get('chart_cfg')
     if not chart_cfg:
