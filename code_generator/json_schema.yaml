@@ -328,12 +328,11 @@ definitions:
         x-relationship:
           labelField: entity_name
       status:
-        minimum: 0
-        maximum: 2
         enum:
           - Pending
           - Approved
           - Rejected
+          - TerminalRejected
 
   approvable:
     x-generate:

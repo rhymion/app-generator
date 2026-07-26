@@ -489,13 +489,13 @@ definitions:
           target: approval_flow
           labelField: entity_name
       status:
-        type: integer
-        minimum: 0
-        maximum: 2
+        type: string
+        _prisma_native_enum_type: ApprovalRequestStatus
         enum:
           - Pending
           - Approved
           - Rejected
+          - TerminalRejected
 
   approvable:
     type: object

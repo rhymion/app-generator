@@ -197,13 +197,20 @@ model approval_flow {
   @@index([updater_id])
 }
 
+enum ApprovalRequestStatus {
+  Pending
+  Approved
+  Rejected
+  TerminalRejected
+}
+
 model approval_request {
   id               String   @id @default(cuid())
   approvable_id    String
   approvable       approvable @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
   approval_flow_id String
   approval_flow    approval_flow @relation(fields: [approval_flow_id], references: [id])
-  status           Int      @default(0)
+  status           ApprovalRequestStatus @default(Pending)
   approval_histories approval_history[]
   created_at       DateTime @default(now()) @db.Timestamptz(0)
   updated_at       DateTime @updatedAt @db.Timestamptz(0)
