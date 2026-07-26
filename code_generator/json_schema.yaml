@@ -96,7 +96,6 @@ definitions:
             width: 150
     fields:
       name:
-        minLength: 1
         x-pii: direct
       email:
         x-pii: direct
@@ -182,8 +181,7 @@ definitions:
         target: user
     x-import-key: [name]
     fields:
-      name:
-        minLength: 1
+      name: {}
       description: {}
     required:
       - users
@@ -213,8 +211,7 @@ definitions:
       org_id_field: id
     x-import-key: [name]
     fields:
-      name:
-        minLength: 1
+      name: {}
       description:
         x-ui:
           width: 8
@@ -251,7 +248,6 @@ definitions:
             width: 200
     fields:
       name:
-        minLength: 1
         x-entity-select: true
       create: {}
       read: {}
@@ -297,7 +293,6 @@ definitions:
             width: 150
     fields:
       entity_name:
-        minLength: 1
         x-entity-select: true
     required:
       - approver_role
@@ -384,7 +379,6 @@ definitions:
   comment:
     fields:
       message:
-        minLength: 1
         x-mention: true
       commentable_id: {}
   reaction:
@@ -439,8 +433,7 @@ definitions:
         _required: true
       order:
         default: 0
-      name:
-        minLength: 1
+      name: {}
       path:
         format: uri
       attachable_id: {}
@@ -448,10 +441,8 @@ definitions:
     fields:
       dashboard_id:
         x-relationship: {}
-      name:
-        minLength: 1
-      entity_name:
-        minLength: 1
+      name: {}
+      entity_name: {}
       chart_type:
         minimum: 0
         maximum: 3
@@ -478,8 +469,7 @@ definitions:
           - month
           - quarter
           - year
-      group_by_field:
-        minLength: 1
+      group_by_field: {}
       filter_field: {}
       filter_value: {}
       order:
@@ -510,8 +500,7 @@ definitions:
             primary: true
             width: 200
     fields:
-      name:
-        minLength: 1
+      name: {}
     required:
       - widgets
     properties:

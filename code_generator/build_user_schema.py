@@ -286,6 +286,35 @@ def build_intermediate_schema(
     return out
 
 
+# Sibling file of `user_schema_path` (cmd_438 Batch3): entities the
+# framework ships as a documented default, so individual projects don't
+# have to carry pure Prisma-bridge-table boilerplate (approvable,
+# commentable, attachable) in their own schema.
+_INTERNAL_SCHEMA_FILENAME = "json_schema_internal.yaml"
+
+
+def _merge_internal_definitions(user_schema: dict, user_schema_path: Path, yaml: YAML) -> None:
+    """Fill in framework-internal entities from `json_schema_internal.yaml`
+    (sibling of `user_schema_path`) for any entity name the user schema does
+    not already define. User definitions always win — this is a whole-entity
+    override, not a deep merge — so a project that still defines e.g.
+    `approvable` itself keeps behaving exactly as before. No internal file
+    present is a no-op (pre-existing projects are unaffected).
+    """
+    internal_path = user_schema_path.parent / _INTERNAL_SCHEMA_FILENAME
+    if not internal_path.is_file():
+        return
+
+    with internal_path.open("r", encoding="utf-8") as f:
+        internal_schema = yaml.load(f) or {}
+    internal_defs = internal_schema.get("definitions") or {}
+
+    user_defs = user_schema.setdefault("definitions", {})
+    for entity_key, entity_def in internal_defs.items():
+        if entity_key not in user_defs:
+            user_defs[entity_key] = entity_def
+
+
 def build_user_schema(
     user_schema_path: Path, prisma_schema_path: Path, out_path: Path
 ) -> None:
@@ -306,6 +335,8 @@ def build_user_schema(
     yaml = _make_yaml()
     with user_schema_path.open("r", encoding="utf-8") as f:
         user_schema = yaml.load(f)
+
+    _merge_internal_definitions(user_schema, user_schema_path, yaml)
 
     prisma_models = parse_prisma_schema(prisma_schema_path)
     prisma_enums = parse_prisma_enums(prisma_schema_path)
