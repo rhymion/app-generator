@@ -2965,7 +2965,7 @@ def api_spec_context(
     has_import_key = bool(_import_key_raw)
 
     # cmd_421 N11-N13: import eligibility gate for the CSV import round-trip
-    # tests. Mirrors build_context.py's "single place" gate (殿留保 cmd_328)
+    # tests. Mirrors build_context.py's "single place" gate (cmd_328 design decision)
     # exactly — is_primary_entity AND has_import_key AND import:true AND
     # (new:true OR edit:true) — since this test context is built by a
     # separate function and must re-derive the flag rather than reuse it.

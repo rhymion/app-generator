@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Build the intermediate generator schema from a user-authored schema.
 
-Stage 4 (cmd_395 design doc, planning/cmd395-schema-restructuring-design.md
-Sec.12 "Stage 4"; design review queue/reports/subtask_409a_gunshi.yaml): the
-`_detail` suffix is retired from the user-authored schema. Where Stage 3
+Stage 4 single-entity schema format (see docs/knowledge/schema-restructuring-build-order.md):
+the `_detail` suffix is retired from the user-authored schema. Where Stage 3
 required writing `role_detail:` (with the raw entity implicitly named
 `role`), Stage 4 lets the user write the natural `role:` directly. The
 machine-derived raw entity that used to occupy the unsuffixed name now
@@ -40,7 +39,7 @@ it the new key convention:
     (does it carry a view-level annotation?), not by name, because Stage 4
     entity names no longer carry a `_detail` marker to key off of. This is
     also what "normalizes" the one pre-Stage-4 anomaly on record
-    (`inventory_transaction` in proj_c, per gunshi review): a Prisma-model
+    (for example, `inventory_transaction`): a Prisma-model
     entity that had `x-generate` directly on what was nominally its "raw"
     entry now goes through the same split as every other paired entity.
 

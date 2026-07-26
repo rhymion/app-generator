@@ -11,7 +11,7 @@ intermediate schema this builder must reproduce from the (renamed)
 `tests/fixtures/stage2_reference_json_schema.yaml` -- the pre-Stage-3
 legacy full schema, which cmd_408's own roundtrip test already proved is
 exactly what the Stage 3 builder produced -- doubles as ground truth for
-the Phase A golden-diff invariant (queue/reports/subtask_409a_gunshi.yaml
+the Phase A golden-diff invariant (see docs/knowledge/schema-restructuring-build-order.md
 Sec.5 phase_A_schema_level): renaming a paired entity must not change its
 content, only its key and its self-referential `$ref`.
 """
@@ -117,7 +117,7 @@ def test_unknown_field_name_raises_divergence(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Collision detection (subtask_409a_gunshi.yaml Sec.4 collision_detection_design)
+# Collision detection (see docs/knowledge/schema-restructuring-build-order.md Sec.4 collision_detection_design)
 # ---------------------------------------------------------------------------
 
 def test_reserved_dunder_prefix_entity_name_raises():
@@ -178,7 +178,7 @@ def test_non_model_named_pass_through_entity_does_not_raise():
 
 
 # ---------------------------------------------------------------------------
-# Phase A golden diff (subtask_409a_gunshi.yaml Sec.5 phase_A_schema_level)
+# Phase A golden diff (see docs/knowledge/schema-restructuring-build-order.md Sec.5 phase_A_schema_level)
 # ---------------------------------------------------------------------------
 
 def _normalize_legacy_view_self_ref(view: dict, base: str) -> dict:

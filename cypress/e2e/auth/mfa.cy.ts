@@ -1,5 +1,5 @@
 // DO NOT EDIT — handwritten MFA E2E test, not auto-generated.
-// Execution is karo's responsibility (test rule #3). This file only writes tests.
+// This file defines the test cases only; orchestration and test run execution are separate concerns.
 
 import { TEST_CREDENTIALS } from '../../support/test-credentials';
 

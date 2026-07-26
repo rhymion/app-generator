@@ -1776,7 +1776,7 @@ def _build_split_approval_inherit_block(indent: str = '  ') -> str:
     from the parent's own (pre-split) approval_request rows — unconditionally,
     with no requestor-role filter.
 
-    cmd_439 F1 (殿裁定 Option A): a split child continues whatever approval
+    cmd_439 F1 (approved Option A): a split child continues whatever approval
     flow the parent was already subject to, regardless of which role the
     split actor holds. This replaces the old creator-role-filtered lookup
     (_build_approval_create_block_for_entity) for the split path only —
