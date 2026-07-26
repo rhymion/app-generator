@@ -105,7 +105,6 @@ definitions:
         pattern: "^c[a-z0-9]{24,}$"
       name:
         type: string
-        minLength: 1
         x-pii: direct
       email:
         type: string
@@ -155,7 +154,6 @@ definitions:
         pattern: "^c[a-z0-9]{24,}$"
       name:
         type: string
-        minLength: 1
       description:
         type:
           - string
@@ -275,7 +273,6 @@ definitions:
         pattern: "^c[a-z0-9]{24,}$"
       name:
         type: string
-        minLength: 1
       description:
         type:
           - string
@@ -334,7 +331,6 @@ definitions:
         pattern: "^c[a-z0-9]{24,}$"
       name:
         type: string
-        minLength: 1
         x-entity-select: true
       create:
         type: boolean
@@ -400,7 +396,6 @@ definitions:
         pattern: "^c[a-z0-9]{24,}$"
       entity_name:
         type: string
-        minLength: 1
         x-entity-select: true
       requestor_role_id:
         type: 
@@ -494,13 +489,13 @@ definitions:
           target: approval_flow
           labelField: entity_name
       status:
-        type: integer
-        minimum: 0
-        maximum: 2
+        type: string
+        _prisma_native_enum_type: ApprovalRequestStatus
         enum:
           - Pending
           - Approved
           - Rejected
+          - TerminalRejected
 
   approvable:
     type: object
@@ -580,7 +575,6 @@ definitions:
         pattern: "^c[a-z0-9]{24,}$"
       message:
         type: string
-        minLength: 1
         x-mention: true
       commentable_id:
         type: string
@@ -683,7 +677,6 @@ definitions:
         default: 0
       name:
         type: string
-        minLength: 1
       path:
         type: string
         format: uri
@@ -707,7 +700,6 @@ definitions:
         pattern: "^c[a-z0-9]{24,}$"
       name:
         type: string
-        minLength: 1
 
   dashboard_widget:
     type: object
@@ -731,10 +723,8 @@ definitions:
           labelField: name
       name:
         type: string
-        minLength: 1
       entity_name:
         type: string
-        minLength: 1
       chart_type:
         type: integer
         minimum: 0
@@ -773,7 +763,6 @@ definitions:
           - year
       group_by_field:
         type: string
-        minLength: 1
       filter_field:
         type:
           - string
