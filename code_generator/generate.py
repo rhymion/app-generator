@@ -43,6 +43,7 @@ from generators import (
     build_dashboard_catalog,
     build_attachable_owners,
     attachment_type_ts,
+    reaction_type_ts,
     get_reservation_action_routes,
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
@@ -1032,12 +1033,16 @@ def generate(schema_path: str, output_dir: str) -> None:
         print('  Mention parser → lib/mention/parser.ts')
 
     # --- Comment reactions API route (app/api/comment/[commentId]/reactions/toggle/route.ts) ---
-    # Emitted whenever x-internal integer enum entities exist (i.e., reactions are enabled).
+    # Emitted whenever x-internal enum entities exist (i.e., reactions are enabled).
     # D3=A: toggle endpoint is POST /api/comment/[commentId]/reactions/toggle
     if named_constants:
+        _reaction_const = next((c for c in named_constants if c['entity_name'] == 'reaction'), None)
         _write(
             out / 'app' / 'api' / 'comment' / '[commentId]' / 'reactions' / 'toggle' / 'route.ts',
-            _render(env, 'comment_reactions_api_route.ts.jinja2', {}),
+            _render(env, 'comment_reactions_api_route.ts.jinja2', {
+                'value_type': reaction_type_ts(schema),
+                'runtime_type': _reaction_const['value_type'] if _reaction_const else 'number',
+            }),
         )
         print('  Comment reactions API route → app/api/comment/[commentId]/reactions/toggle/route.ts')
 

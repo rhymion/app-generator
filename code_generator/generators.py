@@ -247,6 +247,20 @@ def attachment_type_ts(schema: dict) -> str:
     return get_ts_type(prop)
 
 
+def reaction_type_ts(schema: dict) -> str:
+    """TS type for the `type` param threaded through the comment-reactions
+    feature (toggle server action, toggle API route, CommentReactionSummary /
+    reactionCounts / myReactionTypes). Mirrors reaction.type's actual field
+    type (plain `number` by default, or the nativeEnum literal union once
+    reaction.type has been migrated to a Prisma enum) so hand-offs to
+    prisma.reaction.create/findUnique/groupBy type-check without a cast.
+    """
+    prop = ((schema.get('definitions') or {}).get('reaction') or {}).get('properties', {}).get('type')
+    if not prop:
+        return 'number'
+    return get_ts_type(prop)
+
+
 def chart_context(ctx: dict, schema: dict) -> dict:
     chart_cfg = ctx.get('chart_cfg')
     if not chart_cfg:
@@ -3899,9 +3913,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     comment_jsx_parts = []
     comment_add_id_expr = 'src.id'  # default: old pattern uses parent entity id
     has_reactions = bool(ctx.get('named_constants'))
+    # toggle{Parent}CommentReaction's `type` param is the precise reaction-enum
+    # literal union (see generators.reaction_type_ts) — narrower than the shared
+    # CommentListWrapper's `string | number` callback signature. TS's strict
+    # (contravariant) function-parameter checking rejects the plain function
+    # reference here even though it's runtime-safe (the UI only ever forwards
+    # values that already came from COMMENT_REACTION_TYPES), hence the cast.
     _reaction_props = (
         f"          reactionTypes={{[...COMMENT_REACTION_TYPES]}}\n"
-        f"          onToggleReaction={{toggle{parent_pascal}CommentReaction}}\n"
+        f"          onToggleReaction={{toggle{parent_pascal}CommentReaction as (commentId: string, type: string | number) => Promise<CommentReactionSummary>}}\n"
         if has_reactions else ""
     )
     for c in comment_children:

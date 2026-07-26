@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 {% if has_grid_children or children_raw %}
 import type { GridColDef } from '@/components/ui/data';
 {% endif %}
-import type { FormViewProps } from '@/lib/{{ parent }}/types';
+import type { FormViewProps{% if has_comment_children and named_constants %}, CommentReactionSummary{% endif %} } from '@/lib/{{ parent }}/types';
 {% if has_grid_children %}
 import FieldsViewGrid from '@/components/_standard/FieldsViewGrid';
 {% if col_fn_names %}

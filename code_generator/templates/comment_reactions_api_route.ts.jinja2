@@ -5,10 +5,10 @@ import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 
 export type CommentReactionSummary = {
   commentId: string;
-  type: number;
+  type: {{ value_type }};
   active: boolean;
-  counts: Array<{ type: number; count: number }>;
-  myTypes: number[];
+  counts: Array<{ type: {{ value_type }}; count: number }>;
+  myTypes: ({{ value_type }})[];
 };
 
 type Params = { params: Promise<{ commentId: string }> };
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 
 // POST /api/comment/[commentId]/reactions/toggle
 // Toggles a reaction type for the authenticated user on the given comment.
-// Body: { type: number }
+// Body: { type: {{ value_type }} }
 // Returns CommentReactionSummary with updated active state and counts.
 // D7=A fallback: auth via API key only (see GET handler comment for rationale).
 export async function POST(request: NextRequest, { params }: Params) {
@@ -58,10 +58,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     const { userId } = await authenticateApiKey(request);
 
     const body = await request.json();
-    const { type } = body as { type: number };
+    const { type } = body as { type: {{ value_type }} };
 
-    const validTypes: number[] = COMMENT_REACTION_TYPES.map((t) => t.value);
-    if (typeof type !== 'number' || !validTypes.includes(type)) {
+    const validTypes: ({{ value_type }})[] = COMMENT_REACTION_TYPES.map((t) => t.value);
+    if (typeof type !== '{{ runtime_type }}' || !validTypes.includes(type)) {
       return NextResponse.json({ error: 'Invalid reaction type' }, { status: 400 });
     }
 

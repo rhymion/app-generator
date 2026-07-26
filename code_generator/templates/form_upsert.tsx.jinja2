@@ -20,7 +20,7 @@ import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}
 {% if has_comment_children and named_constants %}
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 {% endif %}
-import type { FormUpsertProps } from '@/lib/{{ parent }}/types';
+import type { FormUpsertProps{% if has_comment_children and named_constants %}, CommentReactionSummary{% endif %} } from '@/lib/{{ parent }}/types';
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
 import { AppFieldText, AppFieldBoolean, AppValidationError{% if has_entity_autocomplete %}, AppFieldRelation{% endif %}{% if has_flatten_accordion_upsert %}, AppSection{% endif %}{% if has_field_select %}, AppFieldSelect{% endif %} } from '@/components/ui';

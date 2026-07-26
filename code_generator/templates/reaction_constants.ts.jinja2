@@ -2,7 +2,11 @@
 {% for c in named_constants %}
 export const {{ c.const_name }} = [
 {% for item in c['items'] %}
+{% if c.value_type == 'string' %}
+  { value: '{{ item.value }}', label: '{{ item.label }}' },
+{% else %}
   { value: {{ item.value }}, label: '{{ item.label }}' },
+{% endif %}
 {% endfor %}
 ] as const;
 export type {{ c.const_name | replace('_TYPES', '_TYPE') }} = typeof {{ c.const_name }}[number];

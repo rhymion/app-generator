@@ -2189,7 +2189,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     # Named constants for x-internal entities (e.g. COMMENT_REACTION_TYPES)
     from generate_types import extract_named_constants
+    from generators import reaction_type_ts
     _all_named_constants = extract_named_constants(schema)
+    reaction_value_type = reaction_type_ts(schema)
 
     # Batched groupBy context for getCommentReactions — consumed by service/132b templates
     reaction_batch_query = (
@@ -2270,6 +2272,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         non_comment_ch=embedded_ch,
         comment_children=comment_children,
         named_constants=_all_named_constants,
+        reaction_value_type=reaction_value_type,
         reaction_batch_query=reaction_batch_query,
         bridge_parent_options=bridge_parent_options,
         bridge_child_ir=bridge_child_ir,

@@ -252,11 +252,18 @@ def generate_types_for_schema(schema_path: str, output_dir: str) -> None:
 
 
 def extract_named_constants(schema: dict) -> list[dict]:
-    """Extract named constants from x-internal entities with integer enum fields.
+    """Extract named constants from x-internal entities with enum fields.
 
-    Returns a list of {const_name, entity_name, prop_name, items: [{value, label}]}.
+    Returns a list of {const_name, entity_name, prop_name, value_type, items: [{value, label}]}.
     Naming: {PARENT}_{ENTITY}_TYPES where PARENT is the first non-user FK target,
     or {ENTITY}_TYPES when no suitable parent FK is found.
+
+    Accepts both plain-integer enum fields (legacy Int-with-magic-numbers) and
+    Prisma nativeEnum (string) fields (cmd_446 Class A) — a field that used to
+    be `type: integer` becomes `type: string` once its minimum/maximum are
+    dropped in favor of a Prisma enum, and must keep producing a constant so
+    consumers (the comment-reactions API route, the toggle server action,
+    reaction_constants.ts itself) don't silently disappear.
     """
     defs = schema.get('definitions', {})
     constants = []
@@ -279,7 +286,8 @@ def extract_named_constants(schema: dict) -> list[dict]:
                 break
 
         for prop_name, prop_def in props.items():
-            if prop_def.get('type') != 'integer':
+            prop_type = prop_def.get('type')
+            if prop_type not in ('integer', 'string'):
                 continue
             enum_vals = prop_def.get('enum')
             if not isinstance(enum_vals, list):
@@ -290,11 +298,18 @@ def extract_named_constants(schema: dict) -> list[dict]:
             else:
                 const_name = f"{entity_name.upper()}_TYPES"
 
-            items = [{'value': i, 'label': str(v)} for i, v in enumerate(enum_vals)]
+            if prop_type == 'integer':
+                value_type = 'number'
+                items = [{'value': i, 'label': str(v)} for i, v in enumerate(enum_vals)]
+            else:
+                value_type = 'string'
+                items = [{'value': v, 'label': str(v)} for v in enum_vals]
+
             constants.append({
                 'const_name': const_name,
                 'entity_name': entity_name,
                 'prop_name': prop_name,
+                'value_type': value_type,
                 'items': items,
             })
 

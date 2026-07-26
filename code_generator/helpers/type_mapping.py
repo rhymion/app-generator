@@ -17,9 +17,15 @@ def get_ts_type(prop: dict, for_view_props: bool = False) -> str:
     # that literal union so values assigned into a Prisma `data: {...}` write
     # type-check without a cast. The exposed JSON `type` is unaffected
     # (still "string" -- Class B: API/JSON shape unchanged).
-    if prop.get('_prisma_native_enum_type') and prop.get('enum') and prop_type == 'string':
-        union = ' | '.join(f"'{v}'" for v in prop['enum'])
-        return f"{union} | null" if for_view_props else union
+    # prop_type is a bare 'string' for non-nullable enum fields, but a JSON
+    # Schema union list like ['string', 'null'] for nullable ones (cmd_446
+    # Class A: dashboard_widget.stack_mode/group_by_bucket) — check both shapes.
+    if prop.get('_prisma_native_enum_type') and prop.get('enum'):
+        _types = prop_type if isinstance(prop_type, list) else [prop_type]
+        if 'string' in _types:
+            union = ' | '.join(f"'{v}'" for v in prop['enum'])
+            is_nullable = 'null' in _types
+            return f"{union} | null" if (is_nullable or for_view_props) else union
 
     if isinstance(prop_type, list):
         if is_date:
