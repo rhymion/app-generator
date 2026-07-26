@@ -5,8 +5,8 @@ import prisma from '@/lib/prisma';
 import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
 {% endif %}
 
-const SPLIT_STATUS = {{ status_split_value }};
-const REJECTED_STATUS = {{ status_rejected_value }};
+const SPLIT_STATUS = '{{ status_split_value }}';
+const REJECTED_STATUS = '{{ status_rejected_value }}';
 
 type SplitPart = {
 {% for field in inherited_fields %}
@@ -307,7 +307,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             {% if split_result_field %}
             {{ split_result_field }}: true,
             {% endif %}
-            status: 0, // pending
+            status: 'pending', // pending
             {% if has_approvable %}
             approvable_id: childApprovable.id,
             {% endif %}

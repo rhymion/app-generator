@@ -1602,6 +1602,11 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             # to the union-typed FormUpsert `src` prop.
             if defn.get('_prisma_native_enum_type') and 'default' in defn:
                 return f"'{defn['default']}' as const"
+            if defn.get('_prisma_native_enum_type') and isinstance(defn.get('enum'), list) and defn['enum']:
+                # No schema default (e.g. shift.status) — seed the "new" form
+                # with the first declared enum member so it still typechecks
+                # against the nativeEnum literal union.
+                return f"'{defn['enum'][0]}' as const"
             return "''"
         if actual == 'boolean':
             return 'false'

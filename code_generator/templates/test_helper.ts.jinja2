@@ -919,7 +919,7 @@ export async function populate{{ pascal }}WithRejectedApproval(creatorId: string
   const approvalRequests = [];
   for (const flowId of approvalFlowIds) {
     const ar = await prisma.approval_request.create({
-      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 2 },
+      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 'Rejected' },
     });
     approvalRequests.push(ar);
   }
@@ -957,7 +957,7 @@ export async function populate{{ pascal }}WithTerminalRejectedApproval(creatorId
   const approvalRequests = [];
   for (const flowId of approvalFlowIds) {
     const ar = await prisma.approval_request.create({
-      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 3 },
+      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 'TerminalRejected' },
     });
     approvalRequests.push(ar);
   }
@@ -996,7 +996,7 @@ export async function populate{{ pascal }}WithApproval(creatorId: string, approv
   const approvalRequests = [];
   for (const flowId of approvalFlowIds) {
     const ar = await prisma.approval_request.create({
-      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 0 },
+      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 'Pending' },
     });
     approvalRequests.push(ar);
   }

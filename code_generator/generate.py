@@ -876,8 +876,8 @@ def generate(schema_path: str, output_dir: str) -> None:
         _split_ctx = {
             'entity_name': _def_key,
             'pascal_name': to_pascal_case(_def_key),
-            'status_split_value': _split_status_enum.index('split') if 'split' in _split_status_enum else 1,
-            'status_rejected_value': _split_status_enum.index('rejected') if 'rejected' in _split_status_enum else 2,
+            'status_split_value': next((v for v in _split_status_enum if str(v).lower() == 'split'), 'split'),
+            'status_rejected_value': next((v for v in _split_status_enum if str(v).lower() == 'rejected'), 'rejected'),
             'has_approvable': _split_has_approvable,
             'approval_create_block': _split_approval_create_block,
             'has_quantity_check': bool(_qty_field),
