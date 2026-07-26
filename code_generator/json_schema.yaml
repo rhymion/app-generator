@@ -387,8 +387,6 @@ definitions:
       api: custom
     fields:
       type:
-        minimum: 0
-        maximum: 4
         enum:
           - Like
           - Love
