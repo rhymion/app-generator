@@ -596,9 +596,8 @@ definitions:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
       type:
-        type: integer
-        minimum: 0
-        maximum: 4
+        type: string
+        _prisma_native_enum_type: ReactionType
         enum:
           - Like
           - Love
@@ -664,9 +663,8 @@ definitions:
         type: string
         pattern: "^c[a-z0-9]{24,}$"
       type:
-        type: integer
-        minimum: 0
-        maximum: 3
+        type: string
+        _prisma_native_enum_type: AttachmentType
         enum:
           - image
           - file
@@ -708,7 +706,6 @@ definitions:
       - dashboard_id
       - name
       - entity_name
-      - chart_type
       - group_by_field
     properties:
       id:
@@ -726,21 +723,19 @@ definitions:
       entity_name:
         type: string
       chart_type:
-        type: integer
-        minimum: 0
-        maximum: 3
+        type: string
+        _prisma_native_enum_type: DashboardWidgetChartType
+        default: column
         enum:
           - pie
           - column
           - bar
           - line
-        default: 1
       stack_mode:
         type:
-          - integer
+          - string
           - "null"
-        minimum: 0
-        maximum: 2
+        _prisma_native_enum_type: DashboardWidgetStackMode
         enum:
           - grouped
           - stacked
@@ -751,10 +746,9 @@ definitions:
           - "null"
       group_by_bucket:
         type:
-          - integer
+          - string
           - "null"
-        minimum: 0
-        maximum: 4
+        _prisma_native_enum_type: DashboardWidgetGroupByBucket
         enum:
           - day
           - week
