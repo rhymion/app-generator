@@ -1,14 +1,14 @@
 # Dependency Bump Acceptance Criteria
 
 **Status: Adopted**
-**Author: gunshi (subtask_459b_process_gap)**
+**Author: the design reviewer (subtask_459b_process_gap)**
 **Date: 2026-07-26**
 
 ---
 
 ## Problem
 
-When an ashigaru runs `npm update` or `npm install <pkg>` to bump a
+When an agent runs `npm update` or `npm install <pkg>` to bump a
 dependency, `npm audit` may exit 0 even if `package-lock.json` is left
 incomplete — indirect dependency entries can be silently dropped from the
 lockfile. CI uses `npm ci`, which validates lockfile structural completeness;
@@ -53,7 +53,7 @@ error listing the missing entry (e.g.
 
 ## Checklist for Dependency Bump Tasks
 
-When writing or reviewing an ashigaru task that bumps any npm dependency,
+When writing or reviewing an agent task that bumps any npm dependency,
 confirm the task YAML's `acceptance_criteria` includes:
 
 ```yaml
@@ -79,7 +79,7 @@ esbuild, napi-rs stack).
 - **Detection**: CI `npm ci` exit 1 with explicit missing-entry error
 - **AC at the time**: `npm audit` only — `npm ci` exit 0 not required
 - **Repair**: `git restore package-lock.json && npm install --package-lock-only`
-  (see `~/.claude/skills/shogun-npm-lock-integrity-repair/SKILL.md`)
+  (see the Repair Procedure section below)
 - **Repair task**: cmd_443
 
 ### Incident 2: subtask_457j_i2_fix → cmd_459 (2026-07-26)
@@ -96,13 +96,13 @@ esbuild, napi-rs stack).
 ## Repair Procedure
 
 If `npm ci` fails after a dependency bump has landed:
-→ See `~/.claude/skills/shogun-npm-lock-integrity-repair/SKILL.md`
+→ `git restore -- package-lock.json` to restore the last known-good committed state, then
+  `npm install --package-lock-only` to regenerate missing structural entries without
+  changing any pinned version. See Incident 1 above for a worked example.
 
 ---
 
 ## Related Documents
 
-- `~/.claude/skills/shogun-npm-lock-integrity-repair/SKILL.md` — repair
-  procedure after lockfile corruption is detected
 - `docs/knowledge/submodule-pointer-bump-policy.md` — analogous policy
   for submodule pointer bump tasks
