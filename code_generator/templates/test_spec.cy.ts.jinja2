@@ -85,6 +85,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for fk in child.fk_create_fields %}
 {{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
 {% endfor %}
+{% for line in child.native_enum_create_calls %}
+{{ I }}{{ line }}
+{% endfor %}
 {% if child.create_obj != '{}' %}
 {{ I }}fillDataGridRow(0, {{ child.create_obj }});
 {% endif %}
@@ -147,6 +150,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_full_fields %}
 {{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
+{% endfor %}
+{% for line in child.native_enum_full_calls %}
+{{ I }}{{ line }}
 {% endfor %}
 {% if child.full_create_obj != '{}' %}
 {{ I }}fillDataGridRow(0, {{ child.full_create_obj }});
@@ -254,6 +260,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_create_fields %}
         selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
+{% endfor %}
+{% for line in child.native_enum_create_calls %}
+        {{ line }}
 {% endfor %}
 {% if child.create_obj != '{}' %}
         fillDataGridRow(0, {{ child.create_obj }});
