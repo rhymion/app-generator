@@ -784,7 +784,8 @@ def _child_system_managed_fk_excludes(child_def: dict) -> set[str]:
     text/select — the service sets them internally (reservation/split/approval
     flows). Excluding them keeps generated full-data e2e tests from calling
     fillDataGridRow with a literal string on a field that requires a real cuid
-    (root cause: queue/reports/subtask_294a_gunshi.yaml failure_classification).
+    (root cause: literal-string autofill cannot satisfy the FK's real-cuid
+    requirement).
 
     - x-relationship.type == 'one-to-one_bridge' (e.g. approvable_id): the
       generic internal-bridge FK marker used throughout code_generator.
