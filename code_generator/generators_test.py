@@ -746,7 +746,12 @@ def get_field_metas(
                 'category': 'string_enum',
                 'required': prop_name in required_fields,
                 'enum_values': prop.get('enum'),
-                'enum_namespace': prop.get('x-enum-namespace'),
+                # nativeEnum (Prisma enum) fields have no explicit x-enum-namespace
+                # in most schemas; generators.py's _native_enum_ns() falls back to
+                # the Prisma enum type name itself for the singleSelect column's
+                # translated option labels — mirror that fallback here so the
+                # generated test's expected label matches what's actually rendered.
+                'enum_namespace': prop.get('x-enum-namespace') or prop.get('_prisma_native_enum_type'),
             })
         else:
             metas.append({
@@ -926,9 +931,7 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
         first = next((v for v in values if v is not None), None)
         if first is None:
             return ''
-        if cat == 'enum':
-            return _enum_label(field, first)
-        return str(first)
+        return _enum_label(field, first)
 
     elif cat == 'number':
         val = 100
@@ -1225,7 +1228,7 @@ def _child_scalar_entries(fields: list, title: str, value_fn) -> list[str]:
     """Return JS object entries for scalar (non-autocomplete) datagrid child fields."""
     entries = []
     for field in fields:
-        if field['category'] in ('autocomplete', 'enum'):
+        if field['category'] in ('autocomplete', 'enum', 'string_enum'):
             continue
         value = value_fn(field, title)
         if field['category'] in ('boolean', 'number'):
@@ -1233,6 +1236,34 @@ def _child_scalar_entries(fields: list, title: str, value_fn) -> list[str]:
         else:
             entries.append(f"{field['prop_name']}: '{value}'")
     return entries
+
+
+def _child_native_enum_singleselect_calls(fields: list, title: str, value_fn) -> list[str]:
+    """Return selectDataGridSingleSelect() call lines for nativeEnum datagrid child fields.
+
+    Row index is always 0: sibling FK calls in these datagrid-child test
+    sections (see gen_child_datagrid_fk_fields) hardcode row 0 too, since
+    each section only ever adds a single child row. selectDataGridSingleSelect
+    is imported directly in the template (no `cy.` prefix), matching the
+    existing fk.field / fk.label_code call sites.
+    """
+    calls = []
+    for field in fields:
+        if field['category'] != 'string_enum':
+            continue
+        # value_fn (cypress_create_value / cypress_edit_value) returns the
+        # translated display label for string_enum (matches the MUI singleSelect
+        # option text); reverse-lookup the raw enum member it corresponds to,
+        # since the cell's underlying input value is the raw member, not the label.
+        label = value_fn(field, title)
+        raw = next(
+            (v for v in (field.get('enum_values') or []) if v is not None and _enum_label(field, v) == label),
+            label,
+        )
+        calls.append(
+            f"selectDataGridSingleSelect(0, '{field['prop_name']}', '{label}', '{raw}');"
+        )
+    return calls
 
 
 def gen_child_datagrid_object(child_meta: dict, action: str) -> str:
@@ -2544,14 +2575,23 @@ def spec_context(
         child_name = child_meta['child']['name']
         fk_create_fields = gen_child_datagrid_fk_fields(child_meta['required_fields'], schema)
         fk_full_fields = gen_child_datagrid_fk_fields(child_meta['fields'], schema)
+        child_title = child_meta['names']['title']
+        native_enum_create_calls = _child_native_enum_singleselect_calls(
+            child_meta['required_fields'], child_title, cypress_create_value
+        )
+        native_enum_full_calls = _child_native_enum_singleselect_calls(
+            child_meta['fields'], child_title, cypress_create_value
+        )
         datagrid_children_data.append({
-            'title': child_meta['names']['title'],
+            'title': child_title,
             'pascal': to_pascal_case(child_name),
             'is_required_in_parent': child_meta['child']['property_name'] in detail_required,
             'create_obj': gen_child_datagrid_object(child_meta, 'create'),
             'full_create_obj': gen_child_full_datagrid_object(child_meta),
             'fk_create_fields': fk_create_fields,
             'fk_full_fields': fk_full_fields,
+            'native_enum_create_calls': native_enum_create_calls,
+            'native_enum_full_calls': native_enum_full_calls,
         })
 
     # List children data
@@ -2770,7 +2810,13 @@ def spec_context(
         'has_optional': bool(optional_field_metas),
         'has_children': bool(child_metas),
         'has_datagrid_children': bool(datagrid_children),
-        'has_datagrid_fk_children': any(c['fk_create_fields'] or c['fk_full_fields'] for c in datagrid_children_data),
+        # Name predates nativeEnum support; it now gates the selectDataGridSingleSelect
+        # import for BOTH FK and nativeEnum datagrid child fields (both need it).
+        'has_datagrid_fk_children': any(
+            c['fk_create_fields'] or c['fk_full_fields']
+            or c['native_enum_create_calls'] or c['native_enum_full_calls']
+            for c in datagrid_children_data
+        ),
         'I': I,
         'required_fill_cmds': required_fill_cmds,
         'all_fill_cmds': all_fill_cmds,
