@@ -3644,6 +3644,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             if actual == 'string' and fmt in ('date', 'date-time', 'time'):
                 return "dayjs().toISOString()"
             if actual == 'string':
+                # Prisma nativeEnum-backed field: '' is not a valid enum member,
+                # so the new-row seed must use the schema's actual default
+                # (mirrors build_context.py:_default_value, cmd_446 pilot).
+                if defn.get('_prisma_native_enum_type') and 'default' in defn:
+                    return f"'{defn['default']}'"
+                if defn.get('_prisma_native_enum_type') and isinstance(defn.get('enum'), list) and defn['enum']:
+                    # No schema default (e.g. nullable stack_mode/group_by_bucket) —
+                    # seed with the first declared enum member so create() still
+                    # receives a valid enum value.
+                    return f"'{defn['enum'][0]}'"
                 return "''"
             if actual in ('integer', 'number'):
                 if nullable:
