@@ -1,0 +1,45 @@
+name: Shogun-vocabulary gate
+
+on: [push, pull_request]
+
+jobs:
+  vocab-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for internal vocabulary leaks
+        run: |
+          set -e
+          DIRS="code_generator cypress prj components lib app scripts"
+          PATTERNS=(
+            '\bshogun\b'
+            '\bkaro\b'
+            '\bashigaru\b'
+            '\bgunshi\b'
+            '殿裁定|殿裁可|殿確認|殿留保'
+            'queue/reports/'
+            'queue/shogun_to_karo'
+            '~/work/|~/\.claude/|/home/sean/'
+          )
+          FOUND=0
+          for dir in $DIRS; do
+            [ -d "$dir" ] || continue
+            for pat in "${PATTERNS[@]}"; do
+              HITS=$(grep -rniE "$pat" "$dir" \
+                --include="*.py" --include="*.ts" --include="*.tsx" \
+                --include="*.js" --include="*.jinja2" --include="*.sh" \
+                --exclude="AGENTS.md" --exclude="CLAUDE.md" \
+                || true)
+              if [ -n "$HITS" ]; then
+                echo "=== VOCAB GATE FAIL: pattern '$pat' in $dir ==="
+                echo "$HITS"
+                FOUND=1
+              fi
+            done
+          done
+          if [ "$FOUND" -eq 1 ]; then
+            echo ""
+            echo "FAIL: internal vocabulary found in product code."
+            echo "See docs/knowledge/dependency-bump-acceptance-criteria.md for context."
+            exit 1
+          fi
