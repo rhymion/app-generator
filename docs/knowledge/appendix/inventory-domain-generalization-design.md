@@ -34,12 +34,12 @@ existing data can be deleted and recreated. This simplification eliminates an en
 
 ### 1.1 Investigation Scope
 
-| Subtask | Worker | Scope |
-|---------|--------|-------|
-| 310a | ashigaru1 | jinja2 templates (`code_generator/templates/`) |
-| 310b | ashigaru3 | Python generator (`code_generator/*.py`) + `prj/code_generator/json_schema.yaml` |
-| 310c | ashigaru6 | x-ledger-source current state + receiving/reservation asymmetry |
-| 310d | ashigaru7 | x-reservation full text (3 blocks) + warehouse/location current state |
+| Subtask | Area | Scope |
+|---------|------|-------|
+| 310a | jinja2 templates | `code_generator/templates/` |
+| 310b | Python generator | `code_generator/*.py` + `prj/code_generator/json_schema.yaml` |
+| 310c | x-ledger-source | current state + receiving/reservation asymmetry |
+| 310d | x-reservation | full text (3 blocks) + warehouse/location current state |
 
 Classification key:
 - **(a-role)** Role-dependent: generator resolves by literal name; **must be replaced with marker**
@@ -104,7 +104,7 @@ Gunshi's original recommendation (embed `ledgerEntity`/`transactionableEntity` i
 
 Rationale: supports multiple independent inventory-like sets in the same schema (e.g., a schema
 with both `inventory` and `supply_pool` each having their own ledger/transactionable entities).
-The per-reservation-block embedding (gunshi's Option A) cannot express this.
+The per-reservation-block embedding (the inline-embedding option) cannot express this.
 
 ### 2.2 New Top-Level Schema Structure
 
@@ -318,7 +318,7 @@ the receiving approval/rejection flow (`receiving_receipt_line`-side) e2e tests 
 
 **Stop-and-report clause**: If, during Phase 2 implementation, `ReceivingConfirmForm` proves
 to be reachable in a currently-exercised user path and its deletion breaks the build or the
-receiving flow, the implementor must **stop immediately and report to shogun** rather than
+receiving flow, the implementor must **stop and raise the issue for maintainer review** rather than
 proceeding with blind deletion. The ruling is based on the premise that the form is
 unused in the current approval flow; if that premise is wrong, escalate.
 
@@ -423,7 +423,7 @@ and catch blocks). Per Lord ruling, this is accepted. All callers must update wh
 **Implementation-time checks (mandatory — from RC-1 ruling, see §4.5)**:
 - (a) `FormView.tsx` has no dangling import after re-generation (build must not error on import)
 - (b) `next build` exits 0; `receiving_receipt_line`-side approval/rejection e2e tests remain green
-- Stop and report to shogun if `ReceivingConfirmForm` proves reachable and deletion breaks the flow
+- Stop and raise for maintainer review if `ReceivingConfirmForm` proves reachable and deletion breaks the flow
 **Lord approval needed before**: none (RC-1 resolved — delete without replacement confirmed).
 
 ### Phase 3 — Rename + Richer Ship Skeleton
@@ -486,7 +486,7 @@ checks documented in §4.5 and Phase 2 gate (§6).
 
 ### RC-2 — RESOLVED (2026-07-13): "Ship" confirmed
 
-**Issue**: gunshi recommends renaming "claim" operation to "Ship". This matches existing schema
+**Issue**: the design review recommends renaming "claim" operation to "Ship". This matches existing schema
 `event_type: ship` and existing code comments. However, if Lord prefers "Fulfill" for semantic
 reasons, code comments and design docs should be updated accordingly.
 

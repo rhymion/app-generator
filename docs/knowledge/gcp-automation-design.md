@@ -54,7 +54,7 @@ Operations performed (idempotent — safe to re-run):
 > Accelerate.** Accelerate has never successfully reached this environment's
 > Cloud SQL instance — it fails with P1001 due to `GOOGLE_MANAGED_INTERNAL_CA` TLS
 > verification (see `rca_266a_accelerate_cloudsql.md` / `rca_267a_db_path_decision.md`
-> in the shogun repo's `queue/reports/`). The Lord is following up with Prisma
+> in the internal reports). The maintainer is following up with Prisma
 > support separately; this step is skipped for normal setup/deploy.
 >
 > Skip straight to Step 4 unless you are specifically re-testing Accelerate.
