@@ -13,7 +13,7 @@ describe('API: CSV Import batch2 (cmd_328) — dotted FK + Tier2/Tier3 authoriza
     Cypress.session.clearAllSavedSessions();
   });
 
-  // test4 (redesigned per gunshi subtask_328d): the original "other org row" scenario
+  // test4 (redesigned per the design review, subtask_328d): the original "other org row" scenario
   // is N/A for this schema (all 5 importable entities have should_filter_by_org=False).
   // Replaced with: an actor whose permission for 'role' has import:false is rejected
   // at Tier2 (assertPermission), before any row is even parsed for match/create/update.
