@@ -96,7 +96,7 @@ Classification key:
 
 ### 2.1 Ruling (OD-1 = B, Lord-refined)
 
-Gunshi's original recommendation (embed `ledgerEntity`/`transactionableEntity` inside
+The design reviewer's original recommendation (embed `ledgerEntity`/`transactionableEntity` inside
 `x-reservation.transaction`) was **not adopted**. The Lord's ruling:
 
 > **Declare `ledger`, `transactionable`, and `pool` as top-level schema entities.
@@ -296,7 +296,7 @@ confirmed these are distinct:
 > Approval and rejection are handled by `receiving_receipt_line`, not by `ReceivingConfirmForm`.
 > `ReceivingConfirmForm.tsx` and `app/api/receiving_receipt/.../actions/confirm/route.ts` are
 > **not needed in the current approval flow**. Abolish x-receiving and **delete these generated
-> files outright — no replacement**. Gunshi's alternative proposal (re-generate confirm
+> files outright — no replacement**. The design reviewer's alternative proposal (re-generate confirm
 > form/route via `x-ledger-source: {event_type: receive}`) is **not adopted** because the
 > form/route themselves are unnecessary.
 
