@@ -54,15 +54,14 @@ Several code comments cite "notification design 2026-05-11" or `performance-plan
 this repo or anywhere findable:
 - `find . -iname "performance-plan-session*"` inside `app-template` (parent + submodule):
   no hits.
-- The only file with that name on disk is
-  `~/work/tutorial/app-generator-1/memory/performance-plan-session.md`, which belongs to a
+- A file with that name does exist elsewhere on the author's machine, but it belongs to a
   **different, unrelated project** (proj_a) and is dated 2026-05-04. It never mentions
   "notification" (`grep -i notif` on that file returns zero matches). This is a coincidental
   filename collision, not the cited doc.
 - The actual specification of the four triggers only exists in the body of commit `465a78f`
   (`git log -1 --format=%B 465a78f`), reproduced in full below — no persisted design doc exists
-  for this feature in either `docs/knowledge/`, `docs/`, or the `planning/` directory
-  (`~/work/app-generator-project-docs/planning/`, which has no notification-related file).
+  for this feature in either `docs/knowledge/`, `docs/`, or the project's separate planning
+  directory (also checked; it has no notification-related file).
 
 Full trigger list as originally specified in commit `465a78f`:
 
