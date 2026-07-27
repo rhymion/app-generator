@@ -172,10 +172,7 @@ def get_splittable_bridge_field(entity_def: dict) -> str:
     plain x-approval-lines + receiving_receipt_line's own x-ledger-source), so
     there is no single reverse lookup that resolves it for both; the entity's
     own x-splittable config is the one place both agree to declare it (cmd_312
-    Phase1, see queue/reports/subtask_312a_ashigaru3.yaml for why the more
-    "principled" x-reservation reverse-lookup was rejected — it silently
-    dropped the bridge for receiving_receipt_line, which has no x-reservation
-    on its parent at all).
+    Phase1; see docs/knowledge/schema-yaml-configuration.md for background).
     """
     split_cfg = entity_def.get('x-splittable')
     split_dict = split_cfg if isinstance(split_cfg, dict) else {}

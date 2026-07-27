@@ -864,7 +864,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         # cmd_296 Phase2: one approvable per part, created directly in the
         # per-part loop (no pre-create array — unlike cmd_295's x-approval-lines
         # batch).
-        # cmd_439 F1 (殿裁定 Option A): split children inherit the parent's
+        # cmd_439 F1 (approved Option A): split children inherit the parent's
         # existing approval_request flow IDs unconditionally — no
         # requestor-role filter. This is a different rule from
         # x-approval-lines' creator-role-filtered flow lookup, so split no
