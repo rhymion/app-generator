@@ -7,7 +7,7 @@
     "build:pdf-font": "python3 scripts/build_pdf_font.py",
     "cleanup": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml ./",
     "cleanup:all": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml ./ --prune-orphans",
-    "check:generated": "python3 code_generator/check_generated.py code_generator/json_schema.yaml ./",
+    "check:generated": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/check_generated.py code_generator/.generated/json_schema.yaml ./",
     "cy:open": "cross-env NODE_ENV=test cypress open",
     "db:generate": "prisma generate",
     "db:reset:test:sql": "cross-env NODE_ENV=test bash scripts/db-reset-sql.sh",
