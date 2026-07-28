@@ -39,7 +39,20 @@ def build_validation_context(ctx: dict) -> dict:
     # missing ("<Field> is required"). Their stored value is preserved on update.
     readonly_props = set(ctx.get('readonly_fields') or [])
 
+    # `required_fields` (schema `required:` only) feeds service_validation.ts,
+    # which guards validateOnAdd() too -- a select-like field with a Prisma
+    # `@default(...)` must stay legal to OMIT entirely on create (the default
+    # fills it in; the generated API POST tests rely on exactly this). Forcing
+    # it there rejects every such create with "<Field> is required" (cmd_472
+    # regression: POST /api/room without `status` started 500ing).
+    #
+    # `client_required_fields` additionally covers select-like non-nullable
+    # fields (cmd_472/R-2) and feeds only form_validation.ts: the client form
+    # always pre-fills such a field (the "new" page's `src` literal sets
+    # `status: 'available'`), so it is never legitimately absent there --
+    # only explicitly cleared, which getValidationError() must block.
     required_fields: list[dict] = []
+    client_required_fields: list[dict] = []
     for prop_info in parent_prop_infos:
         prop = prop_info['prop']
         if prop in _SYSTEM_FIELDS:
@@ -47,12 +60,12 @@ def build_validation_context(ctx: dict) -> dict:
         if prop in readonly_props:
             continue
         defn = prop_info.get('def') or {}
-        if prop not in required_props and not is_forced_required_field(defn):
-            continue
-        required_fields.append({
-            'key': prop,
-            'label': _field_label(prop),
-        })
+        entry = {'key': prop, 'label': _field_label(prop)}
+        if prop in required_props:
+            required_fields.append(entry)
+            client_required_fields.append(entry)
+        elif is_forced_required_field(defn):
+            client_required_fields.append(entry)
 
     one_to_one_checks = []
     for rel in selector_oto_rels:
@@ -68,5 +81,6 @@ def build_validation_context(ctx: dict) -> dict:
     return {
         'model': model,
         'required_fields': required_fields,
+        'client_required_fields': client_required_fields,
         'one_to_one_checks': one_to_one_checks,
     }
