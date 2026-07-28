@@ -12,12 +12,12 @@ The app shell (header, sidebar, footer) is designed to work on both desktop and 
 lib/site-config.ts              ← single config file (title, nav links, theme)
 components/SidebarContext.tsx   ← React context: isOpen / open / close / toggle
 components/SessionSidebar.tsx   ← renders desktop panel OR mobile drawer
-app/providers.tsx               ← SessionProvider + SidebarProvider
-app/layout.tsx                  ← responsive shell (min-h-screen flex flex-col)
-app/@header/page.tsx            ← sticky header with hamburger button
-app/@sidebar/page.tsx           ← nav link list (server component)
-app/@footer/page.tsx            ← footer bar
-app/globals.css                 ← base colour tokens only
+app/[locale]/providers.tsx      ← SessionProvider + SidebarProvider
+app/[locale]/layout.tsx         ← responsive shell (min-h-screen flex flex-col)
+app/[locale]/@header/page.tsx   ← sticky header with hamburger button
+app/[locale]/@sidebar/page.tsx  ← nav link list (server component)
+app/[locale]/@footer/page.tsx   ← footer bar
+app/globals.css                 ← base colour tokens only (root layout, outside [locale])
 ```
 
 ---
@@ -68,7 +68,7 @@ export const themeConfig = {
 
 ### State management
 
-`SidebarContext` (a React context) holds `isOpen` and provides `open`, `close`, and `toggle` helpers. It is provided by `SidebarProvider` inside `app/providers.tsx`, so both the header and the sidebar wrapper can read the same state.
+`SidebarContext` (a React context) holds `isOpen` and provides `open`, `close`, and `toggle` helpers. It is provided by `SidebarProvider` inside `app/[locale]/providers.tsx`, so both the header and the sidebar wrapper can read the same state.
 
 ### Header (hamburger button)
 
@@ -109,7 +109,7 @@ A search icon link to `/search` was added to the global header for authenticated
 - Rendered only for authenticated users (matching `NotificationBell` visibility logic).
 - Uses `next-intl` `Link` so locale prefix is applied automatically.
 - i18n keys: `Header.search` (tooltip/title) and `Header.searchAriaLabel` (aria-label).
-- Defined in `app/@header/page.tsx` (a static file not overwritten by `generate-code`).
+- Defined in `app/[locale]/@header/page.tsx` (a static file not overwritten by `generate-code`).
 
 ---
 
