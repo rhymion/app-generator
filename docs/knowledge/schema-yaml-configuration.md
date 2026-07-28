@@ -1153,7 +1153,7 @@ The intended default is **parent-owned CRUD**: each parent listed in a child's
 `x-bridge.parents` creates/edits/deletes children bound to the current parent implicitly
 via the embedded grid, while the child's standalone pages remain for list/detail/search.
 The full design — including read-only parent metadata and per-parent label strategy — is in
-**`docs/knowledge/appendix/cmd_167_bridge-interface-design.md`**.
+**`docs/knowledge/bridge-interface-design.md`**.
 
 > **Tip:** always give a bridge child an `x-display.table`. It supplies the columns for the
 > parent-embedded grid and the parent-context column on the child's standalone list.

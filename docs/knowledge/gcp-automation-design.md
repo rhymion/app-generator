@@ -49,7 +49,7 @@ Operations performed (idempotent — safe to re-run):
 
 ### Step 3: [Optional, currently disabled] Obtain Accelerate URL from Prisma Console
 
-> **Decision (2026-07-04, rca_267a §6, Lord-approved cmd_267+addendum): the direct
+> **Decision (2026-07-04, rca_267a §6, approved cmd_267+addendum): the direct
 > Cloud SQL socket path (`DATABASE_URL`) is the DEFAULT production DB path, not
 > Accelerate.** Accelerate has never successfully reached this environment's
 > Cloud SQL instance — it fails with P1001 due to `GOOGLE_MANAGED_INTERNAL_CA` TLS

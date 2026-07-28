@@ -963,7 +963,7 @@ class TestVirtualResolverNonOverwrite:
 #
 # Policy history: an isinstance(str) guard dropped composite/dotted labelField
 # relations from x_relationships_list. Restoring that guard (policy (a)) was
-# tried first, but the Lord found the real-world fallout on proj_c: those FK
+# tried first, but real-world fallout was found on proj_c: those FK
 # columns (e.g. inventory_movement.from_inventory_id/to_inventory_id, whose
 # target's labelField is composite) are ALSO excluded from export_scalar_fields
 # (FK columns aren't scalars) — so excluding them from x_relationships_list too
@@ -974,7 +974,7 @@ class TestVirtualResolverNonOverwrite:
 #
 # cmd_432 merge note: this policy supersedes cmd_351's exclusion guard
 # (doreen/import branch only, 2026-07-17), which predates and was never
-# updated to incorporate this later (2026-07-19) Lord-ruled reversal from
+# updated to incorporate this later (2026-07-19) reversal from
 # main. DP-2's display_col naming (next section) composes with this policy
 # unchanged: composite/dotted relations fall back to a `_name`-suffixed
 # display_col since no single field name exists to name it after.
