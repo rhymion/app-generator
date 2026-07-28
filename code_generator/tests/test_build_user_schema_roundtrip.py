@@ -277,16 +277,58 @@ def test_merge_internal_definitions_missing_file_is_noop(tmp_path):
 
 
 def test_default_schema_bridge_entities_are_unaffected_by_internal_file(tmp_path):
-    """The framework's own json_schema.yaml still defines approvable /
-    commentable / attachable itself; the sibling json_schema_internal.yaml
-    (real file, not a fixture) must not change its Stage 4 output at all
-    (user-always-wins) -- regression guard for the file this ships next to
-    SCHEMA_PATH in code_generator/."""
-    out_path = tmp_path / ".generated" / "json_schema.yaml"
-    build_user_schema(SCHEMA_PATH, PRISMA_SCHEMA_PATH, out_path)
+    """The framework's own json_schema.yaml already defines approvable /
+    commentable / attachable itself, so the sibling json_schema_internal.yaml
+    (real file, not a fixture) must leave *those* entities' Stage 4 output
+    completely untouched -- user-always-wins (see _merge_internal_definitions).
 
-    expected = _load(STAGE4_REFERENCE_PATH)
-    rebuilt = _load(out_path)
+    This is NOT the same invariant as "internal file changes nothing at all":
+    an entity the default schema does *not* define itself (e.g.
+    `notification`, added by cmd_475) is legitimately filled in from the
+    internal file -- that is the file's whole purpose, not a violation. A
+    full byte-for-byte comparison against a frozen reference would reject
+    every future internal-only addition, which defeats the point of the
+    file. So this guard builds the schema twice -- once with the real
+    internal file consulted, once with it hidden from build_user_schema --
+    and asserts identical output only for entities the user schema itself
+    defines, while separately confirming the internal-only entity really is
+    internal-only (present when consulted, absent when hidden)."""
+    user_definitions = _load(SCHEMA_PATH)["definitions"]
 
-    diffs = _deep_diff(expected, rebuilt)
-    assert not diffs, "json_schema_internal.yaml changed default schema output:\n" + "\n".join(diffs)
+    with_internal_out = tmp_path / "with_internal" / "json_schema.yaml"
+    build_user_schema(SCHEMA_PATH, PRISMA_SCHEMA_PATH, with_internal_out)
+    with_internal = _load(with_internal_out)
+
+    # A copy of json_schema.yaml in a directory with no sibling
+    # json_schema_internal.yaml -- _merge_internal_definitions is a no-op
+    # here, so this build is "as if" the internal file didn't exist.
+    isolated_dir = tmp_path / "isolated"
+    isolated_dir.mkdir()
+    isolated_schema_path = isolated_dir / "json_schema.yaml"
+    isolated_schema_path.write_text(SCHEMA_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    without_internal_out = tmp_path / "without_internal" / "json_schema.yaml"
+    build_user_schema(isolated_schema_path, PRISMA_SCHEMA_PATH, without_internal_out)
+    without_internal = _load(without_internal_out)
+
+    diffs = []
+    for base in user_definitions:
+        for name in (base, f"__{base}"):
+            if name not in with_internal["definitions"] and name not in without_internal["definitions"]:
+                continue  # standalone entity: no synthesized raw twin either way
+            diffs.extend(
+                _deep_diff(
+                    without_internal["definitions"].get(name),
+                    with_internal["definitions"].get(name),
+                    f".definitions.{name}",
+                )
+            )
+    assert not diffs, (
+        "json_schema_internal.yaml changed the Stage 4 output of an entity "
+        "the default json_schema.yaml defines itself -- user-always-wins "
+        "violated:\n" + "\n".join(diffs)
+    )
+
+    # The internal-only addition is real (merge still functions) and is
+    # genuinely absent without the internal file (not user-defined already).
+    assert "notification" in with_internal["definitions"]
+    assert "notification" not in without_internal["definitions"]
