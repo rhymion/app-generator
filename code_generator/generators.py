@@ -3015,10 +3015,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<number | null>(src.{p} ?? null);"
         for p in enum_int_props
     )
-    enum_str_states = '\n'.join(
-        f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
-        for p in enum_str_props
-    )
+    def _enum_str_state_line(p: str) -> str:
+        sn = safe_var_name(p)
+        if _is_nullable(filtered_props.get(p, {})):
+            return f"  const [{sn}, set{_setter(sn)}] = useState<string | null>(src.{p} ?? null);"
+        return f"  const [{sn}, set{_setter(sn)}] = useState<string>(src.{p} ?? '');"
+    enum_str_states = '\n'.join(_enum_str_state_line(p) for p in enum_str_props)
     # Many-to-one: FK prop is in src type → initialize from src.{prop_name}
     # Selector OTO: FK prop is excluded from src type, but relation object is present → use src.{relation_name}?.id
     rel_states_lines = [
@@ -3195,7 +3197,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         opts_var  = f'{sn}Options'
         enum_vals = prop.get('enum', [])
         ns        = prop.get('x-enum-namespace')
-        req       = p in (model_def.get('required') or [])
+        # A non-nullable enum field (Prisma NOT NULL, possibly with a
+        # `@default(...)` that keeps it out of json_schema `required:`) can
+        # never be legally cleared, so it's validated like a required field
+        # even when the schema doesn't list it (cmd_472/R-2; see
+        # validation_context._is_select_like).
+        req       = p in (model_def.get('required') or []) or not _is_nullable(prop)
 
         if ns and ns not in enum_ns_set:
             enum_ns_set.add(ns)
@@ -3234,7 +3241,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         setter    = _setter(sn)
         opts_var  = f'{sn}Options'
         enum_vals = prop.get('enum', [])
-        req       = p in (model_def.get('required') or [])
+        # See the enum_int_props loop above (cmd_472/R-2): a non-nullable
+        # enum field is validated as required even if a Prisma default
+        # keeps it out of json_schema `required:`.
+        req       = p in (model_def.get('required') or []) or not _is_nullable(prop)
         native_ns = _native_enum_ns(prop)
 
         if native_ns:
@@ -3252,11 +3262,20 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         _enum_str_width_cols = _ui_width_cols(prop)
         if _enum_str_width_cols:
             has_box_import = True
+        # Nullable → pass the cleared (null) value straight through so an
+        # explicit NULL reaches the server. Non-nullable → fall back to ''
+        # so the missing-value check in form_validation.ts (isMissingValue)
+        # catches it before submit (cmd_472/R-2).
+        _enum_str_on_change = (
+            f"onChange={{(newValue) => set{setter}(newValue)}}"
+            if _is_nullable(prop)
+            else f"onChange={{(newValue) => set{setter}(newValue ?? '')}}"
+        )
         _enum_str_jsx = (
             f"      <AppFieldSelect\n"
             f"        options={{{opts_var}}}\n"
             f"        value={{{opts_var}.find((o) => o.value === {sn}) ?? null}}\n"
-            f"        onChange={{(newValue) => set{setter}(newValue ?? '')}}\n"
+            f"        {_enum_str_on_change}\n"
             f"        label={{tf('{fk}')}}\n"
             f"        {'required' if req else ''}\n"
             f"      />"
@@ -3430,8 +3449,21 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         return f"    formData.set('{r['prop_name']}', {var} || '');"
     rel_ds   = '\n'.join(_rel_fds_line(r) for r in list(parent_rels_raw) + list(selector_oto_rels))
     bool_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}.toString());" for p in boolean_props)
-    enum_ds      = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} !== null ? String({safe_var_name(p)}) : '');" for p in enum_int_props)
-    enum_str_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in enum_str_props)
+    def _enum_int_fds_line(p: str) -> str:
+        var = safe_var_name(p)
+        if _is_nullable(filtered_props.get(p, {})):
+            # Nullable → omit the key entirely when cleared, matching the
+            # rel/entity_select convention: data.get() then naturally
+            # returns null instead of the string 'null' (cmd_472/R-2).
+            return f"    if ({var} !== null) formData.set('{p}', String({var}));"
+        return f"    formData.set('{p}', {var} !== null ? String({var}) : '');"
+    enum_ds      = '\n'.join(_enum_int_fds_line(p) for p in enum_int_props)
+    def _enum_str_fds_line(p: str) -> str:
+        var = safe_var_name(p)
+        if _is_nullable(filtered_props.get(p, {})):
+            return f"    if ({var}) formData.set('{p}', {var});"
+        return f"    formData.set('{p}', {var});"
+    enum_str_ds  = '\n'.join(_enum_str_fds_line(p) for p in enum_str_props)
     def _custom_form_data_line(p: str) -> str:
         defn = filtered_props.get(p, {})
         if _get_actual_type(defn) == 'boolean':

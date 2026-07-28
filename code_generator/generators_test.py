@@ -77,7 +77,7 @@ from helpers.label_field import (
     build_label_expression, render_prisma_include, resolve_label_paths, relation_chain_targets,
     build_string_only_label_expression,
 )
-from build_context import _get_entity_options, _raw_def
+from build_context import _get_entity_options, _raw_def, is_forced_required_field
 from generate_types import extract_entities
 
 
@@ -2656,11 +2656,19 @@ def spec_context(
     ] if use_deps_in_3_1 else []
     opt_fill_cmds_3_1 = opt_fill_cmds_3_1_non_ac + opt_fill_cmds_3_1_ac + opt_fill_cmds_3_1_ua
 
-    # Section 3.2: optional clear commands (8-space indent, non-autocomplete only)
+    # Section 3.2: optional clear commands (8-space indent, non-autocomplete only).
+    # A select-like field (enum/string_enum/entity_select) can be schema-optional
+    # (excluded from json_schema `required:` because a Prisma `@default(...)`
+    # supplies a value on create) while still being non-nullable at the DB level
+    # -- e.g. `status RoomStatus @default(available)`. Clearing it is illegal
+    # (neither a valid null nor a valid enum member), so it must be excluded
+    # from the "clears optional data" test the same way R-2 excludes it from
+    # legal clear targets on the client (cmd_472/R-2a).
     opt_clear_cmds_3_2 = [
         gen_clear_command(f, '        ')
         for f in optional_field_metas
         if f['category'] != 'autocomplete' and not f.get('readonly')
+        and not is_forced_required_field(properties.get(f['prop_name'], {}))
     ]
 
     # Section 3.3: primary field edit command

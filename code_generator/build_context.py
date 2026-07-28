@@ -75,6 +75,42 @@ def _is_nullable(defn: dict) -> bool:
     return isinstance(t, list) and 'null' in t
 
 
+def is_select_like_field(defn: dict) -> bool:
+    """True for fields rendered via AppFieldSelect / a MUI Autocomplete that
+    cypress drives with cy.clearAutocomplete(): enum_integer, enum_string
+    (nativeEnum or plain), and entity_select.
+
+    Shared by validation_context.py (form + service required-field checks)
+    and generators_test.py (spec generation's 3.2 "clear optional data"
+    field selection) so both agree on which fields can legally be cleared
+    (cmd_472/R-2, R-2a).
+    """
+    actual = _get_actual_type(defn)
+    if actual in ('integer', 'number') and isinstance(defn.get('enum'), list):
+        return True
+    if actual == 'string' and defn.get('x-entity-select'):
+        return True
+    if actual == 'string' and isinstance(defn.get('enum'), list):
+        return True
+    return False
+
+
+def is_forced_required_field(defn: dict) -> bool:
+    """True when a select-like field must be treated as required for
+    validation/spec-generation purposes even though json_schema `required:`
+    omits it.
+
+    A select-like field can carry a Prisma `@default(...)` (so schema_deriver
+    leaves it out of `required:` -- the default supplies a value on create)
+    while remaining non-nullable at the DB level, e.g.
+    `status RoomStatus @default(available)`. Clearing it on edit produces
+    neither a legal null nor a legal enum value, so both the client
+    validator and the generated "clears optional data" spec must treat it
+    as required (cmd_472/R-2, R-2a).
+    """
+    return is_select_like_field(defn) and not _is_nullable(defn)
+
+
 def _normalize_kind(defn: dict) -> str:
     actual = _get_actual_type(defn)
     fmt = defn.get('format')
@@ -131,6 +167,14 @@ def _build_form_data_gets(prop_infos: list[dict]) -> str:
                 )
         elif actual == 'boolean':
             lines.append(f"  const {var_name} = data.get('{prop}') === 'true';")
+        elif actual in ('integer', 'number') and isinstance(defn.get('enum'), list) and nullable:
+            # Nullable integer-enum: the client omits the FormData key when
+            # cleared, so data.get() returns null. Number(null) is 0, not
+            # null/NaN -- guard explicitly or a cleared field silently
+            # becomes enum member 0 instead of staying null (cmd_472/R-2).
+            lines.append(
+                f"  const {var_name} = data.get('{prop}') !== null ? Number(data.get('{prop}')) : null;"
+            )
         elif actual in ('integer', 'number'):
             lines.append(f"  const {var_name} = Number(data.get('{prop}'));")
         elif actual == 'string' and (pattern == '^c[a-z0-9]{24,}$' or defn.get('x-relationship')) and nullable:
@@ -1613,6 +1657,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 # with the first declared enum member so it still typechecks
                 # against the nativeEnum literal union.
                 return f"'{defn['enum'][0]}' as const"
+            if isinstance(defn.get('enum'), list) and defn['enum']:
+                # Plain (non-nativeEnum) string-enum field, e.g.
+                # inventory_movement.status: a Prisma `String @default(...)`
+                # column, not a Prisma enum type, so no literal-union type to
+                # satisfy (no `as const` needed) -- but it is now validated as
+                # forced-required whenever non-nullable (cmd_472/R-2:
+                # is_forced_required_field), so seeding '' here made the
+                # "new" page's own client-side validation reject its own
+                # untouched default value. Mirror the nativeEnum branches
+                # above: schema default first, else the first enum member.
+                if 'default' in defn:
+                    return f"'{defn['default']}'"
+                return f"'{defn['enum'][0]}'"
             return "''"
         if actual == 'boolean':
             return 'false'
