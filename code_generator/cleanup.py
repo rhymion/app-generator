@@ -18,13 +18,19 @@ an entity's children were removed). The regular pass is schema-driven and
 only knows about today's entities/gates, so prior-schema artefacts linger
 without this mode.
 
+<schema.yaml> must be the *built* schema (code_generator/.generated/json_schema.yaml,
+produced by build_user_schema.py) -- the same one generate.py consumes during
+`npm run generate-code`. The hand-authored code_generator/json_schema.yaml lacks
+the '__'-prefixed raw entities that split synthesizes, so extract_entities()
+finds nothing in it; `npm run cleanup` builds .generated/json_schema.yaml first
+for this reason.
+
 Usage (run from code_generator/):
-    python cleanup.py <schema.yaml> <output-dir> [--keep-stubs] [--prune-orphans]
+    python cleanup.py <built-schema.yaml> <output-dir> [--keep-stubs] [--prune-orphans]
 
 Examples:
-    python cleanup.py json_schema_db_table.yaml ..
-    python cleanup.py json_schema_db_table.yaml .. --keep-stubs
-    python cleanup.py json_schema_db_table.yaml .. --prune-orphans
+    python cleanup.py .generated/json_schema.yaml .. --keep-stubs
+    python cleanup.py .generated/json_schema.yaml .. --prune-orphans
 """
 import json
 import re
@@ -439,8 +445,16 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_o
 
     entities = extract_entities(schema)
     if not entities:
-        print('No entities found in schema.', file=sys.stderr)
-        return
+        print(
+            f'ERROR: no entities found in {schema_path}.\n'
+            "This is almost always a sign that a hand-authored schema (no '__'-prefixed "
+            'raw entities) was passed instead of the built schema. Pass the output of '
+            'build_user_schema.py (code_generator/.generated/json_schema.yaml) -- the '
+            'same file generate.py consumes -- not the source json_schema.yaml. '
+            "Refusing to run rather than silently cleaning up nothing.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     out = Path(output_dir)
     test_entities = [e for e in entities if e['generate_config'].get('test')]
