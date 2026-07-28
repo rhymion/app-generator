@@ -110,7 +110,7 @@ argument is a single dynamic glob:
 
 - `cypress/e2e/api/**` — automatically includes every generated API spec.
 
-The gate does **not** include any UI specs. In particular, `purchase_order.cy.ts`
+The gate does **not** include any UI specs. For example, `purchase_order.cy.ts`
 and `receiving_receipt.cy.ts` are full UI specs (they still exist under
 `cypress/e2e/` and run as part of `npm run test:e2e:cy:ui`), but they are excluded
 from the mandatory gate's `--spec` value — a prior draft of this doc described them
