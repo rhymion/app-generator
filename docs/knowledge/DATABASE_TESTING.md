@@ -13,10 +13,15 @@ This project uses a multi-database strategy for different environments:
 |---|---|---|
 | Compose file | `docker-compose.dev.yml` | `docker-compose.test.yml` |
 | DB name | `my_next_dev` | `my_next_test` |
-| Postgres port | 5433 | 5434 |
-| Redis | None (in-memory rate limiter) | `redis-test` (port 6381) |
+| Postgres port | 5433 | 5432 |
+| Redis | None (in-memory rate limiter) | `redis-test` (port 6379) |
 | Start | `npm run docker:up:dev` | `npm run docker:up:test` |
 | Stop | `npm run docker:down:dev` | `npm run docker:down:test` |
+
+Ports above are the docker-compose defaults (`${POSTGRES_PORT:-5433}` for
+dev, `${POSTGRES_PORT:-5432}` / `${REDIS_PORT:-6379}` for test) — set the
+corresponding env var before starting the containers to use a different
+host port.
 
 Dev omits Redis — `REDIS_URL` is unset in `.env.development`, so `getRateLimiter()` falls back to the in-memory rate limiter automatically.
 
@@ -225,6 +230,10 @@ With `@prisma/extension-accelerate` installed, the PrismaClient requires an `acc
 - Uses `accelerateUrl: process.env.PRISMA_DATABASE_URL || process.env.DATABASE_URL || ''`
 - Falls back to direct connection if `PRISMA_DATABASE_URL` is not set
 - Accelerate extension detects URL format and uses caching only for `prisma+postgres://` URLs
+- **Off by default in every environment, including production**: `PRISMA_DATABASE_URL`
+  is currently unset, so this always falls back to the direct connection. It has never
+  successfully reached this environment's Cloud SQL instance (TLS verification failure
+  against `GOOGLE_MANAGED_INTERNAL_CA`); see the comment in `lib/prisma.ts`.
 
 **Testing** (cypress/support/db-helpers.ts, scripts/seed-test-db.ts):
 - Uses `new PrismaClient()` without Accelerate extension
