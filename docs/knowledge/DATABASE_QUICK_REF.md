@@ -97,6 +97,10 @@ When you need to fill in your actual credentials:
    PRISMA_DATABASE_URL="your-prisma-accelerate-url"
    ```
 
+   Accelerate is off by default (this var is unset in every environment,
+   including production) — `lib/prisma.ts` falls back to a direct connection
+   when it's absent. Only set this if you have a working Accelerate URL.
+
 2. **`.env.test`** (committed to git)
    ```
    DATABASE_URL="postgresql://postgres:postgres@localhost:5432/my_next_test"

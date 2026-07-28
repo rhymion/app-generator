@@ -206,6 +206,12 @@ The `POSTGRES_PORT`/`REDIS_PORT` values above are docker-compose defaults
 for test) — export the env var before starting the containers to use a different
 host port.
 
+Accelerate is off by default in every environment, including production —
+`PRISMA_DATABASE_URL` is unset and `lib/prisma.ts` falls back to a direct
+connection. It has never successfully reached this environment's Cloud SQL
+instance (TLS verification failure against `GOOGLE_MANAGED_INTERNAL_CA`); see
+the comment in `lib/prisma.ts` for the current status.
+
 Docker Compose files per environment:
 
 - `docker-compose.dev.yml` — PostgreSQL on port 5433
