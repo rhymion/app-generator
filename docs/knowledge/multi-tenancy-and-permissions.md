@@ -307,6 +307,17 @@ Plus:
 
 At runtime the filter fires on every list and detail read for that entity. There is no opt-out path per request.
 
+### Mutation-path lookups are org-scoped too
+
+Read paths (list/search/detail-GET/export) scope by `organization_id` via `buildAccessWhere()`/`getDetail()`, as described above. Every mutation-path lookup applies the same org-scoped `findFirst`/`findMany` pattern instead of a global `findUnique`/`findMany` by id, so a caller with a general `update`/`delete`/`import` permission cannot act on another organization's record just by supplying its id:
+
+- **API detail routes** (`api_detail_route.ts.jinja2` `PUT`/`DELETE`): re-fetch the target row with `prisma.{model}.findFirst({ where: { id, organization_id: { in: associatedOrganizationIds } } })` before calling `requirePermission()`.
+- **Session upsert actions** (`generators.py`'s `_upsert_body`, used by `actions.ts.jinja2`): the same org-scoped `findFirst` replaces the pre-update `findUnique` in all three upsert code shapes (reservation, combined create+update, update-only). The generated code also throws immediately (`if (!existing) throw ...`) when the lookup misses, rather than falling through — `requirePermission()` treats a missing item as "no item context" and falls back to the top-level `general` permission, so without the explicit throw the org filter would gate only the permission check's input and not the actual write.
+- **Session delete action** (`removeX` in `actions.ts.jinja2`): fetches associated organizations first, guards against a null `userId` (unauthenticated session) by throwing before the lookup, then filters the batch `findMany` by `organization_id`.
+- **CSV import update path** (`api_import_route.ts.jinja2`): the actor's associated organization ids are fetched once before the per-row loop (not per row, to avoid N+1), and every existing-row lookup adds the `organization_id` filter.
+
+A cross-organization id resolves to a null/empty lookup result instead of succeeding: this returns a 404 on API routes and is a silent no-op on session actions. This guard applies only to entities where `should_filter_by_org` is true (see "Which models are org-scoped" above) — non-org-scoped entities are unaffected.
+
 ---
 
 ## 5. Current limitations

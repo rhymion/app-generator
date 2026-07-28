@@ -1,5 +1,25 @@
 # Notification Feature: Current Behavior Investigation (cmd_316)
 
+> **SUPERSEDED**: this was a read-only investigation into why two notification
+> triggers were not firing as expected. The gaps it identified have since been
+> addressed:
+> - **Trigger 2** (approval request created → notify approver-role holders):
+>   the missing `notifyApprovalRequestCreated()` call was added to the
+>   generated after-create hook (`service_after_create_stub.ts.jinja2`) and to
+>   the other approval-request-creation code paths (datagrid-child approval
+>   lines, the split-action route), so approval requests now notify approvers
+>   on creation. A unit test (`lib/_notifyApprovalRequest.test.ts`) covers the
+>   notify function directly; there is still no dedicated API e2e assertion
+>   for this trigger.
+> - **Trigger 1** (self-assignment → notify new assignee): the template logic
+>   was already correct and remains so — whether it fires for a given entity
+>   still depends on that entity's schema declaring an `assignee_id` field,
+>   which is a per-project schema decision, not a code defect.
+>
+> The investigation and analysis below are preserved for historical
+> reference; treat the "Recommendations" section (§6) as resolved for
+> Trigger 2 rather than as an open action item.
+
 Read-only investigation. No code, schema, or test changes were made while producing this report.
 
 ## 1. Architecture overview
