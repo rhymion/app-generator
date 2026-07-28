@@ -6,20 +6,33 @@ This document describes the conventions that **must** be followed when authoring
 
 ## 1. Model naming
 
-### 1a. Standard case
+### 1a. Standard case (single-file entity format — current)
 
-Most entities follow a two-definition pattern: a base entity (e.g. `ai_agent`) plus a detail entity (e.g. `ai_agent_detail`) that carries `x-generate`. The Prisma model name matches the **base** entity name:
+Entities are declared in the **single-file entity format** (see `docs/knowledge/schema-yaml-configuration.md` §2 for the full authoring guide): `x-generate` and all other generation metadata sit directly on one top-level definition — there is no separate detail/view definition to write. For any entity that also has its own Prisma model, the Prisma model name is exactly the entity's own key:
+
+| JSON schema entity | Prisma model |
+|---|---|
+| `ai_agent` | `model ai_agent` |
+| `job_output` | `model job_output` |
+
+Do not rename, alias, or abbreviate the Prisma model name relative to the entity key.
+
+Internally, `code_generator/build_user_schema.py` still splits each such entity into a machine-derived **raw** definition (stored under a reserved `__`-prefixed key, e.g. `__ai_agent`) and a **view** definition (the plain key, carrying `x-generate` plus the hand-authored embed shape) before handing the result to `generate.py` — `_build_raw_and_view` (`code_generator/build_user_schema.py:205-234`) constructs the view's `allOf` pointer to `#/definitions/__{entity_key}` at line 223, and `_RESERVED_RAW_PREFIX = "__"` is defined at line 85. This raw/view split is an implementation detail of the build pipeline, not something you author yourself: you never write a `__`-prefixed key in `json_schema.yaml` (`_validate_entity_names` rejects any user-chosen entity name starting with `__`, `code_generator/build_user_schema.py:149-176`), and the split has no effect on the Prisma model name, which always matches the plain entity key you wrote.
+
+#### Legacy format (superseded)
+
+Before the single-file format, an entity's generation config lived on a separate `<entity>_detail` definition, and the Prisma model name matched the **base** (non-`_detail`) entity name:
 
 | JSON schema entity | Prisma model |
 |---|---|
 | `ai_agent` / `ai_agent_detail` | `model ai_agent` |
 | `job_output` / `job_output_detail` | `model job_output` |
 
-Do not rename, alias, or abbreviate the Prisma model name relative to the base entity.
+The generator core still parses this shape as a fallback for schemas that haven't been converted to the single-file format, but `build_user_schema.py` and its automated converter `convert_to_user_schema.py` never produce `_detail`-suffixed output, and the live default `code_generator/json_schema.yaml` has zero `_detail`-suffixed entities. Treat this table as historical/compatibility context only — do not use the `_detail` split for new entities.
 
-### 1b. Re-use of an existing model (virtual entity / multiple interfaces)
+### 1b. Re-use of an existing model (pass-through entity / multiple interfaces)
 
-An entity with `x-generate` does **not** need to have its own Prisma model when its `allOf.$ref` points to an existing entity that already has a model. The generated code uses the model of the referenced base entity.
+An entity with `x-generate` does **not** need to have its own Prisma model when its `allOf.$ref` points to an existing entity that already has a model. The generated code uses the model of the referenced entity. This only works when the pass-through entity's own key does **not** match any Prisma model name: `_validate_entity_names` (`code_generator/build_user_schema.py:149-176`) rejects an `allOf`-wrapper entity whose key collides with a real Prisma model name, since that name is reserved for that model's own single-file definition (the collision would otherwise silently discard the `allOf` and misinterpret the entity as that model's own raw/view pair).
 
 Example from the system — `setting` provides a "My Account" interface over the `user` table:
 
@@ -36,18 +49,18 @@ This pattern is also allowed for custom (non-system) entities. Use it when you n
 
 ```yaml
 # Two interfaces over the same Prisma model `order`
-order_buyer_detail:
+order_buyer:
   x-generate: { ... }
   allOf:
     - $ref: "#/definitions/order"
 
-order_admin_detail:
+order_admin:
   x-generate: { ... }
   allOf:
     - $ref: "#/definitions/order"
 ```
 
-**Rule:** determine the Prisma model by walking `allOf.$ref` to the base entity. Only that base entity needs a Prisma model.
+**Rule:** determine the Prisma model by walking `allOf.$ref` to the referenced entity. Only that referenced entity needs a Prisma model.
 
 ---
 
