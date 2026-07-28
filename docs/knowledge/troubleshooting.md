@@ -320,7 +320,7 @@ The PostgreSQL container is not running. Fix:
 npm run docker:up:dev   # starts postgres-dev on port 5433
 
 # Test database
-npm run docker:up:test  # starts postgres-test on port 5432
+npm run docker:up:test  # starts postgres-test on port 5434
 
 # Verify it's up
 docker ps | grep postgres

@@ -225,6 +225,10 @@ With `@prisma/extension-accelerate` installed, the PrismaClient requires an `acc
 - Uses `accelerateUrl: process.env.PRISMA_DATABASE_URL || process.env.DATABASE_URL || ''`
 - Falls back to direct connection if `PRISMA_DATABASE_URL` is not set
 - Accelerate extension detects URL format and uses caching only for `prisma+postgres://` URLs
+- **Off by default in every environment, including production**: `PRISMA_DATABASE_URL`
+  is currently unset, so this always falls back to the direct connection. It has never
+  successfully reached this environment's Cloud SQL instance (TLS verification failure
+  against `GOOGLE_MANAGED_INTERNAL_CA`); see the comment in `lib/prisma.ts`.
 
 **Testing** (cypress/support/db-helpers.ts, scripts/seed-test-db.ts):
 - Uses `new PrismaClient()` without Accelerate extension

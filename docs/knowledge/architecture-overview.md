@@ -188,9 +188,9 @@ and Prisma Accelerate are enabled.
 | Variable | Development (`.env.development`) | Test (`.env.test`) | Production |
 |---|---|---|---|
 | `PORT` | 3001 | 3000 | Vercel-assigned |
-| `POSTGRES_PORT` | 5433 | 5432 | managed |
+| `POSTGRES_PORT` | 5433 | 5434 | managed |
 | `POSTGRES_DB` | `my_next_dev` | `my_next_test` | managed |
-| `DATABASE_URL` | `postgresql://…@localhost:5433/my_next_dev` | `postgresql://…@localhost:5432/my_next_test` | Vercel env var |
+| `DATABASE_URL` | `postgresql://…@localhost:5433/my_next_dev` | `postgresql://…@localhost:5434/my_next_test` | Vercel env var |
 | `PRISMA_DATABASE_URL` | _(empty — direct connection)_ | _(empty — direct connection)_ | Prisma Accelerate URL |
 | `NEXTAUTH_URL` | `http://localhost:3001` | `http://localhost:3000` | production URL |
 | `AUTH_SECRET` | must be set per-env | 64-char hex generated | must be set in Vercel |
@@ -201,8 +201,14 @@ and Prisma Accelerate are enabled.
 before the Prisma client connects, so migrations and seeding use the same env resolution
 as the Next.js dev server.
 
+Accelerate is off by default in every environment, including production —
+`PRISMA_DATABASE_URL` is unset and `lib/prisma.ts` falls back to a direct
+connection. It has never successfully reached this environment's Cloud SQL
+instance (TLS verification failure against `GOOGLE_MANAGED_INTERNAL_CA`); see
+the comment in `lib/prisma.ts` for the current status.
+
 Docker Compose files per environment:
 
 - `docker-compose.dev.yml` — PostgreSQL on port 5433
-- `docker-compose.test.yml` — PostgreSQL on port 5432 + Redis on port 6379
+- `docker-compose.test.yml` — PostgreSQL on port 5434 + Redis on port 6379
 - `docker-compose.prod.yml` — production-targeted compose (external DB, no Redis)
