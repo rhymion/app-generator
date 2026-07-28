@@ -189,15 +189,44 @@ Two renders fired simultaneously: one from `revalidatePath` and one from the nav
 caused by `redirect`.
 
 ### Fix
-Remove `revalidatePath` from upsert and delete actions entirely. `redirect()` in a
-Server Action already invalidates the router cache for the destination path, so
-`revalidatePath` is redundant:
+Remove `revalidatePath` from the upsert action. `redirect()` in a Server Action
+already forces a fresh fetch of the destination route when that route differs
+from the one the action runs on — `upsertEntity` runs on the create/edit form
+(`/entity/new` or `/entity/edit/[id]`) and redirects to the list page
+(`/entity`), a different route, so `revalidatePath` is redundant there:
 
 ```ts
 // After — single fetch
 // (no revalidatePath import needed)
 redirect('/entity');
 ```
+
+**The delete action keeps `revalidatePath`** — this is not a leftover, it's
+still required. `removeEntity` is wired up directly on the list page itself
+(`page_list.tsx.jinja2` passes `removeAction={removeEntity}` straight to the
+DataGrid), so the user is already on `/entity` when delete runs and
+`redirect('/entity')` is a same-route redirect. Next.js's router doesn't
+necessarily refetch a route the user is already on, so without
+`revalidatePath` the list can keep showing the just-deleted row. `upsertEntity`
+doesn't have this problem because it always redirects from a *different* route
+(the form) to the list — a genuine cross-route navigation, which Next.js does
+refetch on its own:
+
+```ts
+// remove{Parent} — revalidatePath still needed: redirect target === current route
+if (can_list) {
+  revalidatePath('/[locale]/entity', 'page');
+}
+redirect('/entity');
+```
+
+(History: `revalidatePath` was removed from both upsert and delete in one
+commit for perceived double-fetch reasons, then revived specifically for
+delete about a week later — commit `b180b99`, "fix: Revive revalidatePath for
+delete" — once the stale-list-after-delete symptom surfaced. The commit
+message doesn't spell out the same-route-redirect mechanism, but it matches
+the code exactly: the revived call is scoped to `remove{Parent}` only, gated
+on `can_list`.)
 
 ### Problem: `router.refresh()` in `handleBack`
 
@@ -248,5 +277,5 @@ export async function addEntityComment(...) {
 | Skeleton screens | All generated pages | Visual placeholder instead of blank/spinner |
 | Parallel permissions + data | `getters.ts` (list + detail) | Saves one sequential DB round-trip |
 | `getModelPermissions` returns `userId` | `lib/authz.ts` | Eliminates separate `getSessionUserId` call |
-| Remove `revalidatePath` from upsert/delete | `actions.ts` | Eliminates double `getAllEntities` on save |
+| Remove `revalidatePath` from upsert (kept on delete — same-route redirect) | `actions.ts` | Eliminates double `getAllEntities` on save |
 | Remove `router.refresh()` from `handleBack` | `FormUpsert.tsx` | Eliminates extra `getDetail` on back navigation |
