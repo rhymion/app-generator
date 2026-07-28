@@ -88,6 +88,39 @@ _CUSTOM_COMPONENT_FIELD_KEYS: dict[str, dict[str, str]] = {
     },
 }
 
+# i18n keys owned by a dedicated namespace section (not Fields) that a named
+# custom component contributes. {component_name: {namespace: {key: label}}}.
+# Unlike _CUSTOM_COMPONENT_FIELD_KEYS (merged into Fields), these keep their
+# own top-level section so the component's translations stay grouped together.
+_CUSTOM_COMPONENT_SECTIONS: dict[str, dict[str, dict[str, str]]] = {
+    'CopyShiftsButton': {
+        'ShiftTemplate': {
+            'copyToShifts': 'Copy to Shifts',
+            'copyToShiftsExplanation': 'Copy Shift Templates to Shifts',
+        },
+    },
+}
+
+
+def _collect_custom_component_sections(entities: list, schema: dict) -> dict[str, dict[str, str]]:
+    """Return {namespace: {key: label}} contributed via _CUSTOM_COMPONENT_SECTIONS
+    by every entity's x-custom-components list."""
+    result: dict[str, dict[str, str]] = {}
+    for entity in entities:
+        def_key = entity.get('definition_key', '')
+        custom_comps = schema['definitions'].get(def_key, {}).get('x-custom-components') or []
+        if not isinstance(custom_comps, list):
+            continue
+        for custom_comp in custom_comps:
+            if not isinstance(custom_comp, dict):
+                continue
+            comp_name = custom_comp.get('name', '')
+            for ns, ns_keys in _CUSTOM_COMPONENT_SECTIONS.get(comp_name, {}).items():
+                ns_entries = result.setdefault(ns, {})
+                for key, label in ns_keys.items():
+                    ns_entries.setdefault(key, label)
+    return result
+
 
 def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
     """Return {camelCaseKey: 'Title Case Label'} for every field across all entities."""
@@ -98,7 +131,8 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
         gen_cfg = entity['generate_config']
 
         model_def = schema['definitions'].get(model, {})
-        props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
+        raw_model_def = _raw_def(model, schema)
+        props = filter_fields(raw_model_def.get('properties', {}), gen_cfg.get('fields'))
 
         # Bridge-child entities (x-bridge) render read-only parent type/label fields
         # via tf('parentType') / tf('parentLabel'). These are synthetic display fields,
@@ -156,7 +190,7 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
             # Column headers for non-comment child tables
             if child.get('output_type') == 'comments':
                 continue
-            child_def = schema['definitions'].get(child['name'], {})
+            child_def = _raw_def(child['name'], schema)
             for cp_name, cp_prop in child_def.get('properties', {}).items():
                 if cp_name in _child_sys:
                     continue
@@ -306,6 +340,16 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     # nativeEnum option keys (one section per Prisma enum / x-enum-namespace)
     native_enum_ns = _collect_native_enum_namespaces(schema)
 
+    # Component-owned namespace sections (e.g. ShiftTemplate.* for CopyShiftsButton)
+    custom_component_ns = _collect_custom_component_sections(entities, schema)
+
+    # Merge namespace-keyed sections rather than spreading (a spread would let a
+    # colliding namespace clobber the other's entries entirely instead of merging).
+    namespace_sections: dict[str, dict[str, str]] = {}
+    for ns_map in (native_enum_ns, custom_component_ns):
+        for ns, ns_entries in ns_map.items():
+            namespace_sections.setdefault(ns, {}).update(ns_entries)
+
     # --- messages/*.json ---
     messages_dir = output_dir / 'messages'
     for lang_file in sorted(messages_dir.glob('*.json')):
@@ -313,7 +357,7 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
             'EntityLabel': entity_label_entries,
             'Nav': nav_entries,
             'Fields': field_keys,
-            **native_enum_ns,
+            **namespace_sections,
         }
         changed = _update_json(lang_file, additions)
         status = 'Updated' if changed else 'No changes'
