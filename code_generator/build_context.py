@@ -1657,6 +1657,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 # with the first declared enum member so it still typechecks
                 # against the nativeEnum literal union.
                 return f"'{defn['enum'][0]}' as const"
+            if isinstance(defn.get('enum'), list) and defn['enum']:
+                # Plain (non-nativeEnum) string-enum field, e.g.
+                # inventory_movement.status: a Prisma `String @default(...)`
+                # column, not a Prisma enum type, so no literal-union type to
+                # satisfy (no `as const` needed) -- but it is now validated as
+                # forced-required whenever non-nullable (cmd_472/R-2:
+                # is_forced_required_field), so seeding '' here made the
+                # "new" page's own client-side validation reject its own
+                # untouched default value. Mirror the nativeEnum branches
+                # above: schema default first, else the first enum member.
+                if 'default' in defn:
+                    return f"'{defn['default']}'"
+                return f"'{defn['enum'][0]}'"
             return "''"
         if actual == 'boolean':
             return 'false'
