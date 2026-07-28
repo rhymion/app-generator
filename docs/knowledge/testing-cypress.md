@@ -401,7 +401,8 @@ repository secret is configured. Otherwise omit it and let `.env.test` provide i
 ### Database
 
 The test database is provided by `npm run docker:up:test` (docker-compose), which
-starts Postgres on port 5432 matching `DATABASE_URL` in `.env.test`. Do **not** add
+starts Postgres on port 5432 (the `${POSTGRES_PORT:-5432}` default in
+`docker-compose.test.yml`) matching `DATABASE_URL` in `.env.test`. Do **not** add
 a redundant `services.postgres` block in the workflow — it runs on a different port
 and is never connected to.
 

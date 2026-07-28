@@ -201,6 +201,11 @@ and Prisma Accelerate are enabled.
 before the Prisma client connects, so migrations and seeding use the same env resolution
 as the Next.js dev server.
 
+The `POSTGRES_PORT`/`REDIS_PORT` values above are docker-compose defaults
+(`${POSTGRES_PORT:-5433}` for dev, `${POSTGRES_PORT:-5432}` / `${REDIS_PORT:-6379}`
+for test) — export the env var before starting the containers to use a different
+host port.
+
 Docker Compose files per environment:
 
 - `docker-compose.dev.yml` — PostgreSQL on port 5433

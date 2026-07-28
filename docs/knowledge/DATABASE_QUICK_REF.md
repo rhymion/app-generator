@@ -1,5 +1,10 @@
 # Database Testing Setup - Quick Reference
 
+> **Ports**: the numbers below are docker-compose defaults —
+> `${POSTGRES_PORT:-5433}` for dev, `${POSTGRES_PORT:-5432}` /
+> `${REDIS_PORT:-6379}` for test. Set the corresponding env var before
+> running the `docker:up:*` scripts if you need a different host port.
+
 ## TL;DR
 
 ```bash
@@ -12,7 +17,7 @@ npm run docker:down:dev  # Stop when done
 
 ```bash
 # E2E tests
-npm run docker:up:test   # Start postgres-test (port 5434) + redis-test (port 6381)
+npm run docker:up:test   # Start postgres-test (port 5432) + redis-test (port 6379)
 npm run migrate:reset:test
 npm run test:e2e
 npm run docker:down:test
@@ -35,7 +40,7 @@ npm run docker:up:dev    # postgres-dev (port 5433, DB=my_next_dev)
 npm run docker:down:dev
 
 # Start/stop test containers (Docker Compose)
-npm run docker:up:test   # postgres-test (port 5434) + redis-test (port 6381)
+npm run docker:up:test   # postgres-test (port 5432) + redis-test (port 6379)
 npm run docker:down:test
 
 # Development
@@ -53,7 +58,7 @@ npm run db:studio        # uses .env.local or .env.development natively
 | Environment | Database | URL Variable |
 |-------------|----------|--------------|
 | Development | PostgreSQL (Local Docker, port 5433) | `DATABASE_URL` in `.env.development` |
-| E2E Testing | PostgreSQL (Local Docker, port 5434) | `DATABASE_URL` in `.env.test` |
+| E2E Testing | PostgreSQL (Local Docker, port 5432) | `DATABASE_URL` in `.env.test` |
 | Production | PostgreSQL (Vercel) | `DATABASE_URL` + `PRISMA_DATABASE_URL` |
 | Local Experimentation | SQLite | `DATABASE_URL="file:./dev.db"` |
 
@@ -94,7 +99,7 @@ When you need to fill in your actual credentials:
 
 2. **`.env.test`** (committed to git)
    ```
-   DATABASE_URL="postgresql://postgres:postgres@localhost:5434/my_next_test"
+   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/my_next_test"
    ```
 
 ## Troubleshooting
