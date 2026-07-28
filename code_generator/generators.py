@@ -2928,7 +2928,23 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     parent_rels_raw = ctx['parent_rels_raw']
     selector_oto_rels = ctx.get('selector_oto_rels', [])
     selector_oto_prop_names = {r['prop_name'] for r in selector_oto_rels}
-    parent_rels_raw = [r for r in parent_rels_raw if r['prop_name'] not in selector_oto_prop_names]
+
+    # Readonly fields: exclude from editable field lists; render as disabled in edit mode only.
+    # Relation fields (parent_rels_raw / selector_oto_rels) are filtered here too, matching
+    # every other category below — without this, an x-readonly relation field renders BOTH
+    # a fully-interactive AppFieldRelation (unfiltered) AND a duplicate readonly display
+    # (readonly_edit_jsxs, edit-mode only), defeating the readonly annotation entirely on
+    # the interactive copy (cmd_355 subtask_355b finding; cmd_477e inventory_movement.
+    # from_inventory_id: the unfiltered required AppFieldRelation blocked every UI-driven
+    # create via native "please fill out this field" validation since the field is never
+    # user-fillable per x-readonly's documented contract).
+    readonly_field_names: set[str] = set(ctx.get('readonly_fields') or [])
+
+    parent_rels_raw = [
+        r for r in parent_rels_raw
+        if r['prop_name'] not in selector_oto_prop_names and r['prop_name'] not in readonly_field_names
+    ]
+    selector_oto_rels = [r for r in selector_oto_rels if r['prop_name'] not in readonly_field_names]
     children_raw  = ctx['children_raw']
     can_delete    = ctx['can_delete']
     selection_targets = ctx['selection_targets']
@@ -2939,9 +2955,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # Set when any autocomplete option / FormView label uses formatLabelValue —
     # the generated component must then `import { formatLabelValue } from '@/lib/_format';`.
     uses_format_label_value = False
-
-    # Readonly fields: exclude from editable field lists; render as disabled in edit mode only.
-    readonly_field_names: set[str] = set(ctx.get('readonly_fields') or [])
 
     text_props           = [p for p in cats['text']           if p not in readonly_field_names]
     number_props         = [p for p in cats['number']         if p not in readonly_field_names]
