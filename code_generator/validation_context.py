@@ -1,6 +1,7 @@
 """Shared validation metadata used by generated form and service validators."""
 
 from helpers.naming import to_title_case
+from build_context import is_forced_required_field
 
 _SYSTEM_FIELDS = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
 
@@ -45,7 +46,8 @@ def build_validation_context(ctx: dict) -> dict:
             continue
         if prop in readonly_props:
             continue
-        if prop not in required_props:
+        defn = prop_info.get('def') or {}
+        if prop not in required_props and not is_forced_required_field(defn):
             continue
         required_fields.append({
             'key': prop,
