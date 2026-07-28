@@ -96,8 +96,8 @@ definitions:
           $ref: "#/definitions/attachment"
 
   notification:
-    # Per-user notification store (framework default). Bell UI (list, mark-
-    # read, SSE stream) is hand-written custom code, not generated CRUD --
+    # Per-user notification store (framework default). Bell UI (list,
+    # mark-read, polling) is hand-written custom code, not generated CRUD --
     # no page/API is generated for this entity. lib/_notifier.ts writes and
     # reads rows directly via Prisma.
     x-generate:

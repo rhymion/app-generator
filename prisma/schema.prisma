@@ -360,11 +360,11 @@ model dashboard_widget {
 }
 
 // Per-user notification store (framework default, mirrored from
-// code_generator/json_schema_internal.yaml). Primary store for the bell UI /
-// SSE polling routes — no CRUD UI/API is generated for this entity
-// (lib/_notifier.ts writes rows directly via Prisma, fire-and-forget).
-// Immutable event log aside from the `read` flag, so there is no
-// updated_at/creator tracking.
+// code_generator/json_schema_internal.yaml). Primary store for the polling
+// bell UI / app/api/notifications/* routes — no CRUD UI/API is generated
+// for this entity (lib/_notifier.ts writes rows directly via Prisma,
+// fire-and-forget). Immutable event log aside from the `read` flag, so
+// there is no updated_at/creator tracking.
 model notification {
   id         String   @id @default(cuid())
   user_id    String
