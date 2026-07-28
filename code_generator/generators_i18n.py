@@ -34,11 +34,15 @@ def _native_enum_key(v) -> str:
 
 
 def _humanize_enum_value(v) -> str:
-    """'TerminalRejected' -> 'Terminal Rejected' (split PascalCase words).
-    Placeholder text only — same convention as _collect_field_keys, whose
-    English label is written into every language file pending translation."""
+    """'TerminalRejected' -> 'Terminal Rejected', 'partially_received' ->
+    'Partially Received' (split on PascalCase boundaries and underscores,
+    Title Case each word). Placeholder text only — same convention as
+    _collect_field_keys, whose English label is written into every language
+    file pending translation."""
     s = str(v)
-    return re.sub(r'(?<=[a-z0-9])(?=[A-Z])', ' ', s).strip() or s
+    s = re.sub(r'(?<=[a-z0-9])(?=[A-Z])', ' ', s).replace('_', ' ')
+    words = s.split()
+    return ' '.join(w[0].upper() + w[1:].lower() for w in words) if words else str(v)
 
 
 def _collect_native_enum_namespaces(schema: dict) -> dict[str, dict[str, str]]:
