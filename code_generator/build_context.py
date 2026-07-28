@@ -1115,7 +1115,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     # x_relationships_list: m2o/o2o FK relations, used by the CSV export
     # getter to flatten FK id -> display value. Every relation is included
-    # regardless of labelField shape (cmd_382, Lord-ruled 2026-07-19,
+    # regardless of labelField shape (cmd_382, decided 2026-07-19,
     # postdating and superseding cmd_351's 2026-07-17 exclusion guard — see
     # cmd_432 merge report for the cross-branch history check): a composite
     # (list) or dotted-path labelField previously caused the FK column to be
@@ -1286,7 +1286,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # (e.g., approval_flow.approver_role_id is a required FK outside export_scalar_fields
     # → CREATE would throw a Prisma "missing required argument" error → 500).
     #
-    # DP-1b/1c (cmd_394 §10-11, Lord's ruling): only writes whose VALUE SOURCE is
+    # DP-1b/1c (cmd_394 §10-11, decided): only writes whose VALUE SOURCE is
     # visible in the exported CSV may count toward CREATE feasibility.
     #   Type 1 — direct scalar key (e.g. entity_name): already covered by
     #            `- set(export_scalar_fields)` below (DP-1a guarantees visibility).

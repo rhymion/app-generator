@@ -1,7 +1,7 @@
 # JSON Schema Restructuring — Build Order (cmd_395)
 
 Tracks the migration described in `planning/cmd395-schema-restructuring-design.md`
-(cmd_395, Lord's ruling: proceed with Stages 1–4; Stage 5 CUID→UUID deferred).
+(cmd_395, decided: proceed with Stages 1–4; Stage 5 CUID→UUID deferred).
 Sections below are numbered in the order each increment landed, not as an
 ongoing naming convention for new work — see "Current entity-naming
 convention" for what `json_schema.yaml` looks like today and why it no

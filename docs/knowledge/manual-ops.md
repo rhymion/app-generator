@@ -8,7 +8,7 @@
 > the default production DB path, not Accelerate.** Accelerate has never
 > successfully reached this environment's Cloud SQL instance (P1001,
 > `GOOGLE_MANAGED_INTERNAL_CA` TLS verification failure — see
-> `rca_266a_accelerate_cloudsql.md` / `rca_267a_db_path_decision.md`). The Lord is
+> `rca_266a_accelerate_cloudsql.md` / `rca_267a_db_path_decision.md`). The maintainer is
 > pursuing this with Prisma support separately. **Do not follow this procedure for
 > normal setup/deploy** — it is kept only for re-testing Accelerate once that
 > support thread resolves.
