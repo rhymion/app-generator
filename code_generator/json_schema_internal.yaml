@@ -31,6 +31,8 @@ x-schema-visibility:
     user_editable: false
   attachable:
     user_editable: false
+  notification:
+    user_editable: false
 
 definitions:
   approvable:
@@ -92,3 +94,18 @@ definitions:
         x-outputType: list
         items:
           $ref: "#/definitions/attachment"
+
+  notification:
+    # Per-user notification store (framework default). Bell UI (list,
+    # mark-read, polling) is hand-written custom code, not generated CRUD --
+    # no page/API is generated for this entity. lib/_notifier.ts writes and
+    # reads rows directly via Prisma.
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false

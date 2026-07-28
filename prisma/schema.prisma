@@ -99,6 +99,7 @@ model user {
   created_tenants           tenant[]            @relation("TenantCreator")
   updated_tenants           tenant[]            @relation("TenantUpdater")
   audit_logs                audit_log[]
+  notifications             notification[]      @relation("NotificationUser")
   anonymized_at             DateTime?            // Timestamp when PII was scrubbed (GDPR anonymization)
 
   @@index([api_key])
@@ -356,6 +357,25 @@ model dashboard_widget {
   created_at     DateTime  @default(now()) @db.Timestamptz(0)
   updated_at     DateTime  @updatedAt @db.Timestamptz(0)
   @@index([dashboard_id])
+}
+
+// Per-user notification store (framework default, mirrored from
+// code_generator/json_schema_internal.yaml). Primary store for the polling
+// bell UI / app/api/notifications/* routes — no CRUD UI/API is generated
+// for this entity (lib/_notifier.ts writes rows directly via Prisma,
+// fire-and-forget). Immutable event log aside from the `read` flag, so
+// there is no updated_at/creator tracking.
+model notification {
+  id         String   @id @default(cuid())
+  user_id    String
+  user       user     @relation("NotificationUser", fields: [user_id], references: [id], onDelete: Cascade)
+  type       String
+  payload    Json
+  read       Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+
+  @@index([user_id, read])
+  @@index([user_id, created_at(sort: Desc)])
 }
 
 // Append-only audit trail for security-relevant events: auth lifecycle
