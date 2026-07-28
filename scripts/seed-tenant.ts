@@ -115,42 +115,6 @@ async function main() {
       delete: false,
     },
   });
-  // ── Default approval flow for leave_request ──────────────────
-  // An approval_flow row must exist for notifications to fire.
-  // Default: any user can submit leave requests (requestor_role_id: null),
-  // and the seeded admin user holds the approver role.
-
-  const leaveRequestApproverRole = (
-    await prisma.role.findFirst({ where: { name: 'Leave Request Approver' } })
-  ) ?? await prisma.role.create({
-    data: {
-      name: 'Leave Request Approver',
-      description: 'Approves leave requests',
-      creator_id: admin.id,
-      updater_id: admin.id,
-    },
-  });
-
-  const existingLeaveRequestFlow = await prisma.approval_flow.findFirst({
-    where: { entity_name: 'leave_request' },
-  });
-  if (!existingLeaveRequestFlow) {
-    await prisma.approval_flow.create({
-      data: {
-        entity_name: 'leave_request',
-        requestor_role_id: null,         // any user can create leave requests
-        approver_role_id: leaveRequestApproverRole.id,
-        creator_id: admin.id,
-        updater_id: admin.id,
-      },
-    });
-  }
-
-  // Give the admin user the approver role so notifications route to them
-  await prisma.user.update({
-    where: { id: admin.id },
-    data: { roles: { connect: { id: leaveRequestApproverRole.id } } },
-  });
 
   console.log('Tenant seeded successfully!');
 }
