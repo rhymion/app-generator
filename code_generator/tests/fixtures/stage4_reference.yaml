@@ -760,3 +760,23 @@ definitions:
             items:
               $ref: "#/definitions/dashboard_widget"
 
+  __notification:
+    type: object
+    required:
+      - id
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+  notification:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    allOf:
+      - $ref: '#/definitions/__notification'
