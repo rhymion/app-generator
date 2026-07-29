@@ -78,6 +78,23 @@ config for this — the target link follows automatically from the
 entity's own `x-relationship: {type: one-to-one_bridge, target:
 approvable}` declaration.
 
+### Two independent approve/reject implementations (cmd_479)
+
+`lib/approval_request/actions.ts`'s `approveApprovalRequest()` /
+`rejectApprovalRequest()` (server actions, called from the UI's
+`ApprovalSection.tsx`) and `app/api/approval_request/[id]/approve|reject/route.ts`
+(the REST API, called by external API consumers and by e2e tests) are
+**two separate implementations of the same approve/reject transaction**
+— not one calling the other. Trigger #3 (`approval_responded`, notifying
+the requester of the outcome) must be duplicated in both places; while
+investigating the link-target fix, the REST routes were found to have
+*no* Trigger #3 notify call at all (not a link bug — a fully missing
+notification, pre-existing before cmd_479). Fixed by copying the same
+post-transaction `getApprovalRequestRecipient()` + `notify()` block from
+`actions.ts` into both route handlers. If either implementation changes
+its post-approval/rejection side effects, check whether the other needs
+the same change — there's no shared code path enforcing parity.
+
 ## Delivery mechanism
 
 Both triggers share the same notification plumbing:

@@ -5,6 +5,8 @@ import prisma from '@/lib/prisma';
 import { getUserRoleIds } from '@/lib/authz';
 import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 import { isTerminalReject, dispatchOnRejected } from '@/lib/approval_request/on_rejected_dispatch';
+import { getApprovalRequestRecipient } from '@/lib/approval_request/actions';
+import { notify } from '@/lib/_notifier';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -81,6 +83,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
       return result;
     }, { isolationLevel: 'Serializable' });
+    // cmd_479: mirrors lib/approval_request/actions.ts's rejectApprovalRequest()
+    // post-transaction notify block — see the approve route's comment for why
+    // this REST path needs its own copy of it.
+    const { recipientId, entityName, href } = await getApprovalRequestRecipient(id);
+    if (recipientId && recipientId !== userId) {
+      notify(recipientId, 'approval_responded', {
+        title: `Your ${entityName ?? 'request'} was rejected`,
+        href,
+        approvalRequestId: id,
+        status: 'rejected',
+        message: message ?? null,
+      });
+    }
     return NextResponse.json(updated);
   } catch (error) {
     return handleApiError(error);
