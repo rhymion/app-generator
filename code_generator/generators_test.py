@@ -279,11 +279,23 @@ def _seed_path_part(
     return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title}'
 
 
-def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dict) -> list[dict]:
+def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dict, is_self_ref: bool = False) -> list[dict]:
     """Compute extra_required_fields for a dep record in populateDependencies.
 
     Uses title-based name (e.g. 'Test Parent', 'Test Assignee') and encodes
     user_account email/password so the template needs no user_account special-casing.
+
+    is_self_ref: True when this dep is another instance of the SAME entity being
+    generated (e.g. approval_flow's precededBy/followedBy). Self-ref dep records
+    exist only to be referenced by the primary create test, not to BE the record
+    under test — but the entity being generated is what the test's own "creates
+    with minimal/full data" flow also creates, using the first x-entity-select
+    option (see cypress_create_value). If a self-ref dep also picked that same
+    first option for an x-entity-select field, and that field participates in a
+    @@unique constraint alongside another dep FK the test also reuses directly
+    (e.g. approval_flow's @@unique([entity_name, approver_role_id])), the self-ref
+    dep's create() and the test's own create() collide with P2002. Self-ref deps
+    pick the second entity option instead so the two never share a unique key.
     """
     if target == 'user':
         return [
@@ -316,6 +328,12 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props | oto_props | _inferred_internal
     _entity_opts = _get_entity_options(schema)
     _first_entity_val = f"'{_entity_opts[0]['value']}'" if _entity_opts else "''"
+    # Self-ref deps use the second entity option (see docstring) so they never
+    # share an x-entity-select value with the primary create test, which always
+    # uses the first option (see cypress_create_value's 'entity_select' branch).
+    _self_ref_entity_val = (
+        f"'{_entity_opts[1]['value']}'" if is_self_ref and len(_entity_opts) > 1 else _first_entity_val
+    )
     result = []
     for prop_name, prop in props.items():
         if prop_name not in required or prop_name in exclude:
@@ -328,7 +346,7 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val_unique = f'`Test {title} ${{i}}`'
             val_second = f"'Test {title} 2'"
         elif actual == 'string' and prop.get('x-entity-select'):
-            val = val_unique = val_second = _first_entity_val
+            val = val_unique = val_second = _self_ref_entity_val
         elif actual == 'string' and fmt == 'date':
             val = 'new Date(Date.UTC(2025, 0, 1)).toISOString()'
             val_unique = 'new Date(Date.UTC(2025, 0, i)).toISOString()'
@@ -1765,7 +1783,9 @@ def helper_context(
         dep_def = schema['definitions'].get(dep['target'], {})
         x_rels = dep_def.get('x-relationships', {})
         dep_label_info = dep_label_info_by_var.get(dep['var_name'])
-        extra_required_fields = _get_dep_populate_fields(dep['target'], dep['var_name'], title_str, schema)
+        extra_required_fields = _get_dep_populate_fields(
+            dep['target'], dep['var_name'], title_str, schema, is_self_ref=(dep['target'] == model_name),
+        )
         # Idempotency hook for `populateXxxDependencies`: if the dep target has
         # a deterministic `name` value (the common case — every required-`name`
         # entity emits `name: 'Test <Title>'`), the template uses
@@ -2039,6 +2059,24 @@ def helper_context(
                 )
                 if _pfk_field:
                     required_fields_prisma.append(_pfk_field)
+
+    # x-ledger-source pool FK(s) (poolIdField / fromPoolIdField / toPoolIdField)
+    # are usually schema-optional — the real pool target is often resolved after
+    # creation (e.g. via a split action) — so they're excluded from
+    # required_fields_prisma by default. But populate{{Pascal}}WithApproval (and
+    # its Rejected/TerminalRejected siblings) share this same field list, and
+    # approving triggers service_after_approve.ts's ledger write, which throws
+    # if the pool FK is unresolved (FS-3 guard). Force-inject any pool FK that
+    # already has a dep available so those helpers seed a valid pre-approval
+    # state instead of tripping the guard (cmd_477e: receiving_receipt_line 7.6).
+    _ledger_source = parent_def.get('x-ledger-source') or {}
+    _pool_fk_props = [v for k, v in _ledger_source.items() if k.lower().endswith('poolidfield') and v]
+    for _pool_prop in _pool_fk_props:
+        if any(f['prop_name'] == _pool_prop for f in required_fields_prisma):
+            continue
+        _pool_field = next((f for f in all_fields_prisma if f['prop_name'] == _pool_prop), None)
+        if _pool_field is not None and _pool_field.get('dep_var_name'):
+            required_fields_prisma.append(_pool_field)
 
     # populateData needs deps when there are required FK fields not covered by per-iteration creation.
     primary_fk_dep_var = primary_fk_dep['var_name'] if primary_fk_dep else None
