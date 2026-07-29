@@ -126,13 +126,21 @@ Gate: none. Cite findings with `file:line` references.
 
 ## Gate matrix
 
+> **Note**: The canonical gate list for each task type is defined in
+> `.claude/commands/<type>.md §Completion gate`. This table is a
+> human-readable summary and may lag behind the commands files. When
+> in doubt, read the commands file.
+
 | Task type        | pytest | build | check:generated | component test | e2e API | e2e UI | vitest | eslint | npm audit | pip-audit |
 |------------------|:------:|:-----:|:---------------:|:--------------:|:-------:|:------:|:------:|:------:|:---------:|:---------:|
 | generate-schema  | -      | ✓     | ✓               | -              | ✓       | -      | -      | ✓      | ✓         | -         |
-| update-generator | ✓      | ✓     | ✓               | -              | ✓       | ✓      | ✓      | ✓      | ✓         | ✓         |
+| update-generator | ✓      | ✓     | ✓               | -              | ✓       | ✓      | ✓†     | ✓      | ✓         | ✓         |
 | add-component    | -      | ✓     | -               | ✓              | ✓       | -      | -      | ✓      | ✓         | -         |
 | update-code      | -      | ✓     | -               | -              | ✓       | -      | -      | ✓      | ✓         | -         |
 | investigate      | -      | -     | -               | -              | -       | -      | -      | -      | -         | -         |
+
+† conditional — `npm run test` is skipped when component code is unchanged
+(see `.claude/commands/update-generator.md §Completion gate`).
 
 Gate commands:
 - **pytest**: `npm run test:pytest`

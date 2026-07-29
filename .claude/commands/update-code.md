@@ -29,6 +29,7 @@ Run in this order:
 1. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
 2. `npm run test:e2e:cy:api` — API Cypress specs only
 3. `npm run lint`
+4. `npm audit --omit=dev --audit-level=high`
 
 (`npm run test:pytest` and `npm run test` are skipped unless the change affects Python or component code.)
 

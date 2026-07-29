@@ -20,17 +20,8 @@ Minimum docs to read before starting:
 
 ## Completion gate
 
-Run in this order:
-
-1. `npm run test:pytest`      — Python unit tests for code generator
-2. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-3. `npm run check:generated`
-4. `npm run test:e2e:cy:api` — API Cypress specs only
-5. `npm run lint`
-6. `npm audit --omit=dev --audit-level=high`
-7. `pip-audit -r requirements.txt`
-
-(`npm run test` is skipped — component code unchanged unless explicitly modified.)
+See `.claude/commands/update-generator.md §Completion gate` — canonical source of truth.
+Open the file directly (it is in the same repository under `.claude/commands/`).
 
 ## Debug priority
 

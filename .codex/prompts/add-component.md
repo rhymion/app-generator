@@ -24,15 +24,8 @@ Minimum docs to read before starting (select relevant ones):
 
 ## Completion gate
 
-Run in this order:
-
-1. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-2. `npm run test`            — vitest component tests
-3. `npm run test:e2e:cy:api` — API Cypress specs only
-4. `npm run lint`
-5. `npm audit --omit=dev --audit-level=high`
-
-(`npm run test:pytest` is skipped — Python generators unchanged.)
+See `.claude/commands/add-component.md §Completion gate` — canonical source of truth.
+Open the file directly (it is in the same repository under `.claude/commands/`).
 
 ## Debug priority
 

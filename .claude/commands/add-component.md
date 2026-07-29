@@ -37,6 +37,7 @@ Run in this order:
 2. `npm run test`            — vitest component tests
 3. `npm run test:e2e:cy:api` — API Cypress specs only
 4. `npm run lint`
+5. `npm audit --omit=dev --audit-level=high`
 
 (`npm run test:pytest` is skipped — Python generators unchanged.)
 

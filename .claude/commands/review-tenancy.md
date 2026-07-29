@@ -82,6 +82,15 @@ need the full phase-by-phase plan.
 - **No cross-tenant isolation Cypress tests** — `cypress/e2e/` has no suite verifying that Tenant A's user cannot read or mutate Tenant B's rows. Phase 4.3 specifies `multi_tenant_isolation.cy.ts` with a two-tenant fixture. Until then, regression coverage for the isolation invariant is zero.
 - **`audit_log` has no `tenant_id`** — admin audit queries cannot filter by tenant. Fix is Phase 4.2. Until then, a superadmin-level audit query returns events from all tenants interleaved.
 
+## Completion gate
+
+Run:
+
+1. `npm audit --omit=dev --audit-level=high`
+
+(No build/test/lint required — this is a read-only review task with no code
+changes; npm audit is run as a companion vulnerability check.)
+
 > **Note**: When running lint or typecheck in isolation, prefix with
 > `npm run generate-code` first. See `AGENTS.md §Generated-code prerequisites
 > for gates` for the full rule.
