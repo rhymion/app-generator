@@ -46,8 +46,8 @@ describe('{{ pascal }} Reservation (generated)', () => {
 {% else %}
   // NOTE: allocation-count/criteria/orderBy tests are not generated for
   // strategy: ledger_transaction entities (allocationEntity is not applicable).
-  // Equivalent multi-lot allocation coverage: see purchase_order_move_reservation.cy.ts
-  // (O-8 test) and code_generator/tests/test_reservation.py::TestO4QuantityInvariantArithmetic.
+  // Equivalent multi-lot allocation coverage is exercised in the generator's own
+  // test suite: code_generator/tests/test_reservation.py::TestO4QuantityInvariantArithmetic.
   // Full ledger_transaction-native reimplementation of these 3 scenarios: tracked as
   // follow-up (RA-3, deferred from cmd_294).
 {% endif %}
