@@ -42,8 +42,11 @@ from generators import (
     form_upsert_context,
     build_dashboard_catalog,
     build_attachable_owners,
+    attachment_type_ts,
+    reaction_type_ts,
     get_reservation_action_routes,
     _build_approval_create_block_for_entity,
+    _build_split_approval_inherit_block,
 )
 from generators_i18n import update_i18n_and_config
 from validate import validate_schema, validate_prisma_indexes, SchemaValidationError
@@ -60,7 +63,7 @@ from generators_test import (
     set_messages_namespaces,
 )
 from validation_context import build_validation_context
-from manifest import ManifestRecorder
+from manifest import ManifestRecorder, sha256_file, sha256_text
 
 
 # ---------------------------------------------------------------------------
@@ -237,11 +240,28 @@ def _write(path: Path, content: str) -> None:
 
 
 def _write_stub(path: Path, content: str) -> None:
-    """Write stub only if file does not already exist (user may have customized)."""
+    """Write stub only if file does not already exist (user may have customized).
+
+    Exception (cmd_413b): if the existing file's content matches a *past*
+    pristine render of this same stub (recorded across manifest runs — see
+    ManifestRecorder.is_stale_stub), it was never hand-edited — it was just
+    left behind by an earlier run before the schema grew a signal (e.g.
+    x-approval / an approvable relation) that changes what this stub should
+    contain. That case self-heals: we refresh it with today's render instead
+    of skipping it forever.
+    """
     # Record the pristine stub content whether or not we (re)write it, so cleanup
     # can delete the file iff it still matches a pristine stub (i.e. untouched).
     _manifest.record(path, content, 'stub')
     if path.exists():
+        existing_hash = sha256_file(path)
+        if existing_hash == sha256_text(content):
+            print(f'  Skipped (up to date) {path}')
+            return
+        if _manifest.is_stale_stub(path, existing_hash):
+            path.write_text(content, encoding='utf-8')
+            print(f'  Refreshed (stale stub, schema changed since it was first generated) {path}')
+            return
         print(f'  Skipped (exists) {path}')
         return
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -407,12 +427,12 @@ def generate(schema_path: str, output_dir: str) -> None:
         print('No entities found in schema', file=sys.stderr)
         return
 
+    out = Path(output_dir)
     global _manifest
-    _manifest = ManifestRecorder()
+    _manifest = ManifestRecorder(out=out)
     _handwritten_notices.clear()
 
     env = _make_env()
-    out = Path(output_dir)
 
     # Load messages/en.json Fields namespace for enum label translation in Cypress tests
     import json as _json
@@ -818,15 +838,19 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'pool_fk_field': _pool_fk_field,
             }
 
-        # perPartRequired fields are enforced as mandatory (every part must
-        # supply a truthy value) only when they're also in the entity's own
-        # top-level `required:` list. purchase_per_item.inventory_id is in
-        # perPartRequired (per-part lot override) but is schema-optional —
-        # split falls back to auto-allocate when a part omits it (cmd_305
-        # FIX-B, DP-B1). receiving_receipt_line.inventory_id is genuinely
-        # required, so its mandatory check is unaffected.
+        # perPartRequired mandatory validation:
+        #   receive-type entities (not split_reserves_inventory): ALL perPartRequired fields
+        #     are mandatory — a part without the lot id cannot be ledger-reconciled at
+        #     approval time (no auto-allocate fallback for receive-type).
+        #   reserve-type entities (split_reserves_inventory=True): only schema-required
+        #     fields are mandatory; others fall back to auto-allocate
+        #     (purchase_per_item.inventory_id, cmd_305 FIX-B DP-B1).
         _entity_required = set(_def_val.get('required') or [])
-        _per_part_req_mandatory = [f for f in _per_part_req if f in _entity_required]
+        _per_part_req_mandatory = (
+            _per_part_req
+            if _has_inventory_bridge and not _split_reserves_inventory
+            else [f for f in _per_part_req if f in _entity_required]
+        )
 
         _always_exclude = {
             'id', 'status', 'approvable_id', _bridge_field,
@@ -839,26 +863,23 @@ def generate(schema_path: str, output_dir: str) -> None:
         _split_has_approvable = 'approvable_id' in _split_entity_props
         # cmd_296 Phase2: one approvable per part, created directly in the
         # per-part loop (no pre-create array — unlike cmd_295's x-approval-lines
-        # batch). Shares its inner block with _build_approval_lines_post_create_code
-        # via generators.py:_build_approval_create_block_for_entity (see
-        # docs/split-generalization-design.md §4.2).
+        # batch).
+        # cmd_439 F1 (approved Option A): split children inherit the parent's
+        # existing approval_request flow IDs unconditionally — no
+        # requestor-role filter. This is a different rule from
+        # x-approval-lines' creator-role-filtered flow lookup, so split no
+        # longer shares _build_approval_create_block_for_entity; that
+        # function remains unchanged for _build_approval_lines_post_create_code.
         _split_approval_create_block = (
-            _build_approval_create_block_for_entity(
-                approvable_id_expr='childApprovable.id',
-                actor_id_expr='userId',
-                flows_var='_splitApprovalFlows',
-                role_ids_var='_splitCreatorRoleIds',
-                tx_var='tx',
-                indent='        ',
-            )
+            _build_split_approval_inherit_block(indent='        ')
             if _split_has_approvable else ''
         )
 
         _split_ctx = {
             'entity_name': _def_key,
             'pascal_name': to_pascal_case(_def_key),
-            'status_split_value': _split_status_enum.index('split') if 'split' in _split_status_enum else 1,
-            'status_rejected_value': _split_status_enum.index('rejected') if 'rejected' in _split_status_enum else 2,
+            'status_split_value': next((v for v in _split_status_enum if str(v).lower() == 'split'), 'split'),
+            'status_rejected_value': next((v for v in _split_status_enum if str(v).lower() == 'rejected'), 'rejected'),
             'has_approvable': _split_has_approvable,
             'approval_create_block': _split_approval_create_block,
             'has_quantity_check': bool(_qty_field),
@@ -884,25 +905,43 @@ def generate(schema_path: str, output_dir: str) -> None:
             _split_ui_parts = []
             _split_uses_format_label_value = False
             _split_has_relation_field = False
+            # DP-B (cmd_424): give SplitActionSection's per-part autocomplete
+            # pickers access to sibling scalar field values (e.g. the parent's
+            # product_id, to narrow inventory_id candidates), reusing the same
+            # 'x-autocomplete-context' annotation DP-5 defined for FormUpsert
+            # relation fields (schema_helpers.get_parent_relationships) —
+            # applied here to whichever perPartRequired FK field carries it.
+            # Purely schema-structure-driven (cmd_420 convention: no entity-
+            # name check), so every other split entity's generated UI is
+            # byte-identical unless it declares this annotation itself.
+            _split_has_context_field = False
+            _section_context_fields = []
             for _f in _per_part_req:
                 _f_def = _split_entity_props.get(_f, {})
                 _f_rel = (_f_def or {}).get('x-relationship') or {}
                 _f_target = _f_rel.get('target')
                 if not _f_target:
                     # No FK relation declared for this field — plain text input.
-                    _split_ui_parts.append({'field': _f, 'is_relation': False})
+                    _split_ui_parts.append({'field': _f, 'is_relation': False, 'context_fields': []})
                     continue
                 _f_label_field = _f_rel.get('labelField', 'id')
                 _f_built = build_label_expression('item', _f_label_field, _f_target, schema)
                 if _f_built['has_format']:
                     _split_uses_format_label_value = True
                 _split_has_relation_field = True
+                _f_ctx_fields = list(_f_def.get('x-autocomplete-context') or [])
+                if _f_ctx_fields:
+                    _split_has_context_field = True
+                    for _cf in _f_ctx_fields:
+                        if _cf not in _section_context_fields:
+                            _section_context_fields.append(_cf)
                 _split_ui_parts.append({
                     'field': _f,
                     'is_relation': True,
                     'target': _f_target,
                     'target_pascal': to_pascal_case(_f_target),
                     'label_expr': _f_built['expression'],
+                    'context_fields': _f_ctx_fields,
                 })
             _split_ui_ctx = {
                 'entity_name': _def_key,
@@ -911,6 +950,8 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'per_part_required': _split_ui_parts,
                 'split_uses_format_label_value': _split_uses_format_label_value,
                 'split_has_relation_field': _split_has_relation_field,
+                'split_has_context_field': _split_has_context_field,
+                'section_context_fields': _section_context_fields,
             }
             _split_ui_dir = out / 'components' / _def_key
             _write(_split_ui_dir / 'SplitActionSection.tsx', _render(env, 'split_action_section.tsx.jinja2', _split_ui_ctx))
@@ -947,7 +988,10 @@ def generate(schema_path: str, output_dir: str) -> None:
     if True:
         _write(
             out / 'lib' / 'attachment' / 'actions.ts',
-            _render(env, 'attachment_actions.ts.jinja2', {'owners': attachable_owners}),
+            _render(env, 'attachment_actions.ts.jinja2', {
+                'owners': attachable_owners,
+                'type_ts': attachment_type_ts(schema),
+            }),
         )
         print(f'  Attachment bridge actions → lib/attachment/actions.ts ({len(attachable_owners)} owners)')
 
@@ -989,12 +1033,16 @@ def generate(schema_path: str, output_dir: str) -> None:
         print('  Mention parser → lib/mention/parser.ts')
 
     # --- Comment reactions API route (app/api/comment/[commentId]/reactions/toggle/route.ts) ---
-    # Emitted whenever x-internal integer enum entities exist (i.e., reactions are enabled).
+    # Emitted whenever x-internal enum entities exist (i.e., reactions are enabled).
     # D3=A: toggle endpoint is POST /api/comment/[commentId]/reactions/toggle
     if named_constants:
+        _reaction_const = next((c for c in named_constants if c['entity_name'] == 'reaction'), None)
         _write(
             out / 'app' / 'api' / 'comment' / '[commentId]' / 'reactions' / 'toggle' / 'route.ts',
-            _render(env, 'comment_reactions_api_route.ts.jinja2', {}),
+            _render(env, 'comment_reactions_api_route.ts.jinja2', {
+                'value_type': reaction_type_ts(schema),
+                'runtime_type': _reaction_const['value_type'] if _reaction_const else 'number',
+            }),
         )
         print('  Comment reactions API route → app/api/comment/[commentId]/reactions/toggle/route.ts')
 
@@ -1262,7 +1310,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             if not child_text_fields:
                 continue  # no searchable text
             _append_no_page_child(
-                no_page_children, child_name, f'{parent}_id',
+                no_page_children, child_name, f'{model}_id',
                 child_text_fields, child_base_def
             )
 
@@ -1282,7 +1330,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             if not target_text_fields:
                 continue
             _append_no_page_child(
-                no_page_children, target, f'{parent}_id',
+                no_page_children, target, f'{model}_id',
                 target_text_fields, target_base_def
             )
 
@@ -1381,12 +1429,12 @@ def generate(schema_path: str, output_dir: str) -> None:
     _test_entity_names = sorted(e['parent'] for e in test_entities)
     db_ctx = db_helpers_context(schema, test_entity_names=_test_entity_names)
     _test_entity_count = len(db_ctx['test_entity_names'])
+    cypress_support = out / 'cypress' / 'support'
+    cypress_e2e    = out / 'cypress' / 'e2e'
+    registry_infos = []
+
     if test_entities:
         print('\nGenerating Cypress tests...')
-        cypress_support = out / 'cypress' / 'support'
-        cypress_e2e    = out / 'cypress' / 'e2e'
-
-        registry_infos = []
         for entity in test_entities:
             parent     = entity['parent']
             model      = entity['model']
@@ -1437,10 +1485,12 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'definition_key': def_key,
             })
 
-        # Task registry (covers all test-enabled entities)
-        registry_ctx = tasks_registry_context(registry_infos, schema)
-        _write(cypress_support / 'generated-tasks.ts',
-               _render(env, 'test_tasks_registry.ts.jinja2', registry_ctx))
+    # Task registry (always generated — empty registry when test_entities is
+    # empty is still valid TypeScript, keeping cypress.config.ts's import
+    # resolvable regardless of schema test coverage).
+    registry_ctx = tasks_registry_context(registry_infos, schema)
+    _write(cypress_support / 'generated-tasks.ts',
+           _render(env, 'test_tasks_registry.ts.jinja2', registry_ctx))
 
     # --- db-helpers.ts (always generated, not gated on test_entities) ---
     print('\nGenerating db-helpers.ts...')

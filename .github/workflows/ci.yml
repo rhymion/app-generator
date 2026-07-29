@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
       - run: npm run lint
@@ -26,7 +26,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
       - name: Generate Prisma client
@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
       - name: npm audit (production deps, high+)
@@ -67,7 +67,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: '24.18.0'
           cache: 'npm'
       - name: Cache Cypress binary
         uses: actions/cache@v5
@@ -79,8 +79,29 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - name: Create env file
-        run: echo "AUTH_SECRET=${{ secrets.AUTH_SECRET }}" >> .env.test.local
+      - name: Generate disposable test-only AUTH_SECRET (not a production secret)
+        # AUTH_SECRET here is a throwaway value scoped to this CI run only —
+        # it has no secrecy value and is never used outside the ephemeral
+        # test environment, so it's generated in-workflow instead of read
+        # from repository secrets. GitHub does not pass repository secrets
+        # to Dependabot-authored `pull_request` runs (Dependabot has its
+        # own, separate secrets store) or to fork PRs, so referencing
+        # secrets.AUTH_SECRET here made CI unusable for those PRs: the
+        # secret resolved empty, got written to .env.test.local anyway, and
+        # only surfaced much later as an Auth.js MissingSecret failure deep
+        # into the UI test suite. Generating the value removes CI's only
+        # dependency on repository secrets and keeps behavior identical for
+        # every PR type.
+        run: echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env.test.local
+      - name: Verify required test env is non-empty (fail-closed)
+        # Guards right at env-generation time so a future accidental
+        # regression back to an empty/undefined value fails fast here
+        # instead of resurfacing as a confusing downstream test failure.
+        run: |
+          if [ -z "$(grep '^AUTH_SECRET=' .env.test.local | cut -d= -f2-)" ]; then
+            echo "::error::AUTH_SECRET resolved empty in .env.test.local — refusing to continue."
+            exit 1
+          fi
       - name: Generate code, start test database, push schema and build
         run: npm run test:e2e:build
       - name: Run API E2E tests

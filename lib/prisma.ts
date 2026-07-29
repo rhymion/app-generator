@@ -36,7 +36,7 @@ function attachSlowQueryListener(client: PrismaClient<'query'>): void {
 // Use Accelerate URL if available, otherwise fall back to direct connection.
 // Accelerate is off by default (PRISMA_DATABASE_URL unset) because it has
 // never reached this environment's Cloud SQL instance — GOOGLE_MANAGED_INTERNAL_CA
-// TLS verification fails (rca_266a/267a). Doreen (the Lord) is following up with
+// TLS verification fails (rca_266a/267a). Doreen is following up with
 // Prisma support after other urgent work; once resolved, set PRISMA_DATABASE_URL
 // again to switch back to this branch without further code changes.
 const createPrismaClient = async () => {

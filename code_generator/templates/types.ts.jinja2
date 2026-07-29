@@ -49,8 +49,8 @@ export type {{ parent | pascal_case }} = {
       created_at?: string | Date | null;
       updated_at?: string | Date | null;
       creator?: { id: string; name: string; image?: string | null } | null;
-      reactionCounts: Array<{ type: number; count: number }>;
-      myReactionTypes: number[];
+      reactionCounts: Array<{ type: {{ reaction_value_type }}; count: number }>;
+      myReactionTypes: ({{ reaction_value_type }})[];
 {% else %}
 {% for rel in child.relationships %}
       {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
@@ -99,8 +99,8 @@ export type {{ child.name | pascal_case }} = {
   created_at?: string | Date | null;
   updated_at?: string | Date | null;
   creator?: { id: string; name: string; image?: string | null } | null;
-  reactionCounts: Array<{ type: number; count: number }>;
-  myReactionTypes: number[];
+  reactionCounts: Array<{ type: {{ reaction_value_type }}; count: number }>;
+  myReactionTypes: ({{ reaction_value_type }})[];
 {% endif %}
 };
 
@@ -122,10 +122,10 @@ export type {{ parent | pascal_case }}Detail = {{ parent | pascal_case }};
 {% if _ns.has_comments %}
 export type CommentReactionSummary = {
   commentId: string;
-  type: number;
+  type: {{ reaction_value_type }};
   active: boolean;
-  counts: Array<{ type: number; count: number }>;
-  myTypes: number[];
+  counts: Array<{ type: {{ reaction_value_type }}; count: number }>;
+  myTypes: ({{ reaction_value_type }})[];
 };
 
 {% endif %}
@@ -174,8 +174,8 @@ export type FormViewProps = Readonly<{
         created_at?: string | Date | null;
         updated_at?: string | Date | null;
         creator?: { id: string; name: string; image?: string | null } | null;
-        reactionCounts: Array<{ type: number; count: number }>;
-        myReactionTypes: number[];
+        reactionCounts: Array<{ type: {{ reaction_value_type }}; count: number }>;
+        myReactionTypes: ({{ reaction_value_type }})[];
 {% else %}
 {% for rel in child.relationships %}
         {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;

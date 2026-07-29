@@ -1,6 +1,6 @@
 # Inventory Domain Generalization — Design Document
 
-> **cmd_310** · 2026-07-13 · **Status: APPROVED — Lord rulings OD-1~8 + RC-1 + RC-2 applied (subtask_310f/310g/310h)**
+> **cmd_310** · 2026-07-13 · **Status: APPROVED — rulings OD-1~8 + RC-1 + RC-2 applied (subtask_310f/310g/310h)**
 >
 > **Scope**: Design only. Implementation follows separate cmds after cmd_309 is serialized and
 > closed (same working tree; concurrent modification forbidden).
@@ -34,12 +34,12 @@ existing data can be deleted and recreated. This simplification eliminates an en
 
 ### 1.1 Investigation Scope
 
-| Subtask | Worker | Scope |
-|---------|--------|-------|
-| 310a | ashigaru1 | jinja2 templates (`code_generator/templates/`) |
-| 310b | ashigaru3 | Python generator (`code_generator/*.py`) + `prj/code_generator/json_schema.yaml` |
-| 310c | ashigaru6 | x-ledger-source current state + receiving/reservation asymmetry |
-| 310d | ashigaru7 | x-reservation full text (3 blocks) + warehouse/location current state |
+| Subtask | Area | Scope |
+|---------|------|-------|
+| 310a | jinja2 templates | `code_generator/templates/` |
+| 310b | Python generator | `code_generator/*.py` + `prj/code_generator/json_schema.yaml` |
+| 310c | x-ledger-source | current state + receiving/reservation asymmetry |
+| 310d | x-reservation | full text (3 blocks) + warehouse/location current state |
 
 Classification key:
 - **(a-role)** Role-dependent: generator resolves by literal name; **must be replaced with marker**
@@ -94,17 +94,17 @@ Classification key:
 
 ## 2. Role Marker Design — Top-Level Entity Declarations (AC2, OD-1)
 
-### 2.1 Ruling (OD-1 = B, Lord-refined)
+### 2.1 Ruling (OD-1 = B, refined)
 
-Gunshi's original recommendation (embed `ledgerEntity`/`transactionableEntity` inside
-`x-reservation.transaction`) was **not adopted**. The Lord's ruling:
+The design reviewer's original recommendation (embed `ledgerEntity`/`transactionableEntity` inside
+`x-reservation.transaction`) was **not adopted**. The ruling:
 
 > **Declare `ledger`, `transactionable`, and `pool` as top-level schema entities.
 > Both `x-reservation` and `x-ledger-source` reference them by key.**
 
 Rationale: supports multiple independent inventory-like sets in the same schema (e.g., a schema
 with both `inventory` and `supply_pool` each having their own ledger/transactionable entities).
-The per-reservation-block embedding (gunshi's Option A) cannot express this.
+The per-reservation-block embedding (the inline-embedding option) cannot express this.
 
 ### 2.2 New Top-Level Schema Structure
 
@@ -278,7 +278,7 @@ inventory:
 
 ### 4.4 Ship/Claim Terminology — Renamed to "Ship" (C.3 Verification Result)
 
-The Lord identified that `_claim` (a TypeScript local variable in split templates representing
+It was identified that `_claim` (a TypeScript local variable in split templates representing
 quantity being allocated) conflicts conceptually with "claim" as an operation name. Investigation
 confirmed these are distinct:
 - `_claim` = quantity amount in a loop iteration (local variable, `const _claim = Math.min(...)`)
@@ -291,12 +291,12 @@ confirmed these are distinct:
 
 ### 4.5 x-receiving Abolition — Confirmed Ruling (RC-1 resolved, 2026-07-13)
 
-**OD-5 + RC-1 ruling (Lord, 2026-07-13)**:
+**OD-5 + RC-1 ruling (2026-07-13)**:
 
 > Approval and rejection are handled by `receiving_receipt_line`, not by `ReceivingConfirmForm`.
 > `ReceivingConfirmForm.tsx` and `app/api/receiving_receipt/.../actions/confirm/route.ts` are
 > **not needed in the current approval flow**. Abolish x-receiving and **delete these generated
-> files outright — no replacement**. Gunshi's alternative proposal (re-generate confirm
+> files outright — no replacement**. The design reviewer's alternative proposal (re-generate confirm
 > form/route via `x-ledger-source: {event_type: receive}`) is **not adopted** because the
 > form/route themselves are unnecessary.
 
@@ -318,7 +318,7 @@ the receiving approval/rejection flow (`receiving_receipt_line`-side) e2e tests 
 
 **Stop-and-report clause**: If, during Phase 2 implementation, `ReceivingConfirmForm` proves
 to be reachable in a currently-exercised user path and its deletion breaks the build or the
-receiving flow, the implementor must **stop immediately and report to shogun** rather than
+receiving flow, the implementor must **stop and raise the issue for maintainer review** rather than
 proceeding with blind deletion. The ruling is based on the premise that the form is
 unused in the current approval flow; if that premise is wrong, escalate.
 
@@ -386,7 +386,7 @@ Sites affected:
 - All generated TypeScript files that import/catch this class
 
 This is a **breaking change in generated TS API** (exception class name appears in API responses
-and catch blocks). Per Lord ruling, this is accepted. All callers must update when regenerated.
+and catch blocks). Per ruling, this is accepted. All callers must update when regenerated.
 
 ---
 
@@ -403,7 +403,7 @@ and catch blocks). Per Lord ruling, this is accepted. All callers must update wh
 - Fix `test_reservation_spec.cy.ts.jinja2:157` template bug (`db:seedReservationInventory` → `db:seedReservation{{ pascal }}`)
 
 **Gate**: re-generate with default schema; golden diff must be empty for all affected files.
-**Lord approval needed before**: none — these are pure fixes.
+**Approval needed before**: none — these are pure fixes.
 
 ### Phase 2 — Top-Level Entity Declarations + Ledger Generalization
 
@@ -423,8 +423,8 @@ and catch blocks). Per Lord ruling, this is accepted. All callers must update wh
 **Implementation-time checks (mandatory — from RC-1 ruling, see §4.5)**:
 - (a) `FormView.tsx` has no dangling import after re-generation (build must not error on import)
 - (b) `next build` exits 0; `receiving_receipt_line`-side approval/rejection e2e tests remain green
-- Stop and report to shogun if `ReceivingConfirmForm` proves reachable and deletion breaks the flow
-**Lord approval needed before**: none (RC-1 resolved — delete without replacement confirmed).
+- Stop and raise for maintainer review if `ReceivingConfirmForm` proves reachable and deletion breaks the flow
+**Approval needed before**: none (RC-1 resolved — delete without replacement confirmed).
 
 ### Phase 3 — Rename + Richer Ship Skeleton
 
@@ -434,7 +434,7 @@ and catch blocks). Per Lord ruling, this is accepted. All callers must update wh
 - Rename "claim" operation concept to "Ship" in documentation and validator vocabulary
 
 **Gate**: build clean; no test regressions; exception rename reflected in type checker.
-**Lord approval needed before**: none (already approved in OD-3, OD-4).
+**Approval needed before**: none (already approved in OD-3, OD-4).
 
 ### Phase 4 — Warehouse / Location FK
 
@@ -444,7 +444,7 @@ and catch blocks). Per Lord ruling, this is accepted. All callers must update wh
 - Run `generate-code` + `prisma db push` (data deletion per OD-6)
 
 **Gate**: build + e2e clean; `inventory.location` string field must no longer exist in generated Prisma schema.
-**Lord approval needed before**: none (OD-6 already approved atomically).
+**Approval needed before**: none (OD-6 already approved atomically).
 
 ### Phase 5 — Movement / Adjustment New Event Types
 
@@ -455,17 +455,17 @@ and catch blocks). Per Lord ruling, this is accepted. All callers must update wh
 - Wire through generator: `x-ledger-source: {event_type: move/adjust}` detection
 
 **Gate**: build + e2e clean; new e2e specs for move and adjust operations.
-**Lord approval needed before**: none (OD-7 already approved).
+**Approval needed before**: none (OD-7 already approved).
 
 ---
 
-## 7. Lord Rulings Applied — Record
+## 7. Rulings Applied — Record
 
 The following decisions from the original Open Decisions (subtask_310e) are now resolved:
 
 | OD | Decision | Adopted design |
 |---|---|---|
-| OD-1 | Lord refined B | Top-level `x-ledger-entities` declarations; x-reservation and x-ledger-source reference by domain key |
+| OD-1 | Refined B | Top-level `x-ledger-entities` declarations; x-reservation and x-ledger-source reference by domain key |
 | OD-2 | No timeline | x-reservation not deprecated; only remove keys if exact duplicate exists in new mechanism |
 | OD-3 | Option B | Config-driven richer ship skeleton; Option C (full declarative) not adopted |
 | OD-4 | Approved | `InsufficientInventoryError` → `InsufficientPoolCapacityError` |
@@ -476,21 +476,21 @@ The following decisions from the original Open Decisions (subtask_310e) are now 
 
 ---
 
-## 8. Remaining Concerns for Lord (dashboard action items)
+## 8. Remaining Concerns (dashboard action items)
 
 ### ~~RC-1~~ — RESOLVED (2026-07-13)
 
-RC-1 (x-receiving abolition replacement mechanism) is closed. Lord ruled: delete
+RC-1 (x-receiving abolition replacement mechanism) is closed. Ruling: delete
 `ReceivingConfirmForm.tsx` and confirm route outright, no replacement. Implementation-time
 checks documented in §4.5 and Phase 2 gate (§6).
 
 ### RC-2 — RESOLVED (2026-07-13): "Ship" confirmed
 
-**Issue**: gunshi recommends renaming "claim" operation to "Ship". This matches existing schema
-`event_type: ship` and existing code comments. However, if Lord prefers "Fulfill" for semantic
+**Issue**: the design review recommends renaming "claim" operation to "Ship". This matches existing schema
+`event_type: ship` and existing code comments. However, if "Fulfill" is preferred for semantic
 reasons, code comments and design docs should be updated accordingly.
 
-Lord confirmed 2026-07-13: adopt "Ship" over "Fulfill" for the Phase 3 renamed operation
+Confirmed 2026-07-13: adopt "Ship" over "Fulfill" for the Phase 3 renamed operation
 (Fulfill rejected — would require a new `event_type`).
 
 ---
@@ -549,5 +549,5 @@ Only `purchase_order` gains the `ledgerDomain` reference in Phase 2.
 
 ---
 
-*Document end. All Lord confirmations resolved (OD-1–8, RC-1, RC-2) as of 2026-07-13. Design phase complete.*
+*Document end. All confirmations resolved (OD-1–8, RC-1, RC-2) as of 2026-07-13. Design phase complete.*
 *Implementation begins after cmd_309 serialization. Phase order: 1 → 2 → 3 → 4 → 5.*

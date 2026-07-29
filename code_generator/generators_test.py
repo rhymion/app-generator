@@ -67,6 +67,8 @@ from helpers.schema_helpers import (
     get_flatten_rels,
     get_splittable_bridge_field,
     resolve_ledger_domain,
+    get_internal_bridge_fk_prop_names,
+    derive_text_fields,
     get_entity_properties,
     get_entity_required,
 )
@@ -75,7 +77,7 @@ from helpers.label_field import (
     build_label_expression, render_prisma_include, resolve_label_paths, relation_chain_targets,
     build_string_only_label_expression,
 )
-from build_context import _get_entity_options, _raw_def
+from build_context import _get_entity_options, _raw_def, is_forced_required_field
 from generate_types import extract_entities
 
 
@@ -277,11 +279,23 @@ def _seed_path_part(
     return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title}'
 
 
-def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dict) -> list[dict]:
+def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dict, is_self_ref: bool = False) -> list[dict]:
     """Compute extra_required_fields for a dep record in populateDependencies.
 
     Uses title-based name (e.g. 'Test Parent', 'Test Assignee') and encodes
     user_account email/password so the template needs no user_account special-casing.
+
+    is_self_ref: True when this dep is another instance of the SAME entity being
+    generated (e.g. approval_flow's precededBy/followedBy). Self-ref dep records
+    exist only to be referenced by the primary create test, not to BE the record
+    under test — but the entity being generated is what the test's own "creates
+    with minimal/full data" flow also creates, using the first x-entity-select
+    option (see cypress_create_value). If a self-ref dep also picked that same
+    first option for an x-entity-select field, and that field participates in a
+    @@unique constraint alongside another dep FK the test also reuses directly
+    (e.g. approval_flow's @@unique([entity_name, approver_role_id])), the self-ref
+    dep's create() and the test's own create() collide with P2002. Self-ref deps
+    pick the second entity option instead so the two never share a unique key.
     """
     if target == 'user':
         return [
@@ -314,6 +328,12 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props | oto_props | _inferred_internal
     _entity_opts = _get_entity_options(schema)
     _first_entity_val = f"'{_entity_opts[0]['value']}'" if _entity_opts else "''"
+    # Self-ref deps use the second entity option (see docstring) so they never
+    # share an x-entity-select value with the primary create test, which always
+    # uses the first option (see cypress_create_value's 'entity_select' branch).
+    _self_ref_entity_val = (
+        f"'{_entity_opts[1]['value']}'" if is_self_ref and len(_entity_opts) > 1 else _first_entity_val
+    )
     result = []
     for prop_name, prop in props.items():
         if prop_name not in required or prop_name in exclude:
@@ -326,7 +346,7 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val_unique = f'`Test {title} ${{i}}`'
             val_second = f"'Test {title} 2'"
         elif actual == 'string' and prop.get('x-entity-select'):
-            val = val_unique = val_second = _first_entity_val
+            val = val_unique = val_second = _self_ref_entity_val
         elif actual == 'string' and fmt == 'date':
             val = 'new Date(Date.UTC(2025, 0, 1)).toISOString()'
             val_unique = 'new Date(Date.UTC(2025, 0, i)).toISOString()'
@@ -744,7 +764,12 @@ def get_field_metas(
                 'category': 'string_enum',
                 'required': prop_name in required_fields,
                 'enum_values': prop.get('enum'),
-                'enum_namespace': prop.get('x-enum-namespace'),
+                # nativeEnum (Prisma enum) fields have no explicit x-enum-namespace
+                # in most schemas; generators.py's _native_enum_ns() falls back to
+                # the Prisma enum type name itself for the singleSelect column's
+                # translated option labels — mirror that fallback here so the
+                # generated test's expected label matches what's actually rendered.
+                'enum_namespace': prop.get('x-enum-namespace') or prop.get('_prisma_native_enum_type'),
             })
         else:
             metas.append({
@@ -782,7 +807,8 @@ def _child_system_managed_fk_excludes(child_def: dict) -> set[str]:
     text/select — the service sets them internally (reservation/split/approval
     flows). Excluding them keeps generated full-data e2e tests from calling
     fillDataGridRow with a literal string on a field that requires a real cuid
-    (root cause: queue/reports/subtask_294a_gunshi.yaml failure_classification).
+    (root cause: literal-string autofill cannot satisfy the FK's real-cuid
+    requirement).
 
     - x-relationship.type == 'one-to-one_bridge' (e.g. approvable_id): the
       generic internal-bridge FK marker used throughout code_generator.
@@ -923,9 +949,7 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
         first = next((v for v in values if v is not None), None)
         if first is None:
             return ''
-        if cat == 'enum':
-            return _enum_label(field, first)
-        return str(first)
+        return _enum_label(field, first)
 
     elif cat == 'number':
         val = 100
@@ -1222,7 +1246,7 @@ def _child_scalar_entries(fields: list, title: str, value_fn) -> list[str]:
     """Return JS object entries for scalar (non-autocomplete) datagrid child fields."""
     entries = []
     for field in fields:
-        if field['category'] in ('autocomplete', 'enum'):
+        if field['category'] in ('autocomplete', 'enum', 'string_enum'):
             continue
         value = value_fn(field, title)
         if field['category'] in ('boolean', 'number'):
@@ -1230,6 +1254,34 @@ def _child_scalar_entries(fields: list, title: str, value_fn) -> list[str]:
         else:
             entries.append(f"{field['prop_name']}: '{value}'")
     return entries
+
+
+def _child_native_enum_singleselect_calls(fields: list, title: str, value_fn) -> list[str]:
+    """Return selectDataGridSingleSelect() call lines for nativeEnum datagrid child fields.
+
+    Row index is always 0: sibling FK calls in these datagrid-child test
+    sections (see gen_child_datagrid_fk_fields) hardcode row 0 too, since
+    each section only ever adds a single child row. selectDataGridSingleSelect
+    is imported directly in the template (no `cy.` prefix), matching the
+    existing fk.field / fk.label_code call sites.
+    """
+    calls = []
+    for field in fields:
+        if field['category'] != 'string_enum':
+            continue
+        # value_fn (cypress_create_value / cypress_edit_value) returns the
+        # translated display label for string_enum (matches the MUI singleSelect
+        # option text); reverse-lookup the raw enum member it corresponds to,
+        # since the cell's underlying input value is the raw member, not the label.
+        label = value_fn(field, title)
+        raw = next(
+            (v for v in (field.get('enum_values') or []) if v is not None and _enum_label(field, v) == label),
+            label,
+        )
+        calls.append(
+            f"selectDataGridSingleSelect(0, '{field['prop_name']}', '{label}', '{raw}');"
+        )
+    return calls
 
 
 def gen_child_datagrid_object(child_meta: dict, action: str) -> str:
@@ -1448,6 +1500,23 @@ def helper_context(
     internal_fk_deps = get_all_internal_fk_deps(model_name, schema)
     internal_fk_prop_names = {d['prop_name'] for d in internal_fk_deps}
     fields = [f for f in fields if f['prop_name'] not in internal_fk_prop_names]
+
+    # cmd_421 Domain 4 (M1, subtask_421i): mention field name resolution. Only
+    # the commentable-bridge shape is supported here (comment_children direct-FK
+    # shape has no populate helper of its own yet — see build_context.py's
+    # _build_comment_actions/_build_comment_actions_bridge split for the two
+    # shapes). Mirrors build_context.py's comment_has_mention detection: the
+    # shared 'comment' model has an x-mention: true field AND this entity has
+    # a one-to-one_bridge FK to 'commentable'.
+    _h_commentable_fk = next((d for d in internal_fk_deps if d['target'] == 'commentable'), None)
+    _h_comment_def = schema.get('definitions', {}).get('comment', {}) or {}
+    _h_comment_mention_fields = [
+        fn for fn, fp in (_h_comment_def.get('properties') or {}).items()
+        if isinstance(fp, dict) and fp.get('x-mention') is True
+    ]
+    has_mention_comments = bool(_h_commentable_fk) and bool(_h_comment_mention_fields)
+    commentable_fk_prop = _h_commentable_fk['prop_name'] if _h_commentable_fk else None
+    mention_field_name = _h_comment_mention_fields[0] if _h_comment_mention_fields else None
     # Mark read-only fields: they stay in `fields` (so seed/prisma data still sets
     # required values) but UI fill/clear/assert commands skip them — the form renders
     # them non-editable, so typing into them would fail.
@@ -1714,7 +1783,9 @@ def helper_context(
         dep_def = schema['definitions'].get(dep['target'], {})
         x_rels = dep_def.get('x-relationships', {})
         dep_label_info = dep_label_info_by_var.get(dep['var_name'])
-        extra_required_fields = _get_dep_populate_fields(dep['target'], dep['var_name'], title_str, schema)
+        extra_required_fields = _get_dep_populate_fields(
+            dep['target'], dep['var_name'], title_str, schema, is_self_ref=(dep['target'] == model_name),
+        )
         # Idempotency hook for `populateXxxDependencies`: if the dep target has
         # a deterministic `name` value (the common case — every required-`name`
         # entity emits `name: 'Test <Title>'`), the template uses
@@ -1989,6 +2060,24 @@ def helper_context(
                 if _pfk_field:
                     required_fields_prisma.append(_pfk_field)
 
+    # x-ledger-source pool FK(s) (poolIdField / fromPoolIdField / toPoolIdField)
+    # are usually schema-optional — the real pool target is often resolved after
+    # creation (e.g. via a split action) — so they're excluded from
+    # required_fields_prisma by default. But populate{{Pascal}}WithApproval (and
+    # its Rejected/TerminalRejected siblings) share this same field list, and
+    # approving triggers service_after_approve.ts's ledger write, which throws
+    # if the pool FK is unresolved (FS-3 guard). Force-inject any pool FK that
+    # already has a dep available so those helpers seed a valid pre-approval
+    # state instead of tripping the guard (cmd_477e: receiving_receipt_line 7.6).
+    _ledger_source = parent_def.get('x-ledger-source') or {}
+    _pool_fk_props = [v for k, v in _ledger_source.items() if k.lower().endswith('poolidfield') and v]
+    for _pool_prop in _pool_fk_props:
+        if any(f['prop_name'] == _pool_prop for f in required_fields_prisma):
+            continue
+        _pool_field = next((f for f in all_fields_prisma if f['prop_name'] == _pool_prop), None)
+        if _pool_field is not None and _pool_field.get('dep_var_name'):
+            required_fields_prisma.append(_pool_field)
+
     # populateData needs deps when there are required FK fields not covered by per-iteration creation.
     primary_fk_dep_var = primary_fk_dep['var_name'] if primary_fk_dep else None
     primary_fk_is_ua = primary_fk_dep is not None and primary_fk_dep.get('is_user_account', False)
@@ -2134,6 +2223,10 @@ def helper_context(
         'needs_format_label_value': any(d.get('label_has_format') for d in enriched_deps),
         'reservation_lines_pool_seed': reservation_lines_pool_seed,
         'reservation_nolines_pool_seed': reservation_nolines_pool_seed,
+        # cmd_421 Domain 4 (M1)
+        'has_mention_comments': has_mention_comments,
+        'commentable_fk_prop': commentable_fk_prop,
+        'mention_field_name': mention_field_name,
     }
 
 
@@ -2520,14 +2613,23 @@ def spec_context(
         child_name = child_meta['child']['name']
         fk_create_fields = gen_child_datagrid_fk_fields(child_meta['required_fields'], schema)
         fk_full_fields = gen_child_datagrid_fk_fields(child_meta['fields'], schema)
+        child_title = child_meta['names']['title']
+        native_enum_create_calls = _child_native_enum_singleselect_calls(
+            child_meta['required_fields'], child_title, cypress_create_value
+        )
+        native_enum_full_calls = _child_native_enum_singleselect_calls(
+            child_meta['fields'], child_title, cypress_create_value
+        )
         datagrid_children_data.append({
-            'title': child_meta['names']['title'],
+            'title': child_title,
             'pascal': to_pascal_case(child_name),
             'is_required_in_parent': child_meta['child']['property_name'] in detail_required,
             'create_obj': gen_child_datagrid_object(child_meta, 'create'),
             'full_create_obj': gen_child_full_datagrid_object(child_meta),
             'fk_create_fields': fk_create_fields,
             'fk_full_fields': fk_full_fields,
+            'native_enum_create_calls': native_enum_create_calls,
+            'native_enum_full_calls': native_enum_full_calls,
         })
 
     # List children data
@@ -2592,11 +2694,19 @@ def spec_context(
     ] if use_deps_in_3_1 else []
     opt_fill_cmds_3_1 = opt_fill_cmds_3_1_non_ac + opt_fill_cmds_3_1_ac + opt_fill_cmds_3_1_ua
 
-    # Section 3.2: optional clear commands (8-space indent, non-autocomplete only)
+    # Section 3.2: optional clear commands (8-space indent, non-autocomplete only).
+    # A select-like field (enum/string_enum/entity_select) can be schema-optional
+    # (excluded from json_schema `required:` because a Prisma `@default(...)`
+    # supplies a value on create) while still being non-nullable at the DB level
+    # -- e.g. `status RoomStatus @default(available)`. Clearing it is illegal
+    # (neither a valid null nor a valid enum member), so it must be excluded
+    # from the "clears optional data" test the same way R-2 excludes it from
+    # legal clear targets on the client (cmd_472/R-2a).
     opt_clear_cmds_3_2 = [
         gen_clear_command(f, '        ')
         for f in optional_field_metas
         if f['category'] != 'autocomplete' and not f.get('readonly')
+        and not is_forced_required_field(properties.get(f['prop_name'], {}))
     ]
 
     # Section 3.3: primary field edit command
@@ -2746,7 +2856,13 @@ def spec_context(
         'has_optional': bool(optional_field_metas),
         'has_children': bool(child_metas),
         'has_datagrid_children': bool(datagrid_children),
-        'has_datagrid_fk_children': any(c['fk_create_fields'] or c['fk_full_fields'] for c in datagrid_children_data),
+        # Name predates nativeEnum support; it now gates the selectDataGridSingleSelect
+        # import for BOTH FK and nativeEnum datagrid child fields (both need it).
+        'has_datagrid_fk_children': any(
+            c['fk_create_fields'] or c['fk_full_fields']
+            or c['native_enum_create_calls'] or c['native_enum_full_calls']
+            for c in datagrid_children_data
+        ),
         'I': I,
         'required_fill_cmds': required_fill_cmds,
         'all_fill_cmds': all_fill_cmds,
@@ -2803,6 +2919,14 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
     # the hardcoded one too would produce a duplicate-identifier TS error.
     user_in_entities = any(e.get('parent') == 'user' for e in entities)
     has_user_account_populate = False
+    # cmd_421 Domain 4 (M1): schema-wide constant — does the shared 'comment'
+    # model have an x-mention: true field at all. Combined per-entity below
+    # with a one-to-one_bridge FK to 'commentable' (mirrors helper_context).
+    _reg_comment_def = schema.get('definitions', {}).get('comment', {}) or {}
+    _reg_comment_has_mention_field = any(
+        isinstance(fp, dict) and fp.get('x-mention') is True
+        for fp in (_reg_comment_def.get('properties') or {}).values()
+    )
     for entity in entities:
         parent = entity['parent']
         pascal = to_pascal_case(parent)
@@ -2822,6 +2946,10 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
         flatten_test_rels = _compute_flatten_test_rels(parent, pascal, definition_key, schema)
         _xres = _raw_def(parent, schema).get('x-reservation', {})
         has_reservation = bool(_xres and _xres.get('mode') == 'count')
+        has_mention_comments = _reg_comment_has_mention_field and any(
+            d['target'] == 'commentable'
+            for d in get_internal_one_to_one_fks(entity['model_name'], schema)
+        )
         enriched_entities.append({
             'parent': parent,
             'pascal': pascal,
@@ -2837,6 +2965,7 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
             ],
             'has_approvable': has_approvable,
             'has_reservation': has_reservation,
+            'has_mention_comments': has_mention_comments,
             'flatten_test_rels': flatten_test_rels,
         })
     if user_in_entities:
@@ -2866,12 +2995,88 @@ def api_spec_context(
     filtered_props = filter_fields(model_def.get('properties') or {}, gen_cfg.get('fields'))
     relationships = get_parent_relationships({**model_def, 'properties': filtered_props}, schema)
 
+    # is_searchable (cmd_421 Domain 5): whether this entity actually participates
+    # in the global full-text search index (lib/search/helpers.ts), so the API
+    # e2e template can assert per-entity data surfaces via /api/search. Mirrors
+    # the is_search + text_fields derivation in generate.py's search_entities
+    # loop exactly — same x-generator.search.default_scope / x-audit / explicit
+    # x-generate.search precedence, and the same "no derivable text_fields ⇒
+    # not searchable" fallback — so this flag never claims searchability that
+    # generate.py's search-context build would itself skip.
+    _api_detail_def = schema['definitions'].get(definition_key or f'{parent}_detail', {}) or {}
+    _api_is_audited = bool(
+        _api_detail_def.get('x-audit') is True
+        or model_def.get('x-audit') is True
+    )
+    _api_search_default_scope = (schema.get('x-generator', {}).get('search', {}) or {}).get(
+        'default_scope', 'opt_in'
+    )
+    _api_x_generate_raw = _api_detail_def.get('x-generate') or model_def.get('x-generate') or {}
+    _api_explicit_search = _api_x_generate_raw.get('search')
+    if _api_search_default_scope == 'all':
+        if _api_is_audited and _api_explicit_search is None:
+            is_searchable = False
+        else:
+            is_searchable = _api_explicit_search is not False
+    else:  # opt_in
+        is_searchable = _api_explicit_search is True
+    search_sample_field = None
+    search_sample_field_required = False
+    if is_searchable:
+        _api_xsearch = _api_detail_def.get('x-search') or {}
+        _api_text_fields = _api_xsearch.get('text_fields') or derive_text_fields(model_def.get('properties') or {})
+        if not _api_text_fields:
+            is_searchable = False
+        elif _api_xsearch.get('org_id_field') == 'id':
+            # Self-referential org scope (e.g. the organization entity itself):
+            # a freshly created row via db:populate<Entity> belongs to a
+            # different org than the test user's own, so it structurally can
+            # never surface in that user's search results regardless of the
+            # search feature working correctly — N10 would fail by
+            # construction rather than signal a real coverage gap.
+            is_searchable = False
+        else:
+            search_sample_field = _api_text_fields[0]
+            # db:populate<Entity> (the base task, used everywhere else in this
+            # file) only sets required fields. When the chosen text field is
+            # optional, that task leaves it null, so `records[0].<field>` is
+            # null and the search query becomes a nonsense "null" string —
+            # N10 fails by fixture-incompleteness, not a real coverage gap
+            # (found on inventory/inventory_adjustment against the true
+            # 94-entity schema: lot_number/reason are both optional and left
+            # unset by the base populate helper). db:populate<Entity>Full
+            # always sets every field (required + optional — see
+            # ua_dep_fields_full above), so fall back to it here whenever the
+            # sample field isn't required.
+            search_sample_field_required = search_sample_field in (model_def.get('required') or [])
+
     # CSV Export (Phase 1) test context: org-scoping + x-import-key column presence.
     has_org_rel = any(r['target'] == 'organization' for r in relationships)
     should_filter_by_org = has_org_rel and model not in ('organization', 'user')
     _import_key_raw = model_def.get('x-import-key') or []
     import_key_fields = [f for f in _import_key_raw if '.' not in f]
     has_import_key = bool(_import_key_raw)
+
+    # cmd_421 N11-N13: import eligibility gate for the CSV import round-trip
+    # tests. Mirrors build_context.py's "single place" gate (cmd_328 design decision)
+    # exactly — is_primary_entity AND has_import_key AND import:true AND
+    # (new:true OR edit:true) — since this test context is built by a
+    # separate function and must re-derive the flag rather than reuse it.
+    # import_can_update alone (not import_eligible) gates N11-N13 because the
+    # round-trip technique (export an existing row, re-import it) always
+    # re-matches that row by its natural key and so always exercises the
+    # UPDATE branch, never CREATE — an import_eligible-but-create-only entity
+    # (edit:false) would fail these tests for a structural reason unrelated
+    # to any real defect.
+    _api_is_primary_entity = (parent == model)
+    _api_import_flag = gen_cfg.get('import', True)
+    _api_can_create = gen_cfg.get('new', True) is not False
+    _api_can_update = gen_cfg.get('edit', True) is not False
+    import_eligible = (
+        _api_is_primary_entity and has_import_key and _api_import_flag
+        and (_api_can_create or _api_can_update)
+    )
+    import_can_update = import_eligible and _api_can_update
 
     # cmd_324 V1: explicit export-column allowlist + FK flatten metadata for
     # the CSV export tests (N4/N6/N7). Mirrors the equivalent computation in
@@ -2896,7 +3101,15 @@ def api_spec_context(
     x_relationships_list = [
         {
             'field': r['relation_name'],
-            'display_col': f"{r['relation_name']}_name",
+            # DP-2 (cmd_394) naming for simple labelFields, cmd_382's '_name'
+            # fallback for composite/dotted ones (see build_context.py's
+            # x_relationships_list for the full rationale) — no filtering,
+            # matching the 1:1-with-parent_rels comment above.
+            'display_col': (
+                f"{r['relation_name']}_{r['label_field']}"
+                if isinstance(r['label_field'], str) and '.' not in r['label_field']
+                else f"{r['relation_name']}_name"
+            ),
         }
         for r in _api_parent_rels
     ]
@@ -2905,8 +3118,42 @@ def api_spec_context(
         'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
         'organization_id', 'tenant_id',
     }
-    _api_fk_prop_names = {r['prop_name'] for r in _api_parent_rels_raw}
+    # cmd_420: also exclude FKs to internal bridge models (approvable_id,
+    # inventory_transactionable_id, ...) — mirrors the build_context.py fix,
+    # see get_internal_bridge_fk_prop_names() docstring for why
+    # _api_parent_rels_raw alone misses them.
+    _api_internal_bridge_fk_names = get_internal_bridge_fk_prop_names(model_def, schema)
+    _api_fk_prop_names = {r['prop_name'] for r in _api_parent_rels_raw} | _api_internal_bridge_fk_names
     _export_candidates = gen_cfg.get('fields') or list(model_def.get('properties', {}).keys())
+
+    # cmd_421 N9: the internal-bridge-FK subset of _api_fk_prop_names — these
+    # columns are excluded from export_scalar_fields below precisely because
+    # they're internal plumbing (approvable_id, inventory_transactionable_id,
+    # ...), and N9 asserts that exclusion explicitly rather than only
+    # implicitly via the N6 allowlist-equality check.
+    exportable_bridge_fk_names = sorted(_api_internal_bridge_fk_names)
+    has_exportable_bridge_fks = bool(exportable_bridge_fk_names)
+
+    # cmd_421 Domain 4 (M1, subtask_421i): x-mention name resolution after
+    # save. Mirrors build_context.py's comment_has_mention detection exactly
+    # (the shared 'comment' model has an x-mention: true field AND this
+    # entity has a one-to-one_bridge FK to 'commentable') — this test context
+    # is built by a separate function so it must be re-derived here rather
+    # than reused. Only the commentable-bridge shape is covered: the
+    # comment_children direct-FK shape has no test populate helper of its
+    # own yet (helper_context has the same scope note).
+    _api_commentable_fk = next(
+        (d for d in get_internal_one_to_one_fks(model, schema) if d['target'] == 'commentable'),
+        None,
+    )
+    _api_comment_def = schema.get('definitions', {}).get('comment', {}) or {}
+    _api_comment_mention_fields = [
+        fn for fn, fp in (_api_comment_def.get('properties') or {}).items()
+        if isinstance(fp, dict) and fp.get('x-mention') is True
+    ]
+    has_mention_comments = bool(_api_commentable_fk) and bool(_api_comment_mention_fields)
+    commentable_rel_name = _api_commentable_fk['var_name'] if _api_commentable_fk else None
+    mention_field_name = _api_comment_mention_fields[0] if _api_comment_mention_fields else None
 
     def _is_export_scalar(_prop: dict) -> bool:
         _ptype = _prop.get('type')
@@ -3259,12 +3506,26 @@ def api_spec_context(
         'should_filter_by_org': should_filter_by_org,
         'has_import_key': has_import_key,
         'import_key_fields': import_key_fields,
+        # CSV Import round-trip (cmd_421 N11-N13)
+        'import_eligible': import_eligible,
+        'import_can_update': import_can_update,
         # CSV Export (cmd_324 V1) test context
         'export_scalar_fields': export_scalar_fields,
         'export_import_key_fields': export_import_key_fields,
         'x_relationships_list': x_relationships_list,
         'readonly_fields': readonly_fields,
         'put_body_readonly_zero': _put_body_ro_zero_impl('            '),
+        # CSV Export (cmd_421 N9): internal bridge FK exclusion
+        'has_exportable_bridge_fks': has_exportable_bridge_fks,
+        'exportable_bridge_fk_names': exportable_bridge_fk_names,
+        # Search coverage (cmd_421 Domain 5)
+        'is_searchable': is_searchable,
+        'search_sample_field': search_sample_field,
+        'search_sample_field_required': search_sample_field_required,
+        # Mention field name resolution (cmd_421 Domain 4, M1)
+        'has_mention_comments': has_mention_comments,
+        'commentable_rel_name': commentable_rel_name,
+        'mention_field_name': mention_field_name,
     }
 
 

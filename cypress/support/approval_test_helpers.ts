@@ -13,19 +13,7 @@ export async function getApprovableById(approvable_id: string) {
 
 export async function getPendingApprovalRequest(approvable_id: string) {
   const ar = await prisma.approval_request.findFirst({
-    where: { approvable_id, status: 0 },
+    where: { approvable_id, status: 'Pending' },
   });
   return ar ? JSON.parse(JSON.stringify(ar)) : null;
-}
-
-export async function getInventoryTransactionsByBridge(inventory_transactionable_id: string) {
-  const txs = await prisma.inventory_transaction.findMany({
-    where: { inventory_transactionable_id },
-    orderBy: { created_at: 'asc' },
-  });
-  return JSON.parse(JSON.stringify(txs));
-}
-
-export async function countAllInventoryTransactions() {
-  return prisma.inventory_transaction.count();
 }

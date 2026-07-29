@@ -84,13 +84,16 @@ def test_build_attachable_owners_empty_schema():
 
 def test_build_attachable_owners_picks_one_owner():
     schema = _schema('resource')
-    assert build_attachable_owners(schema) == [{'name': 'resource'}]
+    assert build_attachable_owners(schema) == [{'name': 'resource', 'has_assignee': False}]
 
 
 def test_build_attachable_owners_sorts_by_name():
     """Generator output is deterministic — owners come back alphabetised."""
     schema = _schema('resource', 'product')
-    assert build_attachable_owners(schema) == [{'name': 'product'}, {'name': 'resource'}]
+    assert build_attachable_owners(schema) == [
+        {'name': 'product', 'has_assignee': False},
+        {'name': 'resource', 'has_assignee': False},
+    ]
 
 
 def test_build_attachable_owners_skips_view_definitions():
@@ -100,7 +103,7 @@ def test_build_attachable_owners_skips_view_definitions():
     schema = _schema('resource', extras={
         'resource': _attachable_owner('resource'),
     })
-    assert build_attachable_owners(schema) == [{'name': 'resource'}]
+    assert build_attachable_owners(schema) == [{'name': 'resource', 'has_assignee': False}]
 
 
 def test_build_attachable_owners_ignores_wrong_target():
@@ -124,24 +127,30 @@ def _render(owners: list[dict]) -> str:
 
 def test_template_emits_select_branch_per_owner():
     out = _render([{'name': 'resource'}, {'name': 'product'}])
-    assert 'resource: { select: { creator_id: true } }' in out
-    assert 'product: { select: { creator_id: true } }' in out
+    assert 'resource: { select: { id: true, creator_id: true } }' in out
+    assert 'product: { select: { id: true, creator_id: true } }' in out
     assert 'resource: { select: { id: true } }' in out
     assert 'product: { select: { id: true } }' in out
 
 
-def test_template_emits_creator_chain_terminated_with_null():
+def test_template_emits_select_branch_includes_assignee_when_present():
+    """cmd_413: an owner with its own assignee_id gets it added to the
+    permission-check select so requirePermission's Assignee item-level
+    resolution has the field it needs."""
+    out = _render([{'name': 'resource', 'has_assignee': True}])
+    assert 'resource: { select: { id: true, creator_id: true, assignee_id: true } }' in out
+
+
+def test_template_emits_owner_permission_check_per_owner():
+    """cmd_419: editing an attachment defers to the owner's own
+    requirePermission('<model>', 'update', item) path (RBAC + Creator/
+    Assignee item-level resolution) rather than a bespoke creatorId check —
+    one branch per owner, falling through to a final error when none of the
+    owner FKs resolved."""
     out = _render([{'name': 'resource'}, {'name': 'product'}])
-    # The chain must end in `?? null` so the variable resolves to null when
-    # every owner lookup is undefined, not to `undefined` (which would skip
-    # the permission gate inside `if (creatorId && …)`).
-    assert 'owner.resource?.creator_id ??' in out
-    assert 'owner.product?.creator_id ??' in out
-    # `?? null;` may be split across lines; collapse whitespace before checking.
-    collapsed = ' '.join(out.split())
-    assert '?? null;' in collapsed
-    assert '????' not in collapsed
-    assert '??;' not in collapsed
+    assert "requirePermission('resource', 'update', owner.resource);" in out
+    assert "requirePermission('product', 'update', owner.product);" in out
+    assert "throw new Error('Attachable has no owner');" in out
 
 
 def test_template_emits_revalidate_paths_per_owner():
@@ -155,10 +164,10 @@ def test_template_with_no_owners_still_renders():
     at all (see generate.py), but the template must still render to valid
     TypeScript so a future caller that does emit it can rely on the shape."""
     out = _render([])
-    # creatorId resolves to null statically — no chain, no syntax error.
-    assert 'const creatorId = null;' in out
+    # No owner branches to check against — falls straight to the error.
+    assert "throw new Error('Attachable has no owner');" in out
     # No branches in the select clauses.
-    assert ': { select: { creator_id: true } }' not in out
+    assert ': { select: { id: true, creator_id: true } }' not in out
 
 
 # ---------------------------------------------------------------------------

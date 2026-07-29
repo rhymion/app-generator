@@ -172,10 +172,7 @@ def get_splittable_bridge_field(entity_def: dict) -> str:
     plain x-approval-lines + receiving_receipt_line's own x-ledger-source), so
     there is no single reverse lookup that resolves it for both; the entity's
     own x-splittable config is the one place both agree to declare it (cmd_312
-    Phase1, see queue/reports/subtask_312a_ashigaru3.yaml for why the more
-    "principled" x-reservation reverse-lookup was rejected — it silently
-    dropped the bridge for receiving_receipt_line, which has no x-reservation
-    on its parent at all).
+    Phase1; see docs/knowledge/schema-yaml-configuration.md for background).
     """
     split_cfg = entity_def.get('x-splittable')
     split_dict = split_cfg if isinstance(split_cfg, dict) else {}
@@ -343,6 +340,64 @@ def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
             'nullable': nullable,
             'children': children,
         })
+    return result
+
+
+def get_internal_bridge_fk_prop_names(parent_def: dict, schema: dict) -> set[str]:
+    """Returns FK property names on parent_def that point at an internal bridge
+    model (e.g. approvable, commentable, attachable, inventory_transactionable)
+    — server-managed plumbing with no client-visible generation surface, never
+    a real user-facing relation despite existing as a physical FK column.
+
+    Two shapes exist in this schema, and neither is visible to
+    get_parent_relationships() / get_one_to_one_rels() on its own — both
+    require x-relationship with a recognised type, which is exactly what
+    these FKs lack or use differently (cmd_420):
+      (a) x-relationship.type == 'one-to-one_bridge' (e.g. approvable_id) —
+          excluded from get_parent_relationships() by relation type; only
+          get_one_to_one_rels() sees it, and only under its own prop_name key.
+      (b) no x-relationship at all (e.g. inventory_transactionable_id,
+          "bridge created at approval time by ledger_move_stub") — invisible
+          to every relationship-aware helper.
+
+    Detection is by structural signal, not by field name: a `<x>_id` property
+    targets an internal bridge only when `<x>` (and every `<x>_*` schema
+    variant, e.g. `<x>_detail`) carries zero true x-generate flags — i.e. the
+    target has no list/view/new/edit/delete/api surface anywhere. This is what
+    separates a true internal bridge from an ordinary FK that merely omits
+    x-relationship for unrelated reasons (e.g. field.db_table_id, where
+    db_table is a fully exposed, independently generated entity).
+
+    Callers that build an FK-exclusion set (CSV export allowlist, form field
+    filtering, etc.) should union this into whatever get_parent_relationships()
+    already gives them.
+    """
+    props = parent_def.get('properties', {})
+    defs = schema.get('definitions', {})
+
+    def _is_internal_bridge_entity(name: str) -> bool:
+        variants = [name] + [n for n in defs if n.startswith(f'{name}_')]
+        for v in variants:
+            gen = (defs.get(v, {}) or {}).get('x-generate') or {}
+            if any(gen.get(k) for k in ('list', 'view', 'new', 'edit', 'delete', 'api')):
+                return False
+        return True
+
+    result = set()
+    for prop_name, prop in props.items():
+        if not isinstance(prop, dict) or not prop_name.endswith('_id'):
+            continue
+        rel = prop.get('x-relationship')
+        if rel:
+            if rel.get('type') != 'one-to-one_bridge':
+                continue
+            target = rel.get('target')
+        else:
+            target = prop_name[:-3]
+        if not target or target not in defs:
+            continue
+        if _is_internal_bridge_entity(target):
+            result.add(prop_name)
     return result
 
 

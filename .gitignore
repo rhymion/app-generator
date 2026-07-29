@@ -157,7 +157,7 @@ app/api/*/
 # app/api/upload/route.ts is a full generate-code target in both modes
 # (generate.py: base emits the Vercel Blob version, x-cloud:gcp overwrites it
 # with the GCS version), so it is intentionally NOT negated here — it stays
-# ignored to avoid generated-vs-VCS drift (cmd_269/cmd_272, Lord ruling 2026-07-04).
+# ignored to avoid generated-vs-VCS drift (cmd_269/cmd_272, decided 2026-07-04).
 !app/api/uploads/
 !app/api/uploads/**
 !app/api/approval_request/
@@ -196,12 +196,18 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/user_import.cy.ts
 !cypress/e2e/api/import_batch2.cy.ts
 !cypress/e2e/api/round_trip.cy.ts
+!cypress/e2e/api/notification_approval.cy.ts
+!cypress/e2e/api/receiving_receipt_notification.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/
 !cypress/support/audit_log/
 cypress/support/audit_log/*
 !cypress/support/audit_log/helper.ts
+!cypress/support/receiving_receipt/
+cypress/support/receiving_receipt/*
+!cypress/support/receiving_receipt/receiving_receipt_line_helper.ts
+!cypress/support/receiving_receipt/notification_helper.ts
 
 # ── docs/generated/ ──
 docs/generated/

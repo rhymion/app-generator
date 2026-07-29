@@ -1554,7 +1554,7 @@ class TestBatch4ActionButtonsTemplate:
 # ledger_transaction branch); ship/cancel are NOT code-generated — they're
 # hand-implemented once-stub files (lib/purchase_per_item/service_after_approve.ts
 # and service_after_reject.ts, mirroring the corrected_reserve_flow design in
-# queue/reports/subtask_281n_gunshi.yaml). So the ship/cancel tests here read
+# the strategy design (cmd_281 B-5 Phase2b)). So the ship/cancel tests here read
 # those real files directly, the same way the generator tests assert on
 # generated code strings.
 # ---------------------------------------------------------------------------
@@ -1755,7 +1755,7 @@ class TestLedgerTransactionShipAndCancelFiles:
 
 
 class TestO4QuantityInvariantArithmetic:
-    """Executable version of the O-4 proof in queue/reports/subtask_281n_gunshi.yaml:
+    """Executable version of the O-4 proof in the strategy design (cmd_281 B-5 Phase2b):
     available = quantity - reserved_quantity must hold across reserve -> ship and
     reserve -> cancel, for every event's (quantity_delta, reserved_delta) pair."""
 

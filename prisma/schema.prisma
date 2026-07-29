@@ -99,6 +99,7 @@ model user {
   created_tenants           tenant[]            @relation("TenantCreator")
   updated_tenants           tenant[]            @relation("TenantUpdater")
   audit_logs                audit_log[]
+  notifications             notification[]      @relation("NotificationUser")
   anonymized_at             DateTime?            // Timestamp when PII was scrubbed (GDPR anonymization)
 
   @@index([api_key])
@@ -197,13 +198,20 @@ model approval_flow {
   @@index([updater_id])
 }
 
+enum ApprovalRequestStatus {
+  Pending
+  Approved
+  Rejected
+  TerminalRejected
+}
+
 model approval_request {
   id               String   @id @default(cuid())
   approvable_id    String
   approvable       approvable @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
   approval_flow_id String
   approval_flow    approval_flow @relation(fields: [approval_flow_id], references: [id])
-  status           Int      @default(0)
+  status           ApprovalRequestStatus @default(Pending)
   approval_histories approval_history[]
   created_at       DateTime @default(now()) @db.Timestamptz(0)
   updated_at       DateTime @updatedAt @db.Timestamptz(0)
@@ -246,15 +254,23 @@ model comment {
   @@index([commentable_id])
 }
 
+enum ReactionType {
+  Like
+  Love
+  Laugh
+  Surprised
+  Sad
+}
+
 model reaction {
-  id          String   @id @default(cuid())
-  type        Int
+  id          String       @id @default(cuid())
+  type        ReactionType
   user_id     String
-  user        user     @relation("ReactionUser", fields: [user_id], references: [id])
+  user        user         @relation("ReactionUser", fields: [user_id], references: [id])
   comment_id  String
-  comment     comment  @relation(fields: [comment_id], references: [id], onDelete: Cascade)
-  created_at  DateTime @default(now()) @db.Timestamptz(0)
-  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  comment     comment      @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+  created_at  DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime     @updatedAt @db.Timestamptz(0)
 
   @@unique([comment_id, user_id, type])
   @@index([user_id])
@@ -266,10 +282,17 @@ model attachable {
   attachments attachment[]
 }
 
+enum AttachmentType {
+  image
+  file
+  video
+  audio
+}
+
 model attachment {
-  id                     String     @id @default(cuid())
-  type                   Int        @default(0)
-  order                  Int        @default(0)
+  id                     String         @id @default(cuid())
+  type                   AttachmentType @default(image)
+  order                  Int            @default(0)
   name                   String
   path                   String
   encrypted_original_name String?
@@ -296,23 +319,63 @@ model dashboard {
   @@index([updater_id])
 }
 
+enum DashboardWidgetChartType {
+  pie
+  column
+  bar
+  line
+}
+
+enum DashboardWidgetStackMode {
+  grouped
+  stacked
+  standardized
+}
+
+enum DashboardWidgetGroupByBucket {
+  day
+  week
+  month
+  quarter
+  year
+}
+
 model dashboard_widget {
   id             String    @id @default(cuid())
   dashboard_id   String
   dashboard      dashboard @relation(fields: [dashboard_id], references: [id], onDelete: Cascade)
   name            String
   entity_name     String
-  chart_type      Int
+  chart_type      DashboardWidgetChartType @default(column)
   group_by_field  String
-  stack_mode      Int?
+  stack_mode      DashboardWidgetStackMode?
   series_field    String?
-  group_by_bucket Int?
+  group_by_bucket DashboardWidgetGroupByBucket?
   filter_field    String?
   filter_value    String?
   order          Int       @default(0)
   created_at     DateTime  @default(now()) @db.Timestamptz(0)
   updated_at     DateTime  @updatedAt @db.Timestamptz(0)
   @@index([dashboard_id])
+}
+
+// Per-user notification store (framework default, mirrored from
+// code_generator/json_schema_internal.yaml). Primary store for the polling
+// bell UI / app/api/notifications/* routes — no CRUD UI/API is generated
+// for this entity (lib/_notifier.ts writes rows directly via Prisma,
+// fire-and-forget). Immutable event log aside from the `read` flag, so
+// there is no updated_at/creator tracking.
+model notification {
+  id         String   @id @default(cuid())
+  user_id    String
+  user       user     @relation("NotificationUser", fields: [user_id], references: [id], onDelete: Cascade)
+  type       String
+  payload    Json
+  read       Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+
+  @@index([user_id, read])
+  @@index([user_id, created_at(sort: Desc)])
 }
 
 // Append-only audit trail for security-relevant events: auth lifecycle

@@ -317,10 +317,10 @@ The PostgreSQL container is not running. Fix:
 
 ```bash
 # Development database
-npm run docker:up:dev   # starts postgres-dev on port 5433
+npm run docker:up:dev   # starts postgres-dev on port 5433 (default; override via POSTGRES_PORT)
 
 # Test database
-npm run docker:up:test  # starts postgres-test on port 5432
+npm run docker:up:test  # starts postgres-test on port 5432 (default; override via POSTGRES_PORT)
 
 # Verify it's up
 docker ps | grep postgres

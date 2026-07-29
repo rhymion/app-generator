@@ -12,7 +12,10 @@ import re
 from pathlib import Path
 
 from helpers.label_field import resolve_label_paths
-from helpers.schema_helpers import get_entity_properties, get_entity_required
+from helpers.schema_helpers import (
+    get_parent_relationships, get_internal_bridge_fk_prop_names,
+    get_entity_properties, get_entity_required,
+)
 
 _SNAKE_CASE = re.compile(r'^(__)?[a-z][a-z0-9_]*$')
 _ID_SUFFIX  = re.compile(r'_id$')
@@ -142,6 +145,66 @@ def validate_prisma_indexes(schema_path: str | Path) -> None:
             f"Prisma index validation failed — {len(errors)} model(s) missing "
             f"required indexes:\n\n{bullet_list}\n"
         )
+
+
+# ---------------------------------------------------------------------------
+# x-import-key visibility contract (cmd_394 §8, DP-1a)
+# ---------------------------------------------------------------------------
+_EXPORT_SYSTEM_FIELDS = {
+    'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
+    'organization_id', 'tenant_id',
+}
+
+
+def _is_export_scalar_type(prop_def: dict) -> bool:
+    ptype = prop_def.get('type')
+    if isinstance(ptype, list):  # nullable scalar, e.g. ['string', 'null']
+        return True
+    return ptype in ('string', 'integer', 'number', 'boolean')
+
+
+def _compute_export_visibility(def_key: str, defn: dict, defs: dict) -> tuple[set, set]:
+    """Standalone (schema-only) mirror of build_context.py's
+    export_scalar_fields / x_relationships_list computation — kept in sync by
+    hand (see cmd_394 §8). Returns (export_scalar_fields, fk_display_cols) for
+    the base entity `def_key`.
+
+    fk_display_cols uses the DP-2 naming ('{relation}_{labelField}'), so a
+    dotted x-import-key is visible only when the FK's own labelField equals
+    the dotted key's field AND is a plain string (not a composite list —
+    composite labelFields are excluded from export entirely, cmd_351).
+    """
+    gen_cfg = defs.get(f'{def_key}_detail', {}).get('x-generate') or defn.get('x-generate') or {}
+    props = defn.get('properties', {})
+    parent_rels = get_parent_relationships(defn)
+    # cmd_420: also exclude FKs to internal bridge models (approvable_id,
+    # inventory_transactionable_id, ...) — invisible to get_parent_relationships()
+    # alone, see get_internal_bridge_fk_prop_names() docstring.
+    fk_prop_names = {r['prop_name'] for r in parent_rels} | get_internal_bridge_fk_prop_names(defn, {'definitions': defs})
+    candidates = gen_cfg.get('fields') or list(props.keys())
+    view_visible = set(candidates)
+    export_scalar_fields = {
+        f for f in candidates
+        if f not in _EXPORT_SYSTEM_FIELDS
+        and f not in fk_prop_names
+        and f in props
+        and _is_export_scalar_type(props[f])
+    }
+    # DP-1 UNION (build_context.py): non-dotted x-import-key fields already in
+    # the view-visible allowlist are unioned in, mirrored here so this
+    # function agrees with what actually gets exported.
+    _import_key_raw = defn.get('x-import-key') or []
+    if isinstance(_import_key_raw, str):
+        _import_key_raw = [_import_key_raw]
+    for _f in _import_key_raw:
+        if '.' not in _f and _f not in export_scalar_fields and _f in view_visible:
+            export_scalar_fields.add(_f)
+    fk_display_cols = {
+        f"{r['prop_name'].removesuffix('_id')}_{r['label_field']}"
+        for r in parent_rels
+        if isinstance(r['label_field'], str)
+    }
+    return export_scalar_fields, fk_display_cols
 
 
 def validate_schema(schema: dict) -> None:
@@ -858,18 +921,21 @@ def validate_schema(schema: dict) -> None:
                 )
 
     # -----------------------------------------------------------------------
-    # 10. x-import-key ⊆ V1 export allowlist  (IA-8)
+    # 10. x-import-key visibility contract (IA-8 / E_IMPORT_KEY_INVISIBLE,
+    #     cmd_394 §8 DP-1a)
     # -----------------------------------------------------------------------
     # For every entity that carries x-import-key:
     #   • direct fields (e.g. "name") must exist in the entity's properties
-    #     and must not be a system/FK column (otherwise they would be excluded
-    #     from export_scalar_fields and the round-trip CSV would be unusable).
+    #     AND must actually be visible in the exported CSV
+    #     (export_scalar_fields, including the DP-1 view-visible UNION).
     #   • dotted-FK fields (e.g. "role.name") must reference an existing target
-    #     entity that has the lookup field in its own properties.
-    _IMPORT_SYSTEM_FIELDS = {
-        'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
-        'organization_id', 'tenant_id', 'assignee_id',
-    }
+    #     entity that has the lookup field in its own properties, AND the FK's
+    #     own labelField must equal that field as a plain string (not a
+    #     composite list) so the value actually appears as an export display
+    #     column (DP-2 naming: '{relation}_{labelField}').
+    # A key that fails this check means KEY_COLUMNS will include a column not
+    # present in the exported CSV — api_import_route.ts.jinja2 rejects EVERY
+    # row with 400 MISSING_COLUMN before any row is processed (cmd_394 §9c).
     for def_key, defn in defs.items():
         if not _SNAKE_CASE.match(def_key):
             continue
@@ -879,38 +945,245 @@ def validate_schema(schema: dict) -> None:
         if isinstance(_import_key_raw, str):
             _import_key_raw = [_import_key_raw]
         _entity_props = defn.get('properties', {})
+        _export_scalars, _fk_display = _compute_export_visibility(def_key, defn, defs)
         for _raw_key in _import_key_raw:
             if '.' in _raw_key:
-                # Dotted FK: e.g. "role.name" → look up 'role' entity, check 'name' field
-                _fk_ent, _fk_field = _raw_key.split('.', 1)
-                if _fk_ent not in defs:
+                # Dotted FK: e.g. "approver_role.name" → the entity to look up is
+                # the FK property's x-relationship.target, NOT the dotted-key
+                # prefix itself (DP-2a, cmd_394 §12).  These diverge whenever the
+                # FK uses an aliased property name — e.g. approver_role_id targets
+                # entity 'role', not a (nonexistent) 'approver_role' entity.
+                _fk_prefix, _fk_field = _raw_key.split('.', 1)
+                _fk_col = f'{_fk_prefix}_id'
+                _fk_prop = _entity_props.get(_fk_col)
+                if _fk_prop is None:
                     errors.append(
-                        f"Definition '{def_key}': x-import-key '{_raw_key}' references "
-                        f"entity '{_fk_ent}' which is not defined in the schema.  "
-                        f"Add a '{_fk_ent}' definition or correct the key."
+                        f"Definition '{def_key}': x-import-key '{_raw_key}' expects "
+                        f"a FK property '{_fk_col}' which does not exist on this "
+                        f"entity.  Correct the key prefix or add the '{_fk_col}' "
+                        f"property."
                     )
-                elif _fk_field not in get_entity_properties(_fk_ent, schema):
+                    continue
+                _fk_target = _fk_prop.get('x-relationship', {}).get('target', _fk_prefix)
+                if _fk_target not in defs:
+                    errors.append(
+                        f"Definition '{def_key}': x-import-key '{_raw_key}' resolves "
+                        f"(via '{_fk_col}'.x-relationship.target) to entity "
+                        f"'{_fk_target}' which is not defined in the schema.  Add a "
+                        f"'{_fk_target}' definition or correct the key."
+                    )
+                    continue
+                # get_entity_properties resolves raw (__x) vs view (x) property
+                # location correctly, unlike a direct defs[_fk_target]['properties']
+                # lookup — required when _fk_target is a bare view entity name.
+                if _fk_field not in get_entity_properties(_fk_target, schema):
                     errors.append(
                         f"Definition '{def_key}': x-import-key '{_raw_key}': field "
-                        f"'{_fk_field}' does not exist on entity '{_fk_ent}'.  "
-                        f"The dotted-FK lookup would fail at import time."
+                        f"'{_fk_field}' does not exist on entity '{_fk_target}' "
+                        f"(resolved via '{_fk_col}'.x-relationship.target).  The "
+                        f"dotted-FK lookup would fail at import time."
+                    )
+                    continue
+                _display_col = f'{_fk_prefix}_{_fk_field}'
+                if _display_col not in _fk_display:
+                    errors.append(
+                        f"Definition '{def_key}': x-import-key '{_raw_key}' "
+                        f"(E_IMPORT_KEY_INVISIBLE) is not present in the exported "
+                        f"CSV columns for '{def_key}_detail'.  The FK property "
+                        f"'{_fk_col}' must have labelField='{_fk_field}' (a plain "
+                        f"string, not a composite list) for '{_display_col}' to "
+                        f"appear as an export display column.  Consequence: the "
+                        f"import route will reject every CSV row with "
+                        f"MISSING_COLUMN."
                     )
             else:
-                # Direct field: must exist in entity's properties
+                # Direct field: must exist in entity's properties AND be
+                # visible in the exported CSV.
                 if _raw_key not in _entity_props:
                     errors.append(
                         f"Definition '{def_key}': x-import-key field '{_raw_key}' "
                         f"does not exist in the entity's properties.  "
                         f"Add it to the schema or remove it from x-import-key."
                     )
-                elif _raw_key.endswith('_id') or _raw_key in _IMPORT_SYSTEM_FIELDS:
+                elif _raw_key not in _export_scalars:
                     errors.append(
                         f"Definition '{def_key}': x-import-key field '{_raw_key}' "
-                        f"is a system/FK field that is excluded from the V1 export "
-                        f"allowlist (export_scalar_fields).  The exported CSV will not "
-                        f"contain this column, so a round-trip import would fail.  "
-                        f"Use a natural-key field instead."
+                        f"(E_IMPORT_KEY_INVISIBLE) is not present in the exported "
+                        f"CSV columns for '{def_key}_detail'.  Either it is a "
+                        f"system/FK column (always excluded) or it is missing from "
+                        f"x-generate.fields (the view-visible allowlist).  "
+                        f"Consequence: the import route will reject every CSV row "
+                        f"with MISSING_COLUMN.  Use a natural-key field that is "
+                        f"already visible in the view, or add it to "
+                        f"x-generate.fields."
                     )
+
+    # -----------------------------------------------------------------------
+    # 11. Composite x-import-key referenced via a single-field labelField
+    #     (E_COMPOSITE_KEY_AMBIGUOUS_LABEL, cmd_394 §5/§13 — fail-loud only;
+    #     a full composite-key roundtrip redesign is out of scope for this
+    #     schema check and is tracked as a separate follow-up cmd)
+    # -----------------------------------------------------------------------
+    # When a target entity T has a COMPOSITE natural key (x-import-key with
+    # 2+ parts), any FK relation elsewhere that displays T via a single-field
+    # labelField cannot uniquely identify a T row from the exported CSV
+    # alone — multiple T rows can share that one labelField value while
+    # differing in the other key parts (e.g. approval_flow keyed on
+    # [entity_name, approver_role.name, requestor_role.name] but referenced
+    # via labelField: entity_name alone — several approval_flow rows can
+    # share the same entity_name). The roundtrip silently degrades to
+    # "matches whichever row comes first" instead of failing loudly, so we
+    # surface it here instead.
+    for _target_key, _target_defn in defs.items():
+        if not _SNAKE_CASE.match(_target_key):
+            continue
+        _target_import_key = _target_defn.get('x-import-key') or []
+        if isinstance(_target_import_key, str):
+            _target_import_key = [_target_import_key]
+        if len(_target_import_key) < 2:
+            continue  # not composite
+        _non_dotted_key_parts = {k for k in _target_import_key if '.' not in k}
+        if not _non_dotted_key_parts:
+            continue
+        for _ref_key, _ref_defn in defs.items():
+            if not _SNAKE_CASE.match(_ref_key) or _ref_key == _target_key:
+                continue
+            for _rel in get_parent_relationships(_ref_defn):
+                if _rel['target'] != _target_key:
+                    continue
+                _label = _rel['label_field']
+                if isinstance(_label, str) and _label in _non_dotted_key_parts:
+                    errors.append(
+                        f"Definition '{_ref_key}', property '{_rel['prop_name']}' "
+                        f"(E_COMPOSITE_KEY_AMBIGUOUS_LABEL): labelField "
+                        f"'{_label}' displays only one part of target "
+                        f"'{_target_key}''s composite x-import-key "
+                        f"{_target_import_key}.  Multiple '{_target_key}' rows "
+                        f"can share the same '{_label}' value, so CSV "
+                        f"export/import cannot uniquely identify a row through "
+                        f"this FK display column — the roundtrip is provably "
+                        f"ambiguous.  A composite-key roundtrip redesign is "
+                        f"required to fix this properly and is out of scope "
+                        f"here (cmd_394 §13); for now, treat '{_target_key}' as "
+                        f"export/UI-reference only through this relation, or "
+                        f"pick a labelField that is independently unique."
+                    )
+
+    # -----------------------------------------------------------------------
+    # 12. Contradictory import configuration (E_IMPORT_KEY_NOT_ELIGIBLE,
+    #     cmd_426): a base entity that declares x-import-key with the import
+    #     route left on (x-generate.import: true, the default) must actually
+    #     be reachable as a primary, create-or-edit-able entity — otherwise
+    #     x-import-key advertises an import path that build_context.py's
+    #     import_eligible gate (§ "Import eligibility — SINGLE PLACE",
+    #     cmd_328/330) silently disables, and nothing ever tells the schema
+    #     author why.
+    #
+    #     Structural condition mirrored 1:1 from build_context.py's
+    #     import_eligible formula (no entity names hardcoded — this walks
+    #     every base model definition uniformly):
+    #       has_import_key AND import_flag(default True) AND
+    #       NOT(is_primary_entity AND (can_create OR can_update))
+    #
+    #     The doc comment on x-import-key (top of this schema) already names
+    #     the sanctioned way to keep x-import-key for export/dotted-FK-target
+    #     purposes while opting out of the entity's own import route:
+    #     x-generate.import: false. That case is intentionally NOT an error
+    #     here — only entities where the import flag is (still) true but the
+    #     structural precondition for import can never be met are rejected.
+    # -----------------------------------------------------------------------
+    _base_model_keys = {
+        key for key, d in defs.items()
+        if isinstance(d, dict)
+        and not key.endswith('_detail') and not key.endswith('_input')
+        and (d.get('properties') or {}).get('id') is not None
+    }
+
+    def _resolved_model_name(d: dict) -> str | None:
+        """Mirrors generate_types.py's extract_entities() model-name resolution
+        (allOf $ref → a base model), without that function's cross-entity
+        child/m2m validation — this check only needs model identity."""
+        for item in d.get('allOf', []) or []:
+            ref = (item.get('$ref') or '').split('/')[-1]
+            if ref in _base_model_keys:
+                return ref
+        return None
+
+    for _model_key, _model_defn in defs.items():
+        if not _SNAKE_CASE.match(_model_key) or _model_key not in _base_model_keys:
+            continue
+        _ik_raw = _model_defn.get('x-import-key') or []
+        if not _ik_raw:
+            continue
+
+        # Find every definition generated *as this model* (parent == model —
+        # i.e. `_model_key` itself or `{_model_key}_detail`, not an aliased
+        # entity like 'setting' → 'user'), and collect whichever x-generate
+        # block actually governs it (own block, else the base model's block —
+        # same fallback chain as extract_entities()).
+        _primary_gen_cfgs = []
+        for _k, _d in defs.items():
+            if not isinstance(_d, dict):
+                continue
+            _resolved = _resolved_model_name(_d)
+            if _resolved is None and _k in _base_model_keys:
+                _resolved = _k
+            if _resolved != _model_key:
+                continue
+            _entity_name = _k[:-len('_detail')] if _k.endswith('_detail') else _k
+            # _entity_name is never '__'-prefixed (only a '_detail' suffix is
+            # ever stripped above), but _resolved is a base_model_keys entry —
+            # '__'-prefixed under Stage 4 (cmd406-409). Strip that prefix
+            # before comparing, or every Stage-4 primary view (e.g. 'user'
+            # resolving to '__user') would wrongly be treated as an alias.
+            _resolved_bare = _resolved[2:] if _resolved.startswith('__') else _resolved
+            if _entity_name != _resolved_bare:
+                continue  # alias entity (parent != model) — never import-eligible
+            _gen_cfg = (
+                _d.get('x-generate')
+                or (_k.endswith('_detail') and defs.get(_resolved, {}).get('x-generate'))
+                or (_k in _base_model_keys and defs.get(_k, {}).get('x-generate'))
+            )
+            if _gen_cfg:
+                _primary_gen_cfgs.append(_gen_cfg)
+
+        _eligible = any(
+            (cfg.get('import', True) is not False)
+            and (cfg.get('new', True) is not False or cfg.get('edit', True) is not False)
+            for cfg in _primary_gen_cfgs
+        )
+        if _eligible:
+            continue
+        _import_explicitly_off = bool(_primary_gen_cfgs) and all(
+            cfg.get('import', True) is False for cfg in _primary_gen_cfgs
+        )
+        if _import_explicitly_off:
+            continue  # sanctioned export/dotted-FK-target-only opt-out
+
+        if not _primary_gen_cfgs:
+            _reason = (
+                f"'{_model_key}' is never generated as a primary entity of its "
+                f"own model (no '{_model_key}' or '{_model_key}_detail' "
+                f"definition carries an x-generate block) — there is no create "
+                f"or edit route to receive imported rows"
+            )
+        else:
+            _reason = (
+                f"'{_model_key}'s primary x-generate configuration has both "
+                f"'new' and 'edit' disabled — there is no create or edit route "
+                f"to receive imported rows"
+            )
+        errors.append(
+            f"Definition '{_model_key}' (E_IMPORT_KEY_NOT_ELIGIBLE): declares "
+            f"x-import-key {_ik_raw!r} with import left enabled (x-generate."
+            f"import is not false), but {_reason}. Fix by either (a) making "
+            f"'{_model_key}' a primary create-or-edit-able entity (add/adjust "
+            f"a '{_model_key}_detail' x-generate block with new: true or "
+            f"edit: true), or (b) if x-import-key is only needed for CSV "
+            f"export / as a dotted-FK natural-key target for other entities, "
+            f"set x-generate.import: false on '{_model_key}' to make the "
+            f"opt-out explicit."
+        )
 
     # -----------------------------------------------------------------------
     # Report

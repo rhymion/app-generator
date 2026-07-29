@@ -105,18 +105,20 @@ is seeded into the test user by `seedTestDatabase()` in `db-helpers.ts`.
 
 ## Mandatory gate (`test:e2e:cy:api`) composition
 
-`test:e2e:cy:api` is the mandatory gate referenced by `CLAUDE.md`. Its `--spec` argument
-has two parts:
+`test:e2e:cy:api` is the mandatory gate referenced by `CLAUDE.md`. Its `--spec`
+argument is a single dynamic glob:
 
-- `cypress/e2e/api/**` — dynamic glob, automatically includes every generated API spec.
-- `cypress/e2e/purchase_order.cy.ts,cypress/e2e/receiving_receipt.cy.ts` — an explicit
-  list of UI specs, added because both regressed during purchase-order/receiving
-  primitive work (cmd_294).
+- `cypress/e2e/api/**` — automatically includes every generated API spec.
 
-The UI list is a **curated, mutable set**, not a fixed one: when manual e2e finds a new
-UI regression, add that spec's path to the list; once the underlying issue is fixed and
-stable, it may be removed. Edit the `--spec` value in `package.json` directly — no
-separate config file governs this list.
+The gate does **not** include any UI specs. For example, `purchase_order.cy.ts`
+and `receiving_receipt.cy.ts` are full UI specs (they still exist under
+`cypress/e2e/` and run as part of `npm run test:e2e:cy:ui`), but they are excluded
+from the mandatory gate's `--spec` value — a prior draft of this doc described them
+as an explicit curated addition to `test:e2e:cy:api`, which never matched
+`package.json` and has been corrected here (cmd_467).
+
+If a future UI regression needs to become a hard gate, add its spec path to the
+`--spec` value in `package.json` directly — no separate config file governs this.
 
 ---
 
@@ -399,7 +401,8 @@ repository secret is configured. Otherwise omit it and let `.env.test` provide i
 ### Database
 
 The test database is provided by `npm run docker:up:test` (docker-compose), which
-starts Postgres on port 5432 matching `DATABASE_URL` in `.env.test`. Do **not** add
+starts Postgres on port 5432 (the `${POSTGRES_PORT:-5432}` default in
+`docker-compose.test.yml`) matching `DATABASE_URL` in `.env.test`. Do **not** add
 a redundant `services.postgres` block in the workflow — it runs on a different port
 and is never connected to.
 

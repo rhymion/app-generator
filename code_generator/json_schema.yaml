@@ -1,5 +1,13 @@
 $schema: "http://json-schema.org/draft-07/schema#"
-format-version: 2.0
+format-version: 3.0
+
+# x-cloud: GCP Cloud Run opt-in (uncomment to use)
+# x-cloud:
+#   enabled: true
+#   provider: gcp
+#   service: cloud_run
+#   region: asia-northeast1
+
 x-generator:
   search:
     default_scope: all
@@ -96,7 +104,6 @@ definitions:
             width: 150
     fields:
       name:
-        minLength: 1
         x-pii: direct
       email:
         x-pii: direct
@@ -182,8 +189,7 @@ definitions:
         target: user
     x-import-key: [name]
     fields:
-      name:
-        minLength: 1
+      name: {}
       description: {}
     required:
       - users
@@ -213,8 +219,7 @@ definitions:
       org_id_field: id
     x-import-key: [name]
     fields:
-      name:
-        minLength: 1
+      name: {}
       description:
         x-ui:
           width: 8
@@ -251,7 +256,6 @@ definitions:
             width: 200
     fields:
       name:
-        minLength: 1
         x-entity-select: true
       create: {}
       read: {}
@@ -259,8 +263,6 @@ definitions:
       delete: {}
       import:
         default: false
-      role_id:
-        x-relationship: {}
     properties:
       role:
         $ref: "#/definitions/role"
@@ -299,12 +301,7 @@ definitions:
             width: 150
     fields:
       entity_name:
-        minLength: 1
         x-entity-select: true
-      requestor_role_id:
-        x-relationship: {}
-      approver_role_id:
-        x-relationship: {}
     required:
       - approver_role
       - preceding_transitions
@@ -339,12 +336,11 @@ definitions:
         x-relationship:
           labelField: entity_name
       status:
-        minimum: 0
-        maximum: 2
         enum:
           - Pending
           - Approved
           - Rejected
+          - TerminalRejected
 
   approvable:
     x-generate:
@@ -390,7 +386,6 @@ definitions:
   comment:
     fields:
       message:
-        minLength: 1
         x-mention: true
       commentable_id: {}
   reaction:
@@ -400,8 +395,6 @@ definitions:
       api: custom
     fields:
       type:
-        minimum: 0
-        maximum: 4
         enum:
           - Like
           - Love
@@ -435,8 +428,6 @@ definitions:
   attachment:
     fields:
       type:
-        minimum: 0
-        maximum: 3
         enum:
           - image
           - file
@@ -445,8 +436,7 @@ definitions:
         _required: true
       order:
         default: 0
-      name:
-        minLength: 1
+      name: {}
       path:
         format: uri
       attachable_id: {}
@@ -454,38 +444,29 @@ definitions:
     fields:
       dashboard_id:
         x-relationship: {}
-      name:
-        minLength: 1
-      entity_name:
-        minLength: 1
+      name: {}
+      entity_name: {}
       chart_type:
-        minimum: 0
-        maximum: 3
         enum:
           - pie
           - column
           - bar
           - line
-        default: 1
+        default: column
       stack_mode:
-        minimum: 0
-        maximum: 2
         enum:
           - grouped
           - stacked
           - standardized
       series_field: {}
       group_by_bucket:
-        minimum: 0
-        maximum: 4
         enum:
           - day
           - week
           - month
           - quarter
           - year
-      group_by_field:
-        minLength: 1
+      group_by_field: {}
       filter_field: {}
       filter_value: {}
       order:
@@ -516,8 +497,7 @@ definitions:
             primary: true
             width: 200
     fields:
-      name:
-        minLength: 1
+      name: {}
     required:
       - widgets
     properties:

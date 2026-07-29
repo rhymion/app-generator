@@ -14,6 +14,13 @@ import { getAssociatedOrganizations } from '@/lib/organization/getters_associate
 {% if non_creator_virtual_columns %}
 import { resolveVirtualColumns } from '@/lib/{{ parent }}/virtual_resolvers';
 {% endif %}
+{% if has_attachable %}
+import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
+{% endif %}
+{% if comment_has_mention %}
+import { decodeMentions, extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
+import { getTranslations } from 'next-intl/server';
+{% endif %}
 import { filterAutocompleteOptions, type AutocompleteFilterContext } from '@/lib/{{ parent }}/autocomplete_filter';
 import { filterListQuery } from '@/lib/{{ parent }}/list_filter';
 {% if export_uses_format_label_value %}
@@ -76,12 +83,29 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     return null;
   }
 
+{% if named_constants and has_commentable and comment_has_mention %}
+  // Resolve @[user_id:<id>] mentions to display names before this row crosses
+  // into FormView (client component) — the raw id must never reach the UI, and
+  // an unresolved id (anonymized/deleted user) falls back to a placeholder
+  // inside decodeMentions() itself (gdpr-design.md Section 4.2).
+  const _rawComments = {{ parent_camel }}.{{ commentable_rel_name }}?.comments ?? [];
+  const _mentionUserIds = new Set<string>();
+  for (const c of _rawComments) {
+    if (c.creator_id) _mentionUserIds.add(c.creator_id);
+    for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
+  }
+  const _mentionUsers = _mentionUserIds.size
+    ? await prisma.user.findMany({ where: { id: { in: [..._mentionUserIds] } }, select: { id: true, name: true } })
+    : [];
+  const _mentionUserContext: UserContext = Object.fromEntries(_mentionUsers.map((u) => [u.id, u.name]));
+  const _tCommon = await getTranslations('Common');
+{% endif %}
 {% if named_constants and has_commentable %}
   const _commentable = {{ parent_camel }}.{{ commentable_rel_name }} ? {
     ...{{ parent_camel }}.{{ commentable_rel_name }},
     comments: {{ parent_camel }}.{{ commentable_rel_name }}.comments.map((c) => {
       const { reactions, ...rest } = c;
-      const reactionCounts = reactions.reduce<Array<{ type: number; count: number }>>(
+      const reactionCounts = reactions.reduce<Array<{ type: {{ reaction_value_type }}; count: number }>>(
         (acc, r) => {
           const entry = acc.find((e) => e.type === r.type);
           if (entry) entry.count += 1;
@@ -90,9 +114,40 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
         },
         [],
       );
-      return { ...rest, reactionCounts, myReactionTypes: [] as number[] };
+{% if comment_has_mention %}
+      return { ...rest, message: decodeMentions(rest.message, _mentionUserContext, _tCommon('deletedUser')), reactionCounts, myReactionTypes: [] as ({{ reaction_value_type }})[] };
+{% else %}
+      return { ...rest, reactionCounts, myReactionTypes: [] as ({{ reaction_value_type }})[] };
+{% endif %}
     }),
   } : {{ parent_camel }}.{{ commentable_rel_name }};
+{% endif %}
+{% if has_attachable %}
+  // encrypted_original_name/name_iv are Prisma-only columns pulled in by the
+  // generic `{{ attachable_attachments_prop }}: true` include — decrypt to the
+  // display name and strip both fields here so the ciphertext/IV never cross
+  // into FormView/FormUpsert (client components) via the `src` prop (cmd_356).
+  const _{{ attachable_rel_name }} = {{ parent_camel }}.{{ attachable_rel_name }} ? {
+    ...{{ parent_camel }}.{{ attachable_rel_name }},
+    {{ attachable_attachments_prop }}: (
+      {{ parent_camel }}.{{ attachable_rel_name }}.{{ attachable_attachments_prop }} as unknown as Array<
+        { id: string; type: {{ attachment_type_ts }}; order: number; name: string; path: string; attachable_id: string; encrypted_original_name?: string | null; name_iv?: string | null }
+      >
+    ).map((raw) => {
+      const { encrypted_original_name, name_iv, ...rest } = raw;
+      let displayName = rest.name;
+      if (encrypted_original_name) {
+        try {
+          displayName = decryptFileName(encrypted_original_name);
+        } catch (e) {
+          // Legacy/rotated-key records: fall back to the stored (UUID) name
+          // rather than throwing and breaking the whole detail page.
+          console.warn('attachment name decrypt failed:', e instanceof Error ? e.message : e);
+        }
+      }
+      return { ...rest, name: displayName };
+    }),
+  } : {{ parent_camel }}.{{ attachable_rel_name }};
 {% endif %}
   return {
     ...{{ parent_camel }},
@@ -104,6 +159,9 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 {% endfor %}
 {% if named_constants and has_commentable %}
     {{ commentable_rel_name }}: _commentable,
+{% endif %}
+{% if has_attachable %}
+    {{ attachable_rel_name }}: _{{ attachable_rel_name }},
 {% endif %}
 {% for dtcol in datetime_display_columns %}
     {{ dtcol }}: {{ parent_camel }}.{{ dtcol }}

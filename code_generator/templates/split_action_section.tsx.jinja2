@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect{% if split_has_context_field %}, useCallback{% endif %} } from 'react';
 import { AppButton, AppText, AppBox, AppIcon, AppIconButton, AppFieldInput, AppDialog } from '@/components/ui';
 {% if split_has_relation_field %}
 import EntityAutocomplete, { type EntityOption } from '@/components/_standard/EntityAutocomplete';
@@ -31,7 +31,7 @@ const EMPTY_PART = (): SplitPart => ({
 });
 
 {% for f in per_part_required %}
-{% if f.is_relation %}
+{% if f.is_relation and not f.context_fields %}
 async function search{{ pascal_name }}{{ f.field | pascal_case }}Options(query: string, includeIds: string[]): Promise<EntityOption[]> {
   const rows = await search{{ f.target_pascal }}Options(query, includeIds);
   return rows.map((item) => ({ id: item.id, label: String({{ f.label_expr }}) }));
@@ -42,10 +42,16 @@ async function search{{ pascal_name }}{{ f.field | pascal_case }}Options(query: 
 export function SplitActionSection({
   id,
   {{ quantity_field }},
+  {% for cf in section_context_fields %}
+  {{ cf }},
+  {% endfor %}
   onSuccess,
 }: {
   id: string;
   {{ quantity_field }}: number;
+  {% for cf in section_context_fields %}
+  {{ cf }}?: unknown;
+  {% endfor %}
   onSuccess?: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -59,10 +65,24 @@ export function SplitActionSection({
   {% endfor %}
 
   {% for f in per_part_required %}
+  {% if f.is_relation and f.context_fields %}
+  // DP-B (cmd_424): component-scoped (not module-level) so it can close over
+  // this section's context props — narrows candidates via the same
+  // AutocompleteFilterContext.formValues contract DP-3/DP-5 established for
+  // FormUpsert relation fields (search{{ f.target_pascal }}Options' context param, applied
+  // here to this split perPartRequired field only).
+  const search{{ pascal_name }}{{ f.field | pascal_case }}Options = useCallback(async (query: string, includeIds: string[]): Promise<EntityOption[]> => {
+    const rows = await search{{ f.target_pascal }}Options(query, includeIds, 50, { callerEntity: '{{ entity_name }}', formValues: { {% for cf in f.context_fields %}{{ cf }}{% if not loop.last %}, {% endif %}{% endfor %} } });
+    return rows.map((item) => ({ id: item.id, label: String({{ f.label_expr }}) }));
+  }, [{% for cf in f.context_fields %}{{ cf }}{% if not loop.last %}, {% endif %}{% endfor %}]);
+  {% endif %}
+  {% endfor %}
+
+  {% for f in per_part_required %}
   {% if f.is_relation %}
   useEffect(() => {
     search{{ pascal_name }}{{ f.field | pascal_case }}Options('', []).then(set{{ f.field | pascal_case }}Options);
-  }, []);
+  }, [search{{ pascal_name }}{{ f.field | pascal_case }}Options]);
   {% endif %}
   {% endfor %}
 

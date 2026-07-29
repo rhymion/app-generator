@@ -90,6 +90,23 @@ def _has_string_labels(enum_values) -> bool:
     return any(isinstance(v, str) and not str(v).lstrip('-').isdigit() for v in (enum_values or []))
 
 
+def _native_enum_ns(prop: dict) -> str | None:
+    """i18n namespace for a nativeEnum (`_prisma_native_enum_type`) field:
+    x-enum-namespace if set, else the Prisma enum block name itself."""
+    native_type = prop.get('_prisma_native_enum_type')
+    if not native_type:
+        return None
+    return prop.get('x-enum-namespace') or native_type
+
+
+def _native_enum_key(v) -> str:
+    """camelCase message key for a nativeEnum value. Prisma enum members are
+    PascalCase (e.g. 'TerminalRejected'), so this lowercases only the first
+    character, mirroring the existing x-enum-namespace int-enum convention."""
+    s = str(v)
+    return s[0].lower() + s[1:] if s else s
+
+
 def _int_enum_option(v, i: int) -> str:
     if isinstance(v, (int, float)):
         return f"{{ value: {int(v)}, label: '{v}' }}"
@@ -111,7 +128,8 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
     `x-display.dashboard: true`. A field is groupable when it is one of:
       - a many-to-one FK (each FK value becomes a series, labelled via
         the relationship's labelField on the target);
-      - an integer with an `enum` (each enum label is a category);
+      - an integer or string with an `enum` (each enum label is a category —
+        covers both legacy int-enum and Prisma nativeEnum string fields);
       - a boolean (Yes / No);
       - an integer or number without enum (numeric filter range);
       - a string with format 'date' or 'date-time' (datetime range filter).
@@ -154,7 +172,7 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
                     'label': to_title_case(prop_name),
                     'kind': 'boolean',
                 })
-            elif actual == 'integer' and isinstance(prop.get('enum'), list):
+            elif actual in ('integer', 'string') and isinstance(prop.get('enum'), list):
                 groupable.append({
                     'name': prop_name,
                     'label': to_title_case(prop_name),
@@ -201,8 +219,10 @@ def build_attachable_owners(schema: dict) -> list[dict]:
     call.
 
     Returns owner descriptors keyed on the Prisma model name (the back
-    reference on `attachable`, e.g. `attachable.resource`). Entries are
-    sorted by name for deterministic generator output.
+    reference on `attachable`, e.g. `attachable.resource`), plus
+    `has_assignee` (whether the owner declares an `assignee_id` property) so
+    the template can select it for item-level permission resolution. Entries
+    are sorted by name for deterministic generator output.
     """
     owners = []
     seen = set()
@@ -214,7 +234,8 @@ def build_attachable_owners(schema: dict) -> list[dict]:
         entity_name = entity_name[2:]
         if entity_name in seen:
             continue
-        for prop_name, prop in (defn.get('properties') or {}).items():
+        properties = defn.get('properties') or {}
+        for prop_name, prop in properties.items():
             if prop_name != 'attachable_id':
                 continue
             rel = prop.get('x-relationship') or {}
@@ -222,11 +243,39 @@ def build_attachable_owners(schema: dict) -> list[dict]:
                 continue
             if rel.get('target') != 'attachable':
                 continue
-            owners.append({'name': entity_name})
+            owners.append({'name': entity_name, 'has_assignee': 'assignee_id' in properties})
             seen.add(entity_name)
             break
     owners.sort(key=lambda o: o['name'])
     return owners
+
+
+def attachment_type_ts(schema: dict) -> str:
+    """TS type for the `type` param of lib/attachment/actions.ts's
+    setAttachmentsForBridge(). Mirrors attachment.type's actual field type
+    (plain `number` by default, or the nativeEnum literal union once
+    attachment.type has been migrated to a Prisma enum) so the hand-off
+    from the generic bridge action to `prisma.attachment.create/findMany`
+    type-checks without a cast.
+    """
+    prop = ((schema.get('definitions') or {}).get('attachment') or {}).get('properties', {}).get('type')
+    if not prop:
+        return 'number'
+    return get_ts_type(prop)
+
+
+def reaction_type_ts(schema: dict) -> str:
+    """TS type for the `type` param threaded through the comment-reactions
+    feature (toggle server action, toggle API route, CommentReactionSummary /
+    reactionCounts / myReactionTypes). Mirrors reaction.type's actual field
+    type (plain `number` by default, or the nativeEnum literal union once
+    reaction.type has been migrated to a Prisma enum) so hand-offs to
+    prisma.reaction.create/findUnique/groupBy type-check without a cast.
+    """
+    prop = ((schema.get('definitions') or {}).get('reaction') or {}).get('properties', {}).get('type')
+    if not prop:
+        return 'number'
+    return get_ts_type(prop)
 
 
 def chart_context(ctx: dict, schema: dict) -> dict:
@@ -403,8 +452,15 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                 actual   = _get_actual_type(prop)
                 enum_vals = prop.get('enum')
                 enum_ns  = prop.get('x-enum-namespace')
+                native_ns = _native_enum_ns(prop)
 
-                if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+                if native_ns and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+                    var_name = f'{to_camel_case(field_name)}Labels'
+                    entries = [(v, _native_enum_key(v)) for v in enum_vals]
+                    if not any(e['var_name'] == var_name for e in enum_ns_list):
+                        enum_ns_list.append({'var_name': var_name, 'ns': native_ns, 'entries': entries, 'is_native_enum': True})
+                    add_formatting(field_name, f"{var_name}[item.{field_name} as string] ?? item.{field_name}")
+                elif actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
                     var_name = f'{to_camel_case(field_name)}Labels'
                     ns_to_use = enum_ns or 'Fields'
                     entries = [
@@ -415,7 +471,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                     ]
                     # avoid duplicates
                     if not any(e['var_name'] == var_name for e in enum_ns_list):
-                        enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries})
+                        enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries, 'is_native_enum': False})
                     add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
 
             if config.get('primary'):
@@ -440,7 +496,14 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
             actual = _get_actual_type(prop)
             enum_vals = prop.get('enum')
             enum_ns = prop.get('x-enum-namespace')
-            if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+            native_ns = _native_enum_ns(prop)
+            if native_ns and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+                var_name = f'{to_camel_case(field_name)}Labels'
+                entries = [(v, _native_enum_key(v)) for v in enum_vals]
+                if not any(e['var_name'] == var_name for e in enum_ns_list):
+                    enum_ns_list.append({'var_name': var_name, 'ns': native_ns, 'entries': entries, 'is_native_enum': True})
+                add_formatting(field_name, f"{var_name}[item.{field_name} as string] ?? item.{field_name}")
+            elif actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
                 var_name = f'{to_camel_case(field_name)}Labels'
                 ns_to_use = enum_ns or 'Fields'
                 entries = [
@@ -450,7 +513,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                     for i, v in enumerate(enum_vals)
                 ]
                 if not any(e['var_name'] == var_name for e in enum_ns_list):
-                    enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries})
+                    enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries, 'is_native_enum': False})
                 add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
 
     needs_formatting = bool(formatting_entries)
@@ -494,6 +557,7 @@ def actions_context(ctx: dict) -> dict:
     has_children  = bool(non_comment_ch)
     reservation_config = ctx.get('reservation_config')
     has_reservation = bool(reservation_config and reservation_config.get('mode') == 'count')
+    should_filter_by_org = bool(ctx.get('should_filter_by_org'))
 
     sep = ', ' if (parent_params and child_args) else ''
     full_child_args = f'{sep}{child_args}' if child_args else ''
@@ -574,12 +638,84 @@ def actions_context(ctx: dict) -> dict:
     flatten_extractions_code = '\n'.join(flatten_extractions_lines)
     flatten_args_str = (', ' + ', '.join(flatten_update_var_names)) if flatten_update_var_names else ''
 
+    def _actor_and_existing_block(indent: str) -> str:
+        # GAP-2 fix (cmd_452): org-scoped entities must retrieve actorId before the
+        # existence check (needed by getAssociatedOrganizations) and re-fetch the
+        # target row through an org-filtered findFirst, not a global findUnique —
+        # otherwise requirePermission() can only see creator_id/assignee_id and a
+        # user with general.update can edit any org's record by id. Applied to
+        # every findUnique-before-update site in this function (not only the
+        # audited line) since they share the identical gap. should_filter_by_org
+        # is False for the overwhelming majority of entities, so this branch is
+        # opt-in and leaves every non-org-scoped entity's generated actions.ts
+        # byte-identical to the pre-fix output (see the `else` arm below and its
+        # callers) — confirmed via cmd_452's golden-diff forward check.
+        #
+        # The explicit `if (!existing) throw` below is NOT optional: requirePermission()
+        # falls back to the top-level (general | creator | assignee) union whenever its
+        # item argument is falsy (lib/authz.ts requirePermission — `item && resolvedUserId
+        # ? resolvePermissions(...) : permissions`), so a general.update=true caller would
+        # still pass the check on a null `existing`, and the subsequent update<Parent>()
+        # call would then write to `id` unconditionally — the org-scoped findFirst above
+        # would filter the *read* but have zero effect on the *write*. Denying immediately
+        # on a null `existing` is what actually stops the cross-org mutation.
+        # actorId must already be declared in the enclosing function scope (before
+        # the if/else this is nested in) — every should_filter_by_org call site
+        # below declares it up front, precisely so it's still in scope for the
+        # update/create calls later in the function body.
+        return (
+            f"{indent}const _orgs = await getAssociatedOrganizations(actorId);\n"
+            f"{indent}const _orgIds = _orgs.map((o) => o.id);\n"
+            f"{indent}const existing = await prisma.{model}.findFirst({{ where: {{ id, organization_id: {{ in: _orgIds }} }}, select: {item_context_select} }});\n"
+            f"{indent}if (!existing) throw new Error('Not found');\n"
+        )
+
     def _upsert_body(has_ch: bool) -> str:
         _flatten_block = (f"{flatten_extractions_code}\n" if flatten_extractions_code else "")
         if can_create and can_update:
             create_call = f'await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});'
             update_call = f'await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
             if has_reservation:
+                if should_filter_by_org:
+                    return (
+                        f"  const id = data.get('id') as string | null;\n"
+                        f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                        f"  const actorId = await getSessionUserIdOrThrow();\n"
+                        f"  if (id) {{\n"
+                        + _actor_and_existing_block("    ") +
+                        f"    await requirePermission('{parent}', 'update', existing);\n"
+                        f"  }} else {{\n"
+                        f"    await requirePermission('{parent}', 'create');\n"
+                        f"  }}\n"
+                        f"{form_data_gets}\n"
+                        + (f"{child_form_data_extractions}\n" if has_ch else "")
+                        + _flatten_block +
+                        f"\n  let _serviceError: string | null = null;\n"
+                        f"  if (id) {{\n"
+                        f"    try {{\n"
+                        f"      {update_call}\n"
+                        f"    }} catch (e) {{\n"
+                        f"      if (e instanceof ReservationMutationError) {{\n"
+                        f"        _serviceError = (e as Error).message;\n"
+                        f"      }} else {{\n"
+                        f"        throw e;\n"
+                        f"      }}\n"
+                        f"    }}\n"
+                        f"  }} else {{\n"
+                        f"    try {{\n"
+                        f"      {create_call}\n"
+                        f"    }} catch (e) {{\n"
+                        f"      if (e instanceof InsufficientPoolCapacityError) {{\n"
+                        f"        _serviceError = (e as Error).message;\n"
+                        f"      }} else {{\n"
+                        f"        throw e;\n"
+                        f"      }}\n"
+                        f"    }}\n"
+                        f"  }}\n"
+                        f"  if (_serviceError) {{\n"
+                        f"    return {{ error: _serviceError }};\n"
+                        f"  }}"
+                    )
                 return (
                     f"  const id = data.get('id') as string | null;\n"
                     f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
@@ -619,6 +755,26 @@ def actions_context(ctx: dict) -> dict:
                     f"    return {{ error: _serviceError }};\n"
                     f"  }}"
                 )
+            if should_filter_by_org:
+                return (
+                    f"  const id = data.get('id') as string | null;\n"
+                    f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                    f"  const actorId = await getSessionUserIdOrThrow();\n"
+                    f"  if (id) {{\n"
+                    + _actor_and_existing_block("    ") +
+                    f"    await requirePermission('{parent}', 'update', existing);\n"
+                    f"  }} else {{\n"
+                    f"    await requirePermission('{parent}', 'create');\n"
+                    f"  }}\n"
+                    f"{form_data_gets}\n"
+                    + (f"{child_form_data_extractions}\n" if has_ch else "")
+                    + _flatten_block +
+                    f"\n  if (id) {{\n"
+                    f"    {update_call}\n"
+                    f"  }} else {{\n"
+                    f"    {create_call}\n"
+                    f"  }}"
+                )
             return (
                 f"  const id = data.get('id') as string | null;\n"
                 f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
@@ -639,6 +795,19 @@ def actions_context(ctx: dict) -> dict:
                 f"  }}"
             )
         elif can_update:
+            if should_filter_by_org:
+                return (
+                    f"  const id = data.get('id') as string | null;\n"
+                    f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                    f"  if (!id) throw new Error('Create not supported');\n"
+                    f"  const actorId = await getSessionUserIdOrThrow();\n"
+                    + _actor_and_existing_block("  ") +
+                    f"  await requirePermission('{parent}', 'update', existing);\n"
+                    f"{form_data_gets}\n"
+                    + (f"{child_form_data_extractions}\n" if has_ch else "")
+                    + _flatten_block +
+                    f"\n  await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
+                )
             return (
                 f"  const id = data.get('id') as string | null;\n"
                 f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
@@ -787,7 +956,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     pattern, since there is no embedded child array for the pre-create
     mechanism to hook into; an entity that needs this path with a NOT NULL
     approvable_id would need the leave_request-style one_to_one_pre_creates
-    treatment instead (out of scope here — see docs/receiving-approval-backfill-design.md §5.2).
+    treatment instead (out of scope here — see docs/knowledge/appendix/approval-flow.md §16.10).
     """
     pool           = rc.get('pool') or {}
     req            = rc.get('request') or {}
@@ -897,7 +1066,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"          continue;\n"
         f"        }}\n"
         f"        await tx.approval_request.create({{\n"
-        f"          data: {{ approvable_id: approvable.id, approval_flow_id: flow.id, status: 0 }},\n"
+        f"          data: {{ approvable_id: approvable.id, approval_flow_id: flow.id, status: 'Pending' }},\n"
         f"        }});\n"
         f"        _hasFlow = true;\n"
         f"      }}\n"
@@ -1502,7 +1671,7 @@ def get_reservation_action_routes(rc: dict, model: str) -> list[dict]:
 # has the exact same shape and gap, so helpers.schema_helpers.
 # get_approval_lines_props() folds both signals into one list and this same
 # pre-create/post-create pair covers both — see
-# docs/receiving-approval-backfill-design.md §5.2 (D2).
+# docs/knowledge/appendix/approval-flow.md §16.10.
 
 def _resolve_approval_lines_entity(model: str, prop_name: str, schema: dict) -> str:
     """Resolve the child entity name for an x-approval-lines property.
@@ -1564,7 +1733,8 @@ def _build_approval_create_block_for_entity(
     creator_id on the approvable if any flow matched.
 
     Shared inner block (cmd_296 Phase2 common-helper — see
-    docs/split-generalization-design.md §4.2) for:
+    docs/knowledge/appendix/approval-flow.md §16.10 and
+    docs/knowledge/appendix/inventory-reservation-split.md §2) for:
       - _build_approval_lines_post_create_code (cmd_295 x-approval-lines):
         called once per pre-created array element, inside the caller's
         `for (const _apprId of {arr}) {...}` loop.
@@ -1573,6 +1743,13 @@ def _build_approval_create_block_for_entity(
 
     Caller pre-fetches `flows_var` (approval_flow[] for the entity) and
     `role_ids_var` (creator's role ids) once, outside any per-approvable loop.
+
+    cmd_413 fix: notifies every approver-role holder for each created
+    approval_request via notifyApprovalRequestCreated (mirrors Trigger #2 in
+    service_after_create_stub.ts.jinja2, which only covers the top-level
+    single-entity afterCreate path — this shared block is the datagrid-child
+    / split-action path, which never had the notify call at all). Caller
+    must import notifyApprovalRequestCreated from '@/lib/_notifyApprovalRequest'.
     """
     return (
         f"{indent}let _hasFlow = false;\n"
@@ -1580,15 +1757,50 @@ def _build_approval_create_block_for_entity(
         f"{indent}  if (_flow.requestor_role_id && !{role_ids_var}.includes(_flow.requestor_role_id)) {{\n"
         f"{indent}    continue;\n"
         f"{indent}  }}\n"
-        f"{indent}  await {tx_var}.approval_request.create({{\n"
-        f"{indent}    data: {{ approvable_id: {approvable_id_expr}, approval_flow_id: _flow.id, status: 0 }},\n"
+        f"{indent}  const _apprReq = await {tx_var}.approval_request.create({{\n"
+        f"{indent}    data: {{ approvable_id: {approvable_id_expr}, approval_flow_id: _flow.id, status: 'Pending' }},\n"
         f"{indent}  }});\n"
+        f"{indent}  await notifyApprovalRequestCreated({tx_var}, _apprReq.id, {{ excludeUserId: {actor_id_expr} }});\n"
         f"{indent}  _hasFlow = true;\n"
         f"{indent}}}\n"
         f"{indent}if (_hasFlow) {{\n"
         f"{indent}  await {tx_var}.approvable.update({{\n"
         f"{indent}    where: {{ id: {approvable_id_expr} }},\n"
         f"{indent}    data: {{ creator_id: {actor_id_expr} }},\n"
+        f"{indent}  }});\n"
+        f"{indent}}}"
+    )
+
+
+def _build_split_approval_inherit_block(indent: str = '  ') -> str:
+    """Create approval_request(s) for ONE split child, inheriting the flow IDs
+    from the parent's own (pre-split) approval_request rows — unconditionally,
+    with no requestor-role filter.
+
+    cmd_439 F1 (approved Option A): a split child continues whatever approval
+    flow the parent was already subject to, regardless of which role the
+    split actor holds. This replaces the old creator-role-filtered lookup
+    (_build_approval_create_block_for_entity) for the split path only —
+    that function is still used unchanged for x-approval-lines
+    (_build_approval_lines_post_create_code), where filtering by the
+    creator's role remains correct.
+
+    Caller must define `_parentARFlowIds` (the parent's approval_request
+    approval_flow_id list) once, outside the per-part loop, and a
+    `childApprovable` var inside it. Caller must import
+    notifyApprovalRequestCreated from '@/lib/_notifyApprovalRequest'.
+    """
+    return (
+        f"{indent}for (const _flowId of _parentARFlowIds) {{\n"
+        f"{indent}  const _apprReq = await tx.approval_request.create({{\n"
+        f"{indent}    data: {{ approvable_id: childApprovable.id, approval_flow_id: _flowId, status: 'Pending' }},\n"
+        f"{indent}  }});\n"
+        f"{indent}  await notifyApprovalRequestCreated(tx, _apprReq.id, {{ excludeUserId: userId }});\n"
+        f"{indent}}}\n"
+        f"{indent}if (_parentARFlowIds.length > 0) {{\n"
+        f"{indent}  await tx.approvable.update({{\n"
+        f"{indent}    where: {{ id: childApprovable.id }},\n"
+        f"{indent}    data: {{ creator_id: userId }},\n"
         f"{indent}  }});\n"
         f"{indent}}}"
     )
@@ -1657,6 +1869,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     child_params_for_add    = ctx['child_params_for_add']
     child_params_for_update = ctx['child_params_for_update']
     has_assignee_id         = ctx.get('has_assignee_id', False)
+    child_assignee_notify_create_code = ctx.get('child_assignee_notify_create_code', '')
+    child_assignee_notify_update_code = ctx.get('child_assignee_notify_update_code', '')
     is_audited              = ctx.get('is_audited', False)
     reservation_config      = ctx.get('reservation_config')
     has_reservation         = bool(reservation_config and reservation_config.get('mode') == 'count')
@@ -1929,7 +2143,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         reservation_actions_code = _build_reservation_action_functions(reservation_config, model, schema)
 
     # x-approval-lines: pre-create/post-create approval for embedded line
-    # children that are new:false (see docs/receiving-approval-backfill-design.md).
+    # children that are new:false (see docs/knowledge/appendix/approval-flow.md §16.10).
     approval_lines_pre_create_code  = ''
     approval_lines_post_create_code = ''
     approval_lines_pre_update_code  = ''
@@ -1988,7 +2202,10 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ validateOnAdd, validateOnUpdate{_validation_extras} }} from './service_validation';" if (can_create or can_update) else '')
         + (f"\nimport {{ assertNoDuplicateReservation }} from './service_validation';" if has_item_daterange and not (can_create or can_update) else '')
         + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '')
-        + (f"\nimport {{ notify }} from '@/lib/_notifier';" if has_assignee_id else '')
+        + (f"\nimport {{ notify }} from '@/lib/_notifier';"
+           if has_assignee_id or child_assignee_notify_create_code or child_assignee_notify_update_code else '')
+        + (f"\nimport {{ notifyApprovalRequestCreated }} from '@/lib/_notifyApprovalRequest';"
+           if approval_lines_post_create_code or approval_lines_post_update_code else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + insufficient_inventory_error_class +
         f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"
@@ -2071,6 +2288,8 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                 rel_params.append(f"{param_camel}Config?: EntityAutocompleteCellConfig")
 
         columns = []
+        col_ns_hooks: list[str] = []
+        col_seen_ns: set[str] = set()
         for key, prop in child_props.items():
             if key in ('id', f'{model}_id', 'created_at', 'updated_at', 'creator_id'):
                 continue
@@ -2163,13 +2382,35 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                     f"      }},\n"
                     f"    }},"
                 )
+            elif actual == 'string' and isinstance(enum_vals, list) and _native_enum_ns(prop):
+                native_ns = _native_enum_ns(prop)
+                is_nullable = isinstance(prop_type_raw, list) and 'null' in prop_type_raw
+                if native_ns not in col_seen_ns:
+                    col_seen_ns.add(native_ns)
+                    col_ns_hooks.append(f"  const t{native_ns} = useTranslations('{native_ns}');")
+                opts = ', '.join(
+                    f"{{ value: '{v}', label: t{native_ns}('{_native_enum_key(v)}') }}"
+                    for v in enum_vals
+                )
+                null_opt = "{ value: '' as const, label: '-- None --' }"
+                value_opts = f'{null_opt}, {opts}' if is_nullable else opts
+                extra = ''
+                if is_nullable:
+                    extra = (
+                        f",\n      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
+                        f"      valueGetter: (value: any) => value ?? '',\n"
+                        f"      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
+                        f"      valueSetter: (value: any, row: any) => ({{ ...row, {key}: value === '' ? null : value }})"
+                    )
+                columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: 150, editable: editable, type: 'singleSelect' as const, valueOptions: [{value_opts}]{extra} }},")
             else:
                 columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: {width}, editable: editable }},")
 
         rel_params_str = (', ' + ', '.join(rel_params)) if rel_params else ''
+        _col_ns_hooks_str = ('\n' + '\n'.join(col_ns_hooks)) if col_ns_hooks else ''
         fn_code = (
             f"export function use{to_pascal_case(prop_name)}Columns(editable: boolean = false{rel_params_str}): GridColDef[] {{\n"
-            f"  const t = useTranslations('Fields');\n"
+            f"  const t = useTranslations('Fields');{_col_ns_hooks_str}\n"
             f"  return [\n"
             + '\n'.join(columns) +
             f"\n  ];\n"
@@ -2241,6 +2482,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     image_flds         = []
     boolean_flds       = []
     enum_integer_flds  = []
+    enum_native_flds   = []
     other_flds         = []
 
     for p in parent_props:
@@ -2257,6 +2499,8 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             boolean_flds.append(p)
         elif actual in ('integer', 'number') and isinstance(prop.get('enum'), list):
             enum_integer_flds.append(p)
+        elif _native_enum_ns(prop) and isinstance(prop.get('enum'), list):
+            enum_native_flds.append(p)
         else:
             other_flds.append(p)
 
@@ -2380,6 +2624,28 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             f"        readOnly\n      />"
         )
 
+    # Enum nativeEnum fields (string-backed Prisma enum, always translated)
+    enum_native_jsxs = []
+    for p in enum_native_flds:
+        prop       = filtered_props[p]
+        state_name = safe_var_name(p)
+        enum_vals  = prop.get('enum', [])
+        ns         = _native_enum_ns(prop)
+        if ns not in seen_ns:
+            seen_ns.add(ns)
+            enum_ns_hooks.append(f"  const t{ns} = useTranslations('{ns}');")
+        opts = ', '.join(
+            f"{{ value: '{v}', label: t{ns}('{_native_enum_key(v)}') }}"
+            for v in enum_vals
+        )
+        enum_opt_setups.append(f"  const {state_name}Options = [{opts}];")
+        fk = _tf(p)
+        enum_native_jsxs.append(
+            f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
+            f"        value={{{state_name}Options.find(o => o.value === src.{p})?.label ?? ''}}\n"
+            f"        readOnly\n      />"
+        )
+
     # Custom view fields
     custom_jsxs = [
         f"      <{to_pascal_case(p)} value={{src.{safe_var_name(p)}}} />"
@@ -2392,6 +2658,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     all_parent_fields = '\n'.join(filter(None, [
         '\n'.join(text_jsxs),
         '\n'.join(enum_int_jsxs),
+        '\n'.join(enum_native_jsxs),
         '\n'.join(bool_jsxs),
         '\n'.join(dt_jsxs),
         '\n'.join(img_jsxs),
@@ -2662,7 +2929,23 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     parent_rels_raw = ctx['parent_rels_raw']
     selector_oto_rels = ctx.get('selector_oto_rels', [])
     selector_oto_prop_names = {r['prop_name'] for r in selector_oto_rels}
-    parent_rels_raw = [r for r in parent_rels_raw if r['prop_name'] not in selector_oto_prop_names]
+
+    # Readonly fields: exclude from editable field lists; render as disabled in edit mode only.
+    # Relation fields (parent_rels_raw / selector_oto_rels) are filtered here too, matching
+    # every other category below — without this, an x-readonly relation field renders BOTH
+    # a fully-interactive AppFieldRelation (unfiltered) AND a duplicate readonly display
+    # (readonly_edit_jsxs, edit-mode only), defeating the readonly annotation entirely on
+    # the interactive copy (cmd_355 subtask_355b finding; cmd_477e inventory_movement.
+    # from_inventory_id: the unfiltered required AppFieldRelation blocked every UI-driven
+    # create via native "please fill out this field" validation since the field is never
+    # user-fillable per x-readonly's documented contract).
+    readonly_field_names: set[str] = set(ctx.get('readonly_fields') or [])
+
+    parent_rels_raw = [
+        r for r in parent_rels_raw
+        if r['prop_name'] not in selector_oto_prop_names and r['prop_name'] not in readonly_field_names
+    ]
+    selector_oto_rels = [r for r in selector_oto_rels if r['prop_name'] not in readonly_field_names]
     children_raw  = ctx['children_raw']
     can_delete    = ctx['can_delete']
     selection_targets = ctx['selection_targets']
@@ -2673,9 +2956,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # Set when any autocomplete option / FormView label uses formatLabelValue —
     # the generated component must then `import { formatLabelValue } from '@/lib/_format';`.
     uses_format_label_value = False
-
-    # Readonly fields: exclude from editable field lists; render as disabled in edit mode only.
-    readonly_field_names: set[str] = set(ctx.get('readonly_fields') or [])
 
     text_props           = [p for p in cats['text']           if p not in readonly_field_names]
     number_props         = [p for p in cats['number']         if p not in readonly_field_names]
@@ -2749,10 +3029,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<number | null>(src.{p} ?? null);"
         for p in enum_int_props
     )
-    enum_str_states = '\n'.join(
-        f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
-        for p in enum_str_props
-    )
+    def _enum_str_state_line(p: str) -> str:
+        sn = safe_var_name(p)
+        if _is_nullable(filtered_props.get(p, {})):
+            return f"  const [{sn}, set{_setter(sn)}] = useState<string | null>(src.{p} ?? null);"
+        return f"  const [{sn}, set{_setter(sn)}] = useState<string>(src.{p} ?? '');"
+    enum_str_states = '\n'.join(_enum_str_state_line(p) for p in enum_str_props)
     # Many-to-one: FK prop is in src type → initialize from src.{prop_name}
     # Selector OTO: FK prop is excluded from src type, but relation object is present → use src.{relation_name}?.id
     rel_states_lines = [
@@ -2929,7 +3211,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         opts_var  = f'{sn}Options'
         enum_vals = prop.get('enum', [])
         ns        = prop.get('x-enum-namespace')
-        req       = p in (model_def.get('required') or [])
+        # A non-nullable enum field (Prisma NOT NULL, possibly with a
+        # `@default(...)` that keeps it out of json_schema `required:`) can
+        # never be legally cleared, so it's validated like a required field
+        # even when the schema doesn't list it (cmd_472/R-2; see
+        # validation_context._is_select_like).
+        req       = p in (model_def.get('required') or []) or not _is_nullable(prop)
 
         if ns and ns not in enum_ns_set:
             enum_ns_set.add(ns)
@@ -2968,19 +3255,41 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         setter    = _setter(sn)
         opts_var  = f'{sn}Options'
         enum_vals = prop.get('enum', [])
-        req       = p in (model_def.get('required') or [])
+        # See the enum_int_props loop above (cmd_472/R-2): a non-nullable
+        # enum field is validated as required even if a Prisma default
+        # keeps it out of json_schema `required:`.
+        req       = p in (model_def.get('required') or []) or not _is_nullable(prop)
+        native_ns = _native_enum_ns(prop)
 
-        opts = ', '.join(f"{{ value: '{v}', label: '{v}' }}" for v in enum_vals)
+        if native_ns:
+            if native_ns not in enum_ns_set:
+                enum_ns_set.add(native_ns)
+                enum_ns_hooks.append(f"  const t{native_ns} = useTranslations('{native_ns}');")
+            opts = ', '.join(
+                f"{{ value: '{v}', label: t{native_ns}('{_native_enum_key(v)}') }}"
+                for v in enum_vals
+            )
+        else:
+            opts = ', '.join(f"{{ value: '{v}', label: '{v}' }}" for v in enum_vals)
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
         _enum_str_width_cols = _ui_width_cols(prop)
         if _enum_str_width_cols:
             has_box_import = True
+        # Nullable → pass the cleared (null) value straight through so an
+        # explicit NULL reaches the server. Non-nullable → fall back to ''
+        # so the missing-value check in form_validation.ts (isMissingValue)
+        # catches it before submit (cmd_472/R-2).
+        _enum_str_on_change = (
+            f"onChange={{(newValue) => set{setter}(newValue)}}"
+            if _is_nullable(prop)
+            else f"onChange={{(newValue) => set{setter}(newValue ?? '')}}"
+        )
         _enum_str_jsx = (
             f"      <AppFieldSelect\n"
             f"        options={{{opts_var}}}\n"
             f"        value={{{opts_var}.find((o) => o.value === {sn}) ?? null}}\n"
-            f"        onChange={{(newValue) => set{setter}(newValue ?? '')}}\n"
+            f"        {_enum_str_on_change}\n"
             f"        label={{tf('{fk}')}}\n"
             f"        {'required' if req else ''}\n"
             f"      />"
@@ -3154,8 +3463,21 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         return f"    formData.set('{r['prop_name']}', {var} || '');"
     rel_ds   = '\n'.join(_rel_fds_line(r) for r in list(parent_rels_raw) + list(selector_oto_rels))
     bool_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}.toString());" for p in boolean_props)
-    enum_ds      = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} !== null ? String({safe_var_name(p)}) : '');" for p in enum_int_props)
-    enum_str_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in enum_str_props)
+    def _enum_int_fds_line(p: str) -> str:
+        var = safe_var_name(p)
+        if _is_nullable(filtered_props.get(p, {})):
+            # Nullable → omit the key entirely when cleared, matching the
+            # rel/entity_select convention: data.get() then naturally
+            # returns null instead of the string 'null' (cmd_472/R-2).
+            return f"    if ({var} !== null) formData.set('{p}', String({var}));"
+        return f"    formData.set('{p}', {var} !== null ? String({var}) : '');"
+    enum_ds      = '\n'.join(_enum_int_fds_line(p) for p in enum_int_props)
+    def _enum_str_fds_line(p: str) -> str:
+        var = safe_var_name(p)
+        if _is_nullable(filtered_props.get(p, {})):
+            return f"    if ({var}) formData.set('{p}', {var});"
+        return f"    formData.set('{p}', {var});"
+    enum_str_ds  = '\n'.join(_enum_str_fds_line(p) for p in enum_str_props)
     def _custom_form_data_line(p: str) -> str:
         defn = filtered_props.get(p, {})
         if _get_actual_type(defn) == 'boolean':
@@ -3368,6 +3690,22 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             if actual == 'string' and fmt in ('date', 'date-time', 'time'):
                 return "dayjs().toISOString()"
             if actual == 'string':
+                # Prisma nativeEnum-backed field: '' is not a valid enum member,
+                # so the new-row seed must use the schema's actual default
+                # (mirrors build_context.py:_default_value, cmd_446 pilot).
+                if defn.get('_prisma_native_enum_type') and 'default' in defn:
+                    return f"'{defn['default']}'"
+                if defn.get('_prisma_native_enum_type') and nullable:
+                    # Nullable (e.g. stack_mode/group_by_bucket) with no schema
+                    # default — seeding with enum[0] would fabricate meaning
+                    # that was never chosen, so leave it unset instead.
+                    return 'null'
+                if defn.get('_prisma_native_enum_type') and isinstance(defn.get('enum'), list) and defn['enum']:
+                    # Required field with no schema default — a required
+                    # column can't be left empty, so fall back to the first
+                    # declared enum member so create() still receives a valid
+                    # enum value.
+                    return f"'{defn['enum'][0]}'"
                 return "''"
             if actual in ('integer', 'number'):
                 if nullable:
@@ -3834,9 +4172,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     comment_jsx_parts = []
     comment_add_id_expr = 'src.id'  # default: old pattern uses parent entity id
     has_reactions = bool(ctx.get('named_constants'))
+    # toggle{Parent}CommentReaction's `type` param is the precise reaction-enum
+    # literal union (see generators.reaction_type_ts) — narrower than the shared
+    # CommentListWrapper's `string | number` callback signature. TS's strict
+    # (contravariant) function-parameter checking rejects the plain function
+    # reference here even though it's runtime-safe (the UI only ever forwards
+    # values that already came from COMMENT_REACTION_TYPES), hence the cast.
     _reaction_props = (
         f"          reactionTypes={{[...COMMENT_REACTION_TYPES]}}\n"
-        f"          onToggleReaction={{toggle{parent_pascal}CommentReaction}}\n"
+        f"          onToggleReaction={{toggle{parent_pascal}CommentReaction as (commentId: string, type: string | number) => Promise<CommentReactionSummary>}}\n"
         if has_reactions else ""
     )
     for c in comment_children:

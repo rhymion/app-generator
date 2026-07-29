@@ -587,7 +587,7 @@ describe('API: {{ title }}', () => {
             url: `/api/approval_request/${arId}/approve`,
           }).then((res) => {
             expect(res.status).to.eq(200);
-            expect(res.body.status).to.eq(1);
+            expect(res.body.status).to.eq('Approved');
           });
         });
       });
@@ -632,7 +632,7 @@ describe('API: {{ title }}', () => {
             url: `/api/approval_request/${arId}/reject`,
           }).then((res) => {
             expect(res.status).to.eq(200);
-            expect(res.body.status).to.eq(2);
+            expect(res.body.status).to.eq('Rejected');
           });
         });
       });
@@ -715,7 +715,7 @@ describe('API: {{ title }}', () => {
     });
 {% endif %}
 {% if entity_on_rejected_terminal %}
-    it('13.5 terminal reject sets approval_request.status = 3 (terminal_rejected)', () => {
+    it('13.5 terminal reject sets approval_request.status = TerminalRejected (terminal_rejected)', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {
           creatorId: setup.requestorUser.id,
@@ -730,7 +730,7 @@ describe('API: {{ title }}', () => {
             url: `/api/approval_request/${arId}/reject`,
           }).then((res) => {
             expect(res.status).to.eq(200);
-            expect(res.body.status).to.eq(3);
+            expect(res.body.status).to.eq('TerminalRejected');
           });
         });
       });
@@ -808,7 +808,7 @@ describe('API: {{ title }}', () => {
               url: `/api/approval_request/${ar2.id}/approve`,
             }).then((res2) => {
               expect(res2.status).to.eq(200);
-              expect(res2.body.status).to.eq(1);
+              expect(res2.body.status).to.eq('Approved');
             });
           });
         });
@@ -830,7 +830,7 @@ describe('API: {{ title }}', () => {
             headers: { 'X-API-Key': setup.requestorUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
-            expect(res.body.status).to.eq(0);
+            expect(res.body.status).to.eq('Pending');
           });
         });
       });
@@ -1044,6 +1044,124 @@ describe('API: {{ title }}', () => {
       });
     });
 {% endif %}
+{% if has_exportable_bridge_fks %}
+
+    it('N9 CSV export excludes internal bridge FK columns', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: `{{ api_path }}/export` })
+        .then((res) => {
+          expect(res.status).to.eq(200);
+          const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
+          const headers = headerLine.split(',');
+{% for fk in exportable_bridge_fk_names %}
+          expect(headers).to.not.include('{{ fk }}');
+{% endfor %}
+        });
+    });
+{% endif %}
+{% if import_can_update %}
+
+    it('N11 CSV import round-trip: re-importing an exported row matches it via the natural key with zero errors (dry run)', () => {
+      cy.task('db:populate{{ pascal }}', 1).then(() => {
+        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+          expect(exportRes.status).to.eq(200);
+          const csv = exportRes.body as string;
+          cy.request({
+            method: 'POST',
+            url: `{{ api_path }}/import`,
+            body: { csv, dryRun: true },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            expect(res.body.errors).to.have.length(0);
+            expect(res.body.summary.failed).to.eq(0);
+            expect(res.body.summary.total).to.be.greaterThan(0);
+            expect(res.body.summary.succeeded).to.eq(res.body.summary.total);
+            expect(res.body.confirmToken).to.be.a('string');
+          });
+        });
+      });
+    });
+
+    it('N12 CSV import round-trip: confirming the dry run (dryRun=false) commits with zero write failures', () => {
+      cy.task('db:populate{{ pascal }}', 1).then(() => {
+        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+          const csv = exportRes.body as string;
+          cy.request({
+            method: 'POST',
+            url: `{{ api_path }}/import`,
+            body: { csv, dryRun: true },
+          }).then((dryRunRes) => {
+            const confirmToken = dryRunRes.body.confirmToken as string;
+            cy.request({
+              method: 'POST',
+              url: `{{ api_path }}/import`,
+              body: { csv, dryRun: false, confirmToken },
+            }).then((commitRes) => {
+              expect(commitRes.status).to.eq(200);
+              expect(commitRes.body.errors).to.have.length(0);
+              expect(commitRes.body.summary.failed).to.eq(0);
+              expect(commitRes.body.summary.succeeded).to.be.greaterThan(0);
+            });
+          });
+        });
+      });
+    });
+
+    it('N13 CSV import rejects an unconfirmed commit (dryRun=false without a valid confirmToken)', () => {
+      cy.task('db:populate{{ pascal }}', 1).then(() => {
+        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+          const csv = exportRes.body as string;
+          cy.request({
+            method: 'POST',
+            url: `{{ api_path }}/import`,
+            body: { csv, dryRun: false },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(400);
+            expect(res.body.errors[0].code).to.eq('INVALID_CONFIRM_TOKEN');
+          });
+        });
+      });
+    });
+{% endif %}
+  });
+{% endif %}
+{% if is_searchable %}
+
+  describe('Search coverage (GET /api/search)', () => {
+    beforeEach(() => {
+      Cypress.session.clearAllSavedSessions();
+      cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+    });
+
+    it('N10 per-entity data surfaces in global search results', () => {
+      cy.task<any[]>('db:populate{{ pascal }}{% if not search_sample_field_required %}Full{% endif %}', 1).then((records) => {
+        const q = records[0].{{ search_sample_field }} as string;
+        cy.request({ url: `/api/search?q=${encodeURIComponent(q)}` })
+          .then((res) => {
+            expect(res.status).to.eq(200);
+            expect(
+              res.body.results.some((r: { entity_type: string }) => r.entity_type === '{{ parent }}')
+            ).to.eq(true);
+          });
+      });
+    });
+  });
+{% endif %}
+{% if can_view and has_mention_comments %}
+
+  describe('Mention field name resolution (GET {{ api_path }}/:id)', () => {
+    it('M1 saves a mention and returns the resolved user name in the response', () => {
+      cy.task<{ record: any; mentionedUser: any }>('db:populate{{ pascal }}WithMentionUser').then((result) => {
+        cy.request({ url: `${API_BASE}/${result.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+          .then((res) => {
+            expect(res.status).to.eq(200);
+            const messages = (res.body.{{ commentable_rel_name }}.comments as Array<{ {{ mention_field_name }}: string }>)
+              .map((c) => c.{{ mention_field_name }});
+            expect(messages.some((m) => m.includes(result.mentionedUser.name))).to.eq(true);
+          });
+      });
+    });
   });
 {% endif %}
 });

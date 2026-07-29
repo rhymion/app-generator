@@ -115,6 +115,7 @@ async function main() {
       delete: false,
     },
   });
+
   console.log('Tenant seeded successfully!');
 }
 

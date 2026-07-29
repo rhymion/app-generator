@@ -7,6 +7,9 @@ import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
 {% if can_update or can_delete %}
 import { {% if can_update %}update{{ parent_pascal }}{% endif %}{% if can_update and can_delete %}, {% endif %}{% if can_delete %}delete{{ parent_pascal }}{% endif %}{% if reservation_config and reservation_config.mode == 'count' %}, ReservationMutationError{% endif %} } from '@/lib/{{ parent }}/service';
 {% endif %}
+{% if should_filter_by_org and (can_update or can_delete) %}
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}
 
 type Params = { params: Promise<{ id: string }> };
 {% if can_view %}
@@ -30,7 +33,13 @@ export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId: actorId } = await authenticateApiKey(request);
+{% if should_filter_by_org %}
+    const _assocOrgs = await getAssociatedOrganizations(actorId);
+    const _assocOrgIds = _assocOrgs.map((o) => o.id);
+    const existing = await prisma.{{ model }}.findFirst({ where: { id, organization_id: { in: _assocOrgIds } }, select: {{ item_context_select }} });
+{% else %}
     const existing = await prisma.{{ model }}.findUnique({ where: { id }, select: {{ item_context_select }} });
+{% endif %}
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
@@ -65,7 +74,13 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId: actorId } = await authenticateApiKey(request);
+{% if should_filter_by_org %}
+    const _assocOrgs = await getAssociatedOrganizations(actorId);
+    const _assocOrgIds = _assocOrgs.map((o) => o.id);
+    const existing = await prisma.{{ model }}.findFirst({ where: { id, organization_id: { in: _assocOrgIds } }, select: {{ item_context_select }} });
+{% else %}
     const existing = await prisma.{{ model }}.findUnique({ where: { id }, select: {{ item_context_select }} });
+{% endif %}
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }

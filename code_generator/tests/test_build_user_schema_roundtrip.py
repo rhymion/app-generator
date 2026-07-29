@@ -11,7 +11,7 @@ intermediate schema this builder must reproduce from the (renamed)
 `tests/fixtures/stage2_reference_json_schema.yaml` -- the pre-Stage-3
 legacy full schema, which cmd_408's own roundtrip test already proved is
 exactly what the Stage 3 builder produced -- doubles as ground truth for
-the Phase A golden-diff invariant (queue/reports/subtask_409a_gunshi.yaml
+the Phase A golden-diff invariant (see docs/knowledge/schema-restructuring-build-order.md
 Sec.5 phase_A_schema_level): renaming a paired entity must not change its
 content, only its key and its self-referential `$ref`.
 """
@@ -20,7 +20,13 @@ from pathlib import Path
 import pytest
 from ruamel.yaml import YAML
 
-from build_user_schema import UserSchemaError, build_intermediate_schema, build_user_schema
+from build_user_schema import (
+    UserSchemaError,
+    _make_yaml,
+    _merge_internal_definitions,
+    build_intermediate_schema,
+    build_user_schema,
+)
 from schema_deriver import SchemaDivergenceError, parse_prisma_schema
 
 SCHEMA_PATH = Path(__file__).parent.parent / "json_schema.yaml"
@@ -111,7 +117,7 @@ def test_unknown_field_name_raises_divergence(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Collision detection (subtask_409a_gunshi.yaml Sec.4 collision_detection_design)
+# Collision detection (see docs/knowledge/schema-restructuring-build-order.md Sec.4 collision_detection_design)
 # ---------------------------------------------------------------------------
 
 def test_reserved_dunder_prefix_entity_name_raises():
@@ -172,7 +178,7 @@ def test_non_model_named_pass_through_entity_does_not_raise():
 
 
 # ---------------------------------------------------------------------------
-# Phase A golden diff (subtask_409a_gunshi.yaml Sec.5 phase_A_schema_level)
+# Phase A golden diff (see docs/knowledge/schema-restructuring-build-order.md Sec.5 phase_A_schema_level)
 # ---------------------------------------------------------------------------
 
 def _normalize_legacy_view_self_ref(view: dict, base: str) -> dict:
@@ -218,3 +224,111 @@ def test_phase_a_golden_diff_zero(tmp_path):
     )
 
     assert not diffs, "Phase A golden diff non-zero:\n" + "\n".join(diffs)
+
+
+# ---------------------------------------------------------------------------
+# json_schema_internal.yaml merge (cmd_438 Batch3, subtask_438i)
+# ---------------------------------------------------------------------------
+
+def test_merge_internal_definitions_fills_missing_entity(tmp_path):
+    """An entity absent from the user schema, but present in the sibling
+    json_schema_internal.yaml, is filled in from the internal file."""
+    (tmp_path / "json_schema_internal.yaml").write_text(
+        "definitions:\n"
+        "  attachable:\n"
+        "    x-generate: {list: false}\n",
+        encoding="utf-8",
+    )
+    user_schema_path = tmp_path / "json_schema.yaml"  # need not exist on disk
+    user_schema = {"definitions": {"role": {"fields": {}}}}
+
+    _merge_internal_definitions(user_schema, user_schema_path, _make_yaml())
+
+    assert user_schema["definitions"]["attachable"] == {"x-generate": {"list": False}}
+    assert user_schema["definitions"]["role"] == {"fields": {}}
+
+
+def test_merge_internal_definitions_user_definition_wins(tmp_path):
+    """An entity the user schema already defines is never overwritten by
+    the internal file, even if both define the same entity name."""
+    (tmp_path / "json_schema_internal.yaml").write_text(
+        "definitions:\n"
+        "  attachable:\n"
+        "    x-generate: {list: false}\n",
+        encoding="utf-8",
+    )
+    user_schema_path = tmp_path / "json_schema.yaml"
+    user_schema = {"definitions": {"attachable": {"x-generate": {"list": True}}}}
+
+    _merge_internal_definitions(user_schema, user_schema_path, _make_yaml())
+
+    assert user_schema["definitions"]["attachable"] == {"x-generate": {"list": True}}
+
+
+def test_merge_internal_definitions_missing_file_is_noop(tmp_path):
+    """No json_schema_internal.yaml next to the user schema (e.g. an
+    existing, pre-cmd_438i project) leaves the user schema untouched."""
+    user_schema_path = tmp_path / "json_schema.yaml"
+    user_schema = {"definitions": {"role": {"fields": {}}}}
+
+    _merge_internal_definitions(user_schema, user_schema_path, _make_yaml())
+
+    assert user_schema["definitions"] == {"role": {"fields": {}}}
+
+
+def test_default_schema_bridge_entities_are_unaffected_by_internal_file(tmp_path):
+    """The framework's own json_schema.yaml already defines approvable /
+    commentable / attachable itself, so the sibling json_schema_internal.yaml
+    (real file, not a fixture) must leave *those* entities' Stage 4 output
+    completely untouched -- user-always-wins (see _merge_internal_definitions).
+
+    This is NOT the same invariant as "internal file changes nothing at all":
+    an entity the default schema does *not* define itself (e.g.
+    `notification`, added by cmd_475) is legitimately filled in from the
+    internal file -- that is the file's whole purpose, not a violation. A
+    full byte-for-byte comparison against a frozen reference would reject
+    every future internal-only addition, which defeats the point of the
+    file. So this guard builds the schema twice -- once with the real
+    internal file consulted, once with it hidden from build_user_schema --
+    and asserts identical output only for entities the user schema itself
+    defines, while separately confirming the internal-only entity really is
+    internal-only (present when consulted, absent when hidden)."""
+    user_definitions = _load(SCHEMA_PATH)["definitions"]
+
+    with_internal_out = tmp_path / "with_internal" / "json_schema.yaml"
+    build_user_schema(SCHEMA_PATH, PRISMA_SCHEMA_PATH, with_internal_out)
+    with_internal = _load(with_internal_out)
+
+    # A copy of json_schema.yaml in a directory with no sibling
+    # json_schema_internal.yaml -- _merge_internal_definitions is a no-op
+    # here, so this build is "as if" the internal file didn't exist.
+    isolated_dir = tmp_path / "isolated"
+    isolated_dir.mkdir()
+    isolated_schema_path = isolated_dir / "json_schema.yaml"
+    isolated_schema_path.write_text(SCHEMA_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    without_internal_out = tmp_path / "without_internal" / "json_schema.yaml"
+    build_user_schema(isolated_schema_path, PRISMA_SCHEMA_PATH, without_internal_out)
+    without_internal = _load(without_internal_out)
+
+    diffs = []
+    for base in user_definitions:
+        for name in (base, f"__{base}"):
+            if name not in with_internal["definitions"] and name not in without_internal["definitions"]:
+                continue  # standalone entity: no synthesized raw twin either way
+            diffs.extend(
+                _deep_diff(
+                    without_internal["definitions"].get(name),
+                    with_internal["definitions"].get(name),
+                    f".definitions.{name}",
+                )
+            )
+    assert not diffs, (
+        "json_schema_internal.yaml changed the Stage 4 output of an entity "
+        "the default json_schema.yaml defines itself -- user-always-wins "
+        "violated:\n" + "\n".join(diffs)
+    )
+
+    # The internal-only addition is real (merge still functions) and is
+    # genuinely absent without the internal file (not user-defined already).
+    assert "notification" in with_internal["definitions"]
+    assert "notification" not in without_internal["definitions"]

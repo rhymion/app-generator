@@ -44,6 +44,7 @@
     "approverRole": "Approver Role",
     "attachments": "Attachments",
     "chartType": "Chart Type",
+    "comments": "Comments",
     "create": "Create",
     "created_at": "Created At",
     "dashboard": "Dashboard",
@@ -197,5 +198,42 @@
     "errorLastSignInMethod": "Cannot detach: you would no longer be able to sign in.",
     "errorNotFound": "Linked account not found.",
     "errorUnknown": "Something went wrong. Please try again."
+  },
+  "ApprovalRequestStatus": {
+    "approved": "Approved",
+    "pending": "Pending",
+    "rejected": "Rejected",
+    "terminalRejected": "Terminal Rejection"
+  },
+  "ReactionType": {
+    "laugh": "Haha",
+    "like": "Like",
+    "love": "Love",
+    "sad": "Sad",
+    "surprised": "Wow"
+  },
+  "AttachmentType": {
+    "audio": "Audio",
+    "file": "File",
+    "image": "Image",
+    "video": "Video"
+  },
+  "DashboardWidgetChartType": {
+    "bar": "Bar",
+    "column": "Column",
+    "line": "Line",
+    "pie": "Pie"
+  },
+  "DashboardWidgetStackMode": {
+    "grouped": "Grouped",
+    "stacked": "Stacked",
+    "standardized": "Normalized"
+  },
+  "DashboardWidgetGroupByBucket": {
+    "day": "Day",
+    "month": "Month",
+    "quarter": "Quarter",
+    "week": "Week",
+    "year": "Year"
   }
 }

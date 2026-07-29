@@ -6,7 +6,7 @@
 
 import { revalidatePath } from 'next/cache';
 import prisma from '@/lib/prisma';
-import { getSessionUserIdOrThrow } from '@/lib/authz';
+import { requirePermission } from '@/lib/authz';
 import { encryptFileName } from '@/lib/compliance/attachment_name_crypto';
 
 export type AttachmentItemInput = {
@@ -16,29 +16,32 @@ export type AttachmentItemInput = {
   path: string;
 };
 
+/**
+ * Editing an attachment is editing its owner entity — there is no
+ * attachment-specific permission, so this defers to the same
+ * requirePermission('<model>', 'update', item) path every owner's own
+ * upsert action already uses (RBAC general.update, plus Creator/Assignee
+ * item-level resolution). Attachments can only ever be added once the owner
+ * exists (never at create time), so the only branch that matters here is
+ * 'update'.
+ */
 async function assertCanEditBridge(attachable_id: string): Promise<void> {
-  const userId = await getSessionUserIdOrThrow();
   const owner = await prisma.attachable.findUnique({
     where: { id: attachable_id },
     select: {
 {% for owner in owners %}
-      {{ owner.name }}: { select: { creator_id: true } },
+      {{ owner.name }}: { select: { id: true, creator_id: true{% if owner.has_assignee %}, assignee_id: true{% endif %} } },
 {% endfor %}
     },
   });
   if (!owner) throw new Error('Attachable not found');
-{% if owners %}
-  const creatorId =
 {% for owner in owners %}
-    owner.{{ owner.name }}?.creator_id ??
-{% endfor %}
-    null;
-{% else %}
-  const creatorId = null;
-{% endif %}
-  if (creatorId && creatorId !== userId) {
-    throw new Error('No permission to edit attachments');
+  if (owner.{{ owner.name }}) {
+    await requirePermission('{{ owner.name }}', 'update', owner.{{ owner.name }});
+    return;
   }
+{% endfor %}
+  throw new Error('Attachable has no owner');
 }
 
 function revalidateForBridge(attachable_id: string): Promise<void> {
@@ -63,7 +66,7 @@ function revalidateForBridge(attachable_id: string): Promise<void> {
 
 export async function setAttachmentsForBridge(
   attachable_id: string,
-  type: number,
+  type: {{ type_ts }},
   items: AttachmentItemInput[],
 ): Promise<void> {
   await assertCanEditBridge(attachable_id);

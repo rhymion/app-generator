@@ -80,3 +80,42 @@ def test_create_false_update_true(env):
     assert 'ENTITY_IMPORT_UPDATE_NOT_SUPPORTED' not in rendered
     # Full handler IS generated
     assert 'MAX_IMPORT_ROWS' in rendered
+
+
+def test_two_dotted_keys_same_lookup_entity_no_duplicate_const(env):
+    """DP-2a (cmd_394 §12): two dotted x-import-key entries whose lookup_entity
+    resolves to the SAME Prisma model (e.g. approval_flow's approver_role.name
+    and requestor_role.name both target 'role') must render distinct const
+    names — var_prefix (not lookup_entity) drives the generated identifier.
+    A collision here would be a TypeScript 'Cannot redeclare block-scoped
+    variable' build error, invisible to a naive Jinja2-only smoke test."""
+    ctx = _ctx(import_key_specs=[
+        {'csv_col': 'approver_role_name', 'is_dotted': True, 'lookup_field': 'name',
+         'var_prefix': 'approver_role', 'lookup_entity': 'role',
+         'result_col': 'approver_role_id', 'fk_nullable': False, 'raw': 'approver_role.name'},
+        {'csv_col': 'requestor_role_name', 'is_dotted': True, 'lookup_field': 'name',
+         'var_prefix': 'requestor_role', 'lookup_entity': 'role',
+         'result_col': 'requestor_role_id', 'fk_nullable': False, 'raw': 'requestor_role.name'},
+    ], import_key_fields=[])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+
+    # Both dotted lookups target the correct Prisma model.
+    assert rendered.count('await prisma.role.findMany(') == 2
+    assert 'prisma.approver_role.findMany(' not in rendered
+    assert 'prisma.requestor_role.findMany(' not in rendered
+
+    # Distinct, non-colliding const declarations (the actual bug this guards).
+    assert 'const _approver_role_csv_val' in rendered
+    assert 'const _requestor_role_csv_val' in rendered
+    assert 'const _approver_role_rows' in rendered
+    assert 'const _requestor_role_rows' in rendered
+    assert 'const _role_csv_val' not in rendered
+    assert 'const _role_rows' not in rendered
+
+    declared_names = [
+        line.split()[1] for line in rendered.splitlines()
+        if line.strip().startswith('const _') and ('_csv_val' in line or '_rows' in line)
+    ]
+    assert len(declared_names) == len(set(declared_names)), (
+        f"duplicate const declaration(s) in rendered import route: {declared_names}"
+    )

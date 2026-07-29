@@ -43,6 +43,7 @@
     "custom",
     "**/*.cy.tsx",
     "code_generator",
-    "cypress" // Exclude the entire Cypress directory
+    "cypress", // Exclude the entire Cypress directory
+    "cypress.config.ts"
   ],
 }

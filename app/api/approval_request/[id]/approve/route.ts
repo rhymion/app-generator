@@ -30,7 +30,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const updated = await prisma.$transaction(async (tx) => {
       const result = await tx.approval_request.update({
         where: { id },
-        data: { status: 1 },
+        data: { status: 'Approved' },
         select: {
           id: true,
           status: true,
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           approval_requests: { select: { status: true } },
         },
       });
-      const allApproved = approvableData?.approval_requests.every((r) => r.status === 1) ?? false;
+      const allApproved = approvableData?.approval_requests.every((r) => r.status === 'Approved') ?? false;
       const alreadyFired = approvableData?.approved_at != null;
       if (allApproved && !alreadyFired && approvableData) {
         await tx.approvable.update({ where: { id: approvableData.id }, data: { approved_at: new Date() } });

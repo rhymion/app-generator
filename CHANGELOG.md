@@ -3,13 +3,17 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [3.0.0] - 2026-07-07
+## [3.0.0] - 2026-07-28
 
-> Consolidates five feature areas added since 2.0.0: GCP Cloud Run deployment,
+> Consolidates the feature areas added since 2.0.0: GCP Cloud Run deployment,
 > an audit log viewer, GDPR/data-protection tooling, attachment display
-> opt-out, and a round of performance hardening. Released as a major bump
-> because the performance, data-protection, and audit-log work include
-> breaking changes.
+> opt-out, a round of performance hardening, an inventory ledger with
+> receiving/reservation workflows and split actions, CSV import/export,
+> extended search and FK autocomplete/auto-inference, notification
+> persistence, the single-file entity schema format, `nativeEnum` type
+> safety, and organization-isolation enforcement. Released as a major bump
+> because the performance, data-protection, audit-log, and enum-type-safety
+> work include breaking changes.
 > Full upgrade steps: [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
 
 ### BREAKING
@@ -47,6 +51,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   AND actor_user_id NOT IN (SELECT id FROM "user");`. Going forward, deleting
   a `user` with existing `audit_log` rows is rejected instead of silently
   orphaning them.
+- **`nativeEnum` promotion for 6 previously-`Int` enum fields** — if any
+  generated application read or wrote these columns using raw integer values
+  rather than the generated enum constants, those values may fail Prisma's
+  enum validation after upgrade. Affected fields: `approval_request.status`,
+  `reaction.type`, `attachment.type`, `dashboard_widget.chart_type`,
+  `dashboard_widget.stack_mode`, `dashboard_widget.group_by_bucket`. `prisma
+  db push` or `prisma migrate deploy` required.
 
 ### Added
 - **GCP Cloud Run deployment** (`x-cloud` annotation, opt-in — disabled unless
@@ -87,6 +98,73 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   avoid a `prisma migrate dev` drift loop), and a `SearchOpts.count: false`
   opt-out that skips both `COUNT(*)` queries in cross-entity search
   (returns `total: -1`).
+- **Inventory ledger with `x-ledger-source`** — `inventory_transaction`
+  ledger entity and `transactionable` bridge generated when a ledger
+  top-level declaration is present in `json_schema.yaml`. Annotate a
+  receiving-receipt line or billing-detail entity with `x-ledger-source`
+  to emit write / adjust / move stub templates (`ledger_write_stub.ts`,
+  `ledger_adjust_stub.ts`, `ledger_move_stub.ts`).
+- **Receiving workflow** — top-level `ledger` / `transactionable` / `pool`
+  entity declarations and `receiving_confirm_route.ts` generated for
+  receiving-receipt schemas. Replaces the `x-receiving` mechanism removed
+  earlier in the 3.0 development cycle.
+- **Reservation lifecycle** (`reserve` / `ship` / `release` / `cancel`) —
+  `reservation_actions.ts.jinja2` generated per reservable entity; each
+  state transition records an `inventory_transaction` row for audit
+  fidelity. Internally migrated from slot-based to ledger-transaction
+  strategy.
+- **Terminal rejection with `x-readonly-fields`** — annotate fields with
+  `x-readonly-fields` to prevent edits after an entity reaches a terminal
+  rejected state. `on_rejected_dispatch.ts` and `service_after_reject_stub.ts`
+  are generated as once-stubs for custom post-rejection logic (not overwritten
+  on `generate-code` re-runs). `rejection_reason` is wired into the reject
+  route automatically.
+- **Rejection event dispatch** (`on_rejected_dispatch`) — the `reject` API
+  route fires `on_rejected_dispatch.ts` after a terminal rejection, enabling
+  downstream logic such as notifications or inventory adjustments. Paired with
+  `service_after_reject_stub.ts` for application-level customization.
+- **Split action (`x-splittable`)** — annotate an entity with `x-splittable`
+  to generate `SplitActionSection` (UI component) and `split_action_route.ts`
+  (API). Enables lot-level split operations from the list or edit page without
+  requiring a custom route.
+- **CSV Export** — per-entity export route (`api_export_route.ts.jinja2`)
+  generated when `x-generate.export: true` (default `true`). Exported columns
+  match the entity's view-page field set; individual fields opt out via
+  `x-generate.export: false` on the field declaration.
+- **CSV Import** — user CSV import route (`api_import_route.ts.jinja2`) and
+  `ImportModal.tsx` component generated when `x-generate.import: true`.
+  Batch-processes rows server-side; access controlled via the `permission.import`
+  grant per entity.
+- **Search — child entities without a dedicated page** — entities with
+  `x-page: false` now appear in global search results; hits resolve to the
+  parent entity's edit page (method②). Previously only top-level entities
+  appeared in search results.
+- **FK Autocomplete custom filter hook** — `autocomplete_filter_stub.ts.jinja2`
+  generated per entity for narrowing autocomplete and list results beyond the
+  built-in permission filter. Wired into `SplitActionSection`'s FK context
+  automatically.
+- **FK scalar auto-inference** — FK scalar columns (e.g. `organization_id`)
+  no longer need to be declared explicitly in `json_schema.yaml`; the generator
+  derives them from Prisma relation properties, reducing per-entity schema
+  verbosity.
+- **`x-approval-lines` helpers** — annotate an approvable entity with
+  `x-approval-lines` to generate pre-create / post-create helper functions that
+  wire approval-line entities to inventory ledger operations.
+- **Notification persistence** (DB-backed, cursor-based polling) — in-memory
+  SSE notification store replaced with a Prisma-backed `notification` table.
+  Cursor-based DB polling delivers unread notifications reliably across server
+  restarts.
+- **Single-file entity format** (`_detail` suffix retired) —
+  `json_schema.yaml` entity declarations no longer require a paired `*_detail`
+  block; the generator derives field types directly from the Prisma schema.
+  `build_user_schema.py`'s Prisma-derivation pipeline updated accordingly.
+- **enum type safety — `nativeEnum` promotion** — 6 previously-`Int` enum
+  fields promoted to Prisma `nativeEnum`; generated code gains compile-time type
+  checks. See BREAKING above for the affected fields and migration steps.
+- **Organization isolation enforcement** — generated API routes for org-scoped
+  entities deny create / update / delete across organization boundaries. A
+  session-lookup miss in an org-filtered query now returns an explicit deny
+  rather than a silent miss.
 
 > **Backward compatibility**: GCP deployment and attachment display opt-out
 > are non-breaking (pure opt-in / default-preserving). FK index coverage
@@ -94,7 +172,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 > (`scripts/create-gin-indexes.sql`), and the `SearchOpts.count: false`
 > COUNT(*) opt-out are additive only and backward-compatible. The audit log
 > viewer page itself adds no required input, but it surfaces data through a
-> relation that is a breaking schema change — see BREAKING above. The four
+> relation that is a breaking schema change — see BREAKING above. The five
 > items in **BREAKING** above require action before upgrading a pre-3.0
 > deployment — see [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
 

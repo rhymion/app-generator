@@ -16,6 +16,7 @@ from helpers.schema_helpers import (
     is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
     derive_text_fields, derive_searchable_relation_fields,
+    get_internal_bridge_fk_prop_names,
     get_entity_properties,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
@@ -74,6 +75,42 @@ def _is_nullable(defn: dict) -> bool:
     return isinstance(t, list) and 'null' in t
 
 
+def is_select_like_field(defn: dict) -> bool:
+    """True for fields rendered via AppFieldSelect / a MUI Autocomplete that
+    cypress drives with cy.clearAutocomplete(): enum_integer, enum_string
+    (nativeEnum or plain), and entity_select.
+
+    Shared by validation_context.py (form + service required-field checks)
+    and generators_test.py (spec generation's 3.2 "clear optional data"
+    field selection) so both agree on which fields can legally be cleared
+    (cmd_472/R-2, R-2a).
+    """
+    actual = _get_actual_type(defn)
+    if actual in ('integer', 'number') and isinstance(defn.get('enum'), list):
+        return True
+    if actual == 'string' and defn.get('x-entity-select'):
+        return True
+    if actual == 'string' and isinstance(defn.get('enum'), list):
+        return True
+    return False
+
+
+def is_forced_required_field(defn: dict) -> bool:
+    """True when a select-like field must be treated as required for
+    validation/spec-generation purposes even though json_schema `required:`
+    omits it.
+
+    A select-like field can carry a Prisma `@default(...)` (so schema_deriver
+    leaves it out of `required:` -- the default supplies a value on create)
+    while remaining non-nullable at the DB level, e.g.
+    `status RoomStatus @default(available)`. Clearing it on edit produces
+    neither a legal null nor a legal enum value, so both the client
+    validator and the generated "clears optional data" spec must treat it
+    as required (cmd_472/R-2, R-2a).
+    """
+    return is_select_like_field(defn) and not _is_nullable(defn)
+
+
 def _normalize_kind(defn: dict) -> str:
     actual = _get_actual_type(defn)
     fmt = defn.get('format')
@@ -130,10 +167,24 @@ def _build_form_data_gets(prop_infos: list[dict]) -> str:
                 )
         elif actual == 'boolean':
             lines.append(f"  const {var_name} = data.get('{prop}') === 'true';")
+        elif actual in ('integer', 'number') and isinstance(defn.get('enum'), list) and nullable:
+            # Nullable integer-enum: the client omits the FormData key when
+            # cleared, so data.get() returns null. Number(null) is 0, not
+            # null/NaN -- guard explicitly or a cleared field silently
+            # becomes enum member 0 instead of staying null (cmd_472/R-2).
+            lines.append(
+                f"  const {var_name} = data.get('{prop}') !== null ? Number(data.get('{prop}')) : null;"
+            )
         elif actual in ('integer', 'number'):
             lines.append(f"  const {var_name} = Number(data.get('{prop}'));")
         elif actual == 'string' and (pattern == '^c[a-z0-9]{24,}$' or defn.get('x-relationship')) and nullable:
             lines.append(f"  const {var_name} = (data.get('{prop}') as string | null) || null;")
+        elif actual == 'string' and defn.get('_prisma_native_enum_type') and defn.get('enum'):
+            # Prisma nativeEnum-backed field: cast the raw FormData string to
+            # the literal union get_ts_type() derives, matching the
+            # narrower type the service layer now expects (cmd_446 pilot).
+            suffix = ' | null' if nullable else ''
+            lines.append(f"  const {var_name} = data.get('{prop}') as {get_ts_type(defn)}{suffix};")
         else:
             suffix = ' | null' if nullable else ''
             lines.append(f"  const {var_name} = data.get('{prop}') as string{suffix};")
@@ -261,6 +312,13 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         approval_indexed = prop_name in _parent_approval_lines
         approval_array_var = f'_{child_var}ApprIds' if approval_indexed else ''
 
+        # cmd_413: child rows carrying their own assignee_id (e.g.
+        # receiving_receipt_line under receiving_receipt) never got a
+        # Trigger #1 notify — the parent-level has_assignee_id gate only
+        # ever inspected the PARENT's own properties. See
+        # _build_child_assignee_notify_create_code/_update_code below.
+        child_has_assignee_id = 'assignee_id' in child_props_dict
+
         result.append({
             **child_raw,
             'child_var':        child_var,
@@ -277,6 +335,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             'field_map_create': field_map_create,
             'approval_indexed':   approval_indexed,
             'approval_array_var': approval_array_var,
+            'has_assignee_id':    child_has_assignee_id,
         })
     return result
 
@@ -378,6 +437,73 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
                 f"      }},"
             )
     return '\n'.join(lines)
+
+
+def _build_child_assignee_notify_create_code(children_data: list[dict], parent: str, parent_pascal: str) -> str:
+    """Trigger #1 (cmd_413 fix) for datagrid-child rows carrying their own
+    assignee_id (e.g. receiving_receipt_line.assignee_id under
+    receiving_receipt) — the parent-level has_assignee_id notify in
+    service.ts.jinja2 only ever inspected the PARENT's own properties, so
+    child-row assignment never fired a notification. Mirrors the parent
+    pattern: fires after the transaction has committed, self-assign
+    skipped. All items in the create-flow array are newly-created rows
+    (create-flow child param type carries no `id`), so no per-row diff is
+    needed here (contrast with the update-flow version below).
+    """
+    blocks = []
+    for c in children_data:
+        # use_connect children (many-to-many / self-referential) are passed
+        # as plain `{cv}Ids: string[]` — no per-item object, so no
+        # per-item assignee_id to read. Only embedded/nested-create
+        # children (own object with scalar fields) apply here.
+        if not c.get('has_assignee_id') or c['use_connect']:
+            continue
+        cv = c['child_var']
+        blocks.append(
+            f"  for (const f of {cv}Items) {{\n"
+            f"    if (f.assignee_id && f.assignee_id !== actorId) {{\n"
+            f"      notify(f.assignee_id, 'assigned', {{\n"
+            f"        title: 'You were assigned an item on {parent_pascal}',\n"
+            f"        href: `/{parent}/view/${{result.id}}`,\n"
+            f"        itemType: '{parent}',\n"
+            f"        itemId: result.id,\n"
+            f"      }});\n"
+            f"    }}\n"
+            f"  }}"
+        )
+    return '\n'.join(blocks)
+
+
+def _build_child_assignee_notify_update_code(children_data: list[dict], parent: str, parent_pascal: str) -> str:
+    """Update-flow counterpart of _build_child_assignee_notify_create_code.
+
+    Scope (cmd_413): only newly-added rows in the update call (no `id`) are
+    notified, matching the create-flow semantics. Detecting an assignee
+    *change* on an already-existing child row would require fetching each
+    row's prior assignee_id before the update lands — not implemented here;
+    flagged as a follow-up in the cmd_413 report rather than guessed at.
+    """
+    blocks = []
+    for c in children_data:
+        # See _build_child_assignee_notify_create_code: use_connect
+        # children have no per-item object to read assignee_id from.
+        if not c.get('has_assignee_id') or c['use_connect']:
+            continue
+        cv = c['child_var']
+        blocks.append(
+            f"  for (const f of {cv}Items) {{\n"
+            f"    if (f.id) continue;\n"
+            f"    if (f.assignee_id && f.assignee_id !== actorId) {{\n"
+            f"      notify(f.assignee_id, 'assigned', {{\n"
+            f"        title: 'You were assigned an item on {parent_pascal}',\n"
+            f"        href: `/{parent}/view/${{id}}`,\n"
+            f"        itemType: '{parent}',\n"
+            f"        itemId: id,\n"
+            f"      }});\n"
+            f"    }}\n"
+            f"  }}"
+        )
+    return '\n'.join(blocks)
 
 
 def _build_comment_actions(comment_children: list[dict], parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False) -> str:
@@ -1033,21 +1159,36 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     # x_relationships_list: m2o/o2o FK relations, used by the CSV export
     # getter to flatten FK id -> display value. Every relation is included
-    # regardless of labelField shape (cmd_382): a composite (list) or dotted-
-    # path labelField previously caused the FK column to be silently dropped
-    # from CSV export entirely — it's excluded from export_scalar_fields
-    # (FK columns aren't scalars) AND was excluded here, so the column
-    # vanished with no error (real-world case: proj_c inventory_movement's
-    # from_inventory_id/to_inventory_id, whose target labelField is a
-    # composite [product.name, location.name, lot_number, expiration_date]).
-    # Each path segment is resolved via the same helper used elsewhere for
-    # labels (build_label_expression) and joined into one display string;
-    # the nested Prisma include it needs is already present in
-    # include_props_list (built below via the identical helper).
+    # regardless of labelField shape (cmd_382, decided 2026-07-19,
+    # postdating and superseding cmd_351's 2026-07-17 exclusion guard — see
+    # cmd_432 merge report for the cross-branch history check): a composite
+    # (list) or dotted-path labelField previously caused the FK column to be
+    # silently dropped from CSV export entirely — it's excluded from
+    # export_scalar_fields (FK columns aren't scalars) AND was excluded here,
+    # so the column vanished with no error (real-world case: proj_c
+    # inventory_movement's from_inventory_id/to_inventory_id, whose target
+    # labelField is a composite [product.name, location.name, lot_number,
+    # expiration_date]). Each path segment is resolved via the same helper
+    # used elsewhere for labels (build_label_expression) and joined into one
+    # display string; the nested Prisma include it needs is already present
+    # in include_props_list (built below via the identical helper).
+    #
+    # display_col naming (DP-2, cmd_394 §5, Option D): when the target's
+    # labelField is a simple (non-dotted) string, display_col names the
+    # actual labelField rather than always assuming "_name" — the two
+    # column-naming systems (export display_col vs. import csv_col, see
+    # import_key_specs below) must agree, or a dotted x-import-key can never
+    # find its column in the exported CSV (MISSING_COLUMN). Composite/dotted
+    # labelFields (no single field name to name the column after) fall back
+    # to the "_name" suffix — those are not expected to serve as dotted
+    # x-import-key sources.
     from helpers.label_field import build_label_expression as _xrl_build_label_expression
     x_relationships_list = []
     export_uses_format_label_value = False
     for r in parent_rels:
+        _xrl_simple_label = (
+            r['label_field'] if isinstance(r['label_field'], str) and '.' not in r['label_field'] else None
+        )
         try:
             _xrl_built = _xrl_build_label_expression(
                 f"row.{r['relation_name']}", r['label_field'], r['target'], schema,
@@ -1067,7 +1208,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             export_uses_format_label_value = True
         x_relationships_list.append({
             'field': r['relation_name'],
-            'display_col': f"{r['relation_name']}_name",
+            'display_col': (
+                f"{r['relation_name']}_{_xrl_simple_label}" if _xrl_simple_label
+                else f"{r['relation_name']}_name"
+            ),
             'label_expr': _xrl_built['expression'],
         })
 
@@ -1077,15 +1221,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # is derived from the same view-visible field set used elsewhere in this
     # function (x-generate.fields, falling back to all base-model properties),
     # restricted to actual scalar columns on the base model.
-    # NOTE: x-import-key natural-key UNION (Phase 2 import compatibility) is
-    # intentionally NOT applied here — see cmd_324 SA-1 (pending Lord's ruling
-    # on whether user.email should be exported). Once decided, a follow-up
-    # change can union in import-key scalars generically for all entities.
     _SYSTEM_FIELDS = {
         'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
         'organization_id', 'tenant_id',
     }
-    _fk_prop_names = {r['prop_name'] for r in parent_rels_raw}
+    # cmd_420: parent_rels_raw alone misses FKs to internal bridge models
+    # (approvable_id, inventory_transactionable_id, ...) — see
+    # get_internal_bridge_fk_prop_names() docstring for why.
+    _fk_prop_names = {r['prop_name'] for r in parent_rels_raw} | get_internal_bridge_fk_prop_names(model_def, schema)
     _export_candidates = gen_cfg.get('fields') or list(model_def.get('properties', {}).keys())
 
     def _is_export_scalar(_prop: dict) -> bool:
@@ -1102,11 +1245,24 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         and _is_export_scalar(model_def['properties'][f])
     ]
 
-    # export_import_key_fields: the subset of import_key_fields that actually
-    # made it into export_scalar_fields. Since the x-import-key UNION is
-    # deferred (see note above), a natural-key field is no longer guaranteed
-    # to appear in export — this drives the N4 test's assertion list so it
-    # only asserts what the current allowlist actually guarantees.
+    # DP-1 (cmd_394 §3, Option B — conservative UNION): non-dotted x-import-key
+    # scalars are unioned into export_scalar_fields, but ONLY when already
+    # present in the view-visible allowlist (x-generate.fields, or all
+    # properties when unrestricted). A key hidden from the view (e.g. a
+    # candidate future user.email import key, SA-1 pending) is NEVER unioned
+    # in — the cmd_321/324 security ruling (DQ-1=A, view-visible wins) takes
+    # precedence over roundtrip convenience. Dotted FK keys are handled
+    # separately by x_relationships_list/DP-2 above.
+    _view_visible_fields = set(gen_cfg.get('fields') or model_def.get('properties', {}).keys())
+    for _f in import_key_fields:
+        if _f not in export_scalar_fields and _f in _view_visible_fields:
+            export_scalar_fields.append(_f)
+
+    # export_import_key_fields: the subset of import_key_fields that made it
+    # into export_scalar_fields (now including the DP-1 UNION above) — this
+    # drives the N4 test's assertion list so it only asserts what the
+    # allowlist actually guarantees (a key hidden from the view, per DQ-1=A,
+    # is still absent from export and thus absent here).
     export_import_key_fields = [f for f in import_key_fields if f in export_scalar_fields]
 
     # ────────────────────────────────────────────────────────────────
@@ -1139,12 +1295,20 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             if isinstance(_fk_types, str):
                 _fk_types = [_fk_types]
             _fk_nullable = 'null' in _fk_types
+            # DP-2a (cmd_394 §12): the Prisma model to query is the FK's
+            # x-relationship.target, NOT the dotted-key property prefix —
+            # they diverge whenever the relation uses an aliased FK name
+            # (e.g. approver_role_id targets model 'role', not 'approver_role').
+            # Falls back to the prefix when x-relationship/target is absent
+            # (keeps prior behavior for any not-yet-annotated schema).
+            _lookup_entity = _fk_prop.get('x-relationship', {}).get('target', _fk_entity)
             import_key_specs.append({
                 'raw':                  _raw,
                 'is_dotted':            True,
                 'csv_col':              f'{_fk_entity}_{_fk_field}',   # e.g. 'role_name'
-                'lookup_entity':        _fk_entity,                     # e.g. 'role'
-                'lookup_entity_pascal': to_pascal_case(_fk_entity),     # e.g. 'Role'
+                'var_prefix':           _fk_entity,                     # e.g. 'approver_role' — unique per key; drives generated var/error-message naming so two dotted keys resolving to the same lookup_entity (e.g. approver_role.name + requestor_role.name, both target 'role') don't collide on the same TS const name
+                'lookup_entity':        _lookup_entity,                 # e.g. 'role' — actual Prisma model name (x-relationship.target)
+                'lookup_entity_pascal': to_pascal_case(_lookup_entity),  # e.g. 'Role'
                 'lookup_field':         _fk_field,                      # e.g. 'name'
                 'result_col':           _fk_col,                        # e.g. 'role_id'
                 'fk_nullable':          _fk_nullable,
@@ -1165,11 +1329,27 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # import_key_specs (i.e., not a dotted-FK target) cannot be supplied on CREATE
     # (e.g., approval_flow.approver_role_id is a required FK outside export_scalar_fields
     # → CREATE would throw a Prisma "missing required argument" error → 500).
+    #
+    # DP-1b/1c (cmd_394 §10-11, decided): only writes whose VALUE SOURCE is
+    # visible in the exported CSV may count toward CREATE feasibility.
+    #   Type 1 — direct scalar key (e.g. entity_name): already covered by
+    #            `- set(export_scalar_fields)` below (DP-1a guarantees visibility).
+    #   Type 2 — dotted-FK result_col (e.g. role_id, from role.name): the FK id
+    #            itself is never exported, but its VALUE SOURCE is the exported
+    #            display column (role_name) — permitted.
+    #   Forbidden — a dotted-FK key whose csv_col is NOT an exported display
+    #            column (invisible source). validate.py's E_IMPORT_KEY_INVISIBLE
+    #            gate (DP-1a) rejects such schemas outright; this guards
+    #            defense-in-depth for contexts that bypass that gate (e.g. tests).
     _SYSTEM_AND_AUTO_IDS = {
         'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
         'organization_id', 'tenant_id',
     }
-    _import_resolvable_cols = {spec['result_col'] for spec in import_key_specs}
+    _fk_display_col_names = {rel['display_col'] for rel in x_relationships_list}
+    _import_resolvable_cols = {
+        spec['result_col'] for spec in import_key_specs
+        if spec['is_dotted'] and spec['csv_col'] in _fk_display_col_names
+    }
     _required_by_schema     = set(model_def.get('required', []))
     _create_required_gaps   = (
         _required_by_schema
@@ -1367,6 +1547,24 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         comment_children = [{'bridge': True, 'property_name': commentable_rel['relation_name'], 'name': 'comment'}]
     else:
         comment_children = [c for c in children_data if c.get('output_type') == 'comments']
+    # Detect bridge-based attachments via one-to-one rel to 'attachable'. The
+    # `attachments` child carries Prisma-only `encrypted_original_name`/`name_iv`
+    # columns (not declared in json_schema.yaml — see cmd_356) that must never
+    # reach a client component; get{{parent}}Detail() decrypts+strips them
+    # server-side before this object is handed to FormView/FormUpsert.
+    attachable_rel = next((r for r in one_to_one_rels if r['target'] == 'attachable'), None)
+    attachable_attachments_prop = None
+    if attachable_rel:
+        attachable_attachments_prop = next(
+            (c['property_name'] for c in attachable_rel['children'] if c['child_name'] == 'attachment'),
+            None,
+        )
+    # attachment.type's own TS type (plain `number` by default, or the
+    # nativeEnum literal union once attachment.type has been migrated to a
+    # Prisma enum) -- mirrors the field's real type in the decrypt/strip
+    # cast above so it doesn't silently drift from lib/attachment/actions.ts.
+    attachment_type_prop = ((schema.get('definitions') or {}).get('attachment') or {}).get('properties', {}).get('type')
+    attachment_type_ts = get_ts_type(attachment_type_prop) if attachment_type_prop else 'number'
     # Embedded children: exclude independent list children (have own pages; shown read-only here).
     # Non-independent mandatory-FK list children (no own page) are embedded with full CRUD.
     # Many-to-many and optional-FK list children (use_connect=True) use connect/set.
@@ -1389,6 +1587,12 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     child_nested_create = _build_child_nested_create(embedded_ch)
     child_nested_update = _build_child_nested_update(embedded_ch)
+    child_assignee_notify_create_code = _build_child_assignee_notify_create_code(
+        embedded_ch, parent, to_pascal_case(parent)
+    )
+    child_assignee_notify_update_code = _build_child_assignee_notify_update_code(
+        embedded_ch, parent, to_pascal_case(parent)
+    )
 
     # Self-parent relationship (for tree structures)
     self_parent_rel  = next((r for r in parent_rels_raw if r['target'] == model), None)
@@ -1440,6 +1644,32 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         if actual in ('integer', 'number'):
             return 'null'
         if actual == 'string':
+            # Prisma nativeEnum-backed field: '' is not a member of the
+            # literal union Prisma's client type expects, so the "new" form
+            # must seed it with the schema's actual default (cmd_446 pilot).
+            # `as const` prevents TS from widening the object-literal
+            # property back to plain `string`, which would fail assignment
+            # to the union-typed FormUpsert `src` prop.
+            if defn.get('_prisma_native_enum_type') and 'default' in defn:
+                return f"'{defn['default']}' as const"
+            if defn.get('_prisma_native_enum_type') and isinstance(defn.get('enum'), list) and defn['enum']:
+                # No schema default (e.g. shift.status) — seed the "new" form
+                # with the first declared enum member so it still typechecks
+                # against the nativeEnum literal union.
+                return f"'{defn['enum'][0]}' as const"
+            if isinstance(defn.get('enum'), list) and defn['enum']:
+                # Plain (non-nativeEnum) string-enum field, e.g.
+                # inventory_movement.status: a Prisma `String @default(...)`
+                # column, not a Prisma enum type, so no literal-union type to
+                # satisfy (no `as const` needed) -- but it is now validated as
+                # forced-required whenever non-nullable (cmd_472/R-2:
+                # is_forced_required_field), so seeding '' here made the
+                # "new" page's own client-side validation reject its own
+                # untouched default value. Mirror the nativeEnum branches
+                # above: schema default first, else the first enum member.
+                if 'default' in defn:
+                    return f"'{defn['default']}'"
+                return f"'{defn['enum'][0]}'"
             return "''"
         if actual == 'boolean':
             return 'false'
@@ -1577,8 +1807,23 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     split_config = None
     if isinstance(_xsplit, dict) and _xsplit.get('quantityField'):
         is_splittable = True
+        # DP-B (cmd_424): forward sibling scalar field values into
+        # SplitActionSection so its per-part autocomplete pickers can reach
+        # them as context. Driven purely by the same 'x-autocomplete-context'
+        # annotation on perPartRequired FK fields that generate.py's split UI
+        # block reads (schema-structure signal, not an entity-name check —
+        # see cmd_420 convention) — empty (byte-identical view render) unless
+        # a perPartRequired relation field actually carries the annotation.
+        _split_props = model_def.get('properties', {})
+        _split_per_part = list(_xsplit.get('perPartRequired') or [])
+        _split_context_fields = []
+        for _pf in _split_per_part:
+            for _cf in (_split_props.get(_pf, {}).get('x-autocomplete-context') or []):
+                if _cf not in _split_context_fields:
+                    _split_context_fields.append(_cf)
         split_config = {
             'quantity_field': _xsplit.get('quantityField'),
+            'context_fields': _split_context_fields,
         }
 
     # Chart config
@@ -2001,7 +2246,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     # Named constants for x-internal entities (e.g. COMMENT_REACTION_TYPES)
     from generate_types import extract_named_constants
+    from generators import reaction_type_ts
     _all_named_constants = extract_named_constants(schema)
+    reaction_value_type = reaction_type_ts(schema)
 
     # Batched groupBy context for getCommentReactions — consumed by service/132b templates
     reaction_batch_query = (
@@ -2082,6 +2329,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         non_comment_ch=embedded_ch,
         comment_children=comment_children,
         named_constants=_all_named_constants,
+        reaction_value_type=reaction_value_type,
         reaction_batch_query=reaction_batch_query,
         bridge_parent_options=bridge_parent_options,
         bridge_child_ir=bridge_child_ir,
@@ -2094,6 +2342,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         has_commentable=bool(commentable_rel),
         comment_has_mention=comment_has_mention,
         commentable_rel_name=commentable_rel['relation_name'] if commentable_rel else None,
+        has_attachable=bool(attachable_rel and attachable_attachments_prop),
+        attachable_rel_name=attachable_rel['relation_name'] if attachable_rel else None,
+        attachable_attachments_prop=attachable_attachments_prop,
+        attachment_type_ts=attachment_type_ts,
         child_mappings=child_mappings,
         child_form_data_extractions=child_form_data_extractions,
         child_params_for_add=child_params_for_add,
@@ -2101,6 +2353,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         child_args_for_call=child_args_for_call,
         child_nested_create=child_nested_create,
         child_nested_update=child_nested_update,
+        child_assignee_notify_create_code=child_assignee_notify_create_code,
+        child_assignee_notify_update_code=child_assignee_notify_update_code,
         comment_actions_code=comment_actions_code,
         # FormData
         form_data_gets=form_data_gets,

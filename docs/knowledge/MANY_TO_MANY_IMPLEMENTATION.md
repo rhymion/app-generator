@@ -97,7 +97,7 @@ user_account_detail:
   />
   ```
 
-### 4. New Page (`app/{entity}/new/page.tsx`)
+### 4. New Page (`app/[locale]/{entity}/new/page.tsx`)
 - Fetches all available target entities
 - Passes them to FormUpsert
   
@@ -109,7 +109,7 @@ user_account_detail:
   }
   ```
 
-### 5. Edit Page (`app/{entity}/edit/[id]/page.tsx`)
+### 5. Edit Page (`app/[locale]/{entity}/edit/[id]/page.tsx`)
 - Uses `Promise.all` for parallel fetching
 - Fetches entity detail and all available target entities
   

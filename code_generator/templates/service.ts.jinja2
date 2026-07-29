@@ -66,6 +66,10 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     });
   }
 {% endif %}
+{% if child_assignee_notify_create_code %}
+  // Trigger #1 (cmd_413 fix): child rows with their own assignee_id.
+{{ child_assignee_notify_create_code }}
+{% endif %}
   return result;
 }
 {% endif %}
@@ -130,6 +134,10 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
       itemId: id,
     });
   }
+{% endif %}
+{% if child_assignee_notify_update_code %}
+  // Trigger #1 (cmd_413 fix): newly-added child rows with their own assignee_id.
+{{ child_assignee_notify_update_code }}
 {% endif %}
 }
 {% endif %}

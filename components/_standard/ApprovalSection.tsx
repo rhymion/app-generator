@@ -50,7 +50,7 @@ type ApprovalHistory = {
 type ApprovalRequest = {
   id: string;
   approval_flow_id: string;
-  status: number;
+  status: 'Pending' | 'Approved' | 'Rejected' | 'TerminalRejected';
   approval_flow?: {
     id: string;
     entity_name: string;
@@ -141,13 +141,13 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
             const requestorRoleId = ar.approval_flow?.requestor_role_id;
             const precedingFlowIds = ar.approval_flow?.preceded_by?.map((f) => f.id) ?? [];
             const precedingApproved = precedingFlowIds.every(
-              (fid) => flowIdToStatus.get(fid) === 1,
+              (fid) => flowIdToStatus.get(fid) === 'Approved',
             );
-            const canAct = ar.status === 0
+            const canAct = ar.status === 'Pending'
               && approverRoleId
               && currentUserRoleIds?.includes(approverRoleId)
               && precedingApproved;
-            const canResubmit = ar.status === 2 && (
+            const canResubmit = ar.status === 'Rejected' && (
               currentUserId === src.creator_id ||
               (requestorRoleId ? currentUserRoleIds?.includes(requestorRoleId) : false)
             );
@@ -158,7 +158,7 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
               <Fragment key={ar.id}>
                 <TableRow>
                   <TableCell>{ar.approval_flow?.approver_role?.name ?? '-'}</TableCell>
-                  <TableCell>{STATUS_LABELS[ar.status] ?? ar.status}</TableCell>
+                  <TableCell>{ar.status}</TableCell>
                   <TableCell>
                     {histories.length > 0 && (
                       <Tooltip title={isExpanded ? 'Hide history' : 'Show history'}>

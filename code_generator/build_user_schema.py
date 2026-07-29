@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Build the intermediate generator schema from a user-authored schema.
 
-Stage 4 (cmd_395 design doc, planning/cmd395-schema-restructuring-design.md
-Sec.12 "Stage 4"; design review queue/reports/subtask_409a_gunshi.yaml): the
-`_detail` suffix is retired from the user-authored schema. Where Stage 3
+Stage 4 single-entity schema format (see docs/knowledge/schema-restructuring-build-order.md):
+the `_detail` suffix is retired from the user-authored schema. Where Stage 3
 required writing `role_detail:` (with the raw entity implicitly named
 `role`), Stage 4 lets the user write the natural `role:` directly. The
 machine-derived raw entity that used to occupy the unsuffixed name now
@@ -40,7 +39,7 @@ it the new key convention:
     (does it carry a view-level annotation?), not by name, because Stage 4
     entity names no longer carry a `_detail` marker to key off of. This is
     also what "normalizes" the one pre-Stage-4 anomaly on record
-    (`inventory_transaction` in proj_c, per gunshi review): a Prisma-model
+    (for example, `inventory_transaction`): a Prisma-model
     entity that had `x-generate` directly on what was nominally its "raw"
     entry now goes through the same split as every other paired entity.
 
@@ -75,7 +74,12 @@ from pathlib import Path
 
 from ruamel.yaml import YAML
 
-from schema_deriver import SchemaDivergenceError, derive_raw_entity, parse_prisma_schema
+from schema_deriver import (
+    SchemaDivergenceError,
+    derive_raw_entity,
+    parse_prisma_enums,
+    parse_prisma_schema,
+)
 
 # Reserved prefix for machine-generated raw entities (Stage 4).
 _RESERVED_RAW_PREFIX = "__"
@@ -174,9 +178,38 @@ def _validate_entity_names(user_definitions: dict, prisma_models: dict) -> None:
             )
 
 
-def _build_raw_and_view(entity_key: str, entry: dict, prisma_models: dict):
-    fields_spec = entry.get("fields") or {}
-    raw = derive_raw_entity(prisma_models[entity_key], fields_spec)
+def _auto_infer_fk_fields(entry: dict, model: "PrismaModel") -> dict:
+    """Infer FK scalar fields from relation object declarations in properties:.
+
+    When the user schema declares a relation object in properties: (e.g.
+    'role: {$ref: "#/definitions/role"}') and omits the corresponding FK
+    scalar from fields: (e.g. 'role_id'), this function reads the Prisma
+    model's relation_fk_fields to auto-add the missing FK scalars with a
+    default 'x-relationship: {}' annotation.
+
+    Only adds columns NOT already present in fields:, so explicit
+    overrides in fields: always take precedence (e.g. role_id with
+    x-ui width annotation can still be declared explicitly).
+    """
+    fields_spec: dict = dict(entry.get("fields") or {})
+    for prop_name in (entry.get("properties") or {}):
+        pf = model.fields.get(prop_name)
+        if pf is None or not pf.is_relation_object:
+            continue
+        for fk_col in pf.relation_fk_fields:
+            if fk_col not in fields_spec:
+                fields_spec[fk_col] = {"x-relationship": {}}
+    return fields_spec
+
+
+def _build_raw_and_view(
+    entity_key: str,
+    entry: dict,
+    prisma_models: dict,
+    prisma_enums: dict | None = None,
+):
+    fields_spec = _auto_infer_fk_fields(entry, prisma_models[entity_key])
+    raw = derive_raw_entity(prisma_models[entity_key], fields_spec, prisma_enums)
 
     for key in _ENTITY_LEVEL_DATA_KEYS:
         if key in entry:
@@ -200,9 +233,14 @@ def _build_raw_and_view(entity_key: str, entry: dict, prisma_models: dict):
     return raw, view
 
 
-def _build_standalone_raw(entity_key: str, entry: dict, prisma_models: dict) -> dict:
-    fields_spec = entry.get("fields") or {}
-    raw = derive_raw_entity(prisma_models[entity_key], fields_spec)
+def _build_standalone_raw(
+    entity_key: str,
+    entry: dict,
+    prisma_models: dict,
+    prisma_enums: dict | None = None,
+) -> dict:
+    fields_spec = _auto_infer_fk_fields(entry, prisma_models[entity_key])
+    raw = derive_raw_entity(prisma_models[entity_key], fields_spec, prisma_enums)
     for key, value in entry.items():
         if key == "fields":
             continue
@@ -210,7 +248,11 @@ def _build_standalone_raw(entity_key: str, entry: dict, prisma_models: dict) -> 
     return raw
 
 
-def build_intermediate_schema(user_schema: dict, prisma_models: dict) -> dict:
+def build_intermediate_schema(
+    user_schema: dict,
+    prisma_models: dict,
+    prisma_enums: dict | None = None,
+) -> dict:
     """Reconstruct the legacy-shape intermediate schema dict (Sec.5 R2)."""
     out: dict = {}
     for top_key, top_value in user_schema.items():
@@ -226,12 +268,12 @@ def build_intermediate_schema(user_schema: dict, prisma_models: dict) -> dict:
         entry = raw_entry or {}
         try:
             if entity_key in prisma_models and _has_view_level_config(entry):
-                raw, view = _build_raw_and_view(entity_key, entry, prisma_models)
+                raw, view = _build_raw_and_view(entity_key, entry, prisma_models, prisma_enums)
                 out["definitions"][f"{_RESERVED_RAW_PREFIX}{entity_key}"] = raw
                 out["definitions"][entity_key] = view
             elif entity_key in prisma_models:
                 out["definitions"][entity_key] = _build_standalone_raw(
-                    entity_key, entry, prisma_models
+                    entity_key, entry, prisma_models, prisma_enums
                 )
             else:
                 # Pass-through: e.g. `setting`, a second view of `user`
@@ -241,6 +283,35 @@ def build_intermediate_schema(user_schema: dict, prisma_models: dict) -> dict:
             raise SchemaDivergenceError(f"entity '{entity_key}': {exc}") from exc
 
     return out
+
+
+# Sibling file of `user_schema_path` (cmd_438 Batch3): entities the
+# framework ships as a documented default, so individual projects don't
+# have to carry pure Prisma-bridge-table boilerplate (approvable,
+# commentable, attachable) in their own schema.
+_INTERNAL_SCHEMA_FILENAME = "json_schema_internal.yaml"
+
+
+def _merge_internal_definitions(user_schema: dict, user_schema_path: Path, yaml: YAML) -> None:
+    """Fill in framework-internal entities from `json_schema_internal.yaml`
+    (sibling of `user_schema_path`) for any entity name the user schema does
+    not already define. User definitions always win — this is a whole-entity
+    override, not a deep merge — so a project that still defines e.g.
+    `approvable` itself keeps behaving exactly as before. No internal file
+    present is a no-op (pre-existing projects are unaffected).
+    """
+    internal_path = user_schema_path.parent / _INTERNAL_SCHEMA_FILENAME
+    if not internal_path.is_file():
+        return
+
+    with internal_path.open("r", encoding="utf-8") as f:
+        internal_schema = yaml.load(f) or {}
+    internal_defs = internal_schema.get("definitions") or {}
+
+    user_defs = user_schema.setdefault("definitions", {})
+    for entity_key, entity_def in internal_defs.items():
+        if entity_key not in user_defs:
+            user_defs[entity_key] = entity_def
 
 
 def build_user_schema(
@@ -264,8 +335,11 @@ def build_user_schema(
     with user_schema_path.open("r", encoding="utf-8") as f:
         user_schema = yaml.load(f)
 
+    _merge_internal_definitions(user_schema, user_schema_path, yaml)
+
     prisma_models = parse_prisma_schema(prisma_schema_path)
-    intermediate = build_intermediate_schema(user_schema, prisma_models)
+    prisma_enums = parse_prisma_enums(prisma_schema_path)
+    intermediate = build_intermediate_schema(user_schema, prisma_models, prisma_enums)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:
