@@ -956,7 +956,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     pattern, since there is no embedded child array for the pre-create
     mechanism to hook into; an entity that needs this path with a NOT NULL
     approvable_id would need the leave_request-style one_to_one_pre_creates
-    treatment instead (out of scope here — see docs/receiving-approval-backfill-design.md §5.2).
+    treatment instead (out of scope here — see docs/knowledge/appendix/approval-flow.md §16.10).
     """
     pool           = rc.get('pool') or {}
     req            = rc.get('request') or {}
@@ -1671,7 +1671,7 @@ def get_reservation_action_routes(rc: dict, model: str) -> list[dict]:
 # has the exact same shape and gap, so helpers.schema_helpers.
 # get_approval_lines_props() folds both signals into one list and this same
 # pre-create/post-create pair covers both — see
-# docs/receiving-approval-backfill-design.md §5.2 (D2).
+# docs/knowledge/appendix/approval-flow.md §16.10.
 
 def _resolve_approval_lines_entity(model: str, prop_name: str, schema: dict) -> str:
     """Resolve the child entity name for an x-approval-lines property.
@@ -1733,7 +1733,8 @@ def _build_approval_create_block_for_entity(
     creator_id on the approvable if any flow matched.
 
     Shared inner block (cmd_296 Phase2 common-helper — see
-    docs/split-generalization-design.md §4.2) for:
+    docs/knowledge/appendix/approval-flow.md §16.10 and
+    docs/knowledge/appendix/inventory-reservation-split.md §2) for:
       - _build_approval_lines_post_create_code (cmd_295 x-approval-lines):
         called once per pre-created array element, inside the caller's
         `for (const _apprId of {arr}) {...}` loop.
@@ -2142,7 +2143,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         reservation_actions_code = _build_reservation_action_functions(reservation_config, model, schema)
 
     # x-approval-lines: pre-create/post-create approval for embedded line
-    # children that are new:false (see docs/receiving-approval-backfill-design.md).
+    # children that are new:false (see docs/knowledge/appendix/approval-flow.md §16.10).
     approval_lines_pre_create_code  = ''
     approval_lines_post_create_code = ''
     approval_lines_pre_update_code  = ''
