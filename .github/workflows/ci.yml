@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master, main, doreen/import]
+    branches: [master, main]
   pull_request:
-    branches: [master, main, doreen/import]
+    branches: [master, main]
 
 jobs:
   lint:
