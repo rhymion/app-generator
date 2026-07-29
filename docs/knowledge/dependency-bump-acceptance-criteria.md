@@ -221,69 +221,65 @@ compliance, and it does nothing to change the fact that PRs merge into
 
 ### (b) A read-only lock-drift gate that actually runs before merge
 
-**Proposed, not implemented — needs a decision, since it changes CI
-trigger scope and cost repo-wide.**
+**Not adopted.** This section originally proposed a fix that baked the
+working branch name (`doreen/import`) directly into `.github/workflows/
+ci.yml`'s trigger scope. Per a standing project policy against
+committing temporary, branch-name-specific settings into CI config (a
+`doreen/import`-scoped trigger was separately and deliberately removed
+from `ci.yml` for this same reason — that removal was intentional, not
+an incident or a reporting error), that specific remedy is withdrawn.
 
-The bigger finding from this investigation: `.github/workflows/ci.yml`'s
-trigger is `pull_request: branches: [master, main]` only. Every one of
-Incidents 1–3 merged into `doreen/import`, which is neither — confirmed
-zero CI check-runs exist against PR #196, #197, #198, or #199's own head
-commits (`gh pr checks <n>` / `gh api commits/<sha>/check-runs`). CI only
-ran, and only caught the break, as an accidental side effect of a
-separate standing `doreen/import → main` PR re-triggering post-merge.
+**The original finding in this section also overstated the gap and has
+been corrected below** (verified directly against CI history, not
+re-asserted from the original write-up): the actual detection/gating
+picture has two tiers, not one missing gate.
 
-**The gate**: add a lightweight job — either by extending the existing
-`pull_request` trigger to also cover `doreen/import`, or a new workflow
-scoped with `paths: ['package.json', 'package-lock.json']` triggering on
-PRs targeting `doreen/import` — that runs, under CI's own pinned
-node/npm:
+- **Subtask PR → `doreen/import`**: no per-PR CI. Confirmed zero
+  check-runs against PR #196–#199's own head commits. Quality evidence
+  for these PRs comes from local runs (mandatory gate, pytest) in an
+  isolated worktree, not CI.
+- **`doreen/import` → `main`** (the standing PR, currently #121): **CI
+  does run here, on every push to `doreen/import`, and it does gate the
+  merge** — merges are not made while this CI is red. Verified directly:
+  `9f6a119` (the merge of Incident 3's breaking PR #199 into
+  `doreen/import`) shows Lint/Unit/E2E/Dependency Audit all `failure` on
+  PR #121's CI; `74386f9` (the merge of the repair PR #200) shows all
+  five checks `success`. The same failure → repair pattern holds for
+  Incident 1 (`7fa1fc2` failure → `cc147b2` success). Separately, `main`'s
+  tip (`4a15b71`) predates all three incidents — `git merge-base
+  --is-ancestor` confirms none of the three incidents' breaking or repair
+  commits are reachable from `main` — so `main` itself has never absorbed
+  any of the three broken lockfile states. This gating is intentional and
+  already relied upon: the 3.0.0 hard-gate policy is built on top of it.
+  It should not be characterized as a hole.
 
-```yaml
-- run: npm install --package-lock-only
-- run: git diff --exit-code package-lock.json
-```
+**The actual, narrower gap**: a broken commit that lands on `doreen/import`
+(tier one, unchecked) is only *detected* the next time tier two's CI
+happens to re-run — which, given `doreen/import → main` is a
+long-lived standing PR, can be a meaningful delay. During that window
+the broken commit is a live base for any other subtask work branching
+from `doreen/import`, even though `main` itself stays protected
+throughout. This is a detection-latency problem at the `doreen/import`
+tier, not an absence of gating at the `main`-merge tier — the three
+recurrences are explained by that latency (each incident's breaking
+commit sat on `doreen/import` for some time before the next tier-two CI
+run caught it), not by "nothing gated the merge."
 
-If the lockfile the PR ships doesn't match what a clean `npm install
---package-lock-only` produces under CI's toolchain, the job fails with a
-diff attached, before merge. This is read-only in the sense that matters:
-it never commits anything back to the branch — `package-lock.json` in
-this repo is already tracked and committed (unlike a repo that
-regenerates an untracked lockfile on every CI run), so a diff-and-fail
-check here cannot introduce drift of its own. It also fully subsumes the
-(already-mandatory) `npm ci` check for this specific failure class, since
-a lockfile that fails this diff check is by definition one `npm ci` would
-also reject under the same toolchain — but it reports the *cause* (a
-diff) instead of a downstream symptom (a missing-entry error), and it
-runs pre-merge instead of relying on an unrelated PR's incidental
-re-trigger.
-
-**Tradeoffs**: adds a CI job (Actions-minutes cost, small — this step
-alone is seconds, not the full `npm ci` + build + e2e suite) and a small
-amount of latency to every subtask PR that touches these two files.
-Extending the trigger to `doreen/import` also means *all* existing CI
-jobs (lint, unit, e2e) start running per-subtask-PR rather than only
-against the standing integration PR — a larger cost/latency change than
-just the lock-drift job, and a workflow-trigger-scope decision with
-repo-wide effect that this task did not judge itself authorized to make
-unilaterally.
+Closing the tier-one gap still needs a design that does not encode a
+specific branch name into committed workflow trigger config, which is
+outside this task's scope to decide unilaterally.
 
 ### Recommendation
 
-Adopt **(b)** as the primary fix, scoped narrowly: a new, small,
-`paths`-filtered workflow (not an extension of the full existing `ci.yml`
-job matrix) that triggers only on PRs targeting `doreen/import` touching
-`package.json`/`package-lock.json`, running only the two-line
-install-and-diff check above. This directly closes the actual gap all
-three incidents share — nothing gated the merge — without taking on the
-cost of running the full test suite twice per subtask PR. Keep **(a)**
-(already landed) as cheap, always-on, complementary defense in depth: it
-makes drift visible locally the moment it happens, both for the (b) job's
-lockfile-writing step (run under CI's own pinned toolchain either way)
-and for anyone who happens to check warnings before pushing.
-
-(b) is a trigger-scope/workflow change with repo-wide cost implications;
-this task implemented (a) only and leaves (b) as a recommendation
-pending sign-off, per the reasoning above.
+No further CI trigger change is recommended by this document at this
+time — the previously recommended fix conflicted with the policy above
+and has been withdrawn. Keep **(a)** (already landed) as cheap,
+always-on, complementary defense in depth: it makes toolchain drift
+visible locally the moment it happens, for anyone who happens to check
+warnings before pushing. Whether and how to close the tier-one
+(`doreen/import`) detection-latency gap described above is left open for
+a future proposal that does not require committing a branch name into
+workflow trigger config.
 
 ## CI Audit Gate Design: Blocking + Non-Blocking Split (cmd_482, Option 5)
 
