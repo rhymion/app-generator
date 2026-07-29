@@ -77,7 +77,8 @@ need the full phase-by-phase plan.
 
 ## Completion gate
 
-1. `npm audit --omit=dev --audit-level=high`
+See `.claude/commands/review-tenancy.md §Completion gate` — canonical source of truth.
+Open the file directly (it is in the same repository under `.claude/commands/`).
 
 ## Input
 $ARGUMENTS

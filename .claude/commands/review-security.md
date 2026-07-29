@@ -90,7 +90,12 @@ Minimum docs to read before starting:
 
 ## Completion gate
 
-None — read-only review task, no code changes.
+Run:
+
+1. `npm audit --omit=dev --audit-level=high`
+
+(No build/test/lint required — this is a read-only review task with no code
+changes; npm audit is run as a companion vulnerability check.)
 
 > **Note**: When running lint or typecheck in isolation, prefix with
 > `npm run generate-code` first. See `AGENTS.md §Generated-code prerequisites
