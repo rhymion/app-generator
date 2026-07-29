@@ -25,13 +25,14 @@ Special roles `Creator` and `Assignee` are resolved at item level: they only gra
 
 ## seed-tenant.ts Role
 
-`scripts/seed-tenant.ts` seeds an `Administrator` role with full CRUD on all 16 entities:
+`scripts/seed-tenant.ts` seeds an `Administrator` role with full CRUD on 8 entities:
 
 ```
 user, role, organization, permission, setting,
-approval_request, approval_flow, approvable, comment, commentable,
-dashboard, dashboard_widget, attachment, attachable, audit_log, tenant
+approval_request, approval_flow, dashboard
 ```
+
+Plus a 9th, read-only permission row on `audit_log` (create/update/delete: false).
 
 Only the admin account (`admin@example.com`) receives this role by default. New users start
 with zero permissions until an Administrator explicitly assigns roles.
@@ -59,11 +60,18 @@ All tests fall into one of three categories:
 
 ## Adding Tests for a New Entity
 
-When adding a new entity to the schema:
+When adding a new **default** entity to `code_generator/json_schema.yaml` (app-generator, the
+generator's own baseline schema):
 
 1. Add the entity name to `ALL_ENTITIES` in `cypress/support/db-helpers.ts`.
 2. Also add it to `scripts/seed-tenant.ts` entities array.
 3. For new Cypress normal-flow tests: use `cy.task('db:grantAllPermissions')` in `beforeEach`.
+
+Consumer/project-specific entities (defined in a consuming project's own `prj/code_generator/
+json_schema.yaml`, e.g. `leave_request`) must **not** be added to `scripts/seed-tenant.ts` —
+that file is generator-owned and shared by every consumer. Project-specific fixture data
+belongs in the consuming project's own test helpers/tasks (see `prj/cypress/support/
+project-tasks.ts`), not the shared seed script.
 4. For API-level no-permission tests: add cases to `lib/authz.test.ts`.
 
 ## Existing Test Refactoring Guide
