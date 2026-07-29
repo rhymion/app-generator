@@ -285,6 +285,74 @@ and for anyone who happens to check warnings before pushing.
 this task implemented (a) only and leaves (b) as a recommendation
 pending sign-off, per the reasoning above.
 
+## CI Audit Gate Design: Blocking + Non-Blocking Split (cmd_482, Option 5)
+
+### Background
+
+cmd_482 found 5 dev-only high-severity CVEs (`axios`, `brace-expansion`,
+`linkify-it`, `shell-quote`, `systeminformation`) that had accumulated
+undetected, because the existing `audit` job's `npm audit --omit=dev
+--audit-level=high` step is scoped to production dependencies only by
+design (see the job's own inline comment in `ci.yml`), and dev-only
+findings were otherwise expected to be caught by Dependabot — a mechanism
+that, at the time, was itself broken for a different reason (see
+`doreen/subtask_481a_dependabot_ci_missing_secret_fix`). The result: a
+class of finding with no active detection path.
+
+Several options were weighed (blocking the existing gate on all scopes,
+lowering the blocking threshold to `moderate`, a time-boxed exception
+list, status quo). The adopted design **keeps the existing blocking gate
+unchanged** and adds a **non-blocking, full-scope companion job** instead
+of widening what blocks merge. Full reasoning and the options considered
+are captured in the subtask_482a design record for this task.
+
+### The design
+
+1. **Blocking gate (`audit` job) — unchanged.**
+   `npm audit --omit=dev --audit-level=high` continues to gate merges on
+   production-dependency high/critical CVEs only. Dev-only findings never
+   block a PR under this job, by design — dev tooling ships to CI runners
+   and contributor machines, not to the deployed product.
+
+2. **Non-blocking gate (`audit-full-scope` job) — new, added in cmd_482
+   subtask_482b.** Runs `npm audit --audit-level=high` (no `--omit=dev`,
+   so it covers the full tree including devDependencies) in its own job,
+   with `continue-on-error: true` on the audit step. A finding here never
+   fails the job or the workflow run — it exists purely as a visibility
+   mechanism for the class of finding the blocking gate deliberately
+   excludes.
+
+   Output is surfaced two ways, both written unconditionally
+   (`if: always()`) regardless of whether the audit step itself failed:
+   - A markdown table in the job's `$GITHUB_STEP_SUMMARY` — severity
+     counts (critical/high/moderate/low/total), visible directly on the
+     Actions run page without opening logs.
+   - A JSON artifact (`npm-audit-full-scope`, `retention-days: 30`) —
+     the raw `npm audit --json` output, kept so a later automation step
+     or a maintainer can inspect exact package/advisory detail beyond the
+     summary counts, without re-running the audit locally. Adopted
+     because the marginal cost is one small JSON file per run; a
+     summary-only design was rejected because "how many" without "which
+     package" is not enough to act on without re-running the audit by
+     hand.
+
+   Verification that this job structure genuinely never fails CI (not
+   just "should" by convention) is captured in the subtask_482b
+   implementation record: a known high/critical-severity dependency was
+   deliberately installed in an isolated worktree, the real `npm audit
+   --audit-level=high --json` command was confirmed to exit non-zero
+   against it, and the exact `continue-on-error: true` step pattern used
+   in this job was run end-to-end via `nektos/act` and confirmed to still
+   produce a successful job outcome.
+
+3. **Who reviews the non-blocking job's output, and how often, is an
+   operational (not code) concern** and is tracked in this project's
+   internal task-management process rather than in this file — a
+   non-blocking job whose output nobody reads reproduces the exact
+   visibility gap that caused cmd_482 in the first place, so that review
+   step is treated as a load-bearing part of this design, not an
+   afterthought, even though its specifics live outside this repository.
+
 ---
 
 ## Related Documents
