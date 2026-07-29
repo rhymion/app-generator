@@ -317,3 +317,84 @@ model approvable {
   approval_requests approval_request[]
 }
 ```
+
+### 16.10 Approval for embedded line children (`x-approval-lines`)
+
+Added in cmd_295. The normal one-to-one `approvable_id` pattern (§16.2) assumes the entity is
+top-level and its own `create` call is where the `approvable` gets pre-created. That breaks down
+for an embedded, `new: false` line child of a nested-create array (e.g.
+`receiving_receipt.lines[]` → `receiving_receipt_line`, `purchase_order.lines[]` →
+`purchase_per_item`): there is no standalone `create` entry point for the child to hook into, and
+a `NOT NULL approvable_id` on the child can't be satisfied by the generic nested-create path.
+
+Declared on the **parent** (base entity, not `_detail`):
+
+```yaml
+receiving_receipt:
+  x-approval-lines:
+    - lines            # property name of the nested-create array on receiving_receipt_detail
+```
+
+The generator (`get_approval_lines_props()` in `helpers/schema_helpers.py`) resolves this to the
+line entity's own `x-approval` config and wires two code blocks into the parent's `service.ts`
+create (and, for newly-added lines only, update) path:
+
+1. **Pre-create** (`_build_approval_lines_pre_create_code`) — before the parent's nested-create
+   call, pre-creates one empty `approvable` row per incoming line (mirrors the single-entity
+   pre-create in §16.3, just looped per array element).
+2. **Post-create** (`_build_approval_lines_post_create_code`) — after the nested-create commits
+   (so each line has an `id`), looks up matching `approval_flow` rows for the line entity's own
+   `entity_name`, filters by the actor's roles, and creates one `approval_request` per matching
+   flow against each line's pre-created `approvable` — reusing the same creator-role-filtered
+   block shared with split part allocation (`_build_approval_create_block_for_entity`).
+
+On `update`, only lines without an existing `id` (i.e. newly appended in this edit) go through
+pre-create/post-create — existing lines already have an `approvable` from their original create.
+
+The line entity itself still declares `x-approval.on_approved` / `on_rejected` exactly as in
+§16.9 / §16.11 — `x-approval-lines` only solves *how the approvable gets created* for an embedded
+child; approval and rejection dispatch behave identically to a top-level approvable entity once
+that pre-create has happened.
+
+### 16.11 Rejection classification and dispatch (`reason_kind`, `x-approval.on_rejected`)
+
+Added in cmd_305. `rejectApprovalRequest()` (server action, `lib/approval_request/actions.ts`) and
+`POST /api/approval_request/{id}/reject` (REST route) both accept an optional `reason_kind`
+(`0 = Customer`, `1 = Internal`) alongside the free-text rejection message, stored on the
+`approval_history` row:
+
+```prisma
+model approval_history {
+  reason_kind Int?   // 0=Customer 1=Internal — classification of a rejection's cause
+}
+```
+
+`ApprovalSection.tsx` offers this as a dropdown next to the rejection message field whenever the
+action is `reject`; both the server-action and REST paths write the same field so the
+classification is consistent regardless of which path the client uses.
+
+**Post-rejection event dispatch** mirrors §16.9's `dispatchOnApproved`, generated from
+`x-approval.on_rejected` on the entity schema:
+
+```yaml
+receiving_receipt_line:
+  x-approval:
+    on_rejected:
+      terminal: true       # rejected requests of this entity type cannot be resubmitted
+      emit_hook: false
+      set_fields:
+        status: "rejected"
+```
+
+`lib/{entity}/on_rejected_dispatch.ts` (generated, `templates/on_rejected_dispatch.ts.jinja2`)
+exposes `dispatchOnRejected(tx, entityType, approvableId, rejectedByUserId)`, called from the
+reject path after `approval_request.status` is updated, plus `isTerminalReject(entityType)` — a
+lookup against every entity marked `terminal: true`. Terminal rejection means the UI's Resubmit
+button (§16.8) is not offered for that entity type; a rejection is final rather than
+returning to Pending. For terminal entities, dispatch reuses the same `approvable.approved_at`
+column as the fire-once guard (§16.9) — despite the name, it just means "final event already
+dispatched for this approvable," approve or reject.
+
+`emit_hook: true` generates a `service_after_reject.ts` once-stub (same non-overwriting
+convention as `service_after_approve.ts`, §16.9), with signature
+`afterReject(tx, entityId, approvableId, rejectedByUserId)`.
