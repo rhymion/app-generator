@@ -60,7 +60,7 @@ need the full phase-by-phase plan.
 
 **User creation (Phase 1.2 partial):** `lib/auth/create-user.ts:createTenantBoundUser` always writes `tenant_id = "default"` (`DEFAULT_TENANT_ID = "default"`) for OAuth users created via the PrismaAdapter. This is intentionally single-tenant until Phase 4.1 (invite-based sign-up) is implemented.
 
-**Generated entity scope (Phase 3 NOT YET STARTED):** The ~30+ generated entity models (bug, character, checkup, clinic, creator, dashboard, epic, feature, funding, leave_request, etc. — see `lib/` directories) carry **no `tenant_id` field** in their Prisma models. This means the DB has no structural constraint preventing cross-tenant reads. All isolation for these models is RBAC-only, enforced in `lib/authz.ts:requirePermission()`/`requireApiPermission()`.
+**Generated entity scope (Phase 3 NOT YET STARTED):** the project's generated entity models (see `lib/` directories, driven by `json_schema.yaml` `definitions`) carry **no `tenant_id` field** in their Prisma models. This means the DB has no structural constraint preventing cross-tenant reads. All isolation for these models is RBAC-only, enforced in `lib/authz.ts:requirePermission()`/`requireApiPermission()`.
 
 **Generator readiness (Phase 2 NOT YET STARTED):** `code_generator/build_context.py` has no `is_tenant_scoped` variable. `json_schema.yaml` has no `x-multi-tenant` flag. Generator templates (`getters.ts.jinja2`, `api_route.ts.jinja2`, `api_detail_route.ts.jinja2`, `api_bulk_route.ts.jinja2`, `actions.ts.jinja2`) have no `{% if is_tenant_scoped %}` branches. The detailed implementation plan is in `docs/multi-tenancy.md` (Phases 2–4).
 
