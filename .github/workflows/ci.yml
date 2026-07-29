@@ -29,9 +29,20 @@ jobs:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Generate code
+        # Tracked handwritten sources (e.g. lib/approval_request/actions.ts)
+        # import generated files (e.g. lib/approval_request/resolve_target.ts)
+        # that only exist after this step. Without it, unit tests for such
+        # sources fail here with an unresolved-import error even though the
+        # code is correct — see docs/knowledge/ci-unit-tests-generate-code-gap.md.
+        run: npm run generate-code
       - name: Generate Prisma client
         run: npm run db:generate
-      - run: npm test
+      - run: npm run test:vitest
 
   audit:
     name: Dependency Audit
