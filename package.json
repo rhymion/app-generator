@@ -2,6 +2,10 @@
   "name": "my-next",
   "version": "3.0.0",
   "private": true,
+  "packageManager": "npm@11.16.0",
+  "engines": {
+    "npm": "^11.16.0"
+  },
   "scripts": {
     "build": "next build",
     "build:pdf-font": "python3 scripts/build_pdf_font.py",
