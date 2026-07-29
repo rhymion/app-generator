@@ -42,6 +42,59 @@ calling `notifyApprovalRequestCreated(tx, approvalRequestId, options)`
 from that entity's own `service_after_create.ts` once its
 `approval_request` row is created.
 
+### Link target convention (cmd_479)
+
+An approval notification must link to the **approvable's own detail
+page** (`/{entityName}/view/{id}`) — the item an approver actually needs
+to review — never to `/approval_request/view/{id}`. That route does not
+exist: `approval_request` has no `x-generate: {view: true}`, since it's
+a bridge/workflow row, not a page-worthy entity in its own right.
+
+`approval_request`/`approvable` are polymorphic — the row doesn't know
+which entity it belongs to, only the reverse (the target entity holds
+`approvable_id`). Two resolution strategies are used, chosen by whether
+the target entity/row is already known at the call site:
+
+- **Known at call time** (Trigger #2, from any entity's own generated
+  code — the top-level `service_after_create_stub.ts.jinja2`, the
+  x-approval-lines post-create block, and the split-action route):
+  the caller passes `targetEntityName`/`targetId` straight into
+  `notifyApprovalRequestCreated()`'s options — no DB lookup needed, the
+  entity name is a template-time literal and the row was just created.
+- **Only known at runtime** (Trigger #3, `lib/approval_request/actions.ts`
+  approve/reject — a single shared handler for every entity's approval
+  requests): `lib/approval_request/resolve_target.ts` (generated,
+  mirrors `on_approved_dispatch.ts`'s per-entity branch pattern) maps
+  `entity_name + approvable_id -> { id }` via one
+  `tx.{entity}.findFirst({ where: { approvable_id } })` branch per
+  entity declaring an `approvable` bridge. Always emitted, even with
+  zero such entities, since `actions.ts` imports it unconditionally.
+
+If neither can resolve a target, `href` is omitted (not defaulted to a
+guessed or broken link) — the bell shows a non-clickable notice instead.
+
+New entities wiring into either trigger don't need any extra schema
+config for this — the target link follows automatically from the
+entity's own `x-relationship: {type: one-to-one_bridge, target:
+approvable}` declaration.
+
+### Two independent approve/reject implementations (cmd_479)
+
+`lib/approval_request/actions.ts`'s `approveApprovalRequest()` /
+`rejectApprovalRequest()` (server actions, called from the UI's
+`ApprovalSection.tsx`) and `app/api/approval_request/[id]/approve|reject/route.ts`
+(the REST API, called by external API consumers and by e2e tests) are
+**two separate implementations of the same approve/reject transaction**
+— not one calling the other. Trigger #3 (`approval_responded`, notifying
+the requester of the outcome) must be duplicated in both places; while
+investigating the link-target fix, the REST routes were found to have
+*no* Trigger #3 notify call at all (not a link bug — a fully missing
+notification, pre-existing before cmd_479). Fixed by copying the same
+post-transaction `getApprovalRequestRecipient()` + `notify()` block from
+`actions.ts` into both route handlers. If either implementation changes
+its post-approval/rejection side effects, check whether the other needs
+the same change — there's no shared code path enforcing parity.
+
 ## Delivery mechanism
 
 Both triggers share the same notification plumbing:

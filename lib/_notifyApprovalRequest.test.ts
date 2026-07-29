@@ -87,4 +87,49 @@ describe('notifyApprovalRequestCreated', () => {
 
     expect(notify).not.toHaveBeenCalled();
   });
+
+  // cmd_479: the notification must link to the approvable's own detail page
+  // (`/{targetEntityName}/view/{targetId}`), not `/approval_request/view/{id}`
+  // — that route never existed (approval_request has no detail page).
+  describe('href (cmd_479)', () => {
+    it('links to the target entity detail page when targetEntityName/targetId are given', async () => {
+      const tx = makeTx({
+        approvalFlow: { approver_role_id: 'role-1', entity_name: 'leave_request' },
+        roleUsers: [{ id: 'u1', organizations: [] }],
+      });
+
+      await notifyApprovalRequestCreated(tx, 'req-1', {
+        targetEntityName: 'leave_request',
+        targetId: 'lr-42',
+      });
+
+      expect(notify.mock.calls[0][2]).toMatchObject({ href: '/leave_request/view/lr-42' });
+    });
+
+    it('never links to /approval_request/view/ regardless of target presence', async () => {
+      const tx = makeTx({
+        approvalFlow: { approver_role_id: 'role-1', entity_name: 'leave_request' },
+        roleUsers: [{ id: 'u1', organizations: [] }],
+      });
+
+      await notifyApprovalRequestCreated(tx, 'req-1', {
+        targetEntityName: 'leave_request',
+        targetId: 'lr-42',
+      });
+
+      const href = notify.mock.calls[0][2].href as string;
+      expect(href).not.toMatch(/^\/approval_request\/view\//);
+    });
+
+    it('omits href (does not fall back to the approval_request row) when target is unknown', async () => {
+      const tx = makeTx({
+        approvalFlow: { approver_role_id: 'role-1', entity_name: 'leave_request' },
+        roleUsers: [{ id: 'u1', organizations: [] }],
+      });
+
+      await notifyApprovalRequestCreated(tx, 'req-1');
+
+      expect(notify.mock.calls[0][2].href).toBeUndefined();
+    });
+  });
 });

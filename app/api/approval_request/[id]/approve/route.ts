@@ -5,6 +5,8 @@ import prisma from '@/lib/prisma';
 import { getUserRoleIds } from '@/lib/authz';
 import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 import { dispatchOnApproved } from '@/lib/approval_request/on_approved_dispatch';
+import { getApprovalRequestRecipient } from '@/lib/approval_request/actions';
+import { notify } from '@/lib/_notifier';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -58,6 +60,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
       return result;
     }, { isolationLevel: 'Serializable' });
+    // cmd_479: this REST route duplicates lib/approval_request/actions.ts's
+    // approveApprovalRequest() transaction but, until now, never sent the
+    // Trigger #3 notification that function sends after its own transaction
+    // — so approving via the API (as opposed to the UI's ApprovalSection.tsx,
+    // which calls the server action) silently never notified the requestor.
+    // Mirrors that function's post-transaction notify block exactly.
+    const { recipientId, entityName, href } = await getApprovalRequestRecipient(id);
+    if (recipientId && recipientId !== userId) {
+      notify(recipientId, 'approval_responded', {
+        title: `Your ${entityName ?? 'request'} was approved`,
+        href,
+        approvalRequestId: id,
+        status: 'approved',
+        message: message ?? null,
+      });
+    }
     return NextResponse.json(updated);
   } catch (error) {
     return handleApiError(error);

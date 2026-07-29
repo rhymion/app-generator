@@ -160,7 +160,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       for (const part of parts) {
         {% if has_approvable %}
         const childApprovable = await tx.approvable.create({ data: {} });
-{{ approval_create_block }}
         {% endif %}
         {% if has_inventory_bridge %}
         // Bridge allocation per child (cmd_305 FIX-B, design B-3): each split
@@ -282,7 +281,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         _childBridgeId = _childBridge.id;
         {% endif %}
         {% endif %}
-        await tx.{{ entity_name }}.create({
+        {% if has_approvable %}const _splitChild = {% endif %}await tx.{{ entity_name }}.create({
           data: {
             {% for field in inherited_fields %}
             {{ field }}: (part.{{ field }} ?? parent.{{ field }}) as never,
@@ -316,6 +315,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             {% endif %}
           },
         });
+        {% if has_approvable %}
+        // cmd_479: the notify call inside approval_create_block links to
+        // this row's own detail page, so it must run after the row exists.
+{{ approval_create_block }}
+        {% endif %}
       }
     });
 

@@ -870,8 +870,16 @@ def generate(schema_path: str, output_dir: str) -> None:
         # x-approval-lines' creator-role-filtered flow lookup, so split no
         # longer shares _build_approval_create_block_for_entity; that
         # function remains unchanged for _build_approval_lines_post_create_code.
+        # cmd_479: target_id_expr references `_splitChild.id` — the split
+        # route template must create the child row (capturing it as
+        # `_splitChild`) BEFORE emitting this block, or the notification
+        # link can never resolve (see split_action_route.ts.jinja2).
         _split_approval_create_block = (
-            _build_split_approval_inherit_block(indent='        ')
+            _build_split_approval_inherit_block(
+                indent='        ',
+                target_entity_name=_def_key,
+                target_id_expr='_splitChild.id',
+            )
             if _split_has_approvable else ''
         )
 
@@ -1119,6 +1127,38 @@ def generate(schema_path: str, output_dir: str) -> None:
         _render(env, 'on_approved_dispatch.ts.jinja2', {'approvable_entities': approvable_entities}),
     )
     print(f'  Approval dispatch → lib/approval_request/on_approved_dispatch.ts ({len(approvable_entities)} entities)')
+
+    # --- Approvable target resolver (lib/approval_request/resolve_target.ts) ---
+    #
+    # cmd_479: entity_name + approvable_id -> target row id, used to build
+    # notification links that point at the approvable's own detail page.
+    # Distinct from `approvable_entities` above: that list is gated on
+    # x-approval.on_approved (post-approval side effects), but every entity
+    # with an approvable bridge needs to be resolvable here regardless of
+    # whether it declares on_approved, since Trigger #2/#3 notifications
+    # fire independently of that config.
+    approvable_bridge_entities = []
+    for def_key, def_val in defs.items():
+        if not def_key.startswith('__'):
+            continue
+        props = def_val.get('properties', {})
+        has_approvable_bridge = any(
+            isinstance(p, dict)
+            and (p.get('x-relationship') or {}).get('type') == 'one-to-one_bridge'
+            and (p.get('x-relationship') or {}).get('target') == 'approvable'
+            for p in props.values()
+        )
+        if not has_approvable_bridge:
+            continue
+        approvable_bridge_entities.append(def_key[2:])
+    # Always emitted (mirrors on_approved_dispatch.ts below) — actions.ts
+    # imports this unconditionally, so it must exist even with zero entities.
+    _write(
+        out / 'lib' / 'approval_request' / 'resolve_target.ts',
+        _render(env, 'resolve_approvable_target.ts.jinja2', {'entities': approvable_bridge_entities}),
+    )
+    print(f'  Approvable target resolver → lib/approval_request/resolve_target.ts ({len(approvable_bridge_entities)} entities)')
+
     for ent in approvable_entities:
         if ent['emit_hook']:
             if ent.get('has_ledger_source'):
