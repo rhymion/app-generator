@@ -1727,6 +1727,8 @@ def _build_approval_create_block_for_entity(
     role_ids_var: str,
     tx_var: str = 'tx',
     indent: str = '  ',
+    target_entity_name: str | None = None,
+    target_id_expr: str | None = None,
 ) -> str:
     """Create approval_request(s) for ONE pre-created approvable against a
     pre-fetched, creator-role-filtered approval_flow[], then stamp
@@ -1749,7 +1751,23 @@ def _build_approval_create_block_for_entity(
     single-entity afterCreate path — this shared block is the datagrid-child
     / split-action path, which never had the notify call at all). Caller
     must import notifyApprovalRequestCreated from '@/lib/_notifyApprovalRequest'.
+
+    cmd_479 fix: `target_entity_name`/`target_id_expr`, when both given, are
+    passed through to notifyApprovalRequestCreated so the notification links
+    to the approvable's own detail page instead of the approval_request row
+    (which has no view page). Caller must ensure the target row already
+    exists (has been created/committed in `tx_var`) by the time this block
+    runs, since target_id_expr is evaluated at that point.
     """
+    notify_opts = f"{{ excludeUserId: {actor_id_expr} }}"
+    if target_entity_name and target_id_expr:
+        notify_opts = (
+            f"{{\n"
+            f"{indent}    excludeUserId: {actor_id_expr},\n"
+            f"{indent}    targetEntityName: '{target_entity_name}',\n"
+            f"{indent}    targetId: {target_id_expr},\n"
+            f"{indent}  }}"
+        )
     return (
         f"{indent}let _hasFlow = false;\n"
         f"{indent}for (const _flow of {flows_var}) {{\n"
@@ -1759,7 +1777,7 @@ def _build_approval_create_block_for_entity(
         f"{indent}  const _apprReq = await {tx_var}.approval_request.create({{\n"
         f"{indent}    data: {{ approvable_id: {approvable_id_expr}, approval_flow_id: _flow.id, status: 'Pending' }},\n"
         f"{indent}  }});\n"
-        f"{indent}  await notifyApprovalRequestCreated({tx_var}, _apprReq.id, {{ excludeUserId: {actor_id_expr} }});\n"
+        f"{indent}  await notifyApprovalRequestCreated({tx_var}, _apprReq.id, {notify_opts});\n"
         f"{indent}  _hasFlow = true;\n"
         f"{indent}}}\n"
         f"{indent}if (_hasFlow) {{\n"
@@ -1771,7 +1789,11 @@ def _build_approval_create_block_for_entity(
     )
 
 
-def _build_split_approval_inherit_block(indent: str = '  ') -> str:
+def _build_split_approval_inherit_block(
+    indent: str = '  ',
+    target_entity_name: str | None = None,
+    target_id_expr: str | None = None,
+) -> str:
     """Create approval_request(s) for ONE split child, inheriting the flow IDs
     from the parent's own (pre-split) approval_request rows — unconditionally,
     with no requestor-role filter.
@@ -1788,13 +1810,28 @@ def _build_split_approval_inherit_block(indent: str = '  ') -> str:
     approval_flow_id list) once, outside the per-part loop, and a
     `childApprovable` var inside it. Caller must import
     notifyApprovalRequestCreated from '@/lib/_notifyApprovalRequest'.
+
+    cmd_479 fix: see `_build_approval_create_block_for_entity` docstring —
+    same `target_entity_name`/`target_id_expr` contract. The split route
+    must create the child entity row (and know its id) BEFORE this block
+    runs, since the old ordering (notify before the child row existed) can
+    never resolve a target.
     """
+    notify_opts = '{ excludeUserId: userId }'
+    if target_entity_name and target_id_expr:
+        notify_opts = (
+            f"{{\n"
+            f"{indent}    excludeUserId: userId,\n"
+            f"{indent}    targetEntityName: '{target_entity_name}',\n"
+            f"{indent}    targetId: {target_id_expr},\n"
+            f"{indent}  }}"
+        )
     return (
         f"{indent}for (const _flowId of _parentARFlowIds) {{\n"
         f"{indent}  const _apprReq = await tx.approval_request.create({{\n"
         f"{indent}    data: {{ approvable_id: childApprovable.id, approval_flow_id: _flowId, status: 'Pending' }},\n"
         f"{indent}  }});\n"
-        f"{indent}  await notifyApprovalRequestCreated(tx, _apprReq.id, {{ excludeUserId: userId }});\n"
+        f"{indent}  await notifyApprovalRequestCreated(tx, _apprReq.id, {notify_opts});\n"
         f"{indent}}}\n"
         f"{indent}if (_parentARFlowIds.length > 0) {{\n"
         f"{indent}  await tx.approvable.update({{\n"
@@ -1833,6 +1870,8 @@ def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema:
             role_ids_var=role_ids_var,
             tx_var='tx',
             indent='        ',
+            target_entity_name=lines_entity,
+            target_id_expr='_apprTargetId',
         )
         blocks.append(
             f"    if ({arr_var}.length > 0) {{\n"
@@ -1845,6 +1884,15 @@ def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema:
             f"      }});\n"
             f"      const {role_ids_var} = {creator_var}?.roles.map((r) => r.id) ?? [];\n"
             f"      for (const _apprId of {arr_var}) {{\n"
+            # cmd_479: the line row was already created (nested under the
+            # parent's own create) by the time this post-create code runs —
+            # look it up by its approvable_id so the notification can link
+            # to the line's own detail page instead of the approval_request.
+            f"        const _apprTargetRow = await tx.{lines_entity}.findFirst({{\n"
+            f"          where: {{ approvable_id: _apprId }},\n"
+            f"          select: {{ id: true }},\n"
+            f"        }});\n"
+            f"        const _apprTargetId = _apprTargetRow?.id;\n"
             f"{inner}\n"
             f"      }}\n"
             f"    }}"

@@ -6,6 +6,7 @@ import { getSessionUserIdOrThrow, getUserRoleIds } from '@/lib/authz';
 import { notify } from '@/lib/_notifier';
 import { dispatchOnApproved } from '@/lib/approval_request/on_approved_dispatch';
 import { isTerminalReject, dispatchOnRejected } from '@/lib/approval_request/on_rejected_dispatch';
+import { resolveApprovableTarget } from '@/lib/approval_request/resolve_target';
 
 // approval_history.pre_status/post_status are separate legacy Int columns
 // (ordinal snapshot, out of Class A Batch A1 scope) — this maps the
@@ -17,23 +18,34 @@ function statusOrdinal(status: string): number {
 
 /**
  * Look up the user who created the entity behind an approval_request so the
- * approve/reject paths can notify them. Returns null when the request has no
- * approvable bridge yet (legacy / mid-migration rows).
+ * approve/reject paths can notify them, plus that entity's own detail-page
+ * link (cmd_479: was hard-coded to the approval_request's own — nonexistent
+ * — view page; now resolved generically via resolveApprovableTarget).
+ * Returns null fields when the request has no approvable bridge yet
+ * (legacy / mid-migration rows).
  */
-async function getApprovalRequestRecipient(id: string): Promise<{
+export async function getApprovalRequestRecipient(id: string): Promise<{
   recipientId: string | null;
   entityName: string | null;
+  href: string | undefined;
 }> {
   const row = await prisma.approval_request.findUnique({
     where: { id },
     select: {
+      approvable_id: true,
       approval_flow: { select: { entity_name: true } },
       approvable: { select: { creator_id: true } },
     },
   });
+  const entityName = row?.approval_flow?.entity_name ?? null;
+  const target =
+    entityName && row?.approvable_id
+      ? await resolveApprovableTarget(prisma, entityName, row.approvable_id)
+      : null;
   return {
     recipientId: row?.approvable?.creator_id ?? null,
-    entityName: row?.approval_flow?.entity_name ?? null,
+    entityName,
+    href: target ? `/${entityName}/view/${target.id}` : undefined,
   };
 }
 
@@ -119,11 +131,11 @@ export async function approveApprovalRequest(id: string, message?: string): Prom
   });
   // Fire-and-forget notification (trigger #3): the requester learns the
   // outcome without sharing the approval_history transaction.
-  const { recipientId, entityName } = await getApprovalRequestRecipient(id);
+  const { recipientId, entityName, href } = await getApprovalRequestRecipient(id);
   if (recipientId && recipientId !== userId) {
     notify(recipientId, 'approval_responded', {
       title: `Your ${entityName ?? 'request'} was approved`,
-      href: `/approval_request/view/${id}`,
+      href,
       approvalRequestId: id,
       status: 'approved',
       message: message ?? null,
@@ -190,11 +202,11 @@ export async function rejectApprovalRequest(
       await dispatchOnRejected(tx, req.approval_flow.entity_name, approvableData.id, userId);
     }
   }, { isolationLevel: 'Serializable' });
-  const { recipientId, entityName } = await getApprovalRequestRecipient(id);
+  const { recipientId, entityName, href } = await getApprovalRequestRecipient(id);
   if (recipientId && recipientId !== userId) {
     notify(recipientId, 'approval_responded', {
       title: `Your ${entityName ?? 'request'} was rejected`,
-      href: `/approval_request/view/${id}`,
+      href,
       approvalRequestId: id,
       status: 'rejected',
       message: message ?? null,
