@@ -1321,16 +1321,6 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
             f"              {pool_field}: _candidate.id,",
             f"              {alloc_qty}: _claim,",
         ]
-        if rc.get('has_actions'):
-            _rem_f_ac = rc.get('actions_remaining_field', 'remaining_quantity')
-            _stat_f_ac = rc.get('actions_status_field', 'status')
-            _init_status = rc.get('actions_initial_status', 'reserved')
-            _init_status_ts = _enum_value_literal(
-                _status_prop_defn(schema, alloc_entity, _stat_f_ac), _init_status)
-            alloc_data_entries += [
-                f"              {_rem_f_ac}: _claim,",
-                f"              {_stat_f_ac}: {_init_status_ts},",
-            ]
         if alloc_has_creator:
             alloc_data_entries += [
                 f"              creator_id: actorId,",
@@ -1430,228 +1420,6 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
         f"    }}",
     ]
     return '\n'.join(lines)
-
-
-def _build_reservation_action_functions(rc: dict, model: str, schema: dict | None = None) -> str:
-    """Generate TypeScript action functions for shipOrder / releaseReservation / cancelReservation."""
-    actions: list[dict] = rc.get('reservation_actions', [])
-    if not actions:
-        return ''
-    pool = rc.get('pool') or {}
-    pool_entity = pool.get('entity')
-    if not pool_entity:
-        raise ValueError(f"x-reservation for {model!r}: pool.entity is required in action functions")
-    pool_qty_field = pool.get('quantityField', 'quantity')
-    pool_res_field = pool.get('reservedField', 'reserved_quantity')
-    res = rc.get('result') or {}
-    parent_field = res.get('parentField') or f'{model}_id'
-    # FK field on the allocation row that points to the pool entity
-    pool_fk_on_alloc = res.get('poolField') or f'{pool_entity}_id'
-
-    # Build a type that includes all needed Prisma models for the action transaction
-    alloc_entities = list({a.get('allocationEntity', '') for a in actions if a.get('allocationEntity')})
-    tx_type_parts = [f"'{model}'", f"'{pool_entity}'"] + [f"'{e}'" for e in alloc_entities]
-    tx_type = f"Pick<typeof prisma, {' | '.join(tx_type_parts)}>"
-
-    parts: list[str] = [f"type ActionTxClient = {tx_type};"]
-    for action in actions:
-        act_name = action['name']
-        act_type = action['type']
-        alloc_entity = action.get('allocationEntity', '')
-        rem_field = action.get('remainingField', 'remaining_quantity')
-        stat_field = action.get('statusField', 'status')
-        open_statuses = action.get('openStatuses', [])
-        done_status = action.get('doneStatus', '')
-        # Resolve status literals against the allocation entity's status field so
-        # integer-enum statuses are emitted as ordinals (string enums stay quoted).
-        _status_defn = _status_prop_defn(schema, alloc_entity, stat_field)
-        open_statuses_ts = ', '.join(_enum_value_literal(_status_defn, s) for s in open_statuses)
-        done_status_ts = _enum_value_literal(_status_defn, done_status)
-        partial_status_ts = _enum_value_literal(_status_defn, 'partially_shipped')
-
-        if act_type == 'ship':
-            parts.append(
-                f"export async function {act_name}(\n"
-                f"  orderId: string,\n"
-                f"  requestedQty: number,\n"
-                f"  actorId: string\n"
-                f"): Promise<void> {{\n"
-                f"  await prisma.$transaction(async (tx) => {{\n"
-                f"    const _tx = tx as unknown as ActionTxClient;\n"
-                f"    const allocations = await _tx.{alloc_entity}.findMany({{\n"
-                f"      where: {{\n"
-                f"        {parent_field}: orderId,\n"
-                f"        {stat_field}: {{ in: [{open_statuses_ts}] }},\n"
-                f"      }},\n"
-                f"      orderBy: {{ created_at: 'asc' }},\n"
-                f"    }});\n"
-                f"    let _remaining = requestedQty;\n"
-                f"    for (const alloc of allocations) {{\n"
-                f"      if (_remaining <= 0) break;\n"
-                f"      const _remQty = (alloc as Record<string, unknown>).{rem_field} as number;\n"
-                f"      const actionQty = Math.min(_remaining, _remQty);\n"
-                f"      const _result = await _tx.{pool_entity}.updateMany({{\n"
-                f"        where: {{\n"
-                f"          id: (alloc as Record<string, unknown>).{pool_fk_on_alloc} as string,\n"
-                f"          {pool_res_field}: {{ gte: actionQty }},\n"
-                f"        }},\n"
-                f"        data: {{\n"
-                f"          {pool_res_field}: {{ decrement: actionQty }},\n"
-                f"        }},\n"
-                f"      }});\n"
-                f"      if (_result.count > 0) {{\n"
-                f"        const newRemaining = _remQty - actionQty;\n"
-                f"        await _tx.{alloc_entity}.update({{\n"
-                f"          where: {{ id: alloc.id }},\n"
-                f"          data: {{\n"
-                f"            {rem_field}: newRemaining,\n"
-                f"            {stat_field}: newRemaining === 0 ? {done_status_ts} : {partial_status_ts},\n"
-                f"            updater_id: actorId,\n"
-                f"          }},\n"
-                f"        }});\n"
-                f"        _remaining -= actionQty;\n"
-                f"      }}\n"
-                f"    }}\n"
-                f"  }}, {{ isolationLevel: 'Serializable' }});\n"
-                f"}}"
-            )
-        elif act_type == 'release':
-            parts.append(
-                f"export async function {act_name}(\n"
-                f"  orderId: string,\n"
-                f"  releaseQty: number,\n"
-                f"  actorId: string\n"
-                f"): Promise<void> {{\n"
-                f"  await prisma.$transaction(async (tx) => {{\n"
-                f"    const _tx = tx as unknown as ActionTxClient;\n"
-                f"    const allocations = await _tx.{alloc_entity}.findMany({{\n"
-                f"      where: {{\n"
-                f"        {parent_field}: orderId,\n"
-                f"        {stat_field}: {{ in: [{open_statuses_ts}] }},\n"
-                f"      }},\n"
-                f"      orderBy: {{ created_at: 'asc' }},\n"
-                f"    }});\n"
-                f"    let _remaining = releaseQty;\n"
-                f"    for (const alloc of allocations) {{\n"
-                f"      if (_remaining <= 0) break;\n"
-                f"      const _remQty = (alloc as Record<string, unknown>).{rem_field} as number;\n"
-                f"      const actionQty = Math.min(_remaining, _remQty);\n"
-                f"      const _result = await _tx.{pool_entity}.updateMany({{\n"
-                f"        where: {{\n"
-                f"          id: (alloc as Record<string, unknown>).{pool_fk_on_alloc} as string,\n"
-                f"          {pool_res_field}: {{ gte: actionQty }},\n"
-                f"        }},\n"
-                f"        data: {{\n"
-                f"          {pool_qty_field}: {{ increment: actionQty }},\n"
-                f"          {pool_res_field}: {{ decrement: actionQty }},\n"
-                f"        }},\n"
-                f"      }});\n"
-                f"      if (_result.count > 0) {{\n"
-                f"        const newRemaining = _remQty - actionQty;\n"
-                f"        await _tx.{alloc_entity}.update({{\n"
-                f"          where: {{ id: alloc.id }},\n"
-                f"          data: {{\n"
-                f"            {rem_field}: newRemaining,\n"
-                f"            {stat_field}: newRemaining === 0 ? {done_status_ts} : {partial_status_ts},\n"
-                f"            updater_id: actorId,\n"
-                f"          }},\n"
-                f"        }});\n"
-                f"        _remaining -= actionQty;\n"
-                f"      }}\n"
-                f"    }}\n"
-                f"  }}, {{ isolationLevel: 'Serializable' }});\n"
-                f"}}"
-            )
-        elif act_type == 'cancel':
-            parts.append(
-                f"export async function {act_name}(\n"
-                f"  orderId: string,\n"
-                f"  actorId: string\n"
-                f"): Promise<void> {{\n"
-                f"  await prisma.$transaction(async (tx) => {{\n"
-                f"    const _tx = tx as unknown as ActionTxClient;\n"
-                f"    const allocations = await _tx.{alloc_entity}.findMany({{\n"
-                f"      where: {{\n"
-                f"        {parent_field}: orderId,\n"
-                f"        {stat_field}: {{ in: [{open_statuses_ts}] }},\n"
-                f"      }},\n"
-                f"    }});\n"
-                f"    for (const alloc of allocations) {{\n"
-                f"      const releaseQty = (alloc as Record<string, unknown>).{rem_field} as number;\n"
-                f"      await _tx.{pool_entity}.updateMany({{\n"
-                f"        where: {{\n"
-                f"          id: (alloc as Record<string, unknown>).{pool_fk_on_alloc} as string,\n"
-                f"          {pool_res_field}: {{ gte: releaseQty }},\n"
-                f"        }},\n"
-                f"        data: {{\n"
-                f"          {pool_qty_field}: {{ increment: releaseQty }},\n"
-                f"          {pool_res_field}: {{ decrement: releaseQty }},\n"
-                f"        }},\n"
-                f"      }});\n"
-                f"      await _tx.{alloc_entity}.update({{\n"
-                f"        where: {{ id: alloc.id }},\n"
-                f"        data: {{\n"
-                f"          {rem_field}: 0,\n"
-                f"          {stat_field}: {done_status_ts},\n"
-                f"          updater_id: actorId,\n"
-                f"        }},\n"
-                f"      }});\n"
-                f"    }}\n"
-                f"  }}, {{ isolationLevel: 'Serializable' }});\n"
-                f"}}"
-            )
-
-    return '\n\n'.join(parts)
-
-
-def _build_action_route_code(action: dict, parent: str, model: str) -> str:
-    """Generate the content of a POST action route handler file."""
-    act_name = action['name']
-    act_type = action['type']
-
-    if act_type == 'cancel':
-        body_destructure = ''
-        service_call = f"await {act_name}(id, actorId);"
-    else:
-        qty_param = 'requestedQty' if act_type == 'ship' else 'releaseQty'
-        body_destructure = f"\n  const {{ {qty_param} }} = await req.json();"
-        service_call = f"await {act_name}(id, {qty_param}, actorId);"
-
-    return (
-        f"import {{ NextRequest, NextResponse }} from 'next/server';\n"
-        f"import {{ {act_name} }} from '@/lib/{parent}/reservation_actions';\n"
-        f"import {{ authenticateApiKey }} from '@/lib/api-auth';\n"
-        f"\n"
-        f"type Params = {{ params: Promise<{{ id: string }}> }};\n"
-        f"export async function POST(\n"
-        f"  req: NextRequest,\n"
-        f"  {{ params }}: Params\n"
-        f"): Promise<NextResponse> {{\n"
-        f"  const {{ id }} = await params;{body_destructure}\n"
-        f"  const {{ userId: actorId }} = await authenticateApiKey(req);\n"
-        f"  try {{\n"
-        f"    {service_call}\n"
-        f"    return NextResponse.json({{ ok: true }});\n"
-        f"  }} catch (err) {{\n"
-        f"    const message = err instanceof Error ? err.message : String(err);\n"
-        f"    return NextResponse.json({{ error: message }}, {{ status: 500 }});\n"
-        f"  }}\n"
-        f"}}\n"
-    )
-
-
-def get_reservation_action_routes(rc: dict, model: str) -> list[dict]:
-    """Return list of {act_type, act_name, code} for each action in rc."""
-    actions: list[dict] = rc.get('reservation_actions', [])
-    parent = model  # model == parent here (same naming)
-    return [
-        {
-            'act_type': a['type'],
-            'act_name': a['name'],
-            'code': _build_action_route_code(a, parent, model),
-        }
-        for a in actions
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -2185,11 +1953,6 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     if has_reservation and reservation_config is not None:
         reservation_allocation_code = _build_reservation_allocation_code(reservation_config, model, schema)
 
-    # Action functions (ship / release / cancel)
-    reservation_actions_code = ''
-    if has_reservation and reservation_config is not None and reservation_config.get('has_actions'):
-        reservation_actions_code = _build_reservation_action_functions(reservation_config, model, schema)
-
     # x-approval-lines: pre-create/post-create approval for embedded line
     # children that are new:false (see docs/knowledge/appendix/approval-flow.md §16.10).
     approval_lines_pre_create_code  = ''
@@ -2283,7 +2046,6 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'flatten_nested_updates':             flatten_nested_updates,
         'flatten_nested_creates':             flatten_nested_creates,
         'reservation_allocation_code':        reservation_allocation_code,
-        'reservation_actions_code':           reservation_actions_code,
         'has_reservation':                    has_reservation,
         'has_item_reservation':               has_item_reservation,
         'reservation_mutation_guard_update':  reservation_mutation_guard_update,

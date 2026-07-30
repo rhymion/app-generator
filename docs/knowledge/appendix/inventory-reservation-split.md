@@ -29,6 +29,26 @@ mode), `request` (`quantityField`, optional `criteria` mapping requester fields 
 e.g. `product_id: product_id`), `policy` (`orderBy` for candidate selection; `availabilitySource:
 overlap` for date-range item mode), `result` (where the reservation outcome is written back).
 
+### 1.1 Role boundary and `actions` deprecation (2026-07-30 ruling)
+
+`x-reservation`'s role is scoped to exactly two things: **(1) inventory allocation** (`count`
+mode — reserving a quantity out of a numeric pool) and **(2) specific-resource reservation**
+(`item` mode — e.g. reserving a hotel `room`). Approval/rejection of the request that owns the
+reservation goes through the generic [Approval Flow System](approval-flow.md)'s
+`approve` / (terminal) `reject` lifecycle — declared via `x-approval` on the requesting or line
+entity — not through a bespoke lifecycle on `x-reservation` itself.
+
+An earlier `x-reservation.actions` sub-feature (declarative `ship` / `release` / `cancel`
+lifecycle actions, generating `reservation_actions.ts`, per-action
+`app/api/{parent}/[id]/actions/{ship,release,cancel}/route.ts` handlers, and a
+`ReservationActionButtons` UI component) was removed 2026-07-30. No entity in the default
+schema or in any known consumer schema ever declared an `actions` block — the mechanism was
+declarative but dormant, and was superseded internally by the `ledger_transaction` strategy
+(§ above) before it was ever exercised in a generated app. `code_generator/validate.py` now
+hard-rejects any schema that still declares `x-reservation.actions`, with an error message
+pointing at `approval_flow`'s approve/reject instead. Do not re-add an `actions` key to
+`x-reservation` — express lifecycle transitions through `x-approval` on the owning entity.
+
 **`criteria`-driven auto-allocate is already product/type-safe by construction.** The generated
 `reserve{Parent}()` service function (`templates/service.ts.jinja2`) builds its Prisma
 `findMany` candidate query as `{ ...criteria }`, so for `purchase_order` (`request.criteria:

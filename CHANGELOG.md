@@ -3,6 +3,25 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+
+### Removed
+- **`x-reservation.actions` sub-feature (2026-07-30 ruling)** — the declarative
+  `ship` / `release` / `cancel` lifecycle-action mechanism under `x-reservation`
+  (`reservation_actions.ts` generation, per-action
+  `app/api/{parent}/[id]/actions/{ship,release,cancel}/route.ts` handlers, and the
+  `ReservationActionButtons` UI component) has been removed. `x-reservation` is
+  retained, scoped to exactly two roles: (1) inventory allocation (`count` mode) and
+  (2) specific-resource reservation (`item` mode, e.g. a hotel `room`). Approval/
+  rejection lifecycle for the owning entity goes through the generic Approval Flow
+  System's `approve` / (terminal) `reject` instead (`x-approval`). No entity in the
+  default schema or any known consumer schema ever declared an `actions` block, so
+  this closes zero generated-output diff for existing apps — confirmed by comparing
+  `generate-code` output before/after this change (identical). `code_generator/
+  validate.py` now hard-rejects any schema that still declares `x-reservation.actions`.
+  See [docs/knowledge/appendix/inventory-reservation-split.md](docs/knowledge/appendix/inventory-reservation-split.md)
+  §1.1.
+
 ## [3.0.0] - 2026-07-28
 
 > Consolidates the feature areas added since 2.0.0: GCP Cloud Run deployment,
