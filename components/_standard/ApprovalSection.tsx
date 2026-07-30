@@ -74,6 +74,7 @@ type Props = {
 export default function ApprovalSection({ src, currentUserRoleIds, currentUserId }: Props) {
   const t = useTranslations('Fields');
   const tCommon = useTranslations('Common');
+  const tStatus = useTranslations('ApprovalRequestStatus');
   const [, startTransition] = useTransition();
   const [dialog, setDialog] = useState<{ arId: string; action: Action } | null>(null);
   const [message, setMessage] = useState('');
@@ -158,7 +159,7 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
               <Fragment key={ar.id}>
                 <TableRow>
                   <TableCell>{ar.approval_flow?.approver_role?.name ?? '-'}</TableCell>
-                  <TableCell>{ar.status}</TableCell>
+                  <TableCell>{tStatus(ar.status)}</TableCell>
                   <TableCell>
                     {histories.length > 0 && (
                       <Tooltip title={isExpanded ? 'Hide history' : 'Show history'}>
