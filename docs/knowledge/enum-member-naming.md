@@ -62,10 +62,55 @@ app-generator version is picked up.
 ## Renaming an existing nativeEnum member
 
 Renaming a Prisma enum member requires a migration that rewrites existing
-column data -- a plain member rename is not additive. See the
-`ApprovalRequestStatus`/`ReactionType` migration produced by cmd_493 as a
-worked example of the SQL pattern (create new enum type, `ALTER COLUMN
-... TYPE ... USING (CASE ... END)` to remap old values to new, rename
-types, then drop the old type). `docs/knowledge/migration-guide.md` covers
-why app-generator itself does not track `prisma/migrations/` and how
-consumers apply migrations.
+column data -- a plain member rename is not additive. `docs/knowledge/
+migration-guide.md` covers why app-generator itself does not track
+`prisma/migrations/` and how consumers apply migrations; the SQL below is
+the worked example for the `ApprovalRequestStatus`/`ReactionType` rename
+this rule shipped with (cmd_493), verified against an isolated test
+database seeded with pre-migration (PascalCase) rows -- applying it
+rewrote every existing row to its lowercase equivalent with no data loss,
+and a post-migration `prisma migrate diff` against the new schema came
+back empty (no drift):
+
+```sql
+BEGIN;
+
+-- ApprovalRequestStatus: Pending/Approved/Rejected/TerminalRejected -> lowercase
+CREATE TYPE "ApprovalRequestStatus_new" AS ENUM ('pending', 'approved', 'rejected', 'terminal_rejected');
+
+ALTER TABLE "approval_request" ALTER COLUMN "status" DROP DEFAULT;
+ALTER TABLE "approval_request" ALTER COLUMN "status" TYPE "ApprovalRequestStatus_new" USING (
+  CASE "status"::text
+    WHEN 'Pending' THEN 'pending'
+    WHEN 'Approved' THEN 'approved'
+    WHEN 'Rejected' THEN 'rejected'
+    WHEN 'TerminalRejected' THEN 'terminal_rejected'
+  END::"ApprovalRequestStatus_new"
+);
+ALTER TYPE "ApprovalRequestStatus" RENAME TO "ApprovalRequestStatus_old";
+ALTER TYPE "ApprovalRequestStatus_new" RENAME TO "ApprovalRequestStatus";
+DROP TYPE "ApprovalRequestStatus_old";
+ALTER TABLE "approval_request" ALTER COLUMN "status" SET DEFAULT 'pending';
+
+-- ReactionType: Like/Love/Laugh/Surprised/Sad -> lowercase
+CREATE TYPE "ReactionType_new" AS ENUM ('like', 'love', 'laugh', 'surprised', 'sad');
+
+ALTER TABLE "reaction" ALTER COLUMN "type" TYPE "ReactionType_new" USING (
+  CASE "type"::text
+    WHEN 'Like' THEN 'like'
+    WHEN 'Love' THEN 'love'
+    WHEN 'Laugh' THEN 'laugh'
+    WHEN 'Surprised' THEN 'surprised'
+    WHEN 'Sad' THEN 'sad'
+  END::"ReactionType_new"
+);
+ALTER TYPE "ReactionType" RENAME TO "ReactionType_old";
+ALTER TYPE "ReactionType_new" RENAME TO "ReactionType";
+DROP TYPE "ReactionType_old";
+
+COMMIT;
+```
+
+Any consumer that already has data in these two columns must run the
+equivalent of this script (adjusted for their own table/type names) before
+regenerating against an app-generator version that includes this change.
