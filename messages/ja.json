@@ -203,7 +203,7 @@
     "approved": "承認済み",
     "pending": "承認待ち",
     "rejected": "否決",
-    "terminalRejected": "最終否決"
+    "terminal_rejected": "最終否決"
   },
   "ReactionType": {
     "laugh": "笑える",
