@@ -6,7 +6,7 @@ import { revalidatePath } from 'next/cache';
 // approval_history.pre_status/post_status are separate legacy Int columns
 // (ordinal snapshot, out of Class A Batch A1 scope) — this maps the
 // ApprovalRequestStatus enum back to its historical ordinal index.
-const APPROVAL_REQUEST_STATUS_ORDER = ['Pending', 'Approved', 'Rejected', 'TerminalRejected'] as const;
+const APPROVAL_REQUEST_STATUS_ORDER = ['pending', 'approved', 'rejected', 'terminal_rejected'] as const;
 function statusOrdinal(status: string): number {
   return APPROVAL_REQUEST_STATUS_ORDER.indexOf(status as (typeof APPROVAL_REQUEST_STATUS_ORDER)[number]);
 }
@@ -69,7 +69,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
       },
     });
     if (!req) throw new Error('Approval request not found');
-    if (req.status !== 'Rejected') throw new Error('Only rejected requests can be re-submitted');
+    if (req.status !== 'rejected') throw new Error('Only rejected requests can be re-submitted');
 
     const userId = await getSessionUserIdOrThrow();
     const entityCreatorId = req.approvable?.creator_id;
@@ -141,7 +141,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     await prisma.$transaction(async (tx) => {
       const req = await tx.approval_request.update({
         where: { id },
-        data: { status: 'Approved' },
+        data: { status: 'approved' },
         select: {
           status: true,
           approvable_id: true,
@@ -166,7 +166,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
           approval_requests: { select: { status: true } },
         },
       });
-      const allApproved = approvableData?.approval_requests.every((r) => r.status === 'Approved') ?? false;
+      const allApproved = approvableData?.approval_requests.every((r) => r.status === 'approved') ?? false;
       const alreadyFired = approvableData?.approved_at != null;
       if (allApproved && !alreadyFired && approvableData) {
         // Set approved_at first (idempotency flag — prevents double-fire on concurrent requests)
@@ -207,7 +207,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
       if (!req?.approval_flow) throw new Error('Approval request not found');
 
       const terminal = deps.isTerminalReject(req.approval_flow.entity_name);
-      const newStatus = terminal ? 'TerminalRejected' : 'Rejected';
+      const newStatus = terminal ? 'terminal_rejected' : 'rejected';
 
       const result = await tx.approval_request.update({
         where: { id },
@@ -273,7 +273,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
       });
       await tx.approval_request.update({
         where: { id },
-        data: { status: 'Pending' },
+        data: { status: 'pending' },
       });
       await tx.approval_history.create({
         data: {

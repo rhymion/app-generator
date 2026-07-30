@@ -50,7 +50,7 @@ type ApprovalHistory = {
 type ApprovalRequest = {
   id: string;
   approval_flow_id: string;
-  status: 'Pending' | 'Approved' | 'Rejected' | 'TerminalRejected';
+  status: 'pending' | 'approved' | 'rejected' | 'terminal_rejected';
   approval_flow?: {
     id: string;
     entity_name: string;
@@ -141,13 +141,13 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
             const requestorRoleId = ar.approval_flow?.requestor_role_id;
             const precedingFlowIds = ar.approval_flow?.preceded_by?.map((f) => f.id) ?? [];
             const precedingApproved = precedingFlowIds.every(
-              (fid) => flowIdToStatus.get(fid) === 'Approved',
+              (fid) => flowIdToStatus.get(fid) === 'approved',
             );
-            const canAct = ar.status === 'Pending'
+            const canAct = ar.status === 'pending'
               && approverRoleId
               && currentUserRoleIds?.includes(approverRoleId)
               && precedingApproved;
-            const canResubmit = ar.status === 'Rejected' && (
+            const canResubmit = ar.status === 'rejected' && (
               currentUserId === src.creator_id ||
               (requestorRoleId ? currentUserRoleIds?.includes(requestorRoleId) : false)
             );

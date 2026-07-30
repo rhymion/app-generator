@@ -13,7 +13,7 @@ export async function getApprovableById(approvable_id: string) {
 
 export async function getPendingApprovalRequest(approvable_id: string) {
   const ar = await prisma.approval_request.findFirst({
-    where: { approvable_id, status: 'Pending' },
+    where: { approvable_id, status: 'pending' },
   });
   return ar ? JSON.parse(JSON.stringify(ar)) : null;
 }
