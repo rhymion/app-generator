@@ -418,6 +418,18 @@ def validate_schema(schema: dict) -> None:
             )
             continue
 
+        # x-reservation.actions was deprecated 2026-07-30: approval/rejection lifecycle
+        # goes through approval_flow's approve/(terminal) reject, not bespoke x-reservation
+        # action routes. x-reservation itself is retained, scoped to (1) inventory
+        # allocation and (2) specific-resource reservation. See
+        # docs/knowledge/appendix/inventory-reservation-split.md.
+        if xres.get('actions'):
+            errors.append(
+                f"Definition '{def_key}': x-reservation.actions is deprecated — use "
+                f"approval_flow's approve/(terminal) reject instead. Remove the "
+                f"'actions' block."
+            )
+
         pool   = xres.get('pool') or {}
         result = xres.get('result') or {}
         lines  = xres.get('lines')
@@ -510,81 +522,6 @@ def validate_schema(schema: dict) -> None:
                         f"(count mode without lines: the quantity must be a field on the "
                         f"request entity itself)."
                     )
-
-            # Validate x-reservation.actions block
-            _xres_actions = xres.get('actions') or {}
-            if _xres_actions:
-                if not isinstance(_xres_actions, dict):
-                    errors.append(
-                        f"Definition '{def_key}': x-reservation.actions must be a mapping."
-                    )
-                else:
-                    _identifier_re_act = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
-                    _valid_act_types = ('ship', 'release', 'cancel')
-                    _pool_ent_name = pool.get('entity')
-                    _pool_ent_props = (
-                        get_entity_properties(_pool_ent_name, schema)
-                        if _pool_ent_name else {}
-                    )
-                    _pool_qty_f = pool.get('quantityField')
-                    _pool_res_f = pool.get('reservedField')
-                    # Validate pool fields exist on pool entity
-                    if _pool_ent_name and _pool_ent_name in defs:
-                        if _pool_qty_f and _pool_qty_f not in _pool_ent_props:
-                            errors.append(
-                                f"Definition '{def_key}': x-reservation.pool.quantityField "
-                                f"'{_pool_qty_f}' does not exist on pool entity '{_pool_ent_name}'."
-                            )
-                        if _pool_res_f and _pool_res_f not in _pool_ent_props:
-                            errors.append(
-                                f"Definition '{def_key}': x-reservation.pool.reservedField "
-                                f"'{_pool_res_f}' does not exist on pool entity '{_pool_ent_name}'."
-                            )
-                    for _aname, _adef in _xres_actions.items():
-                        if not _identifier_re_act.match(_aname):
-                            errors.append(
-                                f"Definition '{def_key}': x-reservation.actions '{_aname}': "
-                                f"action name must be a valid identifier."
-                            )
-                        if not isinstance(_adef, dict):
-                            errors.append(
-                                f"Definition '{def_key}': x-reservation.actions.{_aname} "
-                                f"must be a mapping."
-                            )
-                            continue
-                        _atype = _adef.get('type')
-                        if _atype not in _valid_act_types:
-                            errors.append(
-                                f"Definition '{def_key}': x-reservation.actions.{_aname}.type "
-                                f"must be one of {_valid_act_types!r}, got {_atype!r}."
-                            )
-                        _alloc_ent_act = (
-                            _adef.get('allocationEntity') or result.get('allocationEntity')
-                        )
-                        if not _alloc_ent_act:
-                            errors.append(
-                                f"Definition '{def_key}': x-reservation.actions.{_aname}: "
-                                f"allocationEntity is required."
-                            )
-                        elif _alloc_ent_act not in defs:
-                            errors.append(
-                                f"Definition '{def_key}': x-reservation.actions.{_aname}: "
-                                f"allocationEntity '{_alloc_ent_act}' is not defined in the schema."
-                            )
-                        else:
-                            _alloc_props_act = get_entity_properties(_alloc_ent_act, schema)
-                            _rem_f = _adef.get('remainingField', 'remaining_quantity')
-                            _stat_f = _adef.get('statusField', 'status')
-                            if _rem_f not in _alloc_props_act:
-                                errors.append(
-                                    f"Definition '{def_key}': x-reservation.actions.{_aname}: "
-                                    f"remainingField '{_rem_f}' does not exist on '{_alloc_ent_act}'."
-                                )
-                            if _stat_f not in _alloc_props_act:
-                                errors.append(
-                                    f"Definition '{def_key}': x-reservation.actions.{_aname}: "
-                                    f"statusField '{_stat_f}' does not exist on '{_alloc_ent_act}'."
-                                )
 
         elif mode == 'item':
             # Mode × lines matrix (item)
