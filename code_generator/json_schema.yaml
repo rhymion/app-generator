@@ -337,10 +337,10 @@ definitions:
           labelField: entity_name
       status:
         enum:
-          - Pending
-          - Approved
-          - Rejected
-          - TerminalRejected
+          - pending
+          - approved
+          - rejected
+          - terminal_rejected
 
   comment:
     fields:
@@ -355,11 +355,11 @@ definitions:
     fields:
       type:
         enum:
-          - Like
-          - Love
-          - Laugh
-          - Surprised
-          - Sad
+          - like
+          - love
+          - laugh
+          - surprised
+          - sad
       user_id:
         x-relationship: {}
       comment_id:

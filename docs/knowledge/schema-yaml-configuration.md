@@ -495,14 +495,14 @@ exact member names (case-sensitive) in the field's `enum:` override. No `minimum
 ```prisma
 // prisma/schema.prisma
 enum ApprovalRequestStatus {
-  Pending
-  Approved
-  Rejected
-  TerminalRejected
+  pending
+  approved
+  rejected
+  terminal_rejected
 }
 
 model approval_request {
-  status ApprovalRequestStatus @default(Pending)
+  status ApprovalRequestStatus @default(pending)
   ...
 }
 ```
@@ -513,17 +513,20 @@ approval_request:
   fields:
     status:
       enum:
-        - Pending
-        - Approved
-        - Rejected
-        - TerminalRejected
+        - pending
+        - approved
+        - rejected
+        - terminal_rejected
 ```
+
+Member names must be lowercase snake_case (`code_generator/validate.py` rejects anything else at
+generation time — see `docs/knowledge/enum-member-naming.md`).
 
 `schema_deriver.py`'s `_json_type_for()` (lines 238-249) checks whether the Prisma column's type
 is a name found in `prisma_enums` (parsed from `enum { ... }` blocks in `schema.prisma`); if so
 the JSON Schema `type` is `"string"` and a `_prisma_native_enum_type` marker is attached to the
 property (`derive_property`, lines 288-295) so downstream TypeScript generation emits a literal-
-union type (`'Pending' | 'Approved' | ...`) instead of a generic `string`, and forms/DataGrids
+union type (`'pending' | 'approved' | ...`) instead of a generic `string`, and forms/DataGrids
 render translated labels keyed off the enum member names
 (`code_generator/generators_i18n.py`'s `_collect_native_enum_namespaces`,
 `code_generator/generators.py`'s `_native_enum_ns`/`_native_enum_key`). The database stores the

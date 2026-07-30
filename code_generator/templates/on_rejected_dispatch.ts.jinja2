@@ -17,7 +17,7 @@ const TERMINAL_REJECT_ENTITIES = new Set<string>([
 ]);
 
 /**
- * Returns true if the entity type uses terminal_rejected (status 'TerminalRejected') on rejection.
+ * Returns true if the entity type uses terminal_rejected (status 'terminal_rejected') on rejection.
  * Terminal rejected requests cannot be re-submitted.
  */
 export function isTerminalReject(entityType: string): boolean {

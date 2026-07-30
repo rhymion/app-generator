@@ -587,7 +587,7 @@ describe('API: {{ title }}', () => {
             url: `/api/approval_request/${arId}/approve`,
           }).then((res) => {
             expect(res.status).to.eq(200);
-            expect(res.body.status).to.eq('Approved');
+            expect(res.body.status).to.eq('approved');
           });
         });
       });
@@ -632,7 +632,7 @@ describe('API: {{ title }}', () => {
             url: `/api/approval_request/${arId}/reject`,
           }).then((res) => {
             expect(res.status).to.eq(200);
-            expect(res.body.status).to.eq('Rejected');
+            expect(res.body.status).to.eq('rejected');
           });
         });
       });
@@ -715,7 +715,7 @@ describe('API: {{ title }}', () => {
     });
 {% endif %}
 {% if entity_on_rejected_terminal %}
-    it('13.5 terminal reject sets approval_request.status = TerminalRejected (terminal_rejected)', () => {
+    it('13.5 terminal reject sets approval_request.status = terminal_rejected', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {
           creatorId: setup.requestorUser.id,
@@ -730,7 +730,7 @@ describe('API: {{ title }}', () => {
             url: `/api/approval_request/${arId}/reject`,
           }).then((res) => {
             expect(res.status).to.eq(200);
-            expect(res.body.status).to.eq('TerminalRejected');
+            expect(res.body.status).to.eq('terminal_rejected');
           });
         });
       });
@@ -808,7 +808,7 @@ describe('API: {{ title }}', () => {
               url: `/api/approval_request/${ar2.id}/approve`,
             }).then((res2) => {
               expect(res2.status).to.eq(200);
-              expect(res2.body.status).to.eq('Approved');
+              expect(res2.body.status).to.eq('approved');
             });
           });
         });
@@ -830,7 +830,7 @@ describe('API: {{ title }}', () => {
             headers: { 'X-API-Key': setup.requestorUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
-            expect(res.body.status).to.eq('Pending');
+            expect(res.body.status).to.eq('pending');
           });
         });
       });

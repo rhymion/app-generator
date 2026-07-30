@@ -5,6 +5,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### BREAKING
+- **nativeEnum member names normalized to lowercase snake_case (cmd_493)** —
+  `ApprovalRequestStatus` (`Pending`/`Approved`/`Rejected`/`TerminalRejected`
+  → `pending`/`approved`/`rejected`/`terminal_rejected`) and `ReactionType`
+  (`Like`/`Love`/`Laugh`/`Surprised`/`Sad` → lowercase) are the only two
+  PascalCase nativeEnum types app-generator itself ships; an inventory
+  across the full default schema + the app-template consumer schema found
+  lowercase snake_case already the established majority (16/20 nativeEnum
+  types, 61/80 members). `code_generator/validate.py` now rejects any
+  nativeEnum member that isn't lowercase snake_case at generation time.
+  Existing consumer data must be migrated — see
+  [docs/knowledge/enum-member-naming.md](docs/knowledge/enum-member-naming.md)
+  for the naming rule, rationale, consumer-impact list, and the exact
+  migration SQL (verified against an isolated test database seeded with
+  pre-migration rows).
+
 ### Removed
 - **`x-reservation.actions` sub-feature (2026-07-30 ruling)** — the declarative
   `ship` / `release` / `cancel` lifecycle-action mechanism under `x-reservation`

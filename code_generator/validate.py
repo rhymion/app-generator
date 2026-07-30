@@ -20,6 +20,14 @@ from helpers.schema_helpers import (
 _SNAKE_CASE = re.compile(r'^(__)?[a-z][a-z0-9_]*$')
 _ID_SUFFIX  = re.compile(r'_id$')
 
+# nativeEnum (Prisma `enum` block) member naming convention -- lowercase
+# snake_case, matching the established majority (16/20 nativeEnum types,
+# 61/80 members, plus every x-approval.set_fields reference-side literal,
+# per the cmd_493 inventory in docs/knowledge/enum-member-naming.md).
+# PascalCase members (e.g. legacy ApprovalRequestStatus.Pending) are no
+# longer permitted for newly-defined or newly-added enum members.
+_ENUM_MEMBER_NAME = re.compile(r'^[a-z][a-z0-9_]*$')
+
 # Columns that MUST be indexed (leftmost column of some @@index) when present
 # on a model.  See docs/knowledge/prisma-schema-conventions.md.
 _REQUIRED_INDEX_COLUMNS = ('creator_id', 'assignee_id', 'organization_id')
@@ -1121,6 +1129,32 @@ def validate_schema(schema: dict) -> None:
             f"set x-generate.import: false on '{_model_key}' to make the "
             f"opt-out explicit."
         )
+
+    # -----------------------------------------------------------------------
+    # 9. nativeEnum member naming convention (cmd_493)
+    # -----------------------------------------------------------------------
+    # Prisma `enum` block member names must be lowercase snake_case (e.g.
+    # 'terminal_rejected', not 'TerminalRejected' or 'terminalRejected').
+    # Scoped to nativeEnum fields only (_prisma_native_enum_type set by
+    # schema_deriver.py) -- int-enum `enum:` lists are human-readable UI
+    # labels, not Prisma identifier names, and are out of scope here.
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        for prop_name, prop_def in defn.get('properties', {}).items():
+            native_type = prop_def.get('_prisma_native_enum_type')
+            enum_vals = prop_def.get('enum')
+            if not native_type or not isinstance(enum_vals, list):
+                continue
+            for v in enum_vals:
+                if not isinstance(v, str) or not _ENUM_MEMBER_NAME.match(v):
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}' "
+                        f"(nativeEnum '{native_type}'): member '{v}' violates "
+                        f"the lowercase snake_case naming convention "
+                        f"(pattern: {_ENUM_MEMBER_NAME.pattern}). "
+                        f"See docs/knowledge/enum-member-naming.md."
+                    )
 
     # -----------------------------------------------------------------------
     # Report
