@@ -95,6 +95,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
   async function getApprovalRequestRecipient(id: string): Promise<{
     recipientId: string | null;
     entityName: string | null;
+    targetId: string | null;
     href: string | undefined;
   }> {
     const row = await prisma.approval_request.findUnique({
@@ -113,8 +114,25 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     return {
       recipientId: row?.approvable?.creator_id ?? null,
       entityName,
+      targetId: target?.id ?? null,
       href: target ? `/${entityName}/view/${target.id}` : undefined,
     };
+  }
+
+  /**
+   * cmd_491: revalidatePath('/approval_request') never matched anything —
+   * there is no /approval_request page, and ApprovalSection.tsx is mounted
+   * on the *target* entity's own view/edit pages (x-custom-components
+   * target: [view, edit], see docs/knowledge/code-generation-custom-
+   * extensions.md §2). revalidatePath silently no-ops on a non-matching
+   * path, so this was dead code, not a caught exception. Mirrors the
+   * dynamic-segment form code_generator/templates/attachment_actions.ts.jinja2
+   * already uses for the same cross-entity-invalidation shape.
+   */
+  function revalidateApprovableTarget(entityName: string | null, targetId: string | null): void {
+    if (!entityName || !targetId) return;
+    revalidatePath(`/[locale]/${entityName}/view/${targetId}`, 'page');
+    revalidatePath(`/[locale]/${entityName}/edit/${targetId}`, 'page');
   }
 
   async function approveApprovalRequest(id: string, message?: string): Promise<void> {
@@ -161,7 +179,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     });
     // Fire-and-forget notification (trigger #3): the requester learns the
     // outcome without sharing the approval_history transaction.
-    const { recipientId, entityName, href } = await getApprovalRequestRecipient(id);
+    const { recipientId, entityName, targetId, href } = await getApprovalRequestRecipient(id);
     if (recipientId && recipientId !== userId) {
       notify(recipientId, 'approval_responded', {
         title: `Your ${entityName ?? 'request'} was approved`,
@@ -171,7 +189,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
         message: message ?? null,
       });
     }
-    revalidatePath('/approval_request');
+    revalidateApprovableTarget(entityName, targetId);
   }
 
   async function rejectApprovalRequest(
@@ -232,7 +250,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
         await deps.dispatchOnRejected(tx, req.approval_flow.entity_name, approvableData.id, userId);
       }
     }, { isolationLevel: 'Serializable' });
-    const { recipientId, entityName, href } = await getApprovalRequestRecipient(id);
+    const { recipientId, entityName, targetId, href } = await getApprovalRequestRecipient(id);
     if (recipientId && recipientId !== userId) {
       notify(recipientId, 'approval_responded', {
         title: `Your ${entityName ?? 'request'} was rejected`,
@@ -242,7 +260,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
         message: message ?? null,
       });
     }
-    revalidatePath('/approval_request');
+    revalidateApprovableTarget(entityName, targetId);
   }
 
   async function resubmitApprovalRequest(id: string, message?: string): Promise<void> {
@@ -267,7 +285,8 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
         },
       });
     });
-    revalidatePath('/approval_request');
+    const { entityName, targetId } = await getApprovalRequestRecipient(id);
+    revalidateApprovableTarget(entityName, targetId);
   }
 
   return {
