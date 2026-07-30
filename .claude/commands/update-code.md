@@ -26,12 +26,18 @@ Task: $ARGUMENTS
 
 Run in this order:
 
-1. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-2. `npm run test:e2e:cy:api` — API Cypress specs only
-3. `npm run lint`
-4. `npm audit --omit=dev --audit-level=high`
+1. `npm run test:pytest`      — Python unit tests for code generator
+2. `npm run test:vitest`     — vitest unit/component tests
+3. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+4. `npm run test:e2e:cy:api` — API Cypress specs only
+5. `npm run lint`
+6. `npm audit --omit=dev --audit-level=high`
 
-(`npm run test:pytest` and `npm run test` are skipped unless the change affects Python or component code.)
+Steps 1 and 2 run unconditionally, with no "unless affected" exemption: CI's
+`unit-tests` and `pytest` jobs run on every push/PR to `main`/`master` with
+no path filter, so a local gate that conditionally skips either can go green
+while CI goes red on the same commit (see
+`docs/knowledge/gate-exemption-must-be-machine-checkable.md` — cmd_498).
 
 ## Debug priority
 
