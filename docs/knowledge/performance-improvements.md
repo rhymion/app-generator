@@ -267,6 +267,49 @@ export async function addEntityComment(...) {
 }
 ```
 
+### `revalidatePath`'s path argument must match a real route file
+
+`revalidatePath` never throws for a path that matches nothing — it just does nothing for
+that page. A literal path with no dynamic segment (`revalidatePath('/entity')`) only
+targets that exact route file; a path containing a dynamic segment (e.g. `/entity/[id]`)
+requires the second `type` argument (`'page'` or `'layout'`) or Next.js rejects it. Locale
+routes live under `app/[locale]/...`, so any path under a localized segment needs the
+literal `[locale]` segment in the pattern too:
+
+```ts
+// Wrong — matches nothing: no [locale] segment, no type for the dynamic id segment.
+revalidatePath('/entity');
+
+// Right — matches app/[locale]/entity/view/[id]/page.tsx.
+revalidatePath('/[locale]/entity/view/[id]', 'page');
+```
+
+This matters most for actions that invalidate a page *other than the one they're
+conceptually attached to* — an approval action attached to `approval_request` but
+invalidating the target entity's own view/edit pages (`lib/approval_request/
+actions_core.ts`), or an attachment action invalidating its owner entity's pages
+(`code_generator/templates/attachment_actions.ts.jinja2`). Both need view *and* edit
+invalidated, since `x-custom-components` can mount a component (`ApprovalSection`,
+an attachment list) on either page (`target: [view, edit]` — see
+`code-generation-custom-extensions.md` §2):
+
+```ts
+revalidatePath(`/[locale]/${entityName}/view/${targetId}`, 'page');
+revalidatePath(`/[locale]/${entityName}/edit/${targetId}`, 'page');
+```
+
+**Next.js 16 caveat (may make this hard to notice in manual testing):** per the
+[`revalidatePath` docs](https://nextjs.org/docs/app/api-reference/functions/revalidatePath),
+"Server Functions: Updates the UI immediately (if viewing the affected path). **Currently,
+it also causes all previously visited pages to refresh when navigated to again. This
+behavior is temporary and will be updated in the future to apply only to the specific
+path.**" On today's Next.js (16.2.x), calling `revalidatePath` with *any* argument — even
+one that matches nothing — still refreshes previously-visited pages on next visit, so a
+wrong path argument does not currently reproduce as a visible stale-page bug. It will once
+Next.js ships the narrower, path-matching-only behavior the docs describe as planned —
+getting the path right now is what keeps this code correct once that ships, not just a
+cosmetic cleanup.
+
 ---
 
 ## Summary Table
