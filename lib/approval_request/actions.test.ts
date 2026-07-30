@@ -154,7 +154,7 @@ describe('revalidatePath targeting (cmd_491)', () => {
         requestor_role_id: 'requestor-role',
       },
       approvable: { creator_id: 'user-1' },
-      status: 'Rejected',
+      status: 'rejected',
     });
     resolveApprovableTarget.mockResolvedValue({ id: 'lr-42' });
   };
@@ -162,14 +162,14 @@ describe('revalidatePath targeting (cmd_491)', () => {
   it('approveApprovalRequest revalidates the target entity view + edit pages', async () => {
     stubApprovalFlowLookup();
     arUpdate.mockResolvedValue({
-      status: 'Approved',
+      status: 'approved',
       approvable_id: 'appr-1',
       approval_flow: { entity_name: 'leave_request' },
     });
     approvableFindUnique.mockResolvedValue({
       id: 'appr-1',
       approved_at: new Date(),
-      approval_requests: [{ status: 'Approved' }],
+      approval_requests: [{ status: 'approved' }],
     });
 
     await approveApprovalRequest('req-1');
@@ -181,7 +181,7 @@ describe('revalidatePath targeting (cmd_491)', () => {
 
   it('rejectApprovalRequest revalidates the target entity view + edit pages', async () => {
     stubApprovalFlowLookup();
-    arUpdate.mockResolvedValue({ id: 'req-1', status: 'Rejected', approvable_id: 'appr-1' });
+    arUpdate.mockResolvedValue({ id: 'req-1', status: 'rejected', approvable_id: 'appr-1' });
     approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: null });
 
     await rejectApprovalRequest('req-1');
@@ -210,7 +210,7 @@ describe('revalidatePath targeting (cmd_491)', () => {
         requestor_role_id: 'requestor-role',
       },
       approvable: null,
-      status: 'Rejected',
+      status: 'rejected',
     });
     // No approvable bridge (creator_id unresolvable) — permission passes via
     // the requestor-role fallback in assertResubmitPermission instead.
