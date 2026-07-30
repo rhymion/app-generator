@@ -34,6 +34,34 @@ PRISMA_SCHEMA_PATH = Path(__file__).parent.parent.parent / "prisma" / "schema.pr
 STAGE2_REFERENCE_PATH = Path(__file__).parent / "fixtures" / "stage2_reference_json_schema.yaml"
 STAGE4_REFERENCE_PATH = Path(__file__).parent / "fixtures" / "stage4_reference.yaml"
 
+# scripts/prj_sync.py treats a sibling `../prj` directory (one level above
+# this repo's root) as the signal that it is mounted as a consumer's
+# submodule, and overlays that consumer's schema onto json_schema.yaml /
+# schema.prisma / messages/*.json (its own PRJ_DIR = PROJECT_ROOT.parent /
+# "prj"). The invariant tests below assert something about *this* project's
+# own default schema, which stops being true the moment a consumer schema
+# has been substituted in -- so they must refuse to run under the exact
+# condition prj_sync.py itself uses to decide "am I being consumed as a
+# submodule" (cmd_492: a prj:synced tree produced a wall of unrelated
+# content diffs here instead of a "you're testing the wrong file" signal).
+REPO_ROOT = SCHEMA_PATH.parent.parent
+PRJ_SYNC_SIBLING = REPO_ROOT.parent / "prj"
+
+
+def _fail_if_prj_synced_tree():
+    if PRJ_SYNC_SIBLING.is_dir():
+        pytest.fail(
+            f"Refusing to run: {PRJ_SYNC_SIBLING} exists, meaning `npm run "
+            "prj:sync` would overlay (or already did overlay) a consumer's "
+            "schema onto code_generator/json_schema.yaml / prisma/schema.prisma. "
+            "This test asserts an invariant about the framework's OWN default "
+            "schema, which is meaningless once a consumer schema has been "
+            "substituted in. Run pytest from a tree with no sibling `prj/` "
+            "directory (e.g. the standalone app-generator checkout, as CI "
+            "does), not from a submodule mount that has run prj:sync.",
+            pytrace=False,
+        )
+
 # The 9 entities that pair a synthesized raw (`__{name}`) with a
 # user-authored view (`{name}`) -- i.e. every entity that was
 # `{name}_detail` before Stage 4.
@@ -72,6 +100,7 @@ def _deep_diff(a, b, path=""):
 
 
 def test_stage4_derivation_matches_reference(tmp_path):
+    _fail_if_prj_synced_tree()
     out_path = tmp_path / ".generated" / "json_schema.yaml"
     build_user_schema(SCHEMA_PATH, PRISMA_SCHEMA_PATH, out_path)
 
@@ -201,6 +230,7 @@ def test_phase_a_golden_diff_zero(tmp_path):
     `{base}_detail` (view) content == new `{base}` content (modulo the
     expected self-ref rename), for every paired entity. Standalone and
     pass-through entities must be byte-for-byte untouched by the rename."""
+    _fail_if_prj_synced_tree()
     out_path = tmp_path / ".generated" / "json_schema.yaml"
     build_user_schema(SCHEMA_PATH, PRISMA_SCHEMA_PATH, out_path)
     new = _load(out_path)
@@ -293,6 +323,7 @@ def test_default_schema_bridge_entities_are_unaffected_by_internal_file(tmp_path
     and asserts identical output only for entities the user schema itself
     defines, while separately confirming the internal-only entity really is
     internal-only (present when consulted, absent when hidden)."""
+    _fail_if_prj_synced_tree()
     user_definitions = _load(SCHEMA_PATH)["definitions"]
 
     with_internal_out = tmp_path / "with_internal" / "json_schema.yaml"
