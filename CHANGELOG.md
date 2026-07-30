@@ -3,6 +3,25 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+
+### Removed
+- **`x-reservation.actions` sub-feature (2026-07-30 ruling)** — the declarative
+  `ship` / `release` / `cancel` lifecycle-action mechanism under `x-reservation`
+  (`reservation_actions.ts` generation, per-action
+  `app/api/{parent}/[id]/actions/{ship,release,cancel}/route.ts` handlers, and the
+  `ReservationActionButtons` UI component) has been removed. `x-reservation` is
+  retained, scoped to exactly two roles: (1) inventory allocation (`count` mode) and
+  (2) specific-resource reservation (`item` mode, e.g. a hotel `room`). Approval/
+  rejection lifecycle for the owning entity goes through the generic Approval Flow
+  System's `approve` / (terminal) `reject` instead (`x-approval`). No entity in the
+  default schema or any known consumer schema ever declared an `actions` block, so
+  this closes zero generated-output diff for existing apps — confirmed by comparing
+  `generate-code` output before/after this change (identical). `code_generator/
+  validate.py` now hard-rejects any schema that still declares `x-reservation.actions`.
+  See [docs/knowledge/appendix/inventory-reservation-split.md](docs/knowledge/appendix/inventory-reservation-split.md)
+  §1.1.
+
 ## [3.0.0] - 2026-07-28
 
 > Consolidates the feature areas added since 2.0.0: GCP Cloud Run deployment,
@@ -12,8 +31,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 > extended search and FK autocomplete/auto-inference, notification
 > persistence, the single-file entity schema format, `nativeEnum` type
 > safety, and organization-isolation enforcement. Released as a major bump
-> because the performance, data-protection, audit-log, and enum-type-safety
-> work include breaking changes.
+> because the performance, data-protection, audit-log, notification-
+> persistence, enum-type-safety, and organization-isolation work include
+> breaking changes.
 > Full upgrade steps: [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
 
 ### BREAKING
@@ -58,6 +78,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `reaction.type`, `attachment.type`, `dashboard_widget.chart_type`,
   `dashboard_widget.stack_mode`, `dashboard_widget.group_by_bucket`. `prisma
   db push` or `prisma migrate deploy` required.
+- **Notification persistence requires the new `notification` table** — the
+  in-memory SSE notification store was replaced with a Prisma-backed
+  `notification` table. Until the table is created, `GET
+  /api/notifications` and `POST /api/notifications/mark-read` throw and
+  return `500` to every logged-in user (the bell icon is on the shared
+  header); notification writes fail silently instead. `prisma db push` or
+  `prisma migrate deploy` required.
+- **Organization-scoped mutation paths now deny cross-org access** —
+  generated API routes and server actions for org-scoped entities previously
+  authorized update/delete/CSV-import-update purely via
+  `creator_id`/`assignee_id`, without checking organization membership,
+  allowing a user with `general.update`/`general.delete`/`general.import` to
+  act on another organization's record by ID. Cross-organization requests
+  now resolve to a deny (`404` on API routes, silent no-op on session
+  actions). No schema change; only bites a deployment whose client or test
+  code depended on the old (permissive) cross-org behavior.
 
 ### Added
 - **GCP Cloud Run deployment** (`x-cloud` annotation, opt-in — disabled unless
@@ -153,7 +189,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Notification persistence** (DB-backed, cursor-based polling) — in-memory
   SSE notification store replaced with a Prisma-backed `notification` table.
   Cursor-based DB polling delivers unread notifications reliably across server
-  restarts.
+  restarts. See BREAKING above — the new table requires `prisma db push` on
+  existing databases.
 - **Single-file entity format** (`_detail` suffix retired) —
   `json_schema.yaml` entity declarations no longer require a paired `*_detail`
   block; the generator derives field types directly from the Prisma schema.
@@ -164,7 +201,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Organization isolation enforcement** — generated API routes for org-scoped
   entities deny create / update / delete across organization boundaries. A
   session-lookup miss in an org-filtered query now returns an explicit deny
-  rather than a silent miss.
+  rather than a silent miss. See BREAKING above — a client or test relying on
+  the old cross-org behavior will now be denied.
 
 > **Backward compatibility**: GCP deployment and attachment display opt-out
 > are non-breaking (pure opt-in / default-preserving). FK index coverage
@@ -172,7 +210,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 > (`scripts/create-gin-indexes.sql`), and the `SearchOpts.count: false`
 > COUNT(*) opt-out are additive only and backward-compatible. The audit log
 > viewer page itself adds no required input, but it surfaces data through a
-> relation that is a breaking schema change — see BREAKING above. The five
+> relation that is a breaking schema change — see BREAKING above. The seven
 > items in **BREAKING** above require action before upgrading a pre-3.0
 > deployment — see [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
 

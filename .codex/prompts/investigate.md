@@ -13,7 +13,7 @@ This is an **investigate** task. Read AGENTS.md before starting.
 
 ## Completion gate
 
-Gate: none. Cite findings with `file:line` references.
+None. See `.claude/commands/investigate.md §Completion gate` for authoritative definition.
 
 No file edits, no builds, no tests, no docker.
 

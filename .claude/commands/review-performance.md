@@ -83,6 +83,15 @@ Scope: $ARGUMENTS (if empty, review the entire codebase)
 - **Wide-table `include` without `select`** — generated `getters.ts` uses `include:` for relations but fetches all scalar columns; for entities with many fields, explicit `select` projections would reduce DB payload.
 - **No DB-level index on `assignee_id`** — generated models with `assignee_id` are filtered in the `WHERE OR` clause, but verify `@@index([assignee_id])` exists in each generated schema; missing index causes full table scan for assignee-restricted users.
 
+## Completion gate
+
+Run:
+
+1. `npm audit --omit=dev --audit-level=high`
+
+(No build/test/lint required — this is a read-only review task with no code
+changes; npm audit is run as a companion vulnerability check.)
+
 > **Note**: When running lint or typecheck in isolation, prefix with
 > `npm run generate-code` first. See `AGENTS.md §Generated-code prerequisites
 > for gates` for the full rule.

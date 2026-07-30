@@ -916,6 +916,14 @@ export async function populate{{ pascal }}WithRejectedApproval(creatorId: string
       updater_id: creatorId,
     },
   });
+  // cmd_479: mirror service_after_create.ts's afterCreate() — stamp the
+  // approvable's own creator_id once approval_requests exist, or the
+  // approve/reject notification's recipient lookup (getApprovalRequestRecipient)
+  // resolves to null and silently skips the notify() call.
+  await prisma.approvable.update({
+    where: { id: {{ approvable_dep.var_name }}Item.id },
+    data: { creator_id: creatorId },
+  });
   const approvalRequests = [];
   for (const flowId of approvalFlowIds) {
     const ar = await prisma.approval_request.create({
@@ -953,6 +961,11 @@ export async function populate{{ pascal }}WithTerminalRejectedApproval(creatorId
       creator_id: creatorId,
       updater_id: creatorId,
     },
+  });
+  // cmd_479: see the Rejected variant above for why this stamp is needed.
+  await prisma.approvable.update({
+    where: { id: {{ approvable_dep.var_name }}Item.id },
+    data: { creator_id: creatorId },
   });
   const approvalRequests = [];
   for (const flowId of approvalFlowIds) {
@@ -992,6 +1005,11 @@ export async function populate{{ pascal }}WithApproval(creatorId: string, approv
       updater_id: creatorId,
       ...overrides,
     },
+  });
+  // cmd_479: see the Rejected variant above for why this stamp is needed.
+  await prisma.approvable.update({
+    where: { id: {{ approvable_dep.var_name }}Item.id },
+    data: { creator_id: creatorId },
   });
   const approvalRequests = [];
   for (const flowId of approvalFlowIds) {

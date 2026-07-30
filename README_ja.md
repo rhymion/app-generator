@@ -515,7 +515,7 @@ app-generator/
 
 > **後方互換（v1.4 → v1.5）**: 非破壊的変更。既存のスキーマはそのまま動作します。エンティティ横断検索はエンティティごとのオプトイン（`x-generate.search: true`）です。承認後イベント発火はスキーマに `x-approval.on_approved` を設定した場合のみ有効になります。
 
-> **後方互換（v2.0 → v3.0）**: 4領域で**破壊的変更**あり — デフォルト `statement_timeout`（30秒、直結接続パス）、`pageSize > 200` は切り詰めではなく `400` を返すように変更、新規 `user.anonymized_at` カラム、新規 `audit_log.actor_user` 外部キー制約。後二者は既存データベースで `prisma db push`/`migrate deploy` が必要（外部キーは事前に孤立行の掃除が必要な場合あり）。GCP デプロイ・添付ファイル表示オプトアウトは非破壊的です。詳細は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照してください。
+> **後方互換（v2.0 → v3.0）**: 7領域で**破壊的変更**あり — デフォルト `statement_timeout`（30秒、直結接続パス）、`pageSize > 200` は切り詰めではなく `400` を返すように変更、組織スコープの更新系操作がID指定での組織跨ぎアクセスを拒否するように変更、新規 `user.anonymized_at` カラム、新規 `audit_log.actor_user` 外部キー制約、6件の旧`Int`フィールドの`nativeEnum`化、新規 `notification` テーブル。後四者は既存データベースで `prisma db push`/`migrate deploy` が必要（`nativeEnum` 化フィールドはデータ損失を避けるため事前に明示的な `ALTER TABLE ... USING` が必要・外部キーは事前に孤立行の掃除が必要な場合あり）。GCP デプロイ・添付ファイル表示オプトアウトは非破壊的です。詳細は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照してください。
 
 ### 開発中
 

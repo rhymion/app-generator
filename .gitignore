@@ -111,6 +111,8 @@ lib/dashboard/service.ts
 lib/dashboard/types.ts
 !lib/organization/getters_associated.ts
 !lib/approval_request/actions.ts
+!lib/approval_request/actions.test.ts
+!lib/approval_request/actions_core.ts
 !lib/approval_request/order-check.ts
 !lib/setting/password-actions.ts
 !lib/audit_log/getters.ts

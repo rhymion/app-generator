@@ -31,7 +31,7 @@ jobs:
       - run: npm ci
       - name: Generate Prisma client
         run: npm run db:generate
-      - run: npm test
+      - run: npm run test:vitest
 
   audit:
     name: Dependency Audit
@@ -57,6 +57,65 @@ jobs:
         run: pip install -r requirements.txt
       - name: pip-audit (requirements.txt)
         run: pip-audit -r requirements.txt
+
+  audit-full-scope:
+    name: Dependency Audit (full scope, non-blocking)
+    runs-on: ubuntu-latest
+    # Failsafe layer alongside the blocking `audit` job above. That job
+    # scopes to --omit=dev so a high-severity CVE in a dev-only dependency
+    # never blocks a merge — see docs/knowledge/dependency-bump-acceptance-
+    # criteria.md (cmd_482): three dev-only high CVEs sat invisible on CI
+    # for a week under that design, only found by manual audit. This job
+    # closes that blind spot by auditing the full tree (prod + dev) at the
+    # same --audit-level=high threshold, but never fails the run — findings
+    # are surfaced via the job summary and a JSON artifact instead of a red
+    # check. Who reviews this output and how often is documented in the
+    # same doc; this job only produces the signal, it does not consume it.
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - name: npm audit (full scope incl. devDependencies, high+, non-blocking)
+        continue-on-error: true
+        run: npm audit --audit-level=high --json > audit-full-scope.json
+      - name: Summarize audit result (severity breakdown, step summary)
+        if: always()
+        run: |
+          node -e '
+            const fs = require("fs");
+            let data = {};
+            try {
+              data = JSON.parse(fs.readFileSync("audit-full-scope.json", "utf8"));
+            } catch (e) {
+              // Missing/invalid JSON (e.g. npm audit errored before it could
+              // write a report) — surface as unknown rather than crash the step.
+            }
+            const v = (data.metadata && data.metadata.vulnerabilities) || {};
+            const lines = [
+              "## Full-scope npm audit (non-blocking, includes devDependencies)",
+              "",
+              "This job never fails the CI run. See `docs/knowledge/dependency-bump-acceptance-criteria.md` for who reviews this output and how often.",
+              "",
+              "| severity | count |",
+              "|---|---|",
+              `| critical | ${v.critical ?? "n/a"} |`,
+              `| high | ${v.high ?? "n/a"} |`,
+              `| moderate | ${v.moderate ?? "n/a"} |`,
+              `| low | ${v.low ?? "n/a"} |`,
+              `| **total** | **${v.total ?? "n/a"}** |`,
+            ];
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+          '
+      - name: Upload audit JSON artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-full-scope
+          path: audit-full-scope.json
+          retention-days: 30
 
   e2e-tests:
     name: E2E Tests

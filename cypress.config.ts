@@ -267,42 +267,6 @@ export default defineConfig({
           return JSON.parse(JSON.stringify({ apiKey: creatorApiKey, ownedRoleId: ownedRole.id }));
         },
         ...getGeneratedTasks(),
-        async 'db:seedReservationInventory'(params: { quantity: number }) {
-          const { seedReservationInventory } = require('./cypress/support/purchase_order/reservation_helper');
-          return await seedReservationInventory(params.quantity);
-        },
-        async 'db:getInventoryAllocation'(params: { purchase_order_id: string }) {
-          const { getInventoryAllocation } = require('./cypress/support/purchase_order/reservation_helper');
-          return await getInventoryAllocation(params.purchase_order_id);
-        },
-        async 'db:setInventoryQuantity'(params: { inventory_id: string; quantity: number }) {
-          const { setInventoryQuantity } = require('./cypress/support/purchase_order/reservation_helper');
-          return await setInventoryQuantity(params.inventory_id, params.quantity);
-        },
-        async 'db:seedSecondInventoryLot'(params: { product_id: string; quantity: number; location: string }) {
-          const { seedSecondInventoryLot } = require('./cypress/support/purchase_order/reservation_helper');
-          return await seedSecondInventoryLot(params.product_id, params.quantity, params.location);
-        },
-        async 'db:seedSecondProduct'(params: { quantity: number }) {
-          const { seedSecondProduct } = require('./cypress/support/purchase_order/reservation_helper');
-          return await seedSecondProduct(params.quantity);
-        },
-        async 'db:setupPurchasePerItemSingleApprovalFlow'() {
-          const { setupPurchasePerItemSingleApprovalFlow } = require('./cypress/support/purchase_order/reservation_helper');
-          return await setupPurchasePerItemSingleApprovalFlow();
-        },
-        async 'db:getPurchasePerItemsForOrder'(params: { purchase_order_id: string }) {
-          const { getPurchasePerItemsForOrder } = require('./cypress/support/purchase_order/reservation_helper');
-          return await getPurchasePerItemsForOrder(params.purchase_order_id);
-        },
-        async 'db:getPurchasePerItemById'(params: { id: string }) {
-          const { getPurchasePerItemById } = require('./cypress/support/purchase_order/reservation_helper');
-          return await getPurchasePerItemById(params.id);
-        },
-        async 'db:getPurchasePerItemChildren'(params: { parentId: string }) {
-          const { getPurchasePerItemChildren } = require('./cypress/support/purchase_order/reservation_helper');
-          return await getPurchasePerItemChildren(params.parentId);
-        },
         async 'db:getApprovableById'(params: { approvable_id: string }) {
           const { getApprovableById } = require('./cypress/support/approval_test_helpers');
           return await getApprovableById(params.approvable_id);

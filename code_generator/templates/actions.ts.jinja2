@@ -72,7 +72,7 @@ export async function invalidate{{ parent_pascal }}(id: string): Promise<void> {
   // write-once stub: implement invalidate{{ parent_pascal }} in lib/{{ parent }}/invalidate_handler.ts
   throw new Error('invalidate{{ parent_pascal }}: handler not configured');
   {% endif %}
-  revalidatePath('/{{ parent }}');
+  revalidatePath('/[locale]/{{ parent }}', 'page');
 }
 {% endif %}
 {% if has_commentable %}

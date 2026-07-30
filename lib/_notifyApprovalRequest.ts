@@ -28,6 +28,15 @@ interface NotifyOptions {
    * creator doesn't get notified about their own request.
    */
   excludeUserId?: string | null;
+  /**
+   * The approvable's owning entity (e.g. 'leave_request') and that row's own
+   * id. When both are provided, the notification links to that entity's
+   * detail page (`/{targetEntityName}/view/{targetId}`) — the item the
+   * approver actually needs to review — instead of the approval_request row,
+   * which has no detail page of its own (cmd_479).
+   */
+  targetEntityName?: string | null;
+  targetId?: string | null;
 }
 
 /**
@@ -68,12 +77,22 @@ export async function notifyApprovalRequestCreated(
 
   const entityLabel = options.entityLabel ?? req.approval_flow.entity_name ?? 'request';
 
+  // cmd_479: link to the approvable's own detail page, not the
+  // approval_request (which has no view page of its own — the old
+  // `/approval_request/view/{id}` link 404'd). Omit href entirely when the
+  // target isn't known so the bell still shows a (non-clickable) notice
+  // rather than a broken link.
+  const href =
+    options.targetEntityName && options.targetId
+      ? `/${options.targetEntityName}/view/${options.targetId}`
+      : undefined;
+
   for (const u of role.users) {
     if (u.id === excludeUserId) continue;
     if (orgId && !u.organizations.some((o) => o.id === orgId)) continue;
     notify(u.id, 'approval_requested', {
       title: `New approval request: ${entityLabel}`,
-      href: `/approval_request/view/${req.id}`,
+      href,
       approvalRequestId: req.id,
       entityName: req.approval_flow.entity_name,
     });

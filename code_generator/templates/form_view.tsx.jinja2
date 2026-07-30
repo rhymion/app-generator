@@ -44,9 +44,6 @@ import { AppDetailShell, AppDetailHeader, AppFieldText, AppFieldBoolean{% if has
 {% for comp in entity_view_components %}
 import {{ comp.name }} from '{{ comp.path if comp.path else "./" + comp.name }}';
 {% endfor %}
-{% if reservation_config and reservation_config.has_actions %}
-import { ReservationActionButtons } from './ReservationActionButtons';
-{% endif %}
 {% if is_splittable and split_config %}
 import { SplitActionSection } from './SplitActionSection';
 {% endif %}
@@ -95,9 +92,6 @@ export default function FormView({ src, permissions{% if entity_view_components 
 {{ child_view_grids }}
 {% endif %}
       <AuditInfo src={src} />
-{% if reservation_config and reservation_config.has_actions %}
-      <ReservationActionButtons id={src.id} />
-{% endif %}
 {% if is_splittable and split_config %}
       <SplitActionSection
         id={src.id}

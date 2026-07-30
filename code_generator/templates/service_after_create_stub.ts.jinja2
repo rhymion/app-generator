@@ -50,9 +50,14 @@ export async function afterCreate(
     });
     // Trigger #2 (notification design 2026-05-11): notify every
     // approver-role holder for each created approval_request.
+    // cmd_479: link to this entity's own detail page (id already in scope
+    // here), not the approval_request row.
+    const targetId = created.id as string | undefined;
     for (const reqId of createdRequestIds) {
       await notifyApprovalRequestCreated(tx, reqId, {
         excludeUserId: creatorId,
+        targetEntityName: '{{ model }}',
+        targetId,
       });
     }
   }

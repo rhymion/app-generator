@@ -31,8 +31,12 @@ Run in this order:
 
 1. `npm run test:pytest`      — Python unit tests for code generator
 2. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-3. `npm run test:e2e:cy:api` — API Cypress specs only
-4. `npm run lint`
+3. `npm run check:generated` — generated code matches templates/schema
+4. `npm run test:e2e:cy:api` — API Cypress specs only
+5. `npm run test:e2e:cy:ui`  — non-API Cypress specs (desktop + mobile)
+6. `npm run lint`
+7. `npm audit --omit=dev --audit-level=high`
+8. `pip-audit -r requirements.txt`
 
 (`npm run test` is skipped — component code unchanged unless explicitly modified.)
 
