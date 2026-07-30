@@ -532,7 +532,7 @@ All architectural documentation lives in `docs/knowledge/`:
 
 > **Backward compatibility (v1.4 → v1.5)**: Non-breaking. Existing schemas work unchanged. Cross-entity search is opt-in per entity (`x-generate.search: true`). Approval event dispatch activates only when `x-approval.on_approved` is set in the schema.
 
-> **Backward compatibility (v2.0 → v3.0)**: **Breaking** in four areas — default `statement_timeout` (30s, direct-connection path), `pageSize > 200` now returns `400` instead of truncating, the new `user.anonymized_at` column, and the new `audit_log.actor_user` foreign key, both of which require `prisma db push`/`migrate deploy` on pre-3.0 databases (the FK can also require cleaning up orphaned rows first). GCP deployment and attachment display opt-out are non-breaking. See [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
+> **Backward compatibility (v2.0 → v3.0)**: **Breaking** in seven areas — default `statement_timeout` (30s, direct-connection path), `pageSize > 200` now returns `400` instead of truncating, organization-scoped mutation paths now deny cross-org access by ID, the new `user.anonymized_at` column, the new `audit_log.actor_user` foreign key, the `nativeEnum` promotion of 6 previously-`Int` fields, and the new `notification` table — the last four require `prisma db push`/`migrate deploy` on pre-3.0 databases (the `nativeEnum` fields need an explicit `ALTER TABLE ... USING` first to avoid data loss; the FK can also require cleaning up orphaned rows first). GCP deployment and attachment display opt-out are non-breaking. See [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
 
 ### In Progress
 
