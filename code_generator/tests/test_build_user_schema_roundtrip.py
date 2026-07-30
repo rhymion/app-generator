@@ -307,22 +307,25 @@ def test_merge_internal_definitions_missing_file_is_noop(tmp_path):
 
 
 def test_default_schema_bridge_entities_are_unaffected_by_internal_file(tmp_path):
-    """The framework's own json_schema.yaml already defines approvable /
-    commentable / attachable itself, so the sibling json_schema_internal.yaml
-    (real file, not a fixture) must leave *those* entities' Stage 4 output
-    completely untouched -- user-always-wins (see _merge_internal_definitions).
+    """The user-always-wins invariant for json_schema_internal.yaml (real
+    file, not a fixture; see _merge_internal_definitions): for any entity
+    the default json_schema.yaml still defines itself, the sibling internal
+    file must leave that entity's Stage 4 output completely untouched.
 
     This is NOT the same invariant as "internal file changes nothing at all":
-    an entity the default schema does *not* define itself (e.g.
-    `notification`, added by cmd_475) is legitimately filled in from the
+    an entity the default schema does *not* define itself -- e.g.
+    `notification` (added by cmd_475), or `approvable` / `commentable` /
+    `attachable` themselves since cmd_497 removed their duplicate
+    definitions from json_schema.yaml (they had been shadowing the identical
+    json_schema_internal.yaml copies) -- is legitimately filled in from the
     internal file -- that is the file's whole purpose, not a violation. A
     full byte-for-byte comparison against a frozen reference would reject
     every future internal-only addition, which defeats the point of the
     file. So this guard builds the schema twice -- once with the real
     internal file consulted, once with it hidden from build_user_schema --
     and asserts identical output only for entities the user schema itself
-    defines, while separately confirming the internal-only entity really is
-    internal-only (present when consulted, absent when hidden)."""
+    still defines, while separately confirming the internal-only entity
+    really is internal-only (present when consulted, absent when hidden)."""
     _fail_if_prj_synced_tree()
     user_definitions = _load(SCHEMA_PATH)["definitions"]
 
