@@ -27,7 +27,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     await assertApprovalOrder(id);
 
     const terminal = isTerminalReject(req.approval_flow.entity_name);
-    const newStatus = terminal ? 'TerminalRejected' : 'Rejected';
+    const newStatus = terminal ? 'terminal_rejected' : 'rejected';
     // approval_history.post_status is a separate legacy Int snapshot column (out of scope).
     const newStatusOrdinal = terminal ? 3 : 2;
 

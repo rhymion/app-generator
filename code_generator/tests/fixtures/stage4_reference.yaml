@@ -454,10 +454,10 @@ definitions:
         type: string
         _prisma_native_enum_type: ApprovalRequestStatus
         enum:
-          - Pending
-          - Approved
-          - Rejected
-          - TerminalRejected
+          - pending
+          - approved
+          - rejected
+          - terminal_rejected
 
     x-display:
       table:
@@ -560,11 +560,11 @@ definitions:
         type: string
         _prisma_native_enum_type: ReactionType
         enum:
-          - Like
-          - Love
-          - Laugh
-          - Surprised
-          - Sad
+          - like
+          - love
+          - laugh
+          - surprised
+          - sad
       user_id:
         type: string
         pattern: ^c[a-z0-9]{24,}$

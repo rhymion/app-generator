@@ -1005,9 +1005,7 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
         raw = values[1] if len(values) > 1 else (values[0] if values else None)
         if raw is None:
             return ''
-        if cat == 'enum':
-            return _enum_label(field, raw)
-        return str(raw)
+        return _enum_label(field, raw)
 
     elif cat == 'number':
         val = 200

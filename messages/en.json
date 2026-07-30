@@ -203,7 +203,7 @@
     "approved": "Approved",
     "pending": "Pending",
     "rejected": "Rejected",
-    "terminalRejected": "Terminal Rejection"
+    "terminal_rejected": "Terminal Rejected"
   },
   "ReactionType": {
     "laugh": "Haha",
