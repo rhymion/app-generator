@@ -34,6 +34,18 @@ approval_request, approval_flow, dashboard
 
 Plus a 9th, read-only permission row on `audit_log` (create/update/delete: false).
 
+This is a **fixed enumeration, not schema-derived**: consumer-added entities
+(see "Adding Tests for a New Entity" below) are never in this list, so the
+seeded `Administrator` role starts with zero permissions on them until an
+admin explicitly grants them via the Permissions UI — a deliberate
+least-privilege-by-default boundary, not a bug. See
+`docs/knowledge/seed-tenant-credential-hardening.md` §"Fixed permission
+enumeration" for the full rationale, plus that doc's credential-hardening
+change (production provisioning now requires `SEED_ADMIN_EMAIL`/
+`SEED_ADMIN_PASSWORD` and mints a random `api_key`, instead of the fixed
+`admin@example.com`/`password123`/literal-`api_key` defaults below staying
+usable in production).
+
 Only the admin account (`admin@example.com`) receives this role by default. New users start
 with zero permissions until an Administrator explicitly assigns roles.
 

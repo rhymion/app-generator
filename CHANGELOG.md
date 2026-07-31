@@ -89,6 +89,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   for the naming rule, rationale, consumer-impact list, and the exact
   migration SQL (verified against an isolated test database seeded with
   pre-migration rows).
+- **`db:seed-tenant` now requires `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`
+  under `NODE_ENV=production` (cmd_504)** — `scripts/seed-tenant.ts`
+  previously seeded the bootstrap admin as `admin@example.com` /
+  `password123` with a fixed `api_key` literal unconditionally; since
+  app-generator is a public repo, any production deployment provisioned
+  without a separate manual rotation shipped with a publicly known admin
+  login. Every production-equivalent entry point (`vercel-build`,
+  `build:full`, GCP's `gcp-seed.sh`) now fails fast unless both env vars are
+  set, and always mints a fresh random `api_key` instead of the literal.
+  `test`/`development` are unaffected — the fixed defaults are unchanged, so
+  existing Cypress/vitest fixtures pinned to them keep working. See
+  [docs/knowledge/seed-tenant-credential-hardening.md](docs/knowledge/seed-tenant-credential-hardening.md)
+  for the required env vars and the remediation runbook for a deployment
+  already seeded with the old defaults.
 
 ### Added
 - **GCP Cloud Run deployment** (`x-cloud` annotation, opt-in — disabled unless
