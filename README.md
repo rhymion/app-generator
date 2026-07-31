@@ -490,6 +490,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | Comment bridge system detail |
 | [cleanup.md](docs/knowledge/cleanup.md) | Removing generated files: default cleanup, manifest vs schema-driven, `--prune-orphans`, orphan handling |
 | [gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) | GCP Cloud Run deployment: `x-cloud` opt-in, Dockerfile, GCS uploads, environment automation scripts |
+| [claude-code-settings-consumer-side.md](docs/knowledge/claude-code-settings-consumer-side.md) | `.claude/settings.json` discovery rules, OS-independent permission syntax, the compound-command matching trap, and how to verify a settings file actually loaded — read this before editing `.claude/settings.json` here or in `app-template` |
 
 ---
 
