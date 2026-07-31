@@ -111,13 +111,21 @@ rules that make sense for everyone (the gate commands this project's
 destructive-operation denials) and should not bake in a specific
 permission mode.
 
-`app-generator/.claude/settings.json` currently still sets
-`defaultMode: "bypassPermissions"` directly (predates this doc). Per the
-principle above that should move to each user's own
-`settings.local.json` too, for the same reason `app-template`'s new file
-doesn't set it — flagged here rather than changed silently, since it's an
-existing, relied-upon default and changing it is a behavior change outside
-this doc's scope.
+`app-generator/.claude/settings.json` used to set
+`defaultMode: "bypassPermissions"` directly (predates this doc); that line
+has been removed so the shared, committed file follows the same principle
+as `app-template`'s. If you launch Claude Code from `app-generator`'s own
+root (rather than as a submodule under `app-template`) and want prompts
+skipped by default there too, add it to your own
+`.claude/settings.local.json` (gitignored) in that repo:
+
+```json
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  }
+}
+```
 
 ## 4. The compound-command trap
 

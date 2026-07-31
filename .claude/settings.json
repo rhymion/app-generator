@@ -1,6 +1,5 @@
 {
   "permissions": {
-    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(npm run docker:up:test)",
       "Bash(npm run docker:down:test)",
