@@ -144,7 +144,15 @@
     "mfaCodeLabel": "6 桁の認証コード",
     "mfaHelper": "認証アプリを開いて現在のコードを入力してください。リカバリーコードも使用できます。",
     "mfaRequired": "サインインを完了するため、認証アプリの 6 桁コードを入力してください。",
-    "mfaInvalid": "コードが一致しません。新しい 6 桁コードを入力するか、リカバリーコードを使用してください。"
+    "mfaInvalid": "コードが一致しません。新しい 6 桁コードを入力するか、リカバリーコードを使用してください。",
+    "legalAgreementNotice": "アカウントを作成すると、<terms>利用規約</terms>および<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。"
+  },
+  "Legal": {
+    "termsTitle": "利用規約",
+    "privacyTitle": "プライバシーポリシー",
+    "templateDisclaimer": "本書はApp Generatorが生成した雛形です。法的助言ではありません——実際の運用に先立ち、必ず有資格の法務専門家によるレビューを受けてください。",
+    "languageSwitcherLabel": "他の言語",
+    "documentUnavailable": "この文書はまだ用意されていません。"
   },
   "Mfa": {
     "title": "2要素認証",

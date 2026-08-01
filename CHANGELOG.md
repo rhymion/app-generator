@@ -3,6 +3,18 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Terms of Service / Privacy Policy pages** (`/[locale]/legal/terms`,
+  `/[locale]/legal/privacy`), linked from the registration page. Content is
+  plain Markdown, one file per document/locale under `content/legal/`,
+  resolved independently of the site's UI locale via a `?lang=` query
+  parameter — adding a new document language is adding two Markdown files,
+  no code change. See `docs/knowledge/legal-documents.md`. Both documents
+  are explicitly labeled templates requiring legal review and
+  deployment-specific `[PLACEHOLDER]` values before real use.
+
 ## [3.0.0] - 2026-07-30
 
 > Consolidates the feature areas added since 2.0.0: GCP Cloud Run deployment,
