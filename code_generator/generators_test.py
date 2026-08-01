@@ -49,13 +49,62 @@ def _enum_label(field: dict, value) -> str:
     When the field declares a namespace, look the value up there (matching the
     rendered Autocomplete option label); otherwise fall back to the Fields key
     `<prop>_<value>` and finally the raw value.
+
+    Namespace path is fail-fast: a missing key means the schema has an enum
+    value not yet reflected in _messages_ns (stale/incomplete data), which
+    would otherwise silently degrade to the raw value and mask the gap. A
+    wholly absent namespace section is not an error by itself — generate.py's
+    schema-defaults overlay (see `generate()`) guarantees the section exists
+    once schema and file are merged, so an absent section here is treated as
+    a first-run edge case (e.g. calling this directly without going through
+    generate()) and only warns.
     """
     ns = field.get('enum_namespace')
     if ns:
-        return _messages_ns.get(ns, {}).get(_enum_ns_key(value), str(value))
+        ns_dict = _messages_ns.get(ns)
+        if ns_dict is None:
+            import warnings
+            warnings.warn(
+                f"_enum_label: namespace '{ns}' not found in _messages_ns for value '{value}'",
+                stacklevel=2,
+            )
+            return str(value)
+        key = _enum_ns_key(value)
+        result = ns_dict.get(key)
+        if result is None:
+            raise ValueError(
+                f"_enum_label: key '{key}' missing in namespace '{ns}' "
+                f"— schema may have new enum values not yet in _messages_ns"
+            )
+        return result
     if _messages_fields:
         return _messages_fields.get(f"{field['prop_name']}_{value}", str(value))
     return str(value)
+
+
+def _reverse_enum_label(field: dict, label: str) -> str:
+    """Reverse-lookup: find the enum member whose _enum_label equals `label`.
+
+    Raises ValueError on no match (lookup failure) or multiple matches (label
+    collision) instead of silently falling back to using `label` itself as
+    the raw value.
+    """
+    matches = [
+        v for v in (field.get('enum_values') or [])
+        if v is not None and _enum_label(field, v) == label
+    ]
+    if not matches:
+        raise ValueError(
+            f"_reverse_enum_label: no enum member maps to label '{label}' "
+            f"for field '{field.get('prop_name')}' — _messages_ns/fields may be stale or missing"
+        )
+    if len(matches) > 1:
+        raise ValueError(
+            f"_reverse_enum_label: label '{label}' is ambiguous — "
+            f"multiple members {matches} map to the same label "
+            f"for field '{field.get('prop_name')}'"
+        )
+    return str(matches[0])
 
 from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
@@ -1272,10 +1321,7 @@ def _child_native_enum_singleselect_calls(fields: list, title: str, value_fn) ->
         # option text); reverse-lookup the raw enum member it corresponds to,
         # since the cell's underlying input value is the raw member, not the label.
         label = value_fn(field, title)
-        raw = next(
-            (v for v in (field.get('enum_values') or []) if v is not None and _enum_label(field, v) == label),
-            label,
-        )
+        raw = _reverse_enum_label(field, label)
         calls.append(
             f"selectDataGridSingleSelect(0, '{field['prop_name']}', '{label}', '{raw}');"
         )
