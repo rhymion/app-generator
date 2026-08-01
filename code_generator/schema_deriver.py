@@ -63,6 +63,7 @@ class PrismaField:
     nullable: bool
     is_list: bool
     is_id: bool = False
+    is_unique: bool = False
     is_updated_at: bool = False
     has_default: bool = False
     default_value: object = None
@@ -120,6 +121,7 @@ def _parse_field_line(line: str) -> PrismaField | None:
     rest = line[head.end():]
 
     is_id = False
+    is_unique = False
     is_updated_at = False
     has_default = False
     default_value = None
@@ -130,6 +132,8 @@ def _parse_field_line(line: str) -> PrismaField | None:
     for attr_name, attr_args in _ATTR_RE.findall(rest):
         if attr_name == "id":
             is_id = True
+        elif attr_name == "unique":
+            is_unique = True
         elif attr_name == "updatedAt":
             is_updated_at = True
         elif attr_name == "default":
@@ -142,7 +146,7 @@ def _parse_field_line(line: str) -> PrismaField | None:
                 relation_fk_fields = tuple(
                     part.strip() for part in m.group(1).split(",") if part.strip()
                 )
-        # @unique, @db.* -- not needed for json-schema derivation, ignored
+        # @db.* -- not needed for json-schema derivation, ignored
 
     return PrismaField(
         name=name,
@@ -150,6 +154,7 @@ def _parse_field_line(line: str) -> PrismaField | None:
         nullable=nullable,
         is_list=is_list,
         is_id=is_id,
+        is_unique=is_unique,
         is_updated_at=is_updated_at,
         has_default=has_default,
         default_value=default_value,
@@ -204,6 +209,30 @@ def parse_prisma_schema(path: Path) -> dict:
                 model.fields[pf.name] = pf
         models[model_name] = model
     return models
+
+
+def collect_unique_columns(models: dict) -> dict:
+    """Return ``{model_name: {'single': [col, ...], 'composite': [[col, ...], ...]}}``.
+
+    `single` lists columns carrying a field-level `@unique`; `composite` lists
+    every `@@unique([...])` column group. The `@id` column is deliberately
+    excluded -- it is always a generated cuid, so it can never be the key a
+    deterministic test fixture is looked up by.
+
+    This is a Prisma-only fact that intentionally does NOT flow into the
+    derived JSON schema (`derive_property`): uniqueness constrains *writes*,
+    not the JSON shape, and the Stage 2/4 golden references assert the derived
+    shape byte-for-byte. Consumers (currently `generators_test.py`, for
+    find-or-create idempotency in the Cypress populate helpers) read it
+    straight off the parsed Prisma models instead.
+    """
+    out: dict = {}
+    for model_name, model in models.items():
+        out[model_name] = {
+            "single": [f.name for f in model.fields.values() if f.is_unique and not f.is_id],
+            "composite": [list(cols) for cols in model.unique_constraints],
+        }
+    return out
 
 
 def parse_prisma_enums(path: Path) -> dict:

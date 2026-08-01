@@ -31,6 +31,20 @@ def set_messages_namespaces(messages: dict) -> None:
     _messages_ns = messages or {}
 
 
+# Prisma uniqueness facts, `{model: {'single': [col], 'composite': [[col, ...]]}}`,
+# as produced by schema_deriver.collect_unique_columns(). Populated by
+# set_prisma_uniques() before any helper context is built. Used to pick the
+# find-or-create lookup key for dep records whose entity has no `name` column
+# (e.g. purchase_order, keyed on its @unique po_number).
+_prisma_uniques: dict = {}
+
+
+def set_prisma_uniques(uniques: dict) -> None:
+    """Register the Prisma @unique / @@unique column map for dep lookups."""
+    global _prisma_uniques
+    _prisma_uniques = uniques or {}
+
+
 def _enum_ns_key(value) -> str:
     """Translation key for an enum value within its namespace.
 
@@ -431,6 +445,80 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val_second = f'`TEST-{prop_name.upper()}-${{Date.now()}}-2`'
         result.append({'prop_name': prop_name, 'prisma_val': val, 'prisma_val_unique': val_unique, 'prisma_val_second': val_second})
     return result
+
+
+def _dep_lookup_columns(target: str, extra_required_fields: list[dict], fk_deps: list[dict]) -> list[dict]:
+    """Pick the columns a dep record's find-or-create should be keyed on.
+
+    Returns a list of column dicts, in `where`-clause order, or `[]` when the
+    dep has no usable key (plain `create()`, the pre-existing behavior for
+    bridges such as commentable/approvable that have no unique constraint at
+    all). Two column shapes come back:
+
+      - a scalar column: the `extra_required_fields` entry itself, so the
+        caller can pick `prisma_val` / `prisma_val_second` / `prisma_val_unique`
+        to match the create() variant it is emitting;
+      - an FK column: `{'prop_name', 'dep_var_name'}` straight from `fk_deps`,
+        rendered as `<dep_var>.id`.
+
+    Priority:
+      1. `name`, when the entity has one — every required-`name` entity emits a
+         deterministic `Test <Title>`, and keying on it is the long-standing
+         behavior that existing generated helpers (and their assertions)
+         depend on.
+      2. a field-level `@unique` column that the dep create() actually writes
+         (e.g. purchase_order.po_number once `name` was dropped from the
+         entity) — without this the second call to a populate helper in the
+         same test trips P2002 on that column.
+      3. a `@@unique([...])` group whose every column the create() can supply,
+         counting FK columns fed by another dep (e.g. bin's
+         `@@unique([location_id, code])`).
+
+    A column the create() does not write (nullable / DB-defaulted, hence absent
+    from `extra_required_fields`) can never be matched by the lookup, so any
+    constraint mentioning one is skipped rather than half-applied.
+    """
+    ef_by_prop = {f['prop_name']: f for f in extra_required_fields}
+    if 'name' in ef_by_prop:
+        return [ef_by_prop['name']]
+
+    uniques = _prisma_uniques.get(target) or {}
+    for col in uniques.get('single') or []:
+        if col in ef_by_prop:
+            return [ef_by_prop[col]]
+
+    fk_by_prop = {fk['prop_name']: fk for fk in (fk_deps or [])}
+    for cols in uniques.get('composite') or []:
+        resolved = []
+        for col in cols:
+            if col in ef_by_prop:
+                resolved.append(ef_by_prop[col])
+            elif col in fk_by_prop:
+                resolved.append(fk_by_prop[col])
+            else:
+                resolved = []
+                break
+        if resolved:
+            return resolved
+    return []
+
+
+def _render_lookup_where(columns: list[dict], value_key: str, fk_prefix: str = '') -> str:
+    """Render `columns` as a Prisma `where` object literal for the template.
+
+    `value_key` selects which of the scalar column's pre-rendered TS
+    expressions to use (`prisma_val` / `prisma_val_second` /
+    `prisma_val_unique`); `fk_prefix` is the accessor the emitting helper uses
+    for its dep records (`''` inside populateXxxDependencies, `'deps.'` inside
+    the populateXxxData / populateXxxFullData loops).
+    """
+    parts = []
+    for col in columns:
+        if 'dep_var_name' in col:
+            parts.append(f"{col['prop_name']}: {fk_prefix}{col['dep_var_name']}.id")
+        else:
+            parts.append(f"{col['prop_name']}: {col[value_key]}")
+    return '{ ' + ', '.join(parts) + ' }'
 
 
 def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
@@ -1830,26 +1918,37 @@ def helper_context(
         extra_required_fields = _get_dep_populate_fields(
             dep['target'], dep['var_name'], title_str, schema, is_self_ref=(dep['target'] == model_name),
         )
-        # Idempotency hook for `populateXxxDependencies`: if the dep target has
-        # a deterministic `name` value (the common case — every required-`name`
-        # entity emits `name: 'Test <Title>'`), the template uses
-        # findFirst({where: {name}}) ?? create(...) so calling the helper twice
-        # in the same test (parent populator + child populator) does not
-        # duplicate the row and trip @unique constraints (e.g. product.code).
-        # Bridges without a `name` field (commentable, approvable) skip this
-        # path — they have no unique constraints, so plain create is safe.
-        name_ef = next((f for f in extra_required_fields if f['prop_name'] == 'name'), None)
-        lookup_field = 'name' if name_ef else None
-        lookup_value = name_ef['prisma_val'] if name_ef else None
-        lookup_value_second = name_ef['prisma_val_second'] if name_ef else None
-        # Per-iteration lookup value (`Test X ${i}`) used by populateXxxData's
+        # Idempotency hook for `populateXxxDependencies`: when the dep record
+        # can be found again by a deterministic key, the template uses
+        # findFirst({where: ...}) ?? create(...) so calling the helper twice in
+        # the same test (parent populator + child populator) does not duplicate
+        # the row and trip @unique constraints (e.g. product.code).
+        # `_dep_lookup_columns` picks that key: `name` when the entity has one
+        # (the common case — every required-`name` entity emits
+        # `name: 'Test <Title>'`), otherwise the entity's own @unique /
+        # @@unique columns (e.g. purchase_order.po_number, or bin's
+        # [location_id, code]). Bridges with neither (commentable, approvable)
+        # skip this path — nothing can collide, so plain create is safe.
+        lookup_columns = _dep_lookup_columns(
+            dep['target'], extra_required_fields, dep.get('fk_deps'),
+        )
+        lookup_field = lookup_columns[0]['prop_name'] if lookup_columns else None
+        lookup_where = _render_lookup_where(lookup_columns, 'prisma_val') if lookup_columns else None
+        lookup_where_second = (
+            _render_lookup_where(lookup_columns, 'prisma_val_second') if lookup_columns else None
+        )
+        # Per-iteration lookup (`Test X ${i}`) used by populateXxxData's
         # find-or-create on the primary FK. Closes the cross-helper
         # collision where deps create `Test X 2` and populate(2) would then
         # try to create another `Test X 2` and trip @unique (e.g.
         # product.code). When the row already exists, the iteration re-uses
-        # it; otherwise it creates a fresh one. Same lookup field as deps
-        # (`name`) so the two helpers see the same row.
-        lookup_value_unique = name_ef['prisma_val_unique'] if name_ef else None
+        # it; otherwise it creates a fresh one. Same lookup columns as the deps
+        # helper — only the dep-record accessor differs (`deps.`) — so the two
+        # helpers see the same row.
+        lookup_where_unique = (
+            _render_lookup_where(lookup_columns, 'prisma_val_unique', fk_prefix='deps.')
+            if lookup_columns else None
+        )
         label_field = dep_label_info.get('label_field', 'name') if dep_label_info else dep.get('label_field', 'name')
         label_field_is_date = dep_label_info.get('label_field_is_date', False) if dep_label_info else dep.get('label_field_is_date', False)
         # Pre-compute the TS expression and Prisma include so the template
@@ -1911,9 +2010,9 @@ def helper_context(
             # one-to-one FK pre-creates needed when creating this dep record (e.g. commentable_id)
             'internal_fk_deps': get_all_internal_fk_deps(dep['target'], schema),
             'lookup_field': lookup_field,
-            'lookup_value': lookup_value,
-            'lookup_value_second': lookup_value_second,
-            'lookup_value_unique': lookup_value_unique,
+            'lookup_where': lookup_where,
+            'lookup_where_second': lookup_where_second,
+            'lookup_where_unique': lookup_where_unique,
             # True if dep entity has updater_id (user-visible entities do; leaf/bridge entities may not)
             'has_updater_id': _entity_has_updater_id(dep['target'], schema),
         })
@@ -1958,14 +2057,30 @@ def helper_context(
             _src_dep = non_self_deps_by_var[_alias_var]
             _fresh_var = f'{_alias_var}Alias'
             _fresh_title = f"{_src_dep['title']} Alias"
+            _fresh_efs = _get_dep_populate_fields(_target, _fresh_var, _fresh_title, schema)
+            # Re-key the alias's find-or-create off its OWN field values. For a
+            # `name`-carrying target that is the distinct `Test <Title> Alias`
+            # row this branch exists to create. A `name`-less target keys on a
+            # unique column whose value is field- rather than title-derived
+            # (`_get_dep_populate_fields`), so the alias resolves to the source
+            # dep's row instead of a fresh one — sharing, where the pre-fix
+            # behavior was a P2002 on the duplicate create().
+            _fresh_cols = _dep_lookup_columns(_target, _fresh_efs, _src_dep.get('fk_deps'))
             _fresh_dep = {
                 **_src_dep,
                 'var_name': _fresh_var,
                 'title': _fresh_title,
                 'needs_second': False,
-                'extra_required_fields': _get_dep_populate_fields(_target, _fresh_var, _fresh_title, schema),
-                'lookup_value': f"'Test {_fresh_title}'",
-                'lookup_value_second': f"'Test {_fresh_title} 2'",
+                'extra_required_fields': _fresh_efs,
+                'lookup_field': _fresh_cols[0]['prop_name'] if _fresh_cols else None,
+                'lookup_where': _render_lookup_where(_fresh_cols, 'prisma_val') if _fresh_cols else None,
+                'lookup_where_second': (
+                    _render_lookup_where(_fresh_cols, 'prisma_val_second') if _fresh_cols else None
+                ),
+                'lookup_where_unique': (
+                    _render_lookup_where(_fresh_cols, 'prisma_val_unique', fk_prefix='deps.')
+                    if _fresh_cols else None
+                ),
             }
             non_self_deps.append(_fresh_dep)
             enriched_deps.append(_fresh_dep)

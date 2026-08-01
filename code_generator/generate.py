@@ -66,7 +66,9 @@ from generators_test import (
     reservation_spec_context,
     set_messages_fields,
     set_messages_namespaces,
+    set_prisma_uniques,
 )
+from schema_deriver import collect_unique_columns, parse_prisma_schema
 from validation_context import build_validation_context
 from manifest import ManifestRecorder, sha256_file, sha256_text
 
@@ -469,6 +471,15 @@ def generate(schema_path: str, output_dir: str) -> None:
         bridge_additions = build_bridge_prisma_additions(schema)
         _write(out / 'prisma' / 'bridge_additions.prisma', bridge_additions)
         print(f'  Bridge Prisma additions (reference) → prisma/bridge_additions.prisma')
+
+    # Prisma uniqueness facts (@unique / @@unique) for the Cypress populate
+    # helpers' find-or-create idempotency. Read after the bridge injection
+    # above so freshly injected bridge models are included. Uniqueness is not
+    # part of the derived JSON schema (see schema_deriver.collect_unique_columns),
+    # so it is threaded in here rather than through `schema`.
+    set_prisma_uniques(collect_unique_columns(
+        parse_prisma_schema(out / 'prisma' / 'schema.prisma')
+    ))
 
     print(f'Found {len(entities)} entities in {schema_path}')
 
