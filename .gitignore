@@ -124,6 +124,7 @@ lib/dashboard/types.ts
 !lib/audit_log/virtual_resolvers.ts
 !lib/compliance/**
 !lib/mention/**
+!lib/legal/**
 
 # ── app/[locale]/ ──
 app/\[locale\]/*/
@@ -151,6 +152,8 @@ app/\[locale\]/setting/view/
 !app/\[locale\]/docs/layout.tsx
 app/\[locale\]/docs/page.mdx
 app/\[locale\]/docs/*/
+!app/\[locale\]/legal/
+!app/\[locale\]/legal/**
 
 # ── app/api/ ──
 app/api/*/
@@ -184,6 +187,7 @@ components/setting/FormUpsert.tsx
 components/setting/FormView.tsx
 components/setting/column_def.tsx
 !components/audit_log/FormView.tsx
+!components/legal/**
 
 # ── cypress/e2e/ ──
 cypress/e2e/*.cy.ts
@@ -191,6 +195,7 @@ cypress/e2e/*.cy.ts
 !cypress/e2e/search_page.cy.ts
 !cypress/e2e/audit_log.cy.ts
 !cypress/e2e/import_modal.cy.ts
+!cypress/e2e/legal_pages.cy.ts
 cypress/e2e/mobile/*.cy.ts
 !cypress/e2e/mobile/layout.cy.ts
 !cypress/e2e/mobile/audit_log.cy.ts

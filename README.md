@@ -77,6 +77,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 - **Audit log** — schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over all generated entities' create/update/delete actions
 - **GDPR / data protection** — `x-pii` field classification (`direct`/`sensitive`/`indirect`), an `anonymizeUser()` erasure function, `x-gdpr-mode` data-subject-scope classification (`internal`/`consumer`/`both`; schema-validated, not yet consumed by codegen), AES-256-GCM at-rest attachment filename encryption, and `x-mention` user-mention parsing in comments
+- **Terms of Service / Privacy Policy** (`/[locale]/legal/terms`, `/[locale]/legal/privacy`) — Markdown template documents linked from the registration page; adding a document language is dropping a `content/legal/<doc>.<locale>.md` file, independent of the site's UI locale list (see `docs/knowledge/legal-documents.md`)
 
 ### Other
 
@@ -508,6 +509,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | [cleanup.md](docs/knowledge/cleanup.md) | Removing generated files: default cleanup, manifest vs schema-driven, `--prune-orphans`, orphan handling |
 | [gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) | GCP Cloud Run deployment: `x-cloud` opt-in, Dockerfile, GCS uploads, environment automation scripts |
 | [claude-code-settings-consumer-side.md](docs/knowledge/claude-code-settings-consumer-side.md) | `.claude/settings.json` discovery rules, OS-independent permission syntax, the compound-command matching trap, and how to verify a settings file actually loaded — read this before editing `.claude/settings.json` here or in `app-template` |
+| [legal-documents.md](docs/knowledge/legal-documents.md) | Terms of Service / Privacy Policy pages: why document locale is decoupled from the site UI locale, Markdown-over-JSON/MDX rationale, and how to add a document language |
 
 ---
 

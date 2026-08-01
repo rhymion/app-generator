@@ -93,7 +93,9 @@
     "papaparse": "^5.5.4",
     "qrcode": "^1.5.4",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "react-dom": "^19.2.3",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "overrides": {
     "postcss": ">=8.5.10",
