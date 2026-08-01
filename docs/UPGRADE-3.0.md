@@ -50,7 +50,7 @@ instead of silently orphaning them.
 The `nativeEnum` case is the most severe of the four: unlike the other three,
 a plain `db push`/`migrate deploy` does not merely fail loudly — it
 *succeeds* while silently corrupting data (approved/rejected
-`approval_request` rows observed reverting to `Pending` with no error, in
+`approval_request` rows observed reverting to `pending` with no error, in
 isolated-DB testing on `approval_request.status`). It requires an explicit
 `ALTER TABLE ... ALTER COLUMN ... TYPE ... USING (CASE ...)` per column,
 run **before** `db push`, to convert in place without a drop/recreate — see
@@ -101,7 +101,7 @@ code without changing anything in the database:
 //   actor_user  user?  @relation(fields: [actor_user_id], references: [id], onDelete: Restrict)
 
 // new enums (nativeEnum promotion — these columns were plain Int before 3.0):
-enum ApprovalRequestStatus { Pending Approved Rejected TerminalRejected }
+enum ApprovalRequestStatus { pending approved rejected terminal_rejected }
 enum ReactionType { Like Love Laugh Surprised Sad }
 enum AttachmentType { image file video audio }
 enum DashboardWidgetChartType { pie column bar line }
@@ -109,7 +109,7 @@ enum DashboardWidgetStackMode { grouped stacked standardized }
 enum DashboardWidgetGroupByBucket { day week month quarter year }
 
 // changed on model approval_request:
-//   status  ApprovalRequestStatus  @default(Pending)        // was: Int
+//   status  ApprovalRequestStatus  @default(pending)        // was: Int
 // changed on model reaction:
 //   type    ReactionType                                    // was: Int, no default
 // changed on model attachment:
@@ -201,8 +201,8 @@ psql "$DATABASE_URL" -c \
 #    (must return zero rows before proceeding)
 
 psql "$DATABASE_URL" <<'SQL'
--- 1. approval_request.status (NOT NULL, @default(Pending))
---    Pending(0) / Approved(1) / Rejected(2) / TerminalRejected(new, no old value maps to it)
+-- 1. approval_request.status (NOT NULL, @default(pending))
+--    pending(0) / approved(1) / rejected(2) / terminal_rejected(new, no old value maps to it)
 --    DROP DEFAULT first: Postgres tries to auto-cast the existing Int
 --    default (0) to the new enum type as part of ALTER COLUMN ... TYPE,
 --    and that automatic cast fails (confirmed by isolated-DB testing) —
@@ -212,13 +212,13 @@ ALTER TABLE approval_request
 ALTER TABLE approval_request
   ALTER COLUMN status TYPE "ApprovalRequestStatus"
   USING (CASE status
-    WHEN 0 THEN 'Pending'
-    WHEN 1 THEN 'Approved'
-    WHEN 2 THEN 'Rejected'
-    ELSE 'Pending'  -- safety net for unexpected values; adjust if Pending is not the desired fallback
+    WHEN 0 THEN 'pending'
+    WHEN 1 THEN 'approved'
+    WHEN 2 THEN 'rejected'
+    ELSE 'pending'  -- safety net for unexpected values; adjust if pending is not the desired fallback
   END)::"ApprovalRequestStatus";
 ALTER TABLE approval_request
-  ALTER COLUMN status SET DEFAULT 'Pending';
+  ALTER COLUMN status SET DEFAULT 'pending';
 
 -- 2. attachment.type (NOT NULL, @default(image)) — same DROP DEFAULT need
 --    image(0) / file(1) / video(2) / audio(3) — value set and order unchanged
@@ -362,8 +362,8 @@ ALTER TABLE approval_request
 ALTER TABLE approval_request
   ALTER COLUMN status TYPE INTEGER
   USING (CASE status
-    WHEN 'Pending' THEN 0 WHEN 'Approved' THEN 1 WHEN 'Rejected' THEN 2
-    ELSE 0  -- TerminalRejected has no pre-3.0 equivalent
+    WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 WHEN 'rejected' THEN 2
+    ELSE 0  -- terminal_rejected has no pre-3.0 equivalent
   END);
 ALTER TABLE approval_request
   ALTER COLUMN status SET DEFAULT 0;

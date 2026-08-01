@@ -3,22 +3,6 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [Unreleased]
-
-### Fixed
-- **Non-idempotent Cypress spec generation for enum labels** — `generate-code`
-  used to feed `messages/en.json`'s existing content straight into the
-  Cypress spec label lookup. A first run against a project with an
-  incomplete/missing translation section produced specs with raw enum
-  values (e.g. `'pie'`) baked in, while the same schema on a later run (once
-  the file had been filled in) produced humanized labels (e.g. `'Pie'`) —
-  and the raw-value run's specs no longer matched what the app actually
-  renders, failing with `Expected to find content: 'pie' ... but never
-  did`. `generate()` now always computes the schema-derived label defaults
-  first and overlays any existing file values on top (file wins), so both
-  runs agree and a consumer's custom translation is still honored. See
-  `docs/knowledge/generate-code-idempotency.md`.
-
 ## [3.0.0] - 2026-07-30
 
 > Consolidates the feature areas added since 2.0.0: GCP Cloud Run deployment,
@@ -108,7 +92,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ### Added
 - **GCP Cloud Run deployment** (`x-cloud` annotation, opt-in — disabled unless
-  `enabled: true` and `provider: gcp` are both set explicitly) —
+  `enabled: true` and `provider: gcp` are both set explicitly) — **Vercel
+  remains the default deployment target when `x-cloud` is unset**; this adds
+  GCP Cloud Run as a second, opt-in target, alongside:
   multi-stage/non-root/`HEALTHCHECK` `Dockerfile`, `.dockerignore`,
   `next.config.ts` `output: 'standalone'`, a GCS Signed URL upload route
   (overrides the default Vercel Blob route), a V4 Signed URL proxy route, and
@@ -155,11 +141,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   entity declarations and `receiving_confirm_route.ts` generated for
   receiving-receipt schemas. Replaces the `x-receiving` mechanism removed
   earlier in the 3.0 development cycle.
-- **Reservation lifecycle** (`reserve` / `ship` / `release` / `cancel`) —
-  `reservation_actions.ts.jinja2` generated per reservable entity; each
-  state transition records an `inventory_transaction` row for audit
-  fidelity. Internally migrated from slot-based to ledger-transaction
-  strategy.
+- **Reservation ledger-transaction migration** — `x-reservation`'s internal
+  state tracking migrated from slot-based to ledger-transaction strategy;
+  each reservation records an `inventory_transaction` row for audit
+  fidelity. `x-reservation` is scoped to exactly two roles: inventory
+  allocation (`count` mode) and specific-resource reservation (`item`
+  mode, e.g. a hotel room). Lifecycle transitions (approve/reject) for the
+  entity that owns the reservation go through the generic Approval Flow
+  System (`x-approval`) instead of a bespoke reservation-lifecycle
+  mechanism — see **Removed** below for the `x-reservation.actions`
+  sub-feature this supersedes.
 - **Terminal rejection with `x-readonly-fields`** — annotate fields with
   `x-readonly-fields` to prevent edits after an entity reaches a terminal
   rejected state. `on_rejected_dispatch.ts` and `service_after_reject_stub.ts`
@@ -221,9 +212,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 > (`scripts/create-gin-indexes.sql`), and the `SearchOpts.count: false`
 > COUNT(*) opt-out are additive only and backward-compatible. The audit log
 > viewer page itself adds no required input, but it surfaces data through a
-> relation that is a breaking schema change — see BREAKING above. The seven
+> relation that is a breaking schema change — see BREAKING above. All eight
 > items in **BREAKING** above require action before upgrading a pre-3.0
 > deployment — see [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
+
+### Fixed
+- **Non-idempotent Cypress spec generation for enum labels** — `generate-code`
+  used to feed `messages/en.json`'s existing content straight into the
+  Cypress spec label lookup. A first run against a project with an
+  incomplete/missing translation section produced specs with raw enum
+  values (e.g. `'pie'`) baked in, while the same schema on a later run (once
+  the file had been filled in) produced humanized labels (e.g. `'Pie'`) —
+  and the raw-value run's specs no longer matched what the app actually
+  renders, failing with `Expected to find content: 'pie' ... but never
+  did`. `generate()` now always computes the schema-derived label defaults
+  first and overlays any existing file values on top (file wins), so both
+  runs agree and a consumer's custom translation is still honored. See
+  `docs/knowledge/generate-code-idempotency.md`.
 
 ### Removed
 - **`x-reservation.actions` sub-feature (2026-07-30 ruling)** — the declarative
