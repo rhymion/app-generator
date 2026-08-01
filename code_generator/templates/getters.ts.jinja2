@@ -317,14 +317,24 @@ export async function search{{ parent_pascal }}Options(
   includeIds: string[] = [],
   limit: number = 50,
   context: AutocompleteFilterContext = {},
-): Promise<{{ parent_pascal }}[]> {
+): Promise<{{ parent_pascal }}[] & { permissionDenied?: boolean }> {
 {% if should_filter_by_org %}
   const userId = await getSessionUserIdOrThrow();
   const { permissions } = await getModelPermissions('{{ parent }}', userId);
 {% else %}
   const { permissions, userId } = await getModelPermissions('{{ parent }}');
 {% endif %}
-  await assertPermission(permissions, 'read', '{{ parent }}');
+  if (!permissions.read) {
+    // Option B (cmd_516): the caller lacks read on {{ parent }} itself — this
+    // happens when a *different* entity's create/edit form searches for a
+    // {{ parent }} FK option and the current user can't read {{ parent }}.
+    // This used to throw via assertPermission() and crash the whole
+    // referencing page's Server Component render (Promise.all rejection).
+    // Returning an empty, flagged result instead lets the FK field render
+    // disabled with an explanatory message rather than taking the page down —
+    // see docs/knowledge/fk-read-permission-graceful-degradation.md.
+    return Object.assign([] as {{ parent_pascal }}[], { permissionDenied: true });
+  }
 {% if should_filter_by_org %}
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
@@ -405,11 +415,23 @@ export async function search{{ parent_pascal }}Options(
  * `current{{ parent_pascal }}Id` keeps the {{ oto.target }} attached to the {{ parent }} currently being
  * edited available. The query runs in a single Prisma round-trip (notIn against
  * the set of already-taken target ids) — no full-table scan via getAll.
+ *
+ * Checks read permission on {{ oto.target }} before listing (cmd_516 case g) —
+ * this previously ran with NO permission check at all (an unconditional
+ * listing of {{ oto.target }} regardless of the caller's read access). Mirrors
+ * search{{ parent_pascal }}Options' graceful-degradation contract: returns an
+ * empty, flagged result rather than throwing, so the {{ parent }} create/edit
+ * page doesn't crash either — see
+ * docs/knowledge/fk-read-permission-graceful-degradation.md.
  */
 export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pascal }}(
   current{{ parent_pascal }}Id?: string | null,
   limit: number = 50,
 ) {
+  const { permissions } = await getModelPermissions('{{ oto.target }}');
+  if (!permissions.read) {
+    return [] as unknown as Awaited<ReturnType<typeof prisma.{{ oto.target }}.findMany>> & { permissionDenied: true };
+  }
   const takenTargets = await prisma.{{ model }}.findMany({
     where: {
 {% if oto.nullable %}

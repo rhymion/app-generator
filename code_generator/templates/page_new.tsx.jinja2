@@ -1,4 +1,8 @@
 import { Suspense } from 'react';
+{% if required_relation_fields %}
+import Alert from '@mui/material/Alert';
+import { getTranslations } from 'next-intl/server';
+{% endif %}
 import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/{{ parent }}/FormUpsert';
 {% for target in selection_targets %}
@@ -55,6 +59,31 @@ async function {{ parent_pascal }}NewContent() {
   ]);
 {% else %}
   const userPermissions = await get{{ parent_pascal }}NewPageAccessCheck();
+{% endif %}
+{% if required_relation_fields %}
+  // Option B (cmd_516, item v): a required FK whose target the current user
+  // can't read has no way to be populated on /new — block with an
+  // explanatory message instead of rendering a create form that can never
+  // successfully submit. See docs/knowledge/fk-read-permission-graceful-degradation.md.
+  const _blockedRelationFieldKeys: string[] = [];
+{% for f in required_relation_fields %}
+  if ((initial{{ f.target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied) {
+    _blockedRelationFieldKeys.push('{{ f.field_key }}');
+  }
+{% endfor %}
+  if (_blockedRelationFieldKeys.length > 0) {
+    const tc = await getTranslations('Common');
+    const tf = await getTranslations('Fields');
+    const te = await getTranslations('EntityLabel');
+    return (
+      <Alert severity="warning" sx={{ m: 2 }}>
+        {tc('fkReadPermissionBlocksCreate', {
+          entity: te('{{ parent_camel }}'),
+          field: _blockedRelationFieldKeys.map((k) => tf(k)).join(', '),
+        })}
+      </Alert>
+    );
+  }
 {% endif %}
   const src = {
     id: '',

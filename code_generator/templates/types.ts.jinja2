@@ -208,8 +208,11 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
 {% for target in all_option_targets %}
-  initial{{ target | pascal_case }}s?: {{ target | pascal_case }}[];
-  search{{ target | pascal_case }}Options?: (query: string, includeIds: string[]) => Promise<{{ target | pascal_case }}[]>;
+  {# permissionDenied (cmd_516 Option B): set when the current user lacks read
+     on {{ target }} — the FK field renders disabled-but-clearable instead of
+     the page crashing. See docs/knowledge/fk-read-permission-graceful-degradation.md. #}
+  initial{{ target | pascal_case }}s?: {{ target | pascal_case }}[] & { permissionDenied?: boolean };
+  search{{ target | pascal_case }}Options?: (query: string, includeIds: string[]) => Promise<{{ target | pascal_case }}[] & { permissionDenied?: boolean }>;
 {% endfor %}
   currentUserId?: string | null;
 {% if is_bridge_child %}

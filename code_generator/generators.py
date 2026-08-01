@@ -2918,6 +2918,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         search_var    = f'{state_name}SearchAction'
         initial_var   = f'{state_name}InitialOptions'
         current_var   = f'{state_name}CurrentOption'
+        denied_var    = f'{state_name}PermissionDenied'
         return (
             f"      <AppFieldRelation\n"
             f"        label={{tf('{label_fk}')}}\n"
@@ -2928,6 +2929,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        currentOption={{{current_var}}}\n"
             f"        href={{{state_name} ? `/{target}/view/${{{state_name}}}` : null}}\n"
             f"        required={{{'true' if required else 'false'}}}\n"
+            f"        permissionDenied={{{denied_var}}}\n"
             f"      />"
         )
 
@@ -3124,6 +3126,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         initial_var   = f'{sn}InitialOptions'
         search_var    = f'{sn}SearchAction'
         current_var   = f'{sn}CurrentOption'
+        denied_var    = f'{sn}PermissionDenied'
         prop_initial  = f'initial{target_pascal}s'
         prop_search   = f'search{target_pascal}Options'
 
@@ -3154,6 +3157,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"    id: item.id,\n"
             f"    label: {label_built['expression']},\n"
             f"  }})), [{prop_initial}]);\n"
+            # Option B (cmd_516): initial{Target}s carries a `permissionDenied`
+            # flag (set by search{Target}Options / getAvailable...For...() —
+            # see getters.ts.jinja2) when the current user can't read the FK
+            # target at all. Read it off the raw prop (before the .map() above
+            # strips it) so AppFieldRelation can render the restricted variant.
+            f"  const {denied_var} = Boolean({prop_initial}?.permissionDenied);\n"
             f"  const {search_var} = useCallback(async (query: string, includeIds: string[]) => {{\n"
             f"    const rows = (await {prop_search}?.({search_call_args})) ?? [];\n"
             f"    return rows.map((item) => ({{ id: item.id, label: {label_built['expression']} }}));\n"
