@@ -47,7 +47,13 @@ from generators import (
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
 )
-from generators_i18n import update_i18n_and_config
+from generators_i18n import (
+    update_i18n_and_config,
+    _collect_field_keys,
+    _collect_native_enum_namespaces,
+    _collect_custom_component_sections,
+    _merge_file_wins_messages,
+)
 from validate import validate_schema, validate_prisma_indexes, SchemaValidationError
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
 from generators_test import (
@@ -433,14 +439,28 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     env = _make_env()
 
-    # Load messages/en.json Fields namespace for enum label translation in Cypress tests
-    import json as _json
+    # Compute enum label maps — schema defaults overlaid by existing file values
+    # (file wins, matching _update_json semantics: existing keys preserved, missing keys
+    # filled with schema defaults). This ensures both idempotency and custom-translation
+    # compatibility: specs use the same values that the app will render.
+    _schema_fields = _collect_field_keys(entities, schema)
+    _schema_ns: dict = {}
+    for _ns_src in (
+        _collect_native_enum_namespaces(schema),
+        _collect_custom_component_sections(entities, schema),
+    ):
+        for _ns_k, _ns_entries in _ns_src.items():
+            _schema_ns.setdefault(_ns_k, {}).update(_ns_entries)
+
+    # File-wins overlay: file values take precedence over schema defaults.
     _msg_path = out / 'messages' / 'en.json'
+    _file_msgs = None
     if _msg_path.exists():
         with open(_msg_path) as _mf:
-            _all_messages = _json.load(_mf)
-        set_messages_fields(_all_messages.get('Fields', {}))
-        set_messages_namespaces(_all_messages)
+            _file_msgs = json.load(_mf)
+    _merged_fields, _merged_ns = _merge_file_wins_messages(_schema_fields, _schema_ns, _file_msgs)
+    set_messages_fields(_merged_fields)
+    set_messages_namespaces(_merged_ns)
 
     # --- Bridge Prisma schema emission ---
     bridges = _collect_bridges(schema)

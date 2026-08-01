@@ -212,6 +212,40 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Enum label map merge (file-wins overlay)
+# ---------------------------------------------------------------------------
+
+def _merge_file_wins_messages(
+    schema_fields: dict[str, str],
+    schema_ns: dict[str, dict[str, str]],
+    file_msgs: dict | None,
+) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """Merge schema-computed enum label defaults with an existing messages/en.json,
+    file values winning — same merge semantics as `_update_json` (existing keys
+    preserved, missing keys filled with schema defaults).
+
+    This is what makes generate() idempotent while still honoring consumer
+    translations: run 1 (no file) produces the schema defaults; _update_json
+    writes those defaults into messages/en.json; run 2 (file present) overlays
+    those same values back on top of themselves, so the merged result is
+    identical to run 1. A consumer's custom translation overlays the schema
+    default instead, so specs and the app render the same (custom) value.
+    """
+    if not file_msgs:
+        return dict(schema_fields), {k: dict(v) for k, v in schema_ns.items()}
+
+    merged_fields = {**schema_fields, **file_msgs.get('Fields', {})}
+    merged_ns: dict[str, dict[str, str]] = {}
+    for ns_key, ns_defaults in schema_ns.items():
+        merged_ns[ns_key] = {**ns_defaults, **file_msgs.get(ns_key, {})}
+    # Preserve any namespace sections in the file not covered by schema (e.g. prj/ custom)
+    for ns_key, ns_vals in file_msgs.items():
+        if ns_key not in merged_ns and isinstance(ns_vals, dict):
+            merged_ns[ns_key] = ns_vals
+    return merged_fields, merged_ns
+
+
+# ---------------------------------------------------------------------------
 # JSON file updater
 # ---------------------------------------------------------------------------
 

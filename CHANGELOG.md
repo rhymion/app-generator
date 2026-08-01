@@ -3,6 +3,22 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Non-idempotent Cypress spec generation for enum labels** — `generate-code`
+  used to feed `messages/en.json`'s existing content straight into the
+  Cypress spec label lookup. A first run against a project with an
+  incomplete/missing translation section produced specs with raw enum
+  values (e.g. `'pie'`) baked in, while the same schema on a later run (once
+  the file had been filled in) produced humanized labels (e.g. `'Pie'`) —
+  and the raw-value run's specs no longer matched what the app actually
+  renders, failing with `Expected to find content: 'pie' ... but never
+  did`. `generate()` now always computes the schema-derived label defaults
+  first and overlays any existing file values on top (file wins), so both
+  runs agree and a consumer's custom translation is still honored. See
+  `docs/knowledge/generate-code-idempotency.md`.
+
 ## [3.0.0] - 2026-07-30
 
 > Consolidates the feature areas added since 2.0.0: GCP Cloud Run deployment,
