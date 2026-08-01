@@ -1688,6 +1688,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     child_assignee_notify_create_code = ctx.get('child_assignee_notify_create_code', '')
     child_assignee_notify_update_code = ctx.get('child_assignee_notify_update_code', '')
     is_audited              = ctx.get('is_audited', False)
+    should_filter_by_org    = bool(ctx.get('should_filter_by_org'))
     reservation_config      = ctx.get('reservation_config')
     has_reservation         = bool(reservation_config and reservation_config.get('mode') == 'count')
     has_item_reservation    = bool(reservation_config and reservation_config.get('mode') == 'item')
@@ -2018,6 +2019,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ notifyApprovalRequestCreated }} from '@/lib/_notifyApprovalRequest';"
            if approval_lines_post_create_code or approval_lines_post_update_code else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
+        + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if should_filter_by_org and (can_create or can_update) else '')
         + insufficient_inventory_error_class +
         f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"
         f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
@@ -2054,6 +2056,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'approval_lines_post_create_code':    approval_lines_post_create_code,
         'approval_lines_pre_update_code':     approval_lines_pre_update_code,
         'approval_lines_post_update_code':    approval_lines_post_update_code,
+        'should_filter_by_org':               should_filter_by_org,
     }
 
 

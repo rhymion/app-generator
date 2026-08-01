@@ -1,6 +1,12 @@
 {{ utility_code }}
 {% if can_create %}
 export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string }> {
+{% if should_filter_by_org %}
+  const _createOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
+  if (!_createOrgIds.includes(organizationId)) {
+    throw new Error('Organization access denied');
+  }
+{% endif %}
   const result = await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
 {{ validation_data_obj }}
@@ -77,6 +83,14 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 export async function update{{ parent_pascal }}(actorId: string, id: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_update %}, {{ child_params_for_update }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}, srcSnapshotRaw: string | null): Promise<void> {
 {% if has_assignee_id %}
   let _prevAssigneeId: string | null = null;
+{% endif %}
+{% if should_filter_by_org %}
+  if (organizationId) {
+    const _updateOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
+    if (!_updateOrgIds.includes(organizationId)) {
+      throw new Error('Organization access denied');
+    }
+  }
 {% endif %}
   await prisma.$transaction(async (tx) => {
 {% if reservation_mutation_guard_update %}
