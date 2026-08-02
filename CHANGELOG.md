@@ -6,6 +6,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Graceful degradation for foreign-key read-permission gaps**: a role that
+  can create/edit an entity but lacks read on one of its FK targets (e.g.
+  can manage `approval_flow` but not `role`) previously crashed the create
+  and edit pages entirely (`search{Entity}Options()` threw inside the
+  page's data-fetching `Promise.all`). The affected field now renders
+  disabled instead — read-only for a required FK (which also blocks `/new`
+  entirely with an explanatory message, since there's no way to populate
+  it), clearable for an optional FK. A required FK omitted from an update
+  because of this now falls back to the record's existing value rather
+  than failing validation. Template-layer change only, no Prisma schema
+  change — regenerate to pick it up, no migration needed. See
+  `docs/knowledge/fk-read-permission-graceful-degradation.md`.
 - **Terms of Service / Privacy Policy pages** (`/[locale]/legal/terms`,
   `/[locale]/legal/privacy`), linked from the registration page. Content is
   plain Markdown, one file per document/locale under `content/legal/`,

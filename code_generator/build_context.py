@@ -1654,6 +1654,24 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         if not r.get('nullable', True)
     ]
 
+    # A required relation FK omitted from an update call (the UI's
+    # AppFieldRelation permissionDenied branch doesn't let the acting user
+    # pick or clear it; a bare API PUT may omit it entirely) must NOT be
+    # treated as a validation failure — it must fall back to the record's
+    # current value in the DB, since the caller has no way to supply a
+    # different one. Placed in the shared service layer so both the API
+    # route and the form's server action get the guarantee. See
+    # docs/knowledge/fk-read-permission-graceful-degradation.md.
+    _prop_to_var = {p['prop']: p['var_name'] for p in parent_prop_infos}
+    fk_preservation_update_code = '\n'.join(
+        f"    if (!{_prop_to_var[f['prop_name']]}) {{\n"
+        f"      const _fkFallback = await tx.{model}.findUnique({{ where: {{ id }}, select: {{ {f['prop_name']}: true }} }});\n"
+        f"      {_prop_to_var[f['prop_name']]} = _fkFallback?.{f['prop_name']} ?? {_prop_to_var[f['prop_name']]};\n"
+        f"    }}"
+        for f in required_relation_fields
+        if f['prop_name'] in _prop_to_var
+    )
+
     # Field categorisation (for FormUpsert / FormView)
     # Use all_oto_fk_props to exclude BOTH auto-create and selector OTO FK props from plain field treatment
     field_categories = _categorize_form_fields(filtered_props, parent_rels_raw, gen_cfg, all_oto_fk_props)
@@ -2355,6 +2373,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         # Selection targets (page_new / page_edit)
         selection_targets=selection_targets,
         required_relation_fields=required_relation_fields,
+        fk_preservation_update_code=fk_preservation_update_code,
         # API routes
         all_body_fields_create=all_body_fields_create,
         service_args_for_create=service_args_for_create,

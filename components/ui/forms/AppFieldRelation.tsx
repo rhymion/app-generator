@@ -50,6 +50,7 @@ type AppFieldRelationProps = AppFieldRelationReadOnlyProps | AppFieldRelationEdi
 
 export default function AppFieldRelation(props: AppFieldRelationProps) {
   const tc = useTranslations('Common');
+  const te = useTranslations('Errors');
 
   if (props.readOnly) {
     const { label, href, value } = props;
@@ -87,7 +88,7 @@ export default function AppFieldRelation(props: AppFieldRelationProps) {
         margin="normal"
         required={required}
         aria-readonly
-        helperText={tc('fkReadPermissionRestricted', { field: label })}
+        helperText={`${te('fkPermissionDenied', { entity: label })} ${te('fkPermissionDeniedHint', { entity: label })}`}
         slotProps={{ input: { readOnly: true, endAdornment: (
           <InputAdornment position="end">
             {canClear && (

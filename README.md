@@ -40,6 +40,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - Role-based access control (per-model CRUD permissions)
 - Creator/Assignee-based access control
 - Organization-based access scoping — entities with organization_id are automatically filtered to organizations the user belongs to
+- Graceful degradation for foreign-key read-permission gaps — if a role can create/edit an entity but lacks read on one of its FK targets (e.g. can manage `approval_flow` but not `role`), the affected field renders disabled instead of crashing the page; see [`docs/knowledge/fk-read-permission-graceful-degradation.md`](docs/knowledge/fk-read-permission-graceful-degradation.md) when assigning permissions
 
 ### Built-in Systems
 

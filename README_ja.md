@@ -44,6 +44,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - ロールベースアクセス制御（モデルごとの CRUD 権限）
 - 作成者/担当者ベースのアクセス制御
 - 組織スコープフィルタリング — organization_id を持つエンティティは、ユーザーが所属する組織に自動的にフィルタリングされます
+- FK 参照先の閲覧権限が不足している場合のグレースフルデグラデーション — あるロールがエンティティの作成・編集はできても、その FK 参照先の閲覧権限がない場合（例: `approval_flow` は管理できるが `role` は閲覧できない）、該当フィールドはページをクラッシュさせず無効化表示になります。権限付与の際は [`docs/knowledge/fk-read-permission-graceful-degradation.md`](docs/knowledge/fk-read-permission-graceful-degradation.md) を参照してください
 
 ### 組み込みシステム
 

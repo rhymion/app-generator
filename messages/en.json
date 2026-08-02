@@ -17,13 +17,15 @@
     "deletedUser": "[deleted user]",
     "edit": "Edit",
     "editEntity": "Edit {entity}",
-    "fkReadPermissionBlocksCreate": "This {entity} cannot be created because it requires a related {field} you don't have permission to view. Ask an administrator to grant you read access to {field}.",
-    "fkReadPermissionRestricted": "You don't have permission to view or change {field} options. The current value is kept unchanged when you save.",
     "goBack": "Go Back",
     "imageUrl": "Image URL",
     "nextPage": "Next",
     "previousPage": "Previous",
     "save": "Save"
+  },
+  "Errors": {
+    "fkPermissionDenied": "You do not have permission to view {entity} options.",
+    "fkPermissionDeniedHint": "Contact your administrator to request read access to {entity}."
   },
   "EntityLabel": {
     "approvalFlow": "Approval Flow",

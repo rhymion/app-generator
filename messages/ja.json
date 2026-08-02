@@ -17,13 +17,15 @@
     "deletedUser": "[削除済みユーザー]",
     "edit": "編集",
     "editEntity": "{entity}を編集",
-    "fkReadPermissionBlocksCreate": "閲覧権限のない関連項目「{field}」が必須のため、この{entity}を作成できません。管理者に{field}の閲覧権限付与を依頼してください。",
-    "fkReadPermissionRestricted": "{field}の選択肢を閲覧・変更する権限がありません。保存しても現在の値は変更されません。",
     "goBack": "戻る",
     "imageUrl": "画像URL",
     "nextPage": "次へ",
     "previousPage": "前へ",
     "save": "保存"
+  },
+  "Errors": {
+    "fkPermissionDenied": "{entity}の選択肢を閲覧する権限がありません。",
+    "fkPermissionDeniedHint": "管理者に{entity}の閲覧権限付与を依頼してください。"
   },
   "EntityLabel": {
     "approvalFlow": "承認フロー",
