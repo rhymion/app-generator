@@ -6,6 +6,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Post-login redirect-back with open-redirect protection** (cmd_525): unauthenticated
+  page requests were already redirected to `/login` by `proxy.ts` before this change, but
+  always landed on `/` after signing in, losing the user's original destination. `proxy.ts`
+  now carries the originally-requested path via `?redirect=`, and `app/[locale]/login/page.tsx`
+  navigates there after a successful sign-in (credentials or Google). The new
+  `lib/auth/safe-redirect.ts` (`safeRedirectPath()`) validates the param is a same-origin,
+  path-absolute value before use — off-site, protocol-relative, and backslash-trick values
+  are rejected and fall back to `/`. API routes are unaffected (still return JSON `401`/`404`);
+  the public-path exclusion list (`/login`, `/register`, `/docs`, `/legal`, static assets) is
+  unchanged and was re-verified to produce no redirect loop. See
+  `docs/knowledge/unauthenticated-page-redirect.md`.
+
 - **Generated permission-denial and cross-org isolation API tests** (cmd_520 batch A): every
   generated `cypress/e2e/api/<entity>.cy.ts` now includes PUT/DELETE/export/import
   permission-denial tests (7.3–7.6, gated on `can_edit`/`can_delete`/`can_export`/
