@@ -66,6 +66,15 @@ if [[ -z "${AUTH_SECRET:-}" ]]; then
 fi
 : "${UPSTASH_EMAIL:?UPSTASH_EMAIL is required — set in .env.production.local}"
 : "${UPSTASH_API_KEY:?UPSTASH_API_KEY is required — set in .env.production.local}"
+# SEED_ADMIN_EMAIL/PASSWORD: the bootstrap admin login scripts/gcp-seed.sh's
+# app-migrate Job creates via `npm run db:seed-tenant` (NODE_ENV=production,
+# baked into the Dockerfile). Required, not generated — these represent an
+# operator's actual admin login, not a random secret — same as
+# UPSTASH_EMAIL/UPSTASH_API_KEY above. Without this, seed-tenant.ts's own
+# fail-fast guard (scripts/seed-tenant-credentials.ts) would reject every
+# `gcp-seed.sh` run. See docs/knowledge/seed-tenant-credential-hardening.md.
+: "${SEED_ADMIN_EMAIL:?SEED_ADMIN_EMAIL is required — set in .env.production.local (bootstrap admin login; see docs/knowledge/seed-tenant-credential-hardening.md)}"
+: "${SEED_ADMIN_PASSWORD:?SEED_ADMIN_PASSWORD is required — set in .env.production.local (bootstrap admin login; see docs/knowledge/seed-tenant-credential-hardening.md)}"
 
 # Optional: needed for Step 5 Accelerate secret (obtained via the manual
 # Prisma Accelerate step printed by gcp-setup.sh Step 3, if used)
@@ -108,4 +117,5 @@ export PROJECT_ID REGION SERVICE_NAME INSTANCE_NAME DB_NAME DB_PASSWORD
 export SA_NAME SA_EMAIL REPO_NAME GCS_BUCKET CLOUD_SQL_CONNECTION_NAME
 export IMAGE MIGRATE_IMAGE DATABASE_URL CLOUD_SQL_PUBLIC_IP REDIS_URL
 export AUTH_SECRET UPSTASH_EMAIL UPSTASH_API_KEY PRISMA_ACCELERATE_API_KEY
+export SEED_ADMIN_EMAIL SEED_ADMIN_PASSWORD
 export SQL_AUTHORIZED_NETWORKS UPSTASH_PRIMARY_REGION
