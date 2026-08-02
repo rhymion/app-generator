@@ -2238,6 +2238,7 @@ def helper_context(
             }
 
     return {
+        'parent': parent,
         'pascal': pascal,
         'title': title,
         'model_name': model_name,
@@ -3014,7 +3015,24 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
         })
     if user_in_entities:
         has_user_account_populate = False
-    return {'entities': enriched_entities, 'has_user_account_populate': has_user_account_populate}
+    # cmd_522 (M2): schema-global signal — mirrors generate.py's _has_any_mention
+    # gate for lib/mention/parser.ts and search.ts. Broader than
+    # _reg_comment_has_mention_field (which only checks the shared `comment`
+    # model): any x-mention: true field anywhere means db:getNotificationsForUser
+    # should be registered, since MentionInput usage isn't limited to comments.
+    has_any_mention = any(
+        any(
+            isinstance(prop, dict) and prop.get('x-mention') is True
+            for prop in defn.get('properties', {}).values()
+        )
+        for defn in schema.get('definitions', {}).values()
+        if isinstance(defn, dict)
+    )
+    return {
+        'entities': enriched_entities,
+        'has_user_account_populate': has_user_account_populate,
+        'has_any_mention': has_any_mention,
+    }
 
 
 def api_spec_context(

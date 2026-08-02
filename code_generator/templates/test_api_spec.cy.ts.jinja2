@@ -1367,6 +1367,14 @@ describe('API: {{ title }}', () => {
           });
       });
     });
+
+    it('M2 creates a mention notification when a comment with @mention is added', () => {
+      cy.task<{ parentId: string; mentionedUserId: string }>('db:populate{{ pascal }}WithMentionUser').then(({ mentionedUserId }) => {
+        cy.task<Array<{ type: string }>>('db:getNotificationsForUser', mentionedUserId).then((notifications) => {
+          expect(notifications.some((n) => n.type === 'mentioned_in_comment')).to.eq(true);
+        });
+      });
+    });
   });
 {% endif %}
 });

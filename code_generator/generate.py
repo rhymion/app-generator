@@ -1034,6 +1034,11 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'mention_parser.ts.jinja2', {}),
         )
         print('  Mention parser → lib/mention/parser.ts')
+        _write(
+            out / 'lib' / 'mention' / 'search.ts',
+            _render(env, 'mention_search.ts.jinja2', {}),
+        )
+        print('  Mention candidate search → lib/mention/search.ts')
 
     # --- Comment reactions API route (app/api/comment/[commentId]/reactions/toggle/route.ts) ---
     # Emitted whenever x-internal enum entities exist (i.e., reactions are enabled).

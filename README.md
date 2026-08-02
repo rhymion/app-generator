@@ -268,7 +268,9 @@ See [docs/knowledge/appendix/approval-flow.md](docs/knowledge/appendix/approval-
 
 A polymorphic bridge pattern allows comment threads to be attached to any entity without schema changes to each entity. Comments are displayed inline on view pages, and each comment supports reaction buttons (a per-comment toggle endpoint with batched aggregation and parent-owner read authorization).
 
-See [docs/knowledge/appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md).
+Any comment field annotated `x-mention: true` also gets `@mention` support: an org-scoped candidate picker, GDPR-safe id-based storage (`@[user_id:<id>]`), and a notification to newly-mentioned users (self-mentions excluded; edits only notify on newly-added mentions).
+
+See [docs/knowledge/appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) and [docs/knowledge/mention-system.md](docs/knowledge/mention-system.md).
 
 ### Attachment Management
 
