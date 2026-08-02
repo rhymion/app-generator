@@ -152,6 +152,16 @@ jobs:
         # dependency on repository secrets and keeps behavior identical for
         # every PR type.
         run: echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env.test.local
+      - name: Enable the test-only mock Google OAuth provider (cmd_527)
+        # Registers an extra CredentialsProvider under id:"google" in
+        # auth.ts, used only by cypress/e2e/auth/mfa.cy.ts to exercise the
+        # OAuth+MFA code path without any real Google credentials or
+        # outbound network call — see docs/knowledge/authentication.md
+        # "MFA on the OAuth path". Safe to always set in this workflow:
+        # this job only ever runs against the ephemeral CI test database,
+        # never a real deployment, and the flag adds a provider, it never
+        # removes or weakens one.
+        run: echo "MOCK_GOOGLE_OAUTH_TEST=true" >> .env.test.local
       - name: Verify required test env is non-empty (fail-closed)
         # Guards right at env-generation time so a future accidental
         # regression back to an empty/undefined value fails fast here
