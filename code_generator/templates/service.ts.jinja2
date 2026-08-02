@@ -96,6 +96,14 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% if reservation_mutation_guard_update %}
 {{ reservation_mutation_guard_update }}
 {% endif %}
+{% if fk_preservation_update_code %}
+    // A required FK the acting user can't read is omitted by the UI's
+    // AppFieldRelation permissionDenied branch (and may be omitted by a
+    // bare API PUT too) — preserve the existing value instead of failing
+    // required-field validation. See
+    // docs/knowledge/fk-read-permission-graceful-degradation.md.
+{{ fk_preservation_update_code }}
+{% endif %}
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }

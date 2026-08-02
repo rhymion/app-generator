@@ -23,6 +23,10 @@
     "previousPage": "Previous",
     "save": "Save"
   },
+  "Errors": {
+    "fkPermissionDenied": "You do not have permission to view {entity} options.",
+    "fkPermissionDeniedHint": "Contact your administrator to request read access to {entity}."
+  },
   "EntityLabel": {
     "approvalFlow": "Approval Flow",
     "auditLog": "Audit Log",

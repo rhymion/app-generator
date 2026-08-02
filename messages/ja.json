@@ -23,6 +23,10 @@
     "previousPage": "前へ",
     "save": "保存"
   },
+  "Errors": {
+    "fkPermissionDenied": "{entity}の選択肢を閲覧する権限がありません。",
+    "fkPermissionDeniedHint": "管理者に{entity}の閲覧権限付与を依頼してください。"
+  },
   "EntityLabel": {
     "approvalFlow": "承認フロー",
     "auditLog": "監査ログ",

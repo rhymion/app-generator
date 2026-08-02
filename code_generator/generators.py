@@ -2918,6 +2918,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         search_var    = f'{state_name}SearchAction'
         initial_var   = f'{state_name}InitialOptions'
         current_var   = f'{state_name}CurrentOption'
+        denied_var    = f'{state_name}PermissionDenied'
         return (
             f"      <AppFieldRelation\n"
             f"        label={{tf('{label_fk}')}}\n"
@@ -2928,6 +2929,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        currentOption={{{current_var}}}\n"
             f"        href={{{state_name} ? `/{target}/view/${{{state_name}}}` : null}}\n"
             f"        required={{{'true' if required else 'false'}}}\n"
+            f"        permissionDenied={{{denied_var}}}\n"
             f"      />"
         )
 
@@ -3124,6 +3126,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         initial_var   = f'{sn}InitialOptions'
         search_var    = f'{sn}SearchAction'
         current_var   = f'{sn}CurrentOption'
+        denied_var    = f'{sn}PermissionDenied'
         prop_initial  = f'initial{target_pascal}s'
         prop_search   = f'search{target_pascal}Options'
 
@@ -3154,6 +3157,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"    id: item.id,\n"
             f"    label: {label_built['expression']},\n"
             f"  }})), [{prop_initial}]);\n"
+            # The page (a Server Component) computes this flag from
+            # initial{Target}s's permissionDenied marker and passes it as its
+            # own boolean prop — a non-index property attached to an array
+            # does not survive the Server-to-Client Component serialization
+            # boundary, so it cannot be read back off {prop_initial} here.
+            f"  const {denied_var} = Boolean({prop_initial}PermissionDenied);\n"
             f"  const {search_var} = useCallback(async (query: string, includeIds: string[]) => {{\n"
             f"    const rows = (await {prop_search}?.({search_call_args})) ?? [];\n"
             f"    return rows.map((item) => ({{ id: item.id, label: {label_built['expression']} }}));\n"
@@ -3945,8 +3954,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             _seen.add(_t)
             _ordered_targets.append(_t)
     _initial_props = [f"initial{to_pascal_case(t)}s = []" for t in _ordered_targets]
+    _denied_props  = [f"initial{to_pascal_case(t)}sPermissionDenied = false" for t in _ordered_targets]
     _search_props  = [f"search{to_pascal_case(t)}Options" for t in _ordered_targets]
-    extra_default_props = ', '.join(_initial_props + _search_props)
+    extra_default_props = ', '.join(_initial_props + _denied_props + _search_props)
     entity_edit_components = ctx.get('entity_edit_components') or []
     has_current_user_role_ids = bool(entity_edit_components)
     # Bridge children receive parent context (set on the create form by the

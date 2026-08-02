@@ -1,4 +1,8 @@
 import { Suspense } from 'react';
+{% if required_relation_fields %}
+import AppAlert from '@/components/ui/AppAlert';
+import { getTranslations } from 'next-intl/server';
+{% endif %}
 import FormSkeleton from '@/components/_standard/FormSkeleton';
 import FormUpsert from '@/components/{{ parent }}/FormUpsert';
 {% for target in selection_targets %}
@@ -56,6 +60,29 @@ async function {{ parent_pascal }}NewContent() {
 {% else %}
   const userPermissions = await get{{ parent_pascal }}NewPageAccessCheck();
 {% endif %}
+{% if required_relation_fields %}
+  // Option B (cmd_516, item v): a required FK whose target the current user
+  // can't read has no way to be populated on /new — block with an
+  // explanatory message instead of rendering a create form that can never
+  // successfully submit. See docs/knowledge/fk-read-permission-graceful-degradation.md.
+  const _blockedRelationFieldKeys: string[] = [];
+{% for f in required_relation_fields %}
+  if ((initial{{ f.target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied) {
+    _blockedRelationFieldKeys.push('{{ f.field_key }}');
+  }
+{% endfor %}
+  if (_blockedRelationFieldKeys.length > 0) {
+    const te = await getTranslations('Errors');
+    const tf = await getTranslations('Fields');
+    const _blockedFieldLabels = _blockedRelationFieldKeys.map((k) => tf(k)).join(', ');
+    return (
+      <AppAlert severity="warning" className="mb-4">
+        {te('fkPermissionDenied', { entity: _blockedFieldLabels })}{' '}
+        {te('fkPermissionDeniedHint', { entity: _blockedFieldLabels })}
+      </AppAlert>
+    );
+  }
+{% endif %}
   const src = {
     id: '',
 {{ parent_default_props }}
@@ -63,5 +90,5 @@ async function {{ parent_pascal }}NewContent() {
     {{ child.property_name }}: [],
 {% endfor %}
   };
-  return <FormUpsert src={src} isEdit={false} permissions={userPermissions}{% for target in selection_targets %} initial{{ target | pascal_case }}s={ initial{{ target | pascal_case }}s } search{{ target | pascal_case }}Options={ {% if target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ target | pascal_case }}Options{% endif %} }{% endfor %}{% for oto in selector_oto_rels %} initial{{ oto.target | pascal_case }}s={ initialAvailable{{ oto.target | pascal_case }}s }{% endfor %}{% if bridge_child_ir %} initialParentType={_initialParentType} initialParentId={_initialParentId}{% endif %} />;
+  return <FormUpsert src={src} isEdit={false} permissions={userPermissions}{% for target in selection_targets %} initial{{ target | pascal_case }}s={ initial{{ target | pascal_case }}s } initial{{ target | pascal_case }}sPermissionDenied={Boolean((initial{{ target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)} search{{ target | pascal_case }}Options={ {% if target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ target | pascal_case }}Options{% endif %} }{% endfor %}{% for oto in selector_oto_rels %} initial{{ oto.target | pascal_case }}s={ initialAvailable{{ oto.target | pascal_case }}s } initial{{ oto.target | pascal_case }}sPermissionDenied={Boolean((initialAvailable{{ oto.target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)}{% endfor %}{% if bridge_child_ir %} initialParentType={_initialParentType} initialParentId={_initialParentId}{% endif %} />;
 }

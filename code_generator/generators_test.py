@@ -3482,6 +3482,33 @@ def api_spec_context(
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
+    # cmd_516 Option B: pick a required many-to-one relation (guaranteed
+    # non-null after db:populate<Entity>, which only sets required fields) to
+    # regression-test that a PUT omitting the FK entirely — exactly what the
+    # UI now sends when the acting user can't read the FK's target, see
+    # AppFieldRelation's permissionDenied branch and
+    # docs/knowledge/fk-read-permission-graceful-degradation.md — leaves the
+    # existing FK value untouched instead of silently nulling it out. Limited
+    # to required relations so scope stays simple: an entity with only
+    # optional FK relations doesn't get this generated test.
+    # Excludes self-referential relations (target == model): granting the test
+    # actor full CRUD on this entity would also grant read on the "denied"
+    # target in that case, defeating the scenario.
+    _fk_preservation_relation = next(
+        (r for r in relationships if r['required'] and r['target'] != model), None,
+    )
+
+    def _put_body_fk_zero_impl(indent: str) -> list[str]:
+        if not _fk_preservation_relation:
+            return []
+        out = []
+        for prop in put_body_props:
+            if prop != _fk_preservation_relation['prop_name']:
+                out.append(f"{indent}{prop}: original.{prop},")
+        for c in api_child_metas:
+            out.append(f"{indent}{c['child']['property_name']}: [],")
+        return out
+
     has_approvable = any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model, schema))
     _x_approval = model_def.get('x-approval')
     entity_on_rejected = _x_approval.get('on_rejected') if _x_approval else None
@@ -3559,6 +3586,17 @@ def api_spec_context(
         'x_relationships_list': x_relationships_list,
         'readonly_fields': readonly_fields,
         'put_body_readonly_zero': _put_body_ro_zero_impl('            '),
+        # cmd_516 Option B: FK read-permission graceful-degradation regression test
+        'fk_preservation_relation': (
+            {
+                'prop_name': _fk_preservation_relation['prop_name'],
+                'relation_name': _fk_preservation_relation['prop_name'].removesuffix('_id'),
+                'target': _fk_preservation_relation['target'],
+            }
+            if _fk_preservation_relation and (gen_cfg.get('edit', True) is not False)
+            else None
+        ),
+        'put_body_fk_preservation_zero': _put_body_fk_zero_impl('            '),
         # CSV Export (cmd_421 N9): internal bridge FK exclusion
         'has_exportable_bridge_fks': has_exportable_bridge_fks,
         'exportable_bridge_fk_names': exportable_bridge_fk_names,
