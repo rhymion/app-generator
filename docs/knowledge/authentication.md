@@ -288,18 +288,72 @@ gap.
 
 **Testing without real Google credentials**: `auth.ts` registers an
 additional CredentialsProvider under `id: "google"` when
-`MOCK_GOOGLE_OAUTH_TEST=true` (set only in a gitignored
-`.env.test.local`, never in a committed env file). Auth.js sets
-`account.provider = provider.id` for any Credentials-shaped provider
-regardless of its `id`, so this reaches the exact same OAuth branch of
-`signIn()`/`jwt()` a real Google sign-in would, via a real HTTP POST to
-`/api/auth/callback/google` — with zero outbound calls to Google and
-zero real Google credentials. See `cypress/e2e/auth/mfa.cy.ts`
-(`mockGoogleSignIn()`) for the test-side contract. A `NODE_ENV==='test'`
-condition alone cannot gate this: `next build` bakes
-`NODE_ENV=production` into the server regardless of the runtime env
-(see `docs/knowledge/testing-cypress.md`), so the dedicated
-`MOCK_GOOGLE_OAUTH_TEST` flag is required instead.
+`isMockGoogleOAuthTestEnabled()` (`lib/auth/mock-oauth-gate.ts`) returns
+true. Auth.js sets `account.provider = provider.id` for any
+Credentials-shaped provider regardless of its `id`, so this reaches the
+exact same OAuth branch of `signIn()`/`jwt()` a real Google sign-in
+would, via a real HTTP POST to `/api/auth/callback/google` — with zero
+outbound calls to Google and zero real Google credentials. See
+`cypress/e2e/auth/mfa.cy.ts` (`mockGoogleSignIn()`) for the test-side
+contract.
+
+**Double-gated (cmd_528)** — a single env var is not an acceptable gate
+on its own here: the mock provider's `authorize()` looks a user up by
+email with no password or MFA check, so if `MOCK_GOOGLE_OAUTH_TEST=true`
+ever leaked into a real deploy's environment (e.g. a platform env var
+mistakenly scoped to "all environments" instead of just Preview),
+anyone who knows a user's email could sign in as them. Registration
+requires **both**:
+
+1. `MOCK_GOOGLE_OAUTH_TEST=true` (set only in a gitignored
+   `.env.test.local`, never in a committed env file), **and**
+2. The filesystem sentinel file `.mock-oauth-test-sentinel` (repo root,
+   gitignored) existing.
+
+The sentinel is written only by `scripts/write-mock-oauth-sentinel.js`,
+which is wired into the `pre*` hooks of every `test:e2e:*` npm script
+that builds or starts the server (`package.json`). It is **not** part of
+`build`, `build:full`, or `vercel-build` — the only commands any real
+deployment pipeline runs — so the sentinel never exists in a real
+deploy's filesystem, regardless of what env vars are set there. Enabling
+the mock provider in production would require both a dashboard env var
+change AND a code/pipeline change that ships the sentinel writer into
+the build — a materially different, PR-reviewed change, not a dashboard
+toggle.
+
+A second *env var* was considered and rejected as insufficient: it would
+sit behind the exact same "flip it in the platform dashboard" channel as
+the first one, so it wouldn't add an independent gate. A
+`NODE_ENV === 'test'` check was also considered and rejected:
+`next build` (Turbopack) bakes in `process.env.NODE_ENV` at build time
+regardless of the runtime env — and this isn't limited to the
+`process.env.NODE_ENV` member-access form. Experimentally verified
+(cmd_528, throwaway probe route + `next build` + grep on the compiled
+output): `process.env["NODE_ENV"]` (bracket notation) and even
+`process.env[k]` for a module-level `const k = "NODE_ENV"` all compiled
+down to the literal string `"production"` too. There is no
+bracket-notation escape hatch (see `docs/knowledge/testing-cypress.md`
+for the original `NODE_ENV`-baking finding this extends).
+
+**Fail-closed**: if `MOCK_GOOGLE_OAUTH_TEST=true` but the sentinel is
+missing, `isMockGoogleOAuthTestEnabled()` throws at module load (server
+startup / cold start) instead of silently skipping provider
+registration — a misconfigured deploy fails loudly rather than quietly
+running with a live account-takeover path.
+
+**Unit vs. e2e coverage split**: `isMockGoogleOAuthTestEnabled()` lives
+in its own dependency-free module (`lib/auth/mock-oauth-gate.ts`)
+specifically so its fail-closed logic can be unit tested in isolation —
+see `lib/auth/mock-oauth-gate.test.ts`. Importing `auth.ts` itself
+directly in vitest is **not currently possible**: `next-auth`
+transitively imports a `next/server` subpath that vitest's Vite-based
+resolver cannot resolve outside Next.js's own bundler
+(`Cannot find module '.../node_modules/next/server' imported from
+next-auth/lib/env.js`). That means the `signIn()`/`jwt()` callback logic
+in `auth.ts` — and the OAuth+MFA wiring end to end — can only be
+exercised via e2e (`cypress/e2e/auth/mfa.cy.ts`), not vitest, until/unless
+that logic is extracted into standalone modules the way the mock-OAuth
+gate was.
 
 ---
 

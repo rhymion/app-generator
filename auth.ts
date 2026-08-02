@@ -11,6 +11,7 @@ import { siteConfig } from "@/lib/site-config";
 import { recordAuditEvent } from "@/lib/audit-log";
 import { verifyMfaCode } from "@/lib/mfa/verify";
 import { createTenantBoundUser } from "@/lib/auth/create-user";
+import { isMockGoogleOAuthTestEnabled } from "@/lib/auth/mock-oauth-gate";
 
 // Custom CredentialsSignin subclasses so @auth/core re-throws them as-is
 // (plain Error gets wrapped in CallbackRouteError and the code is lost).
@@ -147,15 +148,15 @@ function buildProviders(): Provider[] {
   // only the first-factor check differs (email lookup instead of a Google
   // handshake).
   //
-  // Double-gated so this can never activate outside an explicit test
-  // harness: `MOCK_GOOGLE_OAUTH_TEST` must be the literal string "true",
-  // and it must only ever be set in `.env.test.local` (gitignored, never
-  // committed — see that file's header comment). A `NODE_ENV === 'test'`
-  // check alone would NOT work here: `next build` bakes NODE_ENV=production
-  // into the server regardless of the runtime env, so a NODE_ENV branch is
-  // dead-code-eliminated to the production value even under `test:e2e:cy:api`
-  // (see docs/knowledge/testing-cypress.md).
-  if (process.env.MOCK_GOOGLE_OAUTH_TEST === "true") {
+  // Double-gated so a single leaked env var can never activate this outside
+  // an explicit test harness: `MOCK_GOOGLE_OAUTH_TEST` must be the literal
+  // string "true" (only ever set in `.env.test.local`, gitignored, never
+  // committed — see that file's header comment) AND the filesystem sentinel
+  // checked by `isMockGoogleOAuthTestEnabled()`
+  // (lib/auth/mock-oauth-gate.ts) must be present. See that function's
+  // comment for why a second env var (or a NODE_ENV bracket-notation trick)
+  // doesn't work as an independent second gate.
+  if (isMockGoogleOAuthTestEnabled()) {
     providers.push(
       CredentialsProvider({
         id: "google",

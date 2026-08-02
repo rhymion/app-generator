@@ -161,6 +161,14 @@ jobs:
         # this job only ever runs against the ephemeral CI test database,
         # never a real deployment, and the flag adds a provider, it never
         # removes or weakens one.
+        #
+        # This env var alone is NOT sufficient to register the provider
+        # (cmd_528): auth.ts also requires the filesystem sentinel written
+        # by scripts/write-mock-oauth-sentinel.js, which runs automatically
+        # via the `pre*` hooks on the `test:e2e:build`/`test:e2e:cy:start`
+        # npm scripts invoked below. Real deploy pipelines (`vercel-build`,
+        # `build:full`) never run that script, so this flag alone leaking
+        # into a real deployment's env vars can't enable the mock provider.
         run: echo "MOCK_GOOGLE_OAUTH_TEST=true" >> .env.test.local
       - name: Verify required test env is non-empty (fail-closed)
         # Guards right at env-generation time so a future accidental

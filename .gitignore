@@ -15,6 +15,11 @@
 /cypress/videos
 /cypress/screenshots
 
+# e2e test-harness sentinel for the mock Google OAuth provider (cmd_528) —
+# written only by scripts/write-mock-oauth-sentinel.js, never committed.
+# See auth.ts's isMockGoogleOAuthTestEnabled().
+.mock-oauth-test-sentinel
+
 # Claude Code: personal, machine-specific permission overrides (defaultMode,
 # extra allow/deny rules). Never shared — see docs/knowledge/claude-code-settings-consumer-side.md
 .claude/settings.local.json
