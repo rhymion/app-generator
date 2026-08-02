@@ -36,6 +36,9 @@ import { add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 {% endif %}
 {% endif %}
+{% if comment_has_mention %}
+import MentionText from '@/components/_standard/MentionText';
+{% endif %}
 import AuditInfo from '@/components/_standard/AuditInfo';
 import { AppDetailShell, AppDetailHeader, AppFieldText, AppFieldBoolean{% if has_rel_links %}, AppFieldRelation{% endif %}{% if needs_accordion %}, AppSection{% endif %} } from '@/components/ui';
 {% if custom_view_imports %}
@@ -51,7 +54,7 @@ import { SplitActionSection } from './SplitActionSection';
 import dayjs from 'dayjs';
 {% endif %}
 
-export default function FormView({ src, permissions{% if entity_view_components %}, currentUserRoleIds, currentUserId{% endif %} }: FormViewProps) {
+export default function FormView({ src, permissions{% if comment_has_mention %}, canViewUserProfile, mentionUserContext{% endif %}{% if entity_view_components %}, currentUserRoleIds, currentUserId{% endif %} }: FormViewProps) {
   const tf = useTranslations('Fields');
   const te = useTranslations('EntityLabel');
 {% if view_enum_ns_hooks %}

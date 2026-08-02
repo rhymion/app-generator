@@ -2619,6 +2619,16 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     grid_children        = [c for c in children_raw if c.get('output_type') not in ('list', 'comments')]
     col_fn_names         = [f"use{to_pascal_case(c['property_name'])}Columns" for c in grid_children]
 
+    # cmd_522c: comment display uses <MentionText> instead of plain text when
+    # the shared comment entity has an x-mention field. Wired via
+    # CommentListWrapper's renderMessage render-prop (never a direct import
+    # inside that always-present static component — see its own docstring).
+    comment_has_mention = ctx.get('comment_has_mention', False)
+    _render_message_prop = (
+        "        renderMessage={(c) => <MentionText text={c.message} userContext={mentionUserContext ?? {}} canViewUserProfile={Boolean(canViewUserProfile)} />}"
+        if comment_has_mention else ""
+    )
+
     child_view_grids = []
     # Bridge-based comment section (commentable one-to-one)
     if has_commentable:
@@ -2628,7 +2638,8 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             f"        showTitle={{true}}\n"
             f"        title={{tf('comments')}}\n"
             f"        permissions={{{{ create: false, delete: false }}}}\n"
-            f"      />"
+            + (f"{_render_message_prop}\n" if _render_message_prop else "")
+            + f"      />"
         )
     for child in children_raw:
         prop = child['property_name']
@@ -2641,7 +2652,8 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 f"        showTitle={{true}}\n"
                 f"        title={{tf('{child_camel}')}}\n"
                 f"        permissions={{{{ create: false, delete: false }}}}\n"
-                f"      />"
+                + (f"{_render_message_prop}\n" if _render_message_prop else "")
+                + f"      />"
             )
         elif ot == 'list':
             ft = child.get('file_type')
@@ -2712,6 +2724,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         'has_rel_links':          has_rel_links,
         'needs_accordion':        needs_accordion,
         'has_comment_children':   has_comment_children,
+        'comment_has_mention':    comment_has_mention,
         'has_list_children':      has_list_children or has_flatten_array,
         'has_grid_children':      bool(grid_children),
         'col_fn_names':           col_fn_names,
@@ -2771,7 +2784,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # the generated component must then `import { formatLabelValue } from '@/lib/_format';`.
     uses_format_label_value = False
 
-    text_props           = [p for p in cats['text']           if p not in readonly_field_names]
+    # mention_fields (cmd_522c): this entity's own text fields annotated
+    # x-mention: true render via <MentionInput> (picker + @[user_id:<id>]
+    # insertion) instead of the plain uncontrolled AppFieldText used by
+    # every other text field. Pulled out of text_props before the ref-based
+    # uncontrolled pattern below — MentionInput needs a controlled
+    # value/onChange pair so it can insert the marker at the caret.
+    mention_field_names: set[str] = set(ctx.get('mention_fields') or [])
+    mention_props = [p for p in cats['text'] if p not in readonly_field_names and p in mention_field_names]
+
+    text_props           = [p for p in cats['text']           if p not in readonly_field_names and p not in mention_field_names]
     number_props         = [p for p in cats['number']         if p not in readonly_field_names]
     date_time_props      = [p for p in cats['date_time']      if p not in readonly_field_names]
     image_props          = [p for p in cats['image']          if p not in readonly_field_names]
@@ -2835,6 +2857,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} || '');"
         for p in image_props
     )
+    mention_states = '\n'.join(
+        f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
+        for p in mention_props
+    )
     bool_states = '\n'.join(
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<boolean>(Boolean(src.{p}));"
         for p in boolean_props
@@ -2871,7 +2897,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string | null>(src.{p} || null);"
         for p in entity_select_props
     )
-    all_states = '\n'.join(filter(None, [dt_states, img_states, bool_states, enum_states, enum_str_states, rel_states, custom_states, entity_select_states]))
+    all_states = '\n'.join(filter(None, [dt_states, img_states, mention_states, bool_states, enum_states, enum_str_states, rel_states, custom_states, entity_select_states]))
 
     # ---- Form fields (JSX) ----
     def _tf(p):
@@ -2909,6 +2935,30 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      />"
         )
         text_jsxs.append(_maybe_box_wrap(_text_jsx, _text_width_cols))
+
+    # Mention fields (cmd_522c): x-mention: true text fields use the @picker.
+    mention_jsxs = []
+    for p in mention_props:
+        prop = filtered_props[p]
+        fk = _tf(p)
+        sn = safe_var_name(p)
+        req = p in (model_def.get('required') or [])
+        _ui_rows = (prop.get('x-ui') or {}).get('rows')
+        rows = str(int(_ui_rows)) if _ui_rows is not None else '4'
+        _mention_width_cols = _ui_width_cols(prop)
+        if _mention_width_cols:
+            has_box_import = True
+        _mention_jsx = (
+            f"      <MentionInput\n"
+            f"        label={{tf('{fk}')}}\n"
+            f"        value={{{sn}}}\n"
+            f"        onChange={{(v) => set{_setter(sn)}(v)}}\n"
+            f"        searchUsers={{searchMentionUserOptions}}\n"
+            f"        {'required' if req else ''}\n"
+            f"        rows={{{rows}}}\n"
+            f"      />"
+        )
+        mention_jsxs.append(_maybe_box_wrap(_mention_jsx, _mention_width_cols))
 
     def _autocomplete_rel_jsx(prop_name: str, target: str, required: bool) -> str:
         label_base    = prop_name.removesuffix('_id')
@@ -3224,6 +3274,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     all_parent_fields_jsx = '\n'.join(filter(None, [
         '\n'.join(text_jsxs),
+        '\n'.join(mention_jsxs),
         '\n'.join(entity_select_jsxs),
         '\n'.join(rel_jsxs),
         '\n'.join(num_jsxs),
@@ -3277,6 +3328,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             dt_ds_parts.append(f"    formData.set('{p}', {sn}?.toISOString() || '');")
     dt_ds = '\n'.join(dt_ds_parts)
     img_ds   = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in image_props)
+    mention_ds = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in mention_props)
     def _rel_fds_line(r: dict) -> str:
         var = safe_var_name(r['prop_name'])
         # parent_rels_raw entries carry a 'required' key; selector_oto_rels entries carry 'nullable'.
@@ -3307,7 +3359,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             return f"    formData.set('{p}', {safe_var_name(p)}.toString());"
         return f"    formData.set('{p}', {safe_var_name(p)});"
     cust_ds  = '\n'.join(_custom_form_data_line(p) for p in custom_upsert_props)
-    parent_form_data_sets = '\n'.join(filter(None, [text_ds, entity_select_ds, rel_ds, num_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, cust_ds]))
+    parent_form_data_sets = '\n'.join(filter(None, [text_ds, mention_ds, entity_select_ds, rel_ds, num_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, cust_ds]))
 
     # ---- Children analysis ----
     # Use the pre-filtered embedded_ch from build_context (passed as non_comment_ch in ctx).
@@ -3982,6 +4034,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in number_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in date_time_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in image_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in mention_props)
     validation_entry_lines.extend(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in parent_rels_raw)
     validation_entry_lines.extend(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in selector_oto_rels)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in boolean_props)
@@ -4341,6 +4394,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     _child_validation_code_merged = '\n\n'.join(filter(None, [child_validation_code, _flatten_validation_code]))
 
     return {
+        'has_mention_fields':       bool(mention_props),
         'parent_refs':              parent_refs,
         'all_states':               all_states_merged,
         'all_parent_fields_jsx':    all_parent_fields_jsx,

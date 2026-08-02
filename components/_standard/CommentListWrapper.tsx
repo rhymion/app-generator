@@ -46,6 +46,15 @@ interface CommentListWrapperProps {
   onDeleteComment?: (id: string) => Promise<void>;
   reactionTypes?: ReactionType[];
   onToggleReaction?: (commentId: string, type: string | number) => Promise<CommentReactionSummary>;
+  /**
+   * Renders a comment's message body. Defaults to plain text. Pass this to
+   * enable mention-aware rendering (cmd_522) — this component never imports
+   * MentionText itself (that lives at `@/lib/mention/MentionText`, only
+   * generated when the schema has ≥1 `x-mention: true` field), so schemas
+   * with zero mention usage never pull in lib/mention/* code via this
+   * always-present static component.
+   */
+  renderMessage?: (comment: CommentItem) => React.ReactNode;
 }
 
 function getInitials(name: string): string {
@@ -69,9 +78,10 @@ interface CommentItemComponentProps {
   onDelete?: (id: string) => Promise<void>;
   reactionTypes?: ReactionType[];
   onToggleReaction?: (commentId: string, type: string | number) => Promise<CommentReactionSummary>;
+  renderMessage?: (comment: CommentItem) => React.ReactNode;
 }
 
-function CommentItemComponent({ comment, canDelete, onUpdate, onDelete, reactionTypes, onToggleReaction }: CommentItemComponentProps) {
+function CommentItemComponent({ comment, canDelete, onUpdate, onDelete, reactionTypes, onToggleReaction, renderMessage }: CommentItemComponentProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editMessage, setEditMessage] = useState(comment.message);
   const [isPending, startTransition] = useTransition();
@@ -162,7 +172,7 @@ function CommentItemComponent({ comment, canDelete, onUpdate, onDelete, reaction
           ) : (
             <>
               <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {comment.message}
+                {renderMessage ? renderMessage(comment) : comment.message}
               </Typography>
               {reactionTypes && reactionTypes.length > 0 && onToggleReaction && (
                 <CommentReactionBar
@@ -210,6 +220,7 @@ export default function CommentListWrapper({
   onDeleteComment,
   reactionTypes,
   onToggleReaction,
+  renderMessage,
 }: CommentListWrapperProps) {
   const [newMessage, setNewMessage] = useState('');
   const [isPending, startTransition] = useTransition();
@@ -244,6 +255,7 @@ export default function CommentListWrapper({
                   onDelete={onDeleteComment}
                   reactionTypes={reactionTypes}
                   onToggleReaction={onToggleReaction}
+                  renderMessage={renderMessage}
                 />
                 {index < comments.length - 1 && <Divider component="li" />}
               </Fragment>

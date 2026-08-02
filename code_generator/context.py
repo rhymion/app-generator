@@ -18,6 +18,7 @@ from helpers.schema_helpers import (
     get_flatten_rels,
     get_entity_properties,
 )
+from helpers.bridge_direction import collect_parent_bridge_fk_props
 
 
 def _raw_def(entity_name: str, schema: dict) -> dict:
@@ -110,6 +111,7 @@ class EntityContext:
     entity_edit_components: list[dict] = ()    # custom components rendered in FormUpsert; [{name, path?}]
     is_bridge_child: bool = False              # entity declares new-form x-bridge (parent-context create)
     reaction_value_type: str = 'number'        # runtime type of the reaction 'type' constant (see generate_types.extract_named_constants)
+    comment_has_mention: bool = False          # this entity's comment thread supports @mention (cmd_522) — gates FormViewProps.canViewUserProfile/mentionUserContext
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +139,21 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     generate_config = entity.get('generate_config', {})
     children_raw = entity.get('children', [])
 
-    model_def = _raw_def(model, schema)
+    # canonicalize_bridges()/collect_parent_bridge_fk_props(): normalize both
+    # x-bridge forms (old array form → synthetic x-relationship on the `via`
+    # field; new object form → synthesized parent-side FK prop) into
+    # model_def BEFORE any one-to-one-rel detection below — mirrors
+    # build_context.py's identical two-step normalization (its sole other
+    # caller). Without this, get_one_to_one_rels() below never sees the
+    # bridge relation for entities using either x-bridge form, so
+    # comment_has_mention (cmd_522c, computed further down from
+    # one_to_one_rels) silently stays False for a bridge-based comment
+    # thread that build_context.py correctly detects as True.
+    from build_context import canonicalize_bridges
+    model_def = canonicalize_bridges(_raw_def(model, schema), schema.get('definitions', {}))
+    _parent_bridge_fks = collect_parent_bridge_fk_props(model, schema)
+    if _parent_bridge_fks:
+        model_def = {**model_def, 'properties': {**model_def.get('properties', {}), **_parent_bridge_fks}}
     filtered_props = filter_fields(
         model_def.get('properties', {}),
         generate_config.get('fields'),
@@ -493,6 +509,20 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         for r in _flatten_rels_raw
     ]
 
+    # comment_has_mention (cmd_522): this entity has a bridge-based
+    # (commentable one-to-one) or child comment thread AND the shared
+    # `comment` model has ≥1 x-mention: true field. Mirrors build_context.py's
+    # identical computation for getters.ts.jinja2/actions.ts.jinja2 — kept as
+    # a separate calculation here since context.py is a fully independent
+    # context builder (types.ts.jinja2 only) with no shared state.
+    _has_commentable_oto = any(r.target == 'commentable' for r in one_to_one_rels)
+    _has_comment_children = any(c.get('output_type') == 'comments' for c in children_raw)
+    _comment_def = _raw_def('comment', schema)
+    comment_has_mention = (_has_commentable_oto or _has_comment_children) and any(
+        isinstance(fp, dict) and fp.get('x-mention') is True
+        for fp in (_comment_def.get('properties') or {}).values()
+    )
+
     # Custom view/edit components from x-custom-components config (entity-level, list).
     _xcc_list_raw = schema['definitions'].get(def_key, {}).get('x-custom-components') or []
     if not isinstance(_xcc_list_raw, list):
@@ -531,4 +561,5 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         entity_edit_components=entity_edit_components,
         is_bridge_child=isinstance(_x_bridge, dict),
         reaction_value_type=_reaction_value_type,
+        comment_has_mention=comment_has_mention,
     )

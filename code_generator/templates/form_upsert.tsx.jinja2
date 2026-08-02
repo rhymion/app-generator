@@ -27,6 +27,10 @@ import { AppFieldText, AppFieldBoolean, AppValidationError{% if has_entity_autoc
 {% if has_comment_children %}
 import CommentListWrapper from '@/components/_standard/CommentListWrapper';
 {% endif %}
+{% if has_mention_fields %}
+import MentionInput from '@/components/_standard/MentionInput';
+import { searchMentionUserOptions } from '@/lib/mention/search';
+{% endif %}
 {% if child_imports %}
 {{ child_imports }}
 {% endif %}
