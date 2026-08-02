@@ -2,7 +2,6 @@
 
 import prisma from '@/lib/prisma';
 import type { Organization, OrganizationDetail } from '@/lib/organization/types';
-import { auth } from '@/auth';
 import { assertPermission, getModelPermissions, getSessionUserIdOrThrow, Operation, resolvePermissions, toPermissions } from '../authz';
 
 export async function getAssociatedOrganizations(userId: string): Promise<Organization[]> {

@@ -20,7 +20,6 @@ export default defineConfig({
       // Falls back to empty object when no project-tasks.ts exists (base template).
       let projectTasks: Record<string, (...args: any[]) => any> = {};
       try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
         const mod = require('./cypress/support/project-tasks') as {
           getProjectTasks?: () => Record<string, (...args: any[]) => any>;
         };
@@ -100,7 +99,6 @@ export default defineConfig({
         async 'db:createTestComment'() {
           const { prisma } = require('./cypress/support/db-helpers');
           const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
-          const { createId } = require('@paralleldrive/cuid2');
           const testUser = await prisma.user.findUnique({
             where: { email: TEST_CREDENTIALS.email },
           });

@@ -1,7 +1,6 @@
-import { describe, it, expect, afterAll } from 'vitest';
-import { ChildProcess } from 'child_process';
+import { describe, it, expect } from 'vitest';
 import * as net from 'net';
-import { startServer, stopServer, signUp, signIn, waitForPortFree } from './helpers';
+import { startServer, waitForPortFree } from './helpers';
 
 const PORT = 3001;
 

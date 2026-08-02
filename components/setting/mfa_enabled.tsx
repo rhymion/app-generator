@@ -21,7 +21,7 @@ const MFA_ERROR_KEYS: Record<MfaErrorCode, string> = {
   UNKNOWN_ERROR: 'errorUnknown',
 };
 
-export default function MfaEnabled({value, onChange, isEdit}: {value: boolean, onChange: (val: boolean) => void, isEdit: boolean}) {
+export default function MfaEnabled({value, onChange: _onChange, isEdit: _isEdit}: {value: boolean, onChange: (val: boolean) => void, isEdit: boolean}) {
   const t = useTranslations('Mfa');
   const router = useRouter();
   const [isPending, startTransition] = useTransition();

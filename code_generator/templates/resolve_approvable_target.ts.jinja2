@@ -12,9 +12,9 @@ type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction'
  * approval_request row, which has no view page of its own.
  */
 export async function resolveApprovableTarget(
-  tx: Tx,
-  entityType: string,
-  approvableId: string,
+  {% if entities %}tx{% else %}_tx{% endif %}: Tx,
+  {% if entities %}entityType{% else %}_entityType{% endif %}: string,
+  {% if entities %}approvableId{% else %}_approvableId{% endif %}: string,
 ): Promise<{ id: string } | null> {
 {% for entity in entities %}
   if (entityType === '{{ entity }}') {

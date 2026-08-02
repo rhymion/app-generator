@@ -1,6 +1,6 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { NextResponse } from 'next/server';
-import { getModelPermissions, assertPermission, getSessionUserId } from '@/lib/authz';
+import { getModelPermissions, assertPermission{% if should_filter_by_org %}, getSessionUserId{% endif %} } from '@/lib/authz';
 import { handleApiError } from '@/lib/api-auth';
 import { escapeCSV } from '@/lib/_csv';
 import { get{{ parent_pascal }}ChunkForExport } from '@/lib/{{ parent }}/getters';

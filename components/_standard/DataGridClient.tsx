@@ -129,22 +129,6 @@ export default function DataGridClient<T extends BaseEntity>({
     });
   }, [fetchPage]);
 
-  function moveRowUp(index: number) {
-    setItems(prev => {
-      const newItems = [...prev];
-      [newItems[index - 1], newItems[index]] = [newItems[index], newItems[index - 1]];
-      return newItems;
-    });
-  }
-
-  function moveRowDown(index: number) {
-    setItems(prev => {
-      const newItems = [...prev];
-      [newItems[index], newItems[index + 1]] = [newItems[index + 1], newItems[index]];
-      return newItems;
-    });
-  }
-
   const deleteSelected = () => {
     // Capture IDs now — before the Dialog opens and its focus trap causes
     // MUI DataGrid to fire onRowSelectionModelChange with an empty set.

@@ -16,10 +16,10 @@ import { afterApprove as {{ entity.pascal_name }}AfterApprove } from '@/lib/{{ e
  * and approvable.approved_at is set (idempotency guaranteed by DB flag).
  */
 export async function dispatchOnApproved(
-  tx: Tx,
-  entityType: string,
-  approvableId: string,
-  approvedByUserId: string,
+  {% if approvable_entities %}tx{% else %}_tx{% endif %}: Tx,
+  {% if approvable_entities %}entityType{% else %}_entityType{% endif %}: string,
+  {% if approvable_entities %}approvableId{% else %}_approvableId{% endif %}: string,
+  {% if approvable_entities | selectattr('emit_hook') | list %}approvedByUserId{% else %}_approvedByUserId{% endif %}: string,
 ): Promise<void> {
 {% for entity in approvable_entities %}
   if (entityType === '{{ entity.snake_name }}') {

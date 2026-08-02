@@ -32,7 +32,7 @@ async function main() {
   // default on `user.tenant_id` and the backfill value used by the 1.5
   // migration script. Creator/updater stay null on first run; once an
   // admin exists they could be backfilled, but it isn't required.
-  const defaultTenant = await prisma.tenant.upsert({
+  await prisma.tenant.upsert({
     where: { slug: 'default' },
     update: {},
     create: {
