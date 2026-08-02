@@ -4,7 +4,7 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% if should_filter_by_org %}
   const _createOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
   if (!_createOrgIds.includes(organizationId)) {
-    throw new Error('Organization access denied');
+    throw new ApiError(404, 'Not found');
   }
 {% endif %}
   const result = await prisma.$transaction(async (tx) => {
@@ -88,7 +88,7 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
   if (organizationId) {
     const _updateOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
     if (!_updateOrgIds.includes(organizationId)) {
-      throw new Error('Organization access denied');
+      throw new ApiError(404, 'Not found');
     }
   }
 {% endif %}
