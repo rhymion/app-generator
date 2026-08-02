@@ -296,6 +296,8 @@ See [docs/knowledge/appendix/inventory-reservation-split.md](docs/knowledge/appe
 
 **Default-deny**: new users start with zero permissions. An Administrator must explicitly assign roles to grant access. The `Administrator` role (seeded by `seed-tenant.ts`) grants full CRUD on all entities. See [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) for the permission model and test classification rules.
 
+**Unauthenticated page requests** are redirected to `/login` by `proxy.ts` before any page renders, and the user is sent back to their original destination after signing in (open-redirect protected — off-site `redirect` values are rejected). API routes are unaffected and continue returning JSON `401`/`404`. See [docs/knowledge/unauthenticated-page-redirect.md](docs/knowledge/unauthenticated-page-redirect.md).
+
 **Generated permission E2E coverage** includes per-entity permission-denial tests (GET/POST/PUT/DELETE/export/import, 4xx) and cross-organization isolation tests (create/update/read blocked across org boundaries) in `cypress/e2e/api/<entity>.cy.ts`. See [docs/knowledge/permission-e2e-test-design.md](docs/knowledge/permission-e2e-test-design.md).
 
 See [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenancy-and-permissions.md).

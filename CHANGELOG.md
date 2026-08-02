@@ -6,6 +6,17 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Post-login redirect-back with open-redirect protection** (cmd_525): unauthenticated
+  page requests were already redirected to `/login` by `proxy.ts` before this change, but
+  always landed on `/` after signing in, losing the user's original destination. `proxy.ts`
+  now carries the originally-requested path via `?redirect=`, and `app/[locale]/login/page.tsx`
+  navigates there after a successful sign-in (credentials or Google). The new
+  `lib/auth/safe-redirect.ts` (`safeRedirectPath()`) validates the param is a same-origin,
+  path-absolute value before use — off-site, protocol-relative, and backslash-trick values
+  are rejected and fall back to `/`. API routes are unaffected (still return JSON `401`/`404`);
+  the public-path exclusion list (`/login`, `/register`, `/docs`, `/legal`, static assets) is
+  unchanged and was re-verified to produce no redirect loop. See
+  `docs/knowledge/unauthenticated-page-redirect.md`.
 - **`@mention` server-side support** (cmd_522, server side of a two-part feature —
   client-side `MentionInput`/`MentionText` UI ships separately): a new schema-global
   `searchMentionUserOptions()` server action (`lib/mention/search.ts`) returns org-scoped
