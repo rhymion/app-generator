@@ -1,14 +1,14 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { TEST_CREDENTIALS } from '../support/test-credentials';
 {% if has_datagrid_children and has_datagrid_fk_children %}
-import { fillDataGridRow, selectDataGridSingleSelect, {% if seed_count == 0 %}assertDataGridEmpty, {% endif %}getDataGridRowCount, getDataGridTotalRowCount, assertDataGridRowData } from '../support/datagrid-helpers';
+import { fillDataGridRow, selectDataGridSingleSelect, {% if seed_count == 0 %}assertDataGridEmpty, {% endif %}getDataGridTotalRowCount } from '../support/datagrid-helpers';
 {% elif has_datagrid_children %}
-import { fillDataGridRow, {% if seed_count == 0 %}assertDataGridEmpty, {% endif %}getDataGridRowCount, getDataGridTotalRowCount, assertDataGridRowData } from '../support/datagrid-helpers';
+import { fillDataGridRow, {% if seed_count == 0 %}assertDataGridEmpty, {% endif %}getDataGridTotalRowCount } from '../support/datagrid-helpers';
 {% else %}
 {% if seed_count == 0 %}
-import { assertDataGridEmpty, getDataGridRowCount, getDataGridTotalRowCount } from '../support/datagrid-helpers';
+import { assertDataGridEmpty, getDataGridTotalRowCount } from '../support/datagrid-helpers';
 {% else %}
-import { getDataGridRowCount, getDataGridTotalRowCount } from '../support/datagrid-helpers';
+import { getDataGridTotalRowCount } from '../support/datagrid-helpers';
 {% endif %}
 {% endif %}
 
@@ -83,7 +83,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}// Add required child: {{ child.title }}
 {{ I }}cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_create_fields %}
-{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', '{{ fk.label }}');
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
+{% endfor %}
+{% for line in child.native_enum_create_calls %}
+{{ I }}{{ line }}
 {% endfor %}
 {% if child.create_obj != '{}' %}
 {{ I }}fillDataGridRow(0, {{ child.create_obj }});
@@ -146,7 +149,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}// Add child: {{ child.title }}
 {{ I }}cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_full_fields %}
-{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', '{{ fk.label }}');
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
+{% endfor %}
+{% for line in child.native_enum_full_calls %}
+{{ I }}{{ line }}
 {% endfor %}
 {% if child.full_create_obj != '{}' %}
 {{ I }}fillDataGridRow(0, {{ child.full_create_obj }});
@@ -253,7 +259,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
         // Add child: {{ child.title }}
         cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_create_fields %}
-        selectDataGridSingleSelect(0, '{{ fk.field }}', '{{ fk.label }}');
+        selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
+{% endfor %}
+{% for line in child.native_enum_create_calls %}
+        {{ line }}
 {% endfor %}
 {% if child.create_obj != '{}' %}
         fillDataGridRow(0, {{ child.create_obj }});
@@ -281,6 +290,17 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.get('textarea[placeholder="Write a comment..."]').type('Test {{ child.title }} Comment');
         cy.get('button[aria-label="Submit"]').click();
 {% endfor %}
+{% if comment_has_mention %}
+        // @mention (cmd_522c): type "@" + a few letters of the logged-in test
+        // user's own name — self-mention is allowed by design (candidates
+        // include the actor; only outbound notifications exclude self).
+        // Candidate search is org-scoped, so the actor needs ≥1 organization
+        // membership or it always returns zero results (org-isolation policy).
+        cy.task('db:populateOrganizationWithUser', 1);
+        cy.get('textarea[placeholder="Write a comment..."]').type('Hi @Test');
+        cy.get('[role="menuitem"]').contains(TEST_CREDENTIALS.name).click();
+        cy.get('button[aria-label="Submit"]').click();
+{% endif %}
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}');
         cy.url().should('not.include', '/{{ parent }}/');
@@ -300,6 +320,12 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
 {% endif %}
         cy.url().should('include', '/{{ parent }}/view');
+{% if comment_has_mention %}
+        // The inserted @[user_id:<id>] marker must render as a colored profile
+        // link (own read permission on `user` → canViewUserProfile=true), not
+        // raw marker text or a plain-text name (design doc decision (e)).
+        cy.get('.mention-link').should('contain.text', TEST_CREDENTIALS.name);
+{% endif %}
 {% if not check_field_skip %}
 {% if check_field_use_accordion %}
         cy.openAccordion('{{ check_field_label }}');
@@ -584,7 +610,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {{ I }}cy.clickButton('Add {{ fail_create_5_2_scalar.title }}');
 {% for fk in fail_create_5_2_scalar.fk_fields %}
-{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', '{{ fk.label }}');
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
 {% endfor %}
 {% if fail_create_5_2_scalar.partial_obj %}
 {{ I }}fillDataGridRow(0, {{ fail_create_5_2_scalar.partial_obj }});
@@ -953,6 +979,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if has_approvable %}
 
   describe('Approval', () => {
+{% if can_new %}
     it('7.1 creates approval requests for user in requestor role', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
@@ -1000,6 +1027,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         });
       });
     });
+{% endif %}
 
     it('7.4 shows Approve/Reject buttons for user in approver role', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
@@ -1105,6 +1133,32 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.get('[aria-label="Re-submit"]').should('not.exist');
           // History expand button should appear after re-submission
           cy.get('[aria-label="Expand history"]').should('be.visible');
+        });
+      });
+    });
+  });
+{% endif %}
+{% if comment_has_mention and can_edit %}
+
+  describe('Mention permission-denied graceful degradation', () => {
+    it('8.1 shows a non-crashing message instead of candidates when the actor lacks read on user', () => {
+      // cmd_516 Option B: an actor without read permission on the `user`
+      // model gets permissionDenied:true from searchMentionUserOptions —
+      // the picker must show a message, not crash the comment box. Comment
+      // threads only render in edit mode (an unsaved /new entity has no id
+      // to attach comments to), so this needs an existing record + a
+      // session user with edit access to it but no `user` read permission.
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<{ email: string }>('db:createSessionUserWithPermission', {
+          entityName: '{{ parent }}',
+          flags: { create: true, read: true, update: true },
+        }).then((sessionUser) => {
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(sessionUser.email, 'test-password');
+          cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
+          cy.get('textarea[placeholder="Write a comment..."]').type('Hi @Test');
+          cy.contains('Mention suggestions unavailable.').should('be.visible');
         });
       });
     });

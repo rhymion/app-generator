@@ -1,6 +1,12 @@
 {{ utility_code }}
 {% if can_create %}
 export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string }> {
+{% if should_filter_by_org %}
+  const _createOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
+  if (!_createOrgIds.includes(organizationId)) {
+    throw new ApiError(404, 'Not found');
+  }
+{% endif %}
   const result = await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
 {{ validation_data_obj }}
@@ -10,6 +16,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% endif %}
 {% if one_to_one_pre_creates %}
 {{ one_to_one_pre_creates }}
+{% endif %}
+{% if approval_lines_pre_create_code %}
+{{ approval_lines_pre_create_code }}
 {% endif %}
     const created = await tx.{{ model }}.create({
       data: {
@@ -29,6 +38,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% endif %}
 {% if reservation_allocation_code %}
 {{ reservation_allocation_code }}
+{% endif %}
+{% if approval_lines_post_create_code %}
+{{ approval_lines_post_create_code }}
 {% endif %}
 {% if one_to_one_spread %}
     await afterCreate(tx, { ...created, {{ one_to_one_spread }} } as Record<string, unknown>, {
@@ -60,6 +72,10 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     });
   }
 {% endif %}
+{% if child_assignee_notify_create_code %}
+  // Trigger #1 (cmd_413 fix): child rows with their own assignee_id.
+{{ child_assignee_notify_create_code }}
+{% endif %}
   return result;
 }
 {% endif %}
@@ -68,9 +84,25 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% if has_assignee_id %}
   let _prevAssigneeId: string | null = null;
 {% endif %}
+{% if should_filter_by_org %}
+  if (organizationId) {
+    const _updateOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
+    if (!_updateOrgIds.includes(organizationId)) {
+      throw new ApiError(404, 'Not found');
+    }
+  }
+{% endif %}
   await prisma.$transaction(async (tx) => {
 {% if reservation_mutation_guard_update %}
 {{ reservation_mutation_guard_update }}
+{% endif %}
+{% if fk_preservation_update_code %}
+    // A required FK the acting user can't read is omitted by the UI's
+    // AppFieldRelation permissionDenied branch (and may be omitted by a
+    // bare API PUT too) — preserve the existing value instead of failing
+    // required-field validation. See
+    // docs/knowledge/fk-read-permission-graceful-degradation.md.
+{{ fk_preservation_update_code }}
 {% endif %}
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
@@ -86,6 +118,9 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
       select: { assignee_id: true },
     }))?.assignee_id ?? null;
 {% endif %}
+{% if approval_lines_pre_update_code %}
+{{ approval_lines_pre_update_code }}
+{% endif %}
     await tx.{{ model }}.update({
       where: { id },
       data: {
@@ -96,6 +131,9 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% endif %}
       },
     });
+{% if approval_lines_post_update_code %}
+{{ approval_lines_post_update_code }}
+{% endif %}
 {% if flatten_nested_updates %}
 {{ flatten_nested_updates }}
 {% endif %}
@@ -118,6 +156,10 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
       itemId: id,
     });
   }
+{% endif %}
+{% if child_assignee_notify_update_code %}
+  // Trigger #1 (cmd_413 fix): newly-added child rows with their own assignee_id.
+{{ child_assignee_notify_update_code }}
 {% endif %}
 }
 {% endif %}
@@ -173,6 +215,51 @@ export const reserve{{ parent_pascal }} = async (
   criteria: Record<string, unknown> = {}
 ): Promise<{ success: boolean; {{ reservation_config.allocatedField }}: string }> => {
   return await prisma.$transaction(async (tx) => {
+{% if reservation_config.usesOverlapAvailability %}
+    const _startMs = new Date(dateRange.{{ reservation_config.dateRange.startField }} as unknown as string).getTime();
+    const _endMs = new Date(dateRange.{{ reservation_config.dateRange.endField }} as unknown as string).getTime();
+    if (_startMs >= _endMs) {
+      throw new Error('Start date must be before end date');
+    }
+    const candidates = await (tx as unknown as typeof prisma).{{ reservation_config.pool.entity }}.findMany({
+      where: {
+        ...criteria,
+{% if reservation_config.excludePoolStatuses %}
+        {{ reservation_config.statusField }}: { notIn: {{ reservation_config.excludePoolStatuses | tojson }} },
+{% endif %}
+      },
+{% if reservation_config.policy.orderBy %}
+      orderBy: [
+{% for order_item in reservation_config.policy.orderBy %}
+{% for field_name, direction in order_item.items() %}
+{% if '_nulls_' in direction %}
+        { {{ field_name }}: { sort: '{{ direction.split('_nulls_')[0] }}', nulls: '{{ direction.split('_nulls_')[1] }}' } },
+{% else %}
+        { {{ field_name }}: '{{ direction }}' },
+{% endif %}
+{% endfor %}
+{% endfor %}
+      ],
+{% endif %}
+    });
+    for (const candidate of candidates) {
+      try {
+        await assertNoDuplicateReservation(
+          tx as unknown as Pick<typeof prisma, '{{ model }}'>,
+          candidate.id,
+          dateRange
+        );
+      } catch {
+        continue;
+      }
+      await tx.{{ model }}.update({
+        where: { id: requestId },
+        data: { {{ reservation_config.allocatedField }}: candidate.id },
+      });
+      return { success: true, {{ reservation_config.allocatedField }}: candidate.id };
+    }
+    throw new InsufficientPoolCapacityError('No available {{ reservation_config.pool.entity }} for reservation');
+{% else %}
     const candidate = await (tx as unknown as typeof prisma).{{ reservation_config.pool.entity }}.findFirst({
       where: {
         {{ reservation_config.statusField }}: {{ reservation_config.available_status_ts }},
@@ -193,7 +280,7 @@ export const reserve{{ parent_pascal }} = async (
 {% endif %}
     });
     if (!candidate) {
-      throw new InsufficientInventoryError('No available {{ reservation_config.pool.entity }} for reservation');
+      throw new InsufficientPoolCapacityError('No available {{ reservation_config.pool.entity }} for reservation');
     }
 {% if reservation_config.dateRange %}
     await assertNoDuplicateReservation(
@@ -202,15 +289,18 @@ export const reserve{{ parent_pascal }} = async (
       dateRange
     );
 {% endif %}
+{% if reservation_config.updatesPoolStatusOnReserve %}
     await (tx as unknown as typeof prisma).{{ reservation_config.pool.entity }}.update({
       where: { id: candidate.id },
       data: { {{ reservation_config.statusField }}: {{ reservation_config.reserved_status_ts }} },
     });
+{% endif %}
     await tx.{{ model }}.update({
       where: { id: requestId },
       data: { {{ reservation_config.allocatedField }}: candidate.id },
     });
     return { success: true, {{ reservation_config.allocatedField }}: candidate.id };
+{% endif %}
   }, {
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
   });

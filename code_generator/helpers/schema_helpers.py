@@ -1,18 +1,104 @@
 """Schema navigation utilities — port of helpers/schema-helpers.ts"""
 
+import re
+
 _DATE_FORMATS = frozenset({'date', 'date-time', 'time'})
 _SYSTEM_FIELDS = frozenset({'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'})
 
 
+def is_string_prop(prop: dict) -> bool:
+    t = prop.get('type')
+    if isinstance(t, str):
+        return t == 'string'
+    if isinstance(t, list):
+        return 'string' in t and all(v in ('string', 'null') for v in t)
+    return False
+
+
+def derive_text_fields(properties: dict) -> list[str]:
+    """Auto-derive searchable text fields from entity properties.
+
+    Excludes noise (id, FK, enum, CUID pattern, date/uri format, write-only)
+    and per-field opt-outs (x-search: false). Shared by the pg_trgm/pg_bigm
+    full-text search context (generate.py) and the per-entity
+    searchXxxOptions autocomplete filter (build_context.py) so both derive
+    the same set of human-readable text columns from a single rule.
+    """
+    result = []
+    for field_name, prop in properties.items():
+        if not isinstance(prop, dict):
+            continue
+        if not is_string_prop(prop):
+            continue
+        # id and explicit primary key
+        if field_name == 'id' or prop.get('x-primary'):
+            continue
+        # FK fields: x-relationship annotation or *_id naming convention
+        if prop.get('x-relationship') or field_name.endswith('_id'):
+            continue
+        # enum values (integer or string)
+        if isinstance(prop.get('enum'), list):
+            continue
+        # CUID/ID pattern strings
+        pattern = prop.get('pattern', '')
+        if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
+            continue
+        # Non-text formats
+        if prop.get('format') in ('date', 'date-time', 'time', 'uri'):
+            continue
+        # Write-only fields (e.g. password, api_key)
+        xc = prop.get('x-custom-component', {})
+        if isinstance(xc, dict) and 'upsert' in (xc.get('target') or []):
+            continue
+        # Per-field opt-out
+        if prop.get('x-search') is False:
+            continue
+        result.append(field_name)
+    return result
+
+
+def derive_searchable_relation_fields(properties: dict) -> list[dict]:
+    """FK relation fields opted into cross-relation substring search.
+
+    A property with `x-relationship.searchField: <name>` contributes a
+    `{relation, field}` pair so the generated searchXxxOptions getter can
+    additionally match rows by a field on the related entity (e.g. inventory
+    matching by its product's name), via a one-hop Prisma nested `where`.
+    Opt-in (schema-driven) — no relation is joined into search unless
+    explicitly marked, so existing autocomplete behaviour is unaffected.
+    """
+    result = []
+    for field_name, prop in properties.items():
+        if not isinstance(prop, dict):
+            continue
+        rel = prop.get('x-relationship') or {}
+        search_field = rel.get('searchField')
+        if not search_field or not rel.get('target'):
+            continue
+        relation_name = field_name.removesuffix('_id') if field_name.endswith('_id') else field_name
+        result.append({'relation': relation_name, 'field': search_field})
+    return result
+
+
 def _get_entity_base_props(entity: str, schema: dict) -> dict:
-    """Returns the base (non-detail) properties for an entity, resolving allOf if needed."""
+    """Returns the base (raw-entity) properties for an entity, resolving allOf if needed.
+
+    A view entity (`role`) has no properties of its own — its allOf[0] $ref
+    points at the raw entity (`__role`) that actually carries them. Most
+    chains are one hop, but a proxy view like `setting` (allOf $ref -> the
+    `user` VIEW, not `__user`) is two hops, so this walks the $ref chain
+    until it lands on a definition with direct properties rather than
+    resolving only one level.
+    """
     defn = schema['definitions'].get(entity, {})
-    if 'properties' in defn:
-        return defn['properties']
-    for item in defn.get('allOf', []):
-        if 'properties' in item:
-            return item['properties']
-    return {}
+    seen = set()
+    while 'properties' not in defn:
+        ref = next((item.get('$ref') for item in defn.get('allOf', []) if item.get('$ref')), None)
+        if not ref or ref in seen:
+            return {}
+        seen.add(ref)
+        defn = schema['definitions'].get(ref.split('/')[-1], {})
+    return defn['properties']
 
 
 def _label_field_is_date(label_field, target: str, schema: dict) -> bool:
@@ -31,7 +117,7 @@ def _label_field_is_date(label_field, target: str, schema: dict) -> bool:
 
 
 def get_detail_properties(parent: str, schema: dict, detail_key: str | None = None) -> dict | None:
-    key = detail_key or f'{parent}_detail'
+    key = detail_key or parent
     defn = schema['definitions'].get(key)
     if not defn:
         return None
@@ -41,6 +127,76 @@ def get_detail_properties(parent: str, schema: dict, detail_key: str | None = No
         if 'properties' in item:
             return item['properties']
     return None
+
+
+def get_approval_lines_props(parent_def: dict, model: str, schema: dict) -> list[str]:
+    """Embedded-line properties whose approvable_id must be pre-created before
+    the parent create/update (nested-create can't back-fill a NOT NULL FK).
+
+    Two independent schema signals feed this, and both need identical
+    treatment (see docs/receiving-approval-backfill-design.md §5.2 — D2):
+    - explicit `x-approval-lines: [prop, ...]` (e.g. receiving_receipt.lines)
+    - `x-reservation` with `transaction.strategy: ledger_transaction` whose
+      *lines entity itself declares `x-approval`* (e.g. purchase_order.items
+      -> purchase_per_item) — its lines carry their own approvable per-line
+      just like x-approval-lines children, so they're folded into the same
+      list rather than duplicating the pre-create/post-create machinery.
+
+      The x-approval gate matters: ledger_transaction is also used (in tests,
+      and potentially future schemas) for reservation lines that carry no
+      approval at all — those must NOT get approvable_id injected into a
+      nested-create/update body that has no such column.
+    """
+    props = list(parent_def.get('x-approval-lines') or [])
+    xres = parent_def.get('x-reservation') or {}
+    if (xres.get('transaction') or {}).get('strategy') == 'ledger_transaction':
+        lines_prop = xres.get('lines')
+        if lines_prop and lines_prop not in props:
+            detail_props = get_detail_properties(model, schema) or {}
+            ref = ((detail_props.get(lines_prop) or {}).get('items') or {}).get('$ref', '')
+            lines_entity = ref.rsplit('/', 1)[-1]
+            if lines_entity and (schema.get('definitions', {}).get(lines_entity) or {}).get('x-approval'):
+                props.append(lines_prop)
+    return props
+
+
+def get_splittable_bridge_field(entity_def: dict) -> str:
+    """The property name on an x-splittable entity that holds its per-child
+    ledger/reservation bridge FK (e.g. purchase_per_item / receiving_receipt_line's
+    inventory_transactionable_id).
+
+    Config-driven via x-splittable.bridgeField, defaulting to
+    'inventory_transactionable_id' — the two current x-splittable entities
+    reach this field through different parent-side mechanisms (purchase_order's
+    x-reservation.transaction.strategy: ledger_transaction vs. receiving_receipt's
+    plain x-approval-lines + receiving_receipt_line's own x-ledger-source), so
+    there is no single reverse lookup that resolves it for both; the entity's
+    own x-splittable config is the one place both agree to declare it (cmd_312
+    Phase1; see docs/knowledge/schema-yaml-configuration.md for background).
+    """
+    split_cfg = entity_def.get('x-splittable')
+    split_dict = split_cfg if isinstance(split_cfg, dict) else {}
+    return split_dict.get('bridgeField', 'inventory_transactionable_id')
+
+
+def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
+    """Resolve x-ledger-entities[domain_key] to {pool, ledger, transactionable}.
+
+    OD-1 underlying idea: config required, no defaults. Raises ValueError if
+    the domain or any of its required keys is not declared in the schema.
+    """
+    domains = schema.get('x-ledger-entities') or {}
+    if domain_key not in domains:
+        raise ValueError(f"x-ledger-entities.{domain_key!r} not declared in schema")
+    domain = domains[domain_key]
+    for required_key in ('pool', 'ledger', 'transactionable'):
+        if required_key not in domain:
+            raise ValueError(f"x-ledger-entities.{domain_key!r}.{required_key!r} is required")
+    return {
+        'pool': domain['pool'],
+        'ledger': domain['ledger'],
+        'transactionable': domain['transactionable'],
+    }
 
 
 def get_detail_relation_name(parent: str, target: str, schema: dict, detail_key: str | None = None) -> str:
@@ -152,7 +308,7 @@ def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
         # own pages and uses regular m2o/list rendering.
         children = []
         if not is_selector:
-            target_detail = schema['definitions'].get(f'{target}_detail', {})
+            target_detail = schema['definitions'].get(target, {})
             target_detail_props = {}
             if 'properties' in target_detail:
                 target_detail_props = target_detail['properties']
@@ -184,6 +340,64 @@ def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
             'nullable': nullable,
             'children': children,
         })
+    return result
+
+
+def get_internal_bridge_fk_prop_names(parent_def: dict, schema: dict) -> set[str]:
+    """Returns FK property names on parent_def that point at an internal bridge
+    model (e.g. approvable, commentable, attachable, inventory_transactionable)
+    — server-managed plumbing with no client-visible generation surface, never
+    a real user-facing relation despite existing as a physical FK column.
+
+    Two shapes exist in this schema, and neither is visible to
+    get_parent_relationships() / get_one_to_one_rels() on its own — both
+    require x-relationship with a recognised type, which is exactly what
+    these FKs lack or use differently (cmd_420):
+      (a) x-relationship.type == 'one-to-one_bridge' (e.g. approvable_id) —
+          excluded from get_parent_relationships() by relation type; only
+          get_one_to_one_rels() sees it, and only under its own prop_name key.
+      (b) no x-relationship at all (e.g. inventory_transactionable_id,
+          "bridge created at approval time by ledger_move_stub") — invisible
+          to every relationship-aware helper.
+
+    Detection is by structural signal, not by field name: a `<x>_id` property
+    targets an internal bridge only when `<x>` (and every `<x>_*` schema
+    variant, e.g. `<x>_detail`) carries zero true x-generate flags — i.e. the
+    target has no list/view/new/edit/delete/api surface anywhere. This is what
+    separates a true internal bridge from an ordinary FK that merely omits
+    x-relationship for unrelated reasons (e.g. field.db_table_id, where
+    db_table is a fully exposed, independently generated entity).
+
+    Callers that build an FK-exclusion set (CSV export allowlist, form field
+    filtering, etc.) should union this into whatever get_parent_relationships()
+    already gives them.
+    """
+    props = parent_def.get('properties', {})
+    defs = schema.get('definitions', {})
+
+    def _is_internal_bridge_entity(name: str) -> bool:
+        variants = [name] + [n for n in defs if n.startswith(f'{name}_')]
+        for v in variants:
+            gen = (defs.get(v, {}) or {}).get('x-generate') or {}
+            if any(gen.get(k) for k in ('list', 'view', 'new', 'edit', 'delete', 'api')):
+                return False
+        return True
+
+    result = set()
+    for prop_name, prop in props.items():
+        if not isinstance(prop, dict) or not prop_name.endswith('_id'):
+            continue
+        rel = prop.get('x-relationship')
+        if rel:
+            if rel.get('type') != 'one-to-one_bridge':
+                continue
+            target = rel.get('target')
+        else:
+            target = prop_name[:-3]
+        if not target or target not in defs:
+            continue
+        if _is_internal_bridge_entity(target):
+            result.add(prop_name)
     return result
 
 
@@ -242,7 +456,7 @@ def _extract_flatten_fields(target_props: dict, parent_model: str) -> list[dict]
         # are self-evident in the parent's form. Skip them.
         if '$ref' in prop and not prop_type:
             ref_target = prop['$ref'].split('/')[-1]
-            if ref_target == parent_model or ref_target == f'{parent_model}_detail':
+            if ref_target == parent_model or ref_target == f'__{parent_model}':
                 continue
             # Forward-reference to a different entity inside a detail
             # extension — out of scope for inline accordion rendering today.
@@ -289,43 +503,79 @@ def _extract_flatten_fields(target_props: dict, parent_model: str) -> list[dict]
     return fields
 
 
-def _get_flatten_target_props(target: str, schema: dict) -> dict:
-    """Return displayable properties for a flatten target.
-
-    Plain entity (`pre_check`): returns `properties`.
-    Detail entity (`pre_check_detail` = allOf[base $ref, {properties}]):
-        returns the *merge* of base.properties and the extension's
-        properties so flatten rendering sees both the inherited fields
-        (e.g., `ams_score` from `pre_check`) and the extension's added
-        ones (e.g., `symptoms` array, `checkup` back-ref).
-
-    Order in the merge: base first, then extension overrides — extension
-    properties shadow same-name base properties, mirroring JSON Schema
-    semantics for allOf merging.
-
-    Compare with `_get_entity_base_props`, which only returns one block at
-    a time (the first one it finds). That helper has callers that
-    *deliberately* want just the base — keep it; flatten uses this one.
-    """
-    defn = schema['definitions'].get(target, {})
+def _merge_allof_properties(defn: dict, schema: dict) -> dict:
+    """Recursively merge a definition's own properties with every allOf
+    ancestor's properties (base first, so extensions shadow same-name base
+    fields). Walks $ref chains of any depth — e.g. `setting` -> `user`
+    (view, no properties of its own) -> `__user` (raw) is two hops, not
+    the one hop every raw/view pair normally is."""
     if 'properties' in defn:
         return defn['properties']
 
     merged: dict = {}
     for item in defn.get('allOf', []):
         if '$ref' in item:
-            base_target = item['$ref'].split('/')[-1]
-            base_def = schema['definitions'].get(base_target, {})
-            if 'properties' in base_def:
-                merged = {**merged, **base_def['properties']}
-            else:
-                # Nested allOf (rare) — recurse one level.
-                for nested in base_def.get('allOf', []):
-                    if 'properties' in nested:
-                        merged = {**merged, **nested['properties']}
+            ref_def = schema['definitions'].get(item['$ref'].split('/')[-1], {})
+            merged = {**merged, **_merge_allof_properties(ref_def, schema)}
         elif 'properties' in item:
             merged = {**merged, **item['properties']}
     return merged
+
+
+def _get_flatten_target_props(target: str, schema: dict) -> dict:
+    """Return displayable properties for a flatten target.
+
+    Plain entity (`pre_check`): returns `properties`.
+    View entity (`pre_check` = allOf[raw $ref, {properties}]):
+        returns the *merge* of the raw entity's properties and the view's
+        own extension properties (recursively, through any indirection —
+        see `_merge_allof_properties`) so flatten rendering sees both the
+        inherited fields (e.g., `ams_score` from the raw entity) and the
+        extension's added ones (e.g., `symptoms` array, `checkup` back-ref).
+
+    Order in the merge: base first, then extension overrides — extension
+    properties shadow same-name base properties, mirroring JSON Schema
+    semantics for allOf merging.
+
+    Compare with `_get_entity_base_props`, which only returns the raw
+    ancestor's own properties (walks to the end of the chain, no merge).
+    That helper has callers that *deliberately* want just the base — keep
+    it; flatten uses this one.
+    """
+    defn = schema['definitions'].get(target, {})
+    return _merge_allof_properties(defn, schema)
+
+
+def get_entity_properties(entity: str, schema: dict) -> dict:
+    """Public merged-properties lookup for any entity key (raw `__x` or view `x`).
+
+    Thin wrapper around `_get_flatten_target_props` — cross-file callers (e.g.
+    validate.py) that need "does entity E have field F" for a bare model name
+    should use this rather than a direct `defs[E].get('properties', {})`,
+    since a view entity (`role`) carries no properties of its own; its fields
+    live on the raw entity (`__role`) referenced via allOf[0].$ref.
+    """
+    return _get_flatten_target_props(entity, schema)
+
+
+def _merge_allof_required(defn: dict, schema: dict) -> set:
+    """Recursive counterpart to `_merge_allof_properties` for the 'required' list —
+    JSON Schema allOf semantics union every branch's required fields."""
+    merged = set(defn.get('required') or [])
+    for item in defn.get('allOf', []):
+        if '$ref' in item:
+            ref_def = schema['definitions'].get(item['$ref'].split('/')[-1], {})
+            merged |= _merge_allof_required(ref_def, schema)
+        else:
+            merged |= set(item.get('required') or [])
+    return merged
+
+
+def get_entity_required(entity: str, schema: dict) -> set:
+    """Public merged-required lookup for any entity key (raw `__x` or view `x`).
+    See `get_entity_properties` — same raw/view resolution problem, for 'required'."""
+    defn = schema['definitions'].get(entity, {})
+    return _merge_allof_required(defn, schema)
 
 
 def get_flatten_rels(parent: str, parent_def: dict, schema: dict) -> list[dict]:
@@ -438,6 +688,12 @@ def get_parent_relationships(parent_def: dict, schema: dict | None = None) -> li
             'label_field': lf,
             'label_field_is_date': _label_field_is_date(lf, target, schema) if schema else False,
             'required': prop_name in required,
+            # DP-5 (cmd_377/379): scalar field names from *this* entity's own
+            # form state to forward as `formValues` into the target's
+            # search{Target}Options() autocomplete filter hook. Empty when the
+            # FK field carries no 'x-autocomplete-context' annotation — the
+            # unchanged (Phase-1) default.
+            'autocomplete_context_fields': list(prop.get('x-autocomplete-context') or []),
         })
     return result
 
@@ -470,9 +726,13 @@ def find_fk_derivation_path(parent: str, parent_def: dict, target_q: str, schema
                 'intermediate_fk': None,
             }
 
-    # One-hop path — parent → X → target_q.
+    # One-hop path — parent → X → target_q. rel['target'] is the bare/view
+    # name; its m2o/o2o FK annotations live on the raw entity.
     for rel in parent_rels:
-        x_def = schema['definitions'].get(rel['target'], {})
+        x_def = (
+            schema['definitions'].get(f"__{rel['target']}", {})
+            or schema['definitions'].get(rel['target'], {})
+        )
         if not x_def:
             continue
         for x_rel in get_parent_relationships(x_def, schema):

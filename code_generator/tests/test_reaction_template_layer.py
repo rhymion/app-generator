@@ -74,18 +74,18 @@ def _commentable_schema() -> dict:
                     "name": {"type": "string"},
                 },
             },
-            "commentable": {
+            "__commentable": {
                 "type": "object",
                 "required": ["id"],
                 "properties": {"id": _cuid_field()},
             },
-            "commentable_detail": {
+            "commentable": {
                 "x-generate": {
                     "list": False, "view": False, "new": False, "edit": False,
                     "delete": False, "api": False, "test": False,
                 },
                 "allOf": [
-                    {"$ref": "#/definitions/commentable"},
+                    {"$ref": "#/definitions/__commentable"},
                     {"type": "object", "required": ["comments"], "properties": {
                         "comments": {
                             "type": "array",
@@ -106,7 +106,7 @@ def _commentable_schema() -> dict:
                 },
             },
             "reaction": _reaction_defn(),
-            "task": {
+            "__task": {
                 "type": "object",
                 "required": ["id", "name"],
                 "properties": {
@@ -123,12 +123,12 @@ def _commentable_schema() -> dict:
                     },
                 },
             },
-            "task_detail": {
+            "task": {
                 "x-generate": {
                     "list": True, "view": True, "new": True, "edit": True,
                     "delete": True, "api": False, "test": False,
                 },
-                "allOf": [{"$ref": "#/definitions/task"}],
+                "allOf": [{"$ref": "#/definitions/__task"}],
             },
         }
     }

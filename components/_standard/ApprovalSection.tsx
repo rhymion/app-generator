@@ -15,6 +15,10 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import TextField from '@mui/material/TextField';
+import FormControl from '@mui/material/FormControl';
+import InputLabel from '@mui/material/InputLabel';
+import Select, { SelectChangeEvent } from '@mui/material/Select';
+import MenuItem from '@mui/material/MenuItem';
 import Typography from '@mui/material/Typography';
 import Collapse from '@mui/material/Collapse';
 import Box from '@mui/material/Box';
@@ -27,7 +31,12 @@ import { Fragment } from 'react';
 import type { ModelPermissions } from '@/lib/authz';
 import { approveApprovalRequest, rejectApprovalRequest, resubmitApprovalRequest } from '@/lib/approval_request/actions';
 
-const STATUS_LABELS = ['Pending', 'Approved', 'Rejected'] as const;
+const STATUS_LABELS = ['Pending', 'Approved', 'Rejected', 'TerminalRejected'] as const;
+
+const REASON_KIND_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: 'Customer' },
+  { value: 1, label: 'Internal' },
+];
 
 type ApprovalHistory = {
   id: string;
@@ -41,7 +50,7 @@ type ApprovalHistory = {
 type ApprovalRequest = {
   id: string;
   approval_flow_id: string;
-  status: number;
+  status: 'pending' | 'approved' | 'rejected' | 'terminal_rejected';
   approval_flow?: {
     id: string;
     entity_name: string;
@@ -65,9 +74,12 @@ type Props = {
 export default function ApprovalSection({ src, currentUserRoleIds, currentUserId }: Props) {
   const t = useTranslations('Fields');
   const tCommon = useTranslations('Common');
+  const tStatus = useTranslations('ApprovalRequestStatus');
   const [, startTransition] = useTransition();
   const [dialog, setDialog] = useState<{ arId: string; action: Action } | null>(null);
   const [message, setMessage] = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [selectedReasonKind, setSelectedReasonKind] = useState<number | undefined>(undefined);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const requests = src.approvable?.approval_requests ?? [];
@@ -86,6 +98,8 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
 
   const openDialog = (arId: string, action: Action) => {
     setMessage('');
+    setRejectionReason('');
+    setSelectedReasonKind(undefined);
     setDialog({ arId, action });
   };
 
@@ -95,10 +109,12 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
     if (!dialog) return;
     const { arId, action } = dialog;
     const msg = message.trim() || undefined;
+    const reasonText = rejectionReason.trim() || undefined;
+    const reasonKind = selectedReasonKind;
     closeDialog();
     startTransition(() => {
       if (action === 'approve') approveApprovalRequest(arId, msg);
-      else if (action === 'reject') rejectApprovalRequest(arId, msg);
+      else if (action === 'reject') rejectApprovalRequest(arId, msg, { reason: reasonText, reasonKind });
       else resubmitApprovalRequest(arId, msg);
     });
   };
@@ -126,13 +142,13 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
             const requestorRoleId = ar.approval_flow?.requestor_role_id;
             const precedingFlowIds = ar.approval_flow?.preceded_by?.map((f) => f.id) ?? [];
             const precedingApproved = precedingFlowIds.every(
-              (fid) => flowIdToStatus.get(fid) === 1,
+              (fid) => flowIdToStatus.get(fid) === 'approved',
             );
-            const canAct = ar.status === 0
+            const canAct = ar.status === 'pending'
               && approverRoleId
               && currentUserRoleIds?.includes(approverRoleId)
               && precedingApproved;
-            const canResubmit = ar.status === 2 && (
+            const canResubmit = ar.status === 'rejected' && (
               currentUserId === src.creator_id ||
               (requestorRoleId ? currentUserRoleIds?.includes(requestorRoleId) : false)
             );
@@ -143,7 +159,7 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
               <Fragment key={ar.id}>
                 <TableRow>
                   <TableCell>{ar.approval_flow?.approver_role?.name ?? '-'}</TableCell>
-                  <TableCell>{STATUS_LABELS[ar.status] ?? ar.status}</TableCell>
+                  <TableCell>{tStatus(ar.status)}</TableCell>
                   <TableCell>
                     {histories.length > 0 && (
                       <Tooltip title={isExpanded ? 'Hide history' : 'Show history'}>
@@ -217,6 +233,37 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
             margin="normal"
             placeholder="Optional message..."
           />
+          {dialog?.action === 'reject' && (
+            <>
+              <FormControl fullWidth margin="normal">
+                <InputLabel id="reason-kind-label">Reason</InputLabel>
+                <Select
+                  labelId="reason-kind-label"
+                  label="Reason"
+                  value={selectedReasonKind ?? ''}
+                  onChange={(e: SelectChangeEvent<number | string>) => {
+                    const v = e.target.value;
+                    setSelectedReasonKind(v === '' ? undefined : Number(v));
+                  }}
+                >
+                  <MenuItem value="">(unspecified)</MenuItem>
+                  {REASON_KIND_OPTIONS.map((opt) => (
+                    <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <TextField
+                label="Rejection reason"
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                multiline
+                rows={2}
+                fullWidth
+                margin="normal"
+                placeholder="Optional rejection reason..."
+              />
+            </>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={closeDialog}>{tCommon('cancel')}</Button>

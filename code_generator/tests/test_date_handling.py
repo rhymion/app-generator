@@ -220,7 +220,7 @@ class TestDepHelperIdempotency:
     """`populateXxxDependencies` is called multiple times in a single test
     (parent populator + child populators each call it). The helper must be
     idempotent — find an existing row, fall back to create. The helper
-    context exposes `lookup_field` / `lookup_value` per dep so the template
+    context exposes `lookup_field` / `lookup_where*` per dep so the template
     can emit the find-or-create pattern."""
 
     def _schema(self) -> dict:
@@ -262,7 +262,7 @@ class TestDepHelperIdempotency:
         )
         product_dep = next(d for d in ctx["deps"] if d["target"] == "product")
         assert product_dep["lookup_field"] == "name"
-        assert product_dep["lookup_value"] == "'Test Product'"
+        assert product_dep["lookup_where"] == "{ name: 'Test Product' }"
 
     def test_dep_lookup_value_second_for_needs_second(self):
         """needs_second deps also need a deterministic name for the 2nd row's
@@ -273,7 +273,7 @@ class TestDepHelperIdempotency:
             {"list": True, "view": True, "new": True, "edit": True, "delete": True, "api": True, "test": True, "fields": None},
         )
         product_dep = next(d for d in ctx["deps"] if d["target"] == "product")
-        assert product_dep["lookup_value_second"] == "'Test Product 2'"
+        assert product_dep["lookup_where_second"] == "{ name: 'Test Product 2' }"
 
 
 # ---------------------------------------------------------------------------

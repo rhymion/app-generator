@@ -3,7 +3,13 @@ Tests for build_context.py — selection targets, embedded_ch filtering,
 use_connect logic, and field categorisation.
 """
 import pytest
-from build_context import build_context, _get_selection_targets, _categorize_form_fields, get_uri_kind
+from build_context import (
+    build_context,
+    _get_selection_targets,
+    _categorize_form_fields,
+    _build_form_data_gets,
+    get_uri_kind,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -191,15 +197,18 @@ class TestEmbeddedChFiltering:
             "required": ["id", "name", fk_prop],
             "properties": {**_base_props(), fk_prop: _fk_field(parent_name, nullable=False)},
         }
+        if with_own_page:
+            # is_independent (build_context.py) checks x-generate directly on
+            # the bare child entity — no separate `_detail` sibling (Stage 4,
+            # cmd406-409 retired that convention).
+            child_def["x-generate"] = {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": False, "test": False,
+            }
         defs = {
             parent_name: {"type": "object", "required": ["id", "name"], "properties": _base_props()},
             child_name: child_def,
         }
-        if with_own_page:
-            defs[f"{child_name}_detail"] = {
-                "x-generate": {"list": True, "view": True, "new": True, "edit": True, "delete": True, "api": False, "test": False},
-                "allOf": [{"$ref": f"#/definitions/{child_name}"}],
-            }
         entity = _entity(
             model=parent_name,
             children=[_child_entry(child_name, f"{child_name}s", output_type="list")],
@@ -897,3 +906,739 @@ class TestVirtualResolverNonOverwrite:
         _write_stub(resolver_path, content)
         assert resolver_path.exists()
         assert resolver_path.read_text() == content
+
+    def test_write_stub_self_heals_stale_pristine_stub(self, tmp_path, monkeypatch):
+        """cmd_413b: a stub whose on-disk content matches a PAST pristine render
+        (recorded in a prior manifest — e.g. the entity gained x-approval after its
+        stub was already generated) is refreshed, not skipped forever. This is what
+        unblocked leave_request's approval_request generation."""
+        import generate as generate_module
+        from manifest import ManifestRecorder
+
+        out = tmp_path
+        stub_path = out / "lib" / "leave_request" / "service_after_create.ts"
+        stub_path.parent.mkdir(parents=True)
+        old_render = "export async function afterCreate(_tx, _created, _data) {}"
+        stub_path.write_text(old_render)
+
+        # Simulate a prior run's manifest recording `old_render` as the pristine stub.
+        first_manifest = ManifestRecorder(out=out)
+        first_manifest.record(stub_path, old_render, 'stub')
+        first_manifest.write(out, 'json_schema.yaml')
+
+        # This run's schema now calls for the populated (approval-matching) body.
+        new_render = "export async function afterCreate(tx, created, _data) { /* approval logic */ }"
+        monkeypatch.setattr(generate_module, '_manifest', ManifestRecorder(out=out))
+        generate_module._write_stub(stub_path, new_render)
+
+        assert stub_path.read_text() == new_render
+
+    def test_write_stub_preserves_genuine_hand_edit(self, tmp_path, monkeypatch):
+        """A file whose content never matches any generator-produced render (i.e. a
+        real hand customization) must never be overwritten, even across manifest
+        runs — only *provably pristine, just-outdated* renders self-heal."""
+        import generate as generate_module
+        from manifest import ManifestRecorder
+
+        out = tmp_path
+        stub_path = out / "lib" / "leave_request" / "service_after_create.ts"
+        stub_path.parent.mkdir(parents=True)
+        hand_written = "export async function afterCreate(_tx, _created, _data) { /* my custom logic */ }"
+        stub_path.write_text(hand_written)
+
+        first_render = "export async function afterCreate(_tx, _created, _data) {}"
+        first_manifest = ManifestRecorder(out=out)
+        first_manifest.record(stub_path, first_render, 'stub')
+        first_manifest.write(out, 'json_schema.yaml')
+
+        new_render = "export async function afterCreate(tx, created, _data) { /* approval logic */ }"
+        monkeypatch.setattr(generate_module, '_manifest', ManifestRecorder(out=out))
+        generate_module._write_stub(stub_path, new_render)
+
+        assert stub_path.read_text() == hand_written
+
+
+# ---------------------------------------------------------------------------
+# x_relationships_list — composite/dotted labelField join-display (cmd_382)
+#
+# Policy history: an isinstance(str) guard dropped composite/dotted labelField
+# relations from x_relationships_list. Restoring that guard (policy (a)) was
+# tried first, but real-world fallout was found on proj_c: those FK
+# columns (e.g. inventory_movement.from_inventory_id/to_inventory_id, whose
+# target's labelField is composite) are ALSO excluded from export_scalar_fields
+# (FK columns aren't scalars) — so excluding them from x_relationships_list too
+# means the column vanishes from CSV export entirely, silently. Policy (b)
+# (final): every parent relation gets a CSV column; composite/dotted labelField
+# segments are resolved and joined into one display string via the same
+# helper (build_label_expression) already used for autocomplete/list labels.
+#
+# cmd_432 merge note: this policy supersedes cmd_351's exclusion guard
+# (doreen/import branch only, 2026-07-17), which predates and was never
+# updated to incorporate this later (2026-07-19) reversal from
+# main. DP-2's display_col naming (next section) composes with this policy
+# unchanged: composite/dotted relations fall back to a `_name`-suffixed
+# display_col since no single field name exists to name it after.
+# ---------------------------------------------------------------------------
+
+class TestXRelationshipsListCompositeLabelField:
+    """Composite (list) / dotted-path labelField FK relations must still reach
+    x_relationships_list — as a joined human-readable display string — rather
+    than silently vanishing from CSV export (the real proj_c incident)."""
+
+    def _schema(self, movement_label):
+        return {
+            "definitions": {
+                "product": {"type": "object", "properties": _base_props()},
+                "location": {"type": "object", "properties": _base_props()},
+                "inventory": {
+                    "type": "object",
+                    "properties": {
+                        **_base_props(),
+                        "product_id": _fk_field("product", label="name"),
+                        "location_id": _fk_field("location", label="name"),
+                        "lot_number": {"type": "string"},
+                        "expiration_date": {"type": "string", "format": "date"},
+                    },
+                },
+                "inventory_movement": {
+                    "type": "object",
+                    "properties": {
+                        **_base_props(),
+                        "from_inventory_id": _fk_field("inventory", label=movement_label),
+                        "to_inventory_id": _fk_field("inventory", label=movement_label),
+                    },
+                },
+            }
+        }
+
+    def test_composite_label_field_produces_joined_display_column(self):
+        """The real proj_c case: composite labelField
+        [product.name, location.name, lot_number, expiration_date] resolved
+        from the FK's target ('inventory') must appear as a joined-string
+        column — not be dropped from x_relationships_list."""
+        schema = self._schema(["product.name", "location.name", "lot_number", "expiration_date"])
+        ctx = build_context(_entity(model="inventory_movement"), schema)
+        by_field = {r["field"]: r for r in ctx["x_relationships_list"]}
+        assert "from_inventory" in by_field
+        assert "to_inventory" in by_field
+        expr = by_field["from_inventory"]["label_expr"]
+        assert "row.from_inventory?.product?.name" in expr
+        assert "row.from_inventory?.location?.name" in expr
+        assert "row.from_inventory?.lot_number" in expr
+        assert "formatLabelValue(row.from_inventory?.expiration_date, 'date')" in expr
+        assert ctx["export_uses_format_label_value"] is True
+
+    def test_simple_label_field_still_a_single_field_access(self):
+        """Plain (non-dotted, string) labelField relations render a single
+        optional-chained field access, not a multi-segment join."""
+        schema = self._schema("name")
+        ctx = build_context(_entity(model="inventory_movement"), schema)
+        by_field = {r["field"]: r for r in ctx["x_relationships_list"]}
+        assert by_field["from_inventory"]["label_expr"] == "(row.from_inventory?.name ?? '')"
+
+    def test_dotted_string_label_field_also_included(self):
+        """Dotted-path string labelField (single string, e.g. 'product.name')
+        is no longer excluded either — same silent-drop failure mode as a
+        list, just with one segment."""
+        schema = self._schema("product.name")
+        ctx = build_context(_entity(model="inventory_movement"), schema)
+        by_field = {r["field"]: r for r in ctx["x_relationships_list"]}
+        assert by_field["from_inventory"]["label_expr"] == "(row.from_inventory?.product?.name ?? '')"
+
+    def test_unresolvable_label_field_path_falls_back_instead_of_dropping(self):
+        """A labelField path that doesn't resolve (typo'd segment) must not
+        silently drop the column either — it falls back to the target's own
+        id/name rather than raising and disappearing."""
+        schema = self._schema("nonexistent_field")
+        ctx = build_context(_entity(model="inventory_movement"), schema)
+        by_field = {r["field"]: r for r in ctx["x_relationships_list"]}
+        assert "from_inventory" in by_field
+        assert "row.from_inventory?.name" in by_field["from_inventory"]["label_expr"]
+
+
+# ---------------------------------------------------------------------------
+# DP-2a (cmd_394 §12): dotted x-import-key lookup_entity must resolve via
+# x-relationship.target, not the dotted-key property prefix. Regression for
+# the approval_flow.approver_role.name land mine (prisma.approver_role is
+# undefined; the real model is 'role').
+# ---------------------------------------------------------------------------
+
+class TestImportKeySpecsAliasedFkLookup:
+    """approval_flow has TWO FK properties (approver_role_id, requestor_role_id)
+    that both target model 'role' under different property-name prefixes — the
+    scenario that first exposed DP-2a (a single dotted key aliasing to 'role'
+    coincidentally worked before this fix only when prefix==target)."""
+
+    SCHEMA = {
+        "definitions": {
+            "role": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "approval_flow": {
+                "type": "object",
+                "required": ["id", "entity_name", "approver_role_id", "requestor_role_id"],
+                "x-import-key": ["entity_name", "approver_role.name", "requestor_role.name"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "entity_name": {"type": "string"},
+                    "approver_role_id": _fk_field("role", label="name"),
+                    "requestor_role_id": _fk_field("role", label="name"),
+                },
+            },
+        }
+    }
+
+    ENTITY = {
+        "parent": "approval_flow",
+        "model": "approval_flow",
+        "definition_key": "approval_flow",
+        "children": [],
+        "generate_config": {
+            "list": True, "view": True, "new": True, "edit": True,
+            "delete": True, "api": True, "test": False, "fields": None,
+        },
+    }
+
+    def _specs_by_raw(self):
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        return {s["raw"]: s for s in ctx["import_key_specs"] if s["is_dotted"]}
+
+    def test_lookup_entity_resolves_to_relationship_target_not_prefix(self):
+        specs = self._specs_by_raw()
+        assert specs["approver_role.name"]["lookup_entity"] == "role", (
+            "lookup_entity must come from x-relationship.target ('role'), "
+            "not the dotted-key prefix ('approver_role') — prisma.approver_role "
+            "does not exist and would crash at runtime"
+        )
+        assert specs["requestor_role.name"]["lookup_entity"] == "role"
+
+    def test_result_col_and_csv_col_unaffected_by_fix(self):
+        """Only lookup_entity changes — result_col/csv_col stay prefix-derived (correct already)."""
+        specs = self._specs_by_raw()
+        assert specs["approver_role.name"]["result_col"] == "approver_role_id"
+        assert specs["approver_role.name"]["csv_col"] == "approver_role_name"
+        assert specs["requestor_role.name"]["result_col"] == "requestor_role_id"
+        assert specs["requestor_role.name"]["csv_col"] == "requestor_role_name"
+
+    def test_var_prefix_stays_unique_when_lookup_entity_collides(self):
+        """Two dotted keys resolving to the SAME lookup_entity ('role') must keep
+        distinct var_prefix values, or the rendered template emits duplicate
+        `const _role_rows` / `const _role_csv_val` declarations (TS build error)."""
+        specs = self._specs_by_raw()
+        assert specs["approver_role.name"]["lookup_entity"] == specs["requestor_role.name"]["lookup_entity"]
+        assert specs["approver_role.name"]["var_prefix"] != specs["requestor_role.name"]["var_prefix"]
+        assert specs["approver_role.name"]["var_prefix"] == "approver_role"
+        assert specs["requestor_role.name"]["var_prefix"] == "requestor_role"
+
+    def test_non_aliased_dotted_key_unaffected(self):
+        """Non-regression: when the property prefix already matches the target
+        (e.g. role.name on a plain role_id FK), lookup_entity is unchanged."""
+        schema = {
+            "definitions": {
+                "role": self.SCHEMA["definitions"]["role"],
+                "permission": {
+                    "type": "object",
+                    "required": ["id", "name", "role_id"],
+                    "x-import-key": ["name", "role.name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "role_id": _fk_field("role", label="name"),
+                    },
+                },
+            }
+        }
+        entity = {
+            "parent": "permission", "model": "permission", "definition_key": "permission",
+            "children": [],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": True, "test": False, "fields": None,
+            },
+        }
+        ctx = build_context(entity, schema)
+        spec = next(s for s in ctx["import_key_specs"] if s["raw"] == "role.name")
+        assert spec["lookup_entity"] == "role"
+        assert spec["var_prefix"] == "role"
+
+
+# ---------------------------------------------------------------------------
+# cmd_521: dotted x-import-key lookup entities must be org-filtered when the
+# LOOKUP entity itself has organization_id — independently of whether the
+# lookup entity happens to also be the discriminant used for the PARENT
+# model (should_filter_by_org). A dotted key into a system-global entity
+# (e.g. role, no organization_id) must NOT be filtered, or every dotted
+# lookup against it breaks (cmd_515's original gap + the trap it left).
+# ---------------------------------------------------------------------------
+
+class TestImportKeySpecsLookupEntityFilterByOrg:
+    SCHEMA = {
+        "definitions": {
+            "organization": {
+                "type": "object",
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "role": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "department": {
+                "type": "object",
+                "required": ["id", "name", "organization_id"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "organization_id": _fk_field("organization", label="name"),
+                },
+            },
+            "ticket": {
+                "type": "object",
+                "required": ["id", "name", "organization_id"],
+                "x-import-key": ["name", "role.name", "department.name"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "organization_id": _fk_field("organization", label="name"),
+                    "role_id": _fk_field("role", nullable=True, label="name"),
+                    "department_id": _fk_field("department", nullable=True, label="name"),
+                },
+            },
+        }
+    }
+
+    ENTITY = _entity(model="ticket")
+
+    def _specs_by_raw(self):
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        return {s["raw"]: s for s in ctx["import_key_specs"] if s["is_dotted"]}
+
+    def test_org_scoped_lookup_entity_is_filtered(self):
+        """department has organization_id → its dotted lookup must be
+        org-scoped, or a cross-org natural-key collision resolves to a
+        foreign-org row (the cmd_521 leak)."""
+        specs = self._specs_by_raw()
+        assert specs["department.name"]["lookup_entity_filter_by_org"] is True
+
+    def test_system_global_lookup_entity_is_not_filtered(self):
+        """role has no organization_id → filtering it would return zero
+        rows for every dotted role.* lookup (the trap cmd_521's design
+        doc calls out — role is legitimately visible org-wide)."""
+        specs = self._specs_by_raw()
+        assert specs["role.name"]["lookup_entity_filter_by_org"] is False
+
+    def test_any_dotted_fk_needs_org_filter_true_when_any_spec_needs_it(self):
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        assert ctx["any_dotted_fk_needs_org_filter"] is True
+
+    def test_any_dotted_fk_needs_org_filter_false_when_no_lookup_entity_is_org_scoped(self):
+        """Non-regression: a parent with only system-global dotted lookups
+        (no org-scoped lookup entity in the mix) must not gain the
+        _importOrgIds computation/import at all."""
+        schema = {
+            "definitions": {
+                "role": self.SCHEMA["definitions"]["role"],
+                "permission": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "x-import-key": ["name", "role.name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "role_id": _fk_field("role", nullable=True, label="name"),
+                    },
+                },
+            }
+        }
+        ctx = build_context(_entity(model="permission"), schema)
+        assert ctx["any_dotted_fk_needs_org_filter"] is False
+
+    def test_organization_and_user_lookup_targets_are_excluded_even_with_organization_id(self):
+        """Same exclusion list as should_filter_by_org (cmd_515): a dotted
+        key that resolves to 'organization' or 'user' is never filtered by
+        this mechanism, even though both models plausibly have an id an
+        org-filter could apply to — filtering 'organization' rows by
+        organization_id would be nonsensical (self-referential), and
+        'user' membership works differently (org roster, not row-owned)."""
+        schema = {
+            "definitions": {
+                # Both 'organization' and 'user' are given their own
+                # organization_id property here (semantically odd, but
+                # deliberate) so this test isolates the name-based exclusion
+                # itself — proving it fires independently of the has_org_id
+                # check, not merely because these two happen to lack the
+                # column in a more realistic schema.
+                "organization": {
+                    "type": "object",
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", nullable=True, label="name"),
+                    },
+                },
+                "user": {
+                    "type": "object",
+                    "required": ["id", "name", "organization_id"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", label="name"),
+                    },
+                },
+                "ticket": {
+                    "type": "object",
+                    "required": ["id", "name", "organization_id"],
+                    "x-import-key": ["name", "organization.name", "user.name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", label="name"),
+                        "user_id": _fk_field("user", nullable=True, label="name"),
+                    },
+                },
+            }
+        }
+        ctx = build_context(_entity(model="ticket"), schema)
+        specs = {s["raw"]: s for s in ctx["import_key_specs"] if s["is_dotted"]}
+        assert specs["organization.name"]["lookup_entity_filter_by_org"] is False
+        assert specs["user.name"]["lookup_entity_filter_by_org"] is False
+
+
+# ---------------------------------------------------------------------------
+# DP-2 (cmd_394 §5, Option D): export display_col names the actual labelField
+# instead of always assuming "_name". Zero-breaking-change on any schema where
+# every FK labelField happens to be 'name' (true of every currently
+# export-enabled entity, per cmd_394 §5 impact analysis).
+# ---------------------------------------------------------------------------
+
+class TestDP2ExportDisplayColNaming:
+    SCHEMA = {
+        "definitions": {
+            "role": {
+                "type": "object",
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "entity_b": {
+                "type": "object",
+                "properties": {"id": _base_props()["id"], "title": {"type": "string"}},
+            },
+            "widget": {
+                "type": "object",
+                "properties": {
+                    "id": _base_props()["id"],
+                    "role_id": _fk_field("role", label="name"),
+                    "entity_b_id": _fk_field("entity_b", nullable=True, label="title"),
+                },
+            },
+        }
+    }
+    ENTITY = _entity(model="widget")
+
+    def _rel_by_field(self, ctx, field):
+        return next(r for r in ctx["x_relationships_list"] if r["field"] == field)
+
+    def test_name_label_field_unchanged(self):
+        """labelField='name' → display_col stays '{relation}_name' (no-op case)."""
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        rel = self._rel_by_field(ctx, "role")
+        assert rel["display_col"] == "role_name"
+
+    def test_non_name_label_field_uses_actual_label(self):
+        """labelField='title' → display_col is '{relation}_title', not '{relation}_name'."""
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        rel = self._rel_by_field(ctx, "entity_b")
+        assert rel["display_col"] == "entity_b_title"
+
+    def test_approval_flow_style_aliased_fk_display_col(self):
+        """approval_flow-style aliased FK (prop prefix != target model, non-name
+        labelField): display_col must be prefix-derived + labelField-derived,
+        matching the dotted x-import-key csv_col so DP-1a visibility holds."""
+        schema = {
+            "definitions": {
+                "role": self.SCHEMA["definitions"]["role"],
+                "approval_flow": {
+                    "type": "object",
+                    "required": ["id", "entity_name", "approver_role_id"],
+                    "x-import-key": ["entity_name", "approver_role.name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "entity_name": {"type": "string"},
+                        "approver_role_id": _fk_field("role", label="name"),
+                    },
+                },
+            }
+        }
+        entity = {
+            "parent": "approval_flow", "model": "approval_flow", "definition_key": "approval_flow",
+            "children": [],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": True, "test": False, "fields": None,
+            },
+        }
+        ctx = build_context(entity, schema)
+        rel = next(r for r in ctx["x_relationships_list"] if r["field"] == "approver_role")
+        assert rel["display_col"] == "approver_role_name"
+        spec = next(s for s in ctx["import_key_specs"] if s["raw"] == "approver_role.name")
+        assert spec["csv_col"] == rel["display_col"], (
+            "import csv_col and export display_col must agree — this is the "
+            "invariant DP-1a's validate.py check enforces at the schema level"
+        )
+
+
+# ---------------------------------------------------------------------------
+# DP-1 (cmd_394 §3, Option B): non-dotted x-import-key scalars are unioned
+# into export_scalar_fields ONLY when already view-visible (x-generate.fields
+# allowlist). Fields hidden from the view are NEVER unioned in — cmd_321/324
+# security ruling (DQ-1=A) takes precedence.
+# ---------------------------------------------------------------------------
+
+class TestDP1ImportKeyUnion:
+    def _schema(self, extra_prop_type="string"):
+        return {
+            "definitions": {
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "code"],
+                    "x-import-key": ["code"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "code": {"type": extra_prop_type},
+                        "secret": {"type": "string"},
+                    },
+                },
+            }
+        }
+
+    def test_key_field_absent_from_restrictive_fields_allowlist_stays_out(self):
+        """gen_cfg.fields restricts to ['secret'] only (code not view-visible) →
+        DP-1 must NOT union 'code' into export_scalar_fields (DQ-1=A: view-visible
+        wins over roundtrip convenience)."""
+        schema = self._schema()
+        entity = _entity(model="widget", gen_cfg={
+            "list": True, "view": True, "new": True, "edit": True,
+            "delete": True, "api": True, "test": False, "fields": ["secret"],
+        })
+        ctx = build_context(entity, schema)
+        assert "code" not in ctx["export_scalar_fields"], (
+            "an import key hidden from the view allowlist must never be unioned "
+            "into export — DQ-1=A view-visible-wins ruling"
+        )
+        assert "code" not in ctx["export_import_key_fields"]
+
+    def test_key_field_present_in_fields_allowlist_is_unioned(self):
+        """gen_cfg.fields explicitly includes 'code' → union keeps it (this is
+        already true of the base export_scalar_fields computation, but exercises
+        the DP-1 union path directly and confirms export_import_key_fields agrees)."""
+        schema = self._schema()
+        entity = _entity(model="widget", gen_cfg={
+            "list": True, "view": True, "new": True, "edit": True,
+            "delete": True, "api": True, "test": False, "fields": ["code", "secret"],
+        })
+        ctx = build_context(entity, schema)
+        assert "code" in ctx["export_scalar_fields"]
+        assert "code" in ctx["export_import_key_fields"]
+
+    def test_unrestricted_fields_allowlist_unions_key(self):
+        """fields=None (unrestricted, falls back to all properties) → 'code' is
+        already view-visible by default and appears in export."""
+        schema = self._schema()
+        entity = _entity(model="widget")  # default gen_cfg has fields=None
+        ctx = build_context(entity, schema)
+        assert "code" in ctx["export_scalar_fields"]
+        assert "code" in ctx["export_import_key_fields"]
+
+
+# ---------------------------------------------------------------------------
+# DP-1b/1c (cmd_394 §10-11): CREATE feasibility only counts dotted-FK keys
+# whose csv_col is an actually-exported display column (visible source).
+# ---------------------------------------------------------------------------
+
+class TestDP1cVisibleSourceOnlyCreateFeasibility:
+    def _schema_with(self, label):
+        return {
+            "definitions": {
+                "role": {
+                    "type": "object",
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "code", "role_id"],
+                    "x-import-key": ["code", "role.name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "code": {"type": "string"},
+                        "role_id": _fk_field("role", label=label),
+                    },
+                },
+            }
+        }
+
+    def _entity(self):
+        return {
+            "parent": "widget", "model": "widget", "definition_key": "widget",
+            "children": [],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": True, "test": False, "fields": None,
+            },
+        }
+
+    def test_visible_dotted_source_counts_toward_create_feasibility(self):
+        """role.name dotted key, role's own labelField='name' → csv_col
+        'role_name' matches the exported display_col → CREATE feasible."""
+        schema = self._schema_with(label="name")
+        ctx = build_context(self._entity(), schema)
+        assert ctx["import_can_create"] is True
+
+    def test_invisible_dotted_source_does_not_count_toward_create_feasibility(self):
+        """role's FK labelField ('id') diverges from the dotted key's field
+        ('name') → display_col ('role_id') != csv_col ('role_name') → the
+        source is invisible → CREATE must be gated off even though a
+        structurally-shaped dotted key exists (DP-1a would reject this schema
+        outright; this is the build_context.py defense-in-depth layer)."""
+        schema = self._schema_with(label="id")
+        ctx = build_context(self._entity(), schema)
+        assert ctx["import_can_create"] is False
+
+
+# ---------------------------------------------------------------------------
+# cmd_421 Batch3: CSV import of an entity with a required internal bridge FK
+# (raised previously for inventory_movement's approvable_id — DP-B "確認"
+# item). No entity-specific handling exists anywhere in build_context.py for
+# this; the same generic _create_feasible gap-check (required field not in
+# export_scalar_fields and not import-resolvable) already excludes bridge FKs
+# because get_internal_bridge_fk_prop_names() is unioned into the export
+# exclusion set. This test proves that generic mechanism actually produces
+# the correct, safe outcome for import (CREATE gated off, UPDATE still
+# available) rather than a broken route or a 500 at runtime — it is
+# structural verification, not new behavior.
+# ---------------------------------------------------------------------------
+
+class TestRequiredInternalBridgeFkImportFeasibility:
+    def _schema(self):
+        return {
+            "definitions": {
+                # Internal bridge target: zero true x-generate flags anywhere
+                # across its variants → get_internal_bridge_fk_prop_names()
+                # classifies any FK pointing at it as internal plumbing.
+                "approvable": {
+                    "type": "object",
+                    "properties": {"id": _base_props()["id"]},
+                },
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "code", "approvable_id"],
+                    "x-import-key": ["code"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "code": {"type": "string"},
+                        "approvable_id": {
+                            "type": "string",
+                            "pattern": "^c[a-z0-9]{24,}$",
+                            "x-relationship": {
+                                "type": "one-to-one_bridge",
+                                "target": "approvable",
+                                "labelField": "id",
+                            },
+                        },
+                    },
+                },
+            }
+        }
+
+    def _entity(self):
+        return {
+            "parent": "widget", "model": "widget", "definition_key": "widget",
+            "children": [],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": True, "test": False, "fields": None,
+            },
+        }
+
+    def test_bridge_fk_excluded_from_export_and_import_field_specs(self):
+        schema = self._schema()
+        ctx = build_context(self._entity(), schema)
+        assert "approvable_id" not in ctx["export_scalar_fields"]
+        assert all(spec["name"] != "approvable_id" for spec in ctx["import_field_specs"])
+
+    def test_required_bridge_fk_gates_off_create_but_not_update(self):
+        schema = self._schema()
+        ctx = build_context(self._entity(), schema)
+        assert ctx["import_eligible"] is True
+        assert ctx["import_can_create"] is False, (
+            "approvable_id is required but has no visible CSV source (bridge "
+            "FK) — CREATE must be infeasible, matching the generic "
+            "_create_feasible gap-check, not a broken/500-producing route"
+        )
+        assert ctx["import_can_update"] is True, (
+            "UPDATE never needs to supply approvable_id, so it stays "
+            "available even though CREATE is gated off"
+        )
+
+
+class TestFormDataGetsPrismaNativeEnum:
+    """cmd_446 pilot: a Prisma nativeEnum-backed field (schema_deriver's
+    `_prisma_native_enum_type` marker) must cast the raw FormData string to
+    its literal union in actions.ts, not plain `string` — the service layer
+    parameter is now that narrower union."""
+
+    def _prop_info(self, defn: dict) -> dict:
+        return {"prop": "status", "var_name": "status", "def": defn}
+
+    def test_native_enum_field_casts_to_literal_union(self):
+        defn = {
+            "type": "string",
+            "enum": ["pending", "rejected"],
+            "_prisma_native_enum_type": "InventoryMovementStatus",
+        }
+        result = _build_form_data_gets([self._prop_info(defn)])
+        assert result == "  const status = data.get('status') as 'pending' | 'rejected';"
+
+    def test_plain_string_field_unaffected(self):
+        defn = {"type": "string"}
+        result = _build_form_data_gets([self._prop_info(defn)])
+        assert result == "  const status = data.get('status') as string;"
+
+    def test_enum_without_native_marker_stays_plain_string(self):
+        # A json-schema `enum:` constraint alone (no Prisma nativeEnum
+        # backing) must not change codegen for other entities.
+        defn = {"type": "string", "enum": ["pending", "rejected"]}
+        result = _build_form_data_gets([self._prop_info(defn)])
+        assert result == "  const status = data.get('status') as string;"
+
+
+class TestDefaultPropsPrismaNativeEnum:
+    """cmd_446 pilot: a Prisma nativeEnum-backed field's "new" page default
+    must seed the schema's actual `default:` value (not '') and pin it with
+    `as const` so TS doesn't widen it back to plain `string` in the object
+    literal (would fail assignment to the union-typed FormUpsert `src` prop)."""
+
+    def _schema(self, status_defn: dict) -> dict:
+        return {
+            "definitions": {
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": {**_base_props(), "status": status_defn},
+                },
+            }
+        }
+
+    def test_native_enum_default_uses_schema_default_as_const(self):
+        status_defn = {
+            "type": "string",
+            "enum": ["pending", "rejected"],
+            "default": "pending",
+            "_prisma_native_enum_type": "WidgetStatus",
+        }
+        ctx = build_context(_entity("widget"), self._schema(status_defn))
+        assert "status: 'pending' as const," in ctx["parent_default_props"]
+
+    def test_plain_string_field_default_is_empty_string(self):
+        ctx = build_context(_entity("widget"), self._schema({"type": "string"}))
+        assert "status: '',"  in ctx["parent_default_props"]

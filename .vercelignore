@@ -1,0 +1,6 @@
+# Env files — must never be uploaded to Vercel
+.env.production.local
+.env.local
+.env.*.local
+# Python venv — large, never needed by Vercel build
+.venv/

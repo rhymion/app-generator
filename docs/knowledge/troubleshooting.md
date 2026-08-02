@@ -192,6 +192,69 @@ expected response status to equal 403 but got 401
 
 4. **AUTH_SECRET empty in CI**: If the `AUTH_SECRET` environment variable is set to an empty string (e.g., an unset GitHub Actions secret), NextAuth will fail to issue the session cookie. Login appears to succeed but the session is never created. Fix: omit `AUTH_SECRET` from the CI env block and let `.env.test` provide it. See `docs/knowledge/testing-cypress.md` → "CI/CD".
 
+### 2.4 Vitest unit test subject statically importing generator-emitted code
+
+**Symptom**: a tracked unit test (e.g. `lib/{entity}/actions.test.ts`) fails to
+resolve a module in a fresh checkout or CI job that has not run
+`npm run generate-code` yet:
+
+```
+Error: Failed to resolve import "@/lib/{entity}/{generated_module}" from "lib/{entity}/actions.ts"
+```
+
+**Root cause**: the subject under test (`actions.ts`) has a top-level, static
+`import` of a module that `code_generator/generate.py` emits (e.g.
+`lib/approval_request/{resolve_target,on_approved_dispatch,on_rejected_dispatch}.ts`,
+PR #203). `vi.mock('@/lib/{entity}/{generated_module}', factory)` does **not**
+avoid this: Vitest still needs to resolve the specifier to a real file on disk
+to register the mock, and a purely generator-emitted file does not exist
+until `generate-code` has run. This makes the unit test's pass/fail status
+depend on a build step outside its own control — a unit test whose subject
+imports generated output has stepped outside a unit test's proper role.
+
+**Fix — dependency injection, not lazy/dynamic import**: split the file so
+the generated collaborators are taken as **injected parameters** rather than
+imported:
+
+1. Move the business logic into a sibling `*_core.ts` file (tracked,
+   hand-written, no `'use server'`) that exports a factory —
+   `createXActions(deps)` — where `deps` is a plain object of function
+   signatures typed by hand (not `typeof realGeneratedFn`, which would still
+   require resolving the generated module for the type import). The factory
+   body never imports the generated modules.
+2. The original file (`actions.ts`) keeps its exact public API (unchanged
+   signatures — important if it is a Next.js Server Actions file, since
+   `'use server'` requires every export to be an async function and callers,
+   especially client components invoking it as an RPC, cannot pass extra
+   arguments). It becomes a thin wiring layer: import the real generated
+   modules, call the factory once with them as the real `deps`, and have each
+   exported function delegate to the constructed instance.
+3. The test (`actions.test.ts`) imports the factory from `*_core.ts`
+   directly — never from `actions.ts` — and injects hand-written `vi.fn()`
+   fakes for the generated collaborators. Neither the test file nor
+   `*_core.ts` has any import path that touches generated output, so the test
+   runs identically with or without `generate-code` having run.
+
+Rejected alternative — lazy/dynamic `import()` of the generated module inside
+the function body: this still requires the generated file to exist the
+moment the function is actually invoked, so it "passes" a unit test only by
+accident (if the test never exercises that code path) rather than by
+construction. It also does not stop the module from being unresolvable if any
+test path does end up calling that function.
+
+If you add a new hand-written file like `*_core.ts` to `lib/`, remember it
+also needs an explicit `!lib/{entity}/{filename}` exception in `.gitignore`
+(the generic `lib/*/*` structural ignore ignores unlisted files in generated
+directories) or it will silently never be tracked.
+
+See `lib/approval_request/actions_core.ts` / `actions.ts` / `actions.test.ts`
+for a worked example.
+
+See also `gate-exemption-must-be-machine-checkable.md` for the broader
+recurring pattern this section's CI-job fix was one instance of (local
+Completion gate docs stating something CI enforcement doesn't actually
+honor).
+
 ---
 
 ## 3. Code generation failures
@@ -317,10 +380,10 @@ The PostgreSQL container is not running. Fix:
 
 ```bash
 # Development database
-npm run docker:up:dev   # starts postgres-dev on port 5433
+npm run docker:up:dev   # starts postgres-dev on port 5433 (default; override via POSTGRES_PORT)
 
 # Test database
-npm run docker:up:test  # starts postgres-test on port 5432
+npm run docker:up:test  # starts postgres-test on port 5432 (default; override via POSTGRES_PORT)
 
 # Verify it's up
 docker ps | grep postgres

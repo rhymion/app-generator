@@ -8,10 +8,14 @@ Covers:
 4. field_names:     allocation phase uses the field names declared in the schema
 5. item_mode_skipped: item mode is not implemented in Phase 1 (reservation_config=None)
 6. validate:        x-reservation validation catches missing required fields
+7. actions_deprecated: x-reservation.actions is hard-rejected (removed 2026-07-30)
 """
 import pytest
 from build_context import build_context
-from generators import service_context, _build_reservation_allocation_code
+from generators import (
+    service_context,
+    _build_reservation_allocation_code,
+)
 from validate import validate_schema, SchemaValidationError
 
 
@@ -172,7 +176,7 @@ class TestBackwardCompat:
         svc = service_context(ctx, schema)
         assert svc["has_reservation"] is False
         assert svc["reservation_allocation_code"] == ""
-        assert "InsufficientInventoryError" not in svc["utility_code"]
+        assert "InsufficientPoolCapacityError" not in svc["utility_code"]
 
 
 # ---------------------------------------------------------------------------
@@ -240,12 +244,12 @@ class TestGenerate:
 
     def test_insufficient_inventory_error_thrown(self):
         code = self._svc()["reservation_allocation_code"]
-        assert "InsufficientInventoryError" in code
+        assert "InsufficientPoolCapacityError" in code
 
     def test_error_class_in_utility(self):
         svc = self._svc()
-        assert "InsufficientInventoryError" in svc["utility_code"]
-        assert "class InsufficientInventoryError" in svc["utility_code"]
+        assert "InsufficientPoolCapacityError" in svc["utility_code"]
+        assert "class InsufficientPoolCapacityError" in svc["utility_code"]
 
     def test_allocation_row_created(self):
         code = self._svc()["reservation_allocation_code"]
@@ -465,10 +469,10 @@ class TestItemModePhase2:
         assert "| 'room'" in svc["utility_code"]
 
     def test_insufficient_inventory_error_exported_for_item_mode(self):
-        """InsufficientInventoryError must be exported so api_route.ts can import it."""
+        """InsufficientPoolCapacityError must be exported so api_route.ts can import it."""
         ctx = self._ctx()
         svc = service_context(ctx)
-        assert "export class InsufficientInventoryError" in svc["utility_code"]
+        assert "export class InsufficientPoolCapacityError" in svc["utility_code"]
 
     def test_reservation_mutation_error_not_exported_for_item_mode(self):
         """ReservationMutationError is count-mode-only and must NOT be in item mode service."""
@@ -931,3 +935,527 @@ class TestValidateReservationMatrix:
         })
         with pytest.raises(SchemaValidationError, match="nonexistent_lines_entity.*not defined"):
             validate_schema(schema)
+
+
+# ---------------------------------------------------------------------------
+# 8. Overlap availability mode (Q2)
+# ---------------------------------------------------------------------------
+
+def _overlap_mode_def(include_exclude_statuses: bool = False) -> dict:
+    """Item mode schema with availabilitySource: overlap."""
+    xres: dict = {
+        "mode": "item",
+        "pool": {
+            "entity": "room",
+            "statusField": "status",
+            "availableStatus": 0,
+            "reservedStatus": 2,
+        },
+        "request": {
+            "criteria": {"room_type_id": "room_type_id"},
+            "dateRange": {"start": "check_in", "end": "check_out"},
+        },
+        "policy": {
+            "availabilitySource": "overlap",
+            "updatePoolStatusOnReserve": False,
+            "orderBy": [{"floor": "asc"}, {"id": "asc"}],
+        },
+        "result": {
+            "allocatedField": "room_id",
+        },
+    }
+    if include_exclude_statuses:
+        xres["policy"]["excludePoolStatuses"] = [1]
+    return {
+        "type": "object",
+        "required": ["id", "guest_name", "room_type_id", "check_in", "check_out"],
+        "x-reservation": xres,
+        "properties": {
+            "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+            "guest_name": {"type": "string"},
+            "room_type_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "room_type", "labelField": "name"},
+            },
+            "room_id": {"type": ["string", "null"]},
+            "check_in": {"type": "string", "format": "date"},
+            "check_out": {"type": "string", "format": "date"},
+        },
+    }
+
+
+class TestItemModeOverlapAvailability:
+    """Q2: overlap availability mode — assertNoDuplicateReservation used, status update suppressed."""
+
+    def _ctx(self, include_exclude_statuses: bool = False):
+        schema = _room_schema({"room_reservation": _overlap_mode_def(include_exclude_statuses)})
+        entity = _entity_spec("room_reservation", schema)
+        return build_context(entity, schema)
+
+    def _svc(self, include_exclude_statuses: bool = False):
+        schema = _room_schema({"room_reservation": _overlap_mode_def(include_exclude_statuses)})
+        entity = _entity_spec("room_reservation", schema)
+        ctx = build_context(entity, schema)
+        return service_context(ctx, schema)
+
+    # --- Context parsing ---
+
+    def test_uses_overlap_availability_true(self):
+        assert self._ctx()["reservation_config"]["usesOverlapAvailability"] is True
+
+    def test_updates_pool_status_false(self):
+        assert self._ctx()["reservation_config"]["updatesPoolStatusOnReserve"] is False
+
+    def test_exclude_pool_statuses_empty_by_default(self):
+        assert self._ctx()["reservation_config"]["excludePoolStatuses"] == []
+
+    def test_exclude_pool_statuses_populated(self):
+        assert self._ctx(include_exclude_statuses=True)["reservation_config"]["excludePoolStatuses"] == [1]
+
+    # --- Generated service code ---
+
+    def _service_code(self, include_exclude_statuses: bool = False) -> str:
+        from jinja2 import Environment, FileSystemLoader
+        import os
+        schema = _room_schema({"room_reservation": _overlap_mode_def(include_exclude_statuses)})
+        entity = _entity_spec("room_reservation", schema)
+        ctx = build_context(entity, schema)
+        svc_ctx = service_context(ctx, schema)
+        template_dir = os.path.join(os.path.dirname(__file__), "..", "templates")
+        env = Environment(loader=FileSystemLoader(template_dir), keep_trailing_newline=True)
+        tmpl = env.get_template("service.ts.jinja2")
+        return tmpl.render({**ctx, **svc_ctx})
+
+    def test_status_update_suppressed_in_overlap_mode(self):
+        code = self._service_code()
+        assert "data: { status:" not in code
+
+    def test_assert_no_duplicate_reservation_present(self):
+        code = self._service_code()
+        assert "assertNoDuplicateReservation" in code
+
+    def test_find_many_used_in_overlap_mode(self):
+        code = self._service_code()
+        assert "findMany" in code
+
+    def test_not_in_filter_when_exclude_statuses_set(self):
+        code = self._service_code(include_exclude_statuses=True)
+        assert "notIn" in code
+
+    def test_no_not_in_filter_when_exclude_statuses_empty(self):
+        code = self._service_code(include_exclude_statuses=False)
+        assert "notIn" not in code
+
+    # --- Status mode backward compatibility ---
+
+    def test_status_mode_still_updates_pool_status(self):
+        """Status mode (no availabilitySource) must still emit pool status update."""
+        schema = _room_schema({"room_reservation": _item_mode_no_lines_def(with_date_range=True)})
+        entity = _entity_spec("room_reservation", schema)
+        ctx = build_context(entity, schema)
+        svc_ctx = service_context(ctx, schema)
+        from jinja2 import Environment, FileSystemLoader
+        import os
+        template_dir = os.path.join(os.path.dirname(__file__), "..", "templates")
+        env = Environment(loader=FileSystemLoader(template_dir), keep_trailing_newline=True)
+        tmpl = env.get_template("service.ts.jinja2")
+        code = tmpl.render({**ctx, **svc_ctx})
+        assert "data: { status:" in code
+
+    def test_status_mode_uses_overlap_false(self):
+        schema = _room_schema({"room_reservation": _item_mode_no_lines_def()})
+        entity = _entity_spec("room_reservation", schema)
+        ctx = build_context(entity, schema)
+        assert ctx["reservation_config"]["usesOverlapAvailability"] is False
+
+    def test_status_mode_updates_pool_true(self):
+        schema = _room_schema({"room_reservation": _item_mode_no_lines_def()})
+        entity = _entity_spec("room_reservation", schema)
+        ctx = build_context(entity, schema)
+        assert ctx["reservation_config"]["updatesPoolStatusOnReserve"] is True
+
+    # --- Validation ---
+
+    def test_overlap_without_date_range_raises(self):
+        schema = _room_schema({
+            "room_reservation": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}, "room_id": {"type": ["string", "null"]}},
+                "x-reservation": {
+                    "mode": "item",
+                    "pool": {"entity": "room"},
+                    "request": {"criteria": {"room_type_id": "room_type_id"}},
+                    "policy": {"availabilitySource": "overlap"},
+                    "result": {"allocatedField": "room_id"},
+                },
+            }
+        })
+        with pytest.raises(SchemaValidationError, match="dateRange"):
+            validate_schema(schema)
+
+    def test_exclude_pool_statuses_non_integer_raises(self):
+        schema = _room_schema({
+            "room_reservation": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}, "room_id": {"type": ["string", "null"]}},
+                "x-reservation": {
+                    "mode": "item",
+                    "pool": {"entity": "room"},
+                    "request": {
+                        "criteria": {"room_type_id": "room_type_id", "dateRange": {"start": "check_in", "end": "check_out"}},
+                    },
+                    "policy": {
+                        "availabilitySource": "overlap",
+                        "excludePoolStatuses": ["maintenance"],
+                    },
+                    "result": {"allocatedField": "room_id"},
+                },
+            }
+        })
+        with pytest.raises(SchemaValidationError, match="integers"):
+            validate_schema(schema)
+
+    def test_start_end_check_is_before_find_many_in_generated_code(self):
+        """start >= end validation must appear before candidates findMany (not inside try/catch)."""
+        code = self._service_code(include_exclude_statuses=True)
+        pos_start_check = code.find('Start date must be before end date')
+        pos_find_many = code.find('findMany')
+        assert pos_start_check != -1, "Start date check not found in generated code"
+        assert pos_find_many != -1, "findMany not found in generated code"
+        assert pos_start_check < pos_find_many, (
+            "start >= end check must appear before findMany, but findMany comes first"
+        )
+
+    def test_start_end_error_not_wrapped_in_insufficient_inventory(self):
+        """start >= end must NOT be swallowed into InsufficientPoolCapacityError."""
+        code = self._service_code()
+        # The start/end check must come before the for-loop try/catch block.
+        # Verify: 'Start date must be before end date' appears before 'for (const candidate'
+        pos_start_check = code.find('Start date must be before end date')
+        pos_for_loop = code.find('for (const candidate')
+        assert pos_start_check != -1, "Start date check not found in generated code"
+        assert pos_for_loop != -1, "candidate loop not found in generated code"
+        assert pos_start_check < pos_for_loop, (
+            "start >= end check must be before the candidates loop to avoid being swallowed"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 7. x-reservation.actions deprecation (2026-07-30): the Q3 lifecycle-action
+# sub-feature (shipOrder/releaseReservation/cancelReservation action routes,
+# ReservationActionButtons UI, reservation_actions.ts) has been removed.
+# x-reservation is now scoped to (1) inventory allocation and (2)
+# specific-resource reservation only; approval/rejection lifecycle goes
+# through approval_flow's approve/(terminal) reject instead. validate.py
+# now hard-rejects any schema that still declares an 'actions' block.
+# ---------------------------------------------------------------------------
+
+def _po_def_with_deprecated_actions() -> dict:
+    base = _po_def_with_reservation(mode="count")
+    base["x-reservation"]["actions"] = {
+        "shipOrder": {
+            "type": "ship",
+            "allocationEntity": "inventory_allocation",
+            "remainingField": "remaining_quantity",
+            "statusField": "status",
+        },
+    }
+    return base
+
+
+class TestActionsDeprecated:
+    """Verify validate.py hard-rejects x-reservation.actions (removed 2026-07-30)."""
+
+    def test_actions_block_raises(self):
+        schema = _make_schema({"purchase_order": _po_def_with_deprecated_actions()})
+        with pytest.raises(SchemaValidationError, match="deprecated"):
+            validate_schema(schema)
+
+    def test_error_mentions_approval_flow(self):
+        schema = _make_schema({"purchase_order": _po_def_with_deprecated_actions()})
+        with pytest.raises(SchemaValidationError, match="approval_flow"):
+            validate_schema(schema)
+
+    def test_reservation_config_has_no_actions_keys(self):
+        """build_context.py no longer parses/emits any actions-related keys."""
+        schema = _make_schema({"purchase_order": _po_def_with_reservation()})
+        entity = _entity_spec("purchase_order", schema, children=[_line_child()])
+        ctx = build_context(entity, schema)
+        rc = ctx["reservation_config"]
+        for key in ("has_actions", "reservation_actions", "actions_remaining_field",
+                    "actions_status_field", "actions_initial_status"):
+            assert key not in rc, f"{key!r} must not appear in reservation_config"
+
+    def test_normal_reservation_schema_still_passes(self):
+        """The actions rejection must not affect entities that never declared actions."""
+        schema = _make_schema({"purchase_order": _po_def_with_reservation()})
+        validate_schema(schema)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# G11 (cmd_281 B-5 Phase2b): strategy: ledger_transaction — reserve/ship/cancel
+# quantity invariant (O-4: reserved_quantity = SUM(reserved_delta), quantity =
+# SUM(quantity_delta); reserve/cancel never touch quantity, ship touches both).
+#
+# The reserve path is generated by _build_reservation_allocation_code (via the
+# ledger_transaction branch); ship/cancel are NOT code-generated — they're
+# hand-implemented once-stub files (lib/purchase_per_item/service_after_approve.ts
+# and service_after_reject.ts, mirroring the corrected_reserve_flow design in
+# the strategy design (cmd_281 B-5 Phase2b)). So the ship/cancel tests here read
+# those real files directly, the same way the generator tests assert on
+# generated code strings.
+# ---------------------------------------------------------------------------
+
+def _po_def_ledger_transaction() -> dict:
+    base = _po_def_no_reservation()
+    base["x-reservation"] = {
+        "mode": "count",
+        "transaction": {"strategy": "ledger_transaction", "ledgerDomain": "inventory_domain"},
+        "lines": "lines",
+        "pool": {
+            "quantityField": "quantity",
+            "reservedField": "reserved_quantity",
+        },
+        "request": {
+            "quantityField": "quantity",
+            "criteria": {"product_id": "product_id"},
+        },
+        "policy": {
+            "orderBy": [
+                {"expiration_date": "asc_nulls_last"},
+                {"lot_number": "asc"},
+                {"id": "asc"},
+            ]
+        },
+        "result": {
+            "parentField": "order_id",
+            "lineTransactionableField": "inventory_transactionable_id",
+            "quantityField": "quantity",
+        },
+    }
+    return base
+
+
+def _make_ledger_schema() -> dict:
+    schema = _make_schema({"purchase_order": _po_def_ledger_transaction()})
+    # Ledger strategy's lineTransactionableField has no x-relationship (build_context.py
+    # excludes it from the nested-create body by name, not by relationship type).
+    schema["definitions"]["order_line"]["properties"]["inventory_transactionable_id"] = {
+        "type": ["string", "null"],
+        "pattern": "^c[a-z0-9]{24,}$",
+    }
+    # OD-1: top-level domain declaration resolved via transaction.ledgerDomain
+    schema["x-ledger-entities"] = {
+        "inventory_domain": {
+            "pool": "inventory",
+            "ledger": "inventory_transaction",
+            "transactionable": "inventory_transactionable",
+        }
+    }
+    return schema
+
+
+def _ledger_reservation_config() -> dict:
+    schema = _make_ledger_schema()
+    entity = _entity_spec("purchase_order", schema, children=[_line_child()])
+    ctx = build_context(entity, schema)
+    return ctx["reservation_config"]
+
+
+def _ledger_allocation_code() -> str:
+    rc = _ledger_reservation_config()
+    schema = _make_ledger_schema()
+    return _build_reservation_allocation_code(rc, "purchase_order", schema)
+
+
+class TestLedgerTransactionReservePath:
+    """Reserve path (generated): must claim via ledger rows, never touch physical quantity."""
+
+    def test_strategy_parsed_as_ledger_transaction(self):
+        rc = _ledger_reservation_config()
+        assert rc["transaction_strategy"] == "ledger_transaction"
+
+    def test_no_allocation_entity_configured(self):
+        rc = _ledger_reservation_config()
+        assert not rc["result"].get("allocationEntity"), (
+            "ledger_transaction strategy has no allocation table — result must not "
+            "carry an allocationEntity."
+        )
+
+    def test_reserve_creates_ledger_row_not_allocation_row(self):
+        code = _ledger_allocation_code()
+        assert "inventory_transaction.create" in code
+        assert "inventory_allocation" not in code
+
+    def test_reserve_event_type(self):
+        code = _ledger_allocation_code()
+        assert "event_type: 'reserve'" in code
+
+    def test_reserve_o4_quantity_delta_is_zero(self):
+        """O-4: reserve must never move physical quantity."""
+        code = _ledger_allocation_code()
+        assert "quantity_delta: 0" in code
+
+    def test_reserve_o4_reserved_delta_is_claim(self):
+        """O-4: reserve only moves the reserved-slot delta, by the claimed amount."""
+        code = _ledger_allocation_code()
+        assert "reserved_delta: _claim" in code
+
+    def test_reserve_pool_update_only_touches_reserved_field(self):
+        """The pool (inventory) cache update during reserve increments reserved_quantity
+        only — it must never touch the bare quantity field (that's ship's job, O-4).
+        Checks for "{ quantity: " (brace + space) rather than a bare substring, since
+        "quantity: { increment" is also a substring of "reserved_quantity: { increment"."""
+        code = _ledger_allocation_code()
+        assert "reserved_quantity: { increment: _claim }" in code
+        assert "{ quantity: { decrement" not in code
+        assert "{ quantity: { increment" not in code
+
+    def test_reserve_creates_bridge(self):
+        """O-2: a fresh inventory_transactionable bridge anchors the line's ledger rows."""
+        code = _ledger_allocation_code()
+        assert "inventory_transactionable.create" in code
+
+    def test_reserve_uses_denormalized_inventory_identity(self):
+        """O-6: inventory_transaction has no inventory_id FK — identity is denormalized."""
+        code = _ledger_allocation_code()
+        for field in ("product_id", "location", "lot_number", "expiration_date"):
+            assert field in code
+
+
+class TestLedgerTransactionMutationGuards:
+    """Mutation guards for ledger_transaction: allocated = lineTransactionableField set."""
+
+    def _guards(self):
+        schema = _make_ledger_schema()
+        entity = _entity_spec("purchase_order", schema, children=[_line_child()])
+        ctx = build_context(entity, schema)
+        return service_context(ctx, schema)
+
+    def test_update_guard_checks_transactionable_field_not_null(self):
+        guard = self._guards()["reservation_mutation_guard_update"]
+        assert "inventory_transactionable_id" in guard
+        assert "{ not: null }" in guard
+        assert "inventory_allocation" not in guard
+
+    def test_delete_guard_checks_transactionable_field_not_null(self):
+        guard = self._guards()["reservation_mutation_guard_delete"]
+        assert "inventory_transactionable_id" in guard
+        assert "{ not: null }" in guard
+        assert "inventory_allocation" not in guard
+
+
+class TestLedgerTransactionShipAndCancelFiles:
+    """Ship (afterApprove) and cancel (afterReject) are hand-implemented once-stubs,
+    not code-generated (generate.py only emits a comment/TODO skeleton for them —
+    see test_ship_skeleton_stub.py). Read a tracked fixture snapshot of the real
+    hand-authored implementation directly to verify the O-4 invariant holds (ship
+    is the only path touching physical quantity; cancel never does), instead of
+    reading the gitignored generated-app working-tree file — that path only
+    exists after a prj/ copy + generate-code run with non-default
+    inventory/reservation entities, which is not the case in a pristine
+    app-generator checkout. See fixtures/purchase_per_item_ledger_ship_cancel/README.md."""
+
+    @staticmethod
+    def _read(filename: str) -> str:
+        from pathlib import Path
+        fixtures = Path(__file__).parent / "fixtures" / "purchase_per_item_ledger_ship_cancel"
+        return (fixtures / filename).read_text()
+
+    def _ship_code(self) -> str:
+        return self._read("service_after_approve.ts")
+
+    def _cancel_code(self) -> str:
+        return self._read("service_after_reject.ts")
+
+    def test_ship_event_type(self):
+        assert "event_type: 'ship'" in self._ship_code()
+
+    def test_ship_o4_decrements_both_quantity_and_reserved(self):
+        """O-4: ship is the ONLY path that decrements physical quantity, and it
+        always moves reserved_quantity down by the same amount."""
+        code = self._ship_code()
+        assert "quantity: { decrement: reserve.net }" in code
+        assert "reserved_quantity: { decrement: reserve.net }" in code
+        assert "quantity_delta: -reserve.net" in code
+        assert "reserved_delta: -reserve.net" in code
+
+    def test_cancel_event_type(self):
+        assert "event_type: 'cancel'" in self._cancel_code()
+
+    def test_cancel_o4_never_touches_physical_quantity(self):
+        """O-4: cancel only releases the reserved slot; physical quantity is untouched.
+        Checks for "{ quantity: " (brace + space) rather than a bare substring, since
+        "quantity: { decrement" is also a substring of "reserved_quantity: { decrement"."""
+        code = self._cancel_code()
+        assert "quantity_delta: 0" in code
+        assert "reserved_quantity: { decrement: reserve.net }" in code
+        assert "{ quantity: { decrement" not in code, (
+            "cancel must never decrement physical quantity — only ship does (O-4)."
+        )
+
+    def test_cancel_and_ship_are_symmetric_netting(self):
+        """Both derive the outstanding amount by netting reserved_delta across the
+        bridge's full transaction history (O-8 multi-lot support)."""
+        for code in (self._ship_code(), self._cancel_code()):
+            assert "existing.net += t.reserved_delta" in code or "existing.net += t.reserved_delta;" in code
+
+
+class TestO4QuantityInvariantArithmetic:
+    """Executable version of the O-4 proof in the strategy design (cmd_281 B-5 Phase2b):
+    available = quantity - reserved_quantity must hold across reserve -> ship and
+    reserve -> cancel, for every event's (quantity_delta, reserved_delta) pair."""
+
+    def test_reserve_then_ship_full_cycle(self):
+        quantity, reserved = 100, 0
+        available = quantity - reserved
+        assert available == 100
+
+        # reserve 30: quantity_delta=0, reserved_delta=+30
+        quantity += 0
+        reserved += 30
+        assert quantity - reserved == 70  # available drops by the reserved amount
+
+        # ship the same 30: quantity_delta=-30, reserved_delta=-30
+        quantity += -30
+        reserved += -30
+        assert quantity - reserved == 70  # unchanged: physically left, reservation released together
+        assert (quantity, reserved) == (70, 0)
+
+    def test_reserve_then_cancel_full_cycle(self):
+        quantity, reserved = 100, 0
+
+        # reserve 40: quantity_delta=0, reserved_delta=+40
+        quantity += 0
+        reserved += 40
+        assert quantity - reserved == 60
+
+        # cancel the same 40: quantity_delta=0, reserved_delta=-40
+        quantity += 0
+        reserved += -40
+        assert quantity - reserved == 100  # back to original: nothing physically moved
+        assert (quantity, reserved) == (100, 0)
+
+    def test_partial_ship_then_cancel_remainder(self):
+        """O-8-relevant case: a line reserves 50, ships 20, then cancels the
+        remaining 30 (e.g. terminal reject after partial fulfillment)."""
+        quantity, reserved = 100, 0
+
+        quantity += 0
+        reserved += 50  # reserve 50
+        assert quantity - reserved == 50
+
+        quantity += -20
+        reserved += -20  # ship 20
+        assert quantity - reserved == 50
+        assert (quantity, reserved) == (80, 30)
+
+        quantity += 0
+        reserved += -30  # cancel remaining 30 (never shipped -> returns to available pool)
+        assert quantity - reserved == 80, (
+            "cancelling the un-shipped remainder frees it back to available: "
+            "80 physically on hand, 0 now reserved."
+        )
+        assert (quantity, reserved) == (80, 0)

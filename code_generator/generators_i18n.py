@@ -5,7 +5,7 @@ Called once after all entities are generated. Only adds missing keys — never
 removes or overwrites existing values so manual translations are preserved.
 
 Updates:
-  messages/en.json         Nav, EntityLabel, Fields sections
+  messages/en.json         Nav, EntityLabel, Fields, <nativeEnum namespace> sections
   messages/ja.json         same (placeholder values for manual translation)
   lib/site-config.ts       navLinks array
   app/[locale]/@sidebar/page.tsx  navTranslationKeys object
@@ -16,6 +16,60 @@ from pathlib import Path
 
 from helpers.naming import to_camel_case, to_title_case
 from helpers.schema_helpers import filter_fields
+
+
+def _raw_def(entity_name: str, schema: dict) -> dict:
+    """Resolve a bare/view model name to its raw entity dict (mirrors
+    generators.py's `_raw_def` — duplicated locally to avoid a cross-module
+    import for one helper)."""
+    defs = schema.get('definitions', {})
+    return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
+
+
+def _native_enum_key(v) -> str:
+    """camelCase message key for a nativeEnum value (Prisma enum members are
+    PascalCase, e.g. 'TerminalRejected' -> 'terminalRejected')."""
+    s = str(v)
+    return s[0].lower() + s[1:] if s else s
+
+
+def _humanize_enum_value(v) -> str:
+    """'TerminalRejected' -> 'Terminal Rejected', 'partially_received' ->
+    'Partially Received' (split on PascalCase boundaries and underscores,
+    Title Case each word). Placeholder text only — same convention as
+    _collect_field_keys, whose English label is written into every language
+    file pending translation."""
+    s = str(v)
+    s = re.sub(r'(?<=[a-z0-9])(?=[A-Z])', ' ', s).replace('_', ' ')
+    words = s.split()
+    return ' '.join(w[0].upper() + w[1:].lower() for w in words) if words else str(v)
+
+
+def _collect_native_enum_namespaces(schema: dict) -> dict[str, dict[str, str]]:
+    """Return {namespace: {camelKey: 'Humanized Label'}} for every nativeEnum
+    field (`_prisma_native_enum_type`) across all entities — regardless of
+    whether the entity has generated list/view/upsert pages, since a
+    hand-written component (or a future x-generate flip) may still need the
+    translation. Namespace defaults to the Prisma enum block name;
+    `x-enum-namespace` overrides it when set (mirrors generators.py)."""
+    result: dict[str, dict[str, str]] = {}
+    seen_bases = set()
+    for def_key in schema.get('definitions', {}):
+        base = def_key[2:] if def_key.startswith('__') else def_key
+        if base in seen_bases:
+            continue
+        seen_bases.add(base)
+        props = _raw_def(base, schema).get('properties', {})
+        for prop in props.values():
+            native_type = prop.get('_prisma_native_enum_type')
+            enum_vals = prop.get('enum')
+            if not native_type or not isinstance(enum_vals, list):
+                continue
+            ns = prop.get('x-enum-namespace') or native_type
+            ns_entries = result.setdefault(ns, {})
+            for v in enum_vals:
+                ns_entries.setdefault(_native_enum_key(v), _humanize_enum_value(v))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +92,39 @@ _CUSTOM_COMPONENT_FIELD_KEYS: dict[str, dict[str, str]] = {
     },
 }
 
+# i18n keys owned by a dedicated namespace section (not Fields) that a named
+# custom component contributes. {component_name: {namespace: {key: label}}}.
+# Unlike _CUSTOM_COMPONENT_FIELD_KEYS (merged into Fields), these keep their
+# own top-level section so the component's translations stay grouped together.
+_CUSTOM_COMPONENT_SECTIONS: dict[str, dict[str, dict[str, str]]] = {
+    'CopyShiftsButton': {
+        'ShiftTemplate': {
+            'copyToShifts': 'Copy to Shifts',
+            'copyToShiftsExplanation': 'Copy Shift Templates to Shifts',
+        },
+    },
+}
+
+
+def _collect_custom_component_sections(entities: list, schema: dict) -> dict[str, dict[str, str]]:
+    """Return {namespace: {key: label}} contributed via _CUSTOM_COMPONENT_SECTIONS
+    by every entity's x-custom-components list."""
+    result: dict[str, dict[str, str]] = {}
+    for entity in entities:
+        def_key = entity.get('definition_key', '')
+        custom_comps = schema['definitions'].get(def_key, {}).get('x-custom-components') or []
+        if not isinstance(custom_comps, list):
+            continue
+        for custom_comp in custom_comps:
+            if not isinstance(custom_comp, dict):
+                continue
+            comp_name = custom_comp.get('name', '')
+            for ns, ns_keys in _CUSTOM_COMPONENT_SECTIONS.get(comp_name, {}).items():
+                ns_entries = result.setdefault(ns, {})
+                for key, label in ns_keys.items():
+                    ns_entries.setdefault(key, label)
+    return result
+
 
 def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
     """Return {camelCaseKey: 'Title Case Label'} for every field across all entities."""
@@ -48,7 +135,8 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
         gen_cfg = entity['generate_config']
 
         model_def = schema['definitions'].get(model, {})
-        props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
+        raw_model_def = _raw_def(model, schema)
+        props = filter_fields(raw_model_def.get('properties', {}), gen_cfg.get('fields'))
 
         # Bridge-child entities (x-bridge) render read-only parent type/label fields
         # via tf('parentType') / tf('parentLabel'). These are synthetic display fields,
@@ -106,7 +194,7 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
             # Column headers for non-comment child tables
             if child.get('output_type') == 'comments':
                 continue
-            child_def = schema['definitions'].get(child['name'], {})
+            child_def = _raw_def(child['name'], schema)
             for cp_name, cp_prop in child_def.get('properties', {}).items():
                 if cp_name in _child_sys:
                     continue
@@ -121,6 +209,40 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
                     keys.setdefault(to_camel_case(cp_name), to_title_case(cp_name))
 
     return keys
+
+
+# ---------------------------------------------------------------------------
+# Enum label map merge (file-wins overlay)
+# ---------------------------------------------------------------------------
+
+def _merge_file_wins_messages(
+    schema_fields: dict[str, str],
+    schema_ns: dict[str, dict[str, str]],
+    file_msgs: dict | None,
+) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """Merge schema-computed enum label defaults with an existing messages/en.json,
+    file values winning — same merge semantics as `_update_json` (existing keys
+    preserved, missing keys filled with schema defaults).
+
+    This is what makes generate() idempotent while still honoring consumer
+    translations: run 1 (no file) produces the schema defaults; _update_json
+    writes those defaults into messages/en.json; run 2 (file present) overlays
+    those same values back on top of themselves, so the merged result is
+    identical to run 1. A consumer's custom translation overlays the schema
+    default instead, so specs and the app render the same (custom) value.
+    """
+    if not file_msgs:
+        return dict(schema_fields), {k: dict(v) for k, v in schema_ns.items()}
+
+    merged_fields = {**schema_fields, **file_msgs.get('Fields', {})}
+    merged_ns: dict[str, dict[str, str]] = {}
+    for ns_key, ns_defaults in schema_ns.items():
+        merged_ns[ns_key] = {**ns_defaults, **file_msgs.get(ns_key, {})}
+    # Preserve any namespace sections in the file not covered by schema (e.g. prj/ custom)
+    for ns_key, ns_vals in file_msgs.items():
+        if ns_key not in merged_ns and isinstance(ns_vals, dict):
+            merged_ns[ns_key] = ns_vals
+    return merged_fields, merged_ns
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +375,19 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     # Field keys across all entities
     field_keys = _collect_field_keys(entities, schema)
 
+    # nativeEnum option keys (one section per Prisma enum / x-enum-namespace)
+    native_enum_ns = _collect_native_enum_namespaces(schema)
+
+    # Component-owned namespace sections (e.g. ShiftTemplate.* for CopyShiftsButton)
+    custom_component_ns = _collect_custom_component_sections(entities, schema)
+
+    # Merge namespace-keyed sections rather than spreading (a spread would let a
+    # colliding namespace clobber the other's entries entirely instead of merging).
+    namespace_sections: dict[str, dict[str, str]] = {}
+    for ns_map in (native_enum_ns, custom_component_ns):
+        for ns, ns_entries in ns_map.items():
+            namespace_sections.setdefault(ns, {}).update(ns_entries)
+
     # --- messages/*.json ---
     messages_dir = output_dir / 'messages'
     for lang_file in sorted(messages_dir.glob('*.json')):
@@ -260,6 +395,7 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
             'EntityLabel': entity_label_entries,
             'Nav': nav_entries,
             'Fields': field_keys,
+            **namespace_sections,
         }
         changed = _update_json(lang_file, additions)
         status = 'Updated' if changed else 'No changes'

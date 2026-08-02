@@ -88,6 +88,15 @@ Minimum docs to read before starting:
 - **Raw `<img>` in display/upload components** — not a direct XSS vector (React escapes `src`), but bypasses `next/image`'s domain restriction and optimization pipeline.
 - **Tenant suspension enforcement** — `tenant.status` column exists but verify the `signIn()` callback actually queries and checks `tenant.status` for credentials users (not just OAuth).
 
+## Completion gate
+
+Run:
+
+1. `npm audit --omit=dev --audit-level=high`
+
+(No build/test/lint required — this is a read-only review task with no code
+changes; npm audit is run as a companion vulnerability check.)
+
 > **Note**: When running lint or typecheck in isolation, prefix with
 > `npm run generate-code` first. See `AGENTS.md §Generated-code prerequisites
 > for gates` for the full rule.

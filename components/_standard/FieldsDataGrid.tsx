@@ -27,7 +27,6 @@ import Button from '@mui/material/Button';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import SaveIcon from '@mui/icons-material/Save';
 import DateTimeWrapper from './DateTimeWrapper';
 import dayjs from 'dayjs';
 
@@ -148,22 +147,10 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
       getFields: () => fields,
     }), [fields]);
 
-    function processRowUpdate(newRow: GridValidRowModel, oldRow: GridValidRowModel) {
+    function processRowUpdate(newRow: GridValidRowModel, _oldRow: GridValidRowModel) {
       const updatedFields = fields.map(row => row.id === newRow.id ? newRow : row);
       setFields(updatedFields);
       return newRow;
-    }
-
-    function moveRowUp(index: number) {
-      const newFields = [...fields];
-      [newFields[index - 1], newFields[index]] = [newFields[index], newFields[index - 1]];
-      setFields(newFields);
-    }
-
-    function moveRowDown(index: number) {
-      const newFields = [...fields];
-      [newFields[index], newFields[index + 1]] = [newFields[index + 1], newFields[index]];
-      setFields(newFields);
     }
 
     const addField = () => {

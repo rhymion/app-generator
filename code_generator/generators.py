@@ -11,12 +11,25 @@ from helpers.naming import (
     safe_var_name, singularize,
 )
 from helpers.type_mapping import get_ts_type
-from helpers.bridge_direction import collect_parent_bridge_children
 from helpers.schema_helpers import (
     get_parent_relationships,
     get_parent_fk_props,
     find_fk_derivation_path,
+    get_detail_properties,
+    get_approval_lines_props,
+    resolve_ledger_domain,
+    get_entity_properties,
 )
+
+
+def _raw_def(entity_name: str, schema: dict) -> dict:
+    """Resolve a bare/view model name to its raw entity dict — scalar/FK
+    properties, x-readonly-fields, x-gdpr-mode, x-display etc. all live on
+    the raw ('__'-prefixed) entity, not the view. Falls back to the bare
+    view for entities with no raw counterpart (e.g. 'setting', which
+    proxies the 'user' view instead of having its own raw twin)."""
+    defs = schema.get('definitions', {})
+    return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
 from helpers.label_field import (
     build_label_expression,
     first_label_format,
@@ -39,8 +52,59 @@ def _is_nullable(defn: dict) -> bool:
     return isinstance(t, list) and 'null' in t
 
 
+def _enum_value_literal(defn: dict, label) -> str:
+    """Return the TS literal for an enum `label` of property `defn`.
+
+    Integer/number enums persist the ordinal index, so a string label like
+    'reserved' is emitted as its position in the enum list (e.g. 0). Numeric
+    labels pass through unchanged. String enums (or non-enum fields) keep the
+    quoted string. This mirrors the value Prisma stores so generated code
+    typechecks against the client.
+    """
+    if isinstance(label, bool):
+        return 'true' if label else 'false'
+    actual = _get_actual_type(defn or {})
+    enum_vals = (defn or {}).get('enum')
+    if actual in ('integer', 'number') and isinstance(enum_vals, list):
+        if isinstance(label, (int, float)):
+            return str(int(label))
+        s = str(label)
+        if s.lstrip('-').isdigit():
+            return s
+        if s in enum_vals:
+            return str(enum_vals.index(s))
+        return '0'  # unknown label for an int enum — keep numeric so it compiles
+    if isinstance(label, (int, float)):
+        return str(int(label))
+    return f"'{label}'"
+
+
+def _status_prop_defn(schema: dict | None, entity: str, field: str) -> dict:
+    """Look up the property definition for <entity>.<field> (empty dict if absent)."""
+    if not schema:
+        return {}
+    return (_raw_def(entity, schema).get('properties', {}) or {}).get(field) or {}
+
+
 def _has_string_labels(enum_values) -> bool:
     return any(isinstance(v, str) and not str(v).lstrip('-').isdigit() for v in (enum_values or []))
+
+
+def _native_enum_ns(prop: dict) -> str | None:
+    """i18n namespace for a nativeEnum (`_prisma_native_enum_type`) field:
+    x-enum-namespace if set, else the Prisma enum block name itself."""
+    native_type = prop.get('_prisma_native_enum_type')
+    if not native_type:
+        return None
+    return prop.get('x-enum-namespace') or native_type
+
+
+def _native_enum_key(v) -> str:
+    """camelCase message key for a nativeEnum value. Prisma enum members are
+    PascalCase (e.g. 'TerminalRejected'), so this lowercases only the first
+    character, mirroring the existing x-enum-namespace int-enum convention."""
+    s = str(v)
+    return s[0].lower() + s[1:] if s else s
 
 
 def _int_enum_option(v, i: int) -> str:
@@ -64,7 +128,8 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
     `x-display.dashboard: true`. A field is groupable when it is one of:
       - a many-to-one FK (each FK value becomes a series, labelled via
         the relationship's labelField on the target);
-      - an integer with an `enum` (each enum label is a category);
+      - an integer or string with an `enum` (each enum label is a category —
+        covers both legacy int-enum and Prisma nativeEnum string fields);
       - a boolean (Yes / No);
       - an integer or number without enum (numeric filter range);
       - a string with format 'date' or 'date-time' (datetime range filter).
@@ -75,8 +140,9 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
     from helpers.naming import to_title_case
     catalog = []
     for entity_name, defn in schema['definitions'].items():
-        if entity_name.endswith('_detail') or entity_name.endswith('_input'):
+        if not entity_name.startswith('__') or entity_name.endswith('_input'):
             continue
+        entity_name = entity_name[2:]
         xdisplay = defn.get('x-display') or {}
         if not (isinstance(xdisplay, dict) and xdisplay.get('dashboard')):
             continue
@@ -106,7 +172,7 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
                     'label': to_title_case(prop_name),
                     'kind': 'boolean',
                 })
-            elif actual == 'integer' and isinstance(prop.get('enum'), list):
+            elif actual in ('integer', 'string') and isinstance(prop.get('enum'), list):
                 groupable.append({
                     'name': prop_name,
                     'label': to_title_case(prop_name),
@@ -153,19 +219,23 @@ def build_attachable_owners(schema: dict) -> list[dict]:
     call.
 
     Returns owner descriptors keyed on the Prisma model name (the back
-    reference on `attachable`, e.g. `attachable.resource`). Entries are
-    sorted by name for deterministic generator output.
+    reference on `attachable`, e.g. `attachable.resource`), plus
+    `has_assignee` (whether the owner declares an `assignee_id` property) so
+    the template can select it for item-level permission resolution. Entries
+    are sorted by name for deterministic generator output.
     """
     owners = []
     seen = set()
     for entity_name, defn in (schema.get('definitions') or {}).items():
-        # Detail / input variants aren't owners — only the base entity holds
-        # the FK field. Walking the bases is enough.
-        if entity_name.endswith('_detail') or entity_name.endswith('_input'):
+        # View / input variants aren't owners — only the raw entity holds
+        # the FK field. Walking the raw entities is enough.
+        if not entity_name.startswith('__') or entity_name.endswith('_input'):
             continue
+        entity_name = entity_name[2:]
         if entity_name in seen:
             continue
-        for prop_name, prop in (defn.get('properties') or {}).items():
+        properties = defn.get('properties') or {}
+        for prop_name, prop in properties.items():
             if prop_name != 'attachable_id':
                 continue
             rel = prop.get('x-relationship') or {}
@@ -173,11 +243,39 @@ def build_attachable_owners(schema: dict) -> list[dict]:
                 continue
             if rel.get('target') != 'attachable':
                 continue
-            owners.append({'name': entity_name})
+            owners.append({'name': entity_name, 'has_assignee': 'assignee_id' in properties})
             seen.add(entity_name)
             break
     owners.sort(key=lambda o: o['name'])
     return owners
+
+
+def attachment_type_ts(schema: dict) -> str:
+    """TS type for the `type` param of lib/attachment/actions.ts's
+    setAttachmentsForBridge(). Mirrors attachment.type's actual field type
+    (plain `number` by default, or the nativeEnum literal union once
+    attachment.type has been migrated to a Prisma enum) so the hand-off
+    from the generic bridge action to `prisma.attachment.create/findMany`
+    type-checks without a cast.
+    """
+    prop = ((schema.get('definitions') or {}).get('attachment') or {}).get('properties', {}).get('type')
+    if not prop:
+        return 'number'
+    return get_ts_type(prop)
+
+
+def reaction_type_ts(schema: dict) -> str:
+    """TS type for the `type` param threaded through the comment-reactions
+    feature (toggle server action, toggle API route, CommentReactionSummary /
+    reactionCounts / myReactionTypes). Mirrors reaction.type's actual field
+    type (plain `number` by default, or the nativeEnum literal union once
+    reaction.type has been migrated to a Prisma enum) so hand-offs to
+    prisma.reaction.create/findUnique/groupBy type-check without a cast.
+    """
+    prop = ((schema.get('definitions') or {}).get('reaction') or {}).get('properties', {}).get('type')
+    if not prop:
+        return 'number'
+    return get_ts_type(prop)
 
 
 def chart_context(ctx: dict, schema: dict) -> dict:
@@ -299,7 +397,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
     model_props = model_def.get('properties', {})
     formatting_entries = []
     formatting_keys: set[str] = set()
-    enum_ns_list = []       # [{var_name, ns, entries}]
+    enum_ns_list = []       # [{var_name, ns, keys}]
     display_fields_code = ''
     primary_field = ''
 
@@ -354,8 +452,15 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                 actual   = _get_actual_type(prop)
                 enum_vals = prop.get('enum')
                 enum_ns  = prop.get('x-enum-namespace')
+                native_ns = _native_enum_ns(prop)
 
-                if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+                if native_ns and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+                    var_name = f'{to_camel_case(field_name)}Labels'
+                    entries = [(v, _native_enum_key(v)) for v in enum_vals]
+                    if not any(e['var_name'] == var_name for e in enum_ns_list):
+                        enum_ns_list.append({'var_name': var_name, 'ns': native_ns, 'entries': entries, 'is_native_enum': True})
+                    add_formatting(field_name, f"{var_name}[item.{field_name} as string] ?? item.{field_name}")
+                elif actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
                     var_name = f'{to_camel_case(field_name)}Labels'
                     ns_to_use = enum_ns or 'Fields'
                     entries = [
@@ -364,8 +469,9 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                         else (i, v.lower()[0] + v[1:] if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))
                         for i, v in enumerate(enum_vals)
                     ]
+                    # avoid duplicates
                     if not any(e['var_name'] == var_name for e in enum_ns_list):
-                        enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries})
+                        enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries, 'is_native_enum': False})
                     add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
 
             if config.get('primary'):
@@ -376,17 +482,9 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                 rel_info = rel_label_map[field_name]
                 add_formatting(field_name, _label_expr_for_rel(field_name, rel_info))
 
-            _PRISMA_DATETIME = frozenset({'created_at', 'updated_at'})
             fmt = model_props[field_name].get('format') if field_name in model_props else None
-            if fmt is None and field_name in _PRISMA_DATETIME:
-                fmt = 'date-time'
             format_attr = f", format: '{fmt}'" if fmt in ('date-time', 'date', 'time') else ''
-            uri_kind_attr = ''
-            if fmt == 'uri' and field_name in model_props:
-                from build_context import get_uri_kind
-                if get_uri_kind(model_props[field_name]) == 'link':
-                    uri_kind_attr = ", uriKind: 'link'"
-            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr}{uri_kind_attr} }}")
+            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr} }}")
 
         display_fields_code = ',\n'.join(fields_code_parts)
 
@@ -398,7 +496,14 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
             actual = _get_actual_type(prop)
             enum_vals = prop.get('enum')
             enum_ns = prop.get('x-enum-namespace')
-            if actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+            native_ns = _native_enum_ns(prop)
+            if native_ns and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
+                var_name = f'{to_camel_case(field_name)}Labels'
+                entries = [(v, _native_enum_key(v)) for v in enum_vals]
+                if not any(e['var_name'] == var_name for e in enum_ns_list):
+                    enum_ns_list.append({'var_name': var_name, 'ns': native_ns, 'entries': entries, 'is_native_enum': True})
+                add_formatting(field_name, f"{var_name}[item.{field_name} as string] ?? item.{field_name}")
+            elif actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
                 var_name = f'{to_camel_case(field_name)}Labels'
                 ns_to_use = enum_ns or 'Fields'
                 entries = [
@@ -408,7 +513,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                     for i, v in enumerate(enum_vals)
                 ]
                 if not any(e['var_name'] == var_name for e in enum_ns_list):
-                    enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries})
+                    enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries, 'is_native_enum': False})
                 add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
 
     needs_formatting = bool(formatting_entries)
@@ -418,18 +523,6 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
     force_cards   = gen_cfg.get('listDisplay') == 'cards'
     list_component = 'CardListClient' if force_cards else 'ResponsiveListClient'
 
-    # Bridge child (Stage 3): append parent_label column to explicit display_fields_code.
-    # Only for entities with xdisplay_table (ensures tf() is available via needs_tf=True).
-    _bridge_child_ir_pl = ctx.get('bridge_child_ir')
-    _bridge_parent_opts_pl = ctx.get('bridge_parent_options', [])
-    needs_tf = bool(xdisplay_table)
-    if _bridge_child_ir_pl and _bridge_parent_opts_pl and xdisplay_table:
-        _bp_cols = ",\n".join([
-            "          { field: 'parent_type', headerName: tf('parentType'), width: 120 }",
-            "          { field: 'parent_label', headerName: tf('parentLabel'), width: 200 }",
-        ])
-        display_fields_code = (display_fields_code + ',\n' + _bp_cols) if display_fields_code else _bp_cols
-
     return {
         'list_component':     list_component,
         'display_fields_code': display_fields_code,
@@ -438,12 +531,9 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
         'formatting_entries': '\n'.join(formatting_entries),
         'enum_ns_list':       enum_ns_list,
         'src_var':            src_var,
-        'needs_tf':           needs_tf,
+        'needs_tf':           bool(xdisplay_table),
         'needs_tc':           has_chart,
         'list_uses_format_label_value': list_uses_format_label_value,
-        # Bridge children cannot be created standalone (only via a parent context),
-        # so the list view's "+" create button is suppressed for them.
-        'is_bridge_child':    bool(_bridge_child_ir_pl),
     }
 
 
@@ -456,14 +546,9 @@ def actions_context(ctx: dict) -> dict:
     model         = ctx['model']
     parent_pascal = ctx['parent_pascal']
     can_create    = ctx['can_create']
-    # Bridge children disable standalone create (new:false) but ARE creatable from a
-    # parent (cmd_167 §4) — the embedded grid posts selectedParentType/Id. Enable the
-    # create action/service path for them so the parent-context create works.
-    can_create    = can_create or bool(ctx.get('bridge_child_ir'))
     can_update    = ctx['can_update']
     can_delete    = ctx['can_delete']
     parent_params = ctx['parent_params']
-    parent_params_no_bridge = ctx.get('parent_params_no_bridge', parent_params)
     non_comment_ch = ctx['non_comment_ch']
     child_args    = ctx['child_args_for_call']
     form_data_gets = ctx['form_data_gets']
@@ -472,11 +557,10 @@ def actions_context(ctx: dict) -> dict:
     has_children  = bool(non_comment_ch)
     reservation_config = ctx.get('reservation_config')
     has_reservation = bool(reservation_config and reservation_config.get('mode') == 'count')
+    should_filter_by_org = bool(ctx.get('should_filter_by_org'))
 
     sep = ', ' if (parent_params and child_args) else ''
     full_child_args = f'{sep}{child_args}' if child_args else ''
-    sep_no_bridge = ', ' if (parent_params_no_bridge and child_args) else ''
-    full_child_args_no_bridge = f'{sep_no_bridge}{child_args}' if child_args else ''
 
     # Flatten rel extraction code and update args
     flatten_rels_raw = ctx.get('flatten_rels', [])
@@ -554,12 +638,84 @@ def actions_context(ctx: dict) -> dict:
     flatten_extractions_code = '\n'.join(flatten_extractions_lines)
     flatten_args_str = (', ' + ', '.join(flatten_update_var_names)) if flatten_update_var_names else ''
 
+    def _actor_and_existing_block(indent: str) -> str:
+        # GAP-2 fix (cmd_452): org-scoped entities must retrieve actorId before the
+        # existence check (needed by getAssociatedOrganizations) and re-fetch the
+        # target row through an org-filtered findFirst, not a global findUnique —
+        # otherwise requirePermission() can only see creator_id/assignee_id and a
+        # user with general.update can edit any org's record by id. Applied to
+        # every findUnique-before-update site in this function (not only the
+        # audited line) since they share the identical gap. should_filter_by_org
+        # is False for the overwhelming majority of entities, so this branch is
+        # opt-in and leaves every non-org-scoped entity's generated actions.ts
+        # byte-identical to the pre-fix output (see the `else` arm below and its
+        # callers) — confirmed via cmd_452's golden-diff forward check.
+        #
+        # The explicit `if (!existing) throw` below is NOT optional: requirePermission()
+        # falls back to the top-level (general | creator | assignee) union whenever its
+        # item argument is falsy (lib/authz.ts requirePermission — `item && resolvedUserId
+        # ? resolvePermissions(...) : permissions`), so a general.update=true caller would
+        # still pass the check on a null `existing`, and the subsequent update<Parent>()
+        # call would then write to `id` unconditionally — the org-scoped findFirst above
+        # would filter the *read* but have zero effect on the *write*. Denying immediately
+        # on a null `existing` is what actually stops the cross-org mutation.
+        # actorId must already be declared in the enclosing function scope (before
+        # the if/else this is nested in) — every should_filter_by_org call site
+        # below declares it up front, precisely so it's still in scope for the
+        # update/create calls later in the function body.
+        return (
+            f"{indent}const _orgs = await getAssociatedOrganizations(actorId);\n"
+            f"{indent}const _orgIds = _orgs.map((o) => o.id);\n"
+            f"{indent}const existing = await prisma.{model}.findFirst({{ where: {{ id, organization_id: {{ in: _orgIds }} }}, select: {item_context_select} }});\n"
+            f"{indent}if (!existing) throw new Error('Not found');\n"
+        )
+
     def _upsert_body(has_ch: bool) -> str:
         _flatten_block = (f"{flatten_extractions_code}\n" if flatten_extractions_code else "")
         if can_create and can_update:
             create_call = f'await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});'
-            update_call = f'await update{parent_pascal}(actorId, id, {parent_params_no_bridge}{full_child_args_no_bridge}{flatten_args_str}, srcSnapshotRaw);'
+            update_call = f'await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
             if has_reservation:
+                if should_filter_by_org:
+                    return (
+                        f"  const id = data.get('id') as string | null;\n"
+                        f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                        f"  const actorId = await getSessionUserIdOrThrow();\n"
+                        f"  if (id) {{\n"
+                        + _actor_and_existing_block("    ") +
+                        f"    await requirePermission('{parent}', 'update', existing);\n"
+                        f"  }} else {{\n"
+                        f"    await requirePermission('{parent}', 'create');\n"
+                        f"  }}\n"
+                        f"{form_data_gets}\n"
+                        + (f"{child_form_data_extractions}\n" if has_ch else "")
+                        + _flatten_block +
+                        f"\n  let _serviceError: string | null = null;\n"
+                        f"  if (id) {{\n"
+                        f"    try {{\n"
+                        f"      {update_call}\n"
+                        f"    }} catch (e) {{\n"
+                        f"      if (e instanceof ReservationMutationError) {{\n"
+                        f"        _serviceError = (e as Error).message;\n"
+                        f"      }} else {{\n"
+                        f"        throw e;\n"
+                        f"      }}\n"
+                        f"    }}\n"
+                        f"  }} else {{\n"
+                        f"    try {{\n"
+                        f"      {create_call}\n"
+                        f"    }} catch (e) {{\n"
+                        f"      if (e instanceof InsufficientPoolCapacityError) {{\n"
+                        f"        _serviceError = (e as Error).message;\n"
+                        f"      }} else {{\n"
+                        f"        throw e;\n"
+                        f"      }}\n"
+                        f"    }}\n"
+                        f"  }}\n"
+                        f"  if (_serviceError) {{\n"
+                        f"    return {{ error: _serviceError }};\n"
+                        f"  }}"
+                    )
                 return (
                     f"  const id = data.get('id') as string | null;\n"
                     f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
@@ -588,7 +744,7 @@ def actions_context(ctx: dict) -> dict:
                     f"    try {{\n"
                     f"      {create_call}\n"
                     f"    }} catch (e) {{\n"
-                    f"      if (e instanceof InsufficientInventoryError) {{\n"
+                    f"      if (e instanceof InsufficientPoolCapacityError) {{\n"
                     f"        _serviceError = (e as Error).message;\n"
                     f"      }} else {{\n"
                     f"        throw e;\n"
@@ -597,6 +753,26 @@ def actions_context(ctx: dict) -> dict:
                     f"  }}\n"
                     f"  if (_serviceError) {{\n"
                     f"    return {{ error: _serviceError }};\n"
+                    f"  }}"
+                )
+            if should_filter_by_org:
+                return (
+                    f"  const id = data.get('id') as string | null;\n"
+                    f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                    f"  const actorId = await getSessionUserIdOrThrow();\n"
+                    f"  if (id) {{\n"
+                    + _actor_and_existing_block("    ") +
+                    f"    await requirePermission('{parent}', 'update', existing);\n"
+                    f"  }} else {{\n"
+                    f"    await requirePermission('{parent}', 'create');\n"
+                    f"  }}\n"
+                    f"{form_data_gets}\n"
+                    + (f"{child_form_data_extractions}\n" if has_ch else "")
+                    + _flatten_block +
+                    f"\n  if (id) {{\n"
+                    f"    {update_call}\n"
+                    f"  }} else {{\n"
+                    f"    {create_call}\n"
                     f"  }}"
                 )
             return (
@@ -619,6 +795,19 @@ def actions_context(ctx: dict) -> dict:
                 f"  }}"
             )
         elif can_update:
+            if should_filter_by_org:
+                return (
+                    f"  const id = data.get('id') as string | null;\n"
+                    f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                    f"  if (!id) throw new Error('Create not supported');\n"
+                    f"  const actorId = await getSessionUserIdOrThrow();\n"
+                    + _actor_and_existing_block("  ") +
+                    f"  await requirePermission('{parent}', 'update', existing);\n"
+                    f"{form_data_gets}\n"
+                    + (f"{child_form_data_extractions}\n" if has_ch else "")
+                    + _flatten_block +
+                    f"\n  await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
+                )
             return (
                 f"  const id = data.get('id') as string | null;\n"
                 f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
@@ -629,7 +818,7 @@ def actions_context(ctx: dict) -> dict:
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _flatten_block +
                 f"\n  const actorId = await getSessionUserIdOrThrow();\n"
-                f"  await update{parent_pascal}(actorId, id, {parent_params_no_bridge}{full_child_args_no_bridge}{flatten_args_str}, srcSnapshotRaw);"
+                f"  await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
             )
         else:  # create only
             return (
@@ -645,7 +834,7 @@ def actions_context(ctx: dict) -> dict:
         f'update{parent_pascal}' if can_update else '',
         f'delete{parent_pascal}' if can_delete else '',
     ]
-    error_imports = ', InsufficientInventoryError, ReservationMutationError' if has_reservation else ''
+    error_imports = ', InsufficientPoolCapacityError, ReservationMutationError' if has_reservation else ''
     service_imports = ', '.join(f for f in service_fns if f) + error_imports
 
     return {
@@ -660,6 +849,8 @@ def actions_context(ctx: dict) -> dict:
 
 def _build_reservation_mutation_guard_update(rc: dict, model: str) -> str:
     """Generate TypeScript update guard that rejects criteria changes after allocation."""
+    if rc.get('transaction_strategy') == 'ledger_transaction':
+        return _build_reservation_mutation_guard_update_ledger(rc, model)
     res          = rc.get('result') or {}
     alloc_entity = res.get('allocationEntity') or ''
     parent_field = res.get('parentField') or f'{model}_id'
@@ -728,6 +919,8 @@ def _build_reservation_mutation_guard_update(rc: dict, model: str) -> str:
 
 def _build_reservation_mutation_guard_delete(rc: dict, model: str) -> str:
     """Generate TypeScript delete guard that rejects delete when allocation exists."""
+    if rc.get('transaction_strategy') == 'ledger_transaction':
+        return _build_reservation_mutation_guard_delete_ledger(rc, model)
     res          = rc.get('result') or {}
     alloc_entity = res.get('allocationEntity') or ''
     parent_field = res.get('parentField') or f'{model}_id'
@@ -743,14 +936,303 @@ def _build_reservation_mutation_guard_delete(rc: dict, model: str) -> str:
     )
 
 
-def _build_reservation_allocation_code(rc: dict, model: str) -> str:
+def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict | None = None) -> str:
+    """Generate the TypeScript reserve phase for strategy: ledger_transaction.
+
+    No allocationEntity: each pool claim is written as an inventory_transaction
+    ledger row (event_type='reserve', quantity_delta=0 — O-4) instead of an
+    allocation table row, and the line entity's own bridge FK
+    (result.lineTransactionableField) records which transactions belong to it.
+
+    Lines case (has_lines=True, e.g. purchase_per_item): the line's own
+    approvable + approval_request(s) are pre-created and nested-created with
+    the parent (see get_approval_lines_props / _build_approval_lines_*_code —
+    the ledger_transaction lines prop is folded into that same mechanism),
+    so this function only claims inventory and links the bridge FK here —
+    it does not touch approvable at all, and never back-fills approvable_id.
+
+    Self case (has_lines=False, no lines_entity — currently unexercised by
+    any schema entity): kept on the original create-then-back-fill approvable
+    pattern, since there is no embedded child array for the pre-create
+    mechanism to hook into; an entity that needs this path with a NOT NULL
+    approvable_id would need the leave_request-style one_to_one_pre_creates
+    treatment instead (out of scope here — see docs/knowledge/appendix/approval-flow.md §16.10).
+    """
+    pool           = rc.get('pool') or {}
+    req            = rc.get('request') or {}
+    pol            = rc.get('policy') or {}
+    res            = rc.get('result') or {}
+
+    # OD-1: domain resolution (required — no defaults)
+    domain_key = rc.get('ledger_domain')
+    if not domain_key:
+        raise ValueError(
+            f"x-reservation for {model!r}: transaction.ledgerDomain is required (OD-1)"
+        )
+    _domain               = resolve_ledger_domain(schema or {}, domain_key)
+    pool_entity           = _domain['pool']
+    ledger_entity         = _domain['ledger']
+    transactionable_entity = _domain['transactionable']
+
+    pool_qty_field = pool.get('quantityField', 'quantity')
+    pool_res_field = pool.get('reservedField', 'reserved_quantity')
+    lines_prop     = rc.get('lines')
+    lines_entity   = rc.get('lines_entity') or ''
+    req_qty_field  = req.get('quantityField', 'quantity')
+    criteria       = req.get('criteria') or {}
+    policy_order   = pol.get('orderBy') or []
+    line_txable_f  = res.get('lineTransactionableField')
+    if not line_txable_f:
+        raise ValueError(
+            f"x-reservation for {model!r}: result.lineTransactionableField is required (OD-1)"
+        )
+    entity_name    = lines_entity or model
+    has_lines      = rc.get('hasLines', bool(lines_entity))
+    self_qty_field = rc.get('selfQuantityField', req_qty_field)
+
+    def _order_entry(field: str, direction: str) -> str:
+        if direction == 'asc_nulls_last':
+            return f"{{ {field}: {{ sort: 'asc', nulls: 'last' }} }}"
+        if direction == 'desc_nulls_first':
+            return f"{{ {field}: {{ sort: 'desc', nulls: 'first' }} }}"
+        return f"{{ {field}: '{direction}' }}"
+
+    order_parts: list[str] = []
+    for item in policy_order:
+        for field, direction in item.items():
+            order_parts.append(_order_entry(field, str(direction)))
+    order_str = ', '.join(order_parts)
+
+    criteria_lines = [f'          {k}: _line.{v},' for k, v in criteria.items()]
+    criteria_str   = '\n'.join(criteria_lines) if criteria_lines else ''
+    where_clause = f"          {pool_qty_field}: {{ gt: 0 }},"
+    if criteria_str:
+        where_clause = criteria_str + '\n' + f"          {pool_qty_field}: {{ gt: 0 }},"
+
+    # Per-line body: claim inventory via ledger rows against one shared bridge.
+    claim_body = (
+        f"      const _candidates = await tx.{pool_entity}.findMany({{\n"
+        f"        where: {{\n"
+        f"{where_clause}\n"
+        f"        }},\n"
+        + (f"        orderBy: [{order_str}],\n" if order_str else '') +
+        f"        include: {{ location: true }},\n"
+        f"      }});\n"
+        f"      const bridge = await tx.{transactionable_entity}.create({{ data: {{}} }});\n"
+        f"      for (const _candidate of _candidates) {{\n"
+        f"        if (_remaining <= 0) break;\n"
+        f"        const _available = _candidate.{pool_qty_field} - _candidate.{pool_res_field};\n"
+        f"        if (_available <= 0) continue;\n"
+        f"        const _claim = Math.min(_remaining, _available);\n"
+        f"        const _claimResult = await tx.{pool_entity}.updateMany({{\n"
+        f"          where: {{ id: _candidate.id, {pool_res_field}: {{ lte: _candidate.{pool_qty_field} - _claim }} }},\n"
+        f"          data: {{ {pool_res_field}: {{ increment: _claim }} }}, // O-4: quantity unchanged on reserve\n"
+        f"        }});\n"
+        f"        if (_claimResult.count > 0) {{\n"
+        f"          _remaining -= _claim;\n"
+        f"          await tx.{ledger_entity}.create({{\n"
+        f"            data: {{\n"
+        f"              {line_txable_f}: bridge.id,\n"
+        f"              event_type: 'reserve',\n"
+        f"              quantity_delta: 0,\n"
+        f"              reserved_delta: _claim,\n"
+        f"              product_id: _candidate.product_id,\n"
+        f"              location: _candidate.location?.name ?? '',\n"
+        f"              lot_number: _candidate.lot_number,\n"
+        f"              expiration_date: _candidate.expiration_date,\n"
+        f"              created_by_id: actorId,\n"
+        f"              creator_id: actorId,\n"
+        f"              updater_id: actorId,\n"
+        f"            }},\n"
+        f"          }});\n"
+        f"        }}\n"
+        f"      }}\n"
+        f"      if (_remaining > 0) {{\n"
+        f"        throw new InsufficientPoolCapacityError(\n"
+        f"          `Insufficient inventory for {entity_name} line`\n"
+        f"        );\n"
+        f"      }}\n"
+    )
+
+    # Self case only (no lines_entity): approvable is created inline and
+    # back-filled, since there's no embedded child array for the pre-create
+    # mechanism to hook into (see function docstring).
+    approval_body = (
+        f"\n"
+        f"      const approvable = await tx.approvable.create({{ data: {{}} }});\n"
+        f"      let _hasFlow = false;\n"
+        f"      for (const flow of _approvalFlows) {{\n"
+        f"        if (flow.requestor_role_id && !_creatorRoleIds.includes(flow.requestor_role_id)) {{\n"
+        f"          continue;\n"
+        f"        }}\n"
+        f"        await tx.approval_request.create({{\n"
+        f"          data: {{ approvable_id: approvable.id, approval_flow_id: flow.id, status: 'pending' }},\n"
+        f"        }});\n"
+        f"        _hasFlow = true;\n"
+        f"      }}\n"
+        f"      if (_hasFlow) {{\n"
+        f"        await tx.approvable.update({{ where: {{ id: approvable.id }}, data: {{ creator_id: actorId }} }});\n"
+        f"      }}\n"
+    )
+
+    header_comment = (
+        f"    // Reservation (strategy: ledger_transaction): allocate {pool_entity} via\n"
+        f"    // inventory_transaction ledger rows (O-4/O-6/O-8) — no allocation entity.\n"
+    )
+    approval_lookup_header = (
+        f"    const _creator = await tx.user.findUnique({{\n"
+        f"      where: {{ id: actorId }},\n"
+        f"      select: {{ roles: {{ select: {{ id: true }} }} }},\n"
+        f"    }});\n"
+        f"    const _creatorRoleIds = _creator?.roles.map((r) => r.id) ?? [];\n"
+        f"    const _approvalFlows = await tx.approval_flow.findMany({{\n"
+        f"      where: {{ entity_name: '{entity_name}' }},\n"
+        f"    }});\n"
+    )
+
+    if not lines_entity:
+        # count mode without lines: the request entity itself is the single line
+        return (
+            header_comment + approval_lookup_header +
+            f"    {{\n"
+            f"      let _remaining = (created as Record<string, unknown>).{self_qty_field} as number;\n"
+            + claim_body + approval_body +
+            f"      await tx.{model}.update({{\n"
+            f"        where: {{ id: created.id }},\n"
+            f"        data: {{\n"
+            f"          {line_txable_f}: bridge.id,\n"
+            f"          approvable_id: approvable.id,\n"
+            f"        }},\n"
+            f"      }});\n"
+            f"    }}"
+        )
+
+    # Lines case (e.g. purchase_per_item): approvable_id was already set on
+    # each line by the parent's nested-create (get_approval_lines_props pre-
+    # create/post-create mechanism — see docstring). Only the inventory
+    # claim + bridge link happen here; approvable is never touched.
+    return (
+        header_comment +
+        f"    const _reservationLines = await tx.{lines_entity}.findMany({{\n"
+        f"      where: {{ {model}_id: created.id }},\n"
+        f"    }});\n"
+        f"    for (const _line of _reservationLines) {{\n"
+        f"      let _remaining = (_line as Record<string, unknown>).{req_qty_field} as number;\n"
+        + claim_body +
+        f"      await tx.{lines_entity}.update({{\n"
+        f"        where: {{ id: _line.id }},\n"
+        f"        data: {{\n"
+        f"          {line_txable_f}: bridge.id,\n"
+        f"        }},\n"
+        f"      }});\n"
+        f"    }}"
+    )
+
+
+def _build_reservation_mutation_guard_update_ledger(rc: dict, model: str) -> str:
+    """Mutation guard for strategy: ledger_transaction (no allocationEntity).
+
+    A line counts as "allocated" once it has a non-null lineTransactionableField.
+    """
+    res            = rc.get('result') or {}
+    line_txable_f  = res.get('lineTransactionableField')
+    if not line_txable_f:
+        raise ValueError(f"x-reservation for {model!r}: result.lineTransactionableField is required")
+    lines_entity   = rc.get('lines_entity') or ''
+    lines_prop     = rc.get('lines') or 'items'
+    lines_var      = to_camel_case(lines_prop)
+
+    req         = rc.get('request') or {}
+    criteria    = req.get('criteria') or {}
+    qty_field   = req.get('quantityField', 'quantity')
+
+    if not lines_entity:
+        return (
+            f"    // Reservation mutation guard (ledger_transaction): reject criteria changes after allocation\n"
+            f"    const _existingSelf = await tx.{model}.findUnique({{\n"
+            f"      where: {{ id }},\n"
+            f"      select: {{ {qty_field}: true, {line_txable_f}: true }},\n"
+            f"    }});\n"
+            f"    if (_existingSelf?.{line_txable_f} && _existingSelf.{qty_field} !== {qty_field}) {{\n"
+            f"      throw new ReservationMutationError('Cannot modify reservation criteria after allocation.');\n"
+            f"    }}"
+        )
+
+    select_fields_set = list(dict.fromkeys(list(criteria.keys()) + [qty_field]))
+    select_fields_str = ', '.join(f'{f}: true' for f in select_fields_set)
+    check_parts = [f'ex.{f} !== incoming.{f}' for f in select_fields_set]
+    criteria_check = ' || '.join(check_parts)
+
+    return (
+        f"    // Reservation mutation guard (ledger_transaction): reject criteria changes after allocation\n"
+        f"    const _allocatedCount = await tx.{lines_entity}.count({{\n"
+        f"      where: {{ {model}_id: id, {line_txable_f}: {{ not: null }} }},\n"
+        f"    }});\n"
+        f"    if (_allocatedCount > 0) {{\n"
+        f"      const _existingLines = await tx.{lines_entity}.findMany({{\n"
+        f"        where: {{ {model}_id: id }},\n"
+        f"        select: {{ id: true, {select_fields_str} }},\n"
+        f"      }});\n"
+        f"      const _existingMap = new Map(_existingLines.map(i => [i.id, i]));\n"
+        f"      const _existingIds = new Set(_existingLines.map(i => i.id));\n"
+        f"      const _incomingWithId = {lines_var}Items.filter(i => i.id);\n"
+        f"      const _incomingIds = new Set(_incomingWithId.map(i => i.id as string));\n"
+        f"      const _mutated =\n"
+        f"        {lines_var}Items.some(i => !i.id) ||\n"
+        f"        [..._existingIds].some(eid => !_incomingIds.has(eid)) ||\n"
+        f"        _incomingWithId.some(incoming => {{\n"
+        f"          const ex = _existingMap.get(incoming.id as string);\n"
+        f"          return ex !== undefined && ({criteria_check});\n"
+        f"        }});\n"
+        f"      if (_mutated) {{\n"
+        f"        throw new ReservationMutationError('Cannot modify reservation criteria after allocation.');\n"
+        f"      }}\n"
+        f"    }}"
+    )
+
+
+def _build_reservation_mutation_guard_delete_ledger(rc: dict, model: str) -> str:
+    """Delete guard for strategy: ledger_transaction (no allocationEntity)."""
+    res            = rc.get('result') or {}
+    line_txable_f  = res.get('lineTransactionableField')
+    if not line_txable_f:
+        raise ValueError(f"x-reservation for {model!r}: result.lineTransactionableField is required")
+    lines_entity   = rc.get('lines_entity') or ''
+
+    if not lines_entity:
+        return (
+            f"  // Reservation mutation guard (ledger_transaction): reject delete when allocated\n"
+            f"  const _allocatedCount = await prisma.{model}.count({{\n"
+            f"    where: {{ id: {{ in: ids }}, {line_txable_f}: {{ not: null }} }},\n"
+            f"  }});\n"
+            f"  if (_allocatedCount > 0) {{\n"
+            f"    throw new ReservationMutationError('Cannot delete {model} with existing reservation allocation.');\n"
+            f"  }}"
+        )
+
+    return (
+        f"  // Reservation mutation guard (ledger_transaction): reject delete when allocated\n"
+        f"  const _allocatedCount = await prisma.{lines_entity}.count({{\n"
+        f"    where: {{ {model}_id: {{ in: ids }}, {line_txable_f}: {{ not: null }} }},\n"
+        f"  }});\n"
+        f"  if (_allocatedCount > 0) {{\n"
+        f"    throw new ReservationMutationError('Cannot delete {model} with existing reservation allocation.');\n"
+        f"  }}"
+    )
+
+
+def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None = None) -> str:
     """Generate the TypeScript allocation phase for count mode reservation."""
+    if rc.get('transaction_strategy') == 'ledger_transaction':
+        return _build_ledger_reservation_allocation_code(rc, model, schema)
     pool        = rc.get('pool') or {}
     req         = rc.get('request') or {}
     pol         = rc.get('policy') or {}
     res         = rc.get('result') or {}
 
-    pool_entity     = pool.get('entity', 'inventory')
+    pool_entity     = pool.get('entity')
+    if not pool_entity:
+        raise ValueError(f"x-reservation for {model!r}: pool.entity is required")
     pool_qty_field  = pool.get('quantityField', 'quantity')
     pool_res_field  = pool.get('reservedField', 'reserved_quantity')
     lines_prop      = rc.get('lines')  # None when no lines configured
@@ -887,7 +1369,7 @@ def _build_reservation_allocation_code(rc: dict, model: str) -> str:
             f"        }}",
             f"      }}",
             f"      if (_remaining > 0) {{",
-            f"        throw new InsufficientInventoryError(",
+            f"        throw new InsufficientPoolCapacityError(",
             f"          `Insufficient inventory for request ${{created.id}}`",
             f"        );",
             f"      }}",
@@ -931,7 +1413,7 @@ def _build_reservation_allocation_code(rc: dict, model: str) -> str:
         f"        }}",
         f"      }}",
         f"      if (_remaining > 0) {{",
-        f"        throw new InsufficientInventoryError(",
+        f"        throw new InsufficientPoolCapacityError(",
         f"          `Insufficient inventory for product ${{(_line as Record<string, unknown>).product_id}}`",
         f"        );",
         f"      }}",
@@ -940,15 +1422,259 @@ def _build_reservation_allocation_code(rc: dict, model: str) -> str:
     return '\n'.join(lines)
 
 
+# ---------------------------------------------------------------------------
+# x-approval-lines: pre-create approval on new:false embedded line children
+# ---------------------------------------------------------------------------
+#
+# receiving_receipt_line (and similarly-shaped line children) carry x-approval
+# but are new:false — they're created only via the parent's nested-create and
+# never run their own service_after_create, so approvable/approval_request
+# rows never get generated for them. approvable_id is also mandatory
+# (String @unique, non-null), so a create-then-UPDATE-back-fill approach
+# would violate the NOT NULL constraint. Instead, one approvable is
+# pre-created per line *before* the parent create, so the nested-create body
+# can include approvable_id directly.
+#
+# purchase_per_item (x-reservation, transaction.strategy: ledger_transaction)
+# has the exact same shape and gap, so helpers.schema_helpers.
+# get_approval_lines_props() folds both signals into one list and this same
+# pre-create/post-create pair covers both — see
+# docs/knowledge/appendix/approval-flow.md §16.10.
+
+def _resolve_approval_lines_entity(model: str, prop_name: str, schema: dict) -> str:
+    """Resolve the child entity name for an x-approval-lines property.
+
+    The parent's own definition has no properties for embedded list children
+    — only the `{model}_detail` allOf view does — so entity resolution goes
+    through `{model}_detail.properties.{prop_name}.items.$ref`.
+    """
+    props = get_detail_properties(model, schema) or {}
+    prop  = props.get(prop_name, {})
+    ref   = (prop.get('items') or {}).get('$ref', '')
+    entity = ref.rsplit('/', 1)[-1]
+    if not entity:
+        raise ValueError(
+            f"x-approval-lines: cannot resolve entity for {model}.{prop_name} "
+            f"via {model}_detail.properties.{prop_name}.items.$ref"
+        )
+    return entity
+
+
+def _build_approval_lines_pre_create_code(parent_def: dict, model: str, schema: dict, mode: str = 'create') -> str:
+    """Pre-create one approvable per line, before the parent create/update.
+
+    mode='create': pre-creates for every incoming line (all get nested-created).
+    mode='update': pre-creates only for newly-added lines (no `id` — see
+    _build_child_nested_update), since existing lines already have an
+    approvable from their original creation.
+    """
+    props = get_approval_lines_props(parent_def, model, schema)
+    if not props:
+        return ''
+    blocks = []
+    for prop_name in props:
+        child_var = safe_var_name(prop_name)
+        arr_var   = f'_{child_var}ApprIds'
+        if mode == 'update':
+            src_var = f'_{child_var}NewItems'
+            blocks.append(f"    const {src_var} = {child_var}Items.filter(f => !f.id);")
+        else:
+            src_var = f'{child_var}Items'
+        blocks.append(
+            f"    const {arr_var} = {src_var}.length > 0\n"
+            f"      ? await Promise.all({src_var}.map(() => tx.approvable.create({{ data: {{}} }}).then((a) => a.id)))\n"
+            f"      : [];"
+        )
+    return '\n'.join(blocks)
+
+
+def _build_approval_create_block_for_entity(
+    approvable_id_expr: str,
+    actor_id_expr: str,
+    flows_var: str,
+    role_ids_var: str,
+    tx_var: str = 'tx',
+    indent: str = '  ',
+    target_entity_name: str | None = None,
+    target_id_expr: str | None = None,
+) -> str:
+    """Create approval_request(s) for ONE pre-created approvable against a
+    pre-fetched, creator-role-filtered approval_flow[], then stamp
+    creator_id on the approvable if any flow matched.
+
+    Shared inner block (cmd_296 Phase2 common-helper — see
+    docs/knowledge/appendix/approval-flow.md §16.10 and
+    docs/knowledge/appendix/inventory-reservation-split.md §2) for:
+      - _build_approval_lines_post_create_code (cmd_295 x-approval-lines):
+        called once per pre-created array element, inside the caller's
+        `for (const _apprId of {arr}) {...}` loop.
+      - split_action_route.ts.jinja2 (cmd_296 split): called once per part,
+        directly in the per-part loop — one approvable at a time, no array.
+
+    Caller pre-fetches `flows_var` (approval_flow[] for the entity) and
+    `role_ids_var` (creator's role ids) once, outside any per-approvable loop.
+
+    cmd_413 fix: notifies every approver-role holder for each created
+    approval_request via notifyApprovalRequestCreated (mirrors Trigger #2 in
+    service_after_create_stub.ts.jinja2, which only covers the top-level
+    single-entity afterCreate path — this shared block is the datagrid-child
+    / split-action path, which never had the notify call at all). Caller
+    must import notifyApprovalRequestCreated from '@/lib/_notifyApprovalRequest'.
+
+    cmd_479 fix: `target_entity_name`/`target_id_expr`, when both given, are
+    passed through to notifyApprovalRequestCreated so the notification links
+    to the approvable's own detail page instead of the approval_request row
+    (which has no view page). Caller must ensure the target row already
+    exists (has been created/committed in `tx_var`) by the time this block
+    runs, since target_id_expr is evaluated at that point.
+    """
+    notify_opts = f"{{ excludeUserId: {actor_id_expr} }}"
+    if target_entity_name and target_id_expr:
+        notify_opts = (
+            f"{{\n"
+            f"{indent}    excludeUserId: {actor_id_expr},\n"
+            f"{indent}    targetEntityName: '{target_entity_name}',\n"
+            f"{indent}    targetId: {target_id_expr},\n"
+            f"{indent}  }}"
+        )
+    return (
+        f"{indent}let _hasFlow = false;\n"
+        f"{indent}for (const _flow of {flows_var}) {{\n"
+        f"{indent}  if (_flow.requestor_role_id && !{role_ids_var}.includes(_flow.requestor_role_id)) {{\n"
+        f"{indent}    continue;\n"
+        f"{indent}  }}\n"
+        f"{indent}  const _apprReq = await {tx_var}.approval_request.create({{\n"
+        f"{indent}    data: {{ approvable_id: {approvable_id_expr}, approval_flow_id: _flow.id, status: 'pending' }},\n"
+        f"{indent}  }});\n"
+        f"{indent}  await notifyApprovalRequestCreated({tx_var}, _apprReq.id, {notify_opts});\n"
+        f"{indent}  _hasFlow = true;\n"
+        f"{indent}}}\n"
+        f"{indent}if (_hasFlow) {{\n"
+        f"{indent}  await {tx_var}.approvable.update({{\n"
+        f"{indent}    where: {{ id: {approvable_id_expr} }},\n"
+        f"{indent}    data: {{ creator_id: {actor_id_expr} }},\n"
+        f"{indent}  }});\n"
+        f"{indent}}}"
+    )
+
+
+def _build_split_approval_inherit_block(
+    indent: str = '  ',
+    target_entity_name: str | None = None,
+    target_id_expr: str | None = None,
+) -> str:
+    """Create approval_request(s) for ONE split child, inheriting the flow IDs
+    from the parent's own (pre-split) approval_request rows — unconditionally,
+    with no requestor-role filter.
+
+    cmd_439 F1 (approved Option A): a split child continues whatever approval
+    flow the parent was already subject to, regardless of which role the
+    split actor holds. This replaces the old creator-role-filtered lookup
+    (_build_approval_create_block_for_entity) for the split path only —
+    that function is still used unchanged for x-approval-lines
+    (_build_approval_lines_post_create_code), where filtering by the
+    creator's role remains correct.
+
+    Caller must define `_parentARFlowIds` (the parent's approval_request
+    approval_flow_id list) once, outside the per-part loop, and a
+    `childApprovable` var inside it. Caller must import
+    notifyApprovalRequestCreated from '@/lib/_notifyApprovalRequest'.
+
+    cmd_479 fix: see `_build_approval_create_block_for_entity` docstring —
+    same `target_entity_name`/`target_id_expr` contract. The split route
+    must create the child entity row (and know its id) BEFORE this block
+    runs, since the old ordering (notify before the child row existed) can
+    never resolve a target.
+    """
+    notify_opts = '{ excludeUserId: userId }'
+    if target_entity_name and target_id_expr:
+        notify_opts = (
+            f"{{\n"
+            f"{indent}    excludeUserId: userId,\n"
+            f"{indent}    targetEntityName: '{target_entity_name}',\n"
+            f"{indent}    targetId: {target_id_expr},\n"
+            f"{indent}  }}"
+        )
+    return (
+        f"{indent}for (const _flowId of _parentARFlowIds) {{\n"
+        f"{indent}  const _apprReq = await tx.approval_request.create({{\n"
+        f"{indent}    data: {{ approvable_id: childApprovable.id, approval_flow_id: _flowId, status: 'pending' }},\n"
+        f"{indent}  }});\n"
+        f"{indent}  await notifyApprovalRequestCreated(tx, _apprReq.id, {notify_opts});\n"
+        f"{indent}}}\n"
+        f"{indent}if (_parentARFlowIds.length > 0) {{\n"
+        f"{indent}  await tx.approvable.update({{\n"
+        f"{indent}    where: {{ id: childApprovable.id }},\n"
+        f"{indent}    data: {{ creator_id: userId }},\n"
+        f"{indent}  }});\n"
+        f"{indent}}}"
+    )
+
+
+def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema: dict) -> str:
+    """Create approval_request(s) for each pre-created line approvable.
+
+    Mirrors the per-child approval body in
+    _build_ledger_reservation_allocation_code (creator-role-filtered
+    approval_flow lookup, one approval_request per matching flow, then stamp
+    creator_id on the approvable). Used for both the create and update flow —
+    the caller passes a different `_{child_var}ApprIds` population for each
+    (all lines vs. only newly-added lines).
+    """
+    props = get_approval_lines_props(parent_def, model, schema)
+    if not props:
+        return ''
+    blocks = []
+    for prop_name in props:
+        child_var    = safe_var_name(prop_name)
+        arr_var      = f'_{child_var}ApprIds'
+        lines_entity = _resolve_approval_lines_entity(model, prop_name, schema)
+        flows_var    = f'_{child_var}ApprFlows'
+        creator_var  = f'_{child_var}Creator'
+        role_ids_var = f'_{child_var}CreatorRoleIds'
+        inner = _build_approval_create_block_for_entity(
+            approvable_id_expr='_apprId',
+            actor_id_expr='actorId',
+            flows_var=flows_var,
+            role_ids_var=role_ids_var,
+            tx_var='tx',
+            indent='        ',
+            target_entity_name=lines_entity,
+            target_id_expr='_apprTargetId',
+        )
+        blocks.append(
+            f"    if ({arr_var}.length > 0) {{\n"
+            f"      const {flows_var} = await tx.approval_flow.findMany({{\n"
+            f"        where: {{ entity_name: '{lines_entity}' }},\n"
+            f"      }});\n"
+            f"      const {creator_var} = await tx.user.findUnique({{\n"
+            f"        where: {{ id: actorId }},\n"
+            f"        select: {{ roles: {{ select: {{ id: true }} }} }},\n"
+            f"      }});\n"
+            f"      const {role_ids_var} = {creator_var}?.roles.map((r) => r.id) ?? [];\n"
+            f"      for (const _apprId of {arr_var}) {{\n"
+            # cmd_479: the line row was already created (nested under the
+            # parent's own create) by the time this post-create code runs —
+            # look it up by its approvable_id so the notification can link
+            # to the line's own detail page instead of the approval_request.
+            f"        const _apprTargetRow = await tx.{lines_entity}.findFirst({{\n"
+            f"          where: {{ approvable_id: _apprId }},\n"
+            f"          select: {{ id: true }},\n"
+            f"        }});\n"
+            f"        const _apprTargetId = _apprTargetRow?.id;\n"
+            f"{inner}\n"
+            f"      }}\n"
+            f"    }}"
+        )
+    return '\n'.join(blocks)
+
+
 def service_context(ctx: dict, schema: dict | None = None) -> dict:
     parent                  = ctx['parent']
-    parent_def              = (schema or {}).get('definitions', {}).get(parent, {})
+    parent_def              = _raw_def(parent, schema) if schema else {}
     model                   = ctx['model']
     parent_pascal           = ctx['parent_pascal']
     can_create              = ctx['can_create']
-    # Bridge children create via parent context despite new:false (cmd_167 §4) —
-    # generate the add<Entity> service so the parent-embedded create path works.
-    can_create              = can_create or bool(ctx.get('bridge_child_ir'))
     can_update              = ctx['can_update']
     can_delete              = ctx['can_delete']
     non_comment_ch          = ctx['non_comment_ch']
@@ -959,7 +1685,10 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     child_params_for_add    = ctx['child_params_for_add']
     child_params_for_update = ctx['child_params_for_update']
     has_assignee_id         = ctx.get('has_assignee_id', False)
+    child_assignee_notify_create_code = ctx.get('child_assignee_notify_create_code', '')
+    child_assignee_notify_update_code = ctx.get('child_assignee_notify_update_code', '')
     is_audited              = ctx.get('is_audited', False)
+    should_filter_by_org    = bool(ctx.get('should_filter_by_org'))
     reservation_config      = ctx.get('reservation_config')
     has_reservation         = bool(reservation_config and reservation_config.get('mode') == 'count')
     has_item_reservation    = bool(reservation_config and reservation_config.get('mode') == 'item')
@@ -991,25 +1720,16 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         return f'string{sfx}'
 
     def _resolve_flatten_base_model(target: str) -> str:
-        """Strip `_detail` from a flatten target when the schema confirms
-        it's an allOf-with-base-$ref view of an existing entity.
+        """Return the Prisma model name backing a flatten target.
 
-        The Prisma client only exposes the base table (`prisma.pre_check`),
-        not the `_detail` extension — generating `tx.pre_check_detail.create`
-        produces a type error. When the schema looks like
-        `pre_check_detail: allOf: [$ref: pre_check, {properties: …}]`,
-        return the base entity name; otherwise return the target as-is so
-        plain-target flatten refs keep working.
+        Flatten $ref targets are always the bare view entity key, which IS
+        the Prisma model name directly — the raw entity's '__' prefix is a
+        purely internal JSON-schema bookkeeping artifact that never reaches
+        schema.prisma. No stripping needed; this used to strip a literal
+        `_detail` suffix pre-Stage4 (e.g. `pre_check_detail` -> `pre_check`)
+        when the flatten $ref pointed at the view rather than the base —
+        that distinction no longer exists now that the view IS the bare key.
         """
-        if not schema:
-            return target
-        defn = schema.get('definitions', {}).get(target, {})
-        for item in defn.get('allOf', []):
-            if '$ref' in item:
-                base = item['$ref'].split('/')[-1]
-                if base in schema.get('definitions', {}):
-                    return base
-                break
         return target
 
     flatten_update_params_parts: list[str] = []
@@ -1040,7 +1760,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         # optional, "remove" means unlink (set to null and keep the row); when
         # it's required, "remove" means delete. The inline-create path is the
         # same in both cases.
-        _target_def = (schema or {}).get('definitions', {}).get(_target, {}) if schema else {}
+        _target_def = _raw_def(_target, schema) if schema else {}
         _target_props = _target_def.get('properties', {})
         _fk_prop = _target_props.get(_fk_field, {})
         _fk_type = _fk_prop.get('type')
@@ -1147,7 +1867,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                 _af_name = _af['name']
                 _af_var  = f"{to_camel_case(_prop)}{to_pascal_case(_af_name)}"
                 _item_target = _af.get('item_target', '')
-                _item_props  = (schema or {}).get('definitions', {}).get(_item_target, {}).get('properties', {})
+                _item_props  = _raw_def(_item_target, schema).get('properties', {}) if schema else {}
                 _item_label  = 'name' if 'name' in _item_props else 'id'
                 _array_relation_create_parts.append(
                     f"...({_af_var}.length > 0 ? {{ {_af_name}: {{ create: {_af_var}.map((v: string) => ({{ {_item_label}: v }})) }} }} : {{}})"
@@ -1166,7 +1886,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                 _af_name = _af['name']
                 _af_var  = f"{to_camel_case(_prop)}{to_pascal_case(_af_name)}"
                 _item_target = _af.get('item_target', '')
-                _item_props  = (schema or {}).get('definitions', {}).get(_item_target, {}).get('properties', {})
+                _item_props  = _raw_def(_item_target, schema).get('properties', {}) if schema else {}
                 _item_label  = 'name' if 'name' in _item_props else 'id'
                 _row_var = f"{to_camel_case(_target)}Row"
                 _array_post_upsert.append(
@@ -1232,13 +1952,26 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     # Reservation count mode: build allocation code block
     reservation_allocation_code = ''
     if has_reservation and reservation_config is not None:
-        reservation_allocation_code = _build_reservation_allocation_code(reservation_config, model)
+        reservation_allocation_code = _build_reservation_allocation_code(reservation_config, model, schema)
+
+    # x-approval-lines: pre-create/post-create approval for embedded line
+    # children that are new:false (see docs/knowledge/appendix/approval-flow.md §16.10).
+    approval_lines_pre_create_code  = ''
+    approval_lines_post_create_code = ''
+    approval_lines_pre_update_code  = ''
+    approval_lines_post_update_code = ''
+    if get_approval_lines_props(parent_def, model, schema):
+        approval_lines_pre_create_code  = _build_approval_lines_pre_create_code(parent_def, model, schema, mode='create')
+        approval_lines_post_create_code = _build_approval_lines_post_create_code(parent_def, model, schema)
+        if can_update:
+            approval_lines_pre_update_code  = _build_approval_lines_pre_create_code(parent_def, model, schema, mode='update')
+            approval_lines_post_update_code = _build_approval_lines_post_create_code(parent_def, model, schema)
 
     _insufficient_inventory_error_class_def = (
-        "\n\nexport class InsufficientInventoryError extends Error {\n"
+        "\n\nexport class InsufficientPoolCapacityError extends Error {\n"
         "  constructor(message: string) {\n"
         "    super(message);\n"
-        "    this.name = 'InsufficientInventoryError';\n"
+        "    this.name = 'InsufficientPoolCapacityError';\n"
         "  }\n"
         "}"
     )
@@ -1278,11 +2011,24 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"import {{ Prisma }} from '@/app/generated/prisma/client';\n" if has_item_reservation else '')
         + f"import {{ normalizeValue,{' normalizeChildRefs,' if has_non_comment_ch else ''}"
         f"{' assertNotStale,' if can_update else ''} type NormalizedSnapshot }} from '@/lib/normalize';"
-        + (f"\nimport {{ validateOnAdd, validateOnUpdate{_validation_extras} }} from './service_validation';" if (can_create or can_update) else '')
+        + (
+            "\nimport { "
+            + ', '.join(filter(None, [
+                'validateOnAdd' if can_create else '',
+                'validateOnUpdate' if can_update else '',
+            ])) + _validation_extras
+            + " } from './service_validation';"
+            if (can_create or can_update) else ''
+        )
         + (f"\nimport {{ assertNoDuplicateReservation }} from './service_validation';" if has_item_daterange and not (can_create or can_update) else '')
         + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '')
-        + (f"\nimport {{ notify }} from '@/lib/_notifier';" if has_assignee_id else '')
+        + (f"\nimport {{ notify }} from '@/lib/_notifier';"
+           if has_assignee_id or child_assignee_notify_create_code or child_assignee_notify_update_code else '')
+        + (f"\nimport {{ notifyApprovalRequestCreated }} from '@/lib/_notifyApprovalRequest';"
+           if approval_lines_post_create_code or approval_lines_post_update_code else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
+        + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if should_filter_by_org and (can_create or can_update) else '')
+        + (f"\nimport {{ ApiError }} from '@/lib/api-auth';" if should_filter_by_org and (can_create or can_update) else '')
         + insufficient_inventory_error_class +
         f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"
         f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
@@ -1315,9 +2061,11 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'has_item_reservation':               has_item_reservation,
         'reservation_mutation_guard_update':  reservation_mutation_guard_update,
         'reservation_mutation_guard_delete':  reservation_mutation_guard_delete,
-        # Override ctx so service.ts emits add<Entity> for bridge children too
-        # (parent-context create despite new:false — cmd_167 §4).
-        'can_create':                         can_create,
+        'approval_lines_pre_create_code':     approval_lines_pre_create_code,
+        'approval_lines_post_create_code':    approval_lines_post_create_code,
+        'approval_lines_pre_update_code':     approval_lines_pre_update_code,
+        'approval_lines_post_update_code':    approval_lines_post_update_code,
+        'should_filter_by_org':               should_filter_by_org,
     }
 
 
@@ -1332,12 +2080,13 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
 
     needs_datetime_imports = False
     needs_entity_autocomplete_cell = False
+    uses_format_label_value = False
     column_children = []
 
     for child_raw in non_comment_ch:
         child_name = child_raw['name']
         prop_name  = child_raw['property_name']
-        child_def  = schema['definitions'].get(child_name, {})
+        child_def  = _raw_def(child_name, schema)
         child_props = child_def.get('properties', {})
 
         if not child_props:
@@ -1361,11 +2110,22 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                 rel_params.append(f"{param_camel}Config?: EntityAutocompleteCellConfig")
 
         columns = []
+        col_ns_hooks: list[str] = []
+        col_seen_ns: set[str] = set()
         for key, prop in child_props.items():
             if key in ('id', f'{model}_id', 'created_at', 'updated_at', 'creator_id'):
                 continue
 
             rel = prop.get('x-relationship', {})
+            # Internal bridge FKs are implementation details, never shown as a
+            # plain column: one-to-one_bridge relations (e.g. approvable_id)
+            # and unrelated *able_id technical FKs (e.g.
+            # inventory_transactionable_id) — mirrors the form-body exclusion
+            # in build_context.py's _child_bridge_excludes.
+            if rel.get('type') == 'one-to-one_bridge':
+                continue
+            if not rel and key.endswith('able_id'):
+                continue
             if rel.get('type') == 'many-to-one':
                 needs_entity_autocomplete_cell = True
                 label_base   = key.removesuffix('_id')
@@ -1373,6 +2133,14 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                 prop_camel   = to_camel_case(key)
                 param_name   = f'{prop_camel}Config'
                 label_field  = rel.get('labelField', 'name')
+                # label_field may be a single field name or a composite path list
+                # (e.g. ['product.name', 'location', 'lot_number']) — always go
+                # through build_label_expression rather than raw `row.{label_base}.
+                # {label_field}` property access, which breaks on composite/array
+                # labelField.
+                label_built = build_label_expression(f'row.{label_base}', label_field, rel.get('target'), schema)
+                if label_built['has_format']:
+                    uses_format_label_value = True
                 # When the config is provided, pick uses EntityAutocomplete (any object selectable
                 # via server-side search). When it's missing, the column is read-only with the
                 # included relation's label.
@@ -1384,7 +2152,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                     f"          ),\n"
                     f"          valueFormatter: entityAutocompleteValueFormatter({param_name}) }}]\n"
                     f"      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
-                    f"      : [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: false, valueGetter: (_value: any, row: any) => row.{label_base}?.{label_field} ?? '' }}]),"
+                    f"      : [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: false, valueGetter: (_value: any, row: any) => {label_built['expression']} }}]),"
                 )
                 continue
 
@@ -1436,13 +2204,35 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                     f"      }},\n"
                     f"    }},"
                 )
+            elif actual == 'string' and isinstance(enum_vals, list) and _native_enum_ns(prop):
+                native_ns = _native_enum_ns(prop)
+                is_nullable = isinstance(prop_type_raw, list) and 'null' in prop_type_raw
+                if native_ns not in col_seen_ns:
+                    col_seen_ns.add(native_ns)
+                    col_ns_hooks.append(f"  const t{native_ns} = useTranslations('{native_ns}');")
+                opts = ', '.join(
+                    f"{{ value: '{v}', label: t{native_ns}('{_native_enum_key(v)}') }}"
+                    for v in enum_vals
+                )
+                null_opt = "{ value: '' as const, label: '-- None --' }"
+                value_opts = f'{null_opt}, {opts}' if is_nullable else opts
+                extra = ''
+                if is_nullable:
+                    extra = (
+                        f",\n      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
+                        f"      valueGetter: (value: any) => value ?? '',\n"
+                        f"      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
+                        f"      valueSetter: (value: any, row: any) => ({{ ...row, {key}: value === '' ? null : value }})"
+                    )
+                columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: 150, editable: editable, type: 'singleSelect' as const, valueOptions: [{value_opts}]{extra} }},")
             else:
                 columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: {width}, editable: editable }},")
 
         rel_params_str = (', ' + ', '.join(rel_params)) if rel_params else ''
+        _col_ns_hooks_str = ('\n' + '\n'.join(col_ns_hooks)) if col_ns_hooks else ''
         fn_code = (
             f"export function use{to_pascal_case(prop_name)}Columns(editable: boolean = false{rel_params_str}): GridColDef[] {{\n"
-            f"  const t = useTranslations('Fields');\n"
+            f"  const t = useTranslations('Fields');{_col_ns_hooks_str}\n"
             f"  return [\n"
             + '\n'.join(columns) +
             f"\n  ];\n"
@@ -1454,6 +2244,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
         'column_children': column_children,
         'needs_datetime_imports': needs_datetime_imports,
         'needs_entity_autocomplete_cell': needs_entity_autocomplete_cell,
+        'uses_format_label_value': uses_format_label_value,
     }
 
 
@@ -1489,8 +2280,18 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     one_to_one_fk_props = {r['prop_name'] for r in ctx.get('one_to_one_rels', [])}
     flatten_rels_raw = ctx.get('flatten_rels', [])
     flatten_m2o_fk_props = ctx.get('flatten_m2o_fk_props', set())
+    # Unrelated *able_id technical FKs with no x-relationship (e.g.
+    # inventory_transactionable_id) are system-managed internal bridge FKs —
+    # mirrors the same exclusion in column_def_context.
+    bridge_fk_no_rel_props = {
+        k for k in filtered_props
+        if k.endswith('able_id') and not filtered_props[k].get('x-relationship')
+    }
     # m2o flatten FK props are rendered as accordion sections, not plain FK TextFields
-    EXCLUDE = {'id', 'created_at', 'updated_at', 'creator_id'} | one_to_one_fk_props | flatten_m2o_fk_props
+    EXCLUDE = (
+        {'id', 'created_at', 'updated_at', 'creator_id'}
+        | one_to_one_fk_props | flatten_m2o_fk_props | bridge_fk_no_rel_props
+    )
     parent_props = [k for k in filtered_props if k not in EXCLUDE]
 
     custom_view_props = [
@@ -1501,9 +2302,9 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     date_time_flds     = []
     image_flds         = []
-    link_flds          = []
     boolean_flds       = []
     enum_integer_flds  = []
+    enum_native_flds   = []
     other_flds         = []
 
     for p in parent_props:
@@ -1515,21 +2316,18 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         if actual == 'string' and fmt in ('date', 'date-time', 'time'):
             date_time_flds.append(p)
         elif actual == 'string' and fmt == 'uri':
-            from build_context import get_uri_kind
-            if get_uri_kind(prop) == 'link':
-                link_flds.append(p)
-            else:
-                image_flds.append(p)
+            image_flds.append(p)
         elif actual == 'boolean':
             boolean_flds.append(p)
         elif actual in ('integer', 'number') and isinstance(prop.get('enum'), list):
             enum_integer_flds.append(p)
+        elif _native_enum_ns(prop) and isinstance(prop.get('enum'), list):
+            enum_native_flds.append(p)
         else:
             other_flds.append(p)
 
     needs_datetime_wrapper = bool(date_time_flds)
     needs_image_display    = bool(image_flds)
-    needs_link_display     = bool(link_flds)
 
     def _tf(p: str):
         return to_camel_case(p)
@@ -1584,9 +2382,11 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 f"      />"
             )
         else:
+            fallback_actual = _get_actual_type(filtered_props.get(p, {}))
+            fallback_op = '??' if fallback_actual in ('integer', 'number') else '||'
             text_jsxs.append(
                 f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
-                f"        value={{src.{p} || ''}}\n"
+                f"        value={{src.{p} {fallback_op} ''}}\n"
                 f"        readOnly\n      />"
             )
 
@@ -1610,12 +2410,6 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     # Image fields
     img_jsxs = [f"      <ImageDisplay url={{src.{p}}} alt={{tf('{_tf(p)}')}} />" for p in image_flds]
-
-    # Link URI fields
-    link_jsxs = [
-        f"      <AppFieldExternalLink label={{tf('{_tf(p)}')}} href={{src.{p} || null}} />"
-        for p in link_flds
-    ]
 
     # Boolean fields
     bool_jsxs = [
@@ -1643,15 +2437,32 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 for i, v in enumerate(enum_vals)
             )
         else:
-            opts = ', '.join(
-                (f"{{ value: {i}, label: tf('{p}_{v}') }}"
-                 if isinstance(v, str) and not str(v).lstrip('-').isdigit()
-                 else f"{{ value: {int(v) if isinstance(v, (int, float)) else i}, label: tf('{p}_{v}') }}")
-                for i, v in enumerate(enum_vals)
-            )
+            opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
         enum_opt_setups.append(f"  const {state_name}Options = [{opts}];")
         fk = _tf(p)
         enum_int_jsxs.append(
+            f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
+            f"        value={{{state_name}Options.find(o => o.value === src.{p})?.label ?? ''}}\n"
+            f"        readOnly\n      />"
+        )
+
+    # Enum nativeEnum fields (string-backed Prisma enum, always translated)
+    enum_native_jsxs = []
+    for p in enum_native_flds:
+        prop       = filtered_props[p]
+        state_name = safe_var_name(p)
+        enum_vals  = prop.get('enum', [])
+        ns         = _native_enum_ns(prop)
+        if ns not in seen_ns:
+            seen_ns.add(ns)
+            enum_ns_hooks.append(f"  const t{ns} = useTranslations('{ns}');")
+        opts = ', '.join(
+            f"{{ value: '{v}', label: t{ns}('{_native_enum_key(v)}') }}"
+            for v in enum_vals
+        )
+        enum_opt_setups.append(f"  const {state_name}Options = [{opts}];")
+        fk = _tf(p)
+        enum_native_jsxs.append(
             f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
             f"        value={{{state_name}Options.find(o => o.value === src.{p})?.label ?? ''}}\n"
             f"        readOnly\n      />"
@@ -1669,30 +2480,12 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     all_parent_fields = '\n'.join(filter(None, [
         '\n'.join(text_jsxs),
         '\n'.join(enum_int_jsxs),
+        '\n'.join(enum_native_jsxs),
         '\n'.join(bool_jsxs),
         '\n'.join(dt_jsxs),
         '\n'.join(img_jsxs),
-        '\n'.join(link_jsxs),
         '\n'.join(custom_jsxs),
     ]))
-
-    # Bridge child (Stage 3): prepend parent info section as read-only fields.
-    _bridge_child_ir_fv = ctx.get('bridge_child_ir')
-    _bridge_parent_opts_fv = ctx.get('bridge_parent_options', [])
-    if _bridge_child_ir_fv and _bridge_parent_opts_fv:
-        _bp_section = (
-            "      <AppFieldText\n"
-            "        label={tf('parentType')}\n"
-            "        value={src.parent_type ?? ''}\n"
-            "        readOnly\n"
-            "      />\n"
-            "      <AppFieldText\n"
-            "        label={tf('parentLabel')}\n"
-            "        value={src.parent_label ?? ''}\n"
-            "        readOnly\n"
-            "      />"
-        )
-        all_parent_fields = '\n'.join(filter(None, [_bp_section, all_parent_fields]))
 
     # Reverse OTO rels (FK in target): display as labeled fields with view links
     reverse_oto_rels = ctx.get('reverse_oto_rels', [])
@@ -1740,7 +2533,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 # carry the nested array shape (it's typed as the bare
                 # target's properties, not the _detail's extension).
                 _item_target = _field.get('item_target', '')
-                _item_props  = schema['definitions'].get(_item_target, {}).get('properties', {})
+                _item_props  = _raw_def(_item_target, schema).get('properties', {})
                 _item_label  = 'name' if 'name' in _item_props else 'id'
                 has_flatten_array = True
                 _inner.append(
@@ -1834,14 +2627,17 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     grid_children        = [c for c in children_raw if c.get('output_type') not in ('list', 'comments')]
     col_fn_names         = [f"use{to_pascal_case(c['property_name'])}Columns" for c in grid_children]
 
-    child_view_grids = []
-    _view_has_reactions = bool(ctx.get('named_constants'))
-    _parent_pascal_view = to_pascal_case(ctx.get('parent', ''))
-    _view_reaction_props = (
-        f"        reactionTypes={{[...COMMENT_REACTION_TYPES]}}\n"
-        f"        onToggleReaction={{toggle{_parent_pascal_view}CommentReaction}}\n"
-        if _view_has_reactions else ""
+    # cmd_522c: comment display uses <MentionText> instead of plain text when
+    # the shared comment entity has an x-mention field. Wired via
+    # CommentListWrapper's renderMessage render-prop (never a direct import
+    # inside that always-present static component — see its own docstring).
+    comment_has_mention = ctx.get('comment_has_mention', False)
+    _render_message_prop = (
+        "        renderMessage={(c) => <MentionText text={c.message} userContext={mentionUserContext ?? {}} canViewUserProfile={Boolean(canViewUserProfile)} />}"
+        if comment_has_mention else ""
     )
+
+    child_view_grids = []
     # Bridge-based comment section (commentable one-to-one)
     if has_commentable:
         child_view_grids.append(
@@ -1850,8 +2646,8 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             f"        showTitle={{true}}\n"
             f"        title={{tf('comments')}}\n"
             f"        permissions={{{{ create: false, delete: false }}}}\n"
-            f"{_view_reaction_props}"
-            f"      />"
+            + (f"{_render_message_prop}\n" if _render_message_prop else "")
+            + f"      />"
         )
     for child in children_raw:
         prop = child['property_name']
@@ -1864,8 +2660,8 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 f"        showTitle={{true}}\n"
                 f"        title={{tf('{child_camel}')}}\n"
                 f"        permissions={{{{ create: false, delete: false }}}}\n"
-                f"{_view_reaction_props}"
-                f"      />"
+                + (f"{_render_message_prop}\n" if _render_message_prop else "")
+                + f"      />"
             )
         elif ot == 'list':
             ft = child.get('file_type')
@@ -1930,35 +2726,25 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     has_rel_links = any(rel_by_prop.get(p) for p in other_flds) or bool(reverse_oto_rels) or has_accordion_rel_links
 
-    # Parent-embedded bridge child DataGrids (cmd_167 §4). For each bridge child
-    # whose x-bridge lists this entity as a parent, embed <Child>BridgeGrid bound
-    # to the parent's bridge row (src.<bridge>_id) and import it.
-    _parent_type = ctx.get('model', ctx.get('parent', ''))
-    _bridge_kids = collect_parent_bridge_children(_parent_type, schema) if schema else []
-    if _bridge_kids:
-        _bridge_imports = []
-        for _bk in _bridge_kids:
-            _ck = _bk['child']
-            _cp = to_pascal_case(_ck)
-            _bridge_imports.append(f"import {_cp}BridgeGrid from '../{_ck}/{_cp}BridgeGrid';")
-            # The bridge FK is auto-created and returned by the getter but is not
-            # part of the public detail type, so read it through a safe cast.
-            child_view_grids.append(
-                f"      <{_cp}BridgeGrid"
-                f" bridgeId={{String((src as Record<string, unknown>).{_bk['parent_fk']} ?? '')}}"
-                f" parentType=\"{_parent_type}\""
-                f" parentId={{src.id}}"
-                f" title={{te('{to_camel_case(_ck)}')}} readOnly />"
-            )
-        custom_view_imports = '\n'.join(filter(None, [custom_view_imports, *_bridge_imports]))
+    # AppFieldBoolean is imported unconditionally by the template but only
+    # rendered by boolean_flds (readonly display, all_parent_fields) — check
+    # the assembled body text so this can't drift from the code that emits it
+    # (mirrors the same fix in form_upsert_context, cmd_529).
+    _view_body_text = '\n'.join(filter(None, [
+        all_parent_fields,
+        reverse_oto_fields,
+        flatten_sections,
+        '\n'.join(child_view_grids),
+    ]))
+    uses_app_field_boolean = 'AppFieldBoolean' in _view_body_text
 
     return {
         'needs_datetime_wrapper': needs_datetime_wrapper,
         'needs_image_display':    needs_image_display,
-        'needs_link_display':     needs_link_display,
         'has_rel_links':          has_rel_links,
         'needs_accordion':        needs_accordion,
         'has_comment_children':   has_comment_children,
+        'comment_has_mention':    comment_has_mention,
         'has_list_children':      has_list_children or has_flatten_array,
         'has_grid_children':      bool(grid_children),
         'col_fn_names':           col_fn_names,
@@ -1972,6 +2758,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         'custom_view_imports':    custom_view_imports,
         'use_dayjs':              use_dayjs,
         'uses_format_label_value': uses_format_label_value,
+        'uses_app_field_boolean': uses_app_field_boolean,
     }
 
 
@@ -1990,7 +2777,23 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     parent_rels_raw = ctx['parent_rels_raw']
     selector_oto_rels = ctx.get('selector_oto_rels', [])
     selector_oto_prop_names = {r['prop_name'] for r in selector_oto_rels}
-    parent_rels_raw = [r for r in parent_rels_raw if r['prop_name'] not in selector_oto_prop_names]
+
+    # Readonly fields: exclude from editable field lists; render as disabled in edit mode only.
+    # Relation fields (parent_rels_raw / selector_oto_rels) are filtered here too, matching
+    # every other category below — without this, an x-readonly relation field renders BOTH
+    # a fully-interactive AppFieldRelation (unfiltered) AND a duplicate readonly display
+    # (readonly_edit_jsxs, edit-mode only), defeating the readonly annotation entirely on
+    # the interactive copy (cmd_355 subtask_355b finding; cmd_477e inventory_movement.
+    # from_inventory_id: the unfiltered required AppFieldRelation blocked every UI-driven
+    # create via native "please fill out this field" validation since the field is never
+    # user-fillable per x-readonly's documented contract).
+    readonly_field_names: set[str] = set(ctx.get('readonly_fields') or [])
+
+    parent_rels_raw = [
+        r for r in parent_rels_raw
+        if r['prop_name'] not in selector_oto_prop_names and r['prop_name'] not in readonly_field_names
+    ]
+    selector_oto_rels = [r for r in selector_oto_rels if r['prop_name'] not in readonly_field_names]
     children_raw  = ctx['children_raw']
     can_delete    = ctx['can_delete']
     selection_targets = ctx['selection_targets']
@@ -2002,14 +2805,19 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # the generated component must then `import { formatLabelValue } from '@/lib/_format';`.
     uses_format_label_value = False
 
-    # Readonly fields: exclude from editable field lists; render as disabled in edit mode only.
-    readonly_field_names: set[str] = set(ctx.get('readonly_fields') or [])
+    # mention_fields (cmd_522c): this entity's own text fields annotated
+    # x-mention: true render via <MentionInput> (picker + @[user_id:<id>]
+    # insertion) instead of the plain uncontrolled AppFieldText used by
+    # every other text field. Pulled out of text_props before the ref-based
+    # uncontrolled pattern below — MentionInput needs a controlled
+    # value/onChange pair so it can insert the marker at the caret.
+    mention_field_names: set[str] = set(ctx.get('mention_fields') or [])
+    mention_props = [p for p in cats['text'] if p not in readonly_field_names and p in mention_field_names]
 
-    text_props           = [p for p in cats['text']           if p not in readonly_field_names]
+    text_props           = [p for p in cats['text']           if p not in readonly_field_names and p not in mention_field_names]
     number_props         = [p for p in cats['number']         if p not in readonly_field_names]
     date_time_props      = [p for p in cats['date_time']      if p not in readonly_field_names]
     image_props          = [p for p in cats['image']          if p not in readonly_field_names]
-    link_uri_props       = [p for p in cats.get('link_uri', []) if p not in readonly_field_names]
     boolean_props        = [p for p in cats['boolean']        if p not in readonly_field_names]
     enum_int_props       = [p for p in cats['enum_integer']   if p not in readonly_field_names]
     enum_str_props       = [p for p in cats.get('enum_string', [])  if p not in readonly_field_names]
@@ -2020,12 +2828,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # ---- States / Refs ----
     text_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in text_props)
-    link_uri_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in link_uri_props)
     number_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in number_props)
-    parent_refs = '\n'.join(filter(None, [text_refs, link_uri_refs, number_refs]))
+    parent_refs = '\n'.join(filter(None, [text_refs, number_refs]))
 
-    bridge_child_ir = ctx.get('bridge_child_ir')
-    if bridge_child_ir:
+    _bridge_child_ir = ctx.get('bridge_child_ir')
+    if _bridge_child_ir:
         _bridge_refs = (
             "  const selectedParentTypeRef = useRef<HTMLInputElement>(null);\n"
             "  const selectedParentIdRef = useRef<HTMLInputElement>(null);"
@@ -2035,23 +2842,20 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     def _setter(var_name: str) -> str:
         return to_pascal_case_from_var(var_name)
 
-    def _ui_width_css(prop: dict) -> str | None:
+    def _ui_width_cols(prop: dict) -> int | None:
         val = (prop.get('x-ui') or {}).get('width')
-        if val is None:
+        if val is None or not isinstance(val, (int, float)):
             return None
-        if isinstance(val, (int, float)):
-            pct = val / 12 * 100
-            return f"{pct:.5g}%"
-        return str(val)
+        return int(val)
 
-    def _maybe_box_wrap(jsx: str, width_css: str | None) -> str:
-        if not width_css:
+    def _maybe_box_wrap(jsx: str, cols: int | None) -> str:
+        if not cols:
             return jsx
         reindented = '\n'.join('  ' + line if line.strip() else line for line in jsx.splitlines())
         return (
-            f"      <Box sx={{{{ width: {{ xs: '100%', md: '{width_css}' }} }}}}>\n"
+            f"      <AppFormFieldWrapper cols={{{cols}}}>\n"
             f"{reindented}\n"
-            f"      </Box>"
+            f"      </AppFormFieldWrapper>"
         )
 
     has_box_import = False
@@ -2074,6 +2878,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} || '');"
         for p in image_props
     )
+    mention_states = '\n'.join(
+        f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
+        for p in mention_props
+    )
     bool_states = '\n'.join(
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<boolean>(Boolean(src.{p}));"
         for p in boolean_props
@@ -2082,10 +2890,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<number | null>(src.{p} ?? null);"
         for p in enum_int_props
     )
-    enum_str_states = '\n'.join(
-        f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
-        for p in enum_str_props
-    )
+    def _enum_str_state_line(p: str) -> str:
+        sn = safe_var_name(p)
+        if _is_nullable(filtered_props.get(p, {})):
+            return f"  const [{sn}, set{_setter(sn)}] = useState<string | null>(src.{p} ?? null);"
+        return f"  const [{sn}, set{_setter(sn)}] = useState<string>(src.{p} ?? '');"
+    enum_str_states = '\n'.join(_enum_str_state_line(p) for p in enum_str_props)
     # Many-to-one: FK prop is in src type → initialize from src.{prop_name}
     # Selector OTO: FK prop is excluded from src type, but relation object is present → use src.{relation_name}?.id
     rel_states_lines = [
@@ -2108,7 +2918,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string | null>(src.{p} || null);"
         for p in entity_select_props
     )
-    all_states = '\n'.join(filter(None, [dt_states, img_states, bool_states, enum_states, enum_str_states, rel_states, custom_states, entity_select_states]))
+    all_states = '\n'.join(filter(None, [dt_states, img_states, mention_states, bool_states, enum_states, enum_str_states, rel_states, custom_states, entity_select_states]))
 
     # ---- Form fields (JSX) ----
     def _tf(p):
@@ -2132,8 +2942,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         else:
             multiline = 'true' if p == 'description' else 'false'
             rows = '4' if p == 'description' else 'undefined'
-        _text_width_css = _ui_width_css(prop)
-        if _text_width_css:
+        _text_width_cols = _ui_width_cols(prop)
+        if _text_width_cols:
             has_box_import = True
         _text_jsx = (
             f"      <AppFieldText\n"
@@ -2145,7 +2955,31 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        rows={{{rows}}}\n"
             f"      />"
         )
-        text_jsxs.append(_maybe_box_wrap(_text_jsx, _text_width_css))
+        text_jsxs.append(_maybe_box_wrap(_text_jsx, _text_width_cols))
+
+    # Mention fields (cmd_522c): x-mention: true text fields use the @picker.
+    mention_jsxs = []
+    for p in mention_props:
+        prop = filtered_props[p]
+        fk = _tf(p)
+        sn = safe_var_name(p)
+        req = p in (model_def.get('required') or [])
+        _ui_rows = (prop.get('x-ui') or {}).get('rows')
+        rows = str(int(_ui_rows)) if _ui_rows is not None else '4'
+        _mention_width_cols = _ui_width_cols(prop)
+        if _mention_width_cols:
+            has_box_import = True
+        _mention_jsx = (
+            f"      <MentionInput\n"
+            f"        label={{tf('{fk}')}}\n"
+            f"        value={{{sn}}}\n"
+            f"        onChange={{(v) => set{_setter(sn)}(v)}}\n"
+            f"        searchUsers={{searchMentionUserOptions}}\n"
+            f"        {'required' if req else ''}\n"
+            f"        rows={{{rows}}}\n"
+            f"      />"
+        )
+        mention_jsxs.append(_maybe_box_wrap(_mention_jsx, _mention_width_cols))
 
     def _autocomplete_rel_jsx(prop_name: str, target: str, required: bool) -> str:
         label_base    = prop_name.removesuffix('_id')
@@ -2156,6 +2990,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         search_var    = f'{state_name}SearchAction'
         initial_var   = f'{state_name}InitialOptions'
         current_var   = f'{state_name}CurrentOption'
+        denied_var    = f'{state_name}PermissionDenied'
         return (
             f"      <AppFieldRelation\n"
             f"        label={{tf('{label_fk}')}}\n"
@@ -2166,24 +3001,25 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        currentOption={{{current_var}}}\n"
             f"        href={{{state_name} ? `/{target}/view/${{{state_name}}}` : null}}\n"
             f"        required={{{'true' if required else 'false'}}}\n"
+            f"        permissionDenied={{{denied_var}}}\n"
             f"      />"
         )
 
     # Relationship fields (Autocomplete) — many-to-one and selector OTO
     rel_jsxs = []
     for r in parent_rels_raw:
-        _rel_width_css = _ui_width_css(filtered_props.get(r['prop_name'], {}))
-        if _rel_width_css:
+        _rel_width_cols = _ui_width_cols(filtered_props.get(r['prop_name'], {}))
+        if _rel_width_cols:
             has_box_import = True
         _rel_jsx = _autocomplete_rel_jsx(r['prop_name'], r['target'], bool(r.get('required')))
-        rel_jsxs.append(_maybe_box_wrap(_rel_jsx, _rel_width_css))
+        rel_jsxs.append(_maybe_box_wrap(_rel_jsx, _rel_width_cols))
     for r in selector_oto_rels:
         # Selector OTO: required = FK is not nullable
-        _rel_width_css = _ui_width_css(filtered_props.get(r['prop_name'], {}))
-        if _rel_width_css:
+        _rel_width_cols = _ui_width_cols(filtered_props.get(r['prop_name'], {}))
+        if _rel_width_cols:
             has_box_import = True
         _rel_jsx = _autocomplete_rel_jsx(r['prop_name'], r['target'], not r.get('nullable', True))
-        rel_jsxs.append(_maybe_box_wrap(_rel_jsx, _rel_width_css))
+        rel_jsxs.append(_maybe_box_wrap(_rel_jsx, _rel_width_cols))
 
     # Number fields
     num_jsxs = []
@@ -2226,21 +3062,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      />"
         )
 
-    # Link URI fields (URL text input, no upload)
-    link_uri_jsxs = []
-    for p in link_uri_props:
-        fk  = _tf(p)
-        req = p in (model_def.get('required') or [])
-        link_uri_jsxs.append(
-            f"      <AppFieldText\n"
-            f"        label={{tf('{fk}')}}\n"
-            f"        inputRef={{{p}Ref}}\n"
-            f"        defaultValue={{src.{p} || ''}}\n"
-            f"        {'required' if req else ''}\n"
-            f"        slotProps={{{{ htmlInput: {{ type: 'url' }} }}}}\n"
-            f"      />"
-        )
-
     # Image fields
     img_jsxs = []
     for p in image_props:
@@ -2277,7 +3098,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         opts_var  = f'{sn}Options'
         enum_vals = prop.get('enum', [])
         ns        = prop.get('x-enum-namespace')
-        req       = p in (model_def.get('required') or [])
+        # A non-nullable enum field (Prisma NOT NULL, possibly with a
+        # `@default(...)` that keeps it out of json_schema `required:`) can
+        # never be legally cleared, so it's validated like a required field
+        # even when the schema doesn't list it (cmd_472/R-2; see
+        # validation_context._is_select_like).
+        req       = p in (model_def.get('required') or []) or not _is_nullable(prop)
 
         if ns and ns not in enum_ns_set:
             enum_ns_set.add(ns)
@@ -2290,16 +3116,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 for i, v in enumerate(enum_vals)
             )
         else:
-            opts = ', '.join(
-                (f"{{ value: {i}, label: tf('{p}_{v}') }}"
-                 if isinstance(v, str) and not str(v).lstrip('-').isdigit()
-                 else f"{{ value: {int(v) if isinstance(v, (int, float)) else i}, label: tf('{p}_{v}') }}")
-                for i, v in enumerate(enum_vals)
-            )
+            opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
-        _enum_int_width_css = _ui_width_css(prop)
-        if _enum_int_width_css:
+        _enum_int_width_cols = _ui_width_cols(prop)
+        if _enum_int_width_cols:
             has_box_import = True
         _enum_int_jsx = (
             f"      <AppFieldSelect\n"
@@ -2310,7 +3131,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        {'required' if req else ''}\n"
             f"      />"
         )
-        enum_int_jsxs.append(_maybe_box_wrap(_enum_int_jsx, _enum_int_width_css))
+        enum_int_jsxs.append(_maybe_box_wrap(_enum_int_jsx, _enum_int_width_cols))
 
     # Enum string fields (string discriminator with fixed enum values)
     enum_str_jsxs = []
@@ -2321,24 +3142,46 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         setter    = _setter(sn)
         opts_var  = f'{sn}Options'
         enum_vals = prop.get('enum', [])
-        req       = p in (model_def.get('required') or [])
+        # See the enum_int_props loop above (cmd_472/R-2): a non-nullable
+        # enum field is validated as required even if a Prisma default
+        # keeps it out of json_schema `required:`.
+        req       = p in (model_def.get('required') or []) or not _is_nullable(prop)
+        native_ns = _native_enum_ns(prop)
 
-        opts = ', '.join(f"{{ value: '{v}', label: '{v}' }}" for v in enum_vals)
+        if native_ns:
+            if native_ns not in enum_ns_set:
+                enum_ns_set.add(native_ns)
+                enum_ns_hooks.append(f"  const t{native_ns} = useTranslations('{native_ns}');")
+            opts = ', '.join(
+                f"{{ value: '{v}', label: t{native_ns}('{_native_enum_key(v)}') }}"
+                for v in enum_vals
+            )
+        else:
+            opts = ', '.join(f"{{ value: '{v}', label: '{v}' }}" for v in enum_vals)
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
-        _enum_str_width_css = _ui_width_css(prop)
-        if _enum_str_width_css:
+        _enum_str_width_cols = _ui_width_cols(prop)
+        if _enum_str_width_cols:
             has_box_import = True
+        # Nullable → pass the cleared (null) value straight through so an
+        # explicit NULL reaches the server. Non-nullable → fall back to ''
+        # so the missing-value check in form_validation.ts (isMissingValue)
+        # catches it before submit (cmd_472/R-2).
+        _enum_str_on_change = (
+            f"onChange={{(newValue) => set{setter}(newValue)}}"
+            if _is_nullable(prop)
+            else f"onChange={{(newValue) => set{setter}(newValue ?? '')}}"
+        )
         _enum_str_jsx = (
             f"      <AppFieldSelect\n"
             f"        options={{{opts_var}}}\n"
             f"        value={{{opts_var}.find((o) => o.value === {sn}) ?? null}}\n"
-            f"        onChange={{(newValue) => set{setter}(newValue ?? '')}}\n"
+            f"        {_enum_str_on_change}\n"
             f"        label={{tf('{fk}')}}\n"
             f"        {'required' if req else ''}\n"
             f"      />"
         )
-        enum_str_jsxs.append(_maybe_box_wrap(_enum_str_jsx, _enum_str_width_css))
+        enum_str_jsxs.append(_maybe_box_wrap(_enum_str_jsx, _enum_str_width_cols))
 
     # For each many-to-one (and selector OTO) relation, emit:
     #   - {prop}InitialOptions  : useMemo over the limited initial set (initial{Target}s)
@@ -2355,6 +3198,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         initial_var   = f'{sn}InitialOptions'
         search_var    = f'{sn}SearchAction'
         current_var   = f'{sn}CurrentOption'
+        denied_var    = f'{sn}PermissionDenied'
         prop_initial  = f'initial{target_pascal}s'
         prop_search   = f'search{target_pascal}Options'
 
@@ -2363,15 +3207,38 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         if label_built['has_format']:
             uses_format_label_value = True
 
+        # DP-3 (cmd_377/379): forward callerEntity + selected sibling-field
+        # values into the target's autocomplete filter hook (context param
+        # on search{Target}Options), but only for FK fields that carry an
+        # 'x-autocomplete-context' annotation — every other FK's call site
+        # (the overwhelming majority) is byte-for-byte unchanged.
+        ctx_fields = r.get('autocomplete_context_fields') or []
+        if ctx_fields:
+            form_values_entries = ', '.join(f'{f}: {safe_var_name(f)}' for f in ctx_fields)
+            search_call_args = (
+                f"query, includeIds, 50, "
+                f"{{ callerEntity: '{parent}', formValues: {{ {form_values_entries} }} }}"
+            )
+            search_deps = ''.join(f', {safe_var_name(f)}' for f in ctx_fields)
+        else:
+            search_call_args = "query, includeIds"
+            search_deps = ''
+
         rel_opt_setups.append(
             f"  const {initial_var} = useMemo(() => ({prop_initial} ?? []).map((item) => ({{\n"
             f"    id: item.id,\n"
             f"    label: {label_built['expression']},\n"
             f"  }})), [{prop_initial}]);\n"
+            # The page (a Server Component) computes this flag from
+            # initial{Target}s's permissionDenied marker and passes it as its
+            # own boolean prop — a non-index property attached to an array
+            # does not survive the Server-to-Client Component serialization
+            # boundary, so it cannot be read back off {prop_initial} here.
+            f"  const {denied_var} = Boolean({prop_initial}PermissionDenied);\n"
             f"  const {search_var} = useCallback(async (query: string, includeIds: string[]) => {{\n"
-            f"    const rows = (await {prop_search}?.(query, includeIds)) ?? [];\n"
+            f"    const rows = (await {prop_search}?.({search_call_args})) ?? [];\n"
             f"    return rows.map((item) => ({{ id: item.id, label: {label_built['expression']} }}));\n"
-            f"  }}, [{prop_search}]);\n"
+            f"  }}, [{prop_search}{search_deps}]);\n"
             f"  const {current_var} = useMemo(() => (\n"
             f"    src.{rel_name} ? {{ id: src.{rel_name}.id, label: {current_built['expression']} }} : null\n"
             f"  ), [src.{rel_name}]);"
@@ -2410,7 +3277,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         setter = _setter(sn)
         custom_jsxs.append(f"      <{comp} value={{{sn}}} onChange={{set{setter}}} isEdit={{isEdit}} />")
 
-    # Readonly fields: displayed as disabled text fields in edit mode, omitted in new mode.
+    # Readonly fields: displayed as readOnly text fields in edit mode, omitted in new mode.
     readonly_edit_jsxs = []
     for _ro_fn in sorted(readonly_field_names):
         if _ro_fn not in filtered_props:
@@ -2420,15 +3287,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      {{isEdit && (\n"
             f"        <AppFieldText\n"
             f"          label={{tf('{_ro_fk}')}}\n"
-            f"          defaultValue={{src.{_ro_fn} !== null && src.{_ro_fn} !== undefined ? String(src.{_ro_fn}) : ''}}\n"
-            f"          disabled\n"
+            f"          value={{src.{_ro_fn} !== null && src.{_ro_fn} !== undefined ? String(src.{_ro_fn}) : ''}}\n"
+            f"          readOnly\n"
             f"        />\n"
             f"      )}}"
         )
 
     all_parent_fields_jsx = '\n'.join(filter(None, [
         '\n'.join(text_jsxs),
-        '\n'.join(link_uri_jsxs),
+        '\n'.join(mention_jsxs),
         '\n'.join(entity_select_jsxs),
         '\n'.join(rel_jsxs),
         '\n'.join(num_jsxs),
@@ -2440,12 +3307,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         '\n'.join(custom_jsxs),
         '\n'.join(readonly_edit_jsxs),
     ]))
-    if bridge_child_ir:
+
+    if _bridge_child_ir:
         # Stage 2: bridge parent UI.
         # Edit mode: parent type and label displayed read-only so the user sees context.
         # New mode:  hidden inputs carry selectedParentType/Id (populated by parent-embedded create).
-        _bc_bridge_name = bridge_child_ir['name']
-        _bc_fk_prop = f'{_bc_bridge_name}_id'
+        _bc_bridge_name = _bridge_child_ir['name']
         _bridge_jsx = (
             f"      {{/* bridge-parent: {_bc_bridge_name} — set by parent-embedded create, not switchable */}}\n"
             f"      {{isEdit ? (\n"
@@ -2464,8 +3331,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # ---- FormData sets ----
     text_ds  = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in text_props)
-    link_uri_ds = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in link_uri_props)
-    entity_select_ds = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} || '');" for p in entity_select_props)
+    def _entity_select_fds_line(p: str) -> str:
+        var = safe_var_name(p)
+        if _is_nullable(filtered_props.get(p, {})):
+            return f"    if ({var}) formData.set('{p}', {var});"
+        return f"    formData.set('{p}', {var} || '');"
+    entity_select_ds = '\n'.join(_entity_select_fds_line(p) for p in entity_select_props)
     num_ds   = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in number_props)
     dt_ds_parts = []
     for p in date_time_props:
@@ -2478,17 +3349,38 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             dt_ds_parts.append(f"    formData.set('{p}', {sn}?.toISOString() || '');")
     dt_ds = '\n'.join(dt_ds_parts)
     img_ds   = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in image_props)
-    rel_ds   = '\n'.join(f"    formData.set('{r['prop_name']}', {safe_var_name(r['prop_name'])} || '');" for r in list(parent_rels_raw) + list(selector_oto_rels))
+    mention_ds = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in mention_props)
+    def _rel_fds_line(r: dict) -> str:
+        var = safe_var_name(r['prop_name'])
+        # parent_rels_raw entries carry a 'required' key; selector_oto_rels entries carry 'nullable'.
+        is_optional = r.get('nullable', False) or not r.get('required', True)
+        if is_optional:
+            return f"    if ({var}) formData.set('{r['prop_name']}', {var});"
+        return f"    formData.set('{r['prop_name']}', {var} || '');"
+    rel_ds   = '\n'.join(_rel_fds_line(r) for r in list(parent_rels_raw) + list(selector_oto_rels))
     bool_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)}.toString());" for p in boolean_props)
-    enum_ds      = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)} !== null ? String({safe_var_name(p)}) : '');" for p in enum_int_props)
-    enum_str_ds  = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in enum_str_props)
+    def _enum_int_fds_line(p: str) -> str:
+        var = safe_var_name(p)
+        if _is_nullable(filtered_props.get(p, {})):
+            # Nullable → omit the key entirely when cleared, matching the
+            # rel/entity_select convention: data.get() then naturally
+            # returns null instead of the string 'null' (cmd_472/R-2).
+            return f"    if ({var} !== null) formData.set('{p}', String({var}));"
+        return f"    formData.set('{p}', {var} !== null ? String({var}) : '');"
+    enum_ds      = '\n'.join(_enum_int_fds_line(p) for p in enum_int_props)
+    def _enum_str_fds_line(p: str) -> str:
+        var = safe_var_name(p)
+        if _is_nullable(filtered_props.get(p, {})):
+            return f"    if ({var}) formData.set('{p}', {var});"
+        return f"    formData.set('{p}', {var});"
+    enum_str_ds  = '\n'.join(_enum_str_fds_line(p) for p in enum_str_props)
     def _custom_form_data_line(p: str) -> str:
         defn = filtered_props.get(p, {})
         if _get_actual_type(defn) == 'boolean':
             return f"    formData.set('{p}', {safe_var_name(p)}.toString());"
         return f"    formData.set('{p}', {safe_var_name(p)});"
     cust_ds  = '\n'.join(_custom_form_data_line(p) for p in custom_upsert_props)
-    parent_form_data_sets = '\n'.join(filter(None, [text_ds, link_uri_ds, entity_select_ds, rel_ds, num_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, cust_ds]))
+    parent_form_data_sets = '\n'.join(filter(None, [text_ds, mention_ds, entity_select_ds, rel_ds, num_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, cust_ds]))
 
     # ---- Children analysis ----
     # Use the pre-filtered embedded_ch from build_context (passed as non_comment_ch in ctx).
@@ -2526,11 +3418,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         if c.get('output_type') != 'list' and (c.get('relationship') or {}).get('type') != 'many-to-many'
     ]
 
-    # Ordered children detection
-    has_ordered_ch = any(
-        'order' in (schema['definitions'].get(c['name'], {}).get('properties') or {})
-        for c in non_comment_ch
-    )
     # Flatten arrays (e.g., pre_check_detail.symptoms) need EditableListWrapper
     # too — detect early so the import is included alongside the standard
     # list-child case.
@@ -2546,19 +3433,17 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     )
     has_ordered_list_ch = any(
         c.get('output_type') == 'list' and (c.get('relationship') or {}).get('type') != 'many-to-many'
-        and 'order' in (schema['definitions'].get(c['name'], {}).get('properties') or {})
+        and 'order' in (_raw_def(c['name'], schema).get('properties') or {})
         for c in non_comment_ch
     )
 
     # Child imports
+    # (m2m targets used to also get an `import type { <Target> } from
+    # '@/lib/<target>/types'` here, but that type is never referenced anywhere
+    # in the rendered FormUpsert body — the m2m JSX only reads `item.id` /
+    # `item.name` inline, with no type annotation. Always-dead import, removed
+    # outright rather than gated (cmd_529).)
     child_imports_parts = []
-    m2m_targets = list(dict.fromkeys(
-        c['relationship']['target']
-        for c in children_raw
-        if (c.get('relationship') or {}).get('type') == 'many-to-many'
-    ))
-    for t in m2m_targets:
-        child_imports_parts.append(f"import type {{ {to_pascal_case(t)} }} from '@/lib/{t}/types';")
     if has_list_ch:
         child_imports_parts.append("import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';")
     if has_ordered_list_ch:
@@ -2569,26 +3454,29 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     )
     if has_grid_ch:
         child_imports_parts.append("import type { GridRowsProp } from '@/components/ui/data';")
-        dg_import = (
-            "import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';\n"
-            "import OrderedFieldsDataGrid from '@/components/_standard/OrderedFieldsDataGrid';"
-            if has_ordered_ch else
-            "import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';"
-        )
-        child_imports_parts.append(dg_import)
+        # Each grid child renders OrderedFieldsDataGrid iff it has its own
+        # 'order' prop, else plain FieldsDataGrid (see the `has_order` switch
+        # below) — importing both unconditionally left one dead whenever every
+        # grid child fell on the same side (cmd_529, e.g. dashboard's single
+        # ordered grid child left FieldsDataGrid unused).
+        _grid_ch = [
+            c for c in non_comment_ch
+            if c.get('output_type') != 'list' and (c.get('relationship') or {}).get('type') != 'many-to-many'
+        ]
+        _grid_ch_has_order = [
+            'order' in (_raw_def(c['name'], schema).get('properties') or {})
+            for c in _grid_ch
+        ]
+        dg_import_parts = []
+        if not all(_grid_ch_has_order):
+            dg_import_parts.append("import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';")
+        if any(_grid_ch_has_order):
+            dg_import_parts.append("import OrderedFieldsDataGrid from '@/components/_standard/OrderedFieldsDataGrid';")
+        child_imports_parts.append('\n'.join(dg_import_parts))
     if col_fn_names:
         child_imports_parts.append(f"import {{ {', '.join(col_fn_names)} }} from '../{parent}/column_def';")
     if has_indep_list_children:
         child_imports_parts.append("import ListWrapper from '@/components/_standard/ListWrapper';")
-
-    # Bridge child DataGrids on the parent edit page (P1: mutation affordances on edit, not detail).
-    _upsert_parent_type = ctx.get('model', ctx.get('parent', ''))
-    _bridge_kids_upsert = collect_parent_bridge_children(_upsert_parent_type, schema) if schema else []
-    for _bku in _bridge_kids_upsert:
-        _cku = _bku['child']
-        _cpu = to_pascal_case(_cku)
-        child_imports_parts.append(f"import {_cpu}BridgeGrid from '../{_cku}/{_cpu}BridgeGrid';")
-
     child_imports = '\n'.join(child_imports_parts)
 
     # Child variables (useRef)
@@ -2608,7 +3496,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         prop_name  = c['property_name']
         child_var  = safe_var_name(prop_name)
         child_pascal = to_pascal_case(prop_name)
-        child_def  = schema['definitions'].get(child_name, {})
+        child_def  = _raw_def(child_name, schema)
         child_props_dict = child_def.get('properties', {})
         is_m2m     = (c.get('relationship') or {}).get('type') == 'many-to-many'
         is_list    = c.get('output_type') == 'list'
@@ -2703,12 +3591,32 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             if actual == 'string' and fmt in ('date', 'date-time', 'time'):
                 return "dayjs().toISOString()"
             if actual == 'string':
+                # Prisma nativeEnum-backed field: '' is not a valid enum member,
+                # so the new-row seed must use the schema's actual default
+                # (mirrors build_context.py:_default_value, cmd_446 pilot).
+                if defn.get('_prisma_native_enum_type') and 'default' in defn:
+                    return f"'{defn['default']}'"
+                if defn.get('_prisma_native_enum_type') and nullable:
+                    # Nullable (e.g. stack_mode/group_by_bucket) with no schema
+                    # default — seeding with enum[0] would fabricate meaning
+                    # that was never chosen, so leave it unset instead.
+                    return 'null'
+                if defn.get('_prisma_native_enum_type') and isinstance(defn.get('enum'), list) and defn['enum']:
+                    # Required field with no schema default — a required
+                    # column can't be left empty, so fall back to the first
+                    # declared enum member so create() still receives a valid
+                    # enum value.
+                    return f"'{defn['enum'][0]}'"
                 return "''"
             if actual in ('integer', 'number'):
                 if nullable:
                     return 'null'
                 schema_default = defn.get('default')
-                return str(schema_default) if schema_default is not None else '0'
+                if schema_default is None:
+                    return '0'
+                # Integer-enum defaults may be string labels (e.g. 'outstanding');
+                # emit the stored ordinal so the row value typechecks as a number.
+                return _enum_value_literal(defn, schema_default)
             return 'null'
 
         create_body = '\n'.join(
@@ -2740,7 +3648,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     for c in non_comment_ch:
         if c.get('output_type') == 'list' or (c.get('relationship') or {}).get('type') == 'many-to-many':
             continue
-        cdef = schema['definitions'].get(c['name'], {})
+        cdef = _raw_def(c['name'], schema)
         parent_fk_props_cdef = get_parent_fk_props(cdef, model)
         child_prop_name = c['property_name']
         for r in get_parent_relationships(cdef):
@@ -2762,23 +3670,32 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             prop_initial  = f'initial{target_pascal}s'
             prop_search   = f'search{target_pascal}Options'
 
+            # label_field may be a single field name or a composite path list
+            # (e.g. ['product.name', 'location', 'lot_number']) — always go
+            # through build_label_expression rather than raw `item.{label_field}`
+            # property access, which breaks on composite/array labelField.
+            item_built = build_label_expression('item', label_field, target, schema)
+            row_built  = build_label_expression(f'row.{label_base}', label_field, target, schema)
+            if item_built['has_format'] or row_built['has_format']:
+                uses_format_label_value = True
+
             child_entity_rel_opt.append(
                 f"  const {lookup_var} = useMemo<Map<string, string>>(() => {{\n"
                 f"    const m = new Map<string, string>();\n"
                 f"    src.{child_prop_name}.forEach(row => {{\n"
-                f"      if (row.{label_base}) m.set(row.{label_base}.id, row.{label_base}.{label_field});\n"
+                f"      if (row.{label_base}) m.set(row.{label_base}.id, {row_built['expression']});\n"
                 f"    }});\n"
-                f"    ({prop_initial} ?? []).forEach(item => {{ m.set(item.id, item.{label_field}); }});\n"
+                f"    ({prop_initial} ?? []).forEach(item => {{ m.set(item.id, {item_built['expression']}); }});\n"
                 f"    return m;\n"
                 f"  }}, [src.{child_prop_name}, {prop_initial}]);\n"
                 f"  const {initial_opts_var} = useMemo(() =>\n"
-                f"    ({prop_initial} ?? []).map(item => ({{ id: item.id, label: item.{label_field} }})),\n"
+                f"    ({prop_initial} ?? []).map(item => ({{ id: item.id, label: {item_built['expression']} }})),\n"
                 f"  [{prop_initial}]);\n"
                 f"  const {config_var} = useMemo<EntityAutocompleteCellConfig>(() => ({{\n"
                 f"    searchAction: async (query, includeIds) => {{\n"
                 f"      const rows = (await {prop_search}?.(query, includeIds)) ?? [];\n"
-                f"      rows.forEach(item => {{ {lookup_var}.set(item.id, item.{label_field}); }});\n"
-                f"      return rows.map(item => ({{ id: item.id, label: item.{label_field} }}));\n"
+                f"      rows.forEach(item => {{ {lookup_var}.set(item.id, {item_built['expression']}); }});\n"
+                f"      return rows.map(item => ({{ id: item.id, label: {item_built['expression']} }}));\n"
                 f"    }},\n"
                 f"    initialOptions: {initial_opts_var},\n"
                 f"    labelLookup: {lookup_var},\n"
@@ -2794,7 +3711,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         prop_name  = c['property_name']
         child_var  = safe_var_name(prop_name)
         form_key   = singularize(prop_name)
-        child_def  = schema['definitions'].get(child_name, {})
+        child_def  = _raw_def(child_name, schema)
         child_props_dict = child_def.get('properties', {})
         is_m2m = (c.get('relationship') or {}).get('type') == 'many-to-many'
         is_list = c.get('output_type') == 'list'
@@ -2875,14 +3792,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # Child datagrid required-field validation (injected at start of handleSubmit)
     child_validation_parts = []
-    exclude_validation = {'id', 'created_at', 'updated_at', 'creator_id', 'order'}
+    exclude_validation = {'id', 'created_at', 'updated_at', 'creator_id', 'order', 'approvable_id'}
     for c in non_comment_ch:
         child_name = c['name']
         prop_name  = c['property_name']
         child_var  = safe_var_name(prop_name)
         child_pascal = to_pascal_case(prop_name)
         child_title_label = ' '.join(w.capitalize() for w in prop_name.split('_'))
-        child_def  = schema['definitions'].get(child_name, {})
+        child_def  = _raw_def(child_name, schema)
         child_props_dict_v = child_def.get('properties', {})
         is_list = c.get('output_type') == 'list'
         is_m2m  = (c.get('relationship') or {}).get('type') == 'many-to-many'
@@ -2924,7 +3841,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         child_pascal = to_pascal_case(prop_name)
         child_camel  = to_camel_case(prop_name)
         child_title_label = ' '.join(w.capitalize() for w in prop_name.split('_'))
-        child_def    = schema['definitions'].get(child_name, {})
+        child_def    = _raw_def(child_name, schema)
         child_props_dict = child_def.get('properties', {})
         is_m2m = (c.get('relationship') or {}).get('type') == 'many-to-many'
         is_list = c.get('output_type') == 'list'
@@ -2966,8 +3883,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             search_action_var = f'search{target_pascal}Options'
             initial_data_var  = f'initial{target_pascal}s'
             _ch_prop_def = model_def.get('properties', {}).get(prop_name, {})
-            _ch_width_css = _ui_width_css(_ch_prop_def)
-            if _ch_width_css:
+            _ch_width_cols = _ui_width_cols(_ch_prop_def)
+            if _ch_width_cols:
                 has_box_import = True
             _ch_m2m_jsx = (
                 f"      <EditableListWrapper\n"
@@ -2990,7 +3907,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"        excludeOptionIds={{[src.id]}}\n"
                 f"      />"
             )
-            child_grid_components_parts.append(_maybe_box_wrap(_ch_m2m_jsx, _ch_width_css))
+            child_grid_components_parts.append(_maybe_box_wrap(_ch_m2m_jsx, _ch_width_cols))
             continue
 
         if is_list:
@@ -2998,8 +3915,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             has_order = 'order' in child_props_dict
             list_comp = 'OrderedEditableListWrapper' if has_order else 'EditableListWrapper'
             _ch_prop_def = model_def.get('properties', {}).get(prop_name, {})
-            _ch_width_css = _ui_width_css(_ch_prop_def)
-            if _ch_width_css:
+            _ch_width_cols = _ui_width_cols(_ch_prop_def)
+            if _ch_width_cols:
                 has_box_import = True
             if ft:
                 accepted = ('image/jpeg,image/png,image/gif,image/webp' if ft == 'image'
@@ -3029,7 +3946,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"        textFieldPlaceholder=\"Enter name\"\n"
                     f"      />"
                 )
-            child_grid_components_parts.append(_maybe_box_wrap(_ch_list_jsx, _ch_width_css))
+            child_grid_components_parts.append(_maybe_box_wrap(_ch_list_jsx, _ch_width_cols))
             continue
 
         # Grid child
@@ -3051,24 +3968,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     child_grid_components = '\n'.join(child_grid_components_parts)
 
-    # Bridge child DataGrids on the parent edit page: isEdit-guarded, readOnly={false} to show mutation affordances.
-    bridge_edit_grids_parts = []
-    for _bku in _bridge_kids_upsert:
-        _cku = _bku['child']
-        _cpu = to_pascal_case(_cku)
-        _cku_camel = to_camel_case(_cku)
-        bridge_edit_grids_parts.append(
-            f"      {{isEdit && (\n"
-            f"        <{_cpu}BridgeGrid\n"
-            f"          bridgeId={{String((src as Record<string, unknown>).{_bku['parent_fk']} ?? '')}}\n"
-            f"          parentType=\"{_upsert_parent_type}\"\n"
-            f"          parentId={{src.id}}\n"
-            f"          title={{te('{_cku_camel}')}}\n"
-            f"        />\n"
-            f"      )}}"
-        )
-    bridge_edit_grids = '\n'.join(bridge_edit_grids_parts)
-
     # Read-only JSX for independent mandatory-FK list children (isEdit-guarded, no add/delete)
     indep_list_readonly_parts = []
     for c in indep_list_ch:
@@ -3077,8 +3976,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         ft = c.get('file_type')
         rel = c.get('relationship') or {}
         _indep_prop_def = model_def.get('properties', {}).get(prop, {})
-        _indep_width_css = _ui_width_css(_indep_prop_def)
-        if _indep_width_css:
+        _indep_width_cols = _ui_width_cols(_indep_prop_def)
+        if _indep_width_cols:
             has_box_import = True
         if ft:
             _indep_jsx = (
@@ -3117,7 +4016,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"        />\n"
                 f"      )}}"
             )
-        indep_list_readonly_parts.append(_maybe_box_wrap(_indep_jsx, _indep_width_css))
+        indep_list_readonly_parts.append(_maybe_box_wrap(_indep_jsx, _indep_width_cols))
     indep_list_readonly_jsx = '\n'.join(indep_list_readonly_parts)
 
     # FormUpsert params signature.
@@ -3134,17 +4033,38 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             _seen.add(_t)
             _ordered_targets.append(_t)
     _initial_props = [f"initial{to_pascal_case(t)}s = []" for t in _ordered_targets]
+    # ...PermissionDenied is only read inside the rel_opt_setups block below
+    # (single-FK autocomplete: `const {denied_var} = Boolean(initial{Target}s
+    # PermissionDenied)`, one per parent_rels_raw / selector_oto_rels entry) —
+    # a target that's only a plain m2m/list child (selection_targets but not
+    # also an FK relation target) never reads it, so declaring it
+    # unconditionally for every selection_target left it dead for those
+    # entities (cmd_529, e.g. organization's `users` child). Only declare it
+    # for targets that are actually FK-relation targets.
+    _fk_rel_targets = {r['target'] for r in parent_rels_raw} | {r['target'] for r in selector_oto_rels}
+    _denied_props  = [
+        f"initial{to_pascal_case(t)}sPermissionDenied = false"
+        for t in _ordered_targets
+        if t in _fk_rel_targets
+    ]
     _search_props  = [f"search{to_pascal_case(t)}Options" for t in _ordered_targets]
-    extra_default_props = ', '.join(_initial_props + _search_props)
+    extra_default_props = ', '.join(_initial_props + _denied_props + _search_props)
     entity_edit_components = ctx.get('entity_edit_components') or []
     has_current_user_role_ids = bool(entity_edit_components)
     # Bridge children receive parent context (set on the create form by the
     # parent-embedded grid via /new?parentType=&parentId=).
-    _is_bridge_child = bool(ctx.get('bridge_child_ir'))
+    _is_bridge_child = bool(_bridge_child_ir)
     _bridge_params = ', initialParentType, initialParentId' if _is_bridge_child else ''
+    # `permissions` is only read by the `canDelete` line (itself gated on
+    # can_delete/can_invalidate, cmd_529) and by the entity_edit_components
+    # JSX below — an entity with neither leaves it dead. Still part of
+    # FormUpsertProps (the caller still passes it), so alias rather than drop
+    # the destructured binding.
+    _permissions_used = bool(can_delete) or bool(ctx.get('can_invalidate')) or has_current_user_role_ids
+    _permissions_binding = 'permissions' if _permissions_used else 'permissions: _permissions'
     if extra_default_props or has_comment_children or has_current_user_role_ids or _is_bridge_child:
         form_upsert_params = (
-            f"{{ src, isEdit, permissions"
+            f"{{ src, isEdit, {_permissions_binding}"
             + (', currentUserId' if has_comment_children else '')
             + (', currentUserRoleIds' if has_current_user_role_ids else '')
             + (f', {extra_default_props}' if extra_default_props else '')
@@ -3152,15 +4072,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             + " }: FormUpsertProps"
         )
     else:
-        form_upsert_params = "{ src, isEdit, permissions }: FormUpsertProps"
+        form_upsert_params = f"{{ src, isEdit, {_permissions_binding} }}: FormUpsertProps"
 
     # Validation call
     validation_entry_lines = ['    isEdit,', '    id: src.id,']
     validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in text_props)
-    validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in link_uri_props)
     validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in number_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in date_time_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in image_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in mention_props)
     validation_entry_lines.extend(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in parent_rels_raw)
     validation_entry_lines.extend(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in selector_oto_rels)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in boolean_props)
@@ -3175,9 +4095,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     comment_jsx_parts = []
     comment_add_id_expr = 'src.id'  # default: old pattern uses parent entity id
     has_reactions = bool(ctx.get('named_constants'))
+    # toggle{Parent}CommentReaction's `type` param is the precise reaction-enum
+    # literal union (see generators.reaction_type_ts) — narrower than the shared
+    # CommentListWrapper's `string | number` callback signature. TS's strict
+    # (contravariant) function-parameter checking rejects the plain function
+    # reference here even though it's runtime-safe (the UI only ever forwards
+    # values that already came from COMMENT_REACTION_TYPES), hence the cast.
     _reaction_props = (
         f"          reactionTypes={{[...COMMENT_REACTION_TYPES]}}\n"
-        f"          onToggleReaction={{toggle{parent_pascal}CommentReaction}}\n"
+        f"          onToggleReaction={{toggle{parent_pascal}CommentReaction as (commentId: string, type: string | number) => Promise<CommentReactionSummary>}}\n"
         if has_reactions else ""
     )
     for c in comment_children:
@@ -3257,7 +4183,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         _target = _flat['target']
         _fields = _flat['fields']
         _rel_camel = to_camel_case(_prop)
-        _target_props = schema['definitions'].get(_target, {}).get('properties', {})
+        _target_props = _raw_def(_target, schema).get('properties', {})
 
         _accordion_fields_jsx: list[str] = []
         _rel_fds_lines: list[str] = []
@@ -3279,7 +4205,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 _fname        = _f['name']
                 _fcamel_label = to_camel_case(_fname)
                 _item_target  = _f.get('item_target', '')
-                _item_props   = schema['definitions'].get(_item_target, {}).get('properties', {})
+                _item_props   = _raw_def(_item_target, schema).get('properties', {})
                 _item_label   = 'name' if 'name' in _item_props else 'id'
                 _title_field  = to_title_case(_fname)
                 _ref_var      = safe_var_name(f'{_prop}_{_fname}') + 'Ref'
@@ -3399,12 +4325,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                         for i, v in enumerate(_enum_vals)
                     )
                 else:
-                    _opts = ', '.join(
-                        (f"{{ value: {i}, label: tf('{_fname}_{v}') }}"
-                         if isinstance(v, str) and not str(v).lstrip('-').isdigit()
-                         else f"{{ value: {int(v) if isinstance(v, (int, float)) else i}, label: tf('{_fname}_{v}') }}")
-                        for i, v in enumerate(_enum_vals)
-                    )
+                    _opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(_enum_vals))
                 flatten_enum_opt_setups_upsert.append(f"  const {_opts_var} = [{_opts}];")
                 _accordion_fields_jsx.append(
                     f"        <AppFieldSelect\n"
@@ -3507,7 +4428,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     all_states_merged = '\n'.join(filter(None, [all_states, _flatten_states_str]))
     _flatten_fds_str = '\n'.join(flatten_edit_form_data_sets_blocks)
     parent_form_data_sets_merged = '\n'.join(filter(None, [parent_form_data_sets, _flatten_fds_str]))
-    if bridge_child_ir:
+    if _bridge_child_ir:
         _bridge_fds = (
             "    formData.set('selectedParentType', selectedParentTypeRef.current?.value || '');\n"
             "    formData.set('selectedParentId', selectedParentIdRef.current?.value || '');"
@@ -3518,7 +4439,30 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     _flatten_validation_code = '\n\n'.join(flatten_validation_parts)
     _child_validation_code_merged = '\n\n'.join(filter(None, [child_validation_code, _flatten_validation_code]))
 
+    # AppFieldText / AppFieldBoolean / useCallback / useRef are imported unconditionally
+    # by the template but rendered into the JSX/hook body from many independent code
+    # paths above (editable field, readonly display, bridge parent display, flatten
+    # accordion sections, ...). Rather than re-deriving every path's boolean condition
+    # (fragile, easy to miss a branch and break a build), search the assembled output
+    # text itself — cheap and can't drift from the code that actually emits these
+    # identifiers (cmd_529).
+    _rendered_body_text = '\n'.join(filter(None, [
+        all_parent_fields_jsx,
+        child_grid_components,
+        indep_list_readonly_jsx,
+        '\n'.join(flatten_edit_section_parts),
+    ]))
+    uses_app_field_text = 'AppFieldText' in _rendered_body_text
+    uses_app_field_boolean = 'AppFieldBoolean' in _rendered_body_text
+    uses_use_callback = bool(parent_rels_raw) or bool(selector_oto_rels)
+    # useRef is declared from several independent paths (top-level text/number
+    # field refs, child-list/grid refs, flatten-section refs) — same
+    # text-search approach as above rather than re-deriving each path's
+    # condition (cmd_529).
+    uses_use_ref = 'useRef<' in '\n'.join(filter(None, [parent_refs, child_variables, all_states_merged]))
+
     return {
+        'has_mention_fields':       bool(mention_props),
         'parent_refs':              parent_refs,
         'all_states':               all_states_merged,
         'all_parent_fields_jsx':    all_parent_fields_jsx,
@@ -3529,7 +4473,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'child_form_data_handling': child_form_data_handling,
         'child_validation_code':    _child_validation_code_merged,
         'child_grid_components':    child_grid_components,
-        'bridge_edit_grids':        bridge_edit_grids,
         'has_indep_list_children':  has_indep_list_children,
         'indep_list_readonly_jsx':  indep_list_readonly_jsx,
         'form_upsert_params':       form_upsert_params,
@@ -3555,4 +4498,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'flatten_edit_sections':    '\n'.join(flatten_edit_section_parts),
         'uses_format_label_value':  uses_format_label_value,
         'has_box_import':           has_box_import,
+        'uses_app_field_text':      uses_app_field_text,
+        'uses_app_field_boolean':   uses_app_field_boolean,
+        'uses_use_callback':        uses_use_callback,
+        'uses_use_ref':             uses_use_ref,
     }

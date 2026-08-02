@@ -275,3 +275,52 @@ def test_helper_context_primary_fk_string_labels_are_human_readable():
     # field, NOT by suffixing values with Date.now().
     assert patient_no["prisma_val"] == "'Test Patient No'"
     assert patient_no["prisma_val_unique"] == '`Test Patient No ${i}`'
+
+
+def test_api_spec_context_x_relationships_list_includes_composite_label_field():
+    """cmd_382 (b): api_spec_context's x_relationships_list (used by N6's
+    expected-headers assertion in test_api_spec.cy.ts.jinja2) must match
+    build_context.py's x_relationships_list 1:1 by relation, regardless of
+    labelField shape — else N6 asserts presence of a header that either does
+    (build_context.py includes it) or doesn't (this test context excludes it)
+    actually appear in the generated CSV, and the generated cypress spec
+    itself becomes wrong."""
+    schema = {
+        "definitions": {
+            "product": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}}},
+            "inventory": {
+                "type": "object",
+                "required": ["id", "product_id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "product_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "product", "labelField": "name"},
+                    },
+                },
+            },
+            "inventory_movement": {
+                "type": "object",
+                "required": ["id", "from_inventory_id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "from_inventory_id": {
+                        "type": "string",
+                        "x-relationship": {
+                            "type": "many-to-one",
+                            "target": "inventory",
+                            "labelField": ["product.name", "id"],
+                        },
+                    },
+                },
+            },
+            "inventory_movement_detail": {"allOf": [{"$ref": "#/definitions/inventory_movement"}]},
+        },
+    }
+    ctx = api_spec_context(
+        "inventory_movement", [], schema, "inventory_movement", "inventory_movement_detail",
+        _entity("inventory_movement")["generate_config"],
+    )
+    fields = [r["field"] for r in ctx["x_relationships_list"]]
+    assert "from_inventory" in fields
+    assert ctx["x_relationships_list"][fields.index("from_inventory")]["display_col"] == "from_inventory_name"

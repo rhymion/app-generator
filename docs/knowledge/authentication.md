@@ -9,8 +9,9 @@ The auth stack is **Auth.js v5** (`next-auth@5.0.0-beta`) on top of
 — Auth.js v5's mixed-strategy story doesn't survive runtime when both
 Credentials and OAuth are configured (see "Session strategy" below).
 The adapter still writes `User` / `Account` rows on OAuth sign-in for
-identity stability, just not `Session` rows. MFA / TOTP is not in
-scope for this iteration.
+identity stability, just not `Session` rows. MFA / TOTP is shipped for
+the credentials provider (opt-in per user, see `lib/mfa/`); an OAuth
+MFA gate and admin-mandated MFA are not in scope for this iteration.
 
 ---
 
@@ -250,6 +251,11 @@ export const proxy = auth(async (req) => {
 Next.js 16 proxies always run on the Node.js runtime, so Prisma queries
 from `auth()` work without extra config. (Don't add `runtime: 'nodejs'`
 to the proxy `config` export — Next.js rejects it.)
+
+For the full unauthenticated-redirect behavior — the public-path
+exclusion list, the `?redirect=` return-to-original-page mechanism, and
+its open-redirect defense — see
+`docs/knowledge/unauthenticated-page-redirect.md`.
 
 ---
 

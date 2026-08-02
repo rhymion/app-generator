@@ -201,6 +201,11 @@ export default async function LocaleLayout({ children, params }) {
 
 That's all — next-intl handles the rest automatically.
 
+> This 4-step procedure is for the **site UI locale** (chrome, labels,
+> forms). It does not apply to Terms of Service / Privacy Policy content
+> locales, which are resolved independently of `routing.locales` — see
+> [legal-documents.md](./legal-documents.md#design-document-locale-is-decoupled-from-the-site-ui-locale).
+
 ---
 
 ## Navigation
@@ -262,16 +267,16 @@ Add new namespaces (top-level keys) as features grow. Keep key names camelCase a
 ## Code Generator Integration
 
 The generator outputs pages to `app/[locale]/[entity]/` (not `app/[entity]/`).
-The relevant line in `utils/scripts/generate.ts`:
+The relevant line in `code_generator/generate.py`:
 
-```ts
-const appDir = path.join(outputDir, 'app', '[locale]', parent);
+```python
+app_dir = out / 'app' / '[locale]' / parent
 ```
 
 API routes are **not** locale-prefixed — they stay at `app/api/[entity]/`:
 
-```ts
-const apiDir = path.join(outputDir, 'app', 'api', parent);
+```python
+api_dir = out / 'app' / 'api' / parent
 ```
 
 ---
@@ -288,7 +293,7 @@ cy.visit('/en/booking/new');
 cy.visit('/en/');
 ```
 
-This is baked into the test templates (`utils/scripts/templates-test.ts`). Regenerating tests will produce the correct paths automatically.
+This is baked into the test template (`code_generator/templates/test_spec.cy.ts.jinja2`). Regenerating tests will produce the correct paths automatically.
 
 ### Vitest unit tests
 

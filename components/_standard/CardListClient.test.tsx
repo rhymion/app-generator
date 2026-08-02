@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect } from 'vitest';
 import CardListClient from './CardListClient';
 
 vi.mock('next-intl', () => ({
@@ -19,7 +19,7 @@ type Item = { id: string; name: string; description?: string };
 const item1: Item = { id: '1', name: 'Alpha', description: 'First item' };
 const item2: Item = { id: '2', name: 'Beta', description: 'Second item' };
 const basePath = '/items';
-const allPerms = { create: true, read: true, update: true, delete: true };
+const allPerms = { create: true, read: true, update: true, delete: true, import: true };
 
 describe('CardListClient', () => {
   describe('Read (display)', () => {

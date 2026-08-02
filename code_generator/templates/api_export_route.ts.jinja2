@@ -1,0 +1,70 @@
+// AUTO-GENERATED - DO NOT EDIT
+import { NextResponse } from 'next/server';
+import { getModelPermissions, assertPermission{% if should_filter_by_org %}, getSessionUserId{% endif %} } from '@/lib/authz';
+import { handleApiError } from '@/lib/api-auth';
+import { escapeCSV } from '@/lib/_csv';
+import { get{{ parent_pascal }}ChunkForExport } from '@/lib/{{ parent }}/getters';
+
+const EXPORT_CHUNK_SIZE = Number(process.env.EXPORT_CHUNK_SIZE ?? '200');
+
+export async function GET() {
+  try {
+{% if should_filter_by_org %}
+    const actorId = await getSessionUserId();
+    if (!actorId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { permissions } = await getModelPermissions('{{ parent }}', actorId);
+{% else %}
+    const { permissions, userId: actorId } = await getModelPermissions('{{ parent }}');
+    if (!actorId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+{% endif %}
+    try {
+      await assertPermission(permissions, 'read', '{{ parent }}');
+    } catch {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    const date = new Date().toISOString().slice(0, 10);
+    const encoder = new TextEncoder();
+
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        let skip = 0;
+        let headerWritten = false;
+        try {
+          while (true) {
+            const rows = await get{{ parent_pascal }}ChunkForExport(actorId, skip);
+            if (rows.length === 0) break;
+
+            if (!headerWritten) {
+              const header = '\uFEFF' + Object.keys(rows[0]).map(escapeCSV).join(',') + '\r\n';
+              controller.enqueue(encoder.encode(header));
+              headerWritten = true;
+            }
+
+            for (const row of rows) {
+              const line = Object.values(row).map(escapeCSV).join(',') + '\r\n';
+              controller.enqueue(encoder.encode(line));
+            }
+
+            if (rows.length < EXPORT_CHUNK_SIZE) break;
+            skip += EXPORT_CHUNK_SIZE;
+          }
+          if (!headerWritten) {
+            controller.enqueue(encoder.encode('\uFEFF'));
+          }
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new NextResponse(stream, {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="{{ parent }}_export_${date}.csv"`,
+      },
+    });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

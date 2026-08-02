@@ -84,7 +84,7 @@ export default function CardListClient<T extends BaseEntity>({
   removeAction,
   entityLabel = 'Item',
   displayFields,
-  permissions = { create: true, read: true, update: true, delete: true },
+  permissions = { create: true, read: true, update: true, delete: true, import: true },
   primaryField = 'name' as keyof T,
   allowCreate = true,
 }: CardListClientProps<T>) {
@@ -110,6 +110,7 @@ export default function CardListClient<T extends BaseEntity>({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const tf = useTranslations('Fields');
+  const tc = useTranslations('Common');
   const defaultDisplayFields: DisplayFieldConfig<T>[] = displayFields ?? [
     { field: 'name' as keyof T, headerName: tf('name') },
     { field: 'description' as keyof T, headerName: tf('description') },
@@ -252,7 +253,7 @@ export default function CardListClient<T extends BaseEntity>({
             onClick={() => loadPage(page - 1)}
             aria-label="Previous page"
           >
-            前へ
+            {tc('previousPage')}
           </Button>
           <Typography variant="body2" color="text.secondary">
             {page + 1}
@@ -264,7 +265,7 @@ export default function CardListClient<T extends BaseEntity>({
             onClick={() => loadPage(page + 1)}
             aria-label="Next page"
           >
-            次へ
+            {tc('nextPage')}
           </Button>
         </Box>
       )}

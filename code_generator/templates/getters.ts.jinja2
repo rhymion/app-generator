@@ -14,6 +14,17 @@ import { getAssociatedOrganizations } from '@/lib/organization/getters_associate
 {% if non_creator_virtual_columns %}
 import { resolveVirtualColumns } from '@/lib/{{ parent }}/virtual_resolvers';
 {% endif %}
+{% if has_attachable %}
+import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
+{% endif %}
+{% if comment_has_mention %}
+import { extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
+{% endif %}
+import { filterAutocompleteOptions, type AutocompleteFilterContext } from '@/lib/{{ parent }}/autocomplete_filter';
+import { filterListQuery } from '@/lib/{{ parent }}/list_filter';
+{% if export_uses_format_label_value %}
+import { formatLabelValue } from '@/lib/_format';
+{% endif %}
 
 // Allow-lists for sort/filter — anything not in here is silently dropped at
 // request time so external input cannot pick arbitrary columns.
@@ -72,11 +83,20 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
   }
 
 {% if named_constants and has_commentable %}
+  // NOTE (cmd_522c): `message` here is the RAW stored string — @[user_id:<id>]
+  // markers intact, never decoded to plain names server-side in this shared
+  // getter. get{{ parent_pascal }}Detail() is consumed both by the REST API
+  // route (which decodes to plain text for its JSON contract — see
+  // api_detail_route.ts.jinja2) and by get{{ parent_pascal }}DetailPageData()
+  // (which exposes the raw text + a mentionUserContext id→name map to
+  // FormView, so <MentionText> can render per-mention links). Decoding here
+  // would destroy the ids MentionText needs and force the two consumers to
+  // diverge some other way.
   const _commentable = {{ parent_camel }}.{{ commentable_rel_name }} ? {
     ...{{ parent_camel }}.{{ commentable_rel_name }},
     comments: {{ parent_camel }}.{{ commentable_rel_name }}.comments.map((c) => {
       const { reactions, ...rest } = c;
-      const reactionCounts = reactions.reduce<Array<{ type: number; count: number }>>(
+      const reactionCounts = reactions.reduce<Array<{ type: {{ reaction_value_type }}; count: number }>>(
         (acc, r) => {
           const entry = acc.find((e) => e.type === r.type);
           if (entry) entry.count += 1;
@@ -85,9 +105,36 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
         },
         [],
       );
-      return { ...rest, reactionCounts, myReactionTypes: [] as number[] };
+      return { ...rest, reactionCounts, myReactionTypes: [] as ({{ reaction_value_type }})[] };
     }),
   } : {{ parent_camel }}.{{ commentable_rel_name }};
+{% endif %}
+{% if has_attachable %}
+  // encrypted_original_name/name_iv are Prisma-only columns pulled in by the
+  // generic `{{ attachable_attachments_prop }}: true` include — decrypt to the
+  // display name and strip both fields here so the ciphertext/IV never cross
+  // into FormView/FormUpsert (client components) via the `src` prop (cmd_356).
+  const _{{ attachable_rel_name }} = {{ parent_camel }}.{{ attachable_rel_name }} ? {
+    ...{{ parent_camel }}.{{ attachable_rel_name }},
+    {{ attachable_attachments_prop }}: (
+      {{ parent_camel }}.{{ attachable_rel_name }}.{{ attachable_attachments_prop }} as unknown as Array<
+        { id: string; type: {{ attachment_type_ts }}; order: number; name: string; path: string; attachable_id: string; encrypted_original_name?: string | null; name_iv?: string | null }
+      >
+    ).map((raw) => {
+      const { encrypted_original_name, name_iv, ...rest } = raw;
+      let displayName = rest.name;
+      if (encrypted_original_name) {
+        try {
+          displayName = decryptFileName(encrypted_original_name);
+        } catch (e) {
+          // Legacy/rotated-key records: fall back to the stored (UUID) name
+          // rather than throwing and breaking the whole detail page.
+          console.warn('attachment name decrypt failed:', e instanceof Error ? e.message : e);
+        }
+      }
+      return { ...rest, name: displayName };
+    }),
+  } : {{ parent_camel }}.{{ attachable_rel_name }};
 {% endif %}
   return {
     ...{{ parent_camel }},
@@ -99,6 +146,9 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 {% endfor %}
 {% if named_constants and has_commentable %}
     {{ commentable_rel_name }}: _commentable,
+{% endif %}
+{% if has_attachable %}
+    {{ attachable_rel_name }}: _{{ attachable_rel_name }},
 {% endif %}
 {% for dtcol in datetime_display_columns %}
     {{ dtcol }}: {{ parent_camel }}.{{ dtcol }}
@@ -139,7 +189,44 @@ export async function get{{ parent_pascal }}DetailPageData(id: string, operation
 {% endif %}
   const resolved = await resolvePermissions(basePermissions, {{ parent_camel }}, userId ?? '');
   await assertPermission(resolved, operation, '{{ parent }}');
+{% if comment_has_mention %}
+  // canViewUserProfile (cmd_522): whether the viewer may link mentioned users'
+  // names to their profile page — passed to the comment display component
+  // rather than baked into the row itself, since it reflects the *viewer's*
+  // permissions on the `user` model, not any property of {{ parent }}.
+  const { permissions: _mentionUserPerms } = await getModelPermissions('user', userId ?? null);
+  // mentionUserContext (cmd_522c): id → display name map for every user
+  // referenced (as creator or @mention) in this row's comment thread(s) —
+  // built here (not inside get{{ parent_pascal }}Detail()) so it stays out of
+  // the REST API's JSON contract and only reaches the page/FormView path.
+  const _mentionUserIds = new Set<string>();
+{% if named_constants and has_commentable %}
+  for (const c of {{ parent_camel }}?.{{ commentable_rel_name }}?.comments ?? []) {
+    if (c.creator_id) _mentionUserIds.add(c.creator_id);
+    for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
+  }
+{% endif %}
+{% for child in children_raw %}
+{% if child.output_type == 'comments' %}
+  for (const c of {{ parent_camel }}?.{{ child.property_name }} ?? []) {
+    if (c.creator_id) _mentionUserIds.add(c.creator_id);
+    for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
+  }
+{% endif %}
+{% endfor %}
+  const _mentionUsersForPage = _mentionUserIds.size
+    ? await prisma.user.findMany({ where: { id: { in: [..._mentionUserIds] } }, select: { id: true, name: true } })
+    : [];
+  const mentionUserContext: UserContext = Object.fromEntries(_mentionUsersForPage.map((u) => [u.id, u.name]));
+  return {
+    {{ parent_camel }},
+    userPermissions: await toPermissions(resolved),
+    canViewUserProfile: _mentionUserPerms.read,
+    mentionUserContext,
+  };
+{% else %}
   return { {{ parent_camel }}, userPermissions: await toPermissions(resolved) };
+{% endif %}
 }
 
 export async function get{{ parent_pascal }}NewPageAccessCheck() {
@@ -166,7 +253,14 @@ export async function get{{ parent_pascal }}Page(
 {% endif %}
   const accessAnd = build{{ parent_pascal }}AccessWhere(perms, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
   const filterAnd = buildFilter(opts.filter, FILTERABLE_FIELDS);
-  const where = { AND: [...accessAnd, ...filterAnd] };
+  const customWhere = filterListQuery(opts.filter ?? {});
+  const where = {
+    AND: [
+      ...accessAnd,
+      ...filterAnd,
+      ...(customWhere && Object.keys(customWhere).length > 0 ? [customWhere] : []),
+    ],
+  };
   const orderBy = buildOrderBy(opts.sort, SORTABLE_FIELDS);
 
   const [rowsRaw, total] = await prisma.$transaction([
@@ -238,7 +332,7 @@ export async function fetch{{ parent_pascal }}Page(opts: PageOpts): Promise<Page
 
 /**
  * Lightweight search for autocomplete pickers. Returns up to `limit` rows
- * matching `query`{% if searchable_text_fields %} (substring on {{ searchable_text_fields | join(' / ') }}){% endif %} plus any rows in `includeIds` so the
+ * matching `query`{% if searchable_fields_display %} (substring on {{ searchable_fields_display | join(' / ') }}){% endif %} plus any rows in `includeIds` so the
  * currently-selected option is always present even when it doesn't match the
  * query. Applies the same access scope as the list page.
  */
@@ -246,14 +340,25 @@ export async function search{{ parent_pascal }}Options(
   query: string,
   includeIds: string[] = [],
   limit: number = 50,
-): Promise<{{ parent_pascal }}[]> {
+  context: AutocompleteFilterContext = {},
+): Promise<{{ parent_pascal }}[] & { permissionDenied?: boolean }> {
 {% if should_filter_by_org %}
   const userId = await getSessionUserIdOrThrow();
   const { permissions } = await getModelPermissions('{{ parent }}', userId);
 {% else %}
   const { permissions, userId } = await getModelPermissions('{{ parent }}');
 {% endif %}
-  await assertPermission(permissions, 'read', '{{ parent }}');
+  if (!permissions.read) {
+    // Option B (cmd_516): the caller lacks read on {{ parent }} itself — this
+    // happens when a *different* entity's create/edit form searches for a
+    // {{ parent }} FK option and the current user can't read {{ parent }}.
+    // This used to throw via assertPermission() and crash the whole
+    // referencing page's Server Component render (Promise.all rejection).
+    // Returning an empty, flagged result instead lets the FK field render
+    // disabled with an explanatory message rather than taking the page down —
+    // see docs/knowledge/fk-read-permission-graceful-degradation.md.
+    return Object.assign([] as {{ parent_pascal }}[], { permissionDenied: true });
+  }
 {% if should_filter_by_org %}
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
@@ -261,19 +366,40 @@ export async function search{{ parent_pascal }}Options(
   const accessAnd = build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
 
   const trimmed = query.trim();
-  const orClauses: Record<string, unknown>[] = [];
-  if (trimmed) {
+  // Token-split AND search: each whitespace-separated token must match at
+  // least one searchable field (OR), and every token must match (AND) —
+  // so "Test Location" (product-name-word + location-word) narrows instead
+  // of requiring one field to contain the whole combined string.
+  // filter(Boolean) drops empty tokens from leading/trailing/double spaces
+  // (e.g. a null optional labelField segment) so `contains: ''` never
+  // silently wildcard-matches every row.
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  const matchOr: Record<string, unknown>[] = [];
+  if (tokens.length > 0) {
+    const searchAnd = tokens.map((token) => {
+      const orClauses: Record<string, unknown>[] = [];
 {% for f in searchable_text_fields %}
-    orClauses.push({ {{ f }}: { contains: trimmed, mode: 'insensitive' } });
+      orClauses.push({ {{ f }}: { contains: token, mode: 'insensitive' } });
 {% endfor %}
+{% for rf in searchable_relation_fields %}
+      orClauses.push({ {{ rf.relation }}: { {{ rf.field }}: { contains: token, mode: 'insensitive' } } });
+{% endfor %}
+      return { OR: orClauses };
+    });
+    matchOr.push({ AND: searchAnd });
   }
   if (includeIds.length > 0) {
-    orClauses.push({ id: { in: includeIds } });
+    // Always include currently-selected rows regardless of token search —
+    // an OR sibling of the token-AND block, not ANDed with it, so a
+    // selected option outside the search results still resolves by id.
+    matchOr.push({ id: { in: includeIds } });
   }
+  const customWhere = filterAutocompleteOptions(context);
   const where = {
     AND: [
       ...accessAnd,
-      ...(orClauses.length > 0 ? [{ OR: orClauses }] : []),
+      ...(matchOr.length > 0 ? [{ OR: matchOr }] : []),
+      ...(customWhere && Object.keys(customWhere).length > 0 ? [customWhere] : []),
     ],
   };
   const safeLimit = Math.min(Math.max(Math.floor(limit) || 50, 1), 200);
@@ -313,11 +439,23 @@ export async function search{{ parent_pascal }}Options(
  * `current{{ parent_pascal }}Id` keeps the {{ oto.target }} attached to the {{ parent }} currently being
  * edited available. The query runs in a single Prisma round-trip (notIn against
  * the set of already-taken target ids) — no full-table scan via getAll.
+ *
+ * Checks read permission on {{ oto.target }} before listing (cmd_516 case g) —
+ * this previously ran with NO permission check at all (an unconditional
+ * listing of {{ oto.target }} regardless of the caller's read access). Mirrors
+ * search{{ parent_pascal }}Options' graceful-degradation contract: returns an
+ * empty, flagged result rather than throwing, so the {{ parent }} create/edit
+ * page doesn't crash either — see
+ * docs/knowledge/fk-read-permission-graceful-degradation.md.
  */
 export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pascal }}(
   current{{ parent_pascal }}Id?: string | null,
   limit: number = 50,
 ) {
+  const { permissions } = await getModelPermissions('{{ oto.target }}');
+  if (!permissions.read) {
+    return [] as unknown as Awaited<ReturnType<typeof prisma.{{ oto.target }}.findMany>> & { permissionDenied: true };
+  }
   const takenTargets = await prisma.{{ model }}.findMany({
     where: {
 {% if oto.nullable %}
@@ -346,3 +484,52 @@ export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pa
   });
 }
 {% endfor %}
+
+{% if can_list %}
+// ---------------------------------------------------------------
+// CSV Export (Phase 1) — returns one chunk of rows visible to this
+// user (caller loops with increasing `skip` until an empty chunk),
+// restricted to the same access scope as the list page (org / Creator /
+// Assignee) and to an explicit export-column allowlist (system fields,
+// FK id columns, and non-scalar columns are never included), with FK
+// relations flattened to display values.
+// ---------------------------------------------------------------
+const EXPORT_CHUNK_SIZE = Number(process.env.EXPORT_CHUNK_SIZE ?? '200');
+
+export async function get{{ parent_pascal }}ChunkForExport(
+  userId: string,
+  skip: number,
+): Promise<Record<string, unknown>[]> {
+{% if should_filter_by_org %}
+  const { permissions } = await getModelPermissions('{{ parent }}', userId);
+  const associatedOrganizations = await getAssociatedOrganizations(userId);
+  const associatedOrganizationIds = associatedOrganizations.map((o) => o.id);
+{% else %}
+  const { permissions } = await getModelPermissions('{{ parent }}');
+{% endif %}
+  const accessAnd = build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+  const rows = await prisma.{{ model }}.findMany({
+    where: { AND: accessAnd },
+    orderBy: { created_at: 'asc' },
+    skip,
+    take: EXPORT_CHUNK_SIZE,
+{% if include_props_list %}
+    include: { {{ include_props_list }} },
+{% endif %}
+  });
+  return rows.map((row) => {
+    const result: Record<string, unknown> = {
+{% for field in export_scalar_fields %}
+      '{{ field }}': (row as Record<string, unknown>)['{{ field }}'],
+{% endfor %}
+    };
+{% for rel in x_relationships_list %}
+    // Flatten {{ rel.field }}_id → display value (joined across all labelField
+    // segments when composite/dotted). Always set so the CSV header stays
+    // stable across chunks regardless of which row happens to come first.
+    result['{{ rel.display_col }}'] = {{ rel.label_expr }};
+{% endfor %}
+    return result;
+  });
+}
+{% endif %}

@@ -157,19 +157,30 @@ Cypress.Commands.add('clearField', (label: string) => {
 /**
  * Select an option from MUI Autocomplete by label.
  *
+ * @param searchText  Text typed into the autocomplete input to trigger search.
+ * @param optionText  The dropdown option to click (exact match). When omitted,
+ *                    defaults to `searchText` (backward-compatible).
+ *
+ * Separating searchText from optionText enables the RC6 fix (cmd_323): for
+ * entities whose labelField includes non-string segments (e.g. inventory with
+ * expiration_date), the generator types only string-type tokens so the server
+ * finds results, but clicks the full composed label that appears in the
+ * dropdown.
+ *
  * Uses an EXACT-MATCH regex on the option text so that picking
  * "Test Patient No" doesn't accidentally hit "Test Patient No 2"
  * (which substring-contains the former). Default `cy.contains` is
  * substring-based, and the dropdown order isn't predictable.
  */
-Cypress.Commands.add('selectAutocomplete', (label: string, optionText: string) => {
+Cypress.Commands.add('selectAutocomplete', (label: string, searchText: string, optionText?: string) => {
+  const clickText = optionText ?? searchText;
   getAutocompleteInput(label).then(($input) => {
     cy.wrap($input).click({ force: true });
   });
   getAutocompleteInput(label).then(($input) => {
-    cy.wrap($input).type('{selectall}' + optionText, { force: true });
+    cy.wrap($input).type('{selectall}' + searchText, { force: true });
   });
-  const escaped = optionText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escaped = clickText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const exactRe = new RegExp(`^${escaped}$`);
   // The MUI Autocomplete popper portals to document.body — it is NOT a
   // descendant of the input's accordion. When this command runs inside
@@ -336,7 +347,7 @@ declare global {
       checkField(label: string, expectedValue: string): Chainable<void>;
       clearAndFillField(label: string, value: string): Chainable<void>;
       clearField(label: string): Chainable<void>;
-      selectAutocomplete(label: string, optionText: string): Chainable<void>;
+      selectAutocomplete(label: string, searchText: string, optionText?: string): Chainable<void>;
       clearAutocomplete(label: string): Chainable<void>;
       setCheckbox(label: string, checked: boolean): Chainable<void>;
       fillDateTime(label: string, dateString: string): Chainable<void>;

@@ -18,7 +18,7 @@ export async function getSessionUserIdOrThrow(): Promise<string> {
   return userId;
 }
 
-export type Operation = 'create' | 'read' | 'update' | 'delete';
+export type Operation = 'create' | 'read' | 'update' | 'delete' | 'import';
 export type ModelName = string;
 export type OperationFlags = Record<Operation, boolean>;
 
@@ -50,9 +50,8 @@ export type ItemContext = {
   [key: string]: unknown;
 } | null | undefined;
 
-const EMPTY_FLAGS: OperationFlags = { create: false, read: false, update: false, delete: false };
-const FULL_FLAGS: OperationFlags = { create: true, read: true, update: true, delete: true };
-const READ_ONLY_FLAGS: OperationFlags = { create: false, read: true, update: false, delete: false };
+const EMPTY_FLAGS: OperationFlags = { create: false, read: false, update: false, delete: false, import: false };
+const READ_ONLY_FLAGS: OperationFlags = { create: false, read: true, update: false, delete: false, import: false };
 const SPECIAL_ROLE_NAMES = ['Creator', 'Assignee'] as const;
 
 function mergeFlags(a: OperationFlags, b: OperationFlags): OperationFlags {
@@ -61,12 +60,13 @@ function mergeFlags(a: OperationFlags, b: OperationFlags): OperationFlags {
     read: a.read || b.read,
     update: a.update || b.update,
     delete: a.delete || b.delete,
+    import: a.import || b.import,
   };
 }
 
-/** Strip RichPermissions down to the four effective boolean flags for use in components. */
+/** Strip RichPermissions down to the five effective boolean flags for use in components. */
 export async function toPermissions(p: RichPermissions): Promise<ModelPermissions> {
-  return { create: p.create, read: p.read, update: p.update, delete: p.delete };
+  return { create: p.create, read: p.read, update: p.update, delete: p.delete, import: p.import };
 }
 
 /**
@@ -99,6 +99,7 @@ export async function resolvePermissions(
     read,
     update,
     delete: del,
+    import: perms.general.import,
     general: perms.general,
     creator: perms.creator,
     assignee: perms.assignee,
@@ -197,6 +198,7 @@ export const getModelPermissions = cache(async (
       read: true,
       update: true,
       delete: true,
+      import: true,
       role: { select: { name: true } },
     },
   });
@@ -219,6 +221,7 @@ export const getModelPermissions = cache(async (
       read: row.read,
       update: row.update,
       delete: row.delete,
+      import: row.import,
     };
     const roleName = row.role?.name;
     if (roleName === 'Creator') {
@@ -231,14 +234,15 @@ export const getModelPermissions = cache(async (
   }
 
   // Top-level flags: broadest possible without item context.
-  // create is general-only (special roles are item-scoped, not meaningful for new items).
-  // read/update/delete include special roles so assertPermission passes for
-  // Creator/Assignee-only users on list pages.
+  // create/import are general-only (special roles are item-scoped, not meaningful
+  // for new items or bulk import). read/update/delete include special roles so
+  // assertPermission passes for Creator/Assignee-only users on list pages.
   const permissions: RichPermissions = {
     create: general.create,
     read: general.read || (creatorFlags?.read ?? false) || (assigneeFlags?.read ?? false),
     update: general.update || (creatorFlags?.update ?? false) || (assigneeFlags?.update ?? false),
     delete: general.delete || (creatorFlags?.delete ?? false) || (assigneeFlags?.delete ?? false),
+    import: general.import,
     general,
     creator: creatorFlags,
     assignee: assigneeFlags,

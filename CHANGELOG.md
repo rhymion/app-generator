@@ -3,6 +3,345 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Post-login redirect-back with open-redirect protection** (cmd_525): unauthenticated
+  page requests were already redirected to `/login` by `proxy.ts` before this change, but
+  always landed on `/` after signing in, losing the user's original destination. `proxy.ts`
+  now carries the originally-requested path via `?redirect=`, and `app/[locale]/login/page.tsx`
+  navigates there after a successful sign-in (credentials or Google). The new
+  `lib/auth/safe-redirect.ts` (`safeRedirectPath()`) validates the param is a same-origin,
+  path-absolute value before use — off-site, protocol-relative, and backslash-trick values
+  are rejected and fall back to `/`. API routes are unaffected (still return JSON `401`/`404`);
+  the public-path exclusion list (`/login`, `/register`, `/docs`, `/legal`, static assets) is
+  unchanged and was re-verified to produce no redirect loop. See
+  `docs/knowledge/unauthenticated-page-redirect.md`.
+- **`@mention` server-side support** (cmd_522, server side of a two-part feature —
+  client-side `MentionInput`/`MentionText` UI ships separately): a new schema-global
+  `searchMentionUserOptions()` server action (`lib/mention/search.ts`) returns org-scoped
+  candidates (via the same organization-membership relation as `getAssociatedOrganizations()`,
+  since `user` has no `organization_id` FK) with Option B graceful degradation on a `user`
+  read-permission denial. `encodeMentions()` is retired from the comment save path — the
+  picker now inserts `@[user_id:<id>]` markers directly, so `add/updateXxxComment()` store the
+  raw client text (the function itself is kept, deprecated, for backward compatibility and unit
+  tests). New `'mentioned_in_comment'` notification fires on newly-mentioned users (self-mentions
+  excluded; edits notify only newly-added mentions, diffed against the prior message). Detail
+  getters add a `canViewUserProfile` flag (viewer's `user` read permission) for the display layer
+  to decide whether a mentioned name links to their profile. See
+  `docs/knowledge/mention-system.md`.
+- **`@mention` client UI** (cmd_522c, client side of the two-part feature above): new
+  always-present `MentionInput`/`MentionText` components (`components/_standard/`) — an
+  `@`-triggered candidate picker inserting `@[user_id:<id>]` markers, and a renderer that turns
+  them into profile links or plain chips depending on the viewer's `canViewUserProfile`.
+  `MentionInput` wires into any entity's own `x-mention: true` field on its edit form
+  (`mention_fields`); `MentionText` wires into the comment display when `comment_has_mention`,
+  via a new `renderMessage` render-prop on `CommentListWrapper`. Fixed a latent conflict this
+  exposed: the shared comment getter was already decoding `@[user_id:<id>]` to a plain name
+  server-side (pre-dating cmd_522), which left no id for `MentionText` to link — decoding moved to
+  the REST API route only (keeping its JSON contract unchanged), while the page/FormView path now
+  gets the raw text plus a `mentionUserContext` id→name map. Also fixed: `context.py` (the
+  `types.ts.jinja2`-only context builder) never normalized either x-bridge form before detecting
+  one-to-one relations, so bridge-based comment threads were invisible to it — now mirrors
+  `build_context.py`'s normalization. See `docs/knowledge/mention-system.md`.
+- **Generated permission-denial and cross-org isolation API tests** (cmd_520 batch A): every
+  generated `cypress/e2e/api/<entity>.cy.ts` now includes PUT/DELETE/export/import
+  permission-denial tests (7.3–7.6, gated on `can_edit`/`can_delete`/`can_export`/
+  `import_eligible`) and, for organization-scoped entities, cross-organization isolation tests
+  (G3.1–G3.3: foreign-org CREATE rejected, foreign-org GET/PUT return 404). Adds the
+  `db:createCrossOrgScenario` test-fixture task. Adds a one-line coverage comment to every
+  generated spec recording which of these tests were actually generated. See
+  `docs/knowledge/permission-e2e-test-design.md`.
+- **Graceful degradation for foreign-key read-permission gaps**: a role that
+  can create/edit an entity but lacks read on one of its FK targets (e.g.
+  can manage `approval_flow` but not `role`) previously crashed the create
+  and edit pages entirely (`search{Entity}Options()` threw inside the
+  page's data-fetching `Promise.all`). The affected field now renders
+  disabled instead — read-only for a required FK (which also blocks `/new`
+  entirely with an explanatory message, since there's no way to populate
+  it), clearable for an optional FK. A required FK omitted from an update
+  because of this now falls back to the record's existing value rather
+  than failing validation. Template-layer change only, no Prisma schema
+  change — regenerate to pick it up, no migration needed. See
+  `docs/knowledge/fk-read-permission-graceful-degradation.md`.
+- **Terms of Service / Privacy Policy pages** (`/[locale]/legal/terms`,
+  `/[locale]/legal/privacy`), linked from the registration page. Content is
+  plain Markdown, one file per document/locale under `content/legal/`,
+  resolved independently of the site's UI locale via a `?lang=` query
+  parameter — adding a new document language is adding two Markdown files,
+  no code change. See `docs/knowledge/legal-documents.md`. Both documents
+  are explicitly labeled templates requiring legal review and
+  deployment-specific `[PLACEHOLDER]` values before real use.
+
+### Fixed
+- **CSV import dotted-FK org filter gap** (cmd_521, security): a dotted `x-import-key` lookup
+  (e.g. `role.name`) on an organization-scoped entity's CSV import route was not itself
+  organization-filtered — a same-named row owned by a different organization could resolve and
+  get linked to the importing actor's record. The dotted-FK lookup is now org-filtered whenever
+  its *target* entity has `organization_id`, independently of the parent entity's own scoping;
+  system-global lookup targets (e.g. `role`, no `organization_id`) are correctly left unfiltered.
+  Covers both CREATE and UPDATE (shared resolution path); export was already correctly scoped.
+  Template-layer change only, no Prisma schema change — regenerate to pick it up, no migration
+  needed. See `docs/knowledge/csv-import-dotted-fk-org-filter.md`.
+
+## [3.0.0] - 2026-07-30
+
+> Consolidates the feature areas added since 2.0.0: GCP Cloud Run deployment,
+> an audit log viewer, GDPR/data-protection tooling, attachment display
+> opt-out, a round of performance hardening, an inventory ledger with
+> receiving/reservation workflows and split actions, CSV import/export,
+> extended search and FK autocomplete/auto-inference, notification
+> persistence, the single-file entity schema format, `nativeEnum` type
+> safety, and organization-isolation enforcement. Released as a major bump
+> because the performance, data-protection, audit-log, notification-
+> persistence, enum-type-safety, and organization-isolation work include
+> breaking changes.
+> Full upgrade steps: [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
+
+### BREAKING
+- **`statement_timeout` now enforced by default (soft breaking)** — the direct
+  (PrismaPg) Prisma connection path (`lib/prisma.ts`) now applies a 30-second
+  `statement_timeout` by default. Queries that previously ran unbounded (large
+  exports, complex reports) will now fail with a timeout error if they exceed
+  30 seconds. Configurable via the `STATEMENT_TIMEOUT_MS` env var; set it to a
+  higher value or `0` to disable. Applies only to the direct-connection path —
+  the Accelerate path (Vercel's `PRISMA_DATABASE_URL`) does not forward
+  `statement_timeout` and is unaffected.
+- **`pageSize > 200` now returns `400 Bad Request` (API contract breaking)** —
+  generated REST API routes (`code_generator/templates/api_route.ts.jinja2`)
+  previously truncated an over-limit `pageSize` query parameter to 200
+  silently. They now reject it with `400 Bad Request`. Existing API clients
+  that send `pageSize` above `MAX_PAGE_SIZE` (200) must cap the value
+  client-side before upgrading.
+- **`user.anonymized_at` column now required (soft breaking)** — the new
+  `anonymizeUser()` GDPR-erasure function (`lib/compliance/anonymize_user.ts`)
+  reads/writes `anonymized_at` on the `user` model. 3.0 adds the column as
+  nullable. Pre-3.0 databases must add it: `prisma db push` or
+  `prisma migrate deploy`. New nullable column — no backfill required (see
+  [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md)).
+- **`audit_log.actor_user_id` now enforces a foreign key to `user.id` (schema
+  breaking)** — `prisma/schema.prisma`'s `audit_log.actor_user` relation
+  (`onDelete: Restrict`) and the matching `user.audit_logs` back-relation were
+  added in `ec2cbb8` ("fix: Show audit log page", 2026-06-26), after the
+  2.0.0 cut (`git log`/`git blame` confirm both fields are absent at the
+  `v2.0.0` tag). Pre-3.0 schemas have no such constraint. `prisma db push` /
+  `prisma migrate deploy` will fail if any existing `audit_log.actor_user_id`
+  value references a `user` row that no longer exists — possible because the
+  pre-3.0 schema let a `user` be deleted without touching their audit history.
+  Clean up orphaned rows first, e.g.
+  `UPDATE audit_log SET actor_user_id = NULL WHERE actor_user_id IS NOT NULL
+  AND actor_user_id NOT IN (SELECT id FROM "user");`. Going forward, deleting
+  a `user` with existing `audit_log` rows is rejected instead of silently
+  orphaning them.
+- **`nativeEnum` promotion for 6 previously-`Int` enum fields** — if any
+  generated application read or wrote these columns using raw integer values
+  rather than the generated enum constants, those values may fail Prisma's
+  enum validation after upgrade. Affected fields: `approval_request.status`,
+  `reaction.type`, `attachment.type`, `dashboard_widget.chart_type`,
+  `dashboard_widget.stack_mode`, `dashboard_widget.group_by_bucket`. `prisma
+  db push` or `prisma migrate deploy` required.
+- **Notification persistence requires the new `notification` table** — the
+  in-memory SSE notification store was replaced with a Prisma-backed
+  `notification` table. Until the table is created, `GET
+  /api/notifications` and `POST /api/notifications/mark-read` throw and
+  return `500` to every logged-in user (the bell icon is on the shared
+  header); notification writes fail silently instead. `prisma db push` or
+  `prisma migrate deploy` required.
+- **Organization-scoped mutation paths now deny cross-org access** —
+  generated API routes and server actions for org-scoped entities previously
+  authorized update/delete/CSV-import-update purely via
+  `creator_id`/`assignee_id`, without checking organization membership,
+  allowing a user with `general.update`/`general.delete`/`general.import` to
+  act on another organization's record by ID. Cross-organization requests
+  now resolve to a deny (`404` on API routes, silent no-op on session
+  actions). No schema change; only bites a deployment whose client or test
+  code depended on the old (permissive) cross-org behavior.
+- **nativeEnum member names normalized to lowercase snake_case (cmd_493)** —
+  `ApprovalRequestStatus` (`Pending`/`Approved`/`Rejected`/`TerminalRejected`
+  → `pending`/`approved`/`rejected`/`terminal_rejected`) and `ReactionType`
+  (`Like`/`Love`/`Laugh`/`Surprised`/`Sad` → lowercase) are the only two
+  PascalCase nativeEnum types app-generator itself ships; an inventory
+  across the full default schema + the app-template consumer schema found
+  lowercase snake_case already the established majority (16/20 nativeEnum
+  types, 61/80 members). `code_generator/validate.py` now rejects any
+  nativeEnum member that isn't lowercase snake_case at generation time.
+  Existing consumer data must be migrated — see
+  [docs/knowledge/enum-member-naming.md](docs/knowledge/enum-member-naming.md)
+  for the naming rule, rationale, consumer-impact list, and the exact
+  migration SQL (verified against an isolated test database seeded with
+  pre-migration rows).
+- **`db:seed-tenant` now requires `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`
+  under `NODE_ENV=production` (cmd_504)** — `scripts/seed-tenant.ts`
+  previously seeded the bootstrap admin as `admin@example.com` /
+  `password123` with a fixed `api_key` literal unconditionally; since
+  app-generator is a public repo, any production deployment provisioned
+  without a separate manual rotation shipped with a publicly known admin
+  login. Every production-equivalent entry point (`vercel-build`,
+  `build:full`, GCP's `gcp-seed.sh`) now fails fast unless both env vars are
+  set, and always mints a fresh random `api_key` instead of the literal.
+  `test`/`development` are unaffected — the fixed defaults are unchanged, so
+  existing Cypress/vitest fixtures pinned to them keep working. See
+  [docs/knowledge/seed-tenant-credential-hardening.md](docs/knowledge/seed-tenant-credential-hardening.md)
+  for the required env vars and the remediation runbook for a deployment
+  already seeded with the old defaults.
+
+### Added
+- **GCP Cloud Run deployment** (`x-cloud` annotation, opt-in — disabled unless
+  `enabled: true` and `provider: gcp` are both set explicitly) — **Vercel
+  remains the default deployment target when `x-cloud` is unset**; this adds
+  GCP Cloud Run as a second, opt-in target, alongside:
+  multi-stage/non-root/`HEALTHCHECK` `Dockerfile`, `.dockerignore`,
+  `next.config.ts` `output: 'standalone'`, a GCS Signed URL upload route
+  (overrides the default Vercel Blob route), a V4 Signed URL proxy route, and
+  `proxy.ts` header rewriting so Cloud Run's internal `:8080` port never leaks
+  into a redirect `Location` header. Idempotent environment automation scripts
+  (`scripts/gcp-env.sh`, `gcp-setup.sh`, `gcp-deploy.sh`, `gcp-seed.sh`,
+  `gcp-teardown.sh`) provision Cloud SQL/service account/Upstash/Secret
+  Manager/GCS and drive build+migrate+deploy. See
+  [docs/knowledge/gcp-automation-design.md](docs/knowledge/gcp-automation-design.md).
+  Pure opt-in — zero impact on existing (Vercel-default) apps.
+- **Audit log viewer** — `app/[locale]/audit_log/page.tsx`, a schema-agnostic
+  read-only viewer over the `audit_log` model. `lib/audit_log/getters.ts`
+  resolves the actor user via FK join, restricts the raw `metadata` JSON to the
+  admin-only detail page, and paginates via `CardListPagination`. The
+  `audit_log` model's core columns (id/actor_user_id/action/target_table/
+  target_id/metadata/created_at) predate 2.0.0, but the `actor_user` relation
+  it's joined through is new in 3.0 — see BREAKING above.
+- **Data protection / GDPR compliance** — `x-pii` annotation (`direct` /
+  `sensitive` / `indirect` classification), `anonymizeUser()` scrub function
+  (irreversible, transactional, preserves referential integrity), `x-gdpr-mode`
+  (model/field-level `internal` / `consumer` / `both` data-subject-scope
+  classification — validated by `code_generator/validate.py` but not yet read
+  by any codegen template, so it has no effect on generated code in 3.0),
+  AES-256-GCM at-rest attachment filename encryption
+  (`lib/compliance/attachment_name_crypto.ts`), and `x-mention` user-mention
+  parsing in comments.
+- **Attachment display opt-out** — `AttachmentSection` (`components/_standard/`)
+  gains `showImages` / `showFiles` props (both default `true`) so image/file
+  previews can be hidden per entity independently.
+- **Performance hardening** — automatic FK index coverage
+  (`scripts/add_required_indexes.py`, generator demo schema grew from 18 to 36
+  indexes), a generated pg_trgm GIN index script
+  (`scripts/create-gin-indexes.sql`, kept outside `prisma/schema.prisma` to
+  avoid a `prisma migrate dev` drift loop), and a `SearchOpts.count: false`
+  opt-out that skips both `COUNT(*)` queries in cross-entity search
+  (returns `total: -1`).
+- **Inventory ledger with `x-ledger-source`** — `inventory_transaction`
+  ledger entity and `transactionable` bridge generated when a ledger
+  top-level declaration is present in `json_schema.yaml`. Annotate a
+  receiving-receipt line or billing-detail entity with `x-ledger-source`
+  to emit write / adjust / move stub templates (`ledger_write_stub.ts`,
+  `ledger_adjust_stub.ts`, `ledger_move_stub.ts`).
+- **Receiving workflow** — top-level `ledger` / `transactionable` / `pool`
+  entity declarations and `receiving_confirm_route.ts` generated for
+  receiving-receipt schemas. Replaces the `x-receiving` mechanism removed
+  earlier in the 3.0 development cycle.
+- **Reservation ledger-transaction migration** — `x-reservation`'s internal
+  state tracking migrated from slot-based to ledger-transaction strategy;
+  each reservation records an `inventory_transaction` row for audit
+  fidelity. `x-reservation` is scoped to exactly two roles: inventory
+  allocation (`count` mode) and specific-resource reservation (`item`
+  mode, e.g. a hotel room). Lifecycle transitions (approve/reject) for the
+  entity that owns the reservation go through the generic Approval Flow
+  System (`x-approval`) instead of a bespoke reservation-lifecycle
+  mechanism — see **Removed** below for the `x-reservation.actions`
+  sub-feature this supersedes.
+- **Terminal rejection with `x-readonly-fields`** — annotate fields with
+  `x-readonly-fields` to prevent edits after an entity reaches a terminal
+  rejected state. `on_rejected_dispatch.ts` and `service_after_reject_stub.ts`
+  are generated as once-stubs for custom post-rejection logic (not overwritten
+  on `generate-code` re-runs). `rejection_reason` is wired into the reject
+  route automatically.
+- **Rejection event dispatch** (`on_rejected_dispatch`) — the `reject` API
+  route fires `on_rejected_dispatch.ts` after a terminal rejection, enabling
+  downstream logic such as notifications or inventory adjustments. Paired with
+  `service_after_reject_stub.ts` for application-level customization.
+- **Split action (`x-splittable`)** — annotate an entity with `x-splittable`
+  to generate `SplitActionSection` (UI component) and `split_action_route.ts`
+  (API). Enables lot-level split operations from the list or edit page without
+  requiring a custom route.
+- **CSV Export** — per-entity export route (`api_export_route.ts.jinja2`)
+  generated when `x-generate.export: true` (default `true`). Exported columns
+  match the entity's view-page field set; individual fields opt out via
+  `x-generate.export: false` on the field declaration.
+- **CSV Import** — user CSV import route (`api_import_route.ts.jinja2`) and
+  `ImportModal.tsx` component generated when `x-generate.import: true`.
+  Batch-processes rows server-side; access controlled via the `permission.import`
+  grant per entity.
+- **Search — child entities without a dedicated page** — entities with
+  `x-page: false` now appear in global search results; hits resolve to the
+  parent entity's edit page (method②). Previously only top-level entities
+  appeared in search results.
+- **FK Autocomplete custom filter hook** — `autocomplete_filter_stub.ts.jinja2`
+  generated per entity for narrowing autocomplete and list results beyond the
+  built-in permission filter. Wired into `SplitActionSection`'s FK context
+  automatically.
+- **FK scalar auto-inference** — FK scalar columns (e.g. `organization_id`)
+  no longer need to be declared explicitly in `json_schema.yaml`; the generator
+  derives them from Prisma relation properties, reducing per-entity schema
+  verbosity.
+- **`x-approval-lines` helpers** — annotate an approvable entity with
+  `x-approval-lines` to generate pre-create / post-create helper functions that
+  wire approval-line entities to inventory ledger operations.
+- **Notification persistence** (DB-backed, cursor-based polling) — in-memory
+  SSE notification store replaced with a Prisma-backed `notification` table.
+  Cursor-based DB polling delivers unread notifications reliably across server
+  restarts. See BREAKING above — the new table requires `prisma db push` on
+  existing databases.
+- **Single-file entity format** (`_detail` suffix retired) —
+  `json_schema.yaml` entity declarations no longer require a paired `*_detail`
+  block; the generator derives field types directly from the Prisma schema.
+  `build_user_schema.py`'s Prisma-derivation pipeline updated accordingly.
+- **enum type safety — `nativeEnum` promotion** — 6 previously-`Int` enum
+  fields promoted to Prisma `nativeEnum`; generated code gains compile-time type
+  checks. See BREAKING above for the affected fields and migration steps.
+- **Organization isolation enforcement** — generated API routes for org-scoped
+  entities deny create / update / delete across organization boundaries. A
+  session-lookup miss in an org-filtered query now returns an explicit deny
+  rather than a silent miss. See BREAKING above — a client or test relying on
+  the old cross-org behavior will now be denied.
+
+> **Backward compatibility**: GCP deployment and attachment display opt-out
+> are non-breaking (pure opt-in / default-preserving). FK index coverage
+> (`scripts/add_required_indexes.py`), the pg_trgm GIN index script
+> (`scripts/create-gin-indexes.sql`), and the `SearchOpts.count: false`
+> COUNT(*) opt-out are additive only and backward-compatible. The audit log
+> viewer page itself adds no required input, but it surfaces data through a
+> relation that is a breaking schema change — see BREAKING above. All eight
+> items in **BREAKING** above require action before upgrading a pre-3.0
+> deployment — see [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
+
+### Fixed
+- **Non-idempotent Cypress spec generation for enum labels** — `generate-code`
+  used to feed `messages/en.json`'s existing content straight into the
+  Cypress spec label lookup. A first run against a project with an
+  incomplete/missing translation section produced specs with raw enum
+  values (e.g. `'pie'`) baked in, while the same schema on a later run (once
+  the file had been filled in) produced humanized labels (e.g. `'Pie'`) —
+  and the raw-value run's specs no longer matched what the app actually
+  renders, failing with `Expected to find content: 'pie' ... but never
+  did`. `generate()` now always computes the schema-derived label defaults
+  first and overlays any existing file values on top (file wins), so both
+  runs agree and a consumer's custom translation is still honored. See
+  `docs/knowledge/generate-code-idempotency.md`.
+
+### Removed
+- **`x-reservation.actions` sub-feature (2026-07-30 ruling)** — the declarative
+  `ship` / `release` / `cancel` lifecycle-action mechanism under `x-reservation`
+  (`reservation_actions.ts` generation, per-action
+  `app/api/{parent}/[id]/actions/{ship,release,cancel}/route.ts` handlers, and the
+  `ReservationActionButtons` UI component) has been removed. `x-reservation` is
+  retained, scoped to exactly two roles: (1) inventory allocation (`count` mode) and
+  (2) specific-resource reservation (`item` mode, e.g. a hotel `room`). Approval/
+  rejection lifecycle for the owning entity goes through the generic Approval Flow
+  System's `approve` / (terminal) `reject` instead (`x-approval`). No entity in the
+  default schema or any known consumer schema ever declared an `actions` block, so
+  this closes zero generated-output diff for existing apps — confirmed by comparing
+  `generate-code` output before/after this change (identical). `code_generator/
+  validate.py` now hard-rejects any schema that still declares `x-reservation.actions`.
+  See [docs/knowledge/appendix/inventory-reservation-split.md](docs/knowledge/appendix/inventory-reservation-split.md)
+  §1.1.
+
 ## [2.0.0] - 2026-06-25
 
 > Consolidates the unreleased 1.5 feature set and corrects two breaking changes
@@ -123,7 +462,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - Virtual resolver guide: recorded the spec of the async/bulk/per-entity single-file resolver in `docs/knowledge/virtual-resolver-guide.md`
 
 ### Fixed
-- Deep labelField Prisma include merge: fixed the issue that relations with nested `label_field` are not merged correctly (commit 7aab3c9)。
+- Deep labelField Prisma include merge: fixed the issue that relations with nested `label_field` are not merged correctly (commit 7aab3c9).
 
 ## [1.1.0]
 

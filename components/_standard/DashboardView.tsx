@@ -3,6 +3,8 @@
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import DashboardWidget, { WidgetConfig } from './DashboardWidget';
+import type { ChartType, StackMode } from './DashboardChart';
+import type { BucketGranularity } from '@/lib/dashboard/aggregate-core';
 import type { ModelPermissions } from '@/lib/authz';
 
 type WidgetConfigInput = {
@@ -10,14 +12,14 @@ type WidgetConfigInput = {
   name: string;
   order?: number;
   entity_name: string;
-  chart_type: number;
+  chart_type: ChartType;
   group_by_field: string;
   filter_field?: string | null;
   filter_value?: string | null;
   conditions?: unknown[] | null;
-  stack_mode?: number | null;
+  stack_mode?: StackMode | null;
   series_field?: string | null;
-  group_by_bucket?: number | null;
+  group_by_bucket?: BucketGranularity | null;
   [key: string]: unknown;
 };
 

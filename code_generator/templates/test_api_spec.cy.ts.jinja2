@@ -1,13 +1,16 @@
 // AUTO-GENERATED - DO NOT EDIT
-import { TEST_API_KEY } from '../../support/test-credentials';
+import { TEST_API_KEY, TEST_CREDENTIALS } from '../../support/test-credentials';
 
 const API_BASE = '{{ api_path }}';
+
+// FK Permission / Cross-org Test Coverage (cmd_520 batch A): 7.3(PUT denied)={{ 'yes' if can_edit else 'no(can_edit=false)' }}, 7.4(DELETE denied)={{ 'yes' if can_delete else 'no(can_delete=false)' }}, 7.5(export denied)={{ 'yes' if (can_list and can_export) else 'no(can_export=false)' }}, 7.6(import denied)={{ 'yes' if import_eligible else 'no(import_eligible=false)' }}, G3(cross-org isolation)={{ 'yes' if should_filter_by_org else 'no(should_filter_by_org=false)' }}
 
 describe('API: {{ title }}', () => {
   beforeEach(() => {
     cy.task('db:reset');
     cy.task('db:seed');
     cy.task('db:grantAllPermissions');
+    Cypress.session.clearAllSavedSessions();
   });
 {% if can_list %}
 
@@ -142,6 +145,11 @@ describe('API: {{ title }}', () => {
               .then((getRes) => {
                 expect(getRes.status).to.eq(200);
                 {{ assert_update }}
+{% if readonly_fields %}
+{% for f in readonly_fields %}
+                expect(getRes.body.{{ f }}, '{{ f }} must not change after PUT').to.eq(records[0].{{ f }});
+{% endfor %}
+{% endif %}
               });
           });
         });
@@ -163,6 +171,11 @@ describe('API: {{ title }}', () => {
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
               {{ assert_update }}
+{% if readonly_fields %}
+{% for f in readonly_fields %}
+              expect(getRes.body.{{ f }}, '{{ f }} must not change after PUT').to.eq(records[0].{{ f }});
+{% endfor %}
+{% endif %}
             });
         });
       });
@@ -417,6 +430,84 @@ describe('API: {{ title }}', () => {
   });
 {% endif %}
 
+{% if readonly_fields and can_edit %}
+
+  describe('Readonly field preservation (PUT {{ api_path }}/:id)', () => {
+    it('4.3 should preserve readonly field values ({{ readonly_fields | join(", ") }}) after editing other fields', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        const original = records[0];
+        cy.request({
+          method: 'PUT',
+          url: `${API_BASE}/${original.id}`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: {
+{% for ln in put_body_readonly_zero %}
+{{ ln }}
+{% endfor %}
+          },
+        }).then((res) => {
+          expect(res.status).to.eq(200);
+          cy.request({ url: `${API_BASE}/${original.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+            .then((getRes) => {
+              expect(getRes.status).to.eq(200);
+{% for f in readonly_fields %}
+              expect(getRes.body.{{ f }}, '{{ f }} must not be overwritten by PUT').to.eq(original.{{ f }});
+{% endfor %}
+            });
+        });
+      });
+    });
+  });
+{% endif %}
+
+{% if fk_preservation_relation %}
+
+  // cmd_516 Option B: search{{ fk_preservation_relation.target | pascal_case }}Options()/
+  // getAvailable...() now degrade gracefully (empty + permissionDenied flag)
+  // instead of throwing when the caller lacks read on {{ fk_preservation_relation.target }} —
+  // see docs/knowledge/fk-read-permission-graceful-degradation.md. This regression-
+  // tests the most dangerous failure mode: a PUT that omits the FK field entirely
+  // (exactly what the UI now sends when that field renders disabled) must leave
+  // the existing {{ fk_preservation_relation.prop_name }} value untouched, never null it out.
+  describe('FK read-permission graceful degradation (PUT {{ api_path }}/:id)', () => {
+    it('4.4 preserves {{ fk_preservation_relation.prop_name }} when the acting user cannot read {{ fk_preservation_relation.target }} and omits it from the PUT body', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        const original = records[0];
+        // Full CRUD on {{ parent }} itself, but no permission row at all on
+        // {{ fk_preservation_relation.target }} — defaults to deny (getModelPermissions:
+        // "no rows = deny all"), reproducing the exact actor the UI's
+        // AppFieldRelation permissionDenied branch is for.
+        cy.task<string>('db:createApiUserWithPermission', {
+          entityName: '{{ parent }}',
+          flags: { create: true, read: true, update: true, delete: true },
+          label: 'fk_read_denied',
+        }).then((restrictedKey) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${original.id}`,
+            headers: { 'X-API-Key': restrictedKey },
+            body: {
+{% for ln in put_body_fk_preservation_zero %}
+{{ ln }}
+{% endfor %}
+            },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            cy.request({ url: `${API_BASE}/${original.id}`, headers: { 'X-API-Key': restrictedKey } })
+              .then((getRes) => {
+                expect(getRes.status).to.eq(200);
+                expect(
+                  getRes.body.{{ fk_preservation_relation.relation_name }}?.id,
+                  '{{ fk_preservation_relation.prop_name }} must not be nulled out by a PUT that omits it',
+                ).to.eq(original.{{ fk_preservation_relation.prop_name }});
+              });
+          });
+        });
+      });
+    });
+  });
+{% endif %}
+
   describe('Authentication errors', () => {
     it('6.1 returns 4xx without API key', () => {
       cy.request({ url: API_BASE, failOnStatusCode: false })
@@ -468,7 +559,161 @@ describe('API: {{ title }}', () => {
 {% endif %}
     });
 {% endif %}
+{% if can_edit %}
+
+    it('7.3 returns 4xx for PUT when permission denied', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': limitedKey },
+            body: {},
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.be.gte(400);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_delete %}
+
+    it('7.4 returns 4xx for DELETE when permission denied', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+          cy.request({
+            method: 'DELETE',
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': limitedKey },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.be.gte(400);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_list and can_export %}
+
+    // 7.5 uses a SESSION-loginable actor (db:createSessionUserWithPermission + cy.login),
+    // not X-API-Key: the export route resolves the actor exclusively via
+    // getSessionUserId() (see lib/authz.ts / api_export_route.ts.jinja2) and never reads
+    // X-API-Key, so createLimitedApiUser's key would be silently ignored here.
+    it('7.5 returns 4xx for GET export when permission denied', () => {
+      cy.task<string>('db:createSessionUserWithPermission', {
+        entityName: '{{ parent }}',
+        flags: {},
+        label: 'export_denied',
+      }).then((email) => {
+        cy.login(email, TEST_CREDENTIALS.password);
+        cy.request({
+          url: `${API_BASE}/export`,
+          failOnStatusCode: false,
+        }).then((res) => {
+          expect(res.status).to.be.gte(400);
+        });
+      });
+    });
+{% endif %}
+{% if import_eligible %}
+
+    // 7.6 uses a SESSION-loginable actor — see the 7.5 comment above; the import
+    // route (api_import_route.ts.jinja2) resolves the actor the same way.
+    it('7.6 returns 4xx for POST import when permission denied', () => {
+      cy.task<string>('db:createSessionUserWithPermission', {
+        entityName: '{{ parent }}',
+        flags: {},
+        label: 'import_denied',
+      }).then((email) => {
+        cy.login(email, TEST_CREDENTIALS.password);
+        cy.request({
+          method: 'POST',
+          url: `${API_BASE}/import`,
+          body: { csv: '', dryRun: true },
+          failOnStatusCode: false,
+        }).then((res) => {
+          expect(res.status).to.be.gte(400);
+        });
+      });
+    });
+{% endif %}
   });
+{% if should_filter_by_org %}
+
+  // -------------------------------------------------------------------------
+  // Cross-organization isolation (G3) — verifies cmd_515's organization_id
+  // scope validation: an actor with full CRUD permission on {{ parent }}, who
+  // is a member of orgA only, cannot create or reach resources in orgB.
+  // -------------------------------------------------------------------------
+
+  describe('Cross-organization isolation (G3)', () => {
+{% if can_new %}
+    it('G3.1 POST with foreign organization_id returns 404 (existence hidden)', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I7 }}cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}' }).then((scenario) => {
+{{ I7 }}  cy.request({
+{{ I7 }}    method: 'POST',
+{{ I7 }}    url: API_BASE,
+{{ I7 }}    headers: { 'X-API-Key': TEST_API_KEY },
+{{ I7 }}    body: {
+{% for ln in org_cross_post_body %}
+{{ ln }}
+{% endfor %}
+{{ I7 }}      organization_id: scenario.orgB.id,
+{{ I7 }}    },
+{{ I7 }}    failOnStatusCode: false,
+{{ I7 }}  }).then((res) => {
+{{ I7 }}    // Matches G3.2/G3.3: a foreign org_id is treated as not-found, not as a
+{{ I7 }}    // distinguishable "organization" error — the response must not reveal
+{{ I7 }}    // that the organization exists.
+{{ I7 }}    expect(res.status).to.eq(404);
+{{ I7 }}    expect(JSON.stringify(res.body)).to.not.match(/organization/i);
+{{ I7 }}  });
+{{ I7 }}});
+{% if has_deps %}
+      });
+{% endif %}
+    });
+{% endif %}
+{% if can_view %}
+
+    it('G3.2 GET on entity in foreign org returns 404 (existence hidden)', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then((scenario) => {
+          cy.request({
+            url: `${API_BASE}/${scenario.entityInOrgB.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(404);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_edit %}
+
+    it('G3.3 PUT on entity in foreign org returns 404 (existence hidden)', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then((scenario) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${scenario.entityInOrgB.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {},
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(404);
+          });
+        });
+      });
+    });
+{% endif %}
+  });
+{% endif %}
 {% if has_approvable %}
 
   // -------------------------------------------------------------------------
@@ -539,13 +784,15 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/approve`,
-            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
-            expect(res.body.status).to.eq(1);
+            expect(res.body.status).to.eq('approved');
           });
         });
       });
@@ -558,10 +805,12 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.requestorUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/approve`,
-            headers: { 'X-API-Key': setup.requestorUser.api_key },
             failOnStatusCode: false,
           }).then((res) => {
             expect(res.status).to.eq(403);
@@ -572,6 +821,7 @@ describe('API: {{ title }}', () => {
   });
 
   describe('Reject (POST /api/approval_request/:id/reject)', () => {
+  {% if not entity_on_rejected_terminal %}
     it('13.1 approver can reject a pending request', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {
@@ -579,17 +829,20 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
-            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
-            expect(res.body.status).to.eq(2);
+            expect(res.body.status).to.eq('rejected');
           });
         });
       });
     });
+  {% endif %}
 
     it('13.2 non-approver cannot reject (403)', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
@@ -598,10 +851,12 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.requestorUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
-            headers: { 'X-API-Key': setup.requestorUser.api_key },
             failOnStatusCode: false,
           }).then((res) => {
             expect(res.status).to.eq(403);
@@ -617,10 +872,12 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
-            headers: { 'X-API-Key': setup.approverUser.api_key },
             body: { message: 'Needs more info' },
           }).then((res) => {
             expect(res.status).to.eq(200);
@@ -635,6 +892,80 @@ describe('API: {{ title }}', () => {
       });
     });
   });
+{% if entity_on_rejected and not entity_on_rejected_terminal %}
+    it('13.4 reject fires on_rejected dispatch: entity status updated via set_fields', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/reject`,
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            cy.request({
+              url: `{{ api_path }}/${data.record.id}`,
+              headers: { 'X-API-Key': setup.approverUser.api_key },
+            }).then((getRes) => {
+              expect(getRes.body.approvable.approved_at).to.be.null;
+            });
+          });
+        });
+      });
+    });
+{% endif %}
+{% if entity_on_rejected_terminal %}
+    it('13.5 terminal reject sets approval_request.status = terminal_rejected', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/reject`,
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            expect(res.body.status).to.eq('terminal_rejected');
+          });
+        });
+      });
+    });
+
+    it('13.6 terminal reject sets approvable.approved_at (idempotency guard)', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser.email, 'test-password');
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/reject`,
+          }).then(() => {
+            cy.request({
+              url: `{{ api_path }}/${data.record.id}`,
+              headers: { 'X-API-Key': setup.approverUser.api_key },
+            }).then((getRes) => {
+              expect(getRes.body.approvable.approved_at).to.not.be.null;
+            });
+          });
+        });
+      });
+    });
+{% endif %}
 
   describe('Approval order enforcement', () => {
     it('15.1 cannot approve when preceding request is not approved (400)', () => {
@@ -644,10 +975,12 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flow1.id, setup.flow2.id],
         }).then((data) => {
           const ar2 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser2.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${ar2.id}/approve`,
-            headers: { 'X-API-Key': setup.approverUser2.api_key },
             failOnStatusCode: false,
           }).then((res) => {
             expect(res.status).to.eq(400);
@@ -664,19 +997,23 @@ describe('API: {{ title }}', () => {
         }).then((data) => {
           const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
           const ar2 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+          Cypress.session.clearAllSavedSessions();
+          cy.clearCookies();
+          cy.login(setup.approverUser1.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${ar1.id}/approve`,
-            headers: { 'X-API-Key': setup.approverUser1.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
+            Cypress.session.clearAllSavedSessions();
+            cy.clearCookies();
+            cy.login(setup.approverUser2.email, 'test-password');
             cy.request({
               method: 'POST',
               url: `/api/approval_request/${ar2.id}/approve`,
-              headers: { 'X-API-Key': setup.approverUser2.api_key },
             }).then((res2) => {
               expect(res2.status).to.eq(200);
-              expect(res2.body.status).to.eq(1);
+              expect(res2.body.status).to.eq('approved');
             });
           });
         });
@@ -698,7 +1035,7 @@ describe('API: {{ title }}', () => {
             headers: { 'X-API-Key': setup.requestorUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
-            expect(res.body.status).to.eq(0);
+            expect(res.body.status).to.eq('pending');
           });
         });
       });
@@ -744,6 +1081,297 @@ describe('API: {{ title }}', () => {
                 expect(histories[0].message).to.eq('Updated and resubmitting');
               });
           });
+        });
+      });
+    });
+  });
+{% if entity_on_rejected_terminal %}
+    it('14.4 terminal_rejected request cannot be re-submitted (400)', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithTerminalRejectedApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/resubmit`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(400);
+          });
+        });
+      });
+    });
+{% endif %}
+{% endif %}
+{% if can_list and can_export %}
+
+  describe('GET {{ api_path }}/export', () => {
+    beforeEach(() => {
+      Cypress.session.clearAllSavedSessions();
+      cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+    });
+
+    it('N1 returns 200 CSV with attachment disposition', () => {
+      cy.request({ url: `{{ api_path }}/export` })
+        .then((res) => {
+          expect(res.status).to.eq(200);
+          expect(res.headers['content-type']).to.include('text/csv');
+          expect(res.headers['content-disposition']).to.include('attachment');
+        });
+    });
+
+    it('N2 CSV header row does not include an id column', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: `{{ api_path }}/export` })
+        .then((res) => {
+          const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
+          const headers = headerLine.split(',');
+          expect(headers).to.not.include('id');
+        });
+    });
+{% if should_filter_by_org %}
+
+    it('N3 only returns rows from the caller\'s own organization', () => {
+      cy.task('db:populateOrganizationWithUser', 1).then(() => {
+        cy.task<{ id: string; name: string }[]>('db:populateOrganization', 1).then((otherOrgs) => {
+          cy.task('db:populate{{ pascal }}', 1);
+          cy.request({ url: `{{ api_path }}/export` })
+            .then((res) => {
+              expect(res.status).to.eq(200);
+              const lines = (res.body as string).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean);
+              expect(lines.length - 1).to.be.at.most({{ seed_count + 1 }});
+              expect(res.body).to.not.include(otherOrgs[0].name);
+            });
+        });
+      });
+    });
+{% endif %}
+{% if export_import_key_fields %}
+
+    it('N4 CSV header includes the x-import-key natural-key column(s) present in the export allowlist', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: `{{ api_path }}/export` })
+        .then((res) => {
+          const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
+          const headers = headerLine.split(',');
+{% for f in export_import_key_fields %}
+          expect(headers).to.include('{{ f }}');
+{% endfor %}
+        });
+    });
+{% endif %}
+
+    it('N5 CSV header does not include system fields (timestamps/audit/tenant refs)', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: `{{ api_path }}/export` })
+        .then((res) => {
+          const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
+          const headers = headerLine.split(',');
+          expect(headers).to.not.include('id');
+          expect(headers).to.not.include('created_at');
+          expect(headers).to.not.include('updated_at');
+          expect(headers).to.not.include('creator_id');
+          expect(headers).to.not.include('updater_id');
+          expect(headers).to.not.include('organization_id');
+        });
+    });
+
+    it('N6 CSV export headers match the view-field allowlist exactly', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: `{{ api_path }}/export` })
+        .then((res) => {
+          const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
+          const headers = headerLine.split(',');
+          // Positive: expected allowlist columns
+{% for field in export_scalar_fields %}
+          expect(headers).to.include('{{ field }}');
+{% endfor %}
+{% for rel in x_relationships_list %}
+          expect(headers).to.include('{{ rel.display_col }}');
+{% endfor %}
+          // Negative: system columns must not appear
+          expect(headers).to.not.include('id');
+          expect(headers).to.not.include('creator_id');
+          expect(headers).to.not.include('updater_id');
+          expect(headers).to.not.include('organization_id');
+          expect(headers).to.not.include('tenant_id');
+        });
+    });
+{% if model == 'user' %}
+
+    it('N7 CSV export does not expose sensitive columns (allowlist enforcement)', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.request({ url: `{{ api_path }}/export` })
+          .then((res) => {
+            const body = res.body as string;
+            const headerLine = body.replace(/^\uFEFF/, '').split('\r\n')[0];
+            const headers = headerLine.split(',');
+            // Sensitive column names must not appear as headers
+            expect(headers).to.not.include('password');
+            expect(headers).to.not.include('api_key');
+            expect(headers).to.not.include('mfa_secret');
+            expect(headers).to.not.include('email');
+            expect(headers).to.not.include('emailVerified');
+            // Column name absence in the header is sufficient proof — if a
+            // column isn't in the header it cannot have emitted a raw value.
+            // cmd_324 SA-1: confirm with real data that the seeded row's own
+            // email value is never present in the CSV body (value, not just header).
+            expect(body).to.not.include(records[0].email);
+          });
+      });
+    });
+
+    it('N8 CSV export neutralizes formula-injection values with a leading tab (cmd_324 SA-2)', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.request({
+          method: 'PUT',
+          url: `${API_BASE}/${records[0].id}`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: {
+            name: '=1+1',
+            image: records[0].image,
+            roles: [],
+          },
+        }).then(() => {
+          cy.request({ url: `{{ api_path }}/export` })
+            .then((res) => {
+              const body = res.body as string;
+              // The formula-trigger value must be neutralized with a leading tab...
+              expect(body).to.include('\t=1+1');
+              // ...and must never appear as a bare (unescaped, non-tab-prefixed)
+              // field value, which is what Excel/Sheets would interpret as a formula.
+              expect(body).to.not.match(/(^|,)=1\+1(,|\r|$)/m);
+            });
+        });
+      });
+    });
+{% endif %}
+{% if has_exportable_bridge_fks %}
+
+    it('N9 CSV export excludes internal bridge FK columns', () => {
+      cy.task('db:populate{{ pascal }}', 1);
+      cy.request({ url: `{{ api_path }}/export` })
+        .then((res) => {
+          expect(res.status).to.eq(200);
+          const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
+          const headers = headerLine.split(',');
+{% for fk in exportable_bridge_fk_names %}
+          expect(headers).to.not.include('{{ fk }}');
+{% endfor %}
+        });
+    });
+{% endif %}
+{% if import_can_update %}
+
+    it('N11 CSV import round-trip: re-importing an exported row matches it via the natural key with zero errors (dry run)', () => {
+      cy.task('db:populate{{ pascal }}', 1).then(() => {
+        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+          expect(exportRes.status).to.eq(200);
+          const csv = exportRes.body as string;
+          cy.request({
+            method: 'POST',
+            url: `{{ api_path }}/import`,
+            body: { csv, dryRun: true },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            expect(res.body.errors).to.have.length(0);
+            expect(res.body.summary.failed).to.eq(0);
+            expect(res.body.summary.total).to.be.greaterThan(0);
+            expect(res.body.summary.succeeded).to.eq(res.body.summary.total);
+            expect(res.body.confirmToken).to.be.a('string');
+          });
+        });
+      });
+    });
+
+    it('N12 CSV import round-trip: confirming the dry run (dryRun=false) commits with zero write failures', () => {
+      cy.task('db:populate{{ pascal }}', 1).then(() => {
+        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+          const csv = exportRes.body as string;
+          cy.request({
+            method: 'POST',
+            url: `{{ api_path }}/import`,
+            body: { csv, dryRun: true },
+          }).then((dryRunRes) => {
+            const confirmToken = dryRunRes.body.confirmToken as string;
+            cy.request({
+              method: 'POST',
+              url: `{{ api_path }}/import`,
+              body: { csv, dryRun: false, confirmToken },
+            }).then((commitRes) => {
+              expect(commitRes.status).to.eq(200);
+              expect(commitRes.body.errors).to.have.length(0);
+              expect(commitRes.body.summary.failed).to.eq(0);
+              expect(commitRes.body.summary.succeeded).to.be.greaterThan(0);
+            });
+          });
+        });
+      });
+    });
+
+    it('N13 CSV import rejects an unconfirmed commit (dryRun=false without a valid confirmToken)', () => {
+      cy.task('db:populate{{ pascal }}', 1).then(() => {
+        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+          const csv = exportRes.body as string;
+          cy.request({
+            method: 'POST',
+            url: `{{ api_path }}/import`,
+            body: { csv, dryRun: false },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(400);
+            expect(res.body.errors[0].code).to.eq('INVALID_CONFIRM_TOKEN');
+          });
+        });
+      });
+    });
+{% endif %}
+  });
+{% endif %}
+{% if is_searchable %}
+
+  describe('Search coverage (GET /api/search)', () => {
+    beforeEach(() => {
+      Cypress.session.clearAllSavedSessions();
+      cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+    });
+
+    it('N10 per-entity data surfaces in global search results', () => {
+      cy.task<any[]>('db:populate{{ pascal }}{% if not search_sample_field_required %}Full{% endif %}', 1).then((records) => {
+        const q = records[0].{{ search_sample_field }} as string;
+        cy.request({ url: `/api/search?q=${encodeURIComponent(q)}` })
+          .then((res) => {
+            expect(res.status).to.eq(200);
+            expect(
+              res.body.results.some((r: { entity_type: string }) => r.entity_type === '{{ parent }}')
+            ).to.eq(true);
+          });
+      });
+    });
+  });
+{% endif %}
+{% if can_view and has_mention_comments %}
+
+  describe('Mention field name resolution (GET {{ api_path }}/:id)', () => {
+    it('M1 saves a mention and returns the resolved user name in the response', () => {
+      cy.task<{ record: any; mentionedUser: any }>('db:populate{{ pascal }}WithMentionUser').then((result) => {
+        cy.request({ url: `${API_BASE}/${result.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+          .then((res) => {
+            expect(res.status).to.eq(200);
+            const messages = (res.body.{{ commentable_rel_name }}.comments as Array<{ {{ mention_field_name }}: string }>)
+              .map((c) => c.{{ mention_field_name }});
+            expect(messages.some((m) => m.includes(result.mentionedUser.name))).to.eq(true);
+          });
+      });
+    });
+
+    it('M2 creates a mention notification when a comment with @mention is added', () => {
+      cy.task<{ parentId: string; mentionedUserId: string }>('db:populate{{ pascal }}WithMentionUser').then(({ mentionedUserId }) => {
+        cy.task<Array<{ type: string }>>('db:getNotificationsForUser', mentionedUserId).then((notifications) => {
+          expect(notifications.some((n) => n.type === 'mentioned_in_comment')).to.eq(true);
         });
       });
     });

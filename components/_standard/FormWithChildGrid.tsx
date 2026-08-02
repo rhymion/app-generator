@@ -44,7 +44,6 @@ export default function FormWithChildGrid({
   const [openInvalidateDialog, setOpenInvalidateDialog] = useState(false);
   const [openBackDialog, setOpenBackDialog] = useState(false);
   const tc = useTranslations('Common');
-  const tf = useTranslations('Fields');
 
   const handleDeleteConfirmed = async () => {
     if (onDelete) {

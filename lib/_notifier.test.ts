@@ -1,17 +1,29 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+
+// vi.mock is hoisted to the top of the file before any other code runs, so
+// shared mocks have to be declared via vi.hoisted to be available when the
+// mock factory executes. notify() fire-and-forget writes through this mock
+// on every call in this file — tests below that don't care about the DB
+// write just let it resolve/reject in the background.
+const { create } = vi.hoisted(() => ({ create: vi.fn() }));
+
+vi.mock('@/lib/prisma', () => ({
+  default: { notification: { create } },
+}));
+
 import {
   notify,
   listNotifications,
   unreadCount,
   markAllRead,
   clearInbox,
-  subscribe,
   _resetForTests,
-  type Notification,
 } from './_notifier';
 
 beforeEach(() => {
   _resetForTests();
+  create.mockReset();
+  create.mockResolvedValue({});
 });
 
 describe('notify + listNotifications', () => {
@@ -78,38 +90,6 @@ describe('clearInbox', () => {
   });
 });
 
-describe('subscribe', () => {
-  it('fires the handler for matching userId only', () => {
-    const heard: Notification[] = [];
-    const off = subscribe('u1', (n) => heard.push(n));
-    notify('u1', 'assigned', { title: 'mine' });
-    notify('u2', 'assigned', { title: 'theirs' });
-    expect(heard.map((n) => n.payload.title)).toEqual(['mine']);
-    off();
-  });
-
-  it('stops firing after unsubscribe', () => {
-    const heard: Notification[] = [];
-    const off = subscribe('u1', (n) => heard.push(n));
-    notify('u1', 'assigned', { title: 'first' });
-    off();
-    notify('u1', 'assigned', { title: 'second' });
-    expect(heard).toHaveLength(1);
-  });
-
-  it('supports multiple concurrent subscribers for one user (e.g. two tabs)', () => {
-    const heardA: Notification[] = [];
-    const heardB: Notification[] = [];
-    const offA = subscribe('u1', (n) => heardA.push(n));
-    const offB = subscribe('u1', (n) => heardB.push(n));
-    notify('u1', 'assigned', { title: 'broadcast' });
-    expect(heardA).toHaveLength(1);
-    expect(heardB).toHaveLength(1);
-    offA();
-    offB();
-  });
-});
-
 describe('TTL eviction', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
@@ -120,5 +100,37 @@ describe('TTL eviction', () => {
     notify('u1', 'assigned', { title: 'fresh' });
     const titles = listNotifications('u1').map((n) => n.payload.title);
     expect(titles).toEqual(['fresh']);
+  });
+});
+
+describe('notify DB persistence (fire-and-forget)', () => {
+  it('writes a matching row to the notification table', async () => {
+    const entry = notify('u1', 'assigned', { title: 'persisted' });
+    // notify() itself is synchronous; the write happens on a microtask.
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create).toHaveBeenCalledWith({
+      data: {
+        id: entry.id,
+        user_id: 'u1',
+        type: 'assigned',
+        payload: { title: 'persisted' },
+        read: false,
+        created_at: new Date(entry.createdAt),
+      },
+    });
+  });
+
+  it('does not throw or affect the in-memory store when the DB write fails (e.g. FK violation on a deleted user)', async () => {
+    create.mockReset();
+    create.mockRejectedValue(new Error('Foreign key constraint violated: notification_user_id_fkey'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(() => notify('nobody-real', 'assigned', { title: 'orphan' })).not.toThrow();
+    expect(listNotifications('nobody-real').map((n) => n.payload.title)).toEqual(['orphan']);
+
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled());
+    expect(warnSpy.mock.calls[0][0]).toBe('[_notifier:write_failed]');
+
+    warnSpy.mockRestore();
   });
 });

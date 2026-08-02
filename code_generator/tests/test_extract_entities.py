@@ -22,8 +22,8 @@ def _base_entity(name: str, extra_props: dict = None, extra_required: list = Non
 
 
 def _detail_entity(base_name: str, children: dict = None, x_relationships: dict = None) -> dict:
-    """Minimal _detail entity that allOf-refs the base and adds children."""
-    allof = [{"$ref": f"#/definitions/{base_name}"}]
+    """Minimal view entity that allOf-refs the raw ('__'-prefixed) base and adds children."""
+    allof = [{"$ref": f"#/definitions/__{base_name}"}]
     if children:
         allof.append({"type": "object", "properties": children})
     defn: dict = {"allOf": allof}
@@ -49,19 +49,19 @@ def _schema(*pairs) -> dict:
 
 class TestBasicEntityInclusion:
     def test_parent_only_entity_included(self):
-        """An entity with x-generate directly on its base definition (no children)."""
+        """An entity with x-generate directly on its raw definition (no view sibling)."""
         schema = _schema(
-            ("resource", {**_base_entity("resource"), "x-generate": _x_gen()}),
+            ("__resource", {**_base_entity("resource"), "x-generate": _x_gen()}),
         )
         entities = extract_entities(schema)
         assert len(entities) == 1
         assert entities[0]["model"] == "resource"
 
     def test_detail_entity_included(self):
-        """An entity with x-generate on its _detail definition."""
+        """An entity with x-generate on its view definition."""
         schema = _schema(
-            ("resource", _base_entity("resource")),
-            ("resource_detail", {**_detail_entity("resource"), "x-generate": _x_gen()}),
+            ("__resource", _base_entity("resource")),
+            ("resource", {**_detail_entity("resource"), "x-generate": _x_gen()}),
         )
         entities = extract_entities(schema)
         assert len(entities) == 1
@@ -85,8 +85,8 @@ class TestBasicEntityInclusion:
 
     def test_multiple_entities_all_included(self):
         schema = _schema(
-            ("epic", {**_base_entity("epic"), "x-generate": _x_gen()}),
-            ("feature", {**_base_entity("feature"), "x-generate": _x_gen()}),
+            ("__epic", {**_base_entity("epic"), "x-generate": _x_gen()}),
+            ("__feature", {**_base_entity("feature"), "x-generate": _x_gen()}),
         )
         models = {e["model"] for e in extract_entities(schema)}
         assert models == {"epic", "feature"}
@@ -139,8 +139,8 @@ class TestChildEntityInclusion:
             }
         }
         schema = _schema(
-            ("db_table", _base_entity("db_table")),
-            ("db_table_detail", {**_detail_entity("db_table", children=children), "x-generate": _x_gen()}),
+            ("__db_table", _base_entity("db_table")),
+            ("db_table", {**_detail_entity("db_table", children=children), "x-generate": _x_gen()}),
             ("field", field_def),
         )
         entities = extract_entities(schema)
@@ -149,10 +149,10 @@ class TestChildEntityInclusion:
         assert "field" not in models
 
     def test_independent_child_with_x_generate_included(self):
-        """A child with its own _detail + x-generate IS included as a standalone entity."""
+        """A child with its own view + x-generate IS included as a standalone entity."""
         schema = _schema(
-            ("epic", _base_entity("epic")),
-            ("epic_detail", {
+            ("__epic", _base_entity("epic")),
+            ("epic", {
                 **_detail_entity("epic", children={
                     "features": {
                         "type": "array",
@@ -162,8 +162,8 @@ class TestChildEntityInclusion:
                 }),
                 "x-generate": _x_gen(),
             }),
-            ("feature", _base_entity("feature")),
-            ("feature_detail", {**_detail_entity("feature"), "x-generate": _x_gen()}),
+            ("__feature", _base_entity("feature")),
+            ("feature", {**_detail_entity("feature"), "x-generate": _x_gen()}),
         )
         models = {e["model"] for e in extract_entities(schema)}
         assert "epic" in models
@@ -172,13 +172,13 @@ class TestChildEntityInclusion:
     def test_m2m_child_included_as_standalone(self):
         """An entity that is a m2m child of a generated entity is itself included."""
         schema = _schema(
-            ("user_account", _base_entity("user_account")),
-            ("role", _base_entity("role")),
-            ("user_account_detail", {
+            ("__user_account", _base_entity("user_account")),
+            ("__role", _base_entity("role")),
+            ("user_account", {
                 "x-generate": _x_gen(),
                 "x-relationships": {"roles": {"type": "many-to-many", "target": "role"}},
                 "allOf": [
-                    {"$ref": "#/definitions/user_account"},
+                    {"$ref": "#/definitions/__user_account"},
                     {"type": "object", "properties": {
                         "roles": {
                             "type": "array",
@@ -188,7 +188,7 @@ class TestChildEntityInclusion:
                     }}
                 ],
             }),
-            ("role_detail", {**_detail_entity("role"), "x-generate": _x_gen()}),
+            ("role", {**_detail_entity("role"), "x-generate": _x_gen()}),
         )
         models = {e["model"] for e in extract_entities(schema)}
         assert "user_account" in models
@@ -205,7 +205,7 @@ class TestXGenerateFlags:
         # is falsy in Python and would cause extract_entities to skip the entity).
         x_gen = {"list": True, **flags}
         schema = _schema(
-            ("resource", {**_base_entity("resource"), "x-generate": x_gen}),
+            ("__resource", {**_base_entity("resource"), "x-generate": x_gen}),
         )
         return extract_entities(schema)[0]["generate_config"]
 
@@ -247,8 +247,8 @@ class TestXGenerateFlags:
 
     def test_entity_name_derived_correctly_from_detail_key(self):
         schema = _schema(
-            ("resource", _base_entity("resource")),
-            ("resource_detail", {**_detail_entity("resource"), "x-generate": _x_gen()}),
+            ("__resource", _base_entity("resource")),
+            ("resource", {**_detail_entity("resource"), "x-generate": _x_gen()}),
         )
         entity = extract_entities(schema)[0]
         assert entity["parent"] == "resource"
@@ -262,11 +262,11 @@ class TestXGenerateFlags:
 class TestXGenerateChildValidation:
     def test_valid_list_output_type_does_not_raise(self):
         schema = _schema(
-            ("epic", _base_entity("epic")),
-            ("epic_detail", {
+            ("__epic", _base_entity("epic")),
+            ("epic", {
                 "x-generate": _x_gen(),
                 "allOf": [
-                    {"$ref": "#/definitions/epic"},
+                    {"$ref": "#/definitions/__epic"},
                     {"type": "object", "properties": {
                         "features": {
                             "type": "array",
@@ -276,19 +276,19 @@ class TestXGenerateChildValidation:
                     }}
                 ],
             }),
-            ("feature", _base_entity("feature")),
-            ("feature_detail", {**_detail_entity("feature"), "x-generate": _x_gen()}),
+            ("__feature", _base_entity("feature")),
+            ("feature", {**_detail_entity("feature"), "x-generate": _x_gen()}),
         )
         # Should not raise
         extract_entities(schema)
 
     def test_generated_child_with_table_output_type_raises(self):
         schema = _schema(
-            ("epic", _base_entity("epic")),
-            ("epic_detail", {
+            ("__epic", _base_entity("epic")),
+            ("epic", {
                 "x-generate": _x_gen(),
                 "allOf": [
-                    {"$ref": "#/definitions/epic"},
+                    {"$ref": "#/definitions/__epic"},
                     {"type": "object", "properties": {
                         "features": {
                             "type": "array",
@@ -298,19 +298,19 @@ class TestXGenerateChildValidation:
                     }}
                 ],
             }),
-            ("feature", _base_entity("feature")),
-            ("feature_detail", {**_detail_entity("feature"), "x-generate": _x_gen()}),
+            ("__feature", _base_entity("feature")),
+            ("feature", {**_detail_entity("feature"), "x-generate": _x_gen()}),
         )
         with pytest.raises(ValueError, match="must be 'list'"):
             extract_entities(schema)
 
     def test_generated_child_with_comments_output_type_raises(self):
         schema = _schema(
-            ("epic", _base_entity("epic")),
-            ("epic_detail", {
+            ("__epic", _base_entity("epic")),
+            ("epic", {
                 "x-generate": _x_gen(),
                 "allOf": [
-                    {"$ref": "#/definitions/epic"},
+                    {"$ref": "#/definitions/__epic"},
                     {"type": "object", "properties": {
                         "features": {
                             "type": "array",
@@ -320,8 +320,8 @@ class TestXGenerateChildValidation:
                     }}
                 ],
             }),
-            ("feature", _base_entity("feature")),
-            ("feature_detail", {**_detail_entity("feature"), "x-generate": _x_gen()}),
+            ("__feature", _base_entity("feature")),
+            ("feature", {**_detail_entity("feature"), "x-generate": _x_gen()}),
         )
         with pytest.raises(ValueError, match="must be 'list'"):
             extract_entities(schema)
@@ -330,11 +330,11 @@ class TestXGenerateChildValidation:
         """Non-generated children (no x-generate) are not subject to the validation."""
         inline_child = _base_entity("field")
         schema = _schema(
-            ("parent", _base_entity("parent")),
-            ("parent_detail", {
+            ("__parent", _base_entity("parent")),
+            ("parent", {
                 "x-generate": _x_gen(),
                 "allOf": [
-                    {"$ref": "#/definitions/parent"},
+                    {"$ref": "#/definitions/__parent"},
                     {"type": "object", "properties": {
                         "fields": {
                             "type": "array",
@@ -348,3 +348,46 @@ class TestXGenerateChildValidation:
         )
         # Should not raise — field has no x-generate
         extract_entities(schema)
+
+    def _epic_with_readonly_feature_child(self, feature_flags: dict) -> dict:
+        """Epic detail embedding a 'features' child with NO x-outputType (resolves
+        to None). The feature's own detail page carries `feature_flags`."""
+        return _schema(
+            ("__epic", _base_entity("epic")),
+            ("epic", {
+                "x-generate": _x_gen(),
+                "allOf": [
+                    {"$ref": "#/definitions/__epic"},
+                    {"type": "object", "properties": {
+                        "features": {
+                            "type": "array",
+                            # no x-outputType → output_type None (not 'list')
+                            "items": {"$ref": "#/definitions/feature"},
+                        }
+                    }}
+                ],
+            }),
+            ("__feature", _base_entity("feature")),
+            ("feature", {**_detail_entity("feature"), "x-generate": _x_gen(**feature_flags)}),
+        )
+
+    def test_readonly_generated_child_with_non_list_output_type_allowed(self):
+        """A generated child that disables new/edit/delete (e.g. an approval-only
+        detail page) may appear with a non-list x-outputType without raising."""
+        schema = self._epic_with_readonly_feature_child(
+            {"new": False, "edit": False, "delete": False}
+        )
+        # Should not raise — feature is read-only (view/approve-reject only)
+        models = {e["model"] for e in extract_entities(schema)}
+        assert "epic" in models
+        assert "feature" in models
+
+    def test_mutable_generated_child_with_non_list_output_type_raises(self):
+        """A generated child that still permits any mutation (new/edit/delete) must
+        use x-outputType: list — a non-list embedding raises."""
+        for flag in ("new", "edit", "delete"):
+            schema = self._epic_with_readonly_feature_child(
+                {"new": False, "edit": False, "delete": False, flag: True}
+            )
+            with pytest.raises(ValueError, match="must be 'list'"):
+                extract_entities(schema)

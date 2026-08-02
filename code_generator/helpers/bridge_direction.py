@@ -71,7 +71,7 @@ def collect_parent_bridge_fk_props(model: str, schema: dict) -> dict:
     for entity_name, entity_def in schema.get('definitions', {}).items():
         if not isinstance(entity_def, dict):
             continue
-        if entity_name.endswith('_detail'):
+        if not entity_name.startswith('__'):
             continue
         bridge = get_new_form_bridge(entity_def)
         if not bridge:
@@ -112,7 +112,7 @@ def collect_parent_bridge_children(model: str, schema: dict) -> list[dict]:
     defs = schema.get('definitions', {})
     out: list[dict] = []
     for entity_name, entity_def in defs.items():
-        if not isinstance(entity_def, dict) or entity_name.endswith('_detail'):
+        if not isinstance(entity_def, dict) or not entity_name.startswith('__'):
             continue
         bridge = get_new_form_bridge(entity_def)
         if not bridge:

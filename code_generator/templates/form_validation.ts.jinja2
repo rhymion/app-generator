@@ -1,5 +1,5 @@
 const REQUIRED_FIELDS = [
-{% for field in required_fields %}
+{% for field in client_required_fields %}
   { key: '{{ field.key }}', label: '{{ field.label }}' },
 {% endfor %}
 ] as const;

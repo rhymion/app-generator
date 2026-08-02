@@ -196,13 +196,13 @@ class TestGetDetailProperties:
     def _schema(self):
         return {
             "definitions": {
-                "resource": {
+                "__resource": {
                     "type": "object",
                     "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
                 },
-                "resource_detail": {
+                "resource": {
                     "allOf": [
-                        {"$ref": "#/definitions/resource"},
+                        {"$ref": "#/definitions/__resource"},
                         {"type": "object", "properties": {"organization": {"$ref": "#/definitions/organization"}}},
                     ]
                 }
@@ -239,9 +239,9 @@ class TestGetDetailRelationName:
     def _schema(self):
         return {
             "definitions": {
-                "booking_detail": {
+                "booking": {
                     "allOf": [
-                        {"$ref": "#/definitions/booking"},
+                        {"$ref": "#/definitions/__booking"},
                         {
                             "type": "object",
                             "properties": {
@@ -272,7 +272,7 @@ class TestGetDetailRefRels:
     def _schema(self):
         return {
             "definitions": {
-                "checkup": {
+                "__checkup": {
                     "type": "object",
                     "properties": {
                         "id": {"type": "string"},
@@ -282,9 +282,9 @@ class TestGetDetailRefRels:
                         },
                     },
                 },
-                "checkup_detail": {
+                "checkup": {
                     "allOf": [
-                        {"$ref": "#/definitions/checkup"},
+                        {"$ref": "#/definitions/__checkup"},
                         {
                             "type": "object",
                             "properties": {
@@ -316,7 +316,7 @@ class TestGetDetailRefRels:
 
     def test_detects_reverse_oto(self):
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_detail_ref_rels("checkup", parent_def, schema)
         assert len(rels) == 1
         assert rels[0]["prop_name"] == "pre_check"
@@ -324,30 +324,30 @@ class TestGetDetailRefRels:
 
     def test_skips_many_to_one_rel(self):
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_detail_ref_rels("checkup", parent_def, schema)
         prop_names = [r["prop_name"] for r in rels]
         assert "patient_rel" not in prop_names
 
     def test_skips_array_children(self):
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_detail_ref_rels("checkup", parent_def, schema)
         prop_names = [r["prop_name"] for r in rels]
         assert "medicines" not in prop_names
 
     def test_label_field_auto_detected(self):
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_detail_ref_rels("checkup", parent_def, schema)
         assert rels[0]["label_field"] == "ams_score"
 
     def test_label_field_from_x_labelField(self):
         schema = self._schema()
         # Add x-labelField to the detail property
-        detail_props = schema["definitions"]["checkup_detail"]["allOf"][1]["properties"]
+        detail_props = schema["definitions"]["checkup"]["allOf"][1]["properties"]
         detail_props["pre_check"]["x-labelField"] = "custom_field"
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_detail_ref_rels("checkup", parent_def, schema)
         assert rels[0]["label_field"] == "custom_field"
 
@@ -360,9 +360,9 @@ class TestGetDetailRefRels:
     def test_skips_flatten_properties(self):
         """Properties with x-outputType: flatten are excluded from reverse OTO rels."""
         schema = self._schema()
-        detail_props = schema["definitions"]["checkup_detail"]["allOf"][1]["properties"]
+        detail_props = schema["definitions"]["checkup"]["allOf"][1]["properties"]
         detail_props["pre_check"]["x-outputType"] = "flatten"
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_detail_ref_rels("checkup", parent_def, schema)
         prop_names = [r["prop_name"] for r in rels]
         assert "pre_check" not in prop_names
@@ -376,7 +376,7 @@ class TestGetFlattenRels:
     def _schema(self):
         return {
             "definitions": {
-                "checkup": {
+                "__checkup": {
                     "type": "object",
                     "properties": {
                         "id": {"type": "string"},
@@ -386,9 +386,9 @@ class TestGetFlattenRels:
                         },
                     },
                 },
-                "checkup_detail": {
+                "checkup": {
                     "allOf": [
-                        {"$ref": "#/definitions/checkup"},
+                        {"$ref": "#/definitions/__checkup"},
                         {
                             "type": "object",
                             "properties": {
@@ -455,7 +455,7 @@ class TestGetFlattenRels:
 
     def test_returns_only_flatten_annotated_properties(self):
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         prop_names = [r["prop_name"] for r in rels]
         assert "patient_rel" in prop_names
@@ -466,7 +466,7 @@ class TestGetFlattenRels:
     def test_skips_array_properties(self):
         """Arrays with x-outputType: flatten should still be skipped."""
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         prop_names = [r["prop_name"] for r in rels]
         assert "medicines" not in prop_names
@@ -474,7 +474,7 @@ class TestGetFlattenRels:
     def test_m2o_flag_when_fk_in_parent(self):
         """patient_rel is m2o because patient_rel_id exists in checkup base props."""
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         patient_rel_entry = next(r for r in rels if r["prop_name"] == "patient_rel")
         assert patient_rel_entry["is_m2o"] is True
@@ -482,7 +482,7 @@ class TestGetFlattenRels:
     def test_non_m2o_when_fk_not_in_parent(self):
         """pre_check is non-m2o because pre_check_id is not in checkup base props."""
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
         assert pre_check_entry["is_m2o"] is False
@@ -490,7 +490,7 @@ class TestGetFlattenRels:
     def test_extracts_fields_from_target(self):
         """Fields from target entity are returned, excluding back-refs and system fields."""
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
         field_names = [f["name"] for f in pre_check_entry["fields"]]
@@ -504,7 +504,7 @@ class TestGetFlattenRels:
     def test_fk_field_in_target_marked_as_is_fk(self):
         """FK field (patient_id in patient_rel) should have is_fk=True."""
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         patient_rel_entry = next(r for r in rels if r["prop_name"] == "patient_rel")
         fk_fields = [f for f in patient_rel_entry["fields"] if f.get("is_fk")]
@@ -517,9 +517,9 @@ class TestGetFlattenRels:
     def test_x_relation_name_override(self):
         """x-relationName annotation overrides the relation name."""
         schema = self._schema()
-        detail_props = schema["definitions"]["checkup_detail"]["allOf"][1]["properties"]
+        detail_props = schema["definitions"]["checkup"]["allOf"][1]["properties"]
         detail_props["pre_check"]["x-relationName"] = "preCheckOverride"
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
         assert pre_check_entry["relation_name"] == "preCheckOverride"
@@ -568,28 +568,28 @@ class TestGetFlattenRelsRefToDetail:
         return {
             "definitions": {
                 # Parent
-                "checkup": {
+                "__checkup": {
                     "type": "object",
                     "properties": {
                         "id": {"type": "string"},
                     },
                 },
-                "checkup_detail": {
+                "checkup": {
                     "allOf": [
-                        {"$ref": "#/definitions/checkup"},
+                        {"$ref": "#/definitions/__checkup"},
                         {
                             "type": "object",
                             "properties": {
                                 "pre_check": {
                                     "x-outputType": "flatten",
-                                    "$ref": "#/definitions/pre_check_detail",
+                                    "$ref": "#/definitions/pre_check",
                                 },
                             },
                         },
                     ]
                 },
-                # Flatten target: base + detail extension
-                "pre_check": {
+                # Flatten target: raw + view extension
+                "__pre_check": {
                     "type": "object",
                     "properties": {
                         "id": {"type": "string"},
@@ -604,9 +604,9 @@ class TestGetFlattenRelsRefToDetail:
                         "ams_score": {"type": ["integer", "null"]},
                     },
                 },
-                "pre_check_detail": {
+                "pre_check": {
                     "allOf": [
-                        {"$ref": "#/definitions/pre_check"},
+                        {"$ref": "#/definitions/__pre_check"},
                         {
                             "type": "object",
                             "properties": {
@@ -638,7 +638,7 @@ class TestGetFlattenRelsRefToDetail:
         """A scalar inherited from `pre_check` (ams_score) must surface
         even when the flatten target is `pre_check_detail`."""
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
         names = [f["name"] for f in pre_check_entry["fields"]]
@@ -652,7 +652,7 @@ class TestGetFlattenRelsRefToDetail:
         present with `is_array=True` and the item target name attached so
         renderers can build a list-widget against it."""
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
         symptoms_field = next(
@@ -670,7 +670,7 @@ class TestGetFlattenRelsRefToDetail:
         self-evident back-reference to the parent and must be excluded —
         the parent is the form being rendered."""
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
         names = [f["name"] for f in pre_check_entry["fields"]]
@@ -681,22 +681,22 @@ class TestGetFlattenRelsRefToDetail:
         also a back-reference. The pre-existing rule covered this for
         plain flatten targets; verify it still applies after merging."""
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
         names = [f["name"] for f in pre_check_entry["fields"]]
         assert "checkup_id" not in names
 
-    def test_filters_ref_back_reference_via_parent_detail_name(self):
-        """When the detail extension references `<parent>_detail` (not
-        just `<parent>`), that's still a back-reference."""
+    def test_filters_ref_back_reference_via_parent_raw_name(self):
+        """When the detail extension references `__<parent>` (the raw
+        entity, not the bare view), that's still a back-reference."""
         schema = self._schema()
-        # Replace the plain `checkup` $ref with a `checkup_detail` $ref.
-        detail_extension = schema["definitions"]["pre_check_detail"]["allOf"][1]
+        # Replace the plain `checkup` $ref with a `__checkup` $ref.
+        detail_extension = schema["definitions"]["pre_check"]["allOf"][1]
         detail_extension["properties"]["checkup"] = {
-            "$ref": "#/definitions/checkup_detail",
+            "$ref": "#/definitions/__checkup",
         }
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
         names = [f["name"] for f in pre_check_entry["fields"]]
@@ -707,12 +707,12 @@ class TestGetFlattenRelsRefToDetail:
         of primitives (no $ref) are skipped so the renderer can ignore
         them without special-casing."""
         schema = self._schema()
-        detail_extension = schema["definitions"]["pre_check_detail"]["allOf"][1]
+        detail_extension = schema["definitions"]["pre_check"]["allOf"][1]
         detail_extension["properties"]["raw_tags"] = {
             "type": "array",
             "items": {"type": "string"},
         }
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
         names = [f["name"] for f in pre_check_entry["fields"]]
@@ -723,7 +723,7 @@ class TestGetFlattenRelsRefToDetail:
         field (ams_score) and an array field (symptoms) — the renderers
         downstream pick the right widget based on `is_array`."""
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
         by_name = {f["name"]: f for f in pre_check_entry["fields"]}
@@ -732,12 +732,14 @@ class TestGetFlattenRelsRefToDetail:
         assert by_name["ams_score"].get("is_array") is not True
         assert by_name["symptoms"].get("is_array") is True
 
-    def test_target_field_preserves_detail_name(self):
-        """The `target` on the flatten entry retains the `*_detail` name
+    def test_target_field_is_bare_view_name(self):
+        """The `target` on the flatten entry is the bare view entity name
         — downstream code uses it as the TypeScript type label
-        (PreCheckDetail). Module-path rewriting happens in context.py."""
+        (PreCheckDetail via pascal_case) and the module path
+        (lib/pre_check/types) alike, since Stage4 retired the `_detail`
+        suffix that used to distinguish the two."""
         schema = self._schema()
-        parent_def = schema["definitions"]["checkup"]
+        parent_def = schema["definitions"]["__checkup"]
         rels = get_flatten_rels("checkup", parent_def, schema)
         pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
-        assert pre_check_entry["target"] == "pre_check_detail"
+        assert pre_check_entry["target"] == "pre_check"

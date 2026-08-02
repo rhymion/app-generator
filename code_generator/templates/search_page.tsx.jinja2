@@ -138,7 +138,9 @@ export default function SearchPage() {
         <div data-testid="search-results">
         <AppBox className="flex flex-col gap-3">
           <AppText variant="body2" color="text.secondary" mb={1}>
-            {result.total} result{result.total !== 1 ? 's' : ''}
+            {result.total === -1
+              ? `${result.results.length}+ results`
+              : `${result.total} result${result.total !== 1 ? 's' : ''}`}
           </AppText>
           {result.results.map((item) => (
             <AppSurface

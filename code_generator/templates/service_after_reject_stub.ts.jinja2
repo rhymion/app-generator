@@ -1,0 +1,23 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+
+import type { PrismaClient } from '@/app/generated/prisma/client';
+
+type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+/**
+ * Called after {{ snake_name }} is rejected.
+ * Customize this function to implement post-rejection side effects.
+ *
+ * @param tx - Prisma transaction client
+ * @param entityId - ID of the rejected {{ snake_name }}
+ * @param approvableId - ID of the approvable record
+ * @param rejectedByUserId - ID of the user who rejected
+ */
+export async function afterReject(
+  tx: Tx,
+  entityId: string,
+  approvableId: string,
+  rejectedByUserId: string,
+): Promise<void> {
+  // TODO: implement post-rejection effects here
+}

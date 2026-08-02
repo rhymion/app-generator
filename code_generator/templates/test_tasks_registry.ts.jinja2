@@ -34,6 +34,12 @@ export function getGeneratedTasks() {
       return await populate{{ entity.pascal }}With{{ rel.pascal }}Data(length);
     },
 {% endfor %}
+{% if entity.has_mention_comments %}
+    async 'db:populate{{ entity.pascal }}WithMentionUser'() {
+      const { populate{{ entity.pascal }}WithMentionUser } = require('{{ entity.helper_path }}');
+      return await populate{{ entity.pascal }}WithMentionUser();
+    },
+{% endif %}
 {% if entity.has_approvable %}
     async 'db:setup{{ entity.pascal }}ApprovalFlow'() {
       const { setup{{ entity.pascal }}ApprovalFlow } = require('{{ entity.helper_path }}');
@@ -43,13 +49,17 @@ export function getGeneratedTasks() {
       const { setup{{ entity.pascal }}OrderedApprovalFlow } = require('{{ entity.helper_path }}');
       return await setup{{ entity.pascal }}OrderedApprovalFlow();
     },
-    async 'db:populate{{ entity.pascal }}WithApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+    async 'db:populate{{ entity.pascal }}WithApproval'(params: { creatorId: string; approvalFlowIds: string[]; overrides?: Record<string, any> }) {
       const { populate{{ entity.pascal }}WithApproval } = require('{{ entity.helper_path }}');
-      return await populate{{ entity.pascal }}WithApproval(params.creatorId, params.approvalFlowIds);
+      return await populate{{ entity.pascal }}WithApproval(params.creatorId, params.approvalFlowIds, params.overrides || {});
     },
     async 'db:populate{{ entity.pascal }}WithRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
       const { populate{{ entity.pascal }}WithRejectedApproval } = require('{{ entity.helper_path }}');
       return await populate{{ entity.pascal }}WithRejectedApproval(params.creatorId, params.approvalFlowIds);
+    },
+    async 'db:populate{{ entity.pascal }}WithTerminalRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
+      const { populate{{ entity.pascal }}WithTerminalRejectedApproval } = require('{{ entity.helper_path }}');
+      return await populate{{ entity.pascal }}WithTerminalRejectedApproval(params.creatorId, params.approvalFlowIds);
     },
 {% endif %}
 {% if entity.has_reservation %}
@@ -103,6 +113,13 @@ export function getGeneratedTasks() {
         records.push(record);
       }
       return JSON.parse(JSON.stringify(records));
+    },
+{% endif %}
+{% if has_any_mention %}
+    async 'db:getNotificationsForUser'(userId: string) {
+      const { prisma } = require('./db-helpers');
+      const notifications = await prisma.notification.findMany({ where: { user_id: userId } });
+      return JSON.parse(JSON.stringify(notifications));
     },
 {% endif %}
   };

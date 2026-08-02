@@ -83,7 +83,8 @@ Minimum docs to read before starting:
 
 ## Completion gate
 
-1. `npm audit --omit=dev --audit-level=high`
+See `.claude/commands/review-security.md §Completion gate` — canonical source of truth.
+Open the file directly (it is in the same repository under `.claude/commands/`).
 
 ## Input
 $ARGUMENTS

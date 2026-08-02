@@ -1,5 +1,10 @@
 jinja2>=3.1.6
 pyyaml>=6.0.3
+# Round-trip YAML load/dump (preserves comments, quoting, blank lines) used
+# by code_generator/build_user_schema.py -- plain pyyaml dump does not
+# preserve formatting well enough for the cmd_395 Stage 1 byte-for-byte
+# identity requirement.
+ruamel.yaml>=0.19.1
 pytest>=9.0.0
 pytest-cov>=7.1.0
 fonttools[woff]>=4.63.0

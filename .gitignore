@@ -9,12 +9,15 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
-package-lock.json
 
 # testing
 /coverage
 /cypress/videos
 /cypress/screenshots
+
+# Claude Code: personal, machine-specific permission overrides (defaultMode,
+# extra allow/deny rules). Never shared — see docs/knowledge/claude-code-settings-consumer-side.md
+.claude/settings.local.json
 
 # next.js
 /.next/
@@ -52,7 +55,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-/app/generated/prisma
+/app/generated/
 
 # database
 /prisma/dev.db
@@ -83,6 +86,11 @@ __pycache__/
 # it but it churns with generated content, so it's kept out of version control.
 .generated-manifest.json
 
+# intermediate schema (cmd_395 Stage 1) — build_user_schema.py output, rebuilt
+# from user_schema.yaml + prisma/schema.prisma on every build. Never hand-edited,
+# so it's a build artifact like the rest of the generated code, not a source file.
+code_generator/.generated/
+
 # sample data
 custom/
 memory/
@@ -95,9 +103,6 @@ memory/
 
 # ── lib/ ──
 lib/*/*
-!lib/*/service_after_create.ts
-!lib/*/form_validation.ts
-!lib/*/service_validation.ts
 !lib/account-link/**
 !lib/auth/**
 !lib/mfa/**
@@ -110,6 +115,8 @@ lib/dashboard/service.ts
 lib/dashboard/types.ts
 !lib/organization/getters_associated.ts
 !lib/approval_request/actions.ts
+!lib/approval_request/actions.test.ts
+!lib/approval_request/actions_core.ts
 !lib/approval_request/order-check.ts
 !lib/setting/password-actions.ts
 !lib/audit_log/getters.ts
@@ -117,6 +124,7 @@ lib/dashboard/types.ts
 !lib/audit_log/virtual_resolvers.ts
 !lib/compliance/**
 !lib/mention/**
+!lib/legal/**
 
 # ── app/[locale]/ ──
 app/\[locale\]/*/
@@ -144,6 +152,8 @@ app/\[locale\]/setting/view/
 !app/\[locale\]/docs/layout.tsx
 app/\[locale\]/docs/page.mdx
 app/\[locale\]/docs/*/
+!app/\[locale\]/legal/
+!app/\[locale\]/legal/**
 
 # ── app/api/ ──
 app/api/*/
@@ -156,7 +166,7 @@ app/api/*/
 # app/api/upload/route.ts is a full generate-code target in both modes
 # (generate.py: base emits the Vercel Blob version, x-cloud:gcp overwrites it
 # with the GCS version), so it is intentionally NOT negated here — it stays
-# ignored to avoid generated-vs-VCS drift (cmd_269/cmd_272, 殿 ruling 2026-07-04).
+# ignored to avoid generated-vs-VCS drift (cmd_269/cmd_272, decided 2026-07-04).
 !app/api/uploads/
 !app/api/uploads/**
 !app/api/approval_request/
@@ -164,6 +174,8 @@ app/api/*/
 app/api/approval_request/route.ts
 app/api/approval_request/\[id\]/route.ts
 app/api/approval_request/bulk/route.ts
+!app/api/audit_log/
+!app/api/audit_log/**
 
 # ── components/ ──
 components/*/*
@@ -175,23 +187,40 @@ components/setting/FormUpsert.tsx
 components/setting/FormView.tsx
 components/setting/column_def.tsx
 !components/audit_log/FormView.tsx
+!components/legal/**
 
 # ── cypress/e2e/ ──
 cypress/e2e/*.cy.ts
 !cypress/e2e/auth.cy.ts
+!cypress/e2e/auth_redirect.cy.ts
 !cypress/e2e/search_page.cy.ts
+!cypress/e2e/audit_log.cy.ts
+!cypress/e2e/import_modal.cy.ts
+!cypress/e2e/legal_pages.cy.ts
 cypress/e2e/mobile/*.cy.ts
 !cypress/e2e/mobile/layout.cy.ts
+!cypress/e2e/mobile/audit_log.cy.ts
 cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/search.cy.ts
 !cypress/e2e/api/user_invalidate.cy.ts
 !cypress/e2e/api/user_invalidate_dp6.cy.ts
+!cypress/e2e/api/audit_log.cy.ts
+!cypress/e2e/api/user_import.cy.ts
+!cypress/e2e/api/import_batch2.cy.ts
+!cypress/e2e/api/round_trip.cy.ts
+!cypress/e2e/api/fk_read_permission_graceful_degradation.cy.ts
+!cypress/e2e/api/notification_approval.cy.ts
+!cypress/e2e/api/receiving_receipt_notification.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/
 !cypress/support/audit_log/
 cypress/support/audit_log/*
 !cypress/support/audit_log/helper.ts
+!cypress/support/receiving_receipt/
+cypress/support/receiving_receipt/*
+!cypress/support/receiving_receipt/receiving_receipt_line_helper.ts
+!cypress/support/receiving_receipt/notification_helper.ts
 
 # ── docs/generated/ ──
 docs/generated/

@@ -6,6 +6,7 @@ import { PrismaClient } from '@/app/generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg'
 import * as bcrypt from 'bcryptjs';
 import { createId } from "@paralleldrive/cuid2";
+import { resolveAdminCredentials, requiresExplicitCredentials } from './seed-tenant-credentials';
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -31,7 +32,7 @@ async function main() {
   // default on `user.tenant_id` and the backfill value used by the 1.5
   // migration script. Creator/updater stay null on first run; once an
   // admin exists they could be backfilled, but it isn't required.
-  const defaultTenant = await prisma.tenant.upsert({
+  await prisma.tenant.upsert({
     where: { slug: 'default' },
     update: {},
     create: {
@@ -46,21 +47,39 @@ async function main() {
   // Created here so db:seed-tenant is sufficient for tests requiring a
   // sign-in with admin@example.com. Future default permission of 'none'
   // means the admin must exist before general seeding adds any other data.
-  const hashedPassword = await bcrypt.hash('password123', 10);
+  //
+  // Credentials come from resolveAdminCredentials (scripts/seed-tenant-credentials.ts):
+  // under NODE_ENV=production it fail-fasts unless SEED_ADMIN_EMAIL/
+  // SEED_ADMIN_PASSWORD are set and always mints a fresh random api_key —
+  // app-generator is a public repo, so the well-known admin@example.com/
+  // password123/mk_78d1e51a... literal must never land in a real deployment.
+  // Every other NODE_ENV (test, development, ...) keeps those exact defaults
+  // unchanged, since cypress specs and vitest fixtures are pinned to them.
+  // See docs/knowledge/seed-tenant-credential-hardening.md.
+  const credentials = resolveAdminCredentials(process.env);
+  const hashedPassword = await bcrypt.hash(credentials.password, 10);
   const adminId = createId();
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@example.com' },
+    where: { email: credentials.email },
     update: {},
     create: {
       id: adminId,
       creator_id: adminId,
       updater_id: adminId,
-      api_key: 'mk_78d1e51a47f40912f5a1787367e3f7f6ed17c314590eac84edc5b3f785a527b1',
-      email: 'admin@example.com',
+      api_key: credentials.apiKey,
+      email: credentials.email,
       name: 'Test Admin',
       password: hashedPassword,
     },
   });
+
+  // The upsert's `update: {}` means an existing admin row is never touched —
+  // on a second run the freshly-generated api_key above was never written,
+  // so print exactly what `admin` (the actual post-upsert row) holds. Stdout
+  // only, once, never written to a log file/collector — see requirement 1.
+  if (requiresExplicitCredentials(process.env.NODE_ENV)) {
+    console.log(`Admin api_key (store this now — it is not shown again): ${admin.api_key}`);
+  }
 
   // ── Administrator role + full CRUD permissions ────────────────────────────
   let adminRole = await prisma.role.findFirst({ where: { name: 'Administrator' } });
@@ -68,7 +87,7 @@ async function main() {
     adminRole = await prisma.role.create({
       data: {
         name: 'Administrator',
-        description: '管理者権限',
+        description: 'Administrator permissions',
         creator_id: admin.id,
         updater_id: admin.id,
       },
@@ -79,9 +98,15 @@ async function main() {
     data: { users: { connect: { id: admin.id } } },
   });
 
+  // Fixed enumeration, not schema-derived: any entity a consumer adds on top
+  // of the default schema (e.g. purchase_order, shift) never appears here,
+  // so the Administrator role gets zero permissions on it until an admin
+  // grants them via the Permissions UI. This is a deliberate design
+  // boundary, not a bug — see docs/knowledge/seed-tenant-credential-hardening.md
+  // §"Fixed permission enumeration".
   const entities = [
     'user', 'role', 'organization', 'permission', 'setting',
-    'approval_request', 'approval_flow', 
+    'approval_request', 'approval_flow',
     'dashboard',
   ];
   await Promise.all(entities.map(entity =>
@@ -115,6 +140,7 @@ async function main() {
       delete: false,
     },
   });
+
   console.log('Tenant seeded successfully!');
 }
 

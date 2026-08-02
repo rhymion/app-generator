@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, handleApiError } from '@/lib/api-auth';
+import { requireSession, handleApiError } from '@/lib/api-auth';
 import { ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 import { getUserRoleIds } from '@/lib/authz';
 import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 import { dispatchOnApproved } from '@/lib/approval_request/on_approved_dispatch';
+import { getApprovalRequestRecipient } from '@/lib/approval_request/actions';
+import { notify } from '@/lib/_notifier';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const { userId } = await authenticateApiKey(request);
+    const { userId } = await requireSession();
 
     const req = await prisma.approval_request.findUnique({
       where: { id },
@@ -30,7 +32,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const updated = await prisma.$transaction(async (tx) => {
       const result = await tx.approval_request.update({
         where: { id },
-        data: { status: 1 },
+        data: { status: 'approved' },
         select: {
           id: true,
           status: true,
@@ -50,14 +52,30 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           approval_requests: { select: { status: true } },
         },
       });
-      const allApproved = approvableData?.approval_requests.every((r) => r.status === 1) ?? false;
+      const allApproved = approvableData?.approval_requests.every((r) => r.status === 'approved') ?? false;
       const alreadyFired = approvableData?.approved_at != null;
       if (allApproved && !alreadyFired && approvableData) {
         await tx.approvable.update({ where: { id: approvableData.id }, data: { approved_at: new Date() } });
         await dispatchOnApproved(tx, result.approval_flow.entity_name, approvableData.id, userId);
       }
       return result;
-    });
+    }, { isolationLevel: 'Serializable' });
+    // cmd_479: this REST route duplicates lib/approval_request/actions.ts's
+    // approveApprovalRequest() transaction but, until now, never sent the
+    // Trigger #3 notification that function sends after its own transaction
+    // — so approving via the API (as opposed to the UI's ApprovalSection.tsx,
+    // which calls the server action) silently never notified the requestor.
+    // Mirrors that function's post-transaction notify block exactly.
+    const { recipientId, entityName, href } = await getApprovalRequestRecipient(id);
+    if (recipientId && recipientId !== userId) {
+      notify(recipientId, 'approval_responded', {
+        title: `Your ${entityName ?? 'request'} was approved`,
+        href,
+        approvalRequestId: id,
+        status: 'approved',
+        message: message ?? null,
+      });
+    }
     return NextResponse.json(updated);
   } catch (error) {
     return handleApiError(error);

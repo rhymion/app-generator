@@ -8,7 +8,7 @@
 > the default production DB path, not Accelerate.** Accelerate has never
 > successfully reached this environment's Cloud SQL instance (P1001,
 > `GOOGLE_MANAGED_INTERNAL_CA` TLS verification failure — see
-> `rca_266a_accelerate_cloudsql.md` / `rca_267a_db_path_decision.md`). The Lord is
+> `rca_266a_accelerate_cloudsql.md` / `rca_267a_db_path_decision.md`). The maintainer is
 > pursuing this with Prisma support separately. **Do not follow this procedure for
 > normal setup/deploy** — it is kept only for re-testing Accelerate once that
 > support thread resolves.
@@ -61,3 +61,13 @@ unconditionally in its `gcloud run deploy` step (Step 4).
 ```bash
 gcloud projects describe $PROJECT_ID --format='value(projectNumber)'
 ```
+
+### 6. Vercel Fresh Provisioning — Run vercel-setup.sh Before First Deploy
+
+For a fresh Vercel provisioning (new project, not yet deployed), `app-template/scripts/vercel-setup.sh`
+must be run before the first `vercel deploy`. It handles migration and seeding for both
+environments so no separate manual seed step is needed: Step 4 seeds the production DB
+and Step 5.5 seeds the staging DB (`db:seed-tenant`, idempotent). Skipping this step
+leaves the staging DB without a default tenant/admin user, making the first preview
+deploy unusable for manual testing. See `app-template/docs/vercel-automation-design.md`
+§5 for the full step-by-step breakdown.

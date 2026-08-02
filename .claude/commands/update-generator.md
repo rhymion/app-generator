@@ -30,11 +30,22 @@ Task: $ARGUMENTS
 Run in this order:
 
 1. `npm run test:pytest`      — Python unit tests for code generator
-2. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-3. `npm run test:e2e:cy:api` — API Cypress specs only
-4. `npm run lint`
+2. `npm run test:vitest`     — vitest unit/component tests
+3. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+4. `npm run check:generated` — generated code matches templates/schema
+5. `npm run test:e2e:cy:api` — API Cypress specs only
+6. `npm run test:e2e:cy:ui`  — non-API Cypress specs (desktop + mobile)
+7. `npm run lint`
+8. `npm audit --omit=dev --audit-level=high`
+9. `pip-audit -r requirements.txt`
 
-(`npm run test` is skipped — component code unchanged unless explicitly modified.)
+Both steps 1 and 2 run unconditionally, with no "unchanged" exemption: CI's
+`unit-tests` (`npm run test:vitest`) and `pytest` (Python Generator Tests)
+jobs run on every push/PR to `main`/`master` with no path filter, so a local
+gate that conditionally skips either can go green while CI goes red on the
+same commit. This exact gap caused PR #218's Unit Tests job to fail after
+cmd_493 (see `docs/knowledge/gate-exemption-must-be-machine-checkable.md`
+— cmd_498, the third recurrence of "gate ≠ CI").
 
 ## Debug priority
 

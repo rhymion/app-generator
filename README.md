@@ -4,6 +4,8 @@ Generate production-ready web applications from YAML schema definitions. Describ
 
 Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and [MUI](https://mui.com/).
 
+> **Upgrading from an earlier version?** See [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) for the 3.0 breaking changes and migration steps.
+
 ---
 
 ## Features
@@ -20,6 +22,8 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - **Wrapper component architecture** — generated per-entity components use shared wrappers in `components/_standard/` (statically provided; not overwritten by re-runs) and generated components import shared `App*` wrappers from `components/ui/` instead of `@mui/*`, so auto-generated code no longer depends on MUI directly (provider setup excepted)
 - **Cross-entity full-text search** (`x-generate.search: true`) — `GET /api/search` REST endpoint and a global search UI page (`app/[locale]/search/page.tsx`) generated when searchable entities exist; UNION ALL across opted-in entities with per-entity tenant and permission filters; Japanese 2-gram search via pg_bigm; facets (hit counts per entity type) and XSS-safe snippet highlight
 - **`x-ui.rows`** — textarea row count for any string field controlled via `x-ui: { rows: N }` in the schema
+- **FK scalar auto-inference** — FK scalar columns (e.g. `organization_id`) no longer need to be declared explicitly in `code_generator/json_schema.yaml`; the generator derives them from Prisma relation properties
+- **FK autocomplete custom filter hook** (`autocomplete_filter_stub.ts.jinja2`) — per-entity once-stub for narrowing autocomplete and list results beyond the built-in permission filter
 
 ### Relationships
 
@@ -35,28 +39,46 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - Account linking (multiple OAuth providers per user)
 - Role-based access control (per-model CRUD permissions)
 - Creator/Assignee-based access control
-- Organization-based access scoping — entities with organization_id are automatically filtered to organizations the user belongs to
+- Organization-based access scoping — entities with organization_id are automatically filtered to organizations the user belongs to, including CSV import's dotted natural-key FK lookups (e.g. `role.name`) when the lookup target is itself organization-scoped; see [`docs/knowledge/csv-import-dotted-fk-org-filter.md`](docs/knowledge/csv-import-dotted-fk-org-filter.md)
+- Graceful degradation for foreign-key read-permission gaps — if a role can create/edit an entity but lacks read on one of its FK targets (e.g. can manage `approval_flow` but not `role`), the affected field renders disabled instead of crashing the page; see [`docs/knowledge/fk-read-permission-graceful-degradation.md`](docs/knowledge/fk-read-permission-graceful-degradation.md) when assigning permissions
 
 ### Built-in Systems
 
 - **Comment threads** — polymorphic bridge pattern for attaching comments to any entity, with reaction buttons (toggle endpoint, batched aggregation, parent-owner read authorization)
-- **Attachment management** — file and image upload via polymorphic bridge
-- **Inventory reservation** — schema-level `x-reservation` for capacity and inventory management (count and item modes)
+- **Attachment management** — file and image upload via polymorphic bridge; image/file previews can be opted out independently per entity (`AttachmentSection` `showImages`/`showFiles` props, both default `true`)
+- **Inventory reservation** — schema-level `x-reservation` for capacity and inventory management (count and item modes); lifecycle transitions for the owning entity go through the Approval Flow System's approve/(terminal) reject rather than a bespoke reservation-lifecycle mechanism
+- **Inventory ledger** (`x-ledger-source`) — an `inventory_transaction` ledger entity and `transactionable` bridge, generated when a ledger top-level declaration is present in the schema; annotate a receiving-receipt or billing-detail entity with `x-ledger-source` to emit write/adjust/move stub templates
+- **Receiving workflow** — top-level `ledger` / `transactionable` / `pool` entity declarations plus a generated receiving-confirmation route for receiving-receipt schemas
+- **Split action** (`x-splittable`) — annotate an entity to generate a split-action UI section and API route for lot-level split operations from the list or edit page
 - **Dashboard charts** — per-entity chart widgets (column, bar, line, pie) generated from schema; stacking modes, time bucketing, typed filters, CSV/Excel export, and REST aggregate endpoints
 - **Cross-entity search** — `GET /api/search` with UNION ALL across searchable entities; facets, highlight, Japanese pg_bigm support; header search icon and full search page generated
-- **Approval event dispatch** — post-approval hooks (`x-approval.on_approved.set_fields`, `x-approval.on_approved.emit_hook`) with fire-once idempotency via `approvable.approved_at`
+- **Approval event dispatch** — post-approval hooks (`x-approval.on_approved.set_fields`, `x-approval.on_approved.emit_hook`) with fire-once idempotency via `approvable.approved_at`; `x-approval-lines` generates matching pre-/post-create helpers that wire approval-line entities to inventory ledger operations
+- **Terminal rejection** (`x-readonly-fields`) — annotate fields to lock them once an entity reaches a terminal rejected state; rejection fires a once-stub (`service_after_reject_stub.ts`) via `on_rejected_dispatch` for custom post-rejection logic (e.g. notifications, inventory adjustments)
 
 ### Performance
 
 - Streaming Suspense for fast TTFB
 - Skeleton screens during loading
 - Parallel data and permissions fetching
+- Configurable query timeout on the direct-connection path (`STATEMENT_TIMEOUT_MS`, default 30s, `0` disables)
+- Automatic FK index coverage (`@relation` columns) and a generated pg_trgm GIN index script for search
+- Search `COUNT(*)` opt-out (`SearchOpts.count: false`) to skip both count queries on large result sets
 
 ### Security
 
 - Rate limiting (Redis with in-memory fallback)
 - CSRF protection
 - Parameterized queries via Prisma
+
+### Deployment
+
+- **GCP Cloud Run** (`x-cloud` annotation, opt-in) — multi-stage `Dockerfile`, GCS-backed uploads (Signed URL upload + proxy routes), and idempotent environment automation scripts (`gcp-env.sh`, `gcp-setup.sh`, `gcp-deploy.sh`, `gcp-seed.sh`, `gcp-teardown.sh`); Vercel remains the default when `x-cloud` is not set
+
+### Audit & Compliance
+
+- **Audit log** — schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over all generated entities' create/update/delete actions
+- **GDPR / data protection** — `x-pii` field classification (`direct`/`sensitive`/`indirect`), an `anonymizeUser()` erasure function, `x-gdpr-mode` data-subject-scope classification (`internal`/`consumer`/`both`; schema-validated, not yet consumed by codegen), AES-256-GCM at-rest attachment filename encryption, and `x-mention` user-mention parsing in comments
+- **Terms of Service / Privacy Policy** (`/[locale]/legal/terms`, `/[locale]/legal/privacy`) — Markdown template documents linked from the registration page; adding a document language is dropping a `content/legal/<doc>.<locale>.md` file, independent of the site's UI locale list (see `docs/knowledge/legal-documents.md`)
 
 ### Other
 
@@ -99,15 +121,19 @@ both TOTP codes and recovery codes.
 ### Approval Flow
 
 **What works:** Full approval workflow with configurable flows
-(`approval_flow`), status tracking (Pending/Approved/Rejected), audit
-trail (`approval_history`), role-based approve/reject permissions, and
-post-approval event dispatch (`x-approval.on_approved.set_fields` for
-field updates, `x-approval.on_approved.emit_hook` for custom logic via
-a generated `service_after_approve.ts` once-stub).
+(`approval_flow`), status tracking (`pending`/`approved`/`rejected`/
+`terminal_rejected`), audit trail (`approval_history`), role-based
+approve/reject permissions, post-approval event dispatch
+(`x-approval.on_approved.set_fields` for field updates,
+`x-approval.on_approved.emit_hook` for custom logic via a generated
+`service_after_approve.ts` once-stub), and rejection event dispatch
+(`on_rejected_dispatch`, paired with a `service_after_reject_stub.ts`
+once-stub). `x-readonly-fields` locks specified fields once an entity
+reaches the terminal rejected state.
 
 **What's missing:** Complex multi-step orchestration (e.g., chaining
 approvals to external workflows or automatically kicking off reservation
-changes) requires custom logic in the once-stub.
+changes) requires custom logic in the once-stubs.
 
 ---
 
@@ -234,7 +260,7 @@ To use this generator as the foundation for your own application, see [app-templ
 
 ### Approval Flow
 
-Multi-step, role-based approval workflows with status tracking (Pending/Approved/Rejected) and a full audit trail. Basic approval and rejection with role-based permissions work; approval completion does not yet trigger downstream state changes. See the Roadmap section for details.
+Multi-step, role-based approval workflows with status tracking (`pending`/`approved`/`rejected`/`terminal_rejected`) and a full audit trail. Approval and terminal rejection both dispatch once-stub hooks (`x-approval.on_approved`, `on_rejected_dispatch`) for downstream logic such as field updates or inventory adjustments; `x-readonly-fields` locks fields after a terminal rejection. See the Roadmap section for what's still missing (multi-step cross-workflow orchestration).
 
 See [docs/knowledge/appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md).
 
@@ -242,11 +268,19 @@ See [docs/knowledge/appendix/approval-flow.md](docs/knowledge/appendix/approval-
 
 A polymorphic bridge pattern allows comment threads to be attached to any entity without schema changes to each entity. Comments are displayed inline on view pages, and each comment supports reaction buttons (a per-comment toggle endpoint with batched aggregation and parent-owner read authorization).
 
-See [docs/knowledge/appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md).
+Any comment field annotated `x-mention: true` also gets `@mention` support: an org-scoped candidate picker (`MentionInput`), GDPR-safe id-based storage (`@[user_id:<id>]`), a permission-aware profile-linking renderer (`MentionText`), and a notification to newly-mentioned users (self-mentions excluded; edits only notify on newly-added mentions). Any other field annotated `x-mention: true` on any entity also gets the `MentionInput` picker on its edit form.
+
+See [docs/knowledge/appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) and [docs/knowledge/mention-system.md](docs/knowledge/mention-system.md).
 
 ### Attachment Management
 
-File and image upload via a polymorphic bridge, backed by Vercel Blob. Any entity that opts in receives a file attachment panel on its view page.
+File and image upload via a polymorphic bridge, backed by Vercel Blob by default (GCS-backed when `x-cloud` GCP deployment is enabled — see [Deployment](#deployment)). Any entity that opts in receives a file attachment panel on its view page. Image and file previews can each be hidden independently per entity (`AttachmentSection` `showImages`/`showFiles` props, both default `true`).
+
+### Inventory Reservation, Split & Receiving
+
+Generic primitives — `x-reservation`, `x-splittable`, `x-ledger-source` — that any entity can opt into; not inventory-specific. `x-reservation` covers two roles: inventory allocation (`count` mode, reserving a quantity out of a numeric pool) and specific-resource reservation (`item` mode, e.g. reserving a hotel room). `x-splittable` divides a line item into parts, each drawing from an explicit or auto-allocated pool row. `x-ledger-source` generates an `inventory_transaction` ledger entity plus write/adjust/move stub templates for receiving-receipt or billing-detail entities. Approval and rejection of the owning entity go through the Approval Flow System above, not a bespoke reservation lifecycle.
+
+See [docs/knowledge/appendix/inventory-reservation-split.md](docs/knowledge/appendix/inventory-reservation-split.md).
 
 ---
 
@@ -256,13 +290,29 @@ File and image upload via a polymorphic bridge, backed by Vercel Blob. Any entit
 
 **CSRF protection** is applied to all state-changing API routes.
 
-**Organization-scoped filtering** is applied at the query layer: every list query applies an automatic `organization_id` filter, scoping data to the authenticated user's organization. Tenant-level isolation (cross-tenant data separation) is not yet implemented — see the Roadmap section.
+**Organization-scoped filtering** is applied at the query layer: every list query applies an automatic `organization_id` filter, scoping data to the authenticated user's organization. Mutation paths (update/delete/CSV-import-update) on organization-scoped entities also deny cross-organization access by ID — a request targeting another organization's record resolves to a deny (`404` on API routes, silent no-op on session actions) rather than succeeding on `creator_id`/`assignee_id` permission alone. Tenant-level isolation (cross-tenant data separation) is not yet implemented — see the Roadmap section.
 
 **Role-based access control** is defined per-model in the schema. The `authz.ts` module enforces per-model CRUD permissions on every request.
 
 **Default-deny**: new users start with zero permissions. An Administrator must explicitly assign roles to grant access. The `Administrator` role (seeded by `seed-tenant.ts`) grants full CRUD on all entities. See [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) for the permission model and test classification rules.
 
+**Unauthenticated page requests** are redirected to `/login` by `proxy.ts` before any page renders, and the user is sent back to their original destination after signing in (open-redirect protected — off-site `redirect` values are rejected). API routes are unaffected and continue returning JSON `401`/`404`. See [docs/knowledge/unauthenticated-page-redirect.md](docs/knowledge/unauthenticated-page-redirect.md).
+
+**Generated permission E2E coverage** includes per-entity permission-denial tests (GET/POST/PUT/DELETE/export/import, 4xx) and cross-organization isolation tests (create/update/read blocked across org boundaries) in `cypress/e2e/api/<entity>.cy.ts`. See [docs/knowledge/permission-e2e-test-design.md](docs/knowledge/permission-e2e-test-design.md).
+
 See [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenancy-and-permissions.md).
+
+---
+
+## Audit & Compliance
+
+**Audit log** — a schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over the `audit_log` model, showing create/update/delete actions across all generated entities. `lib/audit_log/getters.ts` resolves the actor user via FK join and paginates via `CardListPagination`; the raw `metadata` JSON is shown only on the admin-only detail page. The `audit_log` model's columns predate 2.0.0, but the `actor_user` relation it joins through (and its `onDelete: Restrict` foreign key) is new in 3.0 — see [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
+
+**GDPR / data protection**:
+- `x-pii` field classification (`direct` / `sensitive` / `indirect`) drives which fields `anonymizeUser()` scrubs on erasure (GDPR Art. 17 right to erasure). The scrub is transactional and irreversible; it does not delete the user row, to preserve referential integrity, and records `anonymized_at` on the `user` model.
+- `x-gdpr-mode` (`internal` / `consumer` / `both`) classifies a model/field's data-subject scope for compliance bookkeeping. It is schema-validated (`code_generator/validate.py`) but not yet read by any codegen template — no effect on generated code as of 3.0.
+- Attachment filenames are encrypted at rest with AES-256-GCM (`lib/compliance/attachment_name_crypto.ts`).
+- `x-mention` enables `@[user_id:uuid]` mention syntax in comments, with generated mention-parser utilities.
 
 ---
 
@@ -271,6 +321,10 @@ See [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenan
 - **Streaming Suspense**: pages stream HTML to the browser immediately, reducing TTFB. Data is loaded asynchronously in Suspense boundaries.
 - **Skeleton screens**: every generated list and view page renders a skeleton while data loads, preventing layout shift.
 - **Parallel fetching**: data and permission checks are fetched in parallel using `Promise.all`, minimizing server round-trips.
+- **Query timeout** (`lib/prisma.ts`): the direct-connection (PrismaPg) path applies a default 30-second `statement_timeout`, configurable via `STATEMENT_TIMEOUT_MS` (`0` disables it). Not applied on the Accelerate path (Vercel), which does not forward `statement_timeout`.
+- **FK index coverage**: `scripts/add_required_indexes.py` auto-detects `@relation` FK columns and adds `@@index` for them (the generator's demo schema grew from 18 to 36 indexes).
+- **pg_trgm GIN indexes for search**: `generate-code` emits `scripts/create-gin-indexes.sql`, applied manually with `psql` — kept outside `prisma/schema.prisma` to avoid a `prisma migrate dev` drift loop on `gin_trgm_ops`.
+- **Search `COUNT(*)` opt-out**: `SearchOpts.count: false` skips both `COUNT(*)` queries in cross-entity search (returns `total: -1`).
 
 See [docs/knowledge/performance-improvements.md](docs/knowledge/performance-improvements.md).
 
@@ -355,6 +409,34 @@ Running `build:full` locally requires `.env.production` and `.env.production.loc
 
 ---
 
+## Deployment
+
+**Vercel** is the default deployment target — no configuration needed.
+
+**GCP Cloud Run** is opt-in via the `x-cloud` annotation in `code_generator/json_schema.yaml` (commented out by default). It only activates when both `enabled: true` and `provider: gcp` are set explicitly; without it, generated output is unaffected.
+
+When enabled, `generate-code` additionally emits:
+- A multi-stage, non-root `Dockerfile` with a `HEALTHCHECK`, plus `.dockerignore`
+- `next.config.ts` with `output: 'standalone'`
+- A GCS Signed URL upload route (overrides the default Vercel Blob upload route) and a V4 Signed URL proxy route (`app/api/gcs/[...path]/route.ts`)
+- `proxy.ts` header rewriting so Cloud Run's internal `:8080` port never leaks into a redirect `Location` header
+
+Idempotent automation scripts in `scripts/` drive the GCP side:
+
+| Script | Purpose |
+|---|---|
+| `gcp-env.sh` | Source environment variables; generate-once-persist secrets |
+| `gcp-setup.sh` | Idempotently provision GCP infrastructure (Cloud SQL, service account, Upstash, Secret Manager, GCS) |
+| `gcp-deploy.sh` | Build the image, run migrations, deploy to Cloud Run |
+| `gcp-seed.sh` | Seed the database |
+| `gcp-teardown.sh` | Tear down GCP resources (two-step confirmation) |
+
+GCP connects to the database directly (`DATABASE_URL`, `PrismaPg`, no pooler, `STATEMENT_TIMEOUT_MS` applied); Vercel uses `PRISMA_DATABASE_URL` (Accelerate), where `STATEMENT_TIMEOUT_MS` has no effect since Accelerate does not forward `statement_timeout`.
+
+See [docs/knowledge/gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) for the full runbook.
+
+---
+
 ## Project Structure
 
 ```
@@ -430,7 +512,11 @@ All architectural documentation lives in `docs/knowledge/`:
 | [search.md](docs/knowledge/search.md) | Cross-entity full-text search: schema opt-in, pg_bigm, authorization, generated API and UI |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | Approval flow system detail, post-approval event dispatch (`on_approved`) |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | Comment bridge system detail |
+| [appendix/inventory-reservation-split.md](docs/knowledge/appendix/inventory-reservation-split.md) | Inventory reservation (`x-reservation`), split (`x-splittable`), and receiving (`x-ledger-source`) generic primitives — current behavior |
 | [cleanup.md](docs/knowledge/cleanup.md) | Removing generated files: default cleanup, manifest vs schema-driven, `--prune-orphans`, orphan handling |
+| [gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) | GCP Cloud Run deployment: `x-cloud` opt-in, Dockerfile, GCS uploads, environment automation scripts |
+| [claude-code-settings-consumer-side.md](docs/knowledge/claude-code-settings-consumer-side.md) | `.claude/settings.json` discovery rules, OS-independent permission syntax, the compound-command matching trap, and how to verify a settings file actually loaded — read this before editing `.claude/settings.json` here or in `app-template` |
+| [legal-documents.md](docs/knowledge/legal-documents.md) | Terms of Service / Privacy Policy pages: why document locale is decoupled from the site UI locale, Markdown-over-JSON/MDX rationale, and how to add a document language |
 
 ---
 
@@ -456,7 +542,16 @@ All architectural documentation lives in `docs/knowledge/`:
 | Streaming Suspense / Skeleton screens | ✅ Implemented |
 | Dashboard charts (x-display.dashboard) | ✅ Implemented |
 | Inventory reservation (x-reservation) | ✅ Implemented |
+| Inventory ledger (x-ledger-source) | ✅ Implemented |
+| Receiving workflow | ✅ Implemented |
+| Split action (x-splittable) | ✅ Implemented |
+| Approval-lines helpers (x-approval-lines) | ✅ Implemented |
+| Terminal rejection (x-readonly-fields) / rejection event dispatch (on_rejected_dispatch) | ✅ Implemented |
 | Integer enums | ✅ Implemented |
+| nativeEnum type safety (6 promoted fields) | ✅ Implemented |
+| FK scalar auto-inference | ✅ Implemented |
+| FK autocomplete custom filter hook | ✅ Implemented |
+| Organization isolation enforcement (cross-org mutation deny) | ✅ Implemented |
 | Wrapper component architecture | ✅ Implemented |
 | MUI-free generated code (wrapper round 2) | ✅ Implemented |
 | Comment reactions | ✅ Implemented |
@@ -465,8 +560,15 @@ All architectural documentation lives in `docs/knowledge/`:
 | Approval event dispatch (on_approved) | ✅ Implemented |
 | Mobile header / sidebar account section | ✅ Implemented |
 | Schema-driven textarea rows (x-ui.rows) | ✅ Implemented |
+| GCP Cloud Run deployment (x-cloud) | ✅ Implemented |
+| Audit log viewer | ✅ Implemented |
+| GDPR / data protection (x-pii, anonymizeUser, x-gdpr-mode) | ✅ Implemented |
+| Attachment display opt-out (showImages/showFiles) | ✅ Implemented |
+| Performance hardening (statement_timeout, FK indexes, GIN indexes, COUNT opt-out) | ✅ Implemented |
 
 > **Backward compatibility (v1.4 → v1.5)**: Non-breaking. Existing schemas work unchanged. Cross-entity search is opt-in per entity (`x-generate.search: true`). Approval event dispatch activates only when `x-approval.on_approved` is set in the schema.
+
+> **Backward compatibility (v2.0 → v3.0)**: **Breaking** in eight areas — default `statement_timeout` (30s, direct-connection path), `pageSize > 200` now returns `400` instead of truncating, organization-scoped mutation paths now deny cross-org access by ID, the new `user.anonymized_at` column, the new `audit_log.actor_user` foreign key, the `nativeEnum` promotion of 6 previously-`Int` fields, the new `notification` table, and `nativeEnum` member names normalized to lowercase snake_case — the last five require `prisma db push`/`migrate deploy` and/or a data migration on pre-3.0 databases (the `nativeEnum` fields need an explicit `ALTER TABLE ... USING` first to avoid data loss; the FK can also require cleaning up orphaned rows first; the member-name normalization requires the migration SQL in [docs/knowledge/enum-member-naming.md](docs/knowledge/enum-member-naming.md)). GCP deployment and attachment display opt-out are non-breaking. See [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
 
 ### In Progress
 

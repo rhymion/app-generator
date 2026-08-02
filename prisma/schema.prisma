@@ -25,6 +25,8 @@ datasource db {
 // tenant created by scripts/seed-its.ts and the 1.5 migration script
 // exists before any user does. Normal admin-created tenants always
 // carry both ids.
+// exists before any user does. Normal admin-created tenants always
+// carry both ids.
 model tenant {
   id         String   @id @default(cuid())
   name       String
@@ -42,6 +44,7 @@ model tenant {
   users      user[]   @relation("UserTenant")
 
   @@index([creator_id])
+  @@index([updater_id])
 }
 
 model user {
@@ -96,11 +99,13 @@ model user {
   created_tenants           tenant[]            @relation("TenantCreator")
   updated_tenants           tenant[]            @relation("TenantUpdater")
   audit_logs                audit_log[]
+  notifications             notification[]      @relation("NotificationUser")
   anonymized_at             DateTime?            // Timestamp when PII was scrubbed (GDPR anonymization)
 
   @@index([api_key])
   @@index([creator_id])
   @@index([tenant_id])
+  @@index([updater_id])
 }
 
 model role {
@@ -119,6 +124,7 @@ model role {
   requestor_approval_flows approval_flow[] @relation("ApprovalFlowRequestorRole")
   approver_approval_flows  approval_flow[] @relation("ApprovalFlowApproverRole")
   @@index([creator_id])
+  @@index([updater_id])
 }
 
 model organization {
@@ -133,6 +139,7 @@ model organization {
   updater     user       @relation("OrganizationUpdater", fields: [updater_id], references: [id])
   users       user[]     @relation("UserOrganizations")
   @@index([creator_id])
+  @@index([updater_id])
 }
 
 model permission {
@@ -144,6 +151,7 @@ model permission {
   read       Boolean
   update     Boolean
   delete     Boolean
+  import     Boolean @default(false)
   created_at DateTime @default(now()) @db.Timestamptz(0)
   updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
@@ -153,6 +161,8 @@ model permission {
 
   @@unique([name, role_id])
   @@index([creator_id])
+  @@index([role_id])
+  @@index([updater_id])
 }
 
 model approvable {
@@ -161,6 +171,7 @@ model approvable {
   creator          user? @relation("ApprovableCreator", fields: [creator_id], references: [id])
   approval_requests approval_request[]
   approved_at       DateTime?          @db.Timestamptz(0)
+  rejection_reason  String?
 
   @@index([creator_id])
 }
@@ -182,6 +193,16 @@ model approval_flow {
   updater_id       String
   updater          user @relation("ApprovalFlowUpdater", fields: [updater_id], references: [id])
   @@index([creator_id])
+  @@index([approver_role_id])
+  @@index([requestor_role_id])
+  @@index([updater_id])
+}
+
+enum ApprovalRequestStatus {
+  pending
+  approved
+  rejected
+  terminal_rejected
 }
 
 model approval_request {
@@ -190,10 +211,12 @@ model approval_request {
   approvable       approvable @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
   approval_flow_id String
   approval_flow    approval_flow @relation(fields: [approval_flow_id], references: [id])
-  status           Int      @default(0)
+  status           ApprovalRequestStatus @default(pending)
   approval_histories approval_history[]
   created_at       DateTime @default(now()) @db.Timestamptz(0)
   updated_at       DateTime @updatedAt @db.Timestamptz(0)
+  @@index([approvable_id])
+  @@index([approval_flow_id])
 }
 
 model approval_history {
@@ -203,11 +226,13 @@ model approval_history {
   pre_status       Int
   post_status      Int
   message          String?
+  reason_kind      Int?             // 0=Customer 1=Internal
   created_at       DateTime @default(now()) @db.Timestamptz(0)
   updated_at       DateTime @updatedAt @db.Timestamptz(0)
   creator_id       String
   creator          user @relation("ApprovalHistoryCreator", fields: [creator_id], references: [id])
   @@index([creator_id])
+  @@index([approval_request_id])
 }
 
 model commentable {
@@ -226,17 +251,26 @@ model comment {
   creator_id     String
   creator        user @relation("CommentCreator", fields: [creator_id], references: [id])
   @@index([creator_id])
+  @@index([commentable_id])
+}
+
+enum ReactionType {
+  like
+  love
+  laugh
+  surprised
+  sad
 }
 
 model reaction {
-  id          String   @id @default(cuid())
-  type        Int
+  id          String       @id @default(cuid())
+  type        ReactionType
   user_id     String
-  user        user     @relation("ReactionUser", fields: [user_id], references: [id])
+  user        user         @relation("ReactionUser", fields: [user_id], references: [id])
   comment_id  String
-  comment     comment  @relation(fields: [comment_id], references: [id], onDelete: Cascade)
-  created_at  DateTime @default(now()) @db.Timestamptz(0)
-  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  comment     comment      @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+  created_at  DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime     @updatedAt @db.Timestamptz(0)
 
   @@unique([comment_id, user_id, type])
   @@index([user_id])
@@ -248,10 +282,17 @@ model attachable {
   attachments attachment[]
 }
 
+enum AttachmentType {
+  image
+  file
+  video
+  audio
+}
+
 model attachment {
-  id                     String     @id @default(cuid())
-  type                   Int        @default(0)
-  order                  Int        @default(0)
+  id                     String         @id @default(cuid())
+  type                   AttachmentType @default(image)
+  order                  Int            @default(0)
   name                   String
   path                   String
   encrypted_original_name String?
@@ -260,6 +301,7 @@ model attachment {
   attachable             attachable @relation(fields: [attachable_id], references: [id], onDelete: Cascade)
   created_at             DateTime   @default(now()) @db.Timestamptz(0)
   updated_at             DateTime   @updatedAt @db.Timestamptz(0)
+  @@index([attachable_id])
 }
 
 model dashboard {
@@ -274,6 +316,28 @@ model dashboard {
   updater    user               @relation("DashboardUpdater", fields: [updater_id], references: [id])
 
   @@index([creator_id])
+  @@index([updater_id])
+}
+
+enum DashboardWidgetChartType {
+  pie
+  column
+  bar
+  line
+}
+
+enum DashboardWidgetStackMode {
+  grouped
+  stacked
+  standardized
+}
+
+enum DashboardWidgetGroupByBucket {
+  day
+  week
+  month
+  quarter
+  year
 }
 
 model dashboard_widget {
@@ -282,16 +346,36 @@ model dashboard_widget {
   dashboard      dashboard @relation(fields: [dashboard_id], references: [id], onDelete: Cascade)
   name            String
   entity_name     String
-  chart_type      Int
+  chart_type      DashboardWidgetChartType @default(column)
   group_by_field  String
-  stack_mode      Int?
+  stack_mode      DashboardWidgetStackMode?
   series_field    String?
-  group_by_bucket Int?
+  group_by_bucket DashboardWidgetGroupByBucket?
   filter_field    String?
   filter_value    String?
   order          Int       @default(0)
   created_at     DateTime  @default(now()) @db.Timestamptz(0)
   updated_at     DateTime  @updatedAt @db.Timestamptz(0)
+  @@index([dashboard_id])
+}
+
+// Per-user notification store (framework default, mirrored from
+// code_generator/json_schema_internal.yaml). Primary store for the polling
+// bell UI / app/api/notifications/* routes — no CRUD UI/API is generated
+// for this entity (lib/_notifier.ts writes rows directly via Prisma,
+// fire-and-forget). Immutable event log aside from the `read` flag, so
+// there is no updated_at/creator tracking.
+model notification {
+  id         String   @id @default(cuid())
+  user_id    String
+  user       user     @relation("NotificationUser", fields: [user_id], references: [id], onDelete: Cascade)
+  type       String
+  payload    Json
+  read       Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+
+  @@index([user_id, read])
+  @@index([user_id, created_at(sort: Desc)])
 }
 
 // Append-only audit trail for security-relevant events: auth lifecycle
@@ -373,6 +457,7 @@ model Account {
   user              user    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 model Session {
@@ -381,6 +466,7 @@ model Session {
   userId       String
   expires      DateTime
   user         user     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
 }
 
 model VerificationToken {

@@ -27,6 +27,23 @@ const eslintConfig = defineConfig([
       "@typescript-eslint/no-namespace": "off",
     },
   },
+  // eslint-config-next's no-unused-vars default doesn't recognize the
+  // repo-wide `_`-prefix convention for intentionally-unused bindings
+  // (mock-function type params, override-hook stub args, destructuring
+  // placeholders) — every `_foo` in the codebase was warning alongside
+  // genuinely dead code, burying the latter (cmd_529).
+  {
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
+      ],
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

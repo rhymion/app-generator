@@ -32,7 +32,7 @@ def _entity(model: str) -> dict:
     return {
         "parent": model,
         "model": model,
-        "definition_key": f"{model}_detail",
+        "definition_key": model,
         "children": [],
         "generate_config": {
             "list": True, "view": True, "new": True, "edit": True,
@@ -62,20 +62,20 @@ def _commentable_schema() -> dict:
                     },
                 },
             },
-            "commentable": {
+            "__commentable": {
                 "type": "object",
                 "required": ["id"],
                 "properties": {
                     "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
                 },
             },
-            "commentable_detail": {
+            "commentable": {
                 "x-generate": {
                     "list": False, "view": False, "new": False, "edit": False,
                     "delete": False, "api": False, "test": False,
                 },
                 "allOf": [
-                    {"$ref": "#/definitions/commentable"},
+                    {"$ref": "#/definitions/__commentable"},
                     {
                         "type": "object",
                         "required": ["comments"],
@@ -89,7 +89,7 @@ def _commentable_schema() -> dict:
                     },
                 ],
             },
-            "db_table": {
+            "__db_table": {
                 "type": "object",
                 "required": ["id", "name", "commentable_id"],
                 "properties": {
@@ -106,13 +106,13 @@ def _commentable_schema() -> dict:
                     },
                 },
             },
-            "db_table_detail": {
+            "db_table": {
                 "x-generate": {
                     "list": True, "view": True, "new": True, "edit": True,
                     "delete": True, "api": True, "test": True,
                 },
                 "allOf": [
-                    {"$ref": "#/definitions/db_table"},
+                    {"$ref": "#/definitions/__db_table"},
                     {
                         "type": "object",
                         "properties": {
@@ -129,7 +129,7 @@ def _approvable_schema() -> dict:
     """leave_request-style schema: parent has approvable_id one-to-one to approvable bridge."""
     return {
         "definitions": {
-            "approval_flow": {
+            "__approval_flow": {
                 "type": "object",
                 "required": ["id", "entity_name"],
                 "properties": {
@@ -137,10 +137,10 @@ def _approvable_schema() -> dict:
                     "entity_name": {"type": "string"},
                 },
             },
-            "approval_flow_detail": {
+            "approval_flow": {
                 "x-generate": {"list": True, "view": True, "new": True, "edit": True,
                                "delete": True, "api": True, "test": True},
-                "allOf": [{"$ref": "#/definitions/approval_flow"}],
+                "allOf": [{"$ref": "#/definitions/__approval_flow"}],
             },
             "approval_request": {
                 "type": "object",
@@ -165,18 +165,18 @@ def _approvable_schema() -> dict:
                     "status": {"type": "integer", "enum": [0, 1, 2]},
                 },
             },
-            "approvable": {
+            "__approvable": {
                 "type": "object",
                 "required": ["id"],
                 "properties": {"id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"}},
             },
-            "approvable_detail": {
+            "approvable": {
                 "x-generate": {
                     "list": False, "view": False, "new": False, "edit": False,
                     "delete": False, "api": False, "test": False,
                 },
                 "allOf": [
-                    {"$ref": "#/definitions/approvable"},
+                    {"$ref": "#/definitions/__approvable"},
                     {
                         "type": "object",
                         "required": ["approval_requests"],
@@ -190,7 +190,7 @@ def _approvable_schema() -> dict:
                     },
                 ],
             },
-            "leave_request": {
+            "__leave_request": {
                 "type": "object",
                 "required": ["id", "approvable_id"],
                 "properties": {
@@ -204,13 +204,13 @@ def _approvable_schema() -> dict:
                     },
                 },
             },
-            "leave_request_detail": {
+            "leave_request": {
                 "x-generate": {
                     "list": True, "view": True, "new": True, "edit": True,
                     "delete": True, "api": True, "test": True,
                 },
                 "allOf": [
-                    {"$ref": "#/definitions/leave_request"},
+                    {"$ref": "#/definitions/__leave_request"},
                     {
                         "type": "object",
                         "properties": {
@@ -449,10 +449,10 @@ class TestRelationTypeBranching:
         # not. Selector target also has no `x-generate` here for symmetry.
         return {
             "definitions": {
-                "commentable": {"type": "object", "required": ["id"]},
-                "commentable_detail": {
+                "__commentable": {"type": "object", "required": ["id"]},
+                "commentable": {
                     "allOf": [
-                        {"$ref": "#/definitions/commentable"},
+                        {"$ref": "#/definitions/__commentable"},
                         {"type": "object", "properties": {
                             "comments": {
                                 "type": "array",
@@ -463,8 +463,8 @@ class TestRelationTypeBranching:
                     ],
                 },
                 "comment": {"type": "object", "required": ["id"]},
-                "checkup": {"type": "object", "required": ["id"]},
-                "checkup_detail": {"allOf": [{"$ref": "#/definitions/checkup"}]},
+                "__checkup": {"type": "object", "required": ["id"]},
+                "checkup": {"allOf": [{"$ref": "#/definitions/__checkup"}]},
             }
         }
 

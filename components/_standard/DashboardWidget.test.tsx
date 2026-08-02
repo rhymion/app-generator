@@ -22,7 +22,7 @@ const widget: WidgetConfig = {
   name: 'Status Chart',
   order: 0,
   entity_name: 'task',
-  chart_type: 0,
+  chart_type: 'pie',
   group_by_field: 'status',
 };
 
@@ -61,16 +61,16 @@ describe('DashboardWidget', () => {
     expect(screen.getByTestId('dashboard-chart')).toHaveAttribute('data-count', '2');
   });
 
-  it('converts chart_type=0 to "pie"', async () => {
+  it('renders with chart_type "pie"', async () => {
     mockAggregate.mockResolvedValue({ kind: 'single', data: [{ label: 'A', count: 1 }] });
-    render(<DashboardWidget widget={{ ...widget, chart_type: 0 }} />);
+    render(<DashboardWidget widget={{ ...widget, chart_type: 'pie' }} />);
     await waitFor(() => screen.getByTestId('dashboard-chart'));
     expect(screen.getByTestId('dashboard-chart')).toHaveAttribute('data-type', 'pie');
   });
 
-  it('converts chart_type=1 to "bar"', async () => {
+  it('renders with chart_type "column"', async () => {
     mockAggregate.mockResolvedValue({ kind: 'single', data: [{ label: 'A', count: 1 }] });
-    render(<DashboardWidget widget={{ ...widget, chart_type: 1 }} />);
+    render(<DashboardWidget widget={{ ...widget, chart_type: 'column' }} />);
     await waitFor(() => screen.getByTestId('dashboard-chart'));
     expect(screen.getByTestId('dashboard-chart')).toHaveAttribute('data-type', 'column');
   });

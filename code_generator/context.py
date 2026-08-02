@@ -16,7 +16,19 @@ from helpers.schema_helpers import (
     get_one_to_one_rels,
     get_detail_ref_rels,
     get_flatten_rels,
+    get_entity_properties,
 )
+from helpers.bridge_direction import collect_parent_bridge_fk_props
+
+
+def _raw_def(entity_name: str, schema: dict) -> dict:
+    """Resolve a bare/view model name to its raw entity dict — scalar/FK
+    properties, x-readonly-fields, x-gdpr-mode, x-display, x-bridge etc. all
+    live on the raw ('__'-prefixed) entity, not the view. Falls back to the
+    bare view for entities with no raw counterpart (e.g. 'setting', which
+    proxies the 'user' view instead of having its own raw twin)."""
+    defs = schema.get('definitions', {})
+    return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +110,8 @@ class EntityContext:
     entity_view_components: list[dict] = ()    # custom components rendered in FormView; [{name, path?}]
     entity_edit_components: list[dict] = ()    # custom components rendered in FormUpsert; [{name, path?}]
     is_bridge_child: bool = False              # entity declares new-form x-bridge (parent-context create)
+    reaction_value_type: str = 'number'        # runtime type of the reaction 'type' constant (see generate_types.extract_named_constants)
+    comment_has_mention: bool = False          # this entity's comment thread supports @mention (cmd_522) — gates FormViewProps.canViewUserProfile/mentionUserContext
 
 
 # ---------------------------------------------------------------------------
@@ -125,11 +139,32 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     generate_config = entity.get('generate_config', {})
     children_raw = entity.get('children', [])
 
-    model_def = schema['definitions'].get(model, {})
+    # canonicalize_bridges()/collect_parent_bridge_fk_props(): normalize both
+    # x-bridge forms (old array form → synthetic x-relationship on the `via`
+    # field; new object form → synthesized parent-side FK prop) into
+    # model_def BEFORE any one-to-one-rel detection below — mirrors
+    # build_context.py's identical two-step normalization (its sole other
+    # caller). Without this, get_one_to_one_rels() below never sees the
+    # bridge relation for entities using either x-bridge form, so
+    # comment_has_mention (cmd_522c, computed further down from
+    # one_to_one_rels) silently stays False for a bridge-based comment
+    # thread that build_context.py correctly detects as True.
+    from build_context import canonicalize_bridges
+    model_def = canonicalize_bridges(_raw_def(model, schema), schema.get('definitions', {}))
+    _parent_bridge_fks = collect_parent_bridge_fk_props(model, schema)
+    if _parent_bridge_fks:
+        model_def = {**model_def, 'properties': {**model_def.get('properties', {}), **_parent_bridge_fks}}
     filtered_props = filter_fields(
         model_def.get('properties', {}),
         generate_config.get('fields'),
     )
+
+    # TS type of the comment-reactions `type` value (plain `number` for legacy
+    # Int-with-magic-numbers x-internal fields, or the nativeEnum literal union
+    # once reaction.type has been migrated to a Prisma enum — cmd_446 Class A).
+    # Needed by types.ts.jinja2's CommentReactionSummary/reactionCounts/myReactionTypes.
+    from generators import reaction_type_ts
+    _reaction_value_type = reaction_type_ts(schema)
 
     # Many-to-one relationships on parent (using filtered props)
     merged_def = {**model_def, 'properties': filtered_props}
@@ -224,14 +259,14 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     for child_raw in children_raw:
         if child_raw.get('output_type') == 'list':
             continue
-        child_def = schema['definitions'].get(child_raw['name'], {})
+        child_def = _raw_def(child_raw['name'], schema)
         if child_def.get('properties'):
             child_rels_early.extend(get_parent_relationships(child_def))
 
     # Only import auto-create OTO child rel targets that have their own generated types
     def _has_generated_types(target: str) -> bool:
-        detail = schema['definitions'].get(f'{target}_detail', {})
-        gen = detail.get('x-generate') or {}
+        view = schema['definitions'].get(target, {})
+        gen = view.get('x-generate') or {}
         return any(gen.get(k) for k in ('list', 'view', 'new', 'edit', 'delete', 'api'))
 
     oto_child_rel_targets = [
@@ -254,25 +289,27 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     # Reverse OTO rels (FK lives in target, not in this model) — display-only in detail view
     _reverse_oto_early = get_detail_ref_rels(parent, {**model_def, 'properties': filtered_props}, schema)
 
-    # Flatten rels (x-outputType: flatten on non-array $ref in _detail)
+    # Flatten rels (x-outputType: flatten on non-array $ref, view extension)
     _flatten_rels_raw = get_flatten_rels(parent, {**model_def, 'properties': filtered_props}, schema)
     # Only non-m2o flatten rels need new type imports (m2o targets are already in parent_rels)
     _flatten_non_m2o_targets = [r['target'] for r in _flatten_rels_raw if not r['is_m2o']]
     # Each flatten target falls into one of three buckets:
-    #   1. `_detail` target with a base entity (e.g. `pre_check_detail` → import
-    #      `PreCheckDetail` from `lib/pre_check/types`). Handled via
-    #      `flatten_detail_imports`.
-    #   2. Plain target that has its own generated module (own page or API).
-    #      Imported normally via `import_targets`.
-    #   3. Plain target with NO generated module (embedded one-to-one with no
-    #      `x-generate` anywhere, e.g. `checkup_result`). There is no
+    #   1. $ref explicitly targets the raw ('__'-prefixed) form of an entity
+    #      that also has its own view (was a '_detail'-suffixed $ref
+    #      pre-Stage4) → import via the view's module, `flatten_detail_imports`.
+    #   2. Bare target that has its own generated module (own page or API) —
+    #      either the view itself carries x-generate, or (schema not yet
+    #      migrated through the raw/view split) the raw form carries
+    #      x-generate directly. Imported normally via `import_targets`.
+    #   3. Bare target with NO generated module anywhere (embedded one-to-one
+    #      with no x-generate at all, e.g. `checkup_result`). There is no
     #      `lib/<target>/types.ts` to import from, so declare the type inline
     #      in this entity's `types.ts`.
     _USER_GENERATE_FLAGS = ('list', 'view', 'new', 'edit', 'delete', 'api')
 
     def _target_has_module(t: str) -> bool:
         defs = schema.get('definitions', {})
-        for key in (t, f'{t}_detail'):
+        for key in (t, f'__{t}'):
             defn = defs.get(key)
             if not isinstance(defn, dict):
                 continue
@@ -285,13 +322,13 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
                 return True
         return False
 
-    _detail_suffix = '_detail'
     _flatten_detail_imports: list[tuple[str, str]] = []
     _flatten_non_detail_targets: list[str] = []
     _inline_flatten_targets: list[str] = []
     for _t in _flatten_non_m2o_targets:
-        if _t.endswith(_detail_suffix) and _t[:-len(_detail_suffix)] in schema.get('definitions', {}):
-            _flatten_detail_imports.append((_t, _t[:-len(_detail_suffix)]))
+        if _t.startswith('__') and _t[2:] in schema.get('definitions', {}):
+            _bare = _t[2:]
+            _flatten_detail_imports.append((_bare, _bare))
         elif _target_has_module(_t):
             _flatten_non_detail_targets.append(_t)
         else:
@@ -338,23 +375,24 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
 
     for child_raw in children_raw:
         child_name = child_raw['name']
-        child_def = schema['definitions'].get(child_name, {})
+        child_def = _raw_def(child_name, schema)
         if not child_def.get('properties'):
             continue
 
-        # Independent entity: a list child (not m2m) that has its own _detail with x-generate.
-        # Its type is declared in its own module — import it rather than redeclaring inline.
+        # Independent entity: a list child (not m2m) that has its own view
+        # definition with x-generate. Its type is declared in its own
+        # module — import it rather than redeclaring inline.
         is_independent = (
             child_raw.get('output_type') == 'list'
             and (child_raw.get('relationship') or {}).get('type') != 'many-to-many'
-            and bool(schema['definitions'].get(f'{child_name}_detail', {}).get('x-generate'))
+            and bool(schema['definitions'].get(child_name, {}).get('x-generate'))
         )
         if is_independent:
             if child_name not in import_targets and child_name != model:
                 import_targets.append(child_name)
 
-        # Respect field filtering from child's own detail definition
-        child_detail_def = schema['definitions'].get(f'{child_name}_detail', {})
+        # Respect field filtering from child's own view definition
+        child_detail_def = schema['definitions'].get(child_name, {})
         child_fields_whitelist = (child_detail_def.get('x-generate') or {}).get('fields')
         filtered_child_props = filter_fields(child_def['properties'], child_fields_whitelist)
 
@@ -471,6 +509,20 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         for r in _flatten_rels_raw
     ]
 
+    # comment_has_mention (cmd_522): this entity has a bridge-based
+    # (commentable one-to-one) or child comment thread AND the shared
+    # `comment` model has ≥1 x-mention: true field. Mirrors build_context.py's
+    # identical computation for getters.ts.jinja2/actions.ts.jinja2 — kept as
+    # a separate calculation here since context.py is a fully independent
+    # context builder (types.ts.jinja2 only) with no shared state.
+    _has_commentable_oto = any(r.target == 'commentable' for r in one_to_one_rels)
+    _has_comment_children = any(c.get('output_type') == 'comments' for c in children_raw)
+    _comment_def = _raw_def('comment', schema)
+    comment_has_mention = (_has_commentable_oto or _has_comment_children) and any(
+        isinstance(fp, dict) and fp.get('x-mention') is True
+        for fp in (_comment_def.get('properties') or {}).values()
+    )
+
     # Custom view/edit components from x-custom-components config (entity-level, list).
     _xcc_list_raw = schema['definitions'].get(def_key, {}).get('x-custom-components') or []
     if not isinstance(_xcc_list_raw, list):
@@ -508,4 +560,6 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         entity_view_components=entity_view_components,
         entity_edit_components=entity_edit_components,
         is_bridge_child=isinstance(_x_bridge, dict),
+        reaction_value_type=_reaction_value_type,
+        comment_has_mention=comment_has_mention,
     )

@@ -1,0 +1,166 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+// B-5: inventory ledger write stub for {{ snake_name }}
+// x-ledger-source event_type: {{ ledger_source.event_type }}
+// Pattern: bridge create → business entity update → inventory_transaction INSERT → inventory cache update
+
+import type { PrismaClient } from '@/app/generated/prisma/client';
+
+type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+/**
+ * Called after {{ snake_name }} approval is confirmed.
+ * Implements ledger write: INSERT into inventory_transaction + update inventory cache.
+ *
+ * Idempotency: check for existing inventory_transaction before writing.
+ * Approved_via: pass approval_request.id as approvedVia for audit trail (R2 compliance).
+ */
+export async function afterApprove(
+  tx: Tx,
+  entityId: string,
+  approvableId: string,
+  approvedByUserId: string,
+): Promise<void> {
+  const entity = await tx.{{ snake_name }}.findFirst({
+    where: { approvable_id: approvableId },
+  });
+  if (!entity) return;
+
+  // FS-2 defensive guard: split invalidates approvable_id on the parent entity
+  // (sets it to null). Redundant with the findFirst lookup above but kept as
+  // a second layer per design — if the lookup strategy ever changes, this stays safe.
+  if (!entity.approvable_id) return;
+
+  // FS-3 defensive guard: ledger writes require a resolved inventory target.
+  if (!entity.{{ ledger_source.poolIdField }}) throw new Error('{{ ledger_source.poolIdField }} required for ledger write ({{ snake_name }})');
+
+  // Idempotency guard: entity-level (preferred over approvable.approved_at check)
+  // NOTE: approved_at is set by approve route BEFORE this function runs in the
+  // same transaction, so approvable-level guard would always fire. Use entity-level
+  // check instead: verify that no inventory_transaction exists for this source.
+  if (entity.{{ bridge_fk_field }}) {
+    const existing = await tx.{{ ledger_entity }}.findFirst({
+      where: { {{ bridge_fk_field }}: entity.{{ bridge_fk_field }} },
+    });
+    if (existing) return; // already written (idempotent)
+  }
+
+  // Step 1: Create bridge if not already exists
+  const bridge = entity.{{ bridge_fk_field }}
+    ? { id: entity.{{ bridge_fk_field }} }
+    : await tx.{{ transactionable_entity }}.create({ data: {} });
+
+  // Step 2: Link bridge to entity (if newly created)
+  if (!entity.{{ bridge_fk_field }}) {
+    await tx.{{ snake_name }}.update({
+      where: { id: entityId },
+      data: { {{ bridge_fk_field }}: bridge.id },
+    });
+  }
+
+  // Step 3: Get inventory identity (O-6 non-normalized fields)
+  const inventory = await tx.{{ pool_entity }}.findUniqueOrThrow({
+    where: { id: entity.{{ ledger_source.poolIdField }} },
+    include: { location: true },
+  });
+
+  // Step 4: INSERT inventory_transaction
+  await tx.{{ ledger_entity }}.create({
+    data: {
+      {{ bridge_fk_field }}: bridge.id,
+      event_type: '{{ ledger_source.event_type }}',
+      quantity_delta: {% if ledger_source.quantity_delta_field %}entity.{{ ledger_source.quantity_delta_field }}{% else %}{{ ledger_source.quantity_delta | default(0) }}{% endif %}, // O-4
+      reserved_delta: {% if ledger_source.reserved_delta_field %}entity.{{ ledger_source.reserved_delta_field }}{% else %}{{ ledger_source.reserved_delta | default(0) }}{% endif %}, // O-4
+      product_id: inventory.product_id,    // O-6
+      location: inventory.location?.name ?? '',   // O-6
+      lot_number: inventory.lot_number,     // O-6
+      expiration_date: inventory.expiration_date, // O-6
+      approved_via: approvableId,           // audit trail (R2)
+      created_by_id: approvedByUserId,
+      creator_id: approvedByUserId,
+      updater_id: approvedByUserId,
+    },
+  });
+
+  // Step 5: Update inventory cache (materialized SUM)
+  await tx.{{ pool_entity }}.update({
+    where: { id: entity.{{ ledger_source.poolIdField }} },
+    data: {
+      quantity: { increment: {% if ledger_source.quantity_delta_field %}entity.{{ ledger_source.quantity_delta_field }}{% else %}{{ ledger_source.quantity_delta | default(0) }}{% endif %} },
+      reserved_quantity: { increment: {% if ledger_source.reserved_delta_field %}entity.{{ ledger_source.reserved_delta_field }}{% else %}{{ ledger_source.reserved_delta | default(0) }}{% endif %} },
+    },
+  });
+}
+{% if ledger_source.reject_event_type %}
+
+/**
+ * Called after {{ snake_name }} is terminally rejected.
+ * Implements ledger write: INSERT a '{{ ledger_source.reject_event_type }}' inventory_transaction
+ * row (O-4: quantity_delta fixed at 0 — a reject never touches physical inventory)
+ * + release the reserved_quantity on the inventory cache.
+ *
+ * Idempotency: check for an existing '{{ ledger_source.reject_event_type }}' transaction on
+ * this bridge before writing.
+ */
+export async function afterReject(
+  tx: Tx,
+  entityId: string,
+  approvableId: string,
+  rejectedByUserId: string,
+): Promise<void> {
+  const entity = await tx.{{ snake_name }}.findFirst({
+    where: { approvable_id: approvableId },
+  });
+  if (!entity || !entity.{{ bridge_fk_field }}) return;
+
+  const priorTxs = await tx.{{ ledger_entity }}.findMany({
+    where: { {{ bridge_fk_field }}: entity.{{ bridge_fk_field }} },
+  });
+  if (priorTxs.some((t) => t.event_type === '{{ ledger_source.reject_event_type }}')) return; // idempotent
+
+  const reservedQty = priorTxs.reduce((sum, t) => sum + t.reserved_delta, 0);
+  if (reservedQty <= 0) return;
+
+  const source = priorTxs[0];
+
+  // O-4: reject never touches physical quantity; only releases the reserved slot.
+  await tx.{{ ledger_entity }}.create({
+    data: {
+      {{ bridge_fk_field }}: entity.{{ bridge_fk_field }},
+      event_type: '{{ ledger_source.reject_event_type }}',
+      quantity_delta: 0,
+      reserved_delta: -reservedQty,
+      product_id: source.product_id,
+      location: source.location,
+      lot_number: source.lot_number,
+      expiration_date: source.expiration_date,
+      created_by_id: rejectedByUserId,
+      creator_id: rejectedByUserId,
+      updater_id: rejectedByUserId,
+    },
+  });
+
+  // Phase4: inventory.location_id FK — denormalized name from the ledger
+  // needs to be reverse-looked-up to a location_id before re-identifying.
+  const _sourceLocName = source.location === '' ? null : source.location;
+  const _sourceLoc = _sourceLocName
+    ? await tx.location.findFirst({ where: { name: _sourceLocName } })
+    : null;
+  const inventoryCache = await tx.{{ pool_entity }}.findFirst({
+    where: {
+      product_id: source.product_id,
+      location_id: _sourceLoc?.id ?? null,
+      lot_number: source.lot_number,
+      expiration_date: source.expiration_date,
+    },
+  });
+  if (inventoryCache) {
+    await tx.{{ pool_entity }}.update({
+      where: { id: inventoryCache.id },
+      data: {
+        reserved_quantity: { decrement: reservedQty },
+        // quantity: unchanged (O-4)
+      },
+    });
+  }
+}
+{% endif %}

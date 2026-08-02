@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { {% if uses_use_callback %}useCallback, {% endif %}useMemo, {% if uses_use_ref %}useRef, {% endif %}useState } from 'react';
 import { useRouter } from '@/i18n/navigation';
 import { useTransition } from 'react';
 import { useTranslations } from 'next-intl';
@@ -11,7 +11,7 @@ import type { EntityAutocompleteCellConfig } from '@/components/_standard/Entity
 import NumberField from '@/components/_standard/NumberField';
 {% endif %}
 {% if has_box_import %}
-import Box from '@mui/material/Box';
+import { AppFormFieldWrapper } from '@/components/ui';
 {% endif %}
 {% if uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
@@ -20,12 +20,16 @@ import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}
 {% if has_comment_children and named_constants %}
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 {% endif %}
-import type { FormUpsertProps } from '@/lib/{{ parent }}/types';
+import type { FormUpsertProps{% if has_comment_children and named_constants %}, CommentReactionSummary{% endif %} } from '@/lib/{{ parent }}/types';
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
-import { AppFieldText, AppFieldBoolean, AppValidationError{% if has_entity_autocomplete %}, AppFieldRelation{% endif %}{% if has_flatten_accordion_upsert %}, AppSection{% endif %}{% if has_field_select %}, AppFieldSelect{% endif %} } from '@/components/ui';
+import { {% if uses_app_field_text %}AppFieldText, {% endif %}{% if uses_app_field_boolean %}AppFieldBoolean, {% endif %}AppValidationError{% if has_entity_autocomplete %}, AppFieldRelation{% endif %}{% if has_flatten_accordion_upsert %}, AppSection{% endif %}{% if has_field_select %}, AppFieldSelect{% endif %} } from '@/components/ui';
 {% if has_comment_children %}
 import CommentListWrapper from '@/components/_standard/CommentListWrapper';
+{% endif %}
+{% if has_mention_fields %}
+import MentionInput from '@/components/_standard/MentionInput';
+import { searchMentionUserOptions } from '@/lib/mention/search';
 {% endif %}
 {% if child_imports %}
 {{ child_imports }}
@@ -56,7 +60,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% endif %}
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+{% if can_delete or can_invalidate %}
   const canDelete = permissions ? permissions.delete : true;
+{% endif %}
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 {% if all_states %}
 
@@ -110,7 +116,10 @@ export default function FormUpsert({{ form_upsert_params }}) {
 
     try {
       startTransition(async () => {
-        await upsert{{ parent_pascal }}(formData);
+        const result = (await upsert{{ parent_pascal }}(formData)) as { error?: string } | void;
+        if (result?.error) {
+          setError(result.error);
+        }
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');

@@ -1,0 +1,283 @@
+// AUTO-GENERATED - DO NOT EDIT
+import { NextRequest, NextResponse } from 'next/server';
+import Papa from 'papaparse';
+import prisma from '@/lib/prisma';
+import { getModelPermissions, assertPermission, canAccess{% if should_filter_by_org %}, getSessionUserId{% endif %} } from '@/lib/authz';
+import { handleApiError } from '@/lib/api-auth';
+import { unescapeImportValue } from '@/lib/_csv';
+import { generateImportToken, verifyImportToken } from '@/lib/_import';
+{% if should_filter_by_org or any_dotted_fk_needs_org_filter %}
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}
+
+const MAX_IMPORT_ROWS = 5_000;
+const MAX_IMPORT_BYTES = 10 * 1024 * 1024; // 10MB
+
+type ImportRowError = { row: number; code: string; message: string };
+type ImportResult = {
+  summary: { total: number; succeeded: number; failed: number; dryRun: boolean };
+  errors: ImportRowError[];
+  confirmToken?: string;
+};
+
+{% if not import_can_create and not import_can_update %}
+export async function POST() {
+  // Tier1: this entity does not support CSV import (x-generate.new and .edit both false).
+  return NextResponse.json(
+    {
+      summary: { total: 0, succeeded: 0, failed: 0, dryRun: true },
+      errors: [{ row: 0, code: 'ENTITY_IMPORT_NOT_SUPPORTED', message: 'This entity does not support CSV import.' }],
+    } satisfies ImportResult,
+    { status: 400 },
+  );
+}
+{% else %}
+type FieldSpec = { name: string; ts_type: 'string' | 'number' | 'boolean'; nullable: boolean; is_key: boolean; is_update: boolean };
+const FIELD_SPECS: FieldSpec[] = {{ import_field_specs | tojson }};
+const KEY_COLUMNS: string[] = {{ import_key_specs | map(attribute='csv_col') | list | tojson }};
+
+type PendingAction =
+  | { op: 'create'; row: number; data: Record<string, unknown> }
+  | { op: 'update'; row: number; id: string; data: Record<string, unknown> };
+
+/** Coerce a raw CSV cell to its schema type. Returns { ok: false } on an unparsable value. */
+function coerceValue(raw: string | undefined, spec: FieldSpec): { ok: true; value: unknown } | { ok: false } {
+  const v = unescapeImportValue(raw ?? '');
+  if (v === '') {
+    if (spec.nullable) return { ok: true, value: null };
+    // Non-nullable: an empty cell is treated as a missing value (all types, including string).
+    return { ok: false };
+  }
+  if (spec.ts_type === 'number') {
+    const n = Number(v);
+    return Number.isFinite(n) ? { ok: true, value: n } : { ok: false };
+  }
+  if (spec.ts_type === 'boolean') {
+    if (v === 'true' || v === '1') return { ok: true, value: true };
+    if (v === 'false' || v === '0') return { ok: true, value: false };
+    return { ok: false };
+  }
+  return { ok: true, value: v };
+}
+
+export async function POST(request: NextRequest) {
+  try {
+{% if should_filter_by_org %}
+    const actorId = await getSessionUserId();
+    if (!actorId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { permissions } = await getModelPermissions('{{ parent }}', actorId);
+{% else %}
+    const { permissions, userId: actorId } = await getModelPermissions('{{ parent }}');
+    if (!actorId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+{% endif %}
+    try {
+      await assertPermission(permissions, 'import', '{{ parent }}');
+    } catch {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    const body = await request.json();
+    const csvRaw = typeof body?.csv === 'string' ? body.csv : '';
+    const dryRun = body?.dryRun !== false;
+    const confirmToken: string | undefined = body?.confirmToken;
+
+    if (Buffer.byteLength(csvRaw, 'utf8') > MAX_IMPORT_BYTES) {
+      return NextResponse.json(
+        {
+          summary: { total: 0, succeeded: 0, failed: 0, dryRun },
+          errors: [{ row: 0, code: 'FILE_TOO_LARGE', message: `CSV exceeds ${MAX_IMPORT_BYTES} bytes` }],
+        } satisfies ImportResult,
+        { status: 400 },
+      );
+    }
+    const csv = csvRaw.charCodeAt(0) === 0xfeff ? csvRaw.slice(1) : csvRaw;
+
+    const parsed = Papa.parse<Record<string, string>>(csv, { header: true, skipEmptyLines: true });
+    const rows = parsed.data;
+
+    if (rows.length > MAX_IMPORT_ROWS) {
+      return NextResponse.json(
+        {
+          summary: { total: rows.length, succeeded: 0, failed: 0, dryRun },
+          errors: [{ row: 0, code: 'TOO_MANY_ROWS', message: `CSV exceeds ${MAX_IMPORT_ROWS} rows` }],
+        } satisfies ImportResult,
+        { status: 400 },
+      );
+    }
+
+    const headerFields = parsed.meta.fields ?? [];
+    const missingColumns = KEY_COLUMNS.filter((c) => !headerFields.includes(c));
+    if (missingColumns.length > 0) {
+      return NextResponse.json(
+        {
+          summary: { total: rows.length, succeeded: 0, failed: 0, dryRun },
+          errors: [{ row: 0, code: 'MISSING_COLUMN', message: `Missing required column(s): ${missingColumns.join(', ')}` }],
+        } satisfies ImportResult,
+        { status: 400 },
+      );
+    }
+
+    const errors: ImportRowError[] = [];
+    const actions: PendingAction[] = [];
+{% if should_filter_by_org or any_dotted_fk_needs_org_filter %}
+    const _importAssocOrgs = await getAssociatedOrganizations(actorId);
+    const _importOrgIds = _importAssocOrgs.map((o) => o.id);
+{% endif %}
+
+    for (let i = 0; i < rows.length; i++) {
+      const rowNum = i + 2; // 1-indexed CSV row, +1 for the header row
+      const raw = rows[i];
+
+      const keyWhere: Record<string, unknown> = {};
+{% for spec in import_key_specs %}
+{% if spec.is_dotted %}
+      // Dotted FK: {{ spec.raw }} → lookup {{ spec.lookup_entity }} by {{ spec.lookup_field }}
+      let _{{ spec.result_col }}: string | null = null;
+      const _{{ spec.var_prefix }}_csv_val = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '');
+{% if spec.fk_nullable %}
+      if (_{{ spec.var_prefix }}_csv_val === '') {
+        // Empty → FK = null (nullable FK is allowed to be unset)
+        _{{ spec.result_col }} = null;
+      } else {
+{% else %}
+      {
+{% endif %}
+        const _{{ spec.var_prefix }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
+          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% endif %} },
+          select: { id: true },
+        });
+        if (_{{ spec.var_prefix }}_rows.length === 0) {
+          errors.push({ row: rowNum, code: 'NOT_FOUND',
+            message: `Row ${rowNum}: no {{ spec.lookup_entity }} with {{ spec.lookup_field }}='${_{{ spec.var_prefix }}_csv_val}'` });
+          continue;
+        }
+        if (_{{ spec.var_prefix }}_rows.length > 1) {
+          errors.push({ row: rowNum, code: 'MULTI_MATCH',
+            message: `Row ${rowNum}: multiple {{ spec.lookup_entity }} match {{ spec.lookup_field }}='${_{{ spec.var_prefix }}_csv_val}' — deduplicate first` });
+          continue;
+        }
+        _{{ spec.result_col }} = _{{ spec.var_prefix }}_rows[0].id;
+      }
+      keyWhere.{{ spec.result_col }} = _{{ spec.result_col }};
+{% else %}
+      keyWhere.{{ spec.csv_col }} = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '');
+{% endif %}
+{% endfor %}
+
+      let rowHasError = false;
+      const data: Record<string, unknown> = {};
+      for (const spec of FIELD_SPECS) {
+        const result = coerceValue(raw[spec.name], spec);
+        if (!result.ok) {
+          errors.push({ row: rowNum, code: 'INVALID_VALUE', message: `Invalid value for column '${spec.name}'` });
+          rowHasError = true;
+          continue;
+        }
+        data[spec.name] = result.value;
+      }
+      if (rowHasError) continue;
+
+{% if should_filter_by_org %}
+      const matches = await prisma.{{ model }}.findMany({
+        where: { ...keyWhere, organization_id: { in: _importOrgIds } },
+        select: {{ item_context_select }},
+      });
+{% else %}
+      const matches = await prisma.{{ model }}.findMany({ where: keyWhere, select: {{ item_context_select }} });
+{% endif %}
+
+      if (matches.length > 1) {
+        errors.push({ row: rowNum, code: 'MULTI_MATCH', message: 'Multiple existing rows match the import key' });
+        continue;
+      }
+
+      if (matches.length === 0) {
+{% if import_can_create %}
+        if (!permissions.create) {
+          errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to create this entity' });
+          continue;
+        }
+        // keyWhere is merged in so resolved dotted-FK columns (e.g. role_id, not part of
+        // FIELD_SPECS since FK columns are excluded from export_scalar_fields) are actually
+        // written on create; direct key fields duplicate an already-identical value in `data`.
+        actions.push({ op: 'create', row: rowNum, data: { ...data, ...keyWhere, creator_id: actorId, updater_id: actorId } });
+{% else %}
+        errors.push({ row: rowNum, code: 'ENTITY_IMPORT_CREATE_NOT_SUPPORTED', message: 'This entity does not support CSV-import row creation' });
+{% endif %}
+        continue;
+      }
+
+      // matches.length === 1
+{% if import_can_update %}
+      const existing = matches[0];
+      const canUpdate = await canAccess('{{ parent }}', 'update', actorId, existing);
+      if (!canUpdate) {
+        errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to update this row' });
+        continue;
+      }
+      const updateData: Record<string, unknown> = { updater_id: actorId };
+{% for f in import_update_fields %}
+      updateData.{{ f }} = data.{{ f }};
+{% endfor %}
+      actions.push({ op: 'update', row: rowNum, id: existing.id, data: updateData });
+{% else %}
+      errors.push({ row: rowNum, code: 'ENTITY_IMPORT_UPDATE_NOT_SUPPORTED', message: 'This entity does not support CSV-import row updates' });
+{% endif %}
+    }
+
+    if (errors.length > 0) {
+      return NextResponse.json(
+        { summary: { total: rows.length, succeeded: 0, failed: errors.length, dryRun }, errors } satisfies ImportResult,
+      );
+    }
+
+    if (dryRun) {
+      return NextResponse.json(
+        {
+          summary: { total: rows.length, succeeded: actions.length, failed: 0, dryRun: true },
+          errors: [],
+          confirmToken: generateImportToken(actorId, '{{ parent }}'),
+        } satisfies ImportResult,
+      );
+    }
+
+    if (!verifyImportToken(confirmToken, actorId, '{{ parent }}')) {
+      return NextResponse.json(
+        {
+          summary: { total: rows.length, succeeded: 0, failed: 0, dryRun: false },
+          errors: [{ row: 0, code: 'INVALID_CONFIRM_TOKEN', message: 'Missing or expired confirmToken; re-run with dryRun=true to obtain a fresh token.' }],
+        } satisfies ImportResult,
+        { status: 400 },
+      );
+    }
+
+    const commitErrors: ImportRowError[] = [];
+    let succeeded = 0;
+    await prisma.$transaction(async (tx) => {
+      for (const action of actions) {
+        try {
+          if (action.op === 'create') {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await tx.{{ model }}.create({ data: action.data as any });
+          } else {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await tx.{{ model }}.update({ where: { id: action.id }, data: action.data as any });
+          }
+          succeeded++;
+        } catch (err) {
+          commitErrors.push({ row: action.row, code: 'WRITE_FAILED', message: err instanceof Error ? err.message : String(err) });
+        }
+      }
+    });
+
+    return NextResponse.json(
+      {
+        summary: { total: rows.length, succeeded, failed: commitErrors.length, dryRun: false },
+        errors: commitErrors,
+      } satisfies ImportResult,
+    );
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+{% endif %}

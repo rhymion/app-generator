@@ -1,13 +1,13 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-{% if has_comment_children %}
+{% if has_comment_children or (is_splittable and split_config) %}
 import { useRouter } from 'next/navigation';
 {% endif %}
-{% if has_grid_children or children_raw %}
+{% if has_grid_children %}
 import type { GridColDef } from '@/components/ui/data';
 {% endif %}
-import type { FormViewProps } from '@/lib/{{ parent }}/types';
+import type { FormViewProps{% if has_comment_children and named_constants %}, CommentReactionSummary{% endif %} } from '@/lib/{{ parent }}/types';
 {% if has_grid_children %}
 import FieldsViewGrid from '@/components/_standard/FieldsViewGrid';
 {% if col_fn_names %}
@@ -36,25 +36,34 @@ import { add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 {% endif %}
 {% endif %}
+{% if comment_has_mention %}
+import MentionText from '@/components/_standard/MentionText';
+{% endif %}
 import AuditInfo from '@/components/_standard/AuditInfo';
-import { AppDetailShell, AppDetailHeader, AppFieldText, AppFieldBoolean{% if has_rel_links %}, AppFieldRelation{% endif %}{% if needs_accordion %}, AppSection{% endif %} } from '@/components/ui';
+import { AppDetailShell, AppDetailHeader, AppFieldText{% if uses_app_field_boolean %}, AppFieldBoolean{% endif %}{% if has_rel_links %}, AppFieldRelation{% endif %}{% if needs_accordion %}, AppSection{% endif %} } from '@/components/ui';
 {% if custom_view_imports %}
 {{ custom_view_imports }}
 {% endif %}
 {% for comp in entity_view_components %}
 import {{ comp.name }} from '{{ comp.path if comp.path else "./" + comp.name }}';
 {% endfor %}
+{% if is_splittable and split_config %}
+import { SplitActionSection } from './SplitActionSection';
+{% endif %}
 {% if use_dayjs %}
 import dayjs from 'dayjs';
 {% endif %}
 
-export default function FormView({ src, permissions{% if entity_view_components %}, currentUserRoleIds, currentUserId{% endif %} }: FormViewProps) {
+export default function FormView({ src, permissions{% if comment_has_mention %}, canViewUserProfile, mentionUserContext{% endif %}{% if entity_view_components %}, currentUserRoleIds, currentUserId{% endif %} }: FormViewProps) {
   const tf = useTranslations('Fields');
   const te = useTranslations('EntityLabel');
 {% if view_enum_ns_hooks %}
 {{ view_enum_ns_hooks }}
 {% endif %}
   const canEdit = permissions?.update ?? true;
+{% if is_splittable and split_config %}
+  const router = useRouter();
+{% endif %}
 {% if view_enum_opt_setups %}
 {{ view_enum_opt_setups }}
 {% endif %}
@@ -86,6 +95,16 @@ export default function FormView({ src, permissions{% if entity_view_components 
 {{ child_view_grids }}
 {% endif %}
       <AuditInfo src={src} />
+{% if is_splittable and split_config %}
+      <SplitActionSection
+        id={src.id}
+        {{ split_config.quantity_field }}={(src as Record<string, unknown>).{{ split_config.quantity_field }} as number}
+        {% for cf in split_config.context_fields %}
+        {{ cf }}={(src as Record<string, unknown>).{{ cf }}}
+        {% endfor %}
+        onSuccess={() => router.refresh()}
+      />
+{% endif %}
 {% for comp in entity_view_components %}
       <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />
 {% endfor %}

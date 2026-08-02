@@ -18,6 +18,12 @@ import { DEFAULT_PAGE_SIZE{% if needs_formatting %}, type PageOpts{% endif %} } 
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
 import AppListToolbar from '@/components/ui/layout/AppListToolbar';
+{% if can_api and can_list and can_export %}
+import ExportCsvButton from '@/components/_standard/ExportCsvButton';
+{% endif %}
+{% if import_eligible %}
+import ImportModal from '@/components/{{ parent }}/ImportModal';
+{% endif %}
 {% for comp in entity_custom_components %}
 import {{ comp.name }} from '{{ comp.path if comp.path else "@/components/" + parent + "/" + comp.name }}';
 {% endfor %}
@@ -60,11 +66,19 @@ async function {{ parent_pascal }}ListContent({
 {% endfor %}
   ]);
 {% for ns in enum_ns_list %}
+{% if ns.is_native_enum %}
+  const {{ ns.var_name }}: Record<string, string> = {
+{% for entry in ns['entries'] %}
+    '{{ entry[0] }}': {{ ns.var_name }}T('{{ entry[1] }}'),
+{% endfor %}
+  };
+{% else %}
   const {{ ns.var_name }}: Record<number, string> = {
 {% for entry in ns['entries'] %}
     {{ entry[0] }}: {{ ns.var_name }}T('{{ entry[1] }}'),
 {% endfor %}
   };
+{% endif %}
 {% endfor %}
   const { {{ parent_camel }}Page, userPermissions } = await get{{ parent_pascal }}PagedData({
     page: Number.isFinite(pageNum) ? pageNum : 0,
@@ -83,11 +97,19 @@ async function {{ parent_pascal }}ListContent({
     const raw = await fetch{{ parent_pascal }}Page(opts);
 {% for ns in enum_ns_list %}
     const {{ ns.var_name }}T = await getTranslations('{{ ns.ns }}');
+{% if ns.is_native_enum %}
+    const {{ ns.var_name }}: Record<string, string> = {
+{% for entry in ns['entries'] %}
+      '{{ entry[0] }}': {{ ns.var_name }}T('{{ entry[1] }}'),
+{% endfor %}
+    };
+{% else %}
     const {{ ns.var_name }}: Record<number, string> = {
 {% for entry in ns['entries'] %}
       {{ entry[0] }}: {{ ns.var_name }}T('{{ entry[1] }}'),
 {% endfor %}
     };
+{% endif %}
 {% endfor %}
     return {
       ...raw,
@@ -107,6 +129,12 @@ async function {{ parent_pascal }}ListContent({
         chartLabel={tc('chart')}
 {% endif %}
       >
+{% if can_api and can_list and can_export %}
+        <ExportCsvButton entity="{{ parent }}" />
+{% endif %}
+{% if import_eligible %}
+        <ImportModal permissions={userPermissions} />
+{% endif %}
 {% for comp in entity_custom_components %}
         <{{ comp.name }}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={userPermissions} />
 {% endfor %}

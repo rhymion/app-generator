@@ -66,7 +66,7 @@ def _entity(parent: str, definition_key: str | None = None) -> dict:
     return {
         'parent':          parent,
         'model':           parent,
-        'definition_key':  definition_key or f'{parent}_detail',
+        'definition_key':  definition_key or parent,
         'children':        [],
         'generate_config': {
             'list':   True,
@@ -92,7 +92,7 @@ def _fixture_schema() -> dict:
     """
     return {
         'definitions': {
-            'patient': {
+            '__patient': {
                 'type': 'object',
                 'required': ['id', 'name'],
                 'properties': {
@@ -101,9 +101,9 @@ def _fixture_schema() -> dict:
                 },
                 'x-display': {'table': [{'name': {'primary': True}}]},
             },
-            'patient_detail': {'allOf': [{'$ref': '#/definitions/patient'}]},
+            'patient': {'allOf': [{'$ref': '#/definitions/__patient'}]},
 
-            'patient_rel': {
+            '__patient_rel': {
                 'type': 'object',
                 'required': ['id', 'patient_no', 'patient_id'],
                 'properties': {
@@ -120,9 +120,9 @@ def _fixture_schema() -> dict:
                 },
                 'x-display': {'table': [{'patient_no': {'primary': True}}]},
             },
-            'patient_rel_detail': {'allOf': [{'$ref': '#/definitions/patient_rel'}]},
+            'patient_rel': {'allOf': [{'$ref': '#/definitions/__patient_rel'}]},
 
-            'checkup': {
+            '__checkup': {
                 'type': 'object',
                 'required': ['id', 'patient_rel_id', 'checkup_date'],
                 'properties': {
@@ -139,9 +139,9 @@ def _fixture_schema() -> dict:
                 },
                 'x-display': {'table': [{'patient_rel': {'primary': True}}]},
             },
-            'checkup_detail': {
+            'checkup': {
                 'allOf': [
-                    {'$ref': '#/definitions/checkup'},
+                    {'$ref': '#/definitions/__checkup'},
                     {
                         'type': 'object',
                         'properties': {
@@ -158,7 +158,7 @@ def _fixture_schema() -> dict:
             },
 
             # Flatten OTO #1 — required parent FK, no external required FK.
-            'pre_check': {
+            '__pre_check': {
                 'type': 'object',
                 'required': ['id', 'checkup_id', 'ams_score'],
                 'properties': {
@@ -174,11 +174,11 @@ def _fixture_schema() -> dict:
                 },
                 'x-display': {'table': [{'checkup': {'primary': True}}]},
             },
-            'pre_check_detail': {'allOf': [{'$ref': '#/definitions/pre_check'}]},
+            'pre_check': {'allOf': [{'$ref': '#/definitions/__pre_check'}]},
 
             # Flatten OTO #2 — enum + boolean fields, used to verify
             # `empty_assert_cmds` emits checkField('', '') and setCheckbox(false).
-            'checkup_judgment': {
+            '__checkup_judgment': {
                 'type': 'object',
                 'required': ['id', 'checkup_id', 'total_testosterone', 'is_followup'],
                 'properties': {
@@ -198,14 +198,14 @@ def _fixture_schema() -> dict:
                 },
                 'x-display': {'table': [{'checkup': {'primary': True}}]},
             },
-            'checkup_judgment_detail': {
-                'allOf': [{'$ref': '#/definitions/checkup_judgment'}],
+            'checkup_judgment': {
+                'allOf': [{'$ref': '#/definitions/__checkup_judgment'}],
             },
 
             # Flatten OTO #3 — required external FK to `patient` that the form
             # does not collect. The service generator must derive patient_id via
             # the parent's `patient_rel_id → patient_rel.patient_id` chain.
-            'lifestyle': {
+            '__lifestyle': {
                 'type': 'object',
                 'required': ['id', 'checkup_id', 'patient_id', 'sleep_hours'],
                 'properties': {
@@ -228,9 +228,9 @@ def _fixture_schema() -> dict:
                 },
                 'x-display': {'table': [{'patient': {'primary': True}}]},
             },
-            'lifestyle_detail': {
+            'lifestyle': {
                 'allOf': [
-                    {'$ref': '#/definitions/lifestyle'},
+                    {'$ref': '#/definitions/__lifestyle'},
                     {
                         'type': 'object',
                         'properties': {
@@ -430,7 +430,7 @@ def test_compute_flatten_test_rels_populates_empty_assert_cmds_for_checkup():
     """
     from generators_test import _compute_flatten_test_rels  # noqa: WPS433
 
-    rels = _compute_flatten_test_rels('checkup', 'Checkup', 'checkup_detail', _fixture_schema())
+    rels = _compute_flatten_test_rels('checkup', 'Checkup', 'checkup', _fixture_schema())
     assert rels, "fixture checkup must have flatten rels (pre_check / checkup_judgment / lifestyle)"
     for r in rels:
         assert 'empty_assert_cmds' in r, f"rel {r.get('prop_name')} missing empty_assert_cmds"
@@ -477,7 +477,7 @@ def test_compute_flatten_test_rels_marks_lifestyle_as_inline_creatable():
     """
     from generators_test import _compute_flatten_test_rels  # noqa: WPS433
 
-    rels = _compute_flatten_test_rels('checkup', 'Checkup', 'checkup_detail', _fixture_schema())
+    rels = _compute_flatten_test_rels('checkup', 'Checkup', 'checkup', _fixture_schema())
     by_prop = {r['prop_name']: r for r in rels}
     assert 'lifestyle' in by_prop, "lifestyle must be a flatten rel of checkup"
     assert by_prop['lifestyle']['can_create_inline'] is True, (
@@ -502,7 +502,7 @@ def test_find_fk_derivation_path_resolves_one_hop():
     from helpers.schema_helpers import find_fk_derivation_path  # noqa: WPS433
 
     schema = _fixture_schema()
-    parent_def = schema['definitions']['checkup']
+    parent_def = schema['definitions']['__checkup']
     path = find_fk_derivation_path('checkup', parent_def, 'patient', schema)
     assert path is not None, "checkup must reach patient via patient_rel"
     assert path['kind'] == 'one_hop'

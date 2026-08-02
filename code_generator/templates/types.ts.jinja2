@@ -49,8 +49,8 @@ export type {{ parent | pascal_case }} = {
       created_at?: string | Date | null;
       updated_at?: string | Date | null;
       creator?: { id: string; name: string; image?: string | null } | null;
-      reactionCounts: Array<{ type: number; count: number }>;
-      myReactionTypes: number[];
+      reactionCounts: Array<{ type: {{ reaction_value_type }}; count: number }>;
+      myReactionTypes: ({{ reaction_value_type }})[];
 {% else %}
 {% for rel in child.relationships %}
       {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
@@ -99,8 +99,8 @@ export type {{ child.name | pascal_case }} = {
   created_at?: string | Date | null;
   updated_at?: string | Date | null;
   creator?: { id: string; name: string; image?: string | null } | null;
-  reactionCounts: Array<{ type: number; count: number }>;
-  myReactionTypes: number[];
+  reactionCounts: Array<{ type: {{ reaction_value_type }}; count: number }>;
+  myReactionTypes: ({{ reaction_value_type }})[];
 {% endif %}
 };
 
@@ -122,10 +122,10 @@ export type {{ parent | pascal_case }}Detail = {{ parent | pascal_case }};
 {% if _ns.has_comments %}
 export type CommentReactionSummary = {
   commentId: string;
-  type: number;
+  type: {{ reaction_value_type }};
   active: boolean;
-  counts: Array<{ type: number; count: number }>;
-  myTypes: number[];
+  counts: Array<{ type: {{ reaction_value_type }}; count: number }>;
+  myTypes: ({{ reaction_value_type }})[];
 };
 
 {% endif %}
@@ -174,8 +174,8 @@ export type FormViewProps = Readonly<{
         created_at?: string | Date | null;
         updated_at?: string | Date | null;
         creator?: { id: string; name: string; image?: string | null } | null;
-        reactionCounts: Array<{ type: number; count: number }>;
-        myReactionTypes: number[];
+        reactionCounts: Array<{ type: {{ reaction_value_type }}; count: number }>;
+        myReactionTypes: ({{ reaction_value_type }})[];
 {% else %}
 {% for rel in child.relationships %}
         {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
@@ -199,6 +199,12 @@ export type FormViewProps = Readonly<{
     updater?: { id: string; name: string } | null;
   };
   permissions?: ModelPermissions;
+{% if comment_has_mention %}
+  /** Whether the viewer may link mentioned users' names to their profile page (cmd_522). */
+  canViewUserProfile?: boolean;
+  /** Maps mentioned user id → display name, for MentionText (cmd_522). */
+  mentionUserContext?: Record<string, string>;
+{% endif %}
 {% if entity_view_components or entity_edit_components %}
   currentUserRoleIds?: string[];
   currentUserId?: string | null;
@@ -208,8 +214,17 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
 {% for target in all_option_targets %}
-  initial{{ target | pascal_case }}s?: {{ target | pascal_case }}[];
-  search{{ target | pascal_case }}Options?: (query: string, includeIds: string[]) => Promise<{{ target | pascal_case }}[]>;
+  {# permissionDenied: set when the current user lacks read on {{ target }} —
+     the FK field renders disabled-but-clearable instead of the page
+     crashing. Passed as its own boolean prop (not read off the array below)
+     because a non-index property attached to an array does not survive
+     the Server-to-Client Component serialization boundary — the page
+     computes it server-side, before the array crosses that boundary, and
+     passes it down alongside the array. See
+     docs/knowledge/fk-read-permission-graceful-degradation.md. #}
+  initial{{ target | pascal_case }}s?: {{ target | pascal_case }}[] & { permissionDenied?: boolean };
+  initial{{ target | pascal_case }}sPermissionDenied?: boolean;
+  search{{ target | pascal_case }}Options?: (query: string, includeIds: string[]) => Promise<{{ target | pascal_case }}[] & { permissionDenied?: boolean }>;
 {% endfor %}
   currentUserId?: string | null;
 {% if is_bridge_child %}

@@ -9,18 +9,15 @@ thread by adding a one-to-one relationship to `commentable`.
 
 ### 17.1 System entities
 
-These definitions must be present in every application schema:
+`commentable` and `comment` are framework-default entities, already declared in
+`code_generator/json_schema_internal.yaml` in the current **single-file entity format**
+(no separate `_detail` definition — see `docs/knowledge/schema-yaml-configuration.md` §2).
+Most projects never need to touch these:
 
 ```yaml
+# code_generator/json_schema_internal.yaml (framework default — merged in automatically;
+# copy an entity's definition into your own json_schema.yaml only to customize it)
 commentable:
-  type: object
-  required: [id]
-  properties:
-    id:
-      type: string
-      pattern: "^c[a-z0-9]{24,}$"
-
-commentable_detail:
   x-generate:
     list: false
     view: false
@@ -30,30 +27,20 @@ commentable_detail:
     invalidate: false
     api: false
     test: false
-  allOf:
-    - $ref: "#/definitions/commentable"
-    - type: object
-      required: [comments]
-      properties:
-        comments:
-          type: array
-          x-outputType: comments
-          items:
-            $ref: "#/definitions/comment"
-
-comment:
-  type: object
-  required: [id, message, commentable_id]
+  required: [comments]
   properties:
-    id:
-      type: string
-      pattern: "^c[a-z0-9]{24,}$"
+    comments:
+      type: array
+      x-outputType: comments
+      items:
+        $ref: "#/definitions/comment"
+
+# your own json_schema.yaml
+comment:
+  fields:
     message:
-      type: string
-      minLength: 1
-    commentable_id:
-      type: string
-      pattern: "^c[a-z0-9]{24,}$"
+      x-mention: true
+    commentable_id: {}
 ```
 
 The corresponding Prisma models:
@@ -63,7 +50,6 @@ model commentable {
   id       String    @id @default(cuid())
   comments comment[]
   // back-relations from each entity using commentable
-  db_table db_table?
 }
 
 model comment {
@@ -80,29 +66,21 @@ model comment {
 
 ### 17.2 Making an entity commentable
 
-Add a `commentable_id` FK with `x-relationship: type: one-to-one` to the entity's base definition,
-and reference `commentable_detail` in the detail definition:
+Add a `commentable_id` FK with `x-relationship: type: one-to-one` directly on the entity —
+there is no separate detail definition to add it to (single-file format, same auto-create
+pattern as `approvable`; see `docs/knowledge/schema-yaml-configuration.md` §12.5):
 
 ```yaml
 db_table:
-  type: object
-  required: [id, name, commentable_id]
-  properties:
+  fields:
     commentable_id:
-      type: string
-      pattern: "^c[a-z0-9]{24,}$"
       x-relationship:
         type: one-to-one
         target: commentable
         labelField: id
-
-db_table_detail:
-  allOf:
-    - $ref: "#/definitions/db_table"
-    - type: object
-      properties:
-        commentable:
-          $ref: "#/definitions/commentable"
+  properties:
+    commentable:
+      $ref: "#/definitions/commentable"   # resolved object included in detail queries
 ```
 
 The `one-to-one` relationship triggers pre-creation of the `commentable` bridge in `$transaction`
@@ -151,7 +129,7 @@ The `CommentListWrapper` reads from `src.commentable?.comments ?? []`.
 | FK | `epic_id` on `epic_comment` | `commentable_id` on `comment` |
 | Action arg | parent entity id (`src.id`) | bridge id (`src.commentable!.id`) |
 | Prisma cascade | `epic` → `epic_comment` | `commentable` → `comment` |
-| Pattern | Direct child in `_detail` | One-to-one rel in entity + `commentable` in detail |
+| Pattern | Direct child, listed in the entity's own `properties:` | One-to-one rel on the entity + `commentable` resolved in `properties:` |
 
 Both patterns produce identical runtime behavior for the end user.
 

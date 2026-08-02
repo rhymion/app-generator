@@ -28,13 +28,20 @@ script) lets reviewers exempt specific (path, pattern, substring)
 combinations. Each entry must record a reason so the carve-out is
 auditable. Entries are matched literally; no globs.
 
+<schema.yaml> must be the *built* schema (code_generator/.generated/json_schema.yaml,
+produced by build_user_schema.py) -- the same one generate.py consumes during
+`npm run generate-code`. The hand-authored code_generator/json_schema.yaml lacks
+the '__'-prefixed raw entities that split synthesizes, so extract_entities()
+finds nothing in it; `npm run check:generated` builds .generated/json_schema.yaml
+first for this reason.
+
 Usage:
-    python check_generated.py <schema.yaml> <project-root>
+    python check_generated.py <built-schema.yaml> <project-root>
 
 Exit codes:
     0 — no violations
     1 — at least one violation
-    2 — invocation / configuration error
+    2 — invocation / configuration error (including a schema with 0 entities)
 """
 from __future__ import annotations
 
@@ -158,6 +165,17 @@ def _enumerate_generated_files(schema_path: Path, root: Path) -> list[Path]:
     with open(schema_path, 'r') as f:
         schema = yaml.safe_load(f)
     entities = extract_entities(schema)
+    if not entities:
+        print(
+            f'ERROR: no entities found in {schema_path}.\n'
+            "This is almost always a sign that a hand-authored schema (no '__'-prefixed "
+            'raw entities) was passed instead of the built schema. Pass the output of '
+            'build_user_schema.py (code_generator/.generated/json_schema.yaml) -- the '
+            'same file generate.py consumes -- not the source json_schema.yaml. '
+            'Refusing to run rather than silently reporting a clean scan of nothing.',
+            file=sys.stderr,
+        )
+        sys.exit(2)
     out: list[Path] = []
     seen: set[Path] = set()
     for entity in entities:

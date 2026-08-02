@@ -16,6 +16,7 @@ interface AppTextProps {
   textAlign?: 'left' | 'center' | 'right';
   mb?: number;
   mt?: number;
+  ml?: number;
   p?: number;
   bgcolor?: string;
   borderRadius?: number;
@@ -33,6 +34,7 @@ export default function AppText({
   textAlign,
   mb,
   mt,
+  ml,
   p,
   bgcolor,
   borderRadius,
@@ -55,6 +57,7 @@ export default function AppText({
       textAlign={textAlign}
       mb={mb}
       mt={mt}
+      ml={ml}
       className={className}
       component={component as React.ElementType}
       sx={Object.keys(sxInternal).length > 0 ? sxInternal : undefined}

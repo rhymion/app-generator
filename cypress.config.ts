@@ -15,6 +15,21 @@ export default defineConfig({
     setupNodeEvents(on, config) {
       config.defaultCommandTimeout = 10000; // Increase default command timeout to 10 seconds
 
+      // Load project-specific task registrations if present.
+      // prj:sync copies prj/cypress/support/project-tasks.ts here.
+      // Falls back to empty object when no project-tasks.ts exists (base template).
+      let projectTasks: Record<string, (...args: any[]) => any> = {};
+      try {
+        const mod = require('./cypress/support/project-tasks') as {
+          getProjectTasks?: () => Record<string, (...args: any[]) => any>;
+        };
+        if (typeof mod.getProjectTasks === 'function') {
+          projectTasks = mod.getProjectTasks();
+        }
+      } catch {
+        // No project-specific tasks file — base generator default
+      }
+
       // Task to reset and seed database before tests
       on('task', {
         async 'db:reset'() {
@@ -44,6 +59,35 @@ export default defineConfig({
           const { createLimitedApiUser } = require('./cypress/support/db-helpers');
           return await createLimitedApiUser(modelName);
         },
+        // cmd_328 batch2: session-loginable actor with a custom permission set, for
+        // testing session-based routes (CSV import/export) that createLimitedApiUser
+        // (X-API-Key only, unusable password) cannot reach.
+        async 'db:createSessionUserWithPermission'(params: {
+          entityName: string;
+          flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean };
+          label?: string;
+        }) {
+          const { createSessionUserWithPermission } = require('./cypress/support/db-helpers');
+          return await createSessionUserWithPermission(params.entityName, params.flags, params.label);
+        },
+        // cmd_452: X-API-Key-bearing actor with a custom permission set, NOT
+        // enrolled in any organization — the org-isolation IDOR fixture for
+        // API-route tests (detail GET/PUT/DELETE, list, export).
+        async 'db:createApiUserWithPermission'(params: {
+          entityName: string;
+          flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean };
+          label?: string;
+        }) {
+          const { createApiUserWithPermission } = require('./cypress/support/db-helpers');
+          return await createApiUserWithPermission(params.entityName, params.flags, params.label);
+        },
+        // cmd_520 G3: cross-org isolation fixture — orgA (test user is a
+        // member), orgB (test user is not), optionally reassigning an
+        // existing entity row into orgB.
+        async 'db:createCrossOrgScenario'(params: { entityName: string; entityId?: string }) {
+          const { createCrossOrgScenario } = require('./cypress/support/db-helpers');
+          return await createCrossOrgScenario(params.entityName, params.entityId);
+        },
         async 'db:seedMfaUser'() {
           const { seedMfaTestUser } = require('./cypress/support/mfa-helpers');
           return await seedMfaTestUser();
@@ -55,7 +99,6 @@ export default defineConfig({
         async 'db:createTestComment'() {
           const { prisma } = require('./cypress/support/db-helpers');
           const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
-          const { createId } = require('@paralleldrive/cuid2');
           const testUser = await prisma.user.findUnique({
             where: { email: TEST_CREDENTIALS.email },
           });
@@ -69,6 +112,49 @@ export default defineConfig({
             },
           });
           return JSON.parse(JSON.stringify({ commentId: comment.id, userId: testUser.id }));
+        },
+        async 'db:createUserWithName'(params: { name: string; image?: string | null }) {
+          // Creates a user row with a caller-chosen (possibly duplicate) name,
+          // owned by the session test user. Used by CSV import tests to set up
+          // natural-key match scenarios (cmd_328).
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
+          const { createId } = require('@paralleldrive/cuid2');
+          const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+          if (!testUser) throw new Error('Test user not found. Run db:seed first.');
+          const newUserId = createId();
+          const record = await prisma.user.create({
+            data: {
+              id: newUserId,
+              creator_id: testUser.id,
+              updater_id: testUser.id,
+              email: `${newUserId}@example.com`,
+              name: params.name,
+              image: params.image ?? null,
+              password: 'not_needed',
+            },
+          });
+          return JSON.parse(JSON.stringify(record));
+        },
+        // subtask_421f (cmd_421 Batch4): resource/product attachment
+        // view/edit-boundary + permission + org-scope regression spec.
+        async 'db:addUserToOrganizationByEmail'(params: { email: string; organizationId: string }) {
+          const { addUserToOrganizationByEmail } = require('./cypress/support/attachment/helper');
+          await addUserToOrganizationByEmail(params.email, params.organizationId);
+          return null;
+        },
+        async 'db:getAttachableAttachments'(params: { attachableId: string }) {
+          const { getAttachableAttachments } = require('./cypress/support/attachment/helper');
+          return await getAttachableAttachments(params.attachableId);
+        },
+        async 'db:seedAttachment'(params: { attachableId: string; type: number; name: string; path: string; order?: number }) {
+          const { seedAttachment } = require('./cypress/support/attachment/helper');
+          return await seedAttachment(params);
+        },
+        async 'db:grantAdditionalEntityPermission'(params: { email: string; entityName: string; flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean } }) {
+          const { grantAdditionalEntityPermission } = require('./cypress/support/attachment/helper');
+          await grantAdditionalEntityPermission(params.email, params.entityName, params.flags);
+          return null;
         },
         async 'db:createSecondUser'() {
           const { prisma } = require('./cypress/support/db-helpers');
@@ -186,13 +272,13 @@ export default defineConfig({
           return JSON.parse(JSON.stringify({ apiKey: creatorApiKey, ownedRoleId: ownedRole.id }));
         },
         ...getGeneratedTasks(),
-        async 'db:seedReservationInventory'(params: { quantity: number }) {
-          const { seedReservationInventory } = require('./cypress/support/purchase_order/reservation_helper');
-          return await seedReservationInventory(params.quantity);
+        async 'db:getApprovableById'(params: { approvable_id: string }) {
+          const { getApprovableById } = require('./cypress/support/approval_test_helpers');
+          return await getApprovableById(params.approvable_id);
         },
-        async 'db:getInventoryAllocation'(params: { purchase_order_id: string }) {
-          const { getInventoryAllocation } = require('./cypress/support/purchase_order/reservation_helper');
-          return await getInventoryAllocation(params.purchase_order_id);
+        async 'db:getPendingApprovalRequest'(params: { approvable_id: string }) {
+          const { getPendingApprovalRequest } = require('./cypress/support/approval_test_helpers');
+          return await getPendingApprovalRequest(params.approvable_id);
         },
         async 'db:populateAuditLog'(length: number) {
           const { populateAuditLogData } = require('./cypress/support/audit_log/helper');
@@ -226,6 +312,7 @@ export default defineConfig({
           const result = await anonymizeUser(userId);
           return JSON.parse(JSON.stringify(result));
         },
+        ...projectTasks,
       });
 
       return config;

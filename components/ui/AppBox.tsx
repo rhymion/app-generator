@@ -23,6 +23,7 @@ interface AppBoxProps {
   borderRadius?: number;
   gridTemplateColumns?: string;
   fontFamily?: string;
+  overflowX?: string;
   component?: React.ElementType;
   onSubmit?: React.FormEventHandler<HTMLElement>;
   className?: string;
@@ -50,6 +51,7 @@ export default function AppBox({
   borderRadius,
   gridTemplateColumns,
   fontFamily,
+  overflowX,
   component,
   onSubmit,
   className,
@@ -59,6 +61,7 @@ export default function AppBox({
   if (fontFamily !== undefined) sx.fontFamily = fontFamily;
   if (bgcolor !== undefined) sx.bgcolor = bgcolor;
   if (borderRadius !== undefined) sx.borderRadius = borderRadius;
+  if (overflowX !== undefined) sx.overflowX = overflowX;
 
   return (
     <Box

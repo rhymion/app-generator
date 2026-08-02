@@ -42,6 +42,8 @@
     "node_modules",
     "custom",
     "**/*.cy.tsx",
-    "cypress" // Exclude the entire Cypress directory
+    "code_generator",
+    "cypress", // Exclude the entire Cypress directory
+    "cypress.config.ts"
   ],
 }

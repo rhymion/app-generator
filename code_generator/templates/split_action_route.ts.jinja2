@@ -1,0 +1,331 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { requireSession, handleApiError, ApiError } from '@/lib/api-auth';
+import prisma from '@/lib/prisma';
+{% if has_approvable %}
+import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
+{% endif %}
+
+const SPLIT_STATUS = '{{ status_split_value }}';
+const REJECTED_STATUS = '{{ status_rejected_value }}';
+
+type SplitPart = {
+{% for field in inherited_fields %}
+  {{ field }}?: unknown;
+{% endfor %}
+{% if quantity_field %}
+  {{ quantity_field }}: number;
+{% endif %}
+{% for f in per_part_required %}
+  {{ f }}?: string;
+{% endfor %}
+};
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { userId } = await requireSession();
+    {% if not has_approvable %}
+    void userId;
+    {% endif %}
+    const { id } = await params;
+
+    let body: { parts?: SplitPart[] };
+    try {
+      body = await req.json();
+    } catch {
+      throw new ApiError(400, 'Invalid JSON body');
+    }
+    const { parts } = body;
+    if (!Array.isArray(parts) || parts.length < 2) {
+      throw new ApiError(400, 'parts must be an array with at least 2 items');
+    }
+
+    const parent = await prisma.{{ entity_name }}.findUnique({
+      where: { id },
+      {% if has_approvable %}
+      // cmd_439 F1: approval_requests included so split children can inherit
+      // the parent's flow IDs (Option A — see _parentARFlowIds below).
+      include: { approvable: { include: { approval_requests: true } } },
+      {% endif %}
+    });
+    if (!parent) throw new ApiError(404, 'Not found');
+
+    // R6: only pending entities may be split
+    if (parent.status === SPLIT_STATUS || parent.status === REJECTED_STATUS) {
+      throw new ApiError(400, `Cannot split an entity with status: ${parent.status}`);
+    }
+    {% if has_approvable %}
+    if (parent.approvable?.approved_at != null) {
+      throw new ApiError(400, 'Cannot split an already-approved entity');
+    }
+    {% endif %}
+    {% for f in per_part_required_mandatory %}
+    // Each part must specify {{ f }}
+    for (const part of parts) {
+      if (!part.{{ f }}) {
+        throw new ApiError(400, 'Each part must specify {{ f }}');
+      }
+    }
+    {% endfor %}
+    {% if has_quantity_check %}
+    // Quantity invariant: each part's {{ quantity_field }} must be positive, and
+    // Σ(parts.{{ quantity_field }}) must equal parent.{{ quantity_field }} — split
+    // is a full re-distribution of the parent quantity, not a partial one.
+    for (const part of parts) {
+      if (!((part.{{ quantity_field }} as number) > 0)) {
+        throw new ApiError(400, 'Each part {{ quantity_field }} must be a positive number');
+      }
+    }
+    const _totalQty = parts.reduce((s, p) => s + ((p.{{ quantity_field }} as number) ?? 0), 0);
+    const _parentQty = (parent as Record<string, unknown>).{{ quantity_field }} as number;
+    if (_totalQty !== _parentQty) {
+      throw new ApiError(400, `Split parts must sum to ${_parentQty} (got ${_totalQty})`);
+    }
+    {% endif %}
+
+    await prisma.$transaction(async (tx) => {
+      // 1. Set parent status = split. approvable_id is mandatory (per cmd_296 ruling) — it is
+      // never null'd and the approvable record is never deleted (history/audit
+      // trail preserved). Only the still-pending approval_requests are removed
+      // so the invalidated parent no longer shows as awaiting approval.
+      {% if has_approvable %}
+      if (parent.approvable_id) {
+        await tx.approval_request.deleteMany({ where: { approvable_id: parent.approvable_id } });
+      }
+      {% endif %}
+      await tx.{{ entity_name }}.update({
+        where: { id },
+        data: { status: SPLIT_STATUS },
+      });
+
+      {% if has_inventory_bridge and split_reserves_inventory %}
+      // 2. Release parent's reserved inventory BEFORE creating the child
+      // reservations below (cmd_307 FIX-α): re-splitting into the same lot
+      // must free the parent's reserved_quantity first, or the child
+      // availability check double-counts against it and trips a false
+      // 'Concurrent reservation conflict'. Same $transaction, so isolation
+      // is preserved regardless of ordering.
+      if ((parent as Record<string, unknown>).{{ bridge_fk_field }}) {
+        const _parentBridgeId = (parent as Record<string, unknown>)
+          .{{ bridge_fk_field }} as string;
+        const _parentReserveRows = await tx.{{ ledger_entity }}.findMany({
+          where: { {{ bridge_fk_field }}: _parentBridgeId, event_type: 'reserve' },
+        });
+        for (const _row of _parentReserveRows) {
+          // Phase4: inventory.location_id FK — denormalized name from the
+          // ledger needs to be reverse-looked-up to a location_id before
+          // re-identifying the parent's reserved inventory row.
+          const _rowLocName = _row.location === '' ? null : _row.location;
+          const _rowLoc = _rowLocName
+            ? await tx.location.findFirst({ where: { name: _rowLocName } })
+            : null;
+          await tx.{{ pool_entity }}.updateMany({
+            where: {
+              product_id: _row.product_id,
+              // O-6 denormalization: inventory_transaction.location stores '' for null-location
+              // lots (written as `?? ''` at PO creation). inventory.location_id is NULL in the DB.
+              // Must undo the normalization — same pattern as service_after_reject.ts:105.
+              location_id: _rowLoc?.id ?? null,
+              ...(_row.lot_number != null ? { lot_number: _row.lot_number } : {}),
+              ...(_row.expiration_date != null ? { expiration_date: _row.expiration_date } : {}),
+            },
+            data: { reserved_quantity: { decrement: _row.reserved_delta } },
+          });
+          await tx.{{ ledger_entity }}.create({
+            data: {
+              {{ bridge_fk_field }}: _parentBridgeId,
+              event_type: 'cancel',
+              quantity_delta: 0,
+              reserved_delta: -_row.reserved_delta,
+              product_id: _row.product_id,
+              location: _row.location ?? '',
+              lot_number: _row.lot_number,
+              expiration_date: _row.expiration_date,
+              creator_id: userId, updater_id: userId, created_by_id: userId,
+            },
+          });
+        }
+      }
+      {% endif %}
+
+      // 3. Create child records — inherit parent fields, override with part-specific values
+      {% if has_approvable %}
+      // cmd_439 F1 (Option A): split children inherit the parent's existing
+      // approval_request flow IDs unconditionally — the split actor's role
+      // is irrelevant, the child continues whatever approval flow the
+      // parent was already subject to.
+      const _parentARFlowIds = (parent.approvable?.approval_requests ?? []).map(
+        (r: { approval_flow_id: string }) => r.approval_flow_id
+      );
+      {% endif %}
+      for (const part of parts) {
+        {% if has_approvable %}
+        const childApprovable = await tx.approvable.create({ data: {} });
+        {% endif %}
+        {% if has_inventory_bridge %}
+        // Bridge allocation per child (cmd_305 FIX-B, design B-3): each split
+        // child gets its own inventory_transactionable bridge instead of
+        // inheriting the parent's, so afterApprove/afterReject fire on it.
+        // cmd_307 FIX-γ: '' is the UI's "no lot selected" sentinel for an
+        // unspecified part — normalize it to undefined so it doesn't slip
+        // past a nullish (`??`) check downstream and get written as an
+        // invalid inventory_id FK.
+        const _childInventoryIdRaw = (part as Record<string, unknown>).{{ pool_fk_field }} as string | undefined;
+        const _childInventoryId: string | undefined = _childInventoryIdRaw === '' ? undefined : _childInventoryIdRaw;
+
+        {% if split_reserves_inventory %}
+        let _childBridgeId: string;
+
+        if (_childInventoryId) {
+          // Specified lot: validate availability and reserve exactly that lot
+          const _childInv = await tx.{{ pool_entity }}.findUnique({
+            where: { id: _childInventoryId },
+            select: { id: true, quantity: true, reserved_quantity: true,
+                      product_id: true, location_id: true, location: { select: { name: true } },
+                      lot_number: true, expiration_date: true },
+          });
+          if (!_childInv) throw new ApiError(400, `Inventory not found: ${_childInventoryId}`);
+          {% if product_id_field %}
+          // item3: hard-fail a specified lot that doesn't belong to this part's
+          // product — the pre-fix code only checked existence, so a lot from an
+          // unrelated product could be reserved against this line.
+          const _childEffectiveProductId = (part.{{ product_id_field }} ?? parent.{{ product_id_field }}) as string;
+          if (_childInv.product_id !== _childEffectiveProductId) {
+            throw new ApiError(400, `Inventory ${_childInventoryId} belongs to a different product than this split part`);
+          }
+          {% endif %}
+          const _childQty = part.{{ quantity_field }} as number;
+          const _claimResult = await tx.{{ pool_entity }}.updateMany({
+            where: { id: _childInventoryId,
+                     reserved_quantity: { lte: _childInv.quantity - _childQty } },
+            data: { reserved_quantity: { increment: _childQty } },
+          });
+          if (_claimResult.count === 0)
+            throw new ApiError(409, 'Concurrent reservation conflict; please retry');
+          const _childBridge = await tx.{{ transactionable_entity }}.create({ data: {} });
+          _childBridgeId = _childBridge.id;
+          await tx.{{ ledger_entity }}.create({
+            data: {
+              {{ bridge_fk_field }}: _childBridgeId,
+              event_type: 'reserve',
+              quantity_delta: 0,
+              reserved_delta: _childQty,
+              product_id: _childInv.product_id,
+              location: _childInv.location?.name ?? '',
+              lot_number: _childInv.lot_number,
+              expiration_date: _childInv.expiration_date,
+              creator_id: userId, updater_id: userId, created_by_id: userId,
+            },
+          });
+        } else {
+          // Auto-allocate: greedy scan by expiration_date asc, lot_number asc (same as PO creation)
+          const _childQty = part.{{ quantity_field }} as number;
+          const _parentForProduct = parent as Record<string, unknown>;
+          const _candidates = await tx.{{ pool_entity }}.findMany({
+            where: { product_id: _parentForProduct.{{ product_id_field }} as string, quantity: { gt: 0 } },
+            orderBy: [{ expiration_date: { sort: 'asc', nulls: 'last' } }, { lot_number: 'asc' }, { id: 'asc' }],
+            include: { location: true },
+          });
+          const _childBridge = await tx.{{ transactionable_entity }}.create({ data: {} });
+          _childBridgeId = _childBridge.id;
+          let _remaining = _childQty;
+          for (const _cand of _candidates) {
+            if (_remaining <= 0) break;
+            const _avail = _cand.quantity - _cand.reserved_quantity;
+            if (_avail <= 0) continue;
+            const _claim = Math.min(_remaining, _avail);
+            const _claimResult = await tx.{{ pool_entity }}.updateMany({
+              where: { id: _cand.id, reserved_quantity: { lte: _cand.quantity - _claim } },
+              data: { reserved_quantity: { increment: _claim } },
+            });
+            if (_claimResult.count > 0) {
+              _remaining -= _claim;
+              await tx.{{ ledger_entity }}.create({
+                data: {
+                  {{ bridge_fk_field }}: _childBridgeId,
+                  event_type: 'reserve',
+                  quantity_delta: 0,
+                  reserved_delta: _claim,
+                  product_id: _cand.product_id,
+                  location: _cand.location?.name ?? '',
+                  lot_number: _cand.lot_number,
+                  expiration_date: _cand.expiration_date,
+                  creator_id: userId, updater_id: userId, created_by_id: userId,
+                },
+              });
+            }
+          }
+          if (_remaining > 0)
+            throw new ApiError(400, `Insufficient inventory for split part (shortfall: ${_remaining})`);
+        }
+        {% else %}
+        // cmd_307 FIX-β: receive-type entity (x-ledger-source event_type
+        // 'receive') — split does not reserve existing inventory; afterApprove
+        // writes the receive ledger row at approval time. The child still
+        // gets its own empty bridge so that hook has something to attach to.
+        {% if product_id_field %}
+        if (_childInventoryId) {
+          // item3: hard-fail a specified lot that doesn't belong to this part's
+          // product here too — otherwise the mismatch would only surface later,
+          // silently, when afterApprove writes the receive ledger.
+          const _childInv = await tx.{{ pool_entity }}.findUnique({
+            where: { id: _childInventoryId },
+            select: { product_id: true },
+          });
+          if (!_childInv) throw new ApiError(400, `Inventory not found: ${_childInventoryId}`);
+          const _childEffectiveProductId = (part.{{ product_id_field }} ?? parent.{{ product_id_field }}) as string;
+          if (_childInv.product_id !== _childEffectiveProductId) {
+            throw new ApiError(400, `Inventory ${_childInventoryId} belongs to a different product than this split part`);
+          }
+        }
+        {% endif %}
+        const _childBridge = await tx.{{ transactionable_entity }}.create({ data: {} });
+        const _childBridgeId = _childBridge.id;
+        {% endif %}
+        {% endif %}
+        {% if has_approvable %}const _splitChild = {% endif %}await tx.{{ entity_name }}.create({
+          data: {
+            {% for field in inherited_fields %}
+            {{ field }}: (part.{{ field }} ?? parent.{{ field }}) as never,
+            {% endfor %}
+            {% if quantity_field %}
+            {{ quantity_field }}: part.{{ quantity_field }},
+            {% endif %}
+            {% for f in per_part_required %}
+            {% if has_inventory_bridge and f == pool_fk_field %}
+            // cmd_307 FIX-γ: use the normalized child lot id, not
+            // `part.inventory_id ?? parent.inventory_id` — the child must
+            // never inherit the parent's inventory_id (auto-allocate can
+            // span multiple lots, so a single inherited id would be wrong).
+            {{ f }}: _childInventoryId ?? null,
+            {% else %}
+            {{ f }}: part.{{ f }} ?? parent.{{ f }},
+            {% endif %}
+            {% endfor %}
+            {% if parent_field %}
+            {{ parent_field }}: parent.id,
+            {% endif %}
+            {% if split_result_field %}
+            {{ split_result_field }}: true,
+            {% endif %}
+            status: 'pending', // pending
+            {% if has_approvable %}
+            approvable_id: childApprovable.id,
+            {% endif %}
+            {% if has_inventory_bridge %}
+            {{ bridge_fk_field }}: _childBridgeId,
+            {% endif %}
+          },
+        });
+        {% if has_approvable %}
+        // cmd_479: the notify call inside approval_create_block links to
+        // this row's own detail page, so it must run after the row exists.
+{{ approval_create_block }}
+        {% endif %}
+      }
+    });
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

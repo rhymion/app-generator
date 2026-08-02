@@ -189,15 +189,44 @@ Two renders fired simultaneously: one from `revalidatePath` and one from the nav
 caused by `redirect`.
 
 ### Fix
-Remove `revalidatePath` from upsert and delete actions entirely. `redirect()` in a
-Server Action already invalidates the router cache for the destination path, so
-`revalidatePath` is redundant:
+Remove `revalidatePath` from the upsert action. `redirect()` in a Server Action
+already forces a fresh fetch of the destination route when that route differs
+from the one the action runs on — `upsertEntity` runs on the create/edit form
+(`/entity/new` or `/entity/edit/[id]`) and redirects to the list page
+(`/entity`), a different route, so `revalidatePath` is redundant there:
 
 ```ts
 // After — single fetch
 // (no revalidatePath import needed)
 redirect('/entity');
 ```
+
+**The delete action keeps `revalidatePath`** — this is not a leftover, it's
+still required. `removeEntity` is wired up directly on the list page itself
+(`page_list.tsx.jinja2` passes `removeAction={removeEntity}` straight to the
+DataGrid), so the user is already on `/entity` when delete runs and
+`redirect('/entity')` is a same-route redirect. Next.js's router doesn't
+necessarily refetch a route the user is already on, so without
+`revalidatePath` the list can keep showing the just-deleted row. `upsertEntity`
+doesn't have this problem because it always redirects from a *different* route
+(the form) to the list — a genuine cross-route navigation, which Next.js does
+refetch on its own:
+
+```ts
+// remove{Parent} — revalidatePath still needed: redirect target === current route
+if (can_list) {
+  revalidatePath('/[locale]/entity', 'page');
+}
+redirect('/entity');
+```
+
+(History: `revalidatePath` was removed from both upsert and delete in one
+commit for perceived double-fetch reasons, then revived specifically for
+delete about a week later — commit `b180b99`, "fix: Revive revalidatePath for
+delete" — once the stale-list-after-delete symptom surfaced. The commit
+message doesn't spell out the same-route-redirect mechanism, but it matches
+the code exactly: the revived call is scoped to `remove{Parent}` only, gated
+on `can_list`.)
 
 ### Problem: `router.refresh()` in `handleBack`
 
@@ -238,6 +267,49 @@ export async function addEntityComment(...) {
 }
 ```
 
+### `revalidatePath`'s path argument must match a real route file
+
+`revalidatePath` never throws for a path that matches nothing — it just does nothing for
+that page. A literal path with no dynamic segment (`revalidatePath('/entity')`) only
+targets that exact route file; a path containing a dynamic segment (e.g. `/entity/[id]`)
+requires the second `type` argument (`'page'` or `'layout'`) or Next.js rejects it. Locale
+routes live under `app/[locale]/...`, so any path under a localized segment needs the
+literal `[locale]` segment in the pattern too:
+
+```ts
+// Wrong — matches nothing: no [locale] segment, no type for the dynamic id segment.
+revalidatePath('/entity');
+
+// Right — matches app/[locale]/entity/view/[id]/page.tsx.
+revalidatePath('/[locale]/entity/view/[id]', 'page');
+```
+
+This matters most for actions that invalidate a page *other than the one they're
+conceptually attached to* — an approval action attached to `approval_request` but
+invalidating the target entity's own view/edit pages (`lib/approval_request/
+actions_core.ts`), or an attachment action invalidating its owner entity's pages
+(`code_generator/templates/attachment_actions.ts.jinja2`). Both need view *and* edit
+invalidated, since `x-custom-components` can mount a component (`ApprovalSection`,
+an attachment list) on either page (`target: [view, edit]` — see
+`code-generation-custom-extensions.md` §2):
+
+```ts
+revalidatePath(`/[locale]/${entityName}/view/${targetId}`, 'page');
+revalidatePath(`/[locale]/${entityName}/edit/${targetId}`, 'page');
+```
+
+**Next.js 16 caveat (may make this hard to notice in manual testing):** per the
+[`revalidatePath` docs](https://nextjs.org/docs/app/api-reference/functions/revalidatePath),
+"Server Functions: Updates the UI immediately (if viewing the affected path). **Currently,
+it also causes all previously visited pages to refresh when navigated to again. This
+behavior is temporary and will be updated in the future to apply only to the specific
+path.**" On today's Next.js (16.2.x), calling `revalidatePath` with *any* argument — even
+one that matches nothing — still refreshes previously-visited pages on next visit, so a
+wrong path argument does not currently reproduce as a visible stale-page bug. It will once
+Next.js ships the narrower, path-matching-only behavior the docs describe as planned —
+getting the path right now is what keeps this code correct once that ships, not just a
+cosmetic cleanup.
+
 ---
 
 ## Summary Table
@@ -248,5 +320,5 @@ export async function addEntityComment(...) {
 | Skeleton screens | All generated pages | Visual placeholder instead of blank/spinner |
 | Parallel permissions + data | `getters.ts` (list + detail) | Saves one sequential DB round-trip |
 | `getModelPermissions` returns `userId` | `lib/authz.ts` | Eliminates separate `getSessionUserId` call |
-| Remove `revalidatePath` from upsert/delete | `actions.ts` | Eliminates double `getAllEntities` on save |
+| Remove `revalidatePath` from upsert (kept on delete — same-route redirect) | `actions.ts` | Eliminates double `getAllEntities` on save |
 | Remove `router.refresh()` from `handleBack` | `FormUpsert.tsx` | Eliminates extra `getDetail` on back navigation |

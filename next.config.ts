@@ -6,8 +6,17 @@ const withNextIntl = createNextIntlPlugin('./i18n/request.ts');
 
 /** @type {import('next').NextConfig} */
 const nextConfig: NextConfig = {
-  output: 'standalone',
   pageExtensions: ['js', 'jsx', 'md', 'mdx', 'ts', 'tsx'],
+  // Terms of Service / Privacy Policy pages (app/[locale]/legal/*) read
+  // content/legal/*.md at request time via fs.readFileSync with a
+  // runtime-built path, so Vercel's build-time file tracer can't discover
+  // the dependency by static analysis. Without this hint, adding a new
+  // content/legal/<doc>.<locale>.md file works locally (full source tree
+  // present) but silently 404s once deployed, because the tracer omits the
+  // untraceable file from the serverless function bundle.
+  outputFileTracingIncludes: {
+    '/**': ['./content/legal/**/*'],
+  },
   // Phase 4 #10 from performance-plan-session.md.
   //  - `formats`: serve AVIF/WEBP when the browser accepts it; saves ~30-50%
   //    bytes on the upload-heavy patient/clinic photos vs PNG/JPEG.

@@ -1,0 +1,211 @@
+'use client';
+
+import React, { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  AppAlert,
+  AppBox,
+  AppButton,
+  AppCircularProgress,
+  AppDialog,
+  AppTable,
+  AppTableBody,
+  AppTableCell,
+  AppTableHead,
+  AppTableRow,
+  AppText,
+} from '@/components/ui';
+
+type RowError = { row: number; code: string; message: string };
+type Summary  = { total: number; succeeded: number; failed: number; dryRun: boolean };
+type Step     = 'idle' | 'dry_running' | 'dry_done' | 'committing' | 'done' | 'error';
+
+const BUTTON_LABEL = {% if import_can_create and import_can_update %}'Import / Update CSV'{% elif import_can_create %}'Import CSV'{% else %}'Update via CSV'{% endif %};
+
+const hiddenInputStyle: React.CSSProperties = { display: 'none' };
+
+interface ImportModalProps {
+  permissions: { import: boolean };
+}
+
+export default function ImportModal({ permissions }: ImportModalProps) {
+  const router = useRouter();
+  const [open,         setOpen]         = useState(false);
+  const [step,         setStep]         = useState<Step>('idle');
+  const [csvText,      setCsvText]      = useState('');
+  const [fileName,     setFileName]     = useState('');
+  const [dryErrors,    setDryErrors]    = useState<RowError[]>([]);
+  const [drySummary,   setDrySummary]   = useState<Summary | null>(null);
+  const [confirmToken, setConfirmToken] = useState<string | undefined>(undefined);
+  const [finalSummary, setFinalSummary] = useState<Summary | null>(null);
+  const [sysError,     setSysError]     = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function reset() {
+    setStep('idle'); setCsvText(''); setFileName('');
+    setDryErrors([]); setDrySummary(null); setConfirmToken(undefined);
+    setFinalSummary(null); setSysError('');
+    if (fileRef.current) fileRef.current.value = '';
+  }
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFileName(f.name);
+    const r = new FileReader();
+    r.onload = ev => {
+      setCsvText((ev.target?.result as string) ?? '');
+      // Reset to idle so Preview button re-appears after file change
+      setStep('idle'); setDryErrors([]); setDrySummary(null); setConfirmToken(undefined);
+    };
+    r.readAsText(f, 'utf-8');
+  }
+
+  async function runDryRun() {
+    setStep('dry_running');
+    try {
+      const res  = await fetch('/api/{{ parent }}/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv: csvText, dryRun: true }),
+      });
+      const data = await res.json() as { summary: Summary; errors: RowError[]; confirmToken?: string };
+      setDrySummary(data.summary);
+      setDryErrors(data.errors ?? []);
+      setConfirmToken(data.confirmToken);
+      setStep('dry_done');
+    } catch (err) {
+      setSysError(String(err)); setStep('error');
+    }
+  }
+
+  async function runCommit() {
+    if (!confirmToken) return;
+    setStep('committing');
+    try {
+      const res  = await fetch('/api/{{ parent }}/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv: csvText, dryRun: false, confirmToken }),
+      });
+      const data = await res.json() as { summary: Summary; errors: RowError[] };
+      if ((data.errors ?? []).length > 0) {
+        setDryErrors(data.errors); setStep('dry_done'); return;
+      }
+      setFinalSummary(data.summary);
+      setStep('done');
+      router.refresh();   // Refresh Server Component list data
+    } catch (err) {
+      setSysError(String(err)); setStep('error');
+    }
+  }
+
+  if (!permissions.import) return null;    // Runtime Tier2 UI gate
+
+  const canPreview = csvText.length > 0 && step === 'idle';
+  const canConfirm = step === 'dry_done' && dryErrors.length === 0 && !!confirmToken;
+
+  return (
+    <>
+      <AppButton variant="outlined" size="small" onClick={() => { reset(); setOpen(true); }}>
+        {BUTTON_LABEL}
+      </AppButton>
+
+      <AppDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title={BUTTON_LABEL}
+        maxWidth="md"
+        actions={
+          <>
+            {canPreview && (
+              <AppButton variant="contained" onClick={runDryRun}>Preview changes</AppButton>
+            )}
+            {canConfirm && (
+              <AppButton variant="contained" color="primary" onClick={runCommit}>Confirm &amp; Import</AppButton>
+            )}
+            {(step === 'dry_done' || step === 'done' || step === 'error') && (
+              <AppButton variant="outlined" onClick={() => setOpen(false)}>Close</AppButton>
+            )}
+          </>
+        }
+      >
+        {/* File picker — visible in idle and dry_done */}
+        {(step === 'idle' || step === 'dry_done') && (
+          <AppBox mb={2}>
+            <input
+              ref={fileRef} type="file" accept=".csv"
+              style={hiddenInputStyle}
+              aria-label="Choose CSV file"
+              onChange={handleFile}
+            />
+            <AppButton variant="outlined" size="small" onClick={() => fileRef.current?.click()}>
+              Choose CSV file
+            </AppButton>
+            {fileName && (
+              <AppText variant="body2" component="span" ml={1}>{fileName}</AppText>
+            )}
+          </AppBox>
+        )}
+
+        {/* Busy indicator */}
+        {(step === 'dry_running' || step === 'committing') && (
+          <AppBox display="flex" alignItems="center" gap={1}>
+            <AppCircularProgress size={18} />
+            <AppText variant="body2">
+              {step === 'dry_running' ? 'Previewing…' : 'Importing…'}
+            </AppText>
+          </AppBox>
+        )}
+
+        {/* Dry-run result — errors */}
+        {step === 'dry_done' && dryErrors.length > 0 && (
+          <>
+            <AppAlert severity="error" mb={2}>
+              {dryErrors.length} error{dryErrors.length !== 1 ? 's' : ''} — fix the CSV and retry.
+            </AppAlert>
+            <AppBox overflowX="auto">
+              <AppTable size="small" ariaLabel="import-errors">
+                <AppTableHead>
+                  <AppTableRow>
+                    <AppTableCell>Row</AppTableCell><AppTableCell>Code</AppTableCell><AppTableCell>Message</AppTableCell>
+                  </AppTableRow>
+                </AppTableHead>
+                <AppTableBody>
+                  {dryErrors.map((e, i) => (
+                    <AppTableRow key={i}>
+                      <AppTableCell>{e.row}</AppTableCell>
+                      <AppTableCell fontFamily="monospace">{e.code}</AppTableCell>
+                      <AppTableCell>{e.message}</AppTableCell>
+                    </AppTableRow>
+                  ))}
+                </AppTableBody>
+              </AppTable>
+            </AppBox>
+          </>
+        )}
+
+        {/* Dry-run result — success, ready to confirm */}
+        {step === 'dry_done' && dryErrors.length === 0 && drySummary && (
+          <AppAlert severity="success">
+            Preview OK — {drySummary.total} row{drySummary.total !== 1 ? 's' : ''} ready.
+            Click &quot;Confirm &amp; Import&quot; to apply.
+          </AppAlert>
+        )}
+
+        {/* Commit result */}
+        {step === 'done' && finalSummary && (
+          <AppAlert severity="success">
+            Import complete — {finalSummary.succeeded} succeeded
+            {finalSummary.failed > 0 ? `, ${finalSummary.failed} failed` : ''}.
+          </AppAlert>
+        )}
+
+        {/* System error */}
+        {step === 'error' && (
+          <AppAlert severity="error">Request failed: {sysError}</AppAlert>
+        )}
+      </AppDialog>
+    </>
+  );
+}
