@@ -190,7 +190,7 @@ export const authConfig: NextAuthConfig = {
   // adapter NextAuth defaults to JWT anyway, but pin it explicitly so adding
   // a future PrismaAdapter doesn't silently flip us to DB-backed sessions
   // (Phase 2 #9 from performance-plan-session.md).
-  session: { strategy: 'jwt' },
+  session: { strategy: sessionStrategy },
   providers: buildProviders(),
   pages: {
     signIn: "/login",

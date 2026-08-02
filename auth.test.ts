@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import bcrypt from "bcryptjs";
-import path from "path";
-import fs from "fs";
 
 // Mock the Prisma client
 const mockPrisma = {
@@ -29,9 +27,6 @@ const mockPrisma = {
 vi.mock("@/lib/prisma", () => ({
   default: mockPrisma,
 }));
-
-// Create a test database path
-const testDbPath = path.join(process.cwd(), ".test-db-auth");
 
 // Simulate the authorize function from auth.ts
 async function simulateAuthorize(credentials: {

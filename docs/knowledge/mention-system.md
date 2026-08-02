@@ -1,8 +1,9 @@
 # Mention System (cmd_522)
 
 `@mention` support for comment fields: storage format, candidate search,
-notification, and display permission — the server-side half (client-side
-`MentionInput`/`MentionText` UI is cmd_522c).
+notification, display permission (server-side, cmd_522b), and the
+`MentionInput`/`MentionText` client UI (cmd_522c, this section's second
+half).
 
 ## Storage format
 
@@ -150,3 +151,189 @@ exercised by consumer schemas that opt in, not by this repo's own
 string-builder level (M3, and the same fixture-schema convention used by
 `test_bridge_migration.py`), plus manual `tsc --noResolve` syntax/type
 verification of the rendered snippet against stub declarations.
+
+---
+
+## Client UI (cmd_522c): MentionInput / MentionText
+
+### Architecture deviation from the original design doc: static components, not generated templates
+
+The design doc originally specified `code_generator/templates/MentionInput.tsx.jinja2`
+and `MentionText.tsx.jinja2`, schema-globally generated to `lib/mention/*.tsx`
+alongside `parser.ts`/`search.ts`. Implemented differently: both live as
+always-present static components —
+`components/_standard/MentionInput.tsx` and
+`components/_standard/MentionText.tsx` — same category as
+`EntityAutocomplete.tsx`/`CommentListWrapper.tsx`, never schema-conditionally
+generated.
+
+Why: `code_generator/tests/test_template_mui_imports.py` enforces a
+hard, zero-allowlist rule — no `code_generator/templates/*.jinja2` file may
+import `@mui` directly (the MUI-wrapper-elimination rule from an earlier
+cmd). MentionInput is MUI-based (`TextField`/`Popper`/`MenuList`). Making
+it a `.jinja2` template would violate that gate; the alternative of a
+`.jinja2` shell wrapping a `_standard` implementation would add a layer for
+a template carrying zero `{{ }}` interpolation — pure duplication. Placing
+both components directly in `_standard/` matches the existing precedent
+exactly: `EntityAutocomplete.tsx` and `CommentListWrapper.tsx` are also
+always-present, schema-agnostic, and MUI-based. Neither new component
+imports anything from `lib/mention/*` (which is schema-conditional), so a
+schema with zero `x-mention: true` fields never pulls either component's
+dependency graph into anything that matters — they're inert, unimported
+dead code, same as `CommentListWrapper.tsx` already is for entities with no
+comment thread at all.
+
+### MentionInput (`components/_standard/MentionInput.tsx`)
+
+Controlled `value`/`onChange` multiline `TextField`. Typing `@` followed by
+non-whitespace opens a `Popper` dropdown (debounced 250ms, same window as
+`EntityAutocomplete`) calling the `searchUsers` prop — generated code passes
+`searchMentionUserOptions` (from `lib/mention/search.ts`) here, receiving it
+as a prop rather than importing it directly, so the component itself stays
+schema-agnostic.
+
+- Trigger detection: `@` must start the text or be preceded by whitespace,
+  and the query itself must contain no whitespace — `user@example.com` or
+  `foo @ bar` never spuriously trigger.
+- Selecting a candidate (click, or Enter/Tab while a candidate is
+  highlighted) replaces the `@query` span with `@[user_id:<id>] ` (trailing
+  space) and moves the caret past it.
+- `permissionDenied: true` on the search result renders "Mention
+  suggestions unavailable." instead of a crash or an empty silent dropdown
+  (cmd_516 Option B).
+- Dropdown anchors below the field (not at the exact caret coordinate) —
+  precise caret-relative positioning in a plain `<textarea>` needs a
+  mirror-div measurement technique that's excess complexity here.
+
+Wired into two places, both gated on annotation, never entity-name
+hardcoded:
+
+1. `mention_fields` (an entity's own field annotated `x-mention: true`,
+   e.g. a `notes` field): `generators.form_upsert_context()` pulls these
+   props out of the normal uncontrolled `text_props`/`AppFieldText` ref
+   pattern (`MentionInput` needs controlled state to insert the marker at
+   the caret) and gives each its own `useState<string>` + `<MentionInput
+   searchUsers={searchMentionUserOptions} .../>`, following the same
+   pattern already used for `image_props`. `has_mention_fields` gates the
+   two new imports in `form_upsert.tsx.jinja2`.
+2. Comment compose/edit boxes are not wired to `MentionInput` in this
+   cmd — see "Deferred: comment-compose mention picker" below.
+
+### MentionText (`components/_standard/MentionText.tsx`)
+
+Renders `@[user_id:<id>]` markers as `<a className="mention-link">`
+(when `canViewUserProfile` and the id resolves in `userContext`) or
+`<span className="mention-chip">` otherwise — including the
+deleted/anonymized-user case (id absent from `userContext`, falls back to
+the translated `Common.deletedUser` label). Colors defined in
+`app/globals.css` (`.mention-link`/`.mention-chip`, light+dark).
+
+Wired into `form_view.tsx.jinja2`'s comment display only (not
+`form_upsert.tsx.jinja2` — see below), via `CommentListWrapper`'s new
+`renderMessage` render-prop:
+
+```
+<CommentListWrapper
+  comments={src.commentable?.comments ?? []}
+  ...
+  renderMessage={(c) => <MentionText text={c.message} userContext={mentionUserContext ?? {}} canViewUserProfile={Boolean(canViewUserProfile)} />}
+/>
+```
+
+`CommentListWrapper.tsx` itself never imports `MentionText` — the render
+prop is supplied by the generated `FormView.tsx`, which only wires it
+when `comment_has_mention`. This preserves the same "always-present,
+schema-agnostic" property for `CommentListWrapper` that it already had.
+
+### The raw-text plumbing this required (getters.ts.jinja2 / api_detail_route.ts.jinja2)
+
+Gap found in the cmd_522b hand-off, not covered by its interface
+contract: `get{Parent}Detail()` already called `decodeMentions()` on
+every bridge-variant comment's `message` before cmd_522 existed (see the
+"Decode block in detail getter" row in the Foundation Inventory) — meaning
+by the time cmd_522c's `MentionText` would receive `c.message`, the
+`@[user_id:<id>]` markers were already gone, replaced with plain
+`@Name` text. `MentionText`'s whole design (regex over the raw marker,
+per-mention id for the link href) cannot function on already-decoded
+text — there is no way to reconstruct per-mention ids from decoded names
+(this is exactly the ambiguity the id-based storage format exists to
+avoid). Fixed as part of this cmd, since it blocks the literal ask
+(wire `MentionText` into the comment display):
+
+- `getters.ts.jinja2`: `get{Parent}Detail()` no longer calls
+  `decodeMentions()` — the comment `message` field returned is now always
+  the raw stored string. `get{Parent}DetailPageData()` (the
+  page-only layer, same one that already added `canViewUserProfile` in
+  cmd_522b) now also computes `mentionUserContext: Record<string,string>`
+  (id → name, scanning both the bridge and any child-table comment
+  sources) and returns it alongside `canViewUserProfile`.
+- `api_detail_route.ts.jinja2`: the REST GET route (consumed
+  directly by M1's assertion, `res.body.{commentable}.comments[].message`)
+  predates this split and its JSON contract must keep returning decoded
+  plain names — so the decode step moved here, applied only to the API
+  response object, never to the shared getter. M1 is unaffected — same
+  decoded-name assertion, same code path shape, just relocated.
+- `types.ts.jinja2`: `FormViewProps` gains
+  `canViewUserProfile?: boolean` and `mentionUserContext?:
+  Record<string, string>` when `comment_has_mention` — a new
+  `comment_has_mention` field had to be added to `context.py`'s
+  `EntityContext`/`build_entity_context()` (its own, fully independent
+  context builder used only by `types.ts.jinja2`; it never had this flag).
+- `page_view.tsx.jinja2` / `form_view.tsx.jinja2`: thread
+  `canViewUserProfile`/`mentionUserContext` from
+  `get{Parent}DetailPageData()` through the page component to `FormView`
+  props. Neither was wired at all before this cmd — cmd_522b only added
+  the field to the return value, per its own interface-contract note;
+  nothing downstream ever read it.
+
+Second pre-existing gap found and fixed in `context.py`: while adding
+`comment_has_mention` there, `build_entity_context()` turned out to never
+call `canonicalize_bridges()`/`collect_parent_bridge_fk_props()` (the two
+x-bridge-form-normalization steps `build_context.py` always applies before
+its own one-to-one-rel detection) — so `one_to_one_rels` in `context.py`
+silently stayed empty for any entity using either x-bridge form,
+independent of mentions entirely. This is a `types.ts.jinja2`-wide gap
+(not new, not scoped to mentions), invisible until now because this
+repo's own schema never uses a real x-bridge relation. Fixed by applying
+the identical two-step normalization `build_context.py` already does.
+
+### Deferred: comment-compose mention picker (not wired in this cmd)
+
+The comment "write a comment"/"edit comment" textareas inside
+`CommentListWrapper` (used by `form_upsert.tsx.jinja2`'s
+`comment_children_jsx`) still render a plain `TextField` — not
+`MentionInput`. Typing `@` while composing a comment does not open the
+picker; a user must know the `@[user_id:<id>]` syntax to trigger a real
+mention. This is a deliberate scope cut, not an oversight: the design
+doc's implementation-plan table lists `MentionText` wiring for
+`form_view.tsx.jinja2` explicitly but never lists a comment-compose-box
+wiring point for `MentionInput`, and the `mention_fields` mechanism (used
+for wiring #1 above) only applies to a regular entity's own field — the
+shared `comment` entity is never a top-level entity that flows through
+`build_context()`/`mention_fields`, so there's no existing
+annotation-driven hook for "make the comment box itself mention-aware."
+Extending `CommentListWrapper` with an equivalent `renderMessageInput`-style
+prop (mirroring `renderMessage`) is a reasonable, small follow-up if
+comment-box mention composition is wanted too — flagged for a future cmd
+rather than done here to keep this cmd's blast radius to what was
+explicitly scoped.
+
+### Tests
+
+| Test | Gate | Notes |
+|------|------|-------|
+| `components/_standard/MentionInput.test.tsx` (7 tests) | `test:vitest` (mandatory) | Trigger detection, dropdown open/search/debounce, marker insertion + caret, email-like `@` non-trigger, `permissionDenied` message, disabled/required passthrough. Actually executes — no schema/DB dependency, unlike the Cypress items below. |
+| `components/_standard/MentionText.test.tsx` (5 tests) | `test:vitest` (mandatory) | Plain text passthrough, link vs chip by `canViewUserProfile`, deleted-user fallback, multiple interleaved mentions. Actually executes. |
+| `code_generator/tests/test_mention_ui_wiring.py` (6 tests) | `pytest` (mandatory) | `form_view_context()`'s `renderMessage` wiring, `form_upsert_context()`'s `mention_fields` → `MentionInput` wiring, `context.py`'s new `comment_has_mention` flag — all via fixture schemas (same convention as `test_bridge_migration.py`/`test_mention_notifications.py`), true/false paired for each. |
+| `test_spec.cy.ts.jinja2` additions (self-mention insert+link-render scenario in "3.1"; a dedicated "8.1" `permissionDenied` graceful-degradation spec) | Not in mandatory gate (non-API UI spec) | Same structural limitation as M1/M2: gated on `comment_has_mention`, which is false for every entity in this repo's own schema — renders correctly (verified via the full `test:e2e:build` compile) but never executes here. Ready for the next schema that adopts a commentable/child comment thread with `x-mention` to exercise and, if needed, adjust selectors against a live page. |
+
+Entity-name independence re-verified for the client UI: this repo's own
+`json_schema.yaml` has `comment.message: x-mention: true` (so
+`_has_any_mention` is true, `lib/mention/parser.ts`/`search.ts` are
+generated — pre-existing from cmd_522b) but zero entities wire a
+`commentable`/child comment relation to it, so `comment_has_mention` and
+`mention_fields` are false/empty everywhere. A full `test:e2e:build` run
+confirms zero occurrences of `MentionInput`/`MentionText`/
+`canViewUserProfile`/`mentionUserContext` in any generated
+`FormUpsert.tsx`/`FormView.tsx`/`getters.ts` in this repo — the new code
+paths are correctly inert.

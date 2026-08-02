@@ -4,7 +4,7 @@ import { useTranslations } from 'next-intl';
 {% if has_comment_children or (is_splittable and split_config) %}
 import { useRouter } from 'next/navigation';
 {% endif %}
-{% if has_grid_children or children_raw %}
+{% if has_grid_children %}
 import type { GridColDef } from '@/components/ui/data';
 {% endif %}
 import type { FormViewProps{% if has_comment_children and named_constants %}, CommentReactionSummary{% endif %} } from '@/lib/{{ parent }}/types';
@@ -36,8 +36,11 @@ import { add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 {% endif %}
 {% endif %}
+{% if comment_has_mention %}
+import MentionText from '@/components/_standard/MentionText';
+{% endif %}
 import AuditInfo from '@/components/_standard/AuditInfo';
-import { AppDetailShell, AppDetailHeader, AppFieldText, AppFieldBoolean{% if has_rel_links %}, AppFieldRelation{% endif %}{% if needs_accordion %}, AppSection{% endif %} } from '@/components/ui';
+import { AppDetailShell, AppDetailHeader, AppFieldText{% if uses_app_field_boolean %}, AppFieldBoolean{% endif %}{% if has_rel_links %}, AppFieldRelation{% endif %}{% if needs_accordion %}, AppSection{% endif %} } from '@/components/ui';
 {% if custom_view_imports %}
 {{ custom_view_imports }}
 {% endif %}
@@ -51,7 +54,7 @@ import { SplitActionSection } from './SplitActionSection';
 import dayjs from 'dayjs';
 {% endif %}
 
-export default function FormView({ src, permissions{% if entity_view_components %}, currentUserRoleIds, currentUserId{% endif %} }: FormViewProps) {
+export default function FormView({ src, permissions{% if comment_has_mention %}, canViewUserProfile, mentionUserContext{% endif %}{% if entity_view_components %}, currentUserRoleIds, currentUserId{% endif %} }: FormViewProps) {
   const tf = useTranslations('Fields');
   const te = useTranslations('EntityLabel');
 {% if view_enum_ns_hooks %}

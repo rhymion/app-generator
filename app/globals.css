@@ -50,3 +50,27 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* @mention rendering (cmd_522c) — MentionText.tsx renders one of these per
+ * @[user_id:<id>] marker, depending on the viewer's read permission on the
+ * user model (cmd_516 Option B graceful degradation). */
+.mention-link {
+  color: #2563eb;
+  font-weight: 600;
+  text-decoration: none;
+}
+.mention-link:hover {
+  text-decoration: underline;
+}
+.mention-chip {
+  color: #6b7280;
+  font-weight: 600;
+}
+@media (prefers-color-scheme: dark) {
+  .mention-link {
+    color: #60a5fa;
+  }
+  .mention-chip {
+    color: #9ca3af;
+  }
+}

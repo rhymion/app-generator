@@ -1213,9 +1213,21 @@ def generate(schema_path: str, output_dir: str) -> None:
             'emit_hook': bool(on_rejected.get('emit_hook', False)),
             'terminal': bool(on_rejected.get('terminal', False)),
         })
+    # tx / approvableId are only read inside the per-entity `if (set_fields or
+    # emit_hook)` body (see the template); rejectedByUserId only inside the
+    # emit_hook arm. An empty or fields-less rejectable_entities list leaves
+    # them dead — same interface-conformance case as on_approved_dispatch.ts,
+    # since dispatchOnRejected's 4-arg signature is a stable call-site
+    # contract (cmd_529).
+    _rejected_body_needed = any(e['set_fields'] or e['emit_hook'] for e in rejectable_entities)
+    _rejected_hook_needed = any(e['emit_hook'] for e in rejectable_entities)
     _write(
         out / 'lib' / 'approval_request' / 'on_rejected_dispatch.ts',
-        _render(env, 'on_rejected_dispatch.ts.jinja2', {'rejectable_entities': rejectable_entities}),
+        _render(env, 'on_rejected_dispatch.ts.jinja2', {
+            'rejectable_entities': rejectable_entities,
+            'rejected_body_needed': _rejected_body_needed,
+            'rejected_hook_needed': _rejected_hook_needed,
+        }),
     )
     print(f'  Rejection dispatch → lib/approval_request/on_rejected_dispatch.ts ({len(rejectable_entities)} entities)')
     for ent in rejectable_entities:

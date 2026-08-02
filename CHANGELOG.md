@@ -30,6 +30,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   getters add a `canViewUserProfile` flag (viewer's `user` read permission) for the display layer
   to decide whether a mentioned name links to their profile. See
   `docs/knowledge/mention-system.md`.
+- **`@mention` client UI** (cmd_522c, client side of the two-part feature above): new
+  always-present `MentionInput`/`MentionText` components (`components/_standard/`) — an
+  `@`-triggered candidate picker inserting `@[user_id:<id>]` markers, and a renderer that turns
+  them into profile links or plain chips depending on the viewer's `canViewUserProfile`.
+  `MentionInput` wires into any entity's own `x-mention: true` field on its edit form
+  (`mention_fields`); `MentionText` wires into the comment display when `comment_has_mention`,
+  via a new `renderMessage` render-prop on `CommentListWrapper`. Fixed a latent conflict this
+  exposed: the shared comment getter was already decoding `@[user_id:<id>]` to a plain name
+  server-side (pre-dating cmd_522), which left no id for `MentionText` to link — decoding moved to
+  the REST API route only (keeping its JSON contract unchanged), while the page/FormView path now
+  gets the raw text plus a `mentionUserContext` id→name map. Also fixed: `context.py` (the
+  `types.ts.jinja2`-only context builder) never normalized either x-bridge form before detecting
+  one-to-one relations, so bridge-based comment threads were invisible to it — now mirrors
+  `build_context.py`'s normalization. See `docs/knowledge/mention-system.md`.
 - **Generated permission-denial and cross-org isolation API tests** (cmd_520 batch A): every
   generated `cypress/e2e/api/<entity>.cy.ts` now includes PUT/DELETE/export/import
   permission-denial tests (7.3–7.6, gated on `can_edit`/`can_delete`/`can_export`/
