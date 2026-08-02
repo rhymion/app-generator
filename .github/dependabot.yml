@@ -18,10 +18,22 @@
 # Policy lives in AGENTS.md (`npm audit` + `pip-audit` in the per-task gates)
 # so the audit also fires on every non-Dependabot change. Dependabot is the
 # proactive half; the gate is the continuous half.
+#
+# target-branch: develop
+# ----------------------
+# All three ecosystems raise routine version-update PRs against `develop`
+# (the repo's actual merge target), not the GitHub-configured default
+# branch (`main`, left untouched — see repo settings). Per GitHub's
+# documented `target-branch` semantics, this applies to version updates
+# only: security-update PRs (triggered by vulnerability alerts) are always
+# raised against the default branch regardless of `target-branch`. As long
+# as the default branch stays `main`, a security-advisory PR will still
+# land on `main` and needs manual retargeting/porting to `develop`.
 version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -46,6 +58,7 @@ updates:
 
   - package-ecosystem: "pip"
     directory: "/"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -70,6 +83,7 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
       day: "monday"
