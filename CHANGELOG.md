@@ -6,6 +6,17 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Post-login redirect-back with open-redirect protection** (cmd_525): unauthenticated
+  page requests were already redirected to `/login` by `proxy.ts` before this change, but
+  always landed on `/` after signing in, losing the user's original destination. `proxy.ts`
+  now carries the originally-requested path via `?redirect=`, and `app/[locale]/login/page.tsx`
+  navigates there after a successful sign-in (credentials or Google). The new
+  `lib/auth/safe-redirect.ts` (`safeRedirectPath()`) validates the param is a same-origin,
+  path-absolute value before use — off-site, protocol-relative, and backslash-trick values
+  are rejected and fall back to `/`. API routes are unaffected (still return JSON `401`/`404`);
+  the public-path exclusion list (`/login`, `/register`, `/docs`, `/legal`, static assets) is
+  unchanged and was re-verified to produce no redirect loop. See
+  `docs/knowledge/unauthenticated-page-redirect.md`.
 - **`@mention` server-side support** (cmd_522, server side of a two-part feature —
   client-side `MentionInput`/`MentionText` UI ships separately): a new schema-global
   `searchMentionUserOptions()` server action (`lib/mention/search.ts`) returns org-scoped
@@ -60,6 +71,26 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   column closes a related session-persistence gap (enabling MFA didn't
   previously revoke an already-active JWT). See
   `docs/knowledge/authentication.md` "MFA on the OAuth path".
+- **Second, independent gate on the test-only mock Google OAuth provider**
+  (cmd_528) — `MOCK_GOOGLE_OAUTH_TEST=true` alone previously let anyone who
+  knows a user's email sign in as them with no password/MFA check, if the
+  flag ever leaked into a real deploy's env vars. Registering the mock
+  provider now additionally requires a filesystem sentinel file that only
+  the e2e test harness writes (`scripts/write-mock-oauth-sentinel.js`),
+  never any real build/deploy pipeline; fails closed (throws at startup) if
+  the flag is set without it. See `docs/knowledge/authentication.md`
+  "MFA on the OAuth path" → "Testing without real Google credentials".
+
+### Fixed
+- **CSV import dotted-FK org filter gap** (cmd_521, security): a dotted `x-import-key` lookup
+  (e.g. `role.name`) on an organization-scoped entity's CSV import route was not itself
+  organization-filtered — a same-named row owned by a different organization could resolve and
+  get linked to the importing actor's record. The dotted-FK lookup is now org-filtered whenever
+  its *target* entity has `organization_id`, independently of the parent entity's own scoping;
+  system-global lookup targets (e.g. `role`, no `organization_id`) are correctly left unfiltered.
+  Covers both CREATE and UPDATE (shared resolution path); export was already correctly scoped.
+  Template-layer change only, no Prisma schema change — regenerate to pick it up, no migration
+  needed. See `docs/knowledge/csv-import-dotted-fk-org-filter.md`.
 
 ## [3.0.0] - 2026-07-30
 

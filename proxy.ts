@@ -3,6 +3,7 @@ import { NextResponse, NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import { routing } from './i18n/routing';
 import { getRateLimiter } from '@/lib/rate-limit';
+import { safeRedirectPath } from '@/lib/auth/safe-redirect';
 
 const intlMiddleware = createIntlMiddleware(routing);
 
@@ -152,7 +153,23 @@ export const proxy = auth(async (req) => {
   // for credentials, both resolved by the auth() wrapper).
   if (!req.auth) {
     const locale = localePrefix ?? routing.defaultLocale;
-    return NextResponse.redirect(buildExternalUrl(req, `/${locale}/login`));
+    const loginUrl = buildExternalUrl(req, `/${locale}/login`);
+    // buildExternalUrl clones req.nextUrl.href wholesale and only overrides
+    // pathname, so it carries over the *original* page's query string (e.g.
+    // "?tab=2") onto the /login URL. Clear it before adding our own param —
+    // that string belongs on the redirect target, not on /login itself.
+    loginUrl.search = '';
+    // Carry the originally-requested path so the login page can send the
+    // user back where they were headed. This value always originates from
+    // our own req.nextUrl (never attacker input) so it's inherently safe to
+    // write here — safeRedirectPath is still run for defense in depth and
+    // because it's the single source of truth the login page also uses to
+    // validate this same query param when reading it back.
+    const returnTo = safeRedirectPath(pathname + req.nextUrl.search);
+    if (returnTo && returnTo !== `/${locale}/login`) {
+      loginUrl.searchParams.set('redirect', returnTo);
+    }
+    return NextResponse.redirect(loginUrl);
   }
 
   // MFA challenge gate (cmd_527). auth.ts's jwt() callback sets

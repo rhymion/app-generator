@@ -389,6 +389,11 @@ Next.js 16 proxies always run on the Node.js runtime, so Prisma queries
 from `auth()` work without extra config. (Don't add `runtime: 'nodejs'`
 to the proxy `config` export — Next.js rejects it.)
 
+For the full unauthenticated-redirect behavior — the public-path
+exclusion list, the `?redirect=` return-to-original-page mechanism, and
+its open-redirect defense — see
+`docs/knowledge/unauthenticated-page-redirect.md`.
+
 ---
 
 ## Why `user.password` is nullable

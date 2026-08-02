@@ -43,7 +43,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - アカウントリンク（ユーザーごとに複数の OAuth プロバイダー）
 - ロールベースアクセス制御（モデルごとの CRUD 権限）
 - 作成者/担当者ベースのアクセス制御
-- 組織スコープフィルタリング — organization_id を持つエンティティは、ユーザーが所属する組織に自動的にフィルタリングされます
+- 組織スコープフィルタリング — organization_id を持つエンティティは、ユーザーが所属する組織に自動的にフィルタリングされます。CSV インポートのドット付き自然キー FK 解決（例: `role.name`）も、参照先エンティティ自体が組織スコープを持つ場合は同様にフィルタリングされます。詳細は [`docs/knowledge/csv-import-dotted-fk-org-filter.md`](docs/knowledge/csv-import-dotted-fk-org-filter.md) を参照してください
 - FK 参照先の閲覧権限が不足している場合のグレースフルデグラデーション — あるロールがエンティティの作成・編集はできても、その FK 参照先の閲覧権限がない場合（例: `approval_flow` は管理できるが `role` は閲覧できない）、該当フィールドはページをクラッシュさせず無効化表示になります。権限付与の際は [`docs/knowledge/fk-read-permission-graceful-degradation.md`](docs/knowledge/fk-read-permission-graceful-degradation.md) を参照してください
 
 ### 組み込みシステム
@@ -275,6 +275,8 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 **ロールベースアクセス制御**はスキーマでモデルごとに定義されます。`authz.ts` モジュールがすべてのリクエストに対してモデルごとの CRUD 権限を強制します。
 
 **デフォルト拒否**: 新規ユーザーは権限ゼロで開始します。Administrator が明示的にロールを割り当てることで初めてアクセスが許可されます。`seed-tenant.ts` によってシードされる `Administrator` ロールはすべてのエンティティに対して完全な CRUD 権限を付与します。詳細は [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) を参照してください。
+
+**未認証のページリクエスト**は、ページが描画される前に `proxy.ts` によって `/login` へリダイレクトされ、サインイン後は元のページへ戻ります(オープンリダイレクト対策済み — サイト外の `redirect` 値は拒否されます)。API ルートは影響を受けず、従来どおり JSON の `401`/`404` を返します。詳細は [docs/knowledge/unauthenticated-page-redirect.md](docs/knowledge/unauthenticated-page-redirect.md) を参照してください。
 
 **生成される権限 E2E テスト**には、エンティティごとの権限拒否テスト(GET/POST/PUT/DELETE/export/import、4xx)と、組織境界をまたぐ作成・更新・参照を拒否するクロス組織分離テストが `cypress/e2e/api/<entity>.cy.ts` に含まれます。詳細は [docs/knowledge/permission-e2e-test-design.md](docs/knowledge/permission-e2e-test-design.md) を参照してください。
 

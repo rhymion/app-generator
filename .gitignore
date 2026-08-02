@@ -199,6 +199,7 @@ components/setting/column_def.tsx
 # ── cypress/e2e/ ──
 cypress/e2e/*.cy.ts
 !cypress/e2e/auth.cy.ts
+!cypress/e2e/auth_redirect.cy.ts
 !cypress/e2e/search_page.cy.ts
 !cypress/e2e/audit_log.cy.ts
 !cypress/e2e/import_modal.cy.ts

@@ -39,7 +39,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - Account linking (multiple OAuth providers per user)
 - Role-based access control (per-model CRUD permissions)
 - Creator/Assignee-based access control
-- Organization-based access scoping — entities with organization_id are automatically filtered to organizations the user belongs to
+- Organization-based access scoping — entities with organization_id are automatically filtered to organizations the user belongs to, including CSV import's dotted natural-key FK lookups (e.g. `role.name`) when the lookup target is itself organization-scoped; see [`docs/knowledge/csv-import-dotted-fk-org-filter.md`](docs/knowledge/csv-import-dotted-fk-org-filter.md)
 - Graceful degradation for foreign-key read-permission gaps — if a role can create/edit an entity but lacks read on one of its FK targets (e.g. can manage `approval_flow` but not `role`), the affected field renders disabled instead of crashing the page; see [`docs/knowledge/fk-read-permission-graceful-degradation.md`](docs/knowledge/fk-read-permission-graceful-degradation.md) when assigning permissions
 
 ### Built-in Systems
@@ -295,6 +295,8 @@ See [docs/knowledge/appendix/inventory-reservation-split.md](docs/knowledge/appe
 **Role-based access control** is defined per-model in the schema. The `authz.ts` module enforces per-model CRUD permissions on every request.
 
 **Default-deny**: new users start with zero permissions. An Administrator must explicitly assign roles to grant access. The `Administrator` role (seeded by `seed-tenant.ts`) grants full CRUD on all entities. See [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) for the permission model and test classification rules.
+
+**Unauthenticated page requests** are redirected to `/login` by `proxy.ts` before any page renders, and the user is sent back to their original destination after signing in (open-redirect protected — off-site `redirect` values are rejected). API routes are unaffected and continue returning JSON `401`/`404`. See [docs/knowledge/unauthenticated-page-redirect.md](docs/knowledge/unauthenticated-page-redirect.md).
 
 **Generated permission E2E coverage** includes per-entity permission-denial tests (GET/POST/PUT/DELETE/export/import, 4xx) and cross-organization isolation tests (create/update/read blocked across org boundaries) in `cypress/e2e/api/<entity>.cy.ts`. See [docs/knowledge/permission-e2e-test-design.md](docs/knowledge/permission-e2e-test-design.md).
 
