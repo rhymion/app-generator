@@ -513,23 +513,46 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
         "[parentRow.creator_id, parentRow.assignee_id]"
         if has_assignee_id else "[parentRow.creator_id]"
     )
-    encode_block = (
-        "\n  const allUsers = await prisma.user.findMany({ select: { id: true, name: true } });"
-        "\n  const userLookup: UserLookup = Object.fromEntries("
-        "\n    allUsers.map(u => [u.name, { id: u.id, name: u.name }])"
-        "\n  );"
-        "\n  const storedMessage = encodeMentions(message, userLookup);"
-    ) if comment_has_mention else ""
-    stored_var = "storedMessage" if comment_has_mention else "message"
     lines = []
     for c in comment_children:
         child_model   = c['name']
         parent_id_prop = f'{model}_id'
+        # Mention notifications (cmd_522): encodeMentions() retired from the save
+        # path — the client-side picker inserts @[user_id:<id>] markers directly,
+        # so the stored message is always the raw client text. Self-mentions are
+        # excluded; on update, only newly-added mentions (vs. the prior message)
+        # are notified.
+        mention_notify_add = (
+            f"\n    const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+            f"\n    for (const mentionedId of new Set(mentionedIds)) {{"
+            f"\n      notify(mentionedId, 'mentioned_in_comment', {{"
+            f"\n        title: 'You were mentioned in a {parent_pascal} comment',"
+            f"\n        href: `/{parent}/view/${{parentRow.id}}`,"
+            f"\n        commentSnippet: message.slice(0, 80),"
+            f"\n      }});"
+            f"\n    }}"
+        ) if comment_has_mention else ""
+        update_select = (
+            "{ creator_id: true, message: true, " + parent_id_prop + ": true }"
+            if comment_has_mention else "{ creator_id: true }"
+        )
+        mention_notify_update = (
+            f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
+            f"\n  const newIds = extractMentionedUserIds(message);"
+            f"\n  const freshMentions = newIds.filter((mid) => !oldIds.has(mid) && mid !== userId);"
+            f"\n  for (const mentionedId of freshMentions) {{"
+            f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
+            f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
+            f"\n      href: `/{parent}/view/${{comment.{parent_id_prop}}}`,"
+            f"\n      commentSnippet: message.slice(0, 80),"
+            f"\n    }});"
+            f"\n  }}"
+        ) if comment_has_mention else ""
         lines.append(f"""
 export async function add{parent_pascal}Comment({parent_id_prop}: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();{encode_block}
+  const userId = await getSessionUserIdOrThrow();
   await prisma.{child_model}.create({{
-    data: {{ message: {stored_var}, {parent_id_prop}, creator_id: userId }},
+    data: {{ message, {parent_id_prop}, creator_id: userId }},
   }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
@@ -547,18 +570,18 @@ export async function add{parent_pascal}Comment({parent_id_prop}: string, messag
         href: `/{parent}/view/${{parentRow.id}}`,
         commentSnippet: message.slice(0, 80),
       }});
-    }}
+    }}{mention_notify_add}
   }}
   revalidatePath('/{parent}');
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();{encode_block}
-  const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
+  const userId = await getSessionUserIdOrThrow();
+  const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {update_select} }});
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
   }}
-  await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message: {stored_var} }} }});
+  await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message }} }});{mention_notify_update}
   revalidatePath('/{parent}');
 }}
 
@@ -583,19 +606,50 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
         "[parentRow.creator_id, parentRow.assignee_id]"
         if has_assignee_id else "[parentRow.creator_id]"
     )
-    encode_block = (
-        "\n  const allUsers = await prisma.user.findMany({ select: { id: true, name: true } });"
-        "\n  const userLookup: UserLookup = Object.fromEntries("
-        "\n    allUsers.map(u => [u.name, { id: u.id, name: u.name }])"
-        "\n  );"
-        "\n  const storedMessage = encodeMentions(message, userLookup);"
+    # Mention notifications (cmd_522): encodeMentions() retired from the save
+    # path — see _build_comment_actions for the rationale. The bridge variant
+    # has no direct parent FK on the comment row (only commentable_id), so the
+    # update path re-resolves the parent row for the href, and only pays for
+    # that extra query when there are fresh mentions to notify.
+    mention_notify_add = (
+        f"\n    const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+        f"\n    for (const mentionedId of new Set(mentionedIds)) {{"
+        f"\n      notify(mentionedId, 'mentioned_in_comment', {{"
+        f"\n        title: 'You were mentioned in a {parent_pascal} comment',"
+        f"\n        href: `/{parent}/view/${{parentRow.id}}`,"
+        f"\n        commentSnippet: message.slice(0, 80),"
+        f"\n      }});"
+        f"\n    }}"
     ) if comment_has_mention else ""
-    stored_var = "storedMessage" if comment_has_mention else "message"
+    update_select = (
+        "{ creator_id: true, message: true, commentable_id: true }"
+        if comment_has_mention else "{ creator_id: true }"
+    )
+    mention_notify_update = (
+        f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
+        f"\n  const newIds = extractMentionedUserIds(message);"
+        f"\n  const freshMentions = newIds.filter((mid) => !oldIds.has(mid) && mid !== userId);"
+        f"\n  if (freshMentions.length > 0) {{"
+        f"\n    const mentionParentRow = await prisma.{model}.findFirst({{"
+        f"\n      where: {{ commentable_id: comment.commentable_id }},"
+        f"\n      select: {{ id: true }},"
+        f"\n    }});"
+        f"\n    if (mentionParentRow) {{"
+        f"\n      for (const mentionedId of freshMentions) {{"
+        f"\n        notify(mentionedId, 'mentioned_in_comment', {{"
+        f"\n          title: 'You were mentioned in a {parent_pascal} comment',"
+        f"\n          href: `/{parent}/view/${{mentionParentRow.id}}`,"
+        f"\n          commentSnippet: message.slice(0, 80),"
+        f"\n        }});"
+        f"\n      }}"
+        f"\n    }}"
+        f"\n  }}"
+    ) if comment_has_mention else ""
     return f"""
 export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();{encode_block}
+  const userId = await getSessionUserIdOrThrow();
   await prisma.comment.create({{
-    data: {{ message: {stored_var}, commentable_id, creator_id: userId }},
+    data: {{ message, commentable_id, creator_id: userId }},
   }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
@@ -613,18 +667,18 @@ export async function add{parent_pascal}Comment(commentable_id: string, message:
         href: `/{parent}/view/${{parentRow.id}}`,
         commentSnippet: message.slice(0, 80),
       }});
-    }}
+    }}{mention_notify_add}
   }}
   revalidatePath('/{parent}');
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();{encode_block}
-  const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
+  const userId = await getSessionUserIdOrThrow();
+  const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {update_select} }});
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
   }}
-  await prisma.comment.update({{ where: {{ id: commentId }}, data: {{ message: {stored_var} }} }});
+  await prisma.comment.update({{ where: {{ id: commentId }}, data: {{ message }} }});{mention_notify_update}
   revalidatePath('/{parent}');
 }}
 
