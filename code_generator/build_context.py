@@ -1629,6 +1629,49 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     if bridge_child_ir:
         selection_targets = _dedupe_ordered([*selection_targets, *bridge_child_ir.get('parent_targets', [])])
 
+    # Required FK relation fields (cmd_516 Option B, page_new blocking check):
+    # a required many-to-one FK or required selector-OTO FK whose target the
+    # current user can't read makes /new unsubmittable (there is no way to
+    # populate the field), so the New page must block with an explanatory
+    # message instead of rendering a create form that can never succeed. Each
+    # entry's `field_key` matches the same Fields-namespace i18n key
+    # _autocomplete_rel_jsx() already uses for the field's label.
+    required_relation_fields = [
+        {
+            'prop_name': r['prop_name'],
+            'target': r['target'],
+            'field_key': to_camel_case(r['prop_name'].removesuffix('_id') if r['prop_name'].endswith('_id') else r['prop_name']),
+        }
+        for r in parent_rels_raw
+        if r.get('required')
+    ] + [
+        {
+            'prop_name': r['prop_name'],
+            'target': r['target'],
+            'field_key': to_camel_case(r['prop_name'].removesuffix('_id') if r['prop_name'].endswith('_id') else r['prop_name']),
+        }
+        for r in selector_oto_rels
+        if not r.get('nullable', True)
+    ]
+
+    # A required relation FK omitted from an update call (the UI's
+    # AppFieldRelation permissionDenied branch doesn't let the acting user
+    # pick or clear it; a bare API PUT may omit it entirely) must NOT be
+    # treated as a validation failure — it must fall back to the record's
+    # current value in the DB, since the caller has no way to supply a
+    # different one. Placed in the shared service layer so both the API
+    # route and the form's server action get the guarantee. See
+    # docs/knowledge/fk-read-permission-graceful-degradation.md.
+    _prop_to_var = {p['prop']: p['var_name'] for p in parent_prop_infos}
+    fk_preservation_update_code = '\n'.join(
+        f"    if (!{_prop_to_var[f['prop_name']]}) {{\n"
+        f"      const _fkFallback = await tx.{model}.findUnique({{ where: {{ id }}, select: {{ {f['prop_name']}: true }} }});\n"
+        f"      {_prop_to_var[f['prop_name']]} = _fkFallback?.{f['prop_name']} ?? {_prop_to_var[f['prop_name']]};\n"
+        f"    }}"
+        for f in required_relation_fields
+        if f['prop_name'] in _prop_to_var
+    )
+
     # Field categorisation (for FormUpsert / FormView)
     # Use all_oto_fk_props to exclude BOTH auto-create and selector OTO FK props from plain field treatment
     field_categories = _categorize_form_fields(filtered_props, parent_rels_raw, gen_cfg, all_oto_fk_props)
@@ -2329,6 +2372,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         include_entries_detail=include_entries_detail,
         # Selection targets (page_new / page_edit)
         selection_targets=selection_targets,
+        required_relation_fields=required_relation_fields,
+        fk_preservation_update_code=fk_preservation_update_code,
         # API routes
         all_body_fields_create=all_body_fields_create,
         service_args_for_create=service_args_for_create,

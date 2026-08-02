@@ -47,7 +47,13 @@ from generators import (
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
 )
-from generators_i18n import update_i18n_and_config
+from generators_i18n import (
+    update_i18n_and_config,
+    _collect_field_keys,
+    _collect_native_enum_namespaces,
+    _collect_custom_component_sections,
+    _merge_file_wins_messages,
+)
 from validate import validate_schema, validate_prisma_indexes, SchemaValidationError
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
 from generators_test import (
@@ -60,7 +66,9 @@ from generators_test import (
     reservation_spec_context,
     set_messages_fields,
     set_messages_namespaces,
+    set_prisma_uniques,
 )
+from schema_deriver import collect_unique_columns, parse_prisma_schema
 from validation_context import build_validation_context
 from manifest import ManifestRecorder, sha256_file, sha256_text
 
@@ -433,14 +441,28 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     env = _make_env()
 
-    # Load messages/en.json Fields namespace for enum label translation in Cypress tests
-    import json as _json
+    # Compute enum label maps — schema defaults overlaid by existing file values
+    # (file wins, matching _update_json semantics: existing keys preserved, missing keys
+    # filled with schema defaults). This ensures both idempotency and custom-translation
+    # compatibility: specs use the same values that the app will render.
+    _schema_fields = _collect_field_keys(entities, schema)
+    _schema_ns: dict = {}
+    for _ns_src in (
+        _collect_native_enum_namespaces(schema),
+        _collect_custom_component_sections(entities, schema),
+    ):
+        for _ns_k, _ns_entries in _ns_src.items():
+            _schema_ns.setdefault(_ns_k, {}).update(_ns_entries)
+
+    # File-wins overlay: file values take precedence over schema defaults.
     _msg_path = out / 'messages' / 'en.json'
+    _file_msgs = None
     if _msg_path.exists():
         with open(_msg_path) as _mf:
-            _all_messages = _json.load(_mf)
-        set_messages_fields(_all_messages.get('Fields', {}))
-        set_messages_namespaces(_all_messages)
+            _file_msgs = json.load(_mf)
+    _merged_fields, _merged_ns = _merge_file_wins_messages(_schema_fields, _schema_ns, _file_msgs)
+    set_messages_fields(_merged_fields)
+    set_messages_namespaces(_merged_ns)
 
     # --- Bridge Prisma schema emission ---
     bridges = _collect_bridges(schema)
@@ -449,6 +471,15 @@ def generate(schema_path: str, output_dir: str) -> None:
         bridge_additions = build_bridge_prisma_additions(schema)
         _write(out / 'prisma' / 'bridge_additions.prisma', bridge_additions)
         print(f'  Bridge Prisma additions (reference) → prisma/bridge_additions.prisma')
+
+    # Prisma uniqueness facts (@unique / @@unique) for the Cypress populate
+    # helpers' find-or-create idempotency. Read after the bridge injection
+    # above so freshly injected bridge models are included. Uniqueness is not
+    # part of the derived JSON schema (see schema_deriver.collect_unique_columns),
+    # so it is threaded in here rather than through `schema`.
+    set_prisma_uniques(collect_unique_columns(
+        parse_prisma_schema(out / 'prisma' / 'schema.prisma')
+    ))
 
     print(f'Found {len(entities)} entities in {schema_path}')
 

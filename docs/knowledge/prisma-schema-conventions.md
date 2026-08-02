@@ -178,6 +178,14 @@ updated_at DateTime @updatedAt @db.Timestamptz(0)
 
 **Prohibited on embedded models:** `creator_id`, `creator`, `updater_id`, `updater`. The generated service never writes these for embedded children, so their presence causes a TypeScript build error.
 
+A `name` column is **not** required. When a model has none, the generated
+Cypress populate helpers key their find-or-create on its `@unique` /
+`@@unique` columns instead (e.g. `purchase_order.po_number`) — as long as
+those columns are non-nullable and carry no `@default(...)`, so that the
+generated `create()` actually writes them. See
+`docs/knowledge/testing-cypress.md` §"Dep records are find-or-create, not
+create".
+
 ---
 
 ## 5. Required indexes

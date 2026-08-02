@@ -171,9 +171,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         // invalid inventory_id FK.
         const _childInventoryIdRaw = (part as Record<string, unknown>).{{ pool_fk_field }} as string | undefined;
         const _childInventoryId: string | undefined = _childInventoryIdRaw === '' ? undefined : _childInventoryIdRaw;
-        let _childBridgeId: string;
 
         {% if split_reserves_inventory %}
+        let _childBridgeId: string;
+
         if (_childInventoryId) {
           // Specified lot: validate availability and reserve exactly that lot
           const _childInv = await tx.{{ pool_entity }}.findUnique({
@@ -278,7 +279,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         }
         {% endif %}
         const _childBridge = await tx.{{ transactionable_entity }}.create({ data: {} });
-        _childBridgeId = _childBridge.id;
+        const _childBridgeId = _childBridge.id;
         {% endif %}
         {% endif %}
         {% if has_approvable %}const _splitChild = {% endif %}await tx.{{ entity_name }}.create({

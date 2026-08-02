@@ -24,7 +24,7 @@ async function _create{{ pascal }}BaseDeps() {
   // Idempotent: re-use an existing row when the helper is called more than
   // once in a single test (e.g. parent populator + child populator).
   let {{ dep.var_name }}Record = await prisma.{{ dep.target }}.findFirst({
-    where: { {{ dep.lookup_field }}: {{ dep.lookup_value }} },
+    where: {{ dep.lookup_where }},
     orderBy: { created_at: 'asc' },
   });
   if (!{{ dep.var_name }}Record) {
@@ -95,7 +95,7 @@ async function _create{{ pascal }}BaseDeps() {
 {% if dep.needs_second %}
 {% if dep.lookup_field %}
   let {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.findFirst({
-    where: { {{ dep.lookup_field }}: {{ dep.lookup_value_second }} },
+    where: {{ dep.lookup_where_second }},
     orderBy: { created_at: 'asc' },
   });
   if (!{{ dep.var_name }}2Record) {
@@ -205,7 +205,7 @@ export async function populate{{ pascal }}Dependencies() {
   // Idempotent: re-use an existing row (created by an earlier helper call in
   // the same test) instead of creating a duplicate that would trip @unique.
   let {{ dep.var_name }}Record = await prisma.{{ dep.target }}.findFirst({
-    where: { {{ dep.lookup_field }}: {{ dep.lookup_value }} },
+    where: {{ dep.lookup_where }},
     orderBy: { created_at: 'asc' },
   });
   if (!{{ dep.var_name }}Record) {
@@ -276,7 +276,7 @@ export async function populate{{ pascal }}Dependencies() {
 {% if dep.needs_second %}
 {% if dep.lookup_field %}
   let {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.findFirst({
-    where: { {{ dep.lookup_field }}: {{ dep.lookup_value_second }} },
+    where: {{ dep.lookup_where_second }},
     orderBy: { created_at: 'asc' },
   });
   if (!{{ dep.var_name }}2Record) {
@@ -385,13 +385,13 @@ export async function populate{{ pascal }}Data(length: number) {
     });
 {% elif primary_fk_dep.lookup_field %}
     // Find-or-create: when a sibling helper (typically populate{{ pascal }}Dependencies)
-    // has already created a row with this iteration's deterministic name
+    // has already created a row with this iteration's deterministic key
     // (e.g. `Test Product 2` at i=2), reuse it instead of issuing a second
     // create that would trip @unique on another required field (e.g.
-    // product.code). Same lookup field as the deps helper, so both end up
+    // product.code). Same lookup columns as the deps helper, so both end up
     // pointing at the same row.
     let {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.findFirst({
-      where: { {{ primary_fk_dep.lookup_field }}: {{ primary_fk_dep.lookup_value_unique }} },
+      where: {{ primary_fk_dep.lookup_where_unique }},
       orderBy: { created_at: 'asc' },
     });
     if (!{{ primary_fk_dep.var_name }}Item) {
@@ -529,7 +529,7 @@ export async function populate{{ pascal }}FullData(length: number) {
 {% elif primary_fk_dep.lookup_field %}
     // Find-or-create — see populate{{ pascal }}Data for the rationale.
     let {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.findFirst({
-      where: { {{ primary_fk_dep.lookup_field }}: {{ primary_fk_dep.lookup_value_unique }} },
+      where: {{ primary_fk_dep.lookup_where_unique }},
       orderBy: { created_at: 'asc' },
     });
     if (!{{ primary_fk_dep.var_name }}Item) {

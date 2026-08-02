@@ -15,6 +15,10 @@
 /cypress/videos
 /cypress/screenshots
 
+# Claude Code: personal, machine-specific permission overrides (defaultMode,
+# extra allow/deny rules). Never shared — see docs/knowledge/claude-code-settings-consumer-side.md
+.claude/settings.local.json
+
 # next.js
 /.next/
 /out/
@@ -120,6 +124,7 @@ lib/dashboard/types.ts
 !lib/audit_log/virtual_resolvers.ts
 !lib/compliance/**
 !lib/mention/**
+!lib/legal/**
 
 # ── app/[locale]/ ──
 app/\[locale\]/*/
@@ -147,6 +152,8 @@ app/\[locale\]/setting/view/
 !app/\[locale\]/docs/layout.tsx
 app/\[locale\]/docs/page.mdx
 app/\[locale\]/docs/*/
+!app/\[locale\]/legal/
+!app/\[locale\]/legal/**
 
 # ── app/api/ ──
 app/api/*/
@@ -180,6 +187,7 @@ components/setting/FormUpsert.tsx
 components/setting/FormView.tsx
 components/setting/column_def.tsx
 !components/audit_log/FormView.tsx
+!components/legal/**
 
 # ── cypress/e2e/ ──
 cypress/e2e/*.cy.ts
@@ -187,6 +195,7 @@ cypress/e2e/*.cy.ts
 !cypress/e2e/search_page.cy.ts
 !cypress/e2e/audit_log.cy.ts
 !cypress/e2e/import_modal.cy.ts
+!cypress/e2e/legal_pages.cy.ts
 cypress/e2e/mobile/*.cy.ts
 !cypress/e2e/mobile/layout.cy.ts
 !cypress/e2e/mobile/audit_log.cy.ts
@@ -198,6 +207,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/user_import.cy.ts
 !cypress/e2e/api/import_batch2.cy.ts
 !cypress/e2e/api/round_trip.cy.ts
+!cypress/e2e/api/fk_read_permission_graceful_degradation.cy.ts
 !cypress/e2e/api/notification_approval.cy.ts
 !cypress/e2e/api/receiving_receipt_notification.cy.ts
 

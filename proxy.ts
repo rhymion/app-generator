@@ -7,7 +7,7 @@ import { getRateLimiter } from '@/lib/rate-limit';
 const intlMiddleware = createIntlMiddleware(routing);
 
 // Paths that do not require authentication (matched after stripping locale prefix)
-const PUBLIC_PATHS = ['/login', '/register', '/docs'];
+const PUBLIC_PATHS = ['/login', '/register', '/docs', '/legal'];
 
 // Map a request to the rate-limit bucket name. Returns null when the request
 // shouldn't be rate-limited (e.g. `/api/auth/session` is hit on every page

@@ -26,6 +26,8 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **ラッパーコンポーネントアーキテクチャ** — エンティティごとに生成されたコンポーネントが `components/_standard/` の共有ラッパーを使用（静的提供；`generate-code` 再実行で上書きされない）、生成コンポーネントは `@mui/*` の代わりに `components/ui/` の共有 `App*` ラッパーを import するため、自動生成コードが MUI に直接依存しなくなりました（プロバイダー設定を除く）
 - **エンティティ横断全文検索** (`x-generate.search: true`) — 検索可能なエンティティが存在する場合に `GET /api/search` REST エンドポイントとグローバル検索 UI ページ（`app/[locale]/search/page.tsx`）を生成；オプトインしたエンティティ全体への UNION ALL クエリで、エンティティごとにテナント・権限フィルターを適用；pg_bigm による日本語 2-gram 検索；ファセット（エンティティタイプ別ヒット件数）と XSS セーフなスニペットハイライト
 - **`x-ui.rows`** — スキーマの `x-ui: { rows: N }` で任意の文字列フィールドのテキストエリア行数を制御
+- **FK スカラーの自動推論** — FK スカラーカラム（例: `organization_id`）を `code_generator/json_schema.yaml` に明示宣言する必要がなくなり、Prisma のリレーション定義から自動導出
+- **FK オートコンプリートのカスタムフィルターフック**（`autocomplete_filter_stub.ts.jinja2`） — 組み込みの権限フィルターを超えてオートコンプリート・一覧結果を絞り込むためのエンティティごとのワンスタブ
 
 ### リレーションシップ
 
@@ -42,15 +44,20 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - ロールベースアクセス制御（モデルごとの CRUD 権限）
 - 作成者/担当者ベースのアクセス制御
 - 組織スコープフィルタリング — organization_id を持つエンティティは、ユーザーが所属する組織に自動的にフィルタリングされます
+- FK 参照先の閲覧権限が不足している場合のグレースフルデグラデーション — あるロールがエンティティの作成・編集はできても、その FK 参照先の閲覧権限がない場合（例: `approval_flow` は管理できるが `role` は閲覧できない）、該当フィールドはページをクラッシュさせず無効化表示になります。権限付与の際は [`docs/knowledge/fk-read-permission-graceful-degradation.md`](docs/knowledge/fk-read-permission-graceful-degradation.md) を参照してください
 
 ### 組み込みシステム
 
 - **コメントスレッド** — ポリモーフィックブリッジパターンにより、任意のエンティティにコメントスレッドを付与。リアクションボタン対応（トグルエンドポイント・バッチ集計・親オーナー read 認可）
 - **添付ファイル管理** — ポリモーフィックブリッジ経由のファイル・画像アップロード；画像・ファイルのプレビューはエンティティごとに個別にオプトアウト可能（`AttachmentSection` の `showImages`/`showFiles` props、両方デフォルト `true`）
-- **インベントリ予約** — スキーマレベルの `x-reservation` による容量・在庫管理（count モードと item モード）
+- **インベントリ予約** — スキーマレベルの `x-reservation` による容量・在庫管理（count モードと item モード）；予約元エンティティのライフサイクル遷移は独自の予約ライフサイクル機構ではなく承認フローシステムの承認/（terminal）却下を経由
+- **インベントリ台帳**（`x-ledger-source`） — スキーマにledgerトップレベル宣言がある場合に生成される `inventory_transaction` 台帳エンティティと `transactionable` ブリッジ；入荷伝票や請求明細エンティティに `x-ledger-source` を付与すると write/adjust/move のスタブテンプレートを生成
+- **入荷ワークフロー** — 入荷伝票スキーマ向けに生成される `ledger` / `transactionable` / `pool` トップレベルエンティティ宣言と入荷確定ルート
+- **分割アクション**（`x-splittable`） — エンティティに付与すると、一覧・編集ページからロット単位の分割操作を行う分割アクション UI セクションと API ルートを生成
 - **ダッシュボードチャート** — スキーマから生成されるエンティティごとのチャートウィジェット（カラム・バー・ライン・パイ）；スタッキング・時間バケット・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント
 - **エンティティ横断検索** — オプトインしたエンティティへの UNION ALL による `GET /api/search`；ファセット・ハイライト・日本語 pg_bigm 対応；ヘッダー検索アイコンと検索ページを生成
-- **承認後イベント発火** — `x-approval.on_approved.set_fields`（フィールド更新）および `x-approval.on_approved.emit_hook`（生成 `service_after_approve.ts` による カスタムロジック）；`approvable.approved_at` による冪等性保証
+- **承認後イベント発火** — `x-approval.on_approved.set_fields`（フィールド更新）および `x-approval.on_approved.emit_hook`（生成 `service_after_approve.ts` による カスタムロジック）；`approvable.approved_at` による冪等性保証。`x-approval-lines` は承認明細エンティティをインベントリ台帳操作に接続する作成前後のヘルパーを生成
+- **終端却下**（`x-readonly-fields`） — エンティティが終端の却下状態に達した後にフィールドをロックするための注釈；却下時は `on_rejected_dispatch` 経由でワンスタブ（`service_after_reject_stub.ts`）を発火し、通知や在庫調整などのカスタムロジックに対応
 
 ### パフォーマンス
 
@@ -75,6 +82,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 - **監査ログ** — 全エンティティの作成・更新・削除操作を横断表示する、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）
 - **GDPR / データ保護** — `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）、`anonymizeUser()` 消去関数、`x-gdpr-mode` によるデータ主体区分の分類（`internal`/`consumer`/`both`。スキーマ検証のみで生成コードへの反映は未実装）、添付ファイル名の AES-256-GCM at-rest 暗号化、コメント内の `x-mention` ユーザーメンション解析
+- **利用規約 / プライバシーポリシー**（`/[locale]/legal/terms`、`/[locale]/legal/privacy`）— 登録画面から導線を張ったMarkdown雛形文書。文書の言語追加は `content/legal/<doc>.<locale>.md` ファイルを追加するのみで、サイトUIの言語一覧とは独立（詳細は `docs/knowledge/legal-documents.md`）
 
 ### その他
 
@@ -103,9 +111,9 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 ### 承認フロー
 
-**動作するもの:** 設定可能なフロー（`approval_flow`）、ステータス管理（保留中/承認済み/却下済み）、監査証跡（`approval_history`）、ロールベースの承認・却下権限を備えた完全な承認ワークフローが実装されています。また、承認後イベント発火（`x-approval.on_approved.set_fields` によるフィールド更新、`x-approval.on_approved.emit_hook` による生成 `service_after_approve.ts` カスタムロジック）もサポートしています。
+**動作するもの:** 設定可能なフロー（`approval_flow`）、ステータス管理（`pending`/`approved`/`rejected`/`terminal_rejected`）、監査証跡（`approval_history`）、ロールベースの承認・却下権限を備えた完全な承認ワークフローが実装されています。また、承認後イベント発火（`x-approval.on_approved.set_fields` によるフィールド更新、`x-approval.on_approved.emit_hook` による生成 `service_after_approve.ts` カスタムロジック）と却下イベント発火（`on_rejected_dispatch`、生成 `service_after_reject_stub.ts` とペア）もサポートしています。`x-readonly-fields` はエンティティが終端の却下状態に達した後、指定フィールドをロックします。
 
-**未実装のもの:** 複雑なマルチステップオーケストレーション（例：承認を外部ワークフローにチェーン、予約変更の自動起動）はカスタムロジックをワンスタブに実装する必要があります。
+**未実装のもの:** 複雑なマルチステップオーケストレーション（例：承認を外部ワークフローにチェーン、予約変更の自動起動）はカスタムロジックを各ワンスタブに実装する必要があります。
 
 ---
 
@@ -232,7 +240,7 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 ### 承認フロー
 
-ステータス管理（保留中/承認済み/却下済み）と完全な監査証跡を備えた、マルチステップかつロールベースの承認ワークフローです。ロールベース権限による承認・却下が動作し、`x-approval.on_approved` によりフィールド更新（`set_fields`）やカスタムロジック（`emit_hook`）などの承認後イベントもトリガーされます。
+ステータス管理（`pending`/`approved`/`rejected`/`terminal_rejected`）と完全な監査証跡を備えた、マルチステップかつロールベースの承認ワークフローです。承認・終端却下のいずれも、フィールド更新や在庫調整などのダウンストリーム処理のためのワンスタブフック（`x-approval.on_approved`、`on_rejected_dispatch`）を発火します。`x-readonly-fields` は終端却下後にフィールドをロックします。未実装の部分（マルチステップのクロスワークフローオーケストレーション）はロードマップセクションを参照してください。
 
 [docs/knowledge/appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) を参照してください。
 
@@ -246,6 +254,12 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 デフォルトでは Vercel Blob をバックエンドとした、ポリモーフィックブリッジ経由のファイル・画像アップロードです（`x-cloud` による GCP デプロイ有効時は GCS バックエンド — [デプロイメント](#デプロイメント)を参照）。オプトインしたエンティティの詳細ページにはファイル添付パネルが表示されます。画像・ファイルのプレビューはエンティティごとに個別に非表示にできます（`AttachmentSection` の `showImages`/`showFiles` props、両方デフォルト `true`）。
 
+### インベントリ予約・分割・入荷
+
+任意のエンティティがオプトインできる汎用プリミティブ — `x-reservation`、`x-splittable`、`x-ledger-source` — であり、在庫専用の機構ではありません。`x-reservation` は2つの役割に限定されます: インベントリ割当（`count` モード、数値プールから数量を予約）と特定リソースの予約（`item` モード、例：ホテルの部屋の予約）。`x-splittable` はライン明細を複数パートに分割し、各パートは明示指定または自動割当されたプール行から引き当てます。`x-ledger-source` は入荷伝票・請求明細エンティティ向けに `inventory_transaction` 台帳エンティティと write/adjust/move のスタブテンプレートを生成します。予約元エンティティの承認・却下は、独自の予約ライフサイクルではなく上記の承認フローシステムを経由します。
+
+[docs/knowledge/appendix/inventory-reservation-split.md](docs/knowledge/appendix/inventory-reservation-split.md) を参照してください。
+
 ---
 
 ## セキュリティ
@@ -254,11 +268,13 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 **CSRF 保護**はすべての状態変更 API ルートに適用されます。
 
-**組織スコープフィルタリング**はクエリレイヤーで適用されます: すべてのリストクエリに自動的な `organization_id` フィルターが適用され、データを認証済みユーザーの組織にスコープします。テナントレベルの分離（クロステナントのデータ分離）はまだ実装されていません — ロードマップセクションを参照してください。
+**組織スコープフィルタリング**はクエリレイヤーで適用されます: すべてのリストクエリに自動的な `organization_id` フィルターが適用され、データを認証済みユーザーの組織にスコープします。組織スコープエンティティの更新系操作（update/delete/CSV インポートによる更新）も、ID指定での組織跨ぎアクセスを拒否します — 他組織のレコードを対象としたリクエストは、`creator_id`/`assignee_id` の権限だけでは成功せず拒否されます（API ルートは `404`、セッションアクションはサイレントに no-op）。テナントレベルの分離（クロステナントのデータ分離）はまだ実装されていません — ロードマップセクションを参照してください。
 
 **ロールベースアクセス制御**はスキーマでモデルごとに定義されます。`authz.ts` モジュールがすべてのリクエストに対してモデルごとの CRUD 権限を強制します。
 
 **デフォルト拒否**: 新規ユーザーは権限ゼロで開始します。Administrator が明示的にロールを割り当てることで初めてアクセスが許可されます。`seed-tenant.ts` によってシードされる `Administrator` ロールはすべてのエンティティに対して完全な CRUD 権限を付与します。詳細は [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) を参照してください。
+
+**生成される権限 E2E テスト**には、エンティティごとの権限拒否テスト(GET/POST/PUT/DELETE/export/import、4xx)と、組織境界をまたぐ作成・更新・参照を拒否するクロス組織分離テストが `cypress/e2e/api/<entity>.cy.ts` に含まれます。詳細は [docs/knowledge/permission-e2e-test-design.md](docs/knowledge/permission-e2e-test-design.md) を参照してください。
 
 [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenancy-and-permissions.md) を参照してください。
 
@@ -472,8 +488,11 @@ app-generator/
 | [search.md](docs/knowledge/search.md) | エンティティ横断全文検索：スキーマオプトイン・pg_bigm・認可・生成 API と UI |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | 承認フローシステムの詳細、承認後イベント発火（`on_approved`） |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | コメントブリッジシステムの詳細 |
+| [appendix/inventory-reservation-split.md](docs/knowledge/appendix/inventory-reservation-split.md) | インベントリ予約（`x-reservation`）、分割（`x-splittable`）、入荷（`x-ledger-source`）の汎用プリミティブ — 現在の挙動 |
 | [cleanup.md](docs/knowledge/cleanup.md) | 生成ファイルの削除: デフォルトクリーンアップ、マニフェスト vs スキーマ駆動、`--prune-orphans`、孤児ファイル処理 |
 | [gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) | GCP Cloud Run デプロイ: `x-cloud` オプトイン、Dockerfile、GCS アップロード、環境自動化スクリプト |
+| [claude-code-settings-consumer-side.md](docs/knowledge/claude-code-settings-consumer-side.md) | `.claude/settings.json` の読み込みルール、OS非依存な権限記法、複合コマンドのマッチングの罠、設定ファイルが実際に読み込まれたかの確認方法 — 本リポジトリまたは `app-template` の `.claude/settings.json` を編集する前に読むこと |
+| [legal-documents.md](docs/knowledge/legal-documents.md) | 利用規約・プライバシーポリシー画面: 文書の言語がサイトUIの言語一覧から独立している理由、Markdown採用（JSON/MDX不採用）の理由、文書の言語追加手順 |
 
 ---
 
@@ -499,6 +518,16 @@ app-generator/
 | ストリーミング Suspense / スケルトン画面 | ✅ 実装済み |
 | ダッシュボードチャート（x-display.dashboard） | ✅ 実装済み |
 | インベントリ予約（x-reservation） | ✅ 実装済み |
+| インベントリ台帳（x-ledger-source） | ✅ 実装済み |
+| 入荷ワークフロー | ✅ 実装済み |
+| 分割アクション（x-splittable） | ✅ 実装済み |
+| 承認明細ヘルパー（x-approval-lines） | ✅ 実装済み |
+| 終端却下（x-readonly-fields）/ 却下イベント発火（on_rejected_dispatch） | ✅ 実装済み |
+| 整数 enum | ✅ 実装済み |
+| nativeEnum 型安全性（6フィールド昇格） | ✅ 実装済み |
+| FK スカラー自動推論 | ✅ 実装済み |
+| FK オートコンプリートカスタムフィルターフック | ✅ 実装済み |
+| 組織アイソレーション強制（組織跨ぎ更新系操作の拒否） | ✅ 実装済み |
 | ラッパーコンポーネントアーキテクチャ | ✅ 実装済み |
 | MUI 非依存の生成コード（ラッパー第2弾） | ✅ 実装済み |
 | コメントリアクション | ✅ 実装済み |
@@ -515,7 +544,7 @@ app-generator/
 
 > **後方互換（v1.4 → v1.5）**: 非破壊的変更。既存のスキーマはそのまま動作します。エンティティ横断検索はエンティティごとのオプトイン（`x-generate.search: true`）です。承認後イベント発火はスキーマに `x-approval.on_approved` を設定した場合のみ有効になります。
 
-> **後方互換（v2.0 → v3.0）**: 7領域で**破壊的変更**あり — デフォルト `statement_timeout`（30秒、直結接続パス）、`pageSize > 200` は切り詰めではなく `400` を返すように変更、組織スコープの更新系操作がID指定での組織跨ぎアクセスを拒否するように変更、新規 `user.anonymized_at` カラム、新規 `audit_log.actor_user` 外部キー制約、6件の旧`Int`フィールドの`nativeEnum`化、新規 `notification` テーブル。後四者は既存データベースで `prisma db push`/`migrate deploy` が必要（`nativeEnum` 化フィールドはデータ損失を避けるため事前に明示的な `ALTER TABLE ... USING` が必要・外部キーは事前に孤立行の掃除が必要な場合あり）。GCP デプロイ・添付ファイル表示オプトアウトは非破壊的です。詳細は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照してください。
+> **後方互換（v2.0 → v3.0）**: 8領域で**破壊的変更**あり — デフォルト `statement_timeout`（30秒、直結接続パス）、`pageSize > 200` は切り詰めではなく `400` を返すように変更、組織スコープの更新系操作がID指定での組織跨ぎアクセスを拒否するように変更、新規 `user.anonymized_at` カラム、新規 `audit_log.actor_user` 外部キー制約、6件の旧`Int`フィールドの`nativeEnum`化、新規 `notification` テーブル、`nativeEnum` メンバー名の小文字スネークケースへの正規化。後五者は既存データベースで `prisma db push`/`migrate deploy` および/またはデータ移行が必要（`nativeEnum` 化フィールドはデータ損失を避けるため事前に明示的な `ALTER TABLE ... USING` が必要・外部キーは事前に孤立行の掃除が必要な場合あり・メンバー名の正規化は [docs/knowledge/enum-member-naming.md](docs/knowledge/enum-member-naming.md) の移行 SQL が必要）。GCP デプロイ・添付ファイル表示オプトアウトは非破壊的です。詳細は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照してください。
 
 ### 開発中
 

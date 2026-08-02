@@ -201,6 +201,11 @@ export default async function LocaleLayout({ children, params }) {
 
 That's all — next-intl handles the rest automatically.
 
+> This 4-step procedure is for the **site UI locale** (chrome, labels,
+> forms). It does not apply to Terms of Service / Privacy Policy content
+> locales, which are resolved independently of `routing.locales` — see
+> [legal-documents.md](./legal-documents.md#design-document-locale-is-decoupled-from-the-site-ui-locale).
+
 ---
 
 ## Navigation

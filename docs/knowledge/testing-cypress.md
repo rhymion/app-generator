@@ -267,6 +267,46 @@ generator:
 4. The test task `db:populate{Entity}Dependencies` returns the dep objects, allowing
    tests to reference `deps.resource.name` for Autocomplete selectors
 
+### Dep records are find-or-create, not create
+
+`populate{Entity}Dependencies()` runs more than once per test — the parent
+populator calls it, and so does every child populator — so each dep row it
+creates has to be looked up first. Otherwise the second call re-issues the same
+`create()` and Prisma raises **P2002 (unique constraint failed)**.
+
+The generator picks the lookup key per dep entity
+(`generators_test._dep_lookup_columns`), in this order:
+
+| # | Key | Example | Emitted `where` |
+|---|-----|---------|-----------------|
+| 1 | `name`, when the entity has a required one | `supplier` | `{ name: 'Test Supplier' }` |
+| 2 | a field-level `@unique` column the create() writes | `purchase_order.po_number` | `{ po_number: 'Test Po Number' }` |
+| 3 | a `@@unique([...])` group whose columns the create() can all supply (FK columns resolve to the dep record that feeds them) | `bin @@unique([location_id, code])` | `{ location_id: location.id, code: 'Test Code' }` |
+| — | none of the above → plain `create()` | `commentable`, `approvable` | — |
+
+Consequences when writing a schema:
+
+- **An entity does not need a `name` column to be safely populated.** Dropping
+  `name` from an entity that has another unique key (e.g. `purchase_order`
+  keyed on `po_number`) is fine; the helper keys on that column instead.
+- A unique column that `create()` never writes — nullable, or supplied by a
+  Prisma `@default(...)`, so it is absent from the entity's `required` set —
+  cannot be matched by the lookup. Rule 3 skips any constraint that mentions
+  one rather than emitting a half-applied `where`, and such an entity falls
+  back to plain `create()`. If it also has a unique column with a DB default,
+  repeated helper calls can still collide; give it a required unique column.
+- Unique-column values are derived from the *field* name (`'Test Po Number'`),
+  not from the dep's role title the way `name` is (`'Test Assignee'` vs
+  `'Test Creator'`). Two deps of the same `name`-less target inside one helper
+  therefore resolve to the *same* row instead of two.
+
+The Prisma facts behind rules 2 and 3 come from
+`schema_deriver.collect_unique_columns()`, which `generate.py` reads off
+`prisma/schema.prisma` and hands to `generators_test.set_prisma_uniques()`.
+Uniqueness deliberately does not enter the derived JSON schema — it constrains
+writes, not the JSON shape, and the Stage 2/4 golden references assert that
+shape byte-for-byte.
+
 ### `beforeEach` Pattern
 
 Every generated spec resets state completely to avoid test pollution:

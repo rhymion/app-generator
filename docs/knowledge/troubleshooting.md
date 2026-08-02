@@ -250,6 +250,11 @@ directories) or it will silently never be tracked.
 See `lib/approval_request/actions_core.ts` / `actions.ts` / `actions.test.ts`
 for a worked example.
 
+See also `gate-exemption-must-be-machine-checkable.md` for the broader
+recurring pattern this section's CI-job fix was one instance of (local
+Completion gate docs stating something CI enforcement doesn't actually
+honor).
+
 ---
 
 ## 3. Code generation failures
