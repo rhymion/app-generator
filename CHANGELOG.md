@@ -6,6 +6,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Generated permission-denial and cross-org isolation API tests** (cmd_520 batch A): every
+  generated `cypress/e2e/api/<entity>.cy.ts` now includes PUT/DELETE/export/import
+  permission-denial tests (7.3–7.6, gated on `can_edit`/`can_delete`/`can_export`/
+  `import_eligible`) and, for organization-scoped entities, cross-organization isolation tests
+  (G3.1–G3.3: foreign-org CREATE rejected, foreign-org GET/PUT return 404). Adds the
+  `db:createCrossOrgScenario` test-fixture task. Adds a one-line coverage comment to every
+  generated spec recording which of these tests were actually generated. See
+  `docs/knowledge/permission-e2e-test-design.md`.
 - **Graceful degradation for foreign-key read-permission gaps**: a role that
   can create/edit an entity but lacks read on one of its FK targets (e.g.
   can manage `approval_flow` but not `role`) previously crashed the create

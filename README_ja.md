@@ -274,6 +274,8 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 **デフォルト拒否**: 新規ユーザーは権限ゼロで開始します。Administrator が明示的にロールを割り当てることで初めてアクセスが許可されます。`seed-tenant.ts` によってシードされる `Administrator` ロールはすべてのエンティティに対して完全な CRUD 権限を付与します。詳細は [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) を参照してください。
 
+**生成される権限 E2E テスト**には、エンティティごとの権限拒否テスト(GET/POST/PUT/DELETE/export/import、4xx)と、組織境界をまたぐ作成・更新・参照を拒否するクロス組織分離テストが `cypress/e2e/api/<entity>.cy.ts` に含まれます。詳細は [docs/knowledge/permission-e2e-test-design.md](docs/knowledge/permission-e2e-test-design.md) を参照してください。
+
 [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenancy-and-permissions.md) を参照してください。
 
 ---
