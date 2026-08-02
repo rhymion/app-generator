@@ -140,6 +140,8 @@ app/\[locale\]/*/
 !app/\[locale\]/audit_log/**
 !app/\[locale\]/login/
 !app/\[locale\]/login/**
+!app/\[locale\]/mfa-challenge/
+!app/\[locale\]/mfa-challenge/**
 !app/\[locale\]/register/
 !app/\[locale\]/register/**
 !app/\[locale\]/setting/

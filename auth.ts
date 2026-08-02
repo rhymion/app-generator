@@ -136,6 +136,45 @@ function buildProviders(): Provider[] {
     );
   }
 
+  // Test-only OAuth simulation (cmd_527). Exercises the exact same
+  // signIn()/jwt()/session() callback path a real Google sign-in hits
+  // (account.provider = "google", the only value any callback in this file
+  // compares against) via a real HTTP round-trip, with zero outbound network
+  // calls and zero real Google credentials involved. A CredentialsProvider
+  // registered under a non-"credentials" id produces `account.provider =
+  // provider.id` (see @auth/core's callback handler), so this reaches the
+  // OAuth branch of signIn()/jwt() below identically to real Google —
+  // only the first-factor check differs (email lookup instead of a Google
+  // handshake).
+  //
+  // Double-gated so this can never activate outside an explicit test
+  // harness: `MOCK_GOOGLE_OAUTH_TEST` must be the literal string "true",
+  // and it must only ever be set in `.env.test.local` (gitignored, never
+  // committed — see that file's header comment). A `NODE_ENV === 'test'`
+  // check alone would NOT work here: `next build` bakes NODE_ENV=production
+  // into the server regardless of the runtime env, so a NODE_ENV branch is
+  // dead-code-eliminated to the production value even under `test:e2e:cy:api`
+  // (see docs/knowledge/testing-cypress.md).
+  if (process.env.MOCK_GOOGLE_OAUTH_TEST === "true") {
+    providers.push(
+      CredentialsProvider({
+        id: "google",
+        name: "google (test simulation)",
+        credentials: {
+          email: { label: "Email", type: "email" },
+        },
+        async authorize(credentials) {
+          if (!credentials?.email) return null;
+          const user = await prisma.user.findUnique({
+            where: { email: credentials.email as string },
+          });
+          if (!user) return null;
+          return user as unknown as AdapterUser;
+        },
+      }),
+    );
+  }
+
   return providers;
 }
 
@@ -327,15 +366,81 @@ export const authConfig: NextAuthConfig = {
     },
     // The session callback receives `user` for database sessions (OAuth)
     // and `token` for JWT sessions (credentials). Forward `id` from
-    // whichever branch fired.
+    // whichever branch fired. `mfa_pending` (see jwt() below) is exposed
+    // so the proxy can gate protected routes on it (S8 — cmd_527).
     async session({ session, user, token }) {
       const id = (user?.id ?? (token as { id?: string } | undefined)?.id) ?? "";
-      return { ...session, user: { ...session.user, id } };
+      const mfa_pending = (token as { mfa_pending?: boolean } | undefined)?.mfa_pending ?? false;
+      return { ...session, user: { ...session.user, id }, mfa_pending };
     },
-    // Only fires for JWT-strategy sessions (credentials). Carries the id
-    // from authorize() into the token so the session callback can echo it.
-    async jwt({ token, user }) {
+    // Runs on every sign-in AND on every subsequent session read (JWT
+    // strategy calls back into this on each `auth()` resolution — see
+    // @auth/core's session action). `account`/`user` are only present on
+    // the sign-in call; every other call is a plain decode-and-refresh.
+    //
+    // S8 (cmd_527): OAuth sign-in never went through the Credentials
+    // provider's MFA gate (auth.ts authorize(), line ~92), so a Google
+    // sign-in for an `mfa_enabled` user previously reached a fully
+    // authenticated session with the second factor never checked. Fix:
+    // mark the token `mfa_pending` on OAuth sign-in when the user has MFA
+    // enabled; the proxy (proxy.ts) redirects any `mfa_pending` session to
+    // `/mfa-challenge` until `completeMfaChallenge()` clears the flag via
+    // `update({ mfa_pending: false })`.
+    //
+    // `mfa_token_version` closes the session-persistence gap this alone
+    // would leave open: enabling MFA does not revoke an already-active JWT
+    // (JWT_MAX_AGE default 30 days). Every request re-checks the DB
+    // version against the value snapshotted into the token; a mismatch
+    // (someone enabled MFA after this session started) re-arms
+    // `mfa_pending` immediately instead of waiting for token expiry. This
+    // applies to both providers uniformly — Credentials already gates MFA
+    // inside authorize() at sign-in time, but a *pre-existing* credentials
+    // session predating a later MFA enable has the exact same gap as
+    // OAuth. Cost: one indexed PK lookup per authenticated request — the
+    // same cost class as the authz permission cache this app already pays
+    // for (lib/authz.ts); see docs/knowledge/authentication.md for the
+    // trade-off discussion.
+    async jwt({ token, user, account, trigger, session: updateData }) {
       if (user?.id) token.id = user.id;
+
+      // MFA challenge completion: /mfa-challenge calls
+      // `update({ mfa_pending: false })` after a valid TOTP/recovery code.
+      if (trigger === "update" && (updateData as { mfa_pending?: boolean } | undefined)?.mfa_pending === false) {
+        token.mfa_pending = false;
+        return token;
+      }
+
+      if (account && user?.id) {
+        // Fresh sign-in (any provider). Snapshot mfa_token_version as the
+        // baseline for future drift detection below.
+        const dbUser = await prisma.user.findUnique({
+          where: { id: token.id },
+          select: { mfa_enabled: true, mfa_token_version: true },
+        });
+        token.mfa_token_version = dbUser?.mfa_token_version ?? 0;
+        // OAuth-only: Credentials already required a valid code inside
+        // authorize() before this JWT was ever minted.
+        if (account.provider !== "credentials" && dbUser?.mfa_enabled) {
+          token.mfa_pending = true;
+        }
+        return token;
+      }
+
+      // Plain session read (no fresh sign-in). Re-check the version so an
+      // MFA-state change mid-session takes effect on the very next request.
+      if (token.id) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: token.id },
+          select: { mfa_enabled: true, mfa_token_version: true },
+        });
+        const dbVersion = dbUser?.mfa_token_version ?? 0;
+        const tokenVersion = token.mfa_token_version ?? 0;
+        if (dbUser?.mfa_enabled && dbVersion > tokenVersion) {
+          token.mfa_pending = true;
+        }
+        token.mfa_token_version = dbVersion;
+      }
+
       return token;
     },
   },
@@ -390,7 +495,7 @@ export const authConfig: NextAuthConfig = {
   },
 };
 
-export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
+export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth(authConfig);
 
 // Module augmentation. The Session.user shape is project-wide; the JWT
 // augmentation is only needed for the credentials (JWT-strategy) branch.
@@ -402,11 +507,17 @@ declare module "next-auth" {
       email?: string | null;
       image?: string | null;
     };
+    /** True when the first factor succeeded (OAuth or credentials) but a
+     *  required MFA code has not yet been verified this session. See the
+     *  jwt() callback above and proxy.ts. */
+    mfa_pending?: boolean;
   }
 }
 
 declare module "@auth/core/jwt" {
   interface JWT {
     id: string;
+    mfa_pending?: boolean;
+    mfa_token_version?: number;
   }
 }

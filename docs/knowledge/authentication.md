@@ -10,8 +10,9 @@ The auth stack is **Auth.js v5** (`next-auth@5.0.0-beta`) on top of
 Credentials and OAuth are configured (see "Session strategy" below).
 The adapter still writes `User` / `Account` rows on OAuth sign-in for
 identity stability, just not `Session` rows. MFA / TOTP is shipped for
-the credentials provider (opt-in per user, see `lib/mfa/`); an OAuth
-MFA gate and admin-mandated MFA are not in scope for this iteration.
+both the credentials provider and the OAuth path (opt-in per user, see
+`lib/mfa/` and "MFA on the OAuth path" below); admin-mandated MFA is
+not in scope for this iteration.
 
 ---
 
@@ -220,6 +221,88 @@ a brand-new domain user.)
 
 ---
 
+## MFA on the OAuth path
+
+MFA applies to **every interactive login provider**, not just
+Credentials. This wasn't always true: through S7, `mfa_enabled` was
+only checked inside `CredentialsProvider.authorize()` (auth.ts). An
+SSO-provisioned user (`password === null`, so the credentials↔OAuth
+collision guard in `signIn()` never fires for them — see "First-time
+SSO sign-in" above) with MFA enabled could sign in via Google and land
+in a fully authenticated session with the second factor never checked.
+Fixed in S8 (cmd_527).
+
+**Mechanism — `mfa_pending` on the JWT, enforced by `proxy.ts`:**
+
+```
+OAuth sign-in completes
+  → jwt() callback: account.provider !== "credentials" && user.mfa_enabled
+    → token.mfa_pending = true
+  → session() callback exposes session.mfa_pending
+
+proxy.ts, every request
+  → req.auth.mfa_pending && path !== /mfa-challenge
+    → redirect to /mfa-challenge?callbackUrl=<original path>
+
+/mfa-challenge (app/[locale]/mfa-challenge/)
+  → user submits a TOTP or recovery code (verifyMfaCode() — same
+    TOTP→recovery fallback the credentials path uses)
+  → on success: unstable_update({ mfa_pending: false })
+  → jwt() callback (trigger: "update") clears the flag
+  → full page navigation (window.location, not the client router — see
+    the page's handleSubmit comment) to the original destination
+```
+
+Credentials sign-in does **not** set `mfa_pending`: `authorize()`
+already requires a valid code before a JWT is ever minted, so there's
+nothing left to challenge.
+
+**Session-persistence gap — `mfa_token_version`:** enabling MFA does
+not, by itself, revoke an already-active JWT (JWT strategy has no
+server-side session table to delete a row from). Without a fix, a user
+with a long-lived session could enable MFA and still ride the
+pre-existing cookie unchallenged for up to `JWT_MAX_AGE` (default 30
+days) — for either provider, not just OAuth. `user.mfa_token_version`
+(`Int @default(0)`) closes this: `completeEnrollment()`
+(`lib/mfa/enrollment.ts`) increments it when MFA is enabled; the
+`jwt()` callback snapshots the version into the token at sign-in and
+re-compares it against the DB on **every** subsequent session read (the
+`account`-less branch — see auth.ts). A mismatch re-arms `mfa_pending`
+immediately instead of waiting for the token to expire.
+
+**Cost/trade-off**: the version re-check is one indexed primary-key
+lookup on every authenticated request (not just MFA-enabled users,
+since there's no cheaper way to know a user *doesn't* have MFA without
+asking the DB) — the same cost class as the authz permission cache this
+app already pays for (`lib/authz.ts`), but without that cache's TTL:
+correctness here means checking on every request, not a stale window.
+Acceptable for a generated-app baseline; revisit with caching (careful —
+caching would reintroduce the exact revocation delay this field exists
+to close) if it shows up in profiling for a specific deployment.
+
+**API keys are unaffected by any of this.** `authenticateApiKey()`
+(`lib/api-auth.ts`) has no MFA check by design — API keys are
+machine-to-machine, long-lived credentials with their own secret; MFA
+is an interactive-login concept. This boundary is intentional, not a
+gap.
+
+**Testing without real Google credentials**: `auth.ts` registers an
+additional CredentialsProvider under `id: "google"` when
+`MOCK_GOOGLE_OAUTH_TEST=true` (set only in a gitignored
+`.env.test.local`, never in a committed env file). Auth.js sets
+`account.provider = provider.id` for any Credentials-shaped provider
+regardless of its `id`, so this reaches the exact same OAuth branch of
+`signIn()`/`jwt()` a real Google sign-in would, via a real HTTP POST to
+`/api/auth/callback/google` — with zero outbound calls to Google and
+zero real Google credentials. See `cypress/e2e/auth/mfa.cy.ts`
+(`mockGoogleSignIn()`) for the test-side contract. A `NODE_ENV==='test'`
+condition alone cannot gate this: `next build` bakes
+`NODE_ENV=production` into the server regardless of the runtime env
+(see `docs/knowledge/testing-cypress.md`), so the dedicated
+`MOCK_GOOGLE_OAUTH_TEST` flag is required instead.
+
+---
+
 ## Reading the session on the server
 
 Auth.js v5 replaces v4's `getServerSession(authOptions)` with a single
@@ -296,8 +379,8 @@ other change is needed.
 
 The following are explicitly out of scope for the current implementation:
 
-- **Server-side revocation for credentials users**: Not implemented. JWT cookie is self-contained; rotating `AUTH_SECRET` is the only global invalidation. Custom `adapter.createSession()` shim deferred. See `auth.ts` `authorize()`.
-- **MFA / TOTP**: Shipped in v1 (S5 phase 5a) for credentials provider, opt-in per user. OAuth MFA gate and admin-mandated MFA deferred. See `lib/mfa/crypto.ts`, `auth.ts`.
+- **Server-side revocation for credentials users**: Not implemented for sign-in itself — a stolen JWT cookie is self-contained and rotating `AUTH_SECRET` is the only global invalidation. Custom `adapter.createSession()` shim deferred. See `auth.ts` `authorize()`. (MFA-state revocation is handled separately — see "MFA on the OAuth path" below.)
+- **MFA / TOTP**: Shipped in v1 (S5 phase 5a) for the credentials provider, opt-in per user. Shipped for the OAuth path too as of S8 (cmd_527) — see "MFA on the OAuth path" below. Admin-mandated MFA is still deferred.
 - **Account linking UI**: Shipped in v1 (S7). `/setting/accounts` lists and connects/detaches OAuth providers; cross-email linking deferred. See `lib/account-link/`, `auth.ts`.
 - **Audit-log table**: Not implemented. Auth events log to `console.info` only. Prisma model with role/permission hooks deferred.
 - **Rate limiting on `/api/auth/*`**: Not implemented. Planned: Next.js proxy + Upstash Redis.

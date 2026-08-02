@@ -48,6 +48,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   are explicitly labeled templates requiring legal review and
   deployment-specific `[PLACEHOLDER]` values before real use.
 
+### Security
+- **Enforce MFA on the Google OAuth sign-in path** (cmd_527) — previously,
+  `mfa_enabled` was only checked inside `CredentialsProvider.authorize()`,
+  so an SSO-provisioned user (`password === null`) with MFA enabled could
+  sign in via Google and reach a fully authenticated session without ever
+  being asked for a TOTP or recovery code. `auth.ts`'s `jwt()` callback now
+  sets `mfa_pending` on any non-credentials sign-in for an `mfa_enabled`
+  user; `proxy.ts` redirects every protected route to a new
+  `/mfa-challenge` page until it clears. A new `user.mfa_token_version`
+  column closes a related session-persistence gap (enabling MFA didn't
+  previously revoke an already-active JWT). See
+  `docs/knowledge/authentication.md` "MFA on the OAuth path".
+
 ## [3.0.0] - 2026-07-30
 
 > Consolidates the feature areas added since 2.0.0: GCP Cloud Run deployment,
