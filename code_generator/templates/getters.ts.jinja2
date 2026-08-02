@@ -18,8 +18,7 @@ import { resolveVirtualColumns } from '@/lib/{{ parent }}/virtual_resolvers';
 import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
 {% endif %}
 {% if comment_has_mention %}
-import { decodeMentions, extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
-import { getTranslations } from 'next-intl/server';
+import { extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
 {% endif %}
 import { filterAutocompleteOptions, type AutocompleteFilterContext } from '@/lib/{{ parent }}/autocomplete_filter';
 import { filterListQuery } from '@/lib/{{ parent }}/list_filter';
@@ -83,24 +82,16 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     return null;
   }
 
-{% if named_constants and has_commentable and comment_has_mention %}
-  // Resolve @[user_id:<id>] mentions to display names before this row crosses
-  // into FormView (client component) — the raw id must never reach the UI, and
-  // an unresolved id (anonymized/deleted user) falls back to a placeholder
-  // inside decodeMentions() itself (gdpr-design.md Section 4.2).
-  const _rawComments = {{ parent_camel }}.{{ commentable_rel_name }}?.comments ?? [];
-  const _mentionUserIds = new Set<string>();
-  for (const c of _rawComments) {
-    if (c.creator_id) _mentionUserIds.add(c.creator_id);
-    for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
-  }
-  const _mentionUsers = _mentionUserIds.size
-    ? await prisma.user.findMany({ where: { id: { in: [..._mentionUserIds] } }, select: { id: true, name: true } })
-    : [];
-  const _mentionUserContext: UserContext = Object.fromEntries(_mentionUsers.map((u) => [u.id, u.name]));
-  const _tCommon = await getTranslations('Common');
-{% endif %}
 {% if named_constants and has_commentable %}
+  // NOTE (cmd_522c): `message` here is the RAW stored string — @[user_id:<id>]
+  // markers intact, never decoded to plain names server-side in this shared
+  // getter. get{{ parent_pascal }}Detail() is consumed both by the REST API
+  // route (which decodes to plain text for its JSON contract — see
+  // api_detail_route.ts.jinja2) and by get{{ parent_pascal }}DetailPageData()
+  // (which exposes the raw text + a mentionUserContext id→name map to
+  // FormView, so <MentionText> can render per-mention links). Decoding here
+  // would destroy the ids MentionText needs and force the two consumers to
+  // diverge some other way.
   const _commentable = {{ parent_camel }}.{{ commentable_rel_name }} ? {
     ...{{ parent_camel }}.{{ commentable_rel_name }},
     comments: {{ parent_camel }}.{{ commentable_rel_name }}.comments.map((c) => {
@@ -114,11 +105,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
         },
         [],
       );
-{% if comment_has_mention %}
-      return { ...rest, message: decodeMentions(rest.message, _mentionUserContext, _tCommon('deletedUser')), reactionCounts, myReactionTypes: [] as ({{ reaction_value_type }})[] };
-{% else %}
       return { ...rest, reactionCounts, myReactionTypes: [] as ({{ reaction_value_type }})[] };
-{% endif %}
     }),
   } : {{ parent_camel }}.{{ commentable_rel_name }};
 {% endif %}
@@ -208,7 +195,35 @@ export async function get{{ parent_pascal }}DetailPageData(id: string, operation
   // rather than baked into the row itself, since it reflects the *viewer's*
   // permissions on the `user` model, not any property of {{ parent }}.
   const { permissions: _mentionUserPerms } = await getModelPermissions('user', userId ?? null);
-  return { {{ parent_camel }}, userPermissions: await toPermissions(resolved), canViewUserProfile: _mentionUserPerms.read };
+  // mentionUserContext (cmd_522c): id → display name map for every user
+  // referenced (as creator or @mention) in this row's comment thread(s) —
+  // built here (not inside get{{ parent_pascal }}Detail()) so it stays out of
+  // the REST API's JSON contract and only reaches the page/FormView path.
+  const _mentionUserIds = new Set<string>();
+{% if named_constants and has_commentable %}
+  for (const c of {{ parent_camel }}?.{{ commentable_rel_name }}?.comments ?? []) {
+    if (c.creator_id) _mentionUserIds.add(c.creator_id);
+    for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
+  }
+{% endif %}
+{% for child in children_raw %}
+{% if child.output_type == 'comments' %}
+  for (const c of {{ parent_camel }}?.{{ child.property_name }} ?? []) {
+    if (c.creator_id) _mentionUserIds.add(c.creator_id);
+    for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
+  }
+{% endif %}
+{% endfor %}
+  const _mentionUsersForPage = _mentionUserIds.size
+    ? await prisma.user.findMany({ where: { id: { in: [..._mentionUserIds] } }, select: { id: true, name: true } })
+    : [];
+  const mentionUserContext: UserContext = Object.fromEntries(_mentionUsersForPage.map((u) => [u.id, u.name]));
+  return {
+    {{ parent_camel }},
+    userPermissions: await toPermissions(resolved),
+    canViewUserProfile: _mentionUserPerms.read,
+    mentionUserContext,
+  };
 {% else %}
   return { {{ parent_camel }}, userPermissions: await toPermissions(resolved) };
 {% endif %}

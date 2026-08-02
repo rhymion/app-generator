@@ -2834,6 +2834,17 @@ def spec_context(
             'pascal': to_pascal_case(child_name),
         })
 
+    # comment_has_mention (cmd_522c): the shared `comment` model has ≥1
+    # x-mention: true field AND this entity actually has a comment thread —
+    # mirrors build_context.py's/context.py's identical computation. Drives
+    # the @mention picker/link UI scenario appended to the "Add comment"
+    # step below.
+    _comment_def_for_mention = _raw_def('comment', schema)
+    comment_has_mention = bool(comment_children_data) and any(
+        isinstance(fp, dict) and fp.get('x-mention') is True
+        for fp in (_comment_def_for_mention.get('properties') or {}).values()
+    )
+
     # Section 3.1: optional fill commands (8-space indent)
     # When deps are available, include optional autocomplete fields too; otherwise omit them.
     use_deps_in_3_1 = has_deps and (can_list is not False)
@@ -3031,6 +3042,7 @@ def spec_context(
         'datagrid_children_data': datagrid_children_data,
         'list_children_data': list_children_data,
         'comment_children_data': comment_children_data,
+        'comment_has_mention': comment_has_mention,
         'use_deps_in_3_1': use_deps_in_3_1,
         'opt_fill_cmds_3_1': opt_fill_cmds_3_1,
         'opt_clear_cmds_3_2': opt_clear_cmds_3_2,

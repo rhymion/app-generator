@@ -199,6 +199,12 @@ export type FormViewProps = Readonly<{
     updater?: { id: string; name: string } | null;
   };
   permissions?: ModelPermissions;
+{% if comment_has_mention %}
+  /** Whether the viewer may link mentioned users' names to their profile page (cmd_522). */
+  canViewUserProfile?: boolean;
+  /** Maps mentioned user id → display name, for MentionText (cmd_522). */
+  mentionUserContext?: Record<string, string>;
+{% endif %}
 {% if entity_view_components or entity_edit_components %}
   currentUserRoleIds?: string[];
   currentUserId?: string | null;

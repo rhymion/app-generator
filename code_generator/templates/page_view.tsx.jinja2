@@ -19,16 +19,16 @@ export default async function View{{ parent_pascal }}Page({ params }: {{ parent_
 
 async function {{ parent_pascal }}ViewContent({ id }: { id: string }) {
 {% if entity_view_components %}
-  const [{ {{ parent_camel }}, userPermissions }, currentUserRoleIds, currentUserId] = await Promise.all([
+  const [{ {{ parent_camel }}, userPermissions{% if comment_has_mention %}, canViewUserProfile, mentionUserContext{% endif %} }, currentUserRoleIds, currentUserId] = await Promise.all([
     get{{ parent_pascal }}DetailPageData(id),
     getUserRoleIds(),
     getSessionUserId(),
   ]);
 {% else %}
-  const { {{ parent_camel }}, userPermissions } = await get{{ parent_pascal }}DetailPageData(id);
+  const { {{ parent_camel }}, userPermissions{% if comment_has_mention %}, canViewUserProfile, mentionUserContext{% endif %} } = await get{{ parent_pascal }}DetailPageData(id);
 {% endif %}
   if (!{{ parent_camel }}) {
     notFound();
   }
-  return <FormView src={{ '{' }}{{ parent_camel }}{{ '}' }} permissions={userPermissions}{% if entity_view_components %} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId}{% endif %} />;
+  return <FormView src={{ '{' }}{{ parent_camel }}{{ '}' }} permissions={userPermissions}{% if comment_has_mention %} canViewUserProfile={canViewUserProfile} mentionUserContext={mentionUserContext}{% endif %}{% if entity_view_components %} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId}{% endif %} />;
 }
