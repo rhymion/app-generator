@@ -6,7 +6,7 @@ import { getModelPermissions, assertPermission, canAccess{% if should_filter_by_
 import { handleApiError } from '@/lib/api-auth';
 import { unescapeImportValue } from '@/lib/_csv';
 import { generateImportToken, verifyImportToken } from '@/lib/_import';
-{% if should_filter_by_org %}
+{% if should_filter_by_org or any_dotted_fk_needs_org_filter %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
 
@@ -119,7 +119,7 @@ export async function POST(request: NextRequest) {
 
     const errors: ImportRowError[] = [];
     const actions: PendingAction[] = [];
-{% if should_filter_by_org %}
+{% if should_filter_by_org or any_dotted_fk_needs_org_filter %}
     const _importAssocOrgs = await getAssociatedOrganizations(actorId);
     const _importOrgIds = _importAssocOrgs.map((o) => o.id);
 {% endif %}
@@ -142,18 +142,8 @@ export async function POST(request: NextRequest) {
 {% else %}
       {
 {% endif %}
-{% if should_filter_by_org %}
-        // TODO(cmd_515 dotted FK org filter gap, tracked separately from cmd_520):
-        // this lookup is NOT scoped by the actor's organization — a dotted FK
-        // value (e.g. "{{ spec.lookup_field }}") can resolve to a
-        // {{ spec.lookup_entity }} row outside the actor's org if the natural-key
-        // value collides across organizations. cmd_520 deliberately does not add
-        // a test asserting the org-filtered (currently-incorrect) behavior here —
-        // see docs/knowledge/permission-e2e-test-design.md OQ-2. Fix belongs in
-        // the separate cmd that scopes this findMany() by organization_id.
-{% endif %}
         const _{{ spec.var_prefix }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
-          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val },
+          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% endif %} },
           select: { id: true },
         });
         if (_{{ spec.var_prefix }}_rows.length === 0) {

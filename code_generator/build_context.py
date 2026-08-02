@@ -1302,6 +1302,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             # Falls back to the prefix when x-relationship/target is absent
             # (keeps prior behavior for any not-yet-annotated schema).
             _lookup_entity = _fk_prop.get('x-relationship', {}).get('target', _fk_entity)
+            # cmd_521: same discriminant as should_filter_by_org (cmd_515) —
+            # applied to the dotted FK's LOOKUP entity rather than the parent
+            # model. A lookup entity without organization_id is system-global
+            # (e.g. 'role'); filtering it would break every dotted lookup
+            # against it (all rows are legitimately visible org-wide).
+            _lookup_entity_def = (
+                schema['definitions'].get(f'__{_lookup_entity}', {})
+                or schema['definitions'].get(_lookup_entity, {})
+            )
+            _lookup_has_org = 'organization_id' in _lookup_entity_def.get('properties', {})
+            _lookup_entity_filter_by_org = _lookup_has_org and _lookup_entity not in ('organization', 'user')
             import_key_specs.append({
                 'raw':                  _raw,
                 'is_dotted':            True,
@@ -1312,6 +1323,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'lookup_field':         _fk_field,                      # e.g. 'name'
                 'result_col':           _fk_col,                        # e.g. 'role_id'
                 'fk_nullable':          _fk_nullable,
+                'lookup_entity_filter_by_org': _lookup_entity_filter_by_org,
             })
         else:
             import_key_specs.append({
@@ -1322,7 +1334,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'lookup_field':  _raw,
                 'result_col':    _raw,
                 'fk_nullable':   False,
+                'lookup_entity_filter_by_org': False,
             })
+
+    # cmd_521: whether ANY dotted-FK lookup in this route needs the
+    # actor's org id list — drives the import/computation gates in
+    # api_import_route.ts.jinja2 (they must fire even when the parent
+    # model itself is not should_filter_by_org, e.g. a system-global
+    # parent with a dotted FK into an org-scoped lookup entity).
+    any_dotted_fk_needs_org_filter = any(
+        s['lookup_entity_filter_by_org'] for s in import_key_specs if s['is_dotted']
+    )
 
     # _create_feasible: True if all required non-system fields can be provided via CSV.
     # Required fields that are NOT in export_scalar_fields and NOT resolvable via
@@ -2303,6 +2325,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         import_can_create=import_can_create,
         import_can_update=import_can_update,
         import_key_specs=import_key_specs,
+        any_dotted_fk_needs_org_filter=any_dotted_fk_needs_org_filter,
         import_update_fields=import_update_fields,
         import_field_specs=import_field_specs,
         has_assignee_id=has_assignee_id,
