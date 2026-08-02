@@ -39,7 +39,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - Account linking (multiple OAuth providers per user)
 - Role-based access control (per-model CRUD permissions)
 - Creator/Assignee-based access control
-- Organization-based access scoping — entities with organization_id are automatically filtered to organizations the user belongs to
+- Organization-based access scoping — entities with organization_id are automatically filtered to organizations the user belongs to, including CSV import's dotted natural-key FK lookups (e.g. `role.name`) when the lookup target is itself organization-scoped; see [`docs/knowledge/csv-import-dotted-fk-org-filter.md`](docs/knowledge/csv-import-dotted-fk-org-filter.md)
 - Graceful degradation for foreign-key read-permission gaps — if a role can create/edit an entity but lacks read on one of its FK targets (e.g. can manage `approval_flow` but not `role`), the affected field renders disabled instead of crashing the page; see [`docs/knowledge/fk-read-permission-graceful-degradation.md`](docs/knowledge/fk-read-permission-graceful-degradation.md) when assigning permissions
 
 ### Built-in Systems

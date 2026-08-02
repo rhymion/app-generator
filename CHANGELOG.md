@@ -59,6 +59,17 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   are explicitly labeled templates requiring legal review and
   deployment-specific `[PLACEHOLDER]` values before real use.
 
+### Fixed
+- **CSV import dotted-FK org filter gap** (cmd_521, security): a dotted `x-import-key` lookup
+  (e.g. `role.name`) on an organization-scoped entity's CSV import route was not itself
+  organization-filtered — a same-named row owned by a different organization could resolve and
+  get linked to the importing actor's record. The dotted-FK lookup is now org-filtered whenever
+  its *target* entity has `organization_id`, independently of the parent entity's own scoping;
+  system-global lookup targets (e.g. `role`, no `organization_id`) are correctly left unfiltered.
+  Covers both CREATE and UPDATE (shared resolution path); export was already correctly scoped.
+  Template-layer change only, no Prisma schema change — regenerate to pick it up, no migration
+  needed. See `docs/knowledge/csv-import-dotted-fk-org-filter.md`.
+
 ## [3.0.0] - 2026-07-30
 
 > Consolidates the feature areas added since 2.0.0: GCP Cloud Run deployment,

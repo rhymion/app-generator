@@ -1165,6 +1165,148 @@ class TestImportKeySpecsAliasedFkLookup:
 
 
 # ---------------------------------------------------------------------------
+# cmd_521: dotted x-import-key lookup entities must be org-filtered when the
+# LOOKUP entity itself has organization_id — independently of whether the
+# lookup entity happens to also be the discriminant used for the PARENT
+# model (should_filter_by_org). A dotted key into a system-global entity
+# (e.g. role, no organization_id) must NOT be filtered, or every dotted
+# lookup against it breaks (cmd_515's original gap + the trap it left).
+# ---------------------------------------------------------------------------
+
+class TestImportKeySpecsLookupEntityFilterByOrg:
+    SCHEMA = {
+        "definitions": {
+            "organization": {
+                "type": "object",
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "role": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "department": {
+                "type": "object",
+                "required": ["id", "name", "organization_id"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "organization_id": _fk_field("organization", label="name"),
+                },
+            },
+            "ticket": {
+                "type": "object",
+                "required": ["id", "name", "organization_id"],
+                "x-import-key": ["name", "role.name", "department.name"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "organization_id": _fk_field("organization", label="name"),
+                    "role_id": _fk_field("role", nullable=True, label="name"),
+                    "department_id": _fk_field("department", nullable=True, label="name"),
+                },
+            },
+        }
+    }
+
+    ENTITY = _entity(model="ticket")
+
+    def _specs_by_raw(self):
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        return {s["raw"]: s for s in ctx["import_key_specs"] if s["is_dotted"]}
+
+    def test_org_scoped_lookup_entity_is_filtered(self):
+        """department has organization_id → its dotted lookup must be
+        org-scoped, or a cross-org natural-key collision resolves to a
+        foreign-org row (the cmd_521 leak)."""
+        specs = self._specs_by_raw()
+        assert specs["department.name"]["lookup_entity_filter_by_org"] is True
+
+    def test_system_global_lookup_entity_is_not_filtered(self):
+        """role has no organization_id → filtering it would return zero
+        rows for every dotted role.* lookup (the trap cmd_521's design
+        doc calls out — role is legitimately visible org-wide)."""
+        specs = self._specs_by_raw()
+        assert specs["role.name"]["lookup_entity_filter_by_org"] is False
+
+    def test_any_dotted_fk_needs_org_filter_true_when_any_spec_needs_it(self):
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        assert ctx["any_dotted_fk_needs_org_filter"] is True
+
+    def test_any_dotted_fk_needs_org_filter_false_when_no_lookup_entity_is_org_scoped(self):
+        """Non-regression: a parent with only system-global dotted lookups
+        (no org-scoped lookup entity in the mix) must not gain the
+        _importOrgIds computation/import at all."""
+        schema = {
+            "definitions": {
+                "role": self.SCHEMA["definitions"]["role"],
+                "permission": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "x-import-key": ["name", "role.name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "role_id": _fk_field("role", nullable=True, label="name"),
+                    },
+                },
+            }
+        }
+        ctx = build_context(_entity(model="permission"), schema)
+        assert ctx["any_dotted_fk_needs_org_filter"] is False
+
+    def test_organization_and_user_lookup_targets_are_excluded_even_with_organization_id(self):
+        """Same exclusion list as should_filter_by_org (cmd_515): a dotted
+        key that resolves to 'organization' or 'user' is never filtered by
+        this mechanism, even though both models plausibly have an id an
+        org-filter could apply to — filtering 'organization' rows by
+        organization_id would be nonsensical (self-referential), and
+        'user' membership works differently (org roster, not row-owned)."""
+        schema = {
+            "definitions": {
+                # Both 'organization' and 'user' are given their own
+                # organization_id property here (semantically odd, but
+                # deliberate) so this test isolates the name-based exclusion
+                # itself — proving it fires independently of the has_org_id
+                # check, not merely because these two happen to lack the
+                # column in a more realistic schema.
+                "organization": {
+                    "type": "object",
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", nullable=True, label="name"),
+                    },
+                },
+                "user": {
+                    "type": "object",
+                    "required": ["id", "name", "organization_id"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", label="name"),
+                    },
+                },
+                "ticket": {
+                    "type": "object",
+                    "required": ["id", "name", "organization_id"],
+                    "x-import-key": ["name", "organization.name", "user.name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", label="name"),
+                        "user_id": _fk_field("user", nullable=True, label="name"),
+                    },
+                },
+            }
+        }
+        ctx = build_context(_entity(model="ticket"), schema)
+        specs = {s["raw"]: s for s in ctx["import_key_specs"] if s["is_dotted"]}
+        assert specs["organization.name"]["lookup_entity_filter_by_org"] is False
+        assert specs["user.name"]["lookup_entity_filter_by_org"] is False
+
+
+# ---------------------------------------------------------------------------
 # DP-2 (cmd_394 §5, Option D): export display_col names the actual labelField
 # instead of always assuming "_name". Zero-breaking-change on any schema where
 # every FK labelField happens to be 'name' (true of every currently
