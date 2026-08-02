@@ -18,6 +18,15 @@ function escapeRegExp(value: string): string {
 }
 
 /**
+ * @deprecated (cmd_522) No longer called from the save path. The client-side
+ * MentionInput picker inserts @[user_id:<id>] markers directly into the
+ * textarea value, so add/updateXxxComment() actions store the raw client
+ * text unchanged — inference by longest-name-first matching is no longer
+ * needed there. Kept for backward compatibility (any out-of-generator code
+ * that may still reference it) and for unit tests exercising the inference
+ * logic directly. Hand-typed "@Jane" (bypassing the picker) is stored as
+ * literal text and will NOT be encoded or matched by decodeMentions().
+ *
  * Converts @username patterns to @[user_id:<id>] storage format before saving to DB.
  * Matches against the known display names in userLookup directly (rather than a
  * fixed [\w.]+ charset) so names containing non-ASCII characters (e.g. Japanese)

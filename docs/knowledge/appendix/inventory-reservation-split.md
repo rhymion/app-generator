@@ -2,9 +2,11 @@
 
 > **Source**: Extracted from `docs/knowledge/schema-yaml-configuration.md` Appendix.
 > This page summarizes the **generator mechanism as it currently behaves**. For the design
-> rationale and decision history behind these mechanisms, see the top-level design docs:
-> `docs/reservation-receiving-redesign.md`, `docs/split-generalization-design.md`,
-> `docs/generic-primitives-redesign.md`, `docs/reservation-split-approval-reject-design.md`.
+> rationale and decision history behind these mechanisms, see the `planning/` design docs in the
+> separate `rhymion/app-generator-project-docs` repository (not part of this repo — these design
+> docs were never tracked here): `planning/reservation-receiving-redesign.md`,
+> `planning/split-generalization-design.md`, `planning/generic-primitives-redesign.md`,
+> `planning/reservation-split-approval-reject-design.md`.
 
 The reservation/split/receiving system is a set of **generic primitives** — `x-reservation`,
 `x-splittable`, `x-ledger-source` — that any entity can opt into. They are not inventory-specific:

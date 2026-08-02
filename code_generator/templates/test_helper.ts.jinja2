@@ -4,6 +4,9 @@ import { TEST_CREDENTIALS } from '../test-credentials';
 {% if needs_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
+{% if has_mention_comments %}
+import { notify } from '@/lib/_notifier';
+{% endif %}
 
 async function getTestUser() {
   const testUser = await prisma.user.findUnique({
@@ -499,10 +502,22 @@ export async function populate{{ pascal }}WithMentionUser() {
       creator_id: testUser.id,
     },
   });
+  // cmd_522 (M2): this helper inserts the comment via direct prisma (like
+  // M1 above) rather than through the generated add{{ pascal }}Comment()
+  // action, so it must fire the mention notification itself — mirroring
+  // what that action's mention-notify block does on the real save path.
+  await notify(mentionedUser.id, 'mentioned_in_comment', {
+    title: 'You were mentioned in a {{ pascal }} comment',
+    href: `/{{ parent }}/view/${record.id}`,
+    commentSnippet: comment.message.slice(0, 80),
+  });
   return {
     record,
     mentionedUser: JSON.parse(JSON.stringify(mentionedUser)),
     comment: JSON.parse(JSON.stringify(comment)),
+    // Convenience aliases matching the M2 test's expected shape.
+    parentId: record.id,
+    mentionedUserId: mentionedUser.id,
   };
 }
 {% endif %}

@@ -41,11 +41,15 @@ mechanism the pre-existing `import_batch2.cy.ts` custom spec already used for th
 New `describe('Cross-organization isolation (G3)', ...)` block, gated on
 `{% if should_filter_by_org %}` (only entities with an `organization_id` FK):
 
-- **G3.1** — POST with a foreign `organization_id` in the body is rejected (`{% if can_new %}`).
-  Asserts `status >= 400` only (not an exact code): the underlying `service.ts.jinja2`
-  `throw new Error('Organization access denied')` isn't wrapped in `ApiError`, so
-  `handleApiError()` currently falls through to a generic 500 rather than 400/403. That's a
-  pre-existing API-quality gap, out of scope for this cmd — see the comment at the assertion.
+- **G3.1** — POST with a foreign `organization_id` in the body returns 404, existence hidden
+  (`{% if can_new %}`). **Fixed by cmd_523**: `service.ts.jinja2`'s `add<Parent>`/`update<Parent>`
+  org-membership checks now `throw new ApiError(404, 'Not found')` (imported from
+  `@/lib/api-auth`) instead of a plain `Error('Organization access denied')` — `handleApiError()`
+  maps `ApiError` to its explicit `statusCode`, so this now returns the same 404 + generic
+  `{"error":"Not found"}` body as G3.2/G3.3, instead of falling through to a 500 that echoed the
+  literal string "Organization access denied" (a cross-org existence leak). The assertion is now
+  a strict `expect(res.status).to.eq(404)` plus `expect(JSON.stringify(res.body)).to.not.match(/organization/i)`,
+  matching G3.2/G3.3's style.
 - **G3.2** — GET on a row in a foreign org returns 404, not 403 (existence hidden) (`{% if can_view %}`).
 - **G3.3** — PUT on a row in a foreign org returns 404 (`{% if can_edit %}`).
 

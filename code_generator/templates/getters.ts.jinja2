@@ -202,7 +202,16 @@ export async function get{{ parent_pascal }}DetailPageData(id: string, operation
 {% endif %}
   const resolved = await resolvePermissions(basePermissions, {{ parent_camel }}, userId ?? '');
   await assertPermission(resolved, operation, '{{ parent }}');
+{% if comment_has_mention %}
+  // canViewUserProfile (cmd_522): whether the viewer may link mentioned users'
+  // names to their profile page — passed to the comment display component
+  // rather than baked into the row itself, since it reflects the *viewer's*
+  // permissions on the `user` model, not any property of {{ parent }}.
+  const { permissions: _mentionUserPerms } = await getModelPermissions('user', userId ?? null);
+  return { {{ parent_camel }}, userPermissions: await toPermissions(resolved), canViewUserProfile: _mentionUserPerms.read };
+{% else %}
   return { {{ parent_camel }}, userPermissions: await toPermissions(resolved) };
+{% endif %}
 }
 
 export async function get{{ parent_pascal }}NewPageAccessCheck() {

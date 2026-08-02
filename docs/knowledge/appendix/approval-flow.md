@@ -4,7 +4,7 @@
 > For the main schema configuration reference, see the parent document.
 
 The approval system is a set of standard entities built into the base schema. Any entity can be
-made approvable by adding a one-to-one relationship to `approvable` and mounting the
+made approvable by adding a `one-to-one_bridge` relationship to `approvable` and mounting the
 `ApprovalSection` custom component.
 
 ### 16.1 System entities
@@ -16,7 +16,7 @@ base `code_generator/json_schema.yaml`):
 |---|---|
 | `approvable` | Bridge record; one-to-one parent for any entity that requires approval |
 | `approval_flow` | Configuration: which entity needs approval, which role approves, sequencing |
-| `approval_request` | One per (`approvable`, `approval_flow`) pair; tracks Pending/Approved/Rejected state |
+| `approval_request` | One per (`approvable`, `approval_flow`) pair; tracks `pending`/`approved`/`rejected`/`terminal_rejected` state (§16.7) |
 | `approval_history` | Audit trail of every status transition on an `approval_request` |
 
 `approvable_detail` has all `x-generate` flags set to `false` — it is never shown as a standalone
@@ -35,10 +35,16 @@ leave_request:
       type: string
       pattern: "^c[a-z0-9]{24,}$"
       x-relationship:
-        type: one-to-one
+        type: one-to-one_bridge
         target: approvable
         labelField: id
 ```
+
+The relationship type is `one-to-one_bridge`, not the plain `one-to-one` used for a
+regular selector FK — `one-to-one_bridge` marks the FK as server-managed plumbing
+(auto-created alongside the parent, never user-selected), which is what excludes it
+from `get_parent_relationships()` while `get_one_to_one_rels()` still picks it up
+(`code_generator/helpers/schema_helpers.py:271-294`, `:346-358`).
 
 **Step 2 — detail entity**: include the resolved `approvable` object and mount `ApprovalSection`:
 
@@ -64,7 +70,7 @@ leave_request_detail:
 
 ### 16.3 What gets generated
 
-The generator detects the `one-to-one` relationship and extends the normal create path:
+The generator detects the `one-to-one_bridge` relationship and extends the normal create path:
 
 1. **`service.ts`** — pre-creates an `approvable` record inside the transaction and stores its
    `id` in `approvable_id`.
@@ -92,18 +98,31 @@ The generator detects the `one-to-one` relationship and extends the normal creat
 ### 16.4 Custom hook: `service_after_create.ts`
 
 The generator only creates the `approvable` bridge record. The approval requests themselves are
-created in the `afterCreate` custom hook:
+created in the `afterCreate` custom hook, emitted as a write-once stub
+(`code_generator/generate.py:603-606`, template
+`code_generator/templates/service_after_create_stub.ts.jinja2`) — generated once, never
+overwritten by a later `generate-code` run, so it's safe to hand-edit:
 
 ```typescript
-// lib/leave_request/service_after_create.ts
+// lib/leave_request/service_after_create.ts (code_generator/templates/service_after_create_stub.ts.jinja2:7-64)
 export async function afterCreate(tx, created, _data) {
-  const approvable = created.approvable as { id: string };
-  const creator = created.creator_id as string;
+  const approvable = created.approvable as { id: string } | null | undefined;
+  if (!approvable?.id) return;
+
+  const creatorId = created.creator_id as string | null | undefined;
+  const db = tx as Tx;
 
   // Find which roles the creator has
-  const creatorRoleIds = await (tx as Tx).user_roles.findMany(...)
+  let creatorRoleIds: string[] = [];
+  if (creatorId) {
+    const creator = await db.user.findUnique({
+      where: { id: creatorId },
+      select: { roles: { select: { id: true } } },
+    });
+    creatorRoleIds = creator?.roles.map((r) => r.id) ?? [];
+  }
 
-  const flows = await (tx as Tx).approval_flow.findMany({
+  const flows = await db.approval_flow.findMany({
     where: { entity_name: 'leave_request' },
   });
 
@@ -111,14 +130,17 @@ export async function afterCreate(tx, created, _data) {
     // Skip if creator doesn't have the required requestor role
     if (flow.requestor_role_id && !creatorRoleIds.includes(flow.requestor_role_id)) continue;
 
-    await (tx as Tx).approval_request.create({
-      data: { approvable_id: approvable.id, approval_flow_id: flow.id, status: 0 },
+    await db.approval_request.create({
+      data: { approvable_id: approvable.id, approval_flow_id: flow.id, status: 'pending' },
     });
   }
+  // ...also notifies every approver-role holder per created approval_request
+  // (notifyApprovalRequestCreated) — see the real template for the full body.
 }
 ```
 
-See `code-generation-custom-extensions.md` for the full `service_after_create.ts` extension point.
+`status` is a string enum value (`'pending'`), not the integer `0` — see §16.7. See
+`code-generation-custom-extensions.md` for the full `service_after_create.ts` extension point.
 
 ### 16.5 `approval_flow` configuration
 
@@ -141,20 +163,27 @@ generated). Three server actions are provided:
 
 | Action | Permission check | Result |
 |---|---|---|
-| `approveApprovalRequest(id, message?)` | User must have `approver_role_id` | Sets status → Approved |
-| `rejectApprovalRequest(id, message?)` | User must have `approver_role_id` | Sets status → Rejected |
-| `resubmitApprovalRequest(id, message?)` | Creator or user with `requestor_role_id` | Sets status → Pending |
+| `approveApprovalRequest(id, message?)` | User must have `approver_role_id` | Sets status → `approved` |
+| `rejectApprovalRequest(id, message?, options?)` | User must have `approver_role_id` | Sets status → `rejected`, or `terminal_rejected` if `isTerminalReject()` says so (§16.11) |
+| `resubmitApprovalRequest(id, message?)` | Creator or user with `requestor_role_id`; only from `rejected` (not `terminal_rejected`) | Sets status → `pending` |
 
 Each action creates an `approval_history` row recording `pre_status`, `post_status`, `message`,
 and `creator_id` (the acting user).
 
 ### 16.7 Prisma models required
 
+Verified against the generated `prisma/schema.prisma:168-236` (models trimmed to the fields
+this document discusses; indexes omitted):
+
 ```prisma
 model approvable {
-  id               String             @id @default(cuid())
+  id                String             @id @default(cuid())
+  creator_id        String?
+  creator           user?              @relation("ApprovableCreator", ...)
   approval_requests approval_request[]
-  leave_request    leave_request?
+  approved_at       DateTime?          // fire-once guard, §16.9/§16.11
+  rejection_reason  String?            // set by rejectApprovalRequest()'s optional `reason`
+  leave_request     leave_request?
 }
 
 model approval_flow {
@@ -175,13 +204,21 @@ model approval_flow {
   updater           user       @relation("ApprovalFlowUpdater", ...)
 }
 
+// prisma/schema.prisma:201-206
+enum ApprovalRequestStatus {
+  pending
+  approved
+  rejected
+  terminal_rejected
+}
+
 model approval_request {
-  id                  String             @id @default(cuid())
+  id                  String                @id @default(cuid())
   approvable_id       String
-  approvable          approvable         @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
+  approvable          approvable            @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
   approval_flow_id    String
-  approval_flow       approval_flow      @relation(fields: [approval_flow_id], references: [id])
-  status              Int                @default(0)   // 0=Pending 1=Approved 2=Rejected
+  approval_flow       approval_flow         @relation(fields: [approval_flow_id], references: [id])
+  status              ApprovalRequestStatus @default(pending)
   approval_histories  approval_history[]
 }
 
@@ -189,14 +226,28 @@ model approval_history {
   id                  String           @id @default(cuid())
   approval_request_id String
   approval_request    approval_request @relation(fields: [approval_request_id], references: [id], onDelete: Cascade)
-  pre_status          Int
-  post_status         Int
+  pre_status          Int              // legacy ordinal snapshot, NOT the ApprovalRequestStatus enum — see below
+  post_status         Int              // ditto
   message             String?
+  reason_kind         Int?             // 0=Customer 1=Internal — see §16.11
   created_at          DateTime         @default(now())
   creator_id          String
   creator             user     @relation("ApprovalHistoryCreator", ...)
 }
 ```
+
+**`status` is a string enum, not an integer.** `approval_request.status` is
+`ApprovalRequestStatus` (`pending` / `approved` / `rejected` / `terminal_rejected`), matching
+`code_generator/json_schema.yaml:338-343`'s `enum:` list for the field. Application code reads
+and writes the lower-case string values directly (e.g. `data: { status: 'approved' }` in
+`lib/approval_request/actions_core.ts:144`, `app/api/approval_request/[id]/approve/route.ts:35`).
+
+`approval_history.pre_status`/`post_status` are a **separate, still-integer** pair of columns —
+a legacy ordinal snapshot, out of scope for the string-enum migration. `statusOrdinal()` in
+`lib/approval_request/actions_core.ts:9-12` maps the enum back to its historical ordinal index
+(`['pending', 'approved', 'rejected', 'terminal_rejected']`) when a history row needs to record
+one; some call sites (e.g. the approve API route) just hard-code the known literal instead
+(`app/api/approval_request/[id]/approve/route.ts:44`, `pre_status: 0, post_status: 1`).
 
 ### 16.8 Data flow summary
 
@@ -210,30 +261,40 @@ User creates leave_request:
     → afterCreate(tx, created, data)      ← custom hook
         → queries approval_flows for entity_name = 'leave_request'
         → filters by requestor_role_id (if set)
-        → creates approval_request { approvable_id, approval_flow_id, status: 0 }
+        → creates approval_request { approvable_id, approval_flow_id, status: 'pending' }
 
 View/edit page renders ApprovalSection with:
   - approval_requests with status + approval_flow + approval_histories
-  - Approve/Reject buttons (shown if user has approver_role_id AND status=Pending AND preceded_by all Approved)
-  - Resubmit button (shown if status=Rejected AND user is creator or has requestor_role_id)
+  - Approve/Reject buttons (shown if user has approver_role_id AND status='pending' AND preceded_by all 'approved')
+  - Resubmit button (shown if status='rejected' AND user is creator or has requestor_role_id —
+    NOT offered for status='terminal_rejected', see §16.11)
 
 Approver clicks Approve:
   approveApprovalRequest(id)
     → checks user has approver_role_id
-    → updates approval_request.status = 1
-    → creates approval_history { pre_status: 0, post_status: 1, ... }
-    → dispatches on_approved events (see §16.9)
+    → updates approval_request.status = 'approved'
+    → creates approval_history { pre_status: 0, post_status: 1, ... }  (legacy Int columns, §16.7)
+    → if ALL of this approvable's approval_requests are now 'approved' AND approved_at is
+      still null: sets approved_at, dispatches on_approved events (see §16.9)
     → revalidates path
 ```
 
 ### 16.9 Post-approval event dispatch (`x-approval.on_approved`)
 
-Added in v1.5.0. When an entity schema includes `x-approval.on_approved`, the generator creates
-`lib/{entity}/on_approved_dispatch.ts` (overwritten on each `generate-code` run) and wires it
-into both the API route (`approve/route.ts`) and server action approval paths.
+Added in v1.5.0. When at least one entity schema includes `x-approval.on_approved`, the
+generator emits a single shared dispatch module,
+**`lib/approval_request/on_approved_dispatch.ts`** (overwritten on every `generate-code` run,
+built from every qualifying entity — not one file per entity), and wires it into both the API
+route (`approve/route.ts`) and server action approval paths
+(`code_generator/generate.py:1063-1135`, template `on_approved_dispatch.ts.jinja2`).
 
-Fire-once idempotency is guaranteed by `approvable.approved_at`: the dispatch runs only when
-`approved_at` is `null`, then sets it to the current timestamp in the same transaction.
+Fire-once idempotency is guaranteed by `approvable.approved_at`: the dispatch runs only once
+**all** of the approvable's `approval_request` rows have reached `status: 'approved'` (an
+approvable can carry more than one, e.g. a multi-step chain ordered by `preceded_by`/
+`followed_by`) **and** `approved_at` is still `null`, then sets `approved_at` to the current
+timestamp in the same transaction before dispatching
+(`lib/approval_request/actions_core.ts:160-178`,
+`app/api/approval_request/[id]/approve/route.ts:46-60`).
 
 #### Schema: `on_approved.set_fields`
 
@@ -254,8 +315,9 @@ preventing TypeScript build errors in the generated dispatch file.
 #### Schema: `on_approved.emit_hook`
 
 Generates `lib/{entity}/service_after_approve.ts` as a **once-stub** (written only when the file
-does not exist; never overwritten by `generate-code` re-runs). This is the safe extension point
-for custom post-approval logic.
+does not exist; never overwritten by `generate-code` re-runs — template
+`service_after_approve_stub.ts.jinja2`). This is the safe extension point for custom
+post-approval logic.
 
 ```yaml
 purchase_order:
@@ -264,59 +326,63 @@ purchase_order:
       emit_hook: true
 ```
 
-Generated stub (`lib/purchase_order/service_after_approve.ts`):
+Generated stub (`lib/purchase_order/service_after_approve.ts`, trimmed to the non-ledger case —
+`code_generator/templates/service_after_approve_stub.ts.jinja2:9-34`):
 
 ```typescript
-import type { Prisma } from "@prisma/client";
+import type { PrismaClient } from '@/app/generated/prisma/client';
 
-type Tx = Omit<Prisma.TransactionClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
+type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
-export async function afterApprove(tx: Tx, approvedId: string) {
-  // Custom post-approval logic here.
-  // approvedId = the purchase_order record id that was just approved.
+export async function afterApprove(
+  tx: Tx,
+  entityId: string,
+  approvableId: string,
+  approvedByUserId: string,
+): Promise<void> {
+  // TODO: implement post-approval effects here
 }
 ```
 
 #### Generated `on_approved_dispatch.ts`
 
+This is **one shared file** covering every entity that declares `x-approval.on_approved` — not
+one file per entity (see the correction above). Each qualifying entity gets its own
+`if (entityType === '...')` branch inside a single `dispatchOnApproved()` function
+(`code_generator/templates/on_approved_dispatch.ts.jinja2`):
+
 ```typescript
-// lib/purchase_order/on_approved_dispatch.ts  (generated — do not edit)
-export async function dispatchOnApproved(tx: Tx, approvedId: string) {
-  const record = await tx.approvable.findUnique({
-    where: { id: approvedId },
-    include: { purchase_order: true },
-  });
-  if (!record?.purchase_order || record.purchase_order.approvable?.approved_at) return;
+// lib/approval_request/on_approved_dispatch.ts  (generated — do not edit)
+import type { PrismaClient } from '@/app/generated/prisma/client';
 
-  // set_fields
-  await tx.purchase_order.update({
-    where: { id: record.purchase_order.id },
-    data: { status: 1 },
-  });
+type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
-  // set approved_at for idempotency
-  await tx.approvable.update({
-    where: { id: approvedId },
-    data: { approved_at: new Date() },
-  });
+import { afterApprove as PurchaseOrderAfterApprove } from '@/lib/purchase_order/service_after_approve';
 
-  // emit_hook
-  const { afterApprove } = await import("@/lib/purchase_order/service_after_approve");
-  await afterApprove(tx, record.purchase_order.id);
+export async function dispatchOnApproved(
+  tx: Tx,
+  entityType: string,
+  approvableId: string,
+  approvedByUserId: string,
+): Promise<void> {
+  if (entityType === 'purchase_order') {
+    const entity = await tx.purchase_order.findFirst({ where: { approvable_id: approvableId } });
+    if (!entity) return;
+
+    // set_fields (auto-generated from x-approval.on_approved.set_fields)
+    await tx.purchase_order.update({ where: { id: entity.id }, data: { status: 1 } });
+
+    // emit_hook
+    await PurchaseOrderAfterApprove(tx, entity.id, approvableId, approvedByUserId);
+    return;
+  }
+  // ...one branch per qualifying entity
 }
 ```
 
-#### Prisma model change
-
-`approvable` gains `approved_at DateTime?` for idempotency tracking:
-
-```prisma
-model approvable {
-  id               String             @id @default(cuid())
-  approved_at      DateTime?          // set by on_approved_dispatch; prevents re-firing
-  approval_requests approval_request[]
-}
-```
+Note the caller (`approveApprovalRequest()` / the approve API route, §16.8) — not this
+function — owns the `approvable.approved_at` fire-once check and the transaction; by the time
+`dispatchOnApproved` runs, `approved_at` has already been set.
 
 ### 16.10 Approval for embedded line children (`x-approval-lines`)
 
@@ -386,10 +452,11 @@ receiving_receipt_line:
         status: "rejected"
 ```
 
-`lib/{entity}/on_rejected_dispatch.ts` (generated, `templates/on_rejected_dispatch.ts.jinja2`)
-exposes `dispatchOnRejected(tx, entityType, approvableId, rejectedByUserId)`, called from the
-reject path after `approval_request.status` is updated, plus `isTerminalReject(entityType)` — a
-lookup against every entity marked `terminal: true`. Terminal rejection means the UI's Resubmit
+**`lib/approval_request/on_rejected_dispatch.ts`** — one shared, generated module (not one file
+per entity; generated, `code_generator/generate.py:1186-1215`, template
+`on_rejected_dispatch.ts.jinja2`) — exposes `dispatchOnRejected(tx, entityType, approvableId,
+rejectedByUserId)`, called from the reject path after `approval_request.status` is updated,
+plus `isTerminalReject(entityType)` — a lookup against every entity marked `terminal: true`. Terminal rejection means the UI's Resubmit
 button (§16.8) is not offered for that entity type; a rejection is final rather than
 returning to Pending. For terminal entities, dispatch reuses the same `approvable.approved_at`
 column as the fire-once guard (§16.9) — despite the name, it just means "final event already

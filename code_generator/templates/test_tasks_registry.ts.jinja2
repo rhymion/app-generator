@@ -115,5 +115,12 @@ export function getGeneratedTasks() {
       return JSON.parse(JSON.stringify(records));
     },
 {% endif %}
+{% if has_any_mention %}
+    async 'db:getNotificationsForUser'(userId: string) {
+      const { prisma } = require('./db-helpers');
+      const notifications = await prisma.notification.findMany({ where: { user_id: userId } });
+      return JSON.parse(JSON.stringify(notifications));
+    },
+{% endif %}
   };
 }

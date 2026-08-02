@@ -17,7 +17,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the public-path exclusion list (`/login`, `/register`, `/docs`, `/legal`, static assets) is
   unchanged and was re-verified to produce no redirect loop. See
   `docs/knowledge/unauthenticated-page-redirect.md`.
-
+- **`@mention` server-side support** (cmd_522, server side of a two-part feature —
+  client-side `MentionInput`/`MentionText` UI ships separately): a new schema-global
+  `searchMentionUserOptions()` server action (`lib/mention/search.ts`) returns org-scoped
+  candidates (via the same organization-membership relation as `getAssociatedOrganizations()`,
+  since `user` has no `organization_id` FK) with Option B graceful degradation on a `user`
+  read-permission denial. `encodeMentions()` is retired from the comment save path — the
+  picker now inserts `@[user_id:<id>]` markers directly, so `add/updateXxxComment()` store the
+  raw client text (the function itself is kept, deprecated, for backward compatibility and unit
+  tests). New `'mentioned_in_comment'` notification fires on newly-mentioned users (self-mentions
+  excluded; edits notify only newly-added mentions, diffed against the prior message). Detail
+  getters add a `canViewUserProfile` flag (viewer's `user` read permission) for the display layer
+  to decide whether a mentioned name links to their profile. See
+  `docs/knowledge/mention-system.md`.
 - **Generated permission-denial and cross-org isolation API tests** (cmd_520 batch A): every
   generated `cypress/e2e/api/<entity>.cy.ts` now includes PUT/DELETE/export/import
   permission-denial tests (7.3–7.6, gated on `can_edit`/`can_delete`/`can_export`/
@@ -133,6 +145,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   for the naming rule, rationale, consumer-impact list, and the exact
   migration SQL (verified against an isolated test database seeded with
   pre-migration rows).
+- **`db:seed-tenant` now requires `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`
+  under `NODE_ENV=production` (cmd_504)** — `scripts/seed-tenant.ts`
+  previously seeded the bootstrap admin as `admin@example.com` /
+  `password123` with a fixed `api_key` literal unconditionally; since
+  app-generator is a public repo, any production deployment provisioned
+  without a separate manual rotation shipped with a publicly known admin
+  login. Every production-equivalent entry point (`vercel-build`,
+  `build:full`, GCP's `gcp-seed.sh`) now fails fast unless both env vars are
+  set, and always mints a fresh random `api_key` instead of the literal.
+  `test`/`development` are unaffected — the fixed defaults are unchanged, so
+  existing Cypress/vitest fixtures pinned to them keep working. See
+  [docs/knowledge/seed-tenant-credential-hardening.md](docs/knowledge/seed-tenant-credential-hardening.md)
+  for the required env vars and the remediation runbook for a deployment
+  already seeded with the old defaults.
 
 ### Added
 - **GCP Cloud Run deployment** (`x-cloud` annotation, opt-in — disabled unless

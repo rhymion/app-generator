@@ -325,6 +325,8 @@ upsert_secret "app-database-url"        "$DATABASE_URL"
 upsert_secret "app-nextauth-secret"     "$AUTH_SECRET"
 upsert_secret "app-auth-secret"         "$AUTH_SECRET"
 upsert_secret "app-gcs-bucket-name"     "$GCS_BUCKET"
+upsert_secret "app-seed-admin-email"    "$SEED_ADMIN_EMAIL"
+upsert_secret "app-seed-admin-password" "$SEED_ADMIN_PASSWORD"
 
 if [[ -n "${REDIS_URL:-}" && "$REDIS_URL" != "rediss://<DRY_RUN_PLACEHOLDER>" ]]; then
   upsert_secret "app-redis-url" "$REDIS_URL"

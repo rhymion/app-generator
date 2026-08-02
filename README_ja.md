@@ -248,7 +248,9 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 ポリモーフィックブリッジパターンにより、各エンティティのスキーマを変更することなく任意のエンティティにコメントスレッドを付与できます。コメントは詳細ページにインラインで表示され、各コメントにはリアクションボタンを付与できます（コメントごとのトグルエンドポイント・バッチ集計・親オーナー read 認可）。
 
-[docs/knowledge/appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) を参照してください。
+`x-mention: true` を付与したコメントフィールドには `@mention` 機能も付与されます: 所属組織で絞り込んだ候補検索、GDPR安全なIDベースの保存形式（`@[user_id:<id>]`）、新規メンション相手への通知（自己メンションは除外・編集時は新たに追加されたメンションのみ通知）。
+
+[docs/knowledge/appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) および [docs/knowledge/mention-system.md](docs/knowledge/mention-system.md) を参照してください。
 
 ### 添付ファイル管理
 

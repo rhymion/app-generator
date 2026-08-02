@@ -649,7 +649,7 @@ describe('API: {{ title }}', () => {
 
   describe('Cross-organization isolation (G3)', () => {
 {% if can_new %}
-    it('G3.1 POST with foreign organization_id is rejected', () => {
+    it('G3.1 POST with foreign organization_id returns 404 (existence hidden)', () => {
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
@@ -666,11 +666,11 @@ describe('API: {{ title }}', () => {
 {{ I7 }}    },
 {{ I7 }}    failOnStatusCode: false,
 {{ I7 }}  }).then((res) => {
-{{ I7 }}    expect(res.status).to.be.gte(400);
-{{ I7 }}    // Error message should reference organization (not a generic error) —
-{{ I7 }}    // status alone is checked with `gte(400)` since the underlying save-path
-{{ I7 }}    // throw isn't wrapped in ApiError yet, so the exact code can be 500.
-{{ I7 }}    expect(JSON.stringify(res.body)).to.match(/organization/i);
+{{ I7 }}    // Matches G3.2/G3.3: a foreign org_id is treated as not-found, not as a
+{{ I7 }}    // distinguishable "organization" error — the response must not reveal
+{{ I7 }}    // that the organization exists.
+{{ I7 }}    expect(res.status).to.eq(404);
+{{ I7 }}    expect(JSON.stringify(res.body)).to.not.match(/organization/i);
 {{ I7 }}  });
 {{ I7 }}});
 {% if has_deps %}
@@ -1365,6 +1365,14 @@ describe('API: {{ title }}', () => {
               .map((c) => c.{{ mention_field_name }});
             expect(messages.some((m) => m.includes(result.mentionedUser.name))).to.eq(true);
           });
+      });
+    });
+
+    it('M2 creates a mention notification when a comment with @mention is added', () => {
+      cy.task<{ parentId: string; mentionedUserId: string }>('db:populate{{ pascal }}WithMentionUser').then(({ mentionedUserId }) => {
+        cy.task<Array<{ type: string }>>('db:getNotificationsForUser', mentionedUserId).then((notifications) => {
+          expect(notifications.some((n) => n.type === 'mentioned_in_comment')).to.eq(true);
+        });
       });
     });
   });
