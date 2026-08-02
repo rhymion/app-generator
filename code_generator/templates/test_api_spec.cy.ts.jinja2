@@ -3,11 +3,14 @@ import { TEST_API_KEY, TEST_CREDENTIALS } from '../../support/test-credentials';
 
 const API_BASE = '{{ api_path }}';
 
+// FK Permission / Cross-org Test Coverage (cmd_520 batch A): 7.3(PUT denied)={{ 'yes' if can_edit else 'no(can_edit=false)' }}, 7.4(DELETE denied)={{ 'yes' if can_delete else 'no(can_delete=false)' }}, 7.5(export denied)={{ 'yes' if (can_list and can_export) else 'no(can_export=false)' }}, 7.6(import denied)={{ 'yes' if import_eligible else 'no(import_eligible=false)' }}, G3(cross-org isolation)={{ 'yes' if should_filter_by_org else 'no(should_filter_by_org=false)' }}
+
 describe('API: {{ title }}', () => {
   beforeEach(() => {
     cy.task('db:reset');
     cy.task('db:seed');
     cy.task('db:grantAllPermissions');
+    Cypress.session.clearAllSavedSessions();
   });
 {% if can_list %}
 
@@ -556,7 +559,161 @@ describe('API: {{ title }}', () => {
 {% endif %}
     });
 {% endif %}
+{% if can_edit %}
+
+    it('7.3 returns 4xx for PUT when permission denied', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': limitedKey },
+            body: {},
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.be.gte(400);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_delete %}
+
+    it('7.4 returns 4xx for DELETE when permission denied', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+          cy.request({
+            method: 'DELETE',
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': limitedKey },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.be.gte(400);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_list and can_export %}
+
+    // 7.5 uses a SESSION-loginable actor (db:createSessionUserWithPermission + cy.login),
+    // not X-API-Key: the export route resolves the actor exclusively via
+    // getSessionUserId() (see lib/authz.ts / api_export_route.ts.jinja2) and never reads
+    // X-API-Key, so createLimitedApiUser's key would be silently ignored here.
+    it('7.5 returns 4xx for GET export when permission denied', () => {
+      cy.task<string>('db:createSessionUserWithPermission', {
+        entityName: '{{ parent }}',
+        flags: {},
+        label: 'export_denied',
+      }).then((email) => {
+        cy.login(email, TEST_CREDENTIALS.password);
+        cy.request({
+          url: `${API_BASE}/export`,
+          failOnStatusCode: false,
+        }).then((res) => {
+          expect(res.status).to.be.gte(400);
+        });
+      });
+    });
+{% endif %}
+{% if import_eligible %}
+
+    // 7.6 uses a SESSION-loginable actor — see the 7.5 comment above; the import
+    // route (api_import_route.ts.jinja2) resolves the actor the same way.
+    it('7.6 returns 4xx for POST import when permission denied', () => {
+      cy.task<string>('db:createSessionUserWithPermission', {
+        entityName: '{{ parent }}',
+        flags: {},
+        label: 'import_denied',
+      }).then((email) => {
+        cy.login(email, TEST_CREDENTIALS.password);
+        cy.request({
+          method: 'POST',
+          url: `${API_BASE}/import`,
+          body: { csv: '', dryRun: true },
+          failOnStatusCode: false,
+        }).then((res) => {
+          expect(res.status).to.be.gte(400);
+        });
+      });
+    });
+{% endif %}
   });
+{% if should_filter_by_org %}
+
+  // -------------------------------------------------------------------------
+  // Cross-organization isolation (G3) — verifies cmd_515's organization_id
+  // scope validation: an actor with full CRUD permission on {{ parent }}, who
+  // is a member of orgA only, cannot create or reach resources in orgB.
+  // -------------------------------------------------------------------------
+
+  describe('Cross-organization isolation (G3)', () => {
+{% if can_new %}
+    it('G3.1 POST with foreign organization_id is rejected', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I7 }}cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}' }).then((scenario) => {
+{{ I7 }}  cy.request({
+{{ I7 }}    method: 'POST',
+{{ I7 }}    url: API_BASE,
+{{ I7 }}    headers: { 'X-API-Key': TEST_API_KEY },
+{{ I7 }}    body: {
+{% for ln in org_cross_post_body %}
+{{ ln }}
+{% endfor %}
+{{ I7 }}      organization_id: scenario.orgB.id,
+{{ I7 }}    },
+{{ I7 }}    failOnStatusCode: false,
+{{ I7 }}  }).then((res) => {
+{{ I7 }}    expect(res.status).to.be.gte(400);
+{{ I7 }}    // Error message should reference organization (not a generic error) —
+{{ I7 }}    // status alone is checked with `gte(400)` since the underlying save-path
+{{ I7 }}    // throw isn't wrapped in ApiError yet, so the exact code can be 500.
+{{ I7 }}    expect(JSON.stringify(res.body)).to.match(/organization/i);
+{{ I7 }}  });
+{{ I7 }}});
+{% if has_deps %}
+      });
+{% endif %}
+    });
+{% endif %}
+{% if can_view %}
+
+    it('G3.2 GET on entity in foreign org returns 404 (existence hidden)', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then((scenario) => {
+          cy.request({
+            url: `${API_BASE}/${scenario.entityInOrgB.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(404);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_edit %}
+
+    it('G3.3 PUT on entity in foreign org returns 404 (existence hidden)', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then((scenario) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${scenario.entityInOrgB.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {},
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(404);
+          });
+        });
+      });
+    });
+{% endif %}
+  });
+{% endif %}
 {% if has_approvable %}
 
   // -------------------------------------------------------------------------

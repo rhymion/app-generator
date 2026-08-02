@@ -3563,6 +3563,9 @@ def api_spec_context(
         'put_body_update': _put_body_impl('            '),
         'put_body_update_fk': _put_body_impl('              '),
         'i7_post_body': _post_body_impl(None, f'{I}      '),
+        # cmd_520 G3.1: same shape as i7_post_body, minus organization_id — the
+        # G3.1 test injects its own (foreign) organization_id value after this.
+        'org_cross_post_body': _post_body_impl('organization_id', f'{I}      '),
         # Bulk test bodies — two extra spaces of indent (inside array item `{`)
         'bulk_post_body_valid':   _post_body_impl(None,               f'{I}      '),
         'bulk_post_body_invalid': _post_body_impl(field_to_skip_5_1, f'{I}      '),

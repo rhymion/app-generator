@@ -142,6 +142,16 @@ export async function POST(request: NextRequest) {
 {% else %}
       {
 {% endif %}
+{% if should_filter_by_org %}
+        // TODO(cmd_515 dotted FK org filter gap, tracked separately from cmd_520):
+        // this lookup is NOT scoped by the actor's organization — a dotted FK
+        // value (e.g. "{{ spec.lookup_field }}") can resolve to a
+        // {{ spec.lookup_entity }} row outside the actor's org if the natural-key
+        // value collides across organizations. cmd_520 deliberately does not add
+        // a test asserting the org-filtered (currently-incorrect) behavior here —
+        // see docs/knowledge/permission-e2e-test-design.md OQ-2. Fix belongs in
+        // the separate cmd that scopes this findMany() by organization_id.
+{% endif %}
         const _{{ spec.var_prefix }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
           where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val },
           select: { id: true },

@@ -1,4 +1,4 @@
-// AUTO-GENERATED - DO NOT EDIT (hand-edited sections: grantAllEntityPermissions, createLimitedApiUser, createSessionUserWithPermission, createApiUserWithPermission)
+// AUTO-GENERATED - DO NOT EDIT (hand-edited sections: grantAllEntityPermissions, createLimitedApiUser, createSessionUserWithPermission, createApiUserWithPermission, createCrossOrgScenario)
 import 'dotenv/config'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/app/generated/prisma/client';
@@ -306,6 +306,61 @@ export async function createSessionUserWithPermission(
   });
 
   return email;
+}
+
+/**
+ * Creates a cross-org test fixture for G3 (cmd_520 batch A): orgA (the main
+ * test user, TEST_CREDENTIALS/TEST_API_KEY, IS a member of), orgB (the main
+ * test user is NOT a member of), and — when entityId is supplied — reassigns
+ * that existing {{ entityName }} row into orgB.
+ *
+ * Deliberately generic across entities: rather than re-deriving each entity's
+ * full FK/required-field construction logic here (already handled by that
+ * entity's own db:populate<Entity> task), the caller creates the row first via
+ * db:populate<Entity> and passes its id in — this helper's only entity-aware
+ * step is a direct Prisma reassignment of that row's organization_id, which
+ * every should_filter_by_org entity has by construction. Deliberately bypasses
+ * the service layer's own org-membership validation (lib/<entity>/service.ts)
+ * — constructing a "row belongs to an org the actor isn't a member of" fixture
+ * is the whole point, so going around that validation for fixture setup is
+ * correct, not a bug.
+ */
+export async function createCrossOrgScenario(
+  entityName: string,
+  entityId?: string,
+): Promise<{ orgA: { id: string }; orgB: { id: string }; entityInOrgB?: { id: string } }> {
+  const testUser = await prisma.user.findUnique({
+    where: { email: TEST_CREDENTIALS.email },
+  });
+  if (!testUser) throw new Error('Test user not found. Run db:seed first.');
+
+  const orgA = await prisma.organization.create({
+    data: {
+      name: `CrossOrgA_${entityName}_${createId()}`,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+      users: { connect: [{ id: testUser.id }] },
+    },
+  });
+  const orgB = await prisma.organization.create({
+    data: {
+      name: `CrossOrgB_${entityName}_${createId()}`,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+      // Deliberately NOT connecting testUser — orgB is the "foreign" org.
+    },
+  });
+
+  let entityInOrgB: { id: string } | undefined;
+  if (entityId) {
+    const updated = await (prisma as Record<string, any>)[entityName].update({
+      where: { id: entityId },
+      data: { organization_id: orgB.id },
+    });
+    entityInOrgB = { id: updated.id };
+  }
+
+  return JSON.parse(JSON.stringify({ orgA: { id: orgA.id }, orgB: { id: orgB.id }, entityInOrgB }));
 }
 
 export { prisma };
