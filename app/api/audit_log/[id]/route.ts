@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
-import prisma from '@/lib/prisma';
 import { getAuditLogDetail } from '@/lib/audit_log/getters';
 
 type Params = { params: Promise<{ id: string }> };

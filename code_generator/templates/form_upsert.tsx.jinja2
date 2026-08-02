@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { {% if uses_use_callback %}useCallback, {% endif %}useMemo, {% if uses_use_ref %}useRef, {% endif %}useState } from 'react';
 import { useRouter } from '@/i18n/navigation';
 import { useTransition } from 'react';
 import { useTranslations } from 'next-intl';
@@ -23,7 +23,7 @@ import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 import type { FormUpsertProps{% if has_comment_children and named_constants %}, CommentReactionSummary{% endif %} } from '@/lib/{{ parent }}/types';
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
-import { AppFieldText, AppFieldBoolean, AppValidationError{% if has_entity_autocomplete %}, AppFieldRelation{% endif %}{% if has_flatten_accordion_upsert %}, AppSection{% endif %}{% if has_field_select %}, AppFieldSelect{% endif %} } from '@/components/ui';
+import { {% if uses_app_field_text %}AppFieldText, {% endif %}{% if uses_app_field_boolean %}AppFieldBoolean, {% endif %}AppValidationError{% if has_entity_autocomplete %}, AppFieldRelation{% endif %}{% if has_flatten_accordion_upsert %}, AppSection{% endif %}{% if has_field_select %}, AppFieldSelect{% endif %} } from '@/components/ui';
 {% if has_comment_children %}
 import CommentListWrapper from '@/components/_standard/CommentListWrapper';
 {% endif %}
@@ -56,7 +56,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% endif %}
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+{% if can_delete or can_invalidate %}
   const canDelete = permissions ? permissions.delete : true;
+{% endif %}
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 {% if all_states %}
 

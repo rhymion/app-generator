@@ -2011,7 +2011,15 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"import {{ Prisma }} from '@/app/generated/prisma/client';\n" if has_item_reservation else '')
         + f"import {{ normalizeValue,{' normalizeChildRefs,' if has_non_comment_ch else ''}"
         f"{' assertNotStale,' if can_update else ''} type NormalizedSnapshot }} from '@/lib/normalize';"
-        + (f"\nimport {{ validateOnAdd, validateOnUpdate{_validation_extras} }} from './service_validation';" if (can_create or can_update) else '')
+        + (
+            "\nimport { "
+            + ', '.join(filter(None, [
+                'validateOnAdd' if can_create else '',
+                'validateOnUpdate' if can_update else '',
+            ])) + _validation_extras
+            + " } from './service_validation';"
+            if (can_create or can_update) else ''
+        )
         + (f"\nimport {{ assertNoDuplicateReservation }} from './service_validation';" if has_item_daterange and not (can_create or can_update) else '')
         + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '')
         + (f"\nimport {{ notify }} from '@/lib/_notifier';"
@@ -2706,6 +2714,18 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     has_rel_links = any(rel_by_prop.get(p) for p in other_flds) or bool(reverse_oto_rels) or has_accordion_rel_links
 
+    # AppFieldBoolean is imported unconditionally by the template but only
+    # rendered by boolean_flds (readonly display, all_parent_fields) — check
+    # the assembled body text so this can't drift from the code that emits it
+    # (mirrors the same fix in form_upsert_context, cmd_529).
+    _view_body_text = '\n'.join(filter(None, [
+        all_parent_fields,
+        reverse_oto_fields,
+        flatten_sections,
+        '\n'.join(child_view_grids),
+    ]))
+    uses_app_field_boolean = 'AppFieldBoolean' in _view_body_text
+
     return {
         'needs_datetime_wrapper': needs_datetime_wrapper,
         'needs_image_display':    needs_image_display,
@@ -2725,6 +2745,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         'custom_view_imports':    custom_view_imports,
         'use_dayjs':              use_dayjs,
         'uses_format_label_value': uses_format_label_value,
+        'uses_app_field_boolean': uses_app_field_boolean,
     }
 
 
@@ -3345,11 +3366,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         if c.get('output_type') != 'list' and (c.get('relationship') or {}).get('type') != 'many-to-many'
     ]
 
-    # Ordered children detection
-    has_ordered_ch = any(
-        'order' in (_raw_def(c['name'], schema).get('properties') or {})
-        for c in non_comment_ch
-    )
     # Flatten arrays (e.g., pre_check_detail.symptoms) need EditableListWrapper
     # too — detect early so the import is included alongside the standard
     # list-child case.
@@ -3370,14 +3386,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     )
 
     # Child imports
+    # (m2m targets used to also get an `import type { <Target> } from
+    # '@/lib/<target>/types'` here, but that type is never referenced anywhere
+    # in the rendered FormUpsert body — the m2m JSX only reads `item.id` /
+    # `item.name` inline, with no type annotation. Always-dead import, removed
+    # outright rather than gated (cmd_529).)
     child_imports_parts = []
-    m2m_targets = list(dict.fromkeys(
-        c['relationship']['target']
-        for c in children_raw
-        if (c.get('relationship') or {}).get('type') == 'many-to-many'
-    ))
-    for t in m2m_targets:
-        child_imports_parts.append(f"import type {{ {to_pascal_case(t)} }} from '@/lib/{t}/types';")
     if has_list_ch:
         child_imports_parts.append("import EditableListWrapper, { EditableListWrapperItem } from '@/components/_standard/EditableListWrapper';")
     if has_ordered_list_ch:
@@ -3388,13 +3402,25 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     )
     if has_grid_ch:
         child_imports_parts.append("import type { GridRowsProp } from '@/components/ui/data';")
-        dg_import = (
-            "import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';\n"
-            "import OrderedFieldsDataGrid from '@/components/_standard/OrderedFieldsDataGrid';"
-            if has_ordered_ch else
-            "import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';"
-        )
-        child_imports_parts.append(dg_import)
+        # Each grid child renders OrderedFieldsDataGrid iff it has its own
+        # 'order' prop, else plain FieldsDataGrid (see the `has_order` switch
+        # below) — importing both unconditionally left one dead whenever every
+        # grid child fell on the same side (cmd_529, e.g. dashboard's single
+        # ordered grid child left FieldsDataGrid unused).
+        _grid_ch = [
+            c for c in non_comment_ch
+            if c.get('output_type') != 'list' and (c.get('relationship') or {}).get('type') != 'many-to-many'
+        ]
+        _grid_ch_has_order = [
+            'order' in (_raw_def(c['name'], schema).get('properties') or {})
+            for c in _grid_ch
+        ]
+        dg_import_parts = []
+        if not all(_grid_ch_has_order):
+            dg_import_parts.append("import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';")
+        if any(_grid_ch_has_order):
+            dg_import_parts.append("import OrderedFieldsDataGrid from '@/components/_standard/OrderedFieldsDataGrid';")
+        child_imports_parts.append('\n'.join(dg_import_parts))
     if col_fn_names:
         child_imports_parts.append(f"import {{ {', '.join(col_fn_names)} }} from '../{parent}/column_def';")
     if has_indep_list_children:
@@ -3955,7 +3981,20 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             _seen.add(_t)
             _ordered_targets.append(_t)
     _initial_props = [f"initial{to_pascal_case(t)}s = []" for t in _ordered_targets]
-    _denied_props  = [f"initial{to_pascal_case(t)}sPermissionDenied = false" for t in _ordered_targets]
+    # ...PermissionDenied is only read inside the rel_opt_setups block below
+    # (single-FK autocomplete: `const {denied_var} = Boolean(initial{Target}s
+    # PermissionDenied)`, one per parent_rels_raw / selector_oto_rels entry) —
+    # a target that's only a plain m2m/list child (selection_targets but not
+    # also an FK relation target) never reads it, so declaring it
+    # unconditionally for every selection_target left it dead for those
+    # entities (cmd_529, e.g. organization's `users` child). Only declare it
+    # for targets that are actually FK-relation targets.
+    _fk_rel_targets = {r['target'] for r in parent_rels_raw} | {r['target'] for r in selector_oto_rels}
+    _denied_props  = [
+        f"initial{to_pascal_case(t)}sPermissionDenied = false"
+        for t in _ordered_targets
+        if t in _fk_rel_targets
+    ]
     _search_props  = [f"search{to_pascal_case(t)}Options" for t in _ordered_targets]
     extra_default_props = ', '.join(_initial_props + _denied_props + _search_props)
     entity_edit_components = ctx.get('entity_edit_components') or []
@@ -3964,9 +4003,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # parent-embedded grid via /new?parentType=&parentId=).
     _is_bridge_child = bool(_bridge_child_ir)
     _bridge_params = ', initialParentType, initialParentId' if _is_bridge_child else ''
+    # `permissions` is only read by the `canDelete` line (itself gated on
+    # can_delete/can_invalidate, cmd_529) and by the entity_edit_components
+    # JSX below — an entity with neither leaves it dead. Still part of
+    # FormUpsertProps (the caller still passes it), so alias rather than drop
+    # the destructured binding.
+    _permissions_used = bool(can_delete) or bool(ctx.get('can_invalidate')) or has_current_user_role_ids
+    _permissions_binding = 'permissions' if _permissions_used else 'permissions: _permissions'
     if extra_default_props or has_comment_children or has_current_user_role_ids or _is_bridge_child:
         form_upsert_params = (
-            f"{{ src, isEdit, permissions"
+            f"{{ src, isEdit, {_permissions_binding}"
             + (', currentUserId' if has_comment_children else '')
             + (', currentUserRoleIds' if has_current_user_role_ids else '')
             + (f', {extra_default_props}' if extra_default_props else '')
@@ -3974,7 +4020,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             + " }: FormUpsertProps"
         )
     else:
-        form_upsert_params = "{ src, isEdit, permissions }: FormUpsertProps"
+        form_upsert_params = f"{{ src, isEdit, {_permissions_binding} }}: FormUpsertProps"
 
     # Validation call
     validation_entry_lines = ['    isEdit,', '    id: src.id,']
@@ -4340,6 +4386,28 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     _flatten_validation_code = '\n\n'.join(flatten_validation_parts)
     _child_validation_code_merged = '\n\n'.join(filter(None, [child_validation_code, _flatten_validation_code]))
 
+    # AppFieldText / AppFieldBoolean / useCallback / useRef are imported unconditionally
+    # by the template but rendered into the JSX/hook body from many independent code
+    # paths above (editable field, readonly display, bridge parent display, flatten
+    # accordion sections, ...). Rather than re-deriving every path's boolean condition
+    # (fragile, easy to miss a branch and break a build), search the assembled output
+    # text itself — cheap and can't drift from the code that actually emits these
+    # identifiers (cmd_529).
+    _rendered_body_text = '\n'.join(filter(None, [
+        all_parent_fields_jsx,
+        child_grid_components,
+        indep_list_readonly_jsx,
+        '\n'.join(flatten_edit_section_parts),
+    ]))
+    uses_app_field_text = 'AppFieldText' in _rendered_body_text
+    uses_app_field_boolean = 'AppFieldBoolean' in _rendered_body_text
+    uses_use_callback = bool(parent_rels_raw) or bool(selector_oto_rels)
+    # useRef is declared from several independent paths (top-level text/number
+    # field refs, child-list/grid refs, flatten-section refs) — same
+    # text-search approach as above rather than re-deriving each path's
+    # condition (cmd_529).
+    uses_use_ref = 'useRef<' in '\n'.join(filter(None, [parent_refs, child_variables, all_states_merged]))
+
     return {
         'parent_refs':              parent_refs,
         'all_states':               all_states_merged,
@@ -4376,4 +4444,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'flatten_edit_sections':    '\n'.join(flatten_edit_section_parts),
         'uses_format_label_value':  uses_format_label_value,
         'has_box_import':           has_box_import,
+        'uses_app_field_text':      uses_app_field_text,
+        'uses_app_field_boolean':   uses_app_field_boolean,
+        'uses_use_callback':        uses_use_callback,
+        'uses_use_ref':             uses_use_ref,
     }

@@ -51,7 +51,6 @@ export type ItemContext = {
 } | null | undefined;
 
 const EMPTY_FLAGS: OperationFlags = { create: false, read: false, update: false, delete: false, import: false };
-const FULL_FLAGS: OperationFlags = { create: true, read: true, update: true, delete: true, import: true };
 const READ_ONLY_FLAGS: OperationFlags = { create: false, read: true, update: false, delete: false, import: false };
 const SPECIAL_ROLE_NAMES = ['Creator', 'Assignee'] as const;
 

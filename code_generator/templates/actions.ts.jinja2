@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation';
 {% if comment_actions_code or (can_list and can_delete) or can_invalidate %}import { revalidatePath } from 'next/cache';
-{% endif %}import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
+{% endif %}import { getSessionUserIdOrThrow, requirePermission{% if can_delete %}, getModelPermissions{% endif %} } from '@/lib/authz';
 {% if can_invalidate and invalidate_module %}
 import { {{ invalidate_handler }} } from '@/{{ invalidate_module }}';
 {% endif %}

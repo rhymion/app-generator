@@ -1,6 +1,5 @@
 import { vi } from "vitest";
 import path from "path";
-import fs from "fs";
 
 // Setup environment for tests
 process.env.DATABASE_URL = `file:${path.join(process.cwd(), ".test-db")}`;
