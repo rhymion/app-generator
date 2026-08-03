@@ -1,0 +1,123 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+x-generator:
+  search:
+    default_scope: all
+
+x-pii:
+  type: string
+  enum: [direct, indirect, sensitive, none]
+
+x-retention:
+  type: string
+
+x-mention:
+  type: boolean
+  default: false
+
+x-gdpr-mode:
+  type: string
+  enum: [internal, consumer, both]
+  default: both
+
+x-import-key:
+  type: array
+  items:
+    type: string
+
+definitions:
+  # Verbatim copies of this repo's own comment/reaction/commentable entities
+  # (see code_generator/json_schema.yaml and code_generator/json_schema_
+  # internal.yaml) -- comment/reaction/commentable themselves are not what
+  # this fixture is testing; they exist only so the fixture's own
+  # `mention_gate_item` entity below has something real to embed. Not merged
+  # in automatically: build_user_schema.py's internal-defaults auto-include
+  # looks for json_schema_internal.yaml as a SIBLING of the schema path it is
+  # given, and pulling in the real one from this fixture's own directory
+  # would also drag in approvable/attachable/notification (and their
+  # approval_request/attachment refs, which this fixture does not define) --
+  # so `commentable` is hand-copied here instead, self-contained. Keep these
+  # three in sync with the real ones by hand if the real ones change shape
+  # (see docs/knowledge/mention-system.md "Fixture gate: how to grow it").
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      image: {}
+  commentable:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    required:
+      - comments
+    properties:
+      comments:
+        type: array
+        x-outputType: comments
+        items:
+          $ref: "#/definitions/comment"
+  comment:
+    fields:
+      message:
+        x-mention: true
+      commentable_id: {}
+  reaction:
+    x-internal:
+      page: false
+      embed: false
+      api: custom
+    fields:
+      type:
+        enum:
+          - like
+          - love
+          - laugh
+          - surprised
+          - sad
+      user_id:
+        x-relationship: {}
+      comment_id:
+        x-relationship:
+          labelField: id
+
+  # The one entity this fixture exists to exercise: a minimal commentable
+  # consumer, per docs/knowledge/appendix/comment-bridge.md §17.2 -- with the
+  # explicit one-to-one_bridge relationship type (not the doc's bare
+  # `type: one-to-one`, which resolves to a *selector* OTO and never
+  # populates the nested `comments` children get_one_to_one_rels() needs;
+  # verified empirically while building this fixture, see mention-system.md).
+  mention_gate_item:
+    x-generate:
+      list: false
+      view: true
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    fields:
+      name: {}
+      commentable_id:
+        x-relationship:
+          type: one-to-one_bridge
+          target: commentable
+          labelField: id
+    properties:
+      commentable:
+        $ref: "#/definitions/commentable"

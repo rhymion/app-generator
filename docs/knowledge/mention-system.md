@@ -357,6 +357,115 @@ attempt was made to classify all of them as covered/dead (that needs
 branch-coverage instrumentation across the schemas actually used in CI,
 not a manual audit), but the count alone rules out "this is a one-off."
 
+### cmd_535: the fixture gate, implemented
+
+cmd_532's recommendation above was implemented as-is: `npm run
+test:mention-gate` (`scripts/check_mention_gate_fixture.sh`), wired into
+both the Gate SoT (`.claude/commands/update-generator.md` step 3) and CI
+(`.github/workflows/ci.yml`'s `mention-gate-fixture` job, no path filter —
+same reasoning as the `unit-tests`/`pytest` jobs). ~4s per run (measured:
+3.7-4.0s wall clock across several runs on this machine, dominated by
+`build_user_schema.py` + `generate.py` + `npx prisma generate` + `tsc
+--noEmit`, in that order) -- cheap enough for every PR, no debounce/opt-in
+needed.
+
+**What it covers.** One branch: `named_constants and has_commentable` in
+both `getters.ts.jinja2` (`get{Parent}DetailPageData()`) and
+`api_detail_route.ts.jinja2` (`GET` handler) -- the exact branch cmd_532
+found broken. The fixture (`code_generator/tests/fixtures/mention_gate/`)
+defines one minimal entity, `mention_gate_item`, wired to `commentable` via
+an explicit `x-relationship: {type: one-to-one_bridge, target: commentable,
+labelField: id}` on its `commentable_id` field. One non-obvious finding from
+building this: `docs/knowledge/appendix/comment-bridge.md` section 17.2's
+own example (`type: one-to-one`, no bridge suffix) does NOT exercise this
+branch -- `get_one_to_one_rels()` (`code_generator/helpers/schema_helpers.py`)
+only populates the nested comment `children` (needed for the
+`has_commentable`/`commentable_rel_name` machinery) when the relation type
+is literally `one-to-one_bridge`; plain `one-to-one` is treated as a
+*selector* OTO (picker UI, no auto-create, no nested children). That doc
+section itself may be stale/simplified -- worth a follow-up to verify against
+a real bridge consumer if one is ever built for real product use; not fixed
+here (out of cmd_535's scope, which is the gate, not the doc).
+
+**What it does NOT cover, disclosed honestly (do not read this fixture as
+"the mention/commentable code is now safe" -- it is not):**
+
+- The sibling `children_raw` `output_type == 'comments'` branch in
+  `getters.ts.jinja2` (a second, direct-child comment path, independent of
+  `has_commentable`) -- same file, different branch, not exercised by this
+  fixture. A second small fixture entity using that shape would close this;
+  not built here (the cmd_535 task instructions named only the
+  `has_commentable` branch as in-scope).
+- Everything else in the ~700 `{% if %}` / 228 single-identifier-condition
+  count from cmd_532's measurement above. This fixture lights up on the
+  order of 2 of those (the two call sites cmd_532 fixed); the other ~698 are
+  exactly as dark as they were before this cmd. No coverage-measurement
+  tooling was built to track this precisely (explicitly out of scope for
+  cmd_535) -- the count is a rough scale indicator, not an audited number.
+- Prisma-level runtime correctness (actual query execution, DB constraints,
+  Prisma migration validity) -- this gate only ever runs `tsc --noEmit`
+  against a Prisma Client generated from an isolated fixture schema. It
+  proves the generated TypeScript's *types* line up with what Prisma would
+  actually return for this query shape; it proves nothing about runtime
+  behavior against a live database.
+- The shared, entity-independent libraries the generated files import
+  (`@/lib/authz`, `@/lib/api-auth`) are represented by hand-written
+  signature-only shims (`code_generator/tests/fixtures/mention_gate/shims/`)
+  matching their real public API, not the real implementations -- see the
+  comment at the top of each shim file for why (the real files' own
+  internals pull in the full production `user` model, unrelated to what
+  this gate checks). Those real files' own correctness is covered by the
+  main repo's own `test:e2e:build` gate, not this one. If their public
+  signatures ever change, the shims will drift and need updating by hand --
+  this is exactly the kind of drift the growth procedure below exists to
+  catch (a shim mismatch shows up as a spurious tsc error unrelated to any
+  real regression, which is itself a signal to re-sync the shim).
+- Consumer (proj_c-style) schemas wholesale -- explicitly out of scope for
+  cmd_535 per its task instructions (a candidate for a future cmd, not built
+  here). cmd_532 measured that running this repo's own `generate-code`
+  against a real copy of a consumer's full `json_schema.yaml` currently
+  fails schema validation outright (4 pre-existing, unrelated errors) -- a
+  periodic full-consumer-schema run remains a reasonable second tier once
+  that is fixed, but is a different, heavier mechanism than this per-PR
+  fixture.
+
+**Fixture gate: how to grow it.** When a new branch is found dark (via a
+downstream consumer break, a code review, or deliberate audit), the
+procedure is:
+
+1. Decide whether the new branch needs a *new fixture entity* (a new
+   relation shape, e.g. the `children_raw`/`comments` path above) or can
+   reuse the existing `mention_gate_item` entity (e.g. a new field-level
+   flag on an existing relation). Prefer reusing when the entity shape
+   doesn't need to change -- keeps the fixture (and the Prisma
+   migration/index bookkeeping it requires) small.
+2. If a new entity is needed: add it to both
+   `code_generator/tests/fixtures/mention_gate/json_schema.yaml` (Stage 4
+   single-file format, same conventions as the main
+   `code_generator/json_schema.yaml`) and
+   `code_generator/tests/fixtures/mention_gate/schema.prisma` (the matching
+   Prisma model -- remember `@@index` on every FK/`creator_id`/`updater_id`
+   column, or `generate.py`'s `validate_prisma_indexes` will reject it; see
+   `docs/knowledge/prisma-schema-conventions.md`).
+3. Run `bash scripts/check_mention_gate_fixture.sh` locally and read the
+   generated files under `.generated-mention-gate/` (gitignored, rebuilt
+   every run) to confirm the new branch actually renders -- grep for the
+   specific template line you're targeting.
+4. If the branch reads from a shared library not yet stubbed
+   (`code_generator/tests/fixtures/mention_gate/shims/`), add a new shim
+   file there with just the public signatures needed -- do not copy the
+   real implementation. Wire it into
+   `code_generator/tests/fixtures/mention_gate/tsconfig.json`'s `paths`.
+5. **Prove it catches the regression it exists to catch**: temporarily
+   revert the fix in the relevant `.jinja2` template, re-run the script,
+   confirm a non-zero exit and a real `tsc` error pointing at the reverted
+   line, then restore the fix and confirm green again. Do not skip this --
+   an unverified gate is exactly the "mechanism exists but nobody watches
+   it" failure mode flagged in cmd_482.
+6. Update the "What it covers" / "What it does NOT cover" lists above so
+   the next reader gets an honest, current picture -- this document rots
+   fast if left as a one-time snapshot.
+
 ### Deferred: comment-compose mention picker (not wired in this cmd)
 
 The comment "write a comment"/"edit comment" textareas inside

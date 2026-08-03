@@ -96,6 +96,10 @@ __pycache__/
 # so it's a build artifact like the rest of the generated code, not a source file.
 code_generator/.generated/
 
+# mention-gate fixture check (cmd_535) scratch output — scripts/check_mention_gate_fixture.sh
+# regenerates this from code_generator/tests/fixtures/mention_gate/ on every run.
+.generated-mention-gate/
+
 # sample data
 custom/
 memory/

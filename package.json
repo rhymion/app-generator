@@ -34,6 +34,7 @@
     "migrate:reset:test": "cross-env NODE_ENV=test prisma migrate reset",
     "lint": "eslint",
     "test:pytest": "pytest code_generator/tests",
+    "test:mention-gate": "bash scripts/check_mention_gate_fixture.sh",
     "start": "node scripts/run-next-start.js",
     "test": "vitest",
     "test:coverage": "vitest --coverage",

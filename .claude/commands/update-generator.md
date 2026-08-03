@@ -29,23 +29,40 @@ Task: $ARGUMENTS
 
 Run in this order:
 
-1. `npm run test:pytest`      — Python unit tests for code generator
-2. `npm run test:vitest`     — vitest unit/component tests
-3. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-4. `npm run check:generated` — generated code matches templates/schema
-5. `npm run test:e2e:cy:api` — API Cypress specs only
-6. `npm run test:e2e:cy:ui`  — non-API Cypress specs (desktop + mobile)
-7. `npm run lint`
-8. `npm audit --omit=dev --audit-level=high`
-9. `pip-audit -r requirements.txt`
+1. `npm run test:pytest`       — Python unit tests for code generator
+2. `npm run test:vitest`      — vitest unit/component tests
+3. `npm run test:mention-gate` — fixture-schema generate-code → tsc check (see below)
+4. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+5. `npm run check:generated`  — generated code matches templates/schema
+6. `npm run test:e2e:cy:api`  — API Cypress specs only
+7. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
+8. `npm run lint`
+9. `npm audit --omit=dev --audit-level=high`
+10. `pip-audit -r requirements.txt`
 
-Both steps 1 and 2 run unconditionally, with no "unchanged" exemption: CI's
-`unit-tests` (`npm run test:vitest`) and `pytest` (Python Generator Tests)
-jobs run on every push/PR to `main`/`master` with no path filter, so a local
-gate that conditionally skips either can go green while CI goes red on the
-same commit. This exact gap caused PR #218's Unit Tests job to fail after
-cmd_493 (see `docs/knowledge/gate-exemption-must-be-machine-checkable.md`
-— cmd_498, the third recurrence of "gate ≠ CI").
+Steps 1, 2, and 3 run unconditionally, with no "unchanged" exemption: CI's
+`unit-tests` (`npm run test:vitest`), `pytest` (Python Generator Tests), and
+`mention-gate-fixture` jobs run on every push/PR to `main`/`master` with no
+path filter, so a local gate that conditionally skips any of them can go
+green while CI goes red on the same commit. This exact gap caused PR #218's
+Unit Tests job to fail after cmd_493 (see
+`docs/knowledge/gate-exemption-must-be-machine-checkable.md` — cmd_498, the
+third recurrence of "gate ≠ CI").
+
+**Step 3 (`test:mention-gate`, cmd_535)**: runs a small, standalone fixture
+entity (commentable + comment + `x-mention: true`) through the real
+`build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline and
+type-checks just the two generated files that carry the
+`named_constants and has_commentable` branch — the branch cmd_532 found
+broken (`c.creator_id` read off a comment type that only ever declares
+`c.creator?.id`), and that this repo's own `test:e2e:build` (step 4) can
+never catch because no entity in this repo's own `json_schema.yaml` wires a
+`commentable` relation. ~4s. See `docs/knowledge/mention-system.md`
+"cmd_532: creator include fix and gate-blind-spot confirmation" and
+"Fixture gate: how to grow it" for what this covers, what it deliberately
+does not (only this one branch — this repo's templates have on the order of
+700 `{% if %}` branches total, most still uncovered by any fixture), and how
+to extend it to a new dark branch.
 
 ## Debug priority
 

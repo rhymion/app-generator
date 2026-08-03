@@ -195,3 +195,28 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Run pytest
         run: pytest code_generator/tests
+
+  mention-gate-fixture:
+    name: Mention Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_535 (following cmd_532): a small fixture entity (commentable +
+    # comment + x-mention: true) run through the real generate-code -> tsc
+    # pipeline, catching regressions in the `named_constants and
+    # has_commentable` branch of getters.ts.jinja2 / api_detail_route.ts.
+    # jinja2 -- a branch this repo's own generate-code/build (the e2e-tests
+    # job) never compiles, because no entity in this repo's own
+    # json_schema.yaml wires a commentable relation. No path filter, same as
+    # unit-tests/pytest above, per docs/knowledge/gate-exemption-must-be-
+    # machine-checkable.md. See docs/knowledge/mention-system.md.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:mention-gate
