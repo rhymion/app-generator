@@ -18,10 +18,31 @@
 # Policy lives in AGENTS.md (`npm audit` + `pip-audit` in the per-task gates)
 # so the audit also fires on every non-Dependabot change. Dependabot is the
 # proactive half; the gate is the continuous half.
+#
+# target-branch: develop, and why this file lives on `main`
+# -----------------------------------------------------------
+# Dependabot always reads its configuration from the repository's
+# GitHub-configured default branch, regardless of where `target-branch`
+# points version-update PRs (confirmed empirically: PR #246 was raised
+# against `main` on 2026-08-02T23:04Z, ~14h after this same config with
+# `target-branch: develop` had already been merged into `develop` via PR
+# #238 — the develop-only copy was never read). The default branch is
+# `main`, so THIS copy is the one Dependabot actually consumes; the
+# identical copy on `develop` exists only for readability/consistency in
+# that branch's tree and has no effect on its own. Keep both copies in
+# sync. `develop` is the repo's actual merge target, not `main` (see
+# CLAUDE.md D009 / develop-is-standard-merge-target policy), hence
+# `target-branch: develop` below. Per GitHub's documented `target-branch`
+# semantics, this applies to version updates only: security-update PRs
+# (triggered by vulnerability alerts) are always raised against the
+# default branch regardless of `target-branch`, so a security-advisory PR
+# will still land on `main` and needs manual retargeting/porting to
+# `develop`.
 version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -46,6 +67,7 @@ updates:
 
   - package-ecosystem: "pip"
     directory: "/"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -70,6 +92,7 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
       day: "monday"
