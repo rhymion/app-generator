@@ -15,6 +15,14 @@
 # Major upgrades are split out (`update-types: ["major"]`) so a breaking bump
 # never rides on the same PR as a minor or patch and surprises the gate.
 #
+# Exception: MUI major upgrades (`npm-mui-major`, cmd_537) are grouped into
+# one PR across the whole `@mui/*` scope. MUI ships breaking major bumps
+# across x-data-grid/x-date-pickers/icons-material/material/material-nextjs
+# in near-lockstep, and reviewing them as four-plus separate major-bump PRs
+# (each touching the same shared MUI theme/wrapper surface) was pure
+# reviewer overhead without added safety — a single PR that upgrades the
+# whole scope together is the actually-testable unit.
+#
 # Policy lives in AGENTS.md (`npm audit` + `pip-audit` in the per-task gates)
 # so the audit also fires on every non-Dependabot change. Dependabot is the
 # proactive half; the gate is the continuous half.
@@ -55,6 +63,12 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      npm-mui-major:
+        applies-to: version-updates
+        update-types:
+          - "major"
+        patterns:
+          - "@mui/*"
       npm-security:
         applies-to: security-updates
         update-types:
