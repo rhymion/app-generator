@@ -73,6 +73,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   are explicitly labeled templates requiring legal review and
   deployment-specific `[PLACEHOLDER]` values before real use.
 
+### Fixed
+- **Mention-collection loops read the wrong field off the comment relation**
+  (cmd_532): `getters.ts.jinja2` and `api_detail_route.ts.jinja2` read
+  `c.creator_id` in both places that collect comment authors for
+  `mentionUserContext`, but the comment type only ever declares
+  `creator?: { id, name, image }` — a TypeScript compile error on any
+  schema whose `comment_has_mention` branch actually renders (this repo's
+  own schema never does, which is why the mandatory gate never caught
+  it). Both loops now read `c.creator?.id`, matching the type; verified
+  safe because `build_context.py` unconditionally includes the `creator`
+  relation on every comment fetch that can reach these loops. See
+  `docs/knowledge/mention-system.md`.
+
 ### Security
 - **Enforce MFA on the Google OAuth sign-in path** (cmd_527) — previously,
   `mfa_enabled` was only checked inside `CredentialsProvider.authorize()`,
