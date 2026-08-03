@@ -73,6 +73,28 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   are explicitly labeled templates requiring legal review and
   deployment-specific `[PLACEHOLDER]` values before real use.
 
+### Security
+- **Enforce MFA on the Google OAuth sign-in path** (cmd_527) — previously,
+  `mfa_enabled` was only checked inside `CredentialsProvider.authorize()`,
+  so an SSO-provisioned user (`password === null`) with MFA enabled could
+  sign in via Google and reach a fully authenticated session without ever
+  being asked for a TOTP or recovery code. `auth.ts`'s `jwt()` callback now
+  sets `mfa_pending` on any non-credentials sign-in for an `mfa_enabled`
+  user; `proxy.ts` redirects every protected route to a new
+  `/mfa-challenge` page until it clears. A new `user.mfa_token_version`
+  column closes a related session-persistence gap (enabling MFA didn't
+  previously revoke an already-active JWT). See
+  `docs/knowledge/authentication.md` "MFA on the OAuth path".
+- **Second, independent gate on the test-only mock Google OAuth provider**
+  (cmd_528) — `MOCK_GOOGLE_OAUTH_TEST=true` alone previously let anyone who
+  knows a user's email sign in as them with no password/MFA check, if the
+  flag ever leaked into a real deploy's env vars. Registering the mock
+  provider now additionally requires a filesystem sentinel file that only
+  the e2e test harness writes (`scripts/write-mock-oauth-sentinel.js`),
+  never any real build/deploy pipeline; fails closed (throws at startup) if
+  the flag is set without it. See `docs/knowledge/authentication.md`
+  "MFA on the OAuth path" → "Testing without real Google credentials".
+
 ### Fixed
 - **CSV import dotted-FK org filter gap** (cmd_521, security): a dotted `x-import-key` lookup
   (e.g. `role.name`) on an organization-scoped entity's CSV import route was not itself

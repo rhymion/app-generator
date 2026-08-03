@@ -28,6 +28,19 @@ export type MfaUserSeed = {
   recoveryCode: string;
 };
 
+export const SSO_MFA_TEST_CREDENTIALS = {
+  email: 'sso-mfa-test@example.com',
+  name: 'SSO MFA Test User',
+};
+
+export type SsoMfaUserSeed = {
+  email: string;
+  /** Plaintext TOTP secret — pass to cy.task('generateTotp', secret) to get a valid code. */
+  secret: string;
+  /** One plaintext recovery code — single-use. */
+  recoveryCode: string;
+};
+
 /**
  * Creates a test user with MFA already enabled and 8 seeded recovery codes.
  * Must be called after cy.task('db:reset') so the default tenant exists.
@@ -62,6 +75,52 @@ export async function seedMfaTestUser(): Promise<MfaUserSeed> {
   return {
     email: MFA_TEST_CREDENTIALS.email,
     password: MFA_TEST_CREDENTIALS.password,
+    secret,
+    recoveryCode: codes[0].plaintext,
+  };
+}
+
+/**
+ * Creates an SSO-provisioned test user (password = null, as any real Google
+ * sign-in produces — see auth.ts buildAdapter()/createTenantBoundUser) with
+ * MFA already enabled and 8 seeded recovery codes. This is the exact user
+ * class the cmd_527 bypass affected: `password === null` skips the
+ * credentials↔OAuth collision guard in auth.ts's signIn() callback, so
+ * only the OAuth-path MFA gate (jwt() callback) protects this account.
+ *
+ * Signs in via the test-only mock Google provider (auth.ts, gated on
+ * `MOCK_GOOGLE_OAUTH_TEST=true`) using `cy.task('db:seedSsoMfaUser')` +
+ * a POST to `/api/auth/callback/google` with `{ email }` — see
+ * cypress/e2e/auth/mfa.cy.ts Test A-E.
+ */
+export async function seedSsoMfaTestUser(): Promise<SsoMfaUserSeed> {
+  const secret = generateSecret();
+  const encryptedSecret = encryptSecret(secret);
+  const codes = await generateRecoveryCodes();
+  const userId = createId();
+
+  await prisma.user.create({
+    data: {
+      id: userId,
+      creator_id: userId,
+      updater_id: userId,
+      email: SSO_MFA_TEST_CREDENTIALS.email,
+      name: SSO_MFA_TEST_CREDENTIALS.name,
+      password: null,
+      mfa_secret: encryptedSecret,
+      mfa_enabled: true,
+    },
+  });
+
+  await prisma.mfa_recovery_code.createMany({
+    data: codes.map((c) => ({
+      user_id: userId,
+      code_hash: c.hash,
+    })),
+  });
+
+  return {
+    email: SSO_MFA_TEST_CREDENTIALS.email,
     secret,
     recoveryCode: codes[0].plaintext,
   };

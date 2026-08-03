@@ -92,6 +92,10 @@ export default defineConfig({
           const { seedMfaTestUser } = require('./cypress/support/mfa-helpers');
           return await seedMfaTestUser();
         },
+        async 'db:seedSsoMfaUser'() {
+          const { seedSsoMfaTestUser } = require('./cypress/support/mfa-helpers');
+          return await seedSsoMfaTestUser();
+        },
         async 'generateTotp'(secret: string) {
           const otplib = require('otplib');
           return otplib.generateSync({ secret });

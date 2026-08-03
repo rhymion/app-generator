@@ -71,6 +71,12 @@ model user {
   mfa_secret                String?
   mfa_enabled               Boolean             @default(false)
   mfa_recovery_codes        mfa_recovery_code[]
+  // Bumped whenever MFA is enabled (lib/mfa/enrollment.ts completeEnrollment).
+  // auth.ts's jwt() callback snapshots this into the JWT at sign-in and
+  // re-compares it on every subsequent request; a mismatch re-arms
+  // mfa_pending so an already-active session can't outlive a later MFA
+  // enable for up to JWT_MAX_AGE (cmd_527, docs/knowledge/authentication.md).
+  mfa_token_version          Int                 @default(0)
   accounts                  Account[]
   sessions                  Session[]
   created_at                DateTime            @default(now()) @db.Timestamptz(0)

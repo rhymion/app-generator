@@ -148,6 +148,7 @@
     "mfaCodeLabel": "6-digit authentication code",
     "mfaHelper": "Open your authenticator app and enter the current code, or use a recovery code.",
     "mfaRequired": "Enter the 6-digit code from your authenticator app to finish signing in.",
+    "mfaChallengeTitle": "Verify it's you",
     "mfaInvalid": "That code did not match. Try again with a fresh 6-digit code, or use a recovery code.",
     "legalAgreementNotice": "By creating an account, you agree to our <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>."
   },
