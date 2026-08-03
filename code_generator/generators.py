@@ -3406,6 +3406,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     else:
         comment_children = [c for c in children_raw if c.get('output_type') == 'comments']
     has_comment_children = bool(comment_children)
+    # comment_has_mention (cmd_538): whether the shared `comment` model has an
+    # x-mention field, computed once upstream (context.py/build_context.py) and
+    # already available on the master ctx — read here (not re-derived) so this
+    # stays in lockstep with the same flag form_view_context()/types.ts.jinja2
+    # already gate on. Drives searchUsers/renderMessage wiring below, so
+    # comment-compose/edit boxes on the edit page get mention support too, not
+    # just the read-only view page (cmd_522c only wired form_view.tsx.jinja2 —
+    # see docs/knowledge/mention-system.md's cmd_538 section for why that left
+    # the edit page's CommentListWrapper both un-suggestable and un-linked).
+    comment_has_mention_fu = ctx.get('comment_has_mention', False)
     has_children = bool(non_comment_ch)
     has_many_to_many = any((c.get('relationship') or {}).get('type') == 'many-to-many' for c in children_raw)
     has_many_to_one = bool(parent_rels_raw) or bool(selector_oto_rels)
@@ -4055,17 +4065,28 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # parent-embedded grid via /new?parentType=&parentId=).
     _is_bridge_child = bool(_bridge_child_ir)
     _bridge_params = ', initialParentType, initialParentId' if _is_bridge_child else ''
-    # `permissions` is only read by the `canDelete` line (itself gated on
-    # can_delete/can_invalidate, cmd_529) and by the entity_edit_components
-    # JSX below — an entity with neither leaves it dead. Still part of
+    # `permissions` is read by the `canDelete` line (itself gated on
+    # can_delete/can_invalidate, cmd_529), the entity_edit_components JSX
+    # below, and the comment_jsx_parts block further down (every
+    # has_comment_children entity's CommentListWrapper reads
+    # `permissions?.update` unconditionally, regardless of mentions) — an
+    # entity with none of the three leaves it dead. Still part of
     # FormUpsertProps (the caller still passes it), so alias rather than drop
-    # the destructured binding.
-    _permissions_used = bool(can_delete) or bool(ctx.get('can_invalidate')) or has_current_user_role_ids
+    # the destructured binding. has_comment_children was missing from this
+    # condition until cmd_538 (masked pre-cmd_538 because nothing type-checked
+    # a has_comment_children entity's rendered FormUpsert.tsx against real
+    # Prisma/FormUpsertProps types — see the mention-gate fixture's cmd_538
+    # section in docs/knowledge/mention-system.md — every has_comment_children
+    # entity with neither can_delete/can_invalidate/entity_edit_components
+    # would have hit a "Cannot find name 'permissions'" tsc error on this
+    # exact branch, mention-unrelated).
+    _permissions_used = bool(can_delete) or bool(ctx.get('can_invalidate')) or has_current_user_role_ids or has_comment_children
     _permissions_binding = 'permissions' if _permissions_used else 'permissions: _permissions'
     if extra_default_props or has_comment_children or has_current_user_role_ids or _is_bridge_child:
         form_upsert_params = (
             f"{{ src, isEdit, {_permissions_binding}"
             + (', currentUserId' if has_comment_children else '')
+            + (', canViewUserProfile, mentionUserContext' if comment_has_mention_fu else '')
             + (', currentUserRoleIds' if has_current_user_role_ids else '')
             + (f', {extra_default_props}' if extra_default_props else '')
             + _bridge_params
@@ -4106,6 +4127,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"          onToggleReaction={{toggle{parent_pascal}CommentReaction as (commentId: string, type: string | number) => Promise<CommentReactionSummary>}}\n"
         if has_reactions else ""
     )
+    # Mention support on the edit page's comment thread (cmd_538): searchUsers
+    # wires MentionInput into CommentListWrapper's compose/edit textareas (the
+    # candidate picker cmd_522c only ever wired onto an entity's own fields,
+    # never the comment box — this closes that gap). renderMessage wires
+    # MentionText into the same display cmd_522c already wired for
+    # form_view.tsx.jinja2, so a comment's mentions render as links here too
+    # instead of showing the raw @[user_id:<id>] marker.
+    _mention_props = (
+        f"          searchUsers={{searchMentionUserOptions}}\n"
+        f"          renderMessage={{(c) => <MentionText text={{c.message}} userContext={{mentionUserContext ?? {{}}}} canViewUserProfile={{Boolean(canViewUserProfile)}} />}}\n"
+        if comment_has_mention_fu else ""
+    )
     for c in comment_children:
         if c.get('bridge'):
             prop = c['property_name']
@@ -4121,6 +4154,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"          onCreateComment={{handleCreateComment}}\n"
                 f"          onUpdateComment={{handleUpdateComment}}\n"
                 f"          onDeleteComment={{handleDeleteComment}}\n"
+                f"{_mention_props}"
                 f"{_reaction_props}"
                 f"        />\n"
                 f"      )}}"
@@ -4139,6 +4173,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"          onCreateComment={{handleCreateComment}}\n"
                 f"          onUpdateComment={{handleUpdateComment}}\n"
                 f"          onDeleteComment={{handleDeleteComment}}\n"
+                f"{_mention_props}"
                 f"{_reaction_props}"
                 f"        />\n"
                 f"      )}}"

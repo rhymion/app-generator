@@ -72,6 +72,9 @@ npx prisma generate --schema="$OUT_DIR/prisma/schema.prisma" >/tmp/mention_gate_
 cp "$FIXTURE_DIR/shims/prisma.ts" "$OUT_DIR/lib/prisma.ts"
 cp "$FIXTURE_DIR/shims/authz.ts" "$OUT_DIR/lib/authz.ts"
 cp "$FIXTURE_DIR/shims/api-auth.ts" "$OUT_DIR/lib/api-auth.ts"
+cp "$FIXTURE_DIR/shims/_notifier.ts" "$OUT_DIR/lib/_notifier.ts"
+mkdir -p "$OUT_DIR/lib/organization"
+cp "$FIXTURE_DIR/shims/organization_getters_associated.ts" "$OUT_DIR/lib/organization/getters_associated.ts"
 cp "$FIXTURE_DIR/tsconfig.json" "$OUT_DIR/tsconfig.json"
 
 echo "-- tsc --noEmit (getters.ts + api route only) --"
