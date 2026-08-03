@@ -122,6 +122,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   limitation, deliberately left unfixed; see the doc's "Known gap" section. See
   `docs/knowledge/csv-import-non-key-fk-write-path.md`.
 
+### Internal
+- **Dependabot `target-branch: develop` never took effect** (cmd_531): Dependabot always reads
+  `.github/dependabot.yml` from the default branch, not `develop`, so `develop`'s copy of the
+  setting was inert; ported to `main`'s copy (PR #248). See
+  `docs/knowledge/dependabot-config-read-from-default-branch.md`.
+
 ## [3.0.0] - 2026-07-30
 
 > Consolidates the feature areas added since 2.0.0: GCP Cloud Run deployment,
