@@ -273,8 +273,8 @@ export async function POST(request: NextRequest) {
 {% endfor %}
       // cmd_530: FK relations (key and non-key) are also rewritten on update — for a key
       // FK, keyWhere already matched, so this value is a no-op that was previously
-      // structurally impossible to write (筋1); for a non-key FK, this is the actual fix
-      // for the CSV column being silently dropped (筋2).
+      // structurally impossible to write (1); for a non-key FK, this is the actual fix
+      // for the CSV column being silently dropped (2).
 {% for spec in import_fk_specs %}
       updateData.{{ spec.result_col }} = _{{ spec.result_col }};
 {% endfor %}
