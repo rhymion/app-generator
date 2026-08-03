@@ -105,6 +105,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Covers both CREATE and UPDATE (shared resolution path); export was already correctly scoped.
   Template-layer change only, no Prisma schema change — regenerate to pick it up, no migration
   needed. See `docs/knowledge/csv-import-dotted-fk-org-filter.md`.
+- **CSV import silently dropped screen-editable FK columns not declared in `x-import-key`**
+  (cmd_530): an FK relation editable on screen (e.g. `approval_flow.requestor_role`) but absent
+  from `x-import-key` had no CSV-import write path at all — the route answered `200 succeeded`
+  while discarding the column, on both CREATE and UPDATE. Separately, even a *declared* dotted
+  `x-import-key` FK was never rewritten on UPDATE (only merged into CREATE data via `keyWhere`).
+  `import_fk_specs` now covers every screen-editable FK relation with a simple (non-composite)
+  labelField — resolved via the same lookup-by-label mechanism as a dotted key, written to both
+  CREATE and UPDATE. A required FK newly made resolvable this way can also flip
+  `import_can_create` from infeasible to feasible for entities like `approval_flow` whose
+  required FK wasn't previously part of the key. Exported FK columns that still have no write
+  path (composite labelField, or read-only) now reject the import with a new
+  `UNIMPORTABLE_COLUMN` error instead of silently succeeding. Template + generator-context
+  change only, no Prisma schema change. A KEY-field null→value transition still creates a
+  phantom duplicate row rather than updating in place — a separate, deeper natural-key-matching
+  limitation, deliberately left unfixed; see the doc's "Known gap" section. See
+  `docs/knowledge/csv-import-non-key-fk-write-path.md`.
 
 ## [3.0.0] - 2026-07-30
 

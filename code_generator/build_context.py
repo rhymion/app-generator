@@ -1267,6 +1267,13 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 else f"{r['relation_name']}_name"
             ),
             'label_expr': _xrl_built['expression'],
+            # cmd_530: needed to build import_fk_specs below — a relation is
+            # only import-resolvable when its labelField is a single field
+            # (simple_label is None for composite/dotted labelFields, which
+            # can't be resolved back to a unique lookup value).
+            'prop_name': r['prop_name'],
+            'target': r['target'],
+            'simple_label': _xrl_simple_label,
         })
 
     # export_scalar_fields: explicit allowlist of CSV export columns (cmd_324 V1).
@@ -1391,14 +1398,81 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'lookup_entity_filter_by_org': False,
             })
 
-    # cmd_521: whether ANY dotted-FK lookup in this route needs the
+    # import_fk_specs (cmd_530): generalizes the dotted-FK lookup-by-label
+    # mechanism above from "x-import-key FKs only" to "every screen-editable
+    # FK relation" — closing the gap where a FK that's editable on the
+    # screen (present in x_relationships_list, i.e. in filtered_props) but
+    # NOT declared in x-import-key had zero CSV-import write path (silently
+    # dropped on both CREATE and UPDATE — the reported bug, root cause 筋2).
+    # Also fixes 筋1 (a *declared* dotted key FK was never written on UPDATE,
+    # only merged into CREATE data via keyWhere) by routing every entry here
+    # — key or not — into updateData in the template.
+    #
+    # Composite/dotted labelFields (x_relationships_list['simple_label'] is
+    # None) are excluded — there's no single lookup field to resolve a CSV
+    # cell back to. Non-editable (x-readonly) FKs are excluded too — they
+    # have no business being writable via import just because they're
+    # visible in export. Both classes remain exported but become
+    # import_unimportable_columns below (fail loud instead of silent drop).
+    _key_relation_names = {s['var_prefix'] for s in import_key_specs if s['is_dotted']}
+    import_fk_specs = [
+        {**s, 'is_key': True} for s in import_key_specs if s['is_dotted']
+    ]
+    for r in x_relationships_list:
+        if r['simple_label'] is None:
+            continue
+        if r['field'] in _key_relation_names:
+            continue
+        if r['prop_name'] in readonly_fields:
+            continue
+        _fk_prop  = model_def.get('properties', {}).get(r['prop_name'], {})
+        _fk_types = _fk_prop.get('type', [])
+        if isinstance(_fk_types, str):
+            _fk_types = [_fk_types]
+        _fk_nullable = 'null' in _fk_types
+        _lookup_entity = r['target']
+        _lookup_entity_def = (
+            schema['definitions'].get(f'__{_lookup_entity}', {})
+            or schema['definitions'].get(_lookup_entity, {})
+        )
+        _lookup_has_org = 'organization_id' in _lookup_entity_def.get('properties', {})
+        _lookup_entity_filter_by_org = _lookup_has_org and _lookup_entity not in ('organization', 'user')
+        import_fk_specs.append({
+            'raw':                  f"{r['field']}.{r['simple_label']}",
+            'is_dotted':            True,
+            'csv_col':              r['display_col'],
+            'var_prefix':           r['field'],
+            'lookup_entity':        _lookup_entity,
+            'lookup_entity_pascal': to_pascal_case(_lookup_entity),
+            'lookup_field':         r['simple_label'],
+            'result_col':           r['prop_name'],
+            'fk_nullable':          _fk_nullable,
+            'lookup_entity_filter_by_org': _lookup_entity_filter_by_org,
+            'is_key':               False,
+        })
+
+    # cmd_521 + cmd_530: whether ANY dotted-FK lookup in this route needs the
     # actor's org id list — drives the import/computation gates in
     # api_import_route.ts.jinja2 (they must fire even when the parent
     # model itself is not should_filter_by_org, e.g. a system-global
-    # parent with a dotted FK into an org-scoped lookup entity).
+    # parent with a dotted FK into an org-scoped lookup entity). Computed
+    # from import_fk_specs (superset of import_key_specs' dotted entries)
+    # so newly-importable non-key FKs pull the org-scoped lookup gate in too.
     any_dotted_fk_needs_org_filter = any(
-        s['lookup_entity_filter_by_org'] for s in import_key_specs if s['is_dotted']
+        s['lookup_entity_filter_by_org'] for s in import_fk_specs
     )
+
+    # import_unimportable_columns (cmd_530): exported FK display columns with
+    # no CSV-import write path (composite/dotted labelField, or read-only on
+    # screen) — a CSV column the generated route would otherwise silently
+    # accept and discard. Checked against the CSV header at request time so
+    # the route refuses (fail loud) rather than answering "success" while
+    # dropping the column — see the fail-loud requirement 筋2 fix companion.
+    _import_fk_csv_cols = {s['csv_col'] for s in import_fk_specs}
+    import_unimportable_columns = [
+        rel['display_col'] for rel in x_relationships_list
+        if rel['display_col'] not in _import_fk_csv_cols
+    ]
 
     # _create_feasible: True if all required non-system fields can be provided via CSV.
     # Required fields that are NOT in export_scalar_fields and NOT resolvable via
@@ -1423,8 +1497,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     }
     _fk_display_col_names = {rel['display_col'] for rel in x_relationships_list}
     _import_resolvable_cols = {
-        spec['result_col'] for spec in import_key_specs
-        if spec['is_dotted'] and spec['csv_col'] in _fk_display_col_names
+        spec['result_col'] for spec in import_fk_specs
+        if spec['csv_col'] in _fk_display_col_names
     }
     _required_by_schema     = set(model_def.get('required', []))
     _create_required_gaps   = (
@@ -2379,6 +2453,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         import_can_create=import_can_create,
         import_can_update=import_can_update,
         import_key_specs=import_key_specs,
+        import_fk_specs=import_fk_specs,
+        import_unimportable_columns=import_unimportable_columns,
         any_dotted_fk_needs_org_filter=any_dotted_fk_needs_org_filter,
         import_update_fields=import_update_fields,
         import_field_specs=import_field_specs,

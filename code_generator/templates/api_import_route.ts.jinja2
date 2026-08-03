@@ -35,6 +35,10 @@ export async function POST() {
 type FieldSpec = { name: string; ts_type: 'string' | 'number' | 'boolean'; nullable: boolean; is_key: boolean; is_update: boolean };
 const FIELD_SPECS: FieldSpec[] = {{ import_field_specs | tojson }};
 const KEY_COLUMNS: string[] = {{ import_key_specs | map(attribute='csv_col') | list | tojson }};
+// cmd_530: exported FK columns with no CSV-import write path (composite/dotted
+// labelField, or read-only on screen) — presence in the CSV header is rejected
+// rather than silently accepted and discarded.
+const UNIMPORTABLE_COLUMNS: string[] = {{ import_unimportable_columns | tojson }};
 
 type PendingAction =
   | { op: 'create'; row: number; data: Record<string, unknown> }
@@ -116,6 +120,16 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    const unimportableColumns = UNIMPORTABLE_COLUMNS.filter((c) => headerFields.includes(c));
+    if (unimportableColumns.length > 0) {
+      return NextResponse.json(
+        {
+          summary: { total: rows.length, succeeded: 0, failed: 0, dryRun },
+          errors: [{ row: 0, code: 'UNIMPORTABLE_COLUMN', message: `Column(s) present in CSV cannot be imported (no write path — read-only or non-resolvable on this entity): ${unimportableColumns.join(', ')}` }],
+        } satisfies ImportResult,
+        { status: 400 },
+      );
+    }
 
     const errors: ImportRowError[] = [];
     const actions: PendingAction[] = [];
@@ -164,6 +178,43 @@ export async function POST(request: NextRequest) {
 {% endif %}
 {% endfor %}
 
+      // cmd_530: non-key FK relations that are screen-editable — resolved the
+      // same way as a dotted x-import-key, but written to fkData (CREATE and
+      // UPDATE) instead of keyWhere (these never participate in row matching).
+      const fkData: Record<string, unknown> = {};
+{% for spec in import_fk_specs %}
+{% if not spec.is_key %}
+      // Non-key FK: {{ spec.raw }} → lookup {{ spec.lookup_entity }} by {{ spec.lookup_field }}
+      let _{{ spec.result_col }}: string | null = null;
+      const _{{ spec.var_prefix }}_csv_val = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '');
+{% if spec.fk_nullable %}
+      if (_{{ spec.var_prefix }}_csv_val === '') {
+        // Empty → FK = null (nullable FK is allowed to be unset)
+        _{{ spec.result_col }} = null;
+      } else {
+{% else %}
+      {
+{% endif %}
+        const _{{ spec.var_prefix }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
+          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% endif %} },
+          select: { id: true },
+        });
+        if (_{{ spec.var_prefix }}_rows.length === 0) {
+          errors.push({ row: rowNum, code: 'NOT_FOUND',
+            message: `Row ${rowNum}: no {{ spec.lookup_entity }} with {{ spec.lookup_field }}='${_{{ spec.var_prefix }}_csv_val}'` });
+          continue;
+        }
+        if (_{{ spec.var_prefix }}_rows.length > 1) {
+          errors.push({ row: rowNum, code: 'MULTI_MATCH',
+            message: `Row ${rowNum}: multiple {{ spec.lookup_entity }} match {{ spec.lookup_field }}='${_{{ spec.var_prefix }}_csv_val}' — deduplicate first` });
+          continue;
+        }
+        _{{ spec.result_col }} = _{{ spec.var_prefix }}_rows[0].id;
+      }
+      fkData.{{ spec.result_col }} = _{{ spec.result_col }};
+{% endif %}
+{% endfor %}
+
       let rowHasError = false;
       const data: Record<string, unknown> = {};
       for (const spec of FIELD_SPECS) {
@@ -197,10 +248,11 @@ export async function POST(request: NextRequest) {
           errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to create this entity' });
           continue;
         }
-        // keyWhere is merged in so resolved dotted-FK columns (e.g. role_id, not part of
-        // FIELD_SPECS since FK columns are excluded from export_scalar_fields) are actually
-        // written on create; direct key fields duplicate an already-identical value in `data`.
-        actions.push({ op: 'create', row: rowNum, data: { ...data, ...keyWhere, creator_id: actorId, updater_id: actorId } });
+        // keyWhere and fkData are merged in so resolved dotted-FK columns (e.g. role_id,
+        // not part of FIELD_SPECS since FK columns are excluded from export_scalar_fields)
+        // are actually written on create; direct key fields duplicate an already-identical
+        // value in `data`.
+        actions.push({ op: 'create', row: rowNum, data: { ...data, ...keyWhere, ...fkData, creator_id: actorId, updater_id: actorId } });
 {% else %}
         errors.push({ row: rowNum, code: 'ENTITY_IMPORT_CREATE_NOT_SUPPORTED', message: 'This entity does not support CSV-import row creation' });
 {% endif %}
@@ -218,6 +270,13 @@ export async function POST(request: NextRequest) {
       const updateData: Record<string, unknown> = { updater_id: actorId };
 {% for f in import_update_fields %}
       updateData.{{ f }} = data.{{ f }};
+{% endfor %}
+      // cmd_530: FK relations (key and non-key) are also rewritten on update — for a key
+      // FK, keyWhere already matched, so this value is a no-op that was previously
+      // structurally impossible to write (1); for a non-key FK, this is the actual fix
+      // for the CSV column being silently dropped (2).
+{% for spec in import_fk_specs %}
+      updateData.{{ spec.result_col }} = _{{ spec.result_col }};
 {% endfor %}
       actions.push({ op: 'update', row: rowNum, id: existing.id, data: updateData });
 {% else %}
