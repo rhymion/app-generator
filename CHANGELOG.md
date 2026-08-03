@@ -105,6 +105,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Covers both CREATE and UPDATE (shared resolution path); export was already correctly scoped.
   Template-layer change only, no Prisma schema change — regenerate to pick it up, no migration
   needed. See `docs/knowledge/csv-import-dotted-fk-org-filter.md`.
+- **Dependabot `target-branch: develop` never took effect** (cmd_531, infra): `develop`'s
+  `.github/dependabot.yml` was updated with `target-branch: develop` (PR #238), but Dependabot
+  version-update PRs kept landing against `main` anyway (e.g. PR #246, opened ~14h after #238
+  merged). Root cause: Dependabot always reads `.github/dependabot.yml` from the repository's
+  default branch (`main`) — a copy of the file on any other branch is inert regardless of its
+  own `target-branch` setting. Ported `target-branch: develop` to `main`'s copy (PR #248, the
+  copy Dependabot actually reads); this branch's copy is corrected only in its explanatory
+  comment (PR #249). Security-update PRs still always target the default branch regardless of
+  `target-branch` — documented GitHub behavior, unaffected by this fix. See
+  `docs/knowledge/dependabot-config-read-from-default-branch.md`.
 
 ## [3.0.0] - 2026-07-30
 
