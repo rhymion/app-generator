@@ -1165,6 +1165,114 @@ class TestImportKeySpecsAliasedFkLookup:
 
 
 # ---------------------------------------------------------------------------
+# cmd_530: import_fk_specs generalizes dotted-FK CSV-import resolution from
+# "x-import-key entries only" to "every screen-editable, simple-labelField
+# FK relation" — closing the gap where a FK visible+editable on screen (e.g.
+# proj_c's approval_flow.requestor_role) had zero import write path just
+# because it wasn't declared as part of x-import-key (筋2). Modeled directly
+# on proj_b's own (real) approval_flow entity: entity_name is the plain key,
+# approver_role is a required dotted-FK, requestor_role is an optional
+# screen-editable dotted-FK absent from x-import-key.
+# ---------------------------------------------------------------------------
+
+class TestImportFkSpecsScreenEditableGeneralization:
+    def _schema(self, import_key=("entity_name", "approver_role.name")):
+        return {
+            "definitions": {
+                "role": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+                "flow": {
+                    "type": "object",
+                    "required": ["id", "entity_name", "approver_role_id"],
+                    "x-import-key": list(import_key),
+                    "x-readonly-fields": ["readonly_role_id"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "entity_name": {"type": "string"},
+                        "approver_role_id": _fk_field("role", label="name"),
+                        "requestor_role_id": _fk_field("role", nullable=True, label="name"),
+                        "readonly_role_id": _fk_field("role", nullable=True, label="name"),
+                        "composite_role_id": _fk_field("role", nullable=True, label=["name", "id"]),
+                    },
+                },
+            }
+        }
+
+    def _entity(self):
+        return {
+            "parent": "flow", "model": "flow", "definition_key": "flow",
+            "children": [],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": True, "test": False, "fields": None,
+            },
+        }
+
+    def _specs_by_result_col(self, ctx):
+        return {s["result_col"]: s for s in ctx["import_fk_specs"]}
+
+    def test_key_fk_marked_is_key(self):
+        ctx = build_context(self._entity(), self._schema())
+        specs = self._specs_by_result_col(ctx)
+        assert specs["approver_role_id"]["is_key"] is True
+
+    def test_non_key_screen_editable_fk_now_importable(self):
+        ctx = build_context(self._entity(), self._schema())
+        specs = self._specs_by_result_col(ctx)
+        assert "requestor_role_id" in specs, (
+            "requestor_role is screen-editable (visible, not readonly) with a "
+            "simple labelField — it must gain an import write path even "
+            "though it's absent from x-import-key (筋2 fix)"
+        )
+        assert specs["requestor_role_id"]["is_key"] is False
+        assert specs["requestor_role_id"]["lookup_entity"] == "role"
+        assert specs["requestor_role_id"]["lookup_field"] == "name"
+        assert specs["requestor_role_id"]["fk_nullable"] is True
+
+    def test_readonly_fk_excluded_from_import_fk_specs(self):
+        ctx = build_context(self._entity(), self._schema())
+        specs = self._specs_by_result_col(ctx)
+        assert "readonly_role_id" not in specs, (
+            "x-readonly-fields marks this FK non-editable on screen — it "
+            "must NOT gain a write path just because it's exported"
+        )
+
+    def test_composite_labelfield_fk_excluded_from_import_fk_specs(self):
+        ctx = build_context(self._entity(), self._schema())
+        specs = self._specs_by_result_col(ctx)
+        assert "composite_role_id" not in specs, (
+            "a composite/dotted labelField has no single lookup field to "
+            "resolve a CSV cell back to — must stay export-only"
+        )
+
+    def test_unimportable_columns_lists_readonly_and_composite_display_cols(self):
+        ctx = build_context(self._entity(), self._schema())
+        assert "readonly_role_name" in ctx["import_unimportable_columns"]
+        assert "composite_role_name" in ctx["import_unimportable_columns"]
+        assert "requestor_role_name" not in ctx["import_unimportable_columns"]
+        assert "approver_role_name" not in ctx["import_unimportable_columns"]
+
+    def test_required_non_key_fk_makes_create_feasible(self):
+        """筋2 companion: a REQUIRED FK that's screen-editable but not in
+        x-import-key used to make CREATE entirely infeasible (proj_b's own
+        pre-fix approval_flow: approver_role required + absent from
+        x-import-key -> import_can_create False, every CSV-import row hit
+        ENTITY_IMPORT_CREATE_NOT_SUPPORTED)."""
+        schema = self._schema(import_key=("entity_name",))
+        ctx = build_context(self._entity(), schema)
+        specs = self._specs_by_result_col(ctx)
+        assert specs["approver_role_id"]["is_key"] is False
+        assert ctx["import_can_create"] is True, (
+            "approver_role_id is required but now resolvable via the "
+            "generalized import_fk_specs (screen-editable, simple label) "
+            "even though it's not part of x-import-key"
+        )
+
+
+# ---------------------------------------------------------------------------
 # cmd_521: dotted x-import-key lookup entities must be org-filtered when the
 # LOOKUP entity itself has organization_id — independently of whether the
 # lookup entity happens to also be the discriminant used for the PARENT
@@ -1254,6 +1362,37 @@ class TestImportKeySpecsLookupEntityFilterByOrg:
         }
         ctx = build_context(_entity(model="permission"), schema)
         assert ctx["any_dotted_fk_needs_org_filter"] is False
+
+    def test_any_dotted_fk_needs_org_filter_true_for_non_key_fk_too(self):
+        """cmd_530 P-3: import_fk_specs generalizes org-filter detection
+        beyond x-import-key — a screen-editable NON-key FK into an
+        org-scoped lookup entity must also trigger
+        any_dotted_fk_needs_org_filter (and carry the same organization_id
+        filter into its own resolution code), or cmd_521's org-isolation
+        fix would only cover key FKs, silently reopening the cross-org leak
+        for any non-key dotted FK newly made importable by this task."""
+        schema = {
+            "definitions": {
+                "organization": self.SCHEMA["definitions"]["organization"],
+                "department": self.SCHEMA["definitions"]["department"],
+                "ticket": {
+                    "type": "object",
+                    "required": ["id", "name", "organization_id"],
+                    "x-import-key": ["name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", label="name"),
+                        "department_id": _fk_field("department", nullable=True, label="name"),
+                    },
+                },
+            }
+        }
+        ctx = build_context(_entity(model="ticket"), schema)
+        specs = {s["result_col"]: s for s in ctx["import_fk_specs"]}
+        assert specs["department_id"]["is_key"] is False
+        assert specs["department_id"]["lookup_entity_filter_by_org"] is True
+        assert ctx["any_dotted_fk_needs_org_filter"] is True
 
     def test_organization_and_user_lookup_targets_are_excluded_even_with_organization_id(self):
         """Same exclusion list as should_filter_by_org (cmd_515): a dotted

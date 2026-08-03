@@ -53,9 +53,17 @@ FK into a genuinely org-scoped entity gets filtered.
 
 The dotted-FK resolution loop runs once, before the CREATE/UPDATE branch, and its result
 (`keyWhere`) feeds both: the `matches` lookup used to find an existing row (already
-`organization_id`-filtered for the parent) and the `create`/`update` payload. UPDATE never
-writes the dotted-FK-resolved column back (`import_update_fields` is scalar-only), so the risk
-was entirely in *resolving* the wrong id, which the same fix eliminates for both branches.
+`organization_id`-filtered for the parent) and the `create`/`update` payload. At the time of this
+fix, UPDATE never wrote the dotted-FK-resolved column back (`import_update_fields` was
+scalar-only), so the risk here was entirely in *resolving* the wrong id, which the same fix
+eliminates for both branches.
+
+**Superseded by cmd_530**: `import_update_fields` being FK-exclusive (and the broader gap that
+only `x-import-key`-declared FKs had any CSV-import write path at all) turned out to be its own
+bug, not just an inert asymmetry — see `docs/knowledge/csv-import-non-key-fk-write-path.md`. The
+org-filter mechanism described here (`lookup_entity_filter_by_org`,
+`any_dotted_fk_needs_org_filter`) is unaffected — cmd_530 extends it to the new non-key
+`import_fk_specs` entries rather than replacing it.
 
 Export (`api_export_route.ts.jinja2`) has no dotted-FK resolution step — it reads through
 `getters.ts`, which already applies standard org filtering. No change needed there.
