@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/lib/mention_gate_item/*": ["./lib/mention_gate_item/*"],
+      "@/lib/mention/*": ["./lib/mention/*"],
+      "@/lib/prisma": ["./lib/prisma.ts"],
+      "@/lib/authz": ["./lib/authz.ts"],
+      "@/lib/api-auth": ["./lib/api-auth.ts"],
+      "@/*": ["../*"]
+    }
+  },
+  "include": [
+    "lib/mention_gate_item/getters.ts",
+    "app/api/mention_gate_item/[id]/route.ts"
+  ],
+  "exclude": ["node_modules"]
+}
