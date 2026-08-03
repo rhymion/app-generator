@@ -21,6 +21,7 @@ const approvalActions = createApprovalActions({
 export async function getApprovalRequestRecipient(id: string): Promise<{
   recipientId: string | null;
   entityName: string | null;
+  targetId: string | null;
   href: string | undefined;
 }> {
   return approvalActions.getApprovalRequestRecipient(id);
