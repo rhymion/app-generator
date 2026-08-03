@@ -72,8 +72,8 @@ jobs:
     # check. Who reviews this output and how often is documented in the
     # same doc; this job only produces the signal, it does not consume it.
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24.18.0'
           cache: 'npm'
@@ -111,7 +111,7 @@ jobs:
           '
       - name: Upload audit JSON artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: npm-audit-full-scope
           path: audit-full-scope.json
