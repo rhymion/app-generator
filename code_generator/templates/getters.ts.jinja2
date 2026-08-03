@@ -202,14 +202,14 @@ export async function get{{ parent_pascal }}DetailPageData(id: string, operation
   const _mentionUserIds = new Set<string>();
 {% if named_constants and has_commentable %}
   for (const c of {{ parent_camel }}?.{{ commentable_rel_name }}?.comments ?? []) {
-    if (c.creator_id) _mentionUserIds.add(c.creator_id);
+    if (c.creator?.id) _mentionUserIds.add(c.creator.id);
     for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
   }
 {% endif %}
 {% for child in children_raw %}
 {% if child.output_type == 'comments' %}
   for (const c of {{ parent_camel }}?.{{ child.property_name }} ?? []) {
-    if (c.creator_id) _mentionUserIds.add(c.creator_id);
+    if (c.creator?.id) _mentionUserIds.add(c.creator.id);
     for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
   }
 {% endif %}

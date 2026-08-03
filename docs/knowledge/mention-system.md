@@ -297,6 +297,66 @@ independent of mentions entirely. This is a `types.ts.jinja2`-wide gap
 repo's own schema never uses a real x-bridge relation. Fixed by applying
 the identical two-step normalization `build_context.py` already does.
 
+### cmd_532: creator include fix and gate-blind-spot confirmation
+
+Both loops that build `_mentionUserIds` (the "who was the creator or an
+`@mention` in this comment thread" set, in `getters.ts.jinja2` and
+`api_detail_route.ts.jinja2`) originally read `c.creator_id` off a `c`
+value typed via `types.ts.jinja2`'s hand-written comment type, which only
+ever declared `creator?: { id, name, image }`, never a bare `creator_id`
+scalar. That is a TS compile error waiting to fire the moment any
+consumer schema actually has a `named_constants`/`has_commentable` (or a
+`children_raw` `output_type: 'comments'`) entity with `comment.message:
+x-mention: true` -- which is exactly what happened when develop was
+pulled into app-template's app-generator submodule and its
+`commentable`-based consumer schema exercised the branch for the first
+time.
+
+Two fix candidates existed: (A) read `c.creator?.id` (matches the
+already-declared type) or (B) add `creator_id: string` to the type and
+keep reading the FK scalar directly. (A) was chosen, verified safe by
+reading `build_context.py`'s two comment-child include-builders (the
+OTO/`commentable_rel_name` path and the direct/`children_raw` path):
+both unconditionally include the `creator` relation on every comment
+fetch that can reach these loops -- there is no schema shape that
+includes a comment child without also including its creator, so
+`c.creator?.id` can never be a silent runtime no-op here. This also
+matches the type as already declared (needed anyway for MentionText
+rendering) and needs no type change, unlike (B).
+
+Why this repo's own mandatory gate never caught it: exactly the gap
+already called out above -- `comment_has_mention` (and therefore both of
+these loops) is false for every entity in this repo's own
+`json_schema.yaml`, because no entity here wires a commentable/child
+comment relation. `pytest` covers the template logic via fixture schemas
+(`test_mention_ui_wiring.py`), but nothing in the mandatory gate ever
+type-checks the rendered TypeScript of this branch -- `test:e2e:build`
+compiles this repo's own (branch-dead) output only. A consumer schema is
+currently the only thing that can ever compile-check this code, and
+consumers pull develop asynchronously, so a break here surfaces late,
+downstream, and outside this repo's own signal.
+
+Recommendation (proposed, not implemented -- pending a ruling): a small
+dedicated fixture schema (a minimal commentable + comment +
+`x-mention: true` entity, analogous to the fixture schemas
+`test_mention_ui_wiring.py` already uses) run through the full
+generate-code -> tsc pipeline as a cheap, every-PR gate step. Measured
+directly: copying app-template's `prj/code_generator/json_schema.yaml`
+into this repo and running generate-code against it currently fails
+schema validation outright (4 pre-existing errors unrelated to mentions
+-- e.g. a many-to-many missing a labelField, an x-reservation field
+mismatch), so generating against the real consumer schema in this repo's
+gate is not just slower, it is currently broken independent of anything
+mention-related, and would need the consumer schema kept green against
+this repo's validate.py at every commit to work at all. A periodic/
+pre-release full-consumer-schema run is a reasonable second tier once
+that is true, but is not a substitute for a fast per-PR fixture check.
+Scale of the underlying gap: this repo's templates contain roughly 700
+`{% if %}` occurrences (228 distinct single-identifier conditions); no
+attempt was made to classify all of them as covered/dead (that needs
+branch-coverage instrumentation across the schemas actually used in CI,
+not a manual audit), but the count alone rules out "this is a one-off."
+
 ### Deferred: comment-compose mention picker (not wired in this cmd)
 
 The comment "write a comment"/"edit comment" textareas inside
