@@ -163,12 +163,33 @@ generated). Three server actions are provided:
 
 | Action | Permission check | Result |
 |---|---|---|
-| `approveApprovalRequest(id, message?)` | User must have `approver_role_id` | Sets status → `approved` |
-| `rejectApprovalRequest(id, message?, options?)` | User must have `approver_role_id` | Sets status → `rejected`, or `terminal_rejected` if `isTerminalReject()` says so (§16.11) |
-| `resubmitApprovalRequest(id, message?)` | Creator or user with `requestor_role_id`; only from `rejected` (not `terminal_rejected`) | Sets status → `pending` |
+| `approveApprovalRequest(id, message?)` | User must have `approver_role_id`; all `preceded_by` flows for this approvable must already be `approved` (`assertApprovalOrder()`, §16.6.1) | Sets status → `approved` |
+| `rejectApprovalRequest(id, message?, options?)` | User must have `approver_role_id`; same `assertApprovalOrder()` ordering check as approve | Sets status → `rejected`, or `terminal_rejected` if `isTerminalReject()` says so (§16.11) |
+| `resubmitApprovalRequest(id, message?)` | Creator or user with `requestor_role_id`; only from `rejected` (not `terminal_rejected`) — ordering does not apply, resubmit is requester-initiated | Sets status → `pending` |
 
 Each action creates an `approval_history` row recording `pre_status`, `post_status`, `message`,
 and `creator_id` (the acting user).
+
+#### 16.6.1 Ordering enforcement (`assertApprovalOrder`)
+
+`lib/approval_request/order-check.ts` (manually maintained, not generated) exports
+`assertApprovalOrder(id)`: given an `approval_request` id, it loads the request's
+`approval_flow.preceded_by` flow ids and confirms every sibling `approval_request` on the
+same `approvable` for those flows already has `status: 'approved'`; otherwise it throws
+(`'Preceding approval requests must be approved first'`).
+
+Both entry points that can transition an `approval_request` call this same function — the
+REST route (`app/api/approval_request/[id]/{approve,reject}/route.ts`) and the server action
+(`lib/approval_request/actions_core.ts`'s `approveApprovalRequest`/`rejectApprovalRequest`,
+called via `approve`/`reject` in `lib/approval_request/actions.ts`) — so the rejection wording
+is identical regardless of which path a caller uses (cmd_540). Before cmd_540, only the REST
+route enforced this; the server action was reachable directly (any authenticated client can
+invoke a `'use server'` export via Next.js's Server Action RPC) and had no ordering check at
+all — `ApprovalSection.tsx`'s `precedingApproved` computation only controls whether the
+Approve/Reject buttons render, it is not an authorization boundary. See
+`test/flows/approval_order_bypass.test.ts` for the real-database regression test (calls the
+server action directly, bypassing the UI) and `lib/approval_request/actions.test.ts`'s
+"assertApprovalOrder gate (cmd_540)" describe block for the mocked-collaborator unit coverage.
 
 ### 16.7 Prisma models required
 
@@ -272,6 +293,7 @@ View/edit page renders ApprovalSection with:
 Approver clicks Approve:
   approveApprovalRequest(id)
     → checks user has approver_role_id
+    → assertApprovalOrder(id): all preceded_by flows' approval_requests must be 'approved' (§16.6.1)
     → updates approval_request.status = 'approved'
     → creates approval_history { pre_status: 0, post_status: 1, ... }  (legacy Int columns, §16.7)
     → if ALL of this approvable's approval_requests are now 'approved' AND approved_at is

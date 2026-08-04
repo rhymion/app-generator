@@ -5,6 +5,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- **Server-action path can no longer bypass multi-stage approval ordering** (cmd_540): the
+  REST route (`app/api/approval_request/[id]/{approve,reject}/route.ts`) enforced
+  `preceded_by` ordering via `assertApprovalOrder()`, but the server action
+  (`lib/approval_request/actions_core.ts`'s `approveApprovalRequest`/`rejectApprovalRequest`,
+  reachable directly via Next.js Server Action RPC from any authenticated client) did not —
+  `ApprovalSection.tsx`'s `precedingApproved` check only hides the button client-side, it is
+  not an authorization boundary. Reproduced against a real database (a later-stage approval
+  succeeded while its preceding stage was still pending) before fixing; both entry points now
+  call the same `assertApprovalOrder()` gate, so rejection wording is identical. See
+  `docs/knowledge/appendix/approval-flow.md` §16.6.1 and
+  `test/flows/approval_order_bypass.test.ts`.
+
 ### Added
 - **Post-login redirect-back with open-redirect protection** (cmd_525): unauthenticated
   page requests were already redirected to `/login` by `proxy.ts` before this change, but

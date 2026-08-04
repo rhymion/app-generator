@@ -34,8 +34,16 @@ vi.mock('@/lib/prisma', () => ({
 vi.mock('@/lib/authz', () => ({ getSessionUserIdOrThrow: vi.fn(), getUserRoleIds: vi.fn() }));
 vi.mock('@/lib/_notifier', () => ({ notify: vi.fn() }));
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
+// cmd_540: assertApprovalOrder() (lib/approval_request/order-check.ts) queries
+// prisma.approval_request.findMany() directly, which this file's minimal
+// prisma mock (above) doesn't define — mocked to a no-op here since order
+// enforcement itself is covered by test/flows/approval_order_bypass.test.ts
+// (real DB) and this file's own focus (recipient/revalidate targeting) is
+// orthogonal to it.
+vi.mock('@/lib/approval_request/order-check', () => ({ assertApprovalOrder: vi.fn().mockResolvedValue(undefined) }));
 
 import { getSessionUserIdOrThrow, getUserRoleIds } from '@/lib/authz';
+import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 import { createApprovalActions } from './actions_core';
 
 const resolveApprovableTarget = vi.fn();
@@ -74,6 +82,7 @@ beforeEach(() => {
   transactionMock.mockReset().mockImplementation(async (cb) => cb(fakeTx));
   vi.mocked(getSessionUserIdOrThrow).mockReset().mockResolvedValue('user-1');
   vi.mocked(getUserRoleIds).mockReset().mockResolvedValue(['approver-role']);
+  vi.mocked(assertApprovalOrder).mockReset().mockResolvedValue(undefined);
 });
 
 describe('getApprovalRequestRecipient (cmd_479)', () => {
@@ -219,5 +228,49 @@ describe('revalidatePath targeting (cmd_491)', () => {
     await resubmitApprovalRequest('req-1');
 
     expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+});
+
+// cmd_540: the REST route (app/api/approval_request/[id]/{approve,reject}/
+// route.ts) enforces multi-stage ordering via assertApprovalOrder(), but
+// this server action didn't call it at all — reachable directly via Next.js
+// Server Action RPC, bypassing the UI's client-side-only `precedingApproved`
+// gate (ApprovalSection.tsx). These tests pin: the gate is invoked, and a
+// rejection from it aborts before the transaction (no partial DB writes).
+// The real-DB end-to-end proof (order violation actually blocked, not just
+// "the mock was called") lives in test/flows/approval_order_bypass.test.ts.
+describe('assertApprovalOrder gate (cmd_540)', () => {
+  const stubApproverRoleLookup = () => {
+    findUnique.mockResolvedValue({
+      approval_flow: { approver_role_id: 'approver-role' },
+    });
+  };
+
+  it('approveApprovalRequest calls assertApprovalOrder with the request id, before the transaction, and propagates its rejection', async () => {
+    stubApproverRoleLookup();
+    const { assertApprovalOrder } = await import('@/lib/approval_request/order-check');
+    vi.mocked(assertApprovalOrder).mockClear().mockRejectedValue(
+      new Error('Preceding approval requests must be approved first'),
+    );
+
+    await expect(approveApprovalRequest('req-1')).rejects.toThrow(
+      'Preceding approval requests must be approved first',
+    );
+    expect(assertApprovalOrder).toHaveBeenCalledWith('req-1');
+    expect(transactionMock).not.toHaveBeenCalled();
+  });
+
+  it('rejectApprovalRequest calls assertApprovalOrder with the request id, before the transaction, and propagates its rejection', async () => {
+    stubApproverRoleLookup();
+    const { assertApprovalOrder } = await import('@/lib/approval_request/order-check');
+    vi.mocked(assertApprovalOrder).mockClear().mockRejectedValue(
+      new Error('Preceding approval requests must be approved first'),
+    );
+
+    await expect(rejectApprovalRequest('req-1')).rejects.toThrow(
+      'Preceding approval requests must be approved first',
+    );
+    expect(assertApprovalOrder).toHaveBeenCalledWith('req-1');
+    expect(transactionMock).not.toHaveBeenCalled();
   });
 });

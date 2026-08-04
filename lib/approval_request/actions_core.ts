@@ -2,6 +2,7 @@ import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow, getUserRoleIds } from '@/lib/authz';
 import { notify } from '@/lib/_notifier';
 import { revalidatePath } from 'next/cache';
+import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 
 // approval_history.pre_status/post_status are separate legacy Int columns
 // (ordinal snapshot, out of Class A Batch A1 scope) — this maps the
@@ -135,8 +136,16 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     revalidatePath(`/[locale]/${entityName}/edit/${targetId}`, 'page');
   }
 
+  // cmd_540: this server action is reachable directly (Next.js Server Action
+  // RPC) from any authenticated client — ApprovalSection.tsx's
+  // `precedingApproved` check only hides the button, it enforces nothing
+  // server-side. assertApprovalOrder() is the same ordering gate the REST
+  // route (app/api/approval_request/[id]/approve/route.ts) already calls;
+  // reusing it here (rather than reimplementing) keeps the rejection wording
+  // identical between both entry points.
   async function approveApprovalRequest(id: string, message?: string): Promise<void> {
     await assertApproverRole(id);
+    await assertApprovalOrder(id);
     const userId = await getSessionUserIdOrThrow();
     await prisma.$transaction(async (tx) => {
       const req = await tx.approval_request.update({
@@ -198,6 +207,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     options?: { reason?: string; reasonKind?: number },
   ): Promise<void> {
     await assertApproverRole(id);
+    await assertApprovalOrder(id);
     const userId = await getSessionUserIdOrThrow();
     await prisma.$transaction(async (tx) => {
       const req = await tx.approval_request.findUnique({
