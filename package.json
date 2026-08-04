@@ -129,7 +129,7 @@
     "cypress": "^15.9.0",
     "eslint": "^10.0.2",
     "eslint-config-next": "^16.1.6",
-    "jsdom": "^27.4.0",
+    "jsdom": "^30.0.1",
     "npm-run-all2": "^9.0.3",
     "prisma": "^7.5.0",
     "start-server-and-test": "^2.1.3",
