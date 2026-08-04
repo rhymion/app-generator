@@ -3,6 +3,8 @@ import { authenticateApiKey, handleApiError } from '@/lib/api-auth';
 import { ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 import { getUserRoleIds } from '@/lib/authz';
+import { getApprovalRequestRecipient } from '@/lib/approval_request/actions';
+import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -40,6 +42,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         data: { approval_request_id: id, pre_status: 2, post_status: 0, message: message ?? null, creator_id: userId },
       });
       return result;
+    });
+    // cmd_539: mirrors lib/approval_request/actions_core.ts's
+    // resubmitApprovalRequest() — this REST path needs its own copy of the
+    // create-path notification (notifyApprovalRequestCreated) since a
+    // resubmission reuses the existing approval_request row rather than
+    // creating a new one, so it was never being re-notified to approvers.
+    const { entityName, targetId } = await getApprovalRequestRecipient(id);
+    await notifyApprovalRequestCreated(prisma, id, {
+      excludeUserId: userId,
+      targetEntityName: entityName,
+      targetId,
     });
     return NextResponse.json(updated);
   } catch (error) {

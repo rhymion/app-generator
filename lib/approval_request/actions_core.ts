@@ -1,6 +1,7 @@
 import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow, getUserRoleIds } from '@/lib/authz';
 import { notify } from '@/lib/_notifier';
+import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
 import { revalidatePath } from 'next/cache';
 
 // approval_history.pre_status/post_status are separate legacy Int columns
@@ -199,6 +200,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
   ): Promise<void> {
     await assertApproverRole(id);
     const userId = await getSessionUserIdOrThrow();
+    let newStatus: 'rejected' | 'terminal_rejected' = 'rejected';
     await prisma.$transaction(async (tx) => {
       const req = await tx.approval_request.findUnique({
         where: { id },
@@ -207,7 +209,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
       if (!req?.approval_flow) throw new Error('Approval request not found');
 
       const terminal = deps.isTerminalReject(req.approval_flow.entity_name);
-      const newStatus = terminal ? 'terminal_rejected' : 'rejected';
+      newStatus = terminal ? 'terminal_rejected' : 'rejected';
 
       const result = await tx.approval_request.update({
         where: { id },
@@ -256,7 +258,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
         title: `Your ${entityName ?? 'request'} was rejected`,
         href,
         approvalRequestId: id,
-        status: 'rejected',
+        status: newStatus,
         message: message ?? null,
       });
     }
@@ -286,6 +288,17 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
       });
     });
     const { entityName, targetId } = await getApprovalRequestRecipient(id);
+    // cmd_539: resubmission reuses the existing approval_request row (only
+    // its status changes, pending again) rather than creating a new one, so
+    // the create-path notification (notifyApprovalRequestCreated, wired
+    // into service_after_create_stub.ts.jinja2 / split_action_route.ts.jinja2)
+    // never re-fires here on its own — the approver-role holders were never
+    // told the request needs their attention again.
+    await notifyApprovalRequestCreated(prisma, id, {
+      excludeUserId: userId,
+      targetEntityName: entityName,
+      targetId,
+    });
     revalidateApprovableTarget(entityName, targetId);
   }
 

@@ -5,6 +5,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Re-submitting a rejected approval request never notified the approver** (cmd_539):
+  `resubmitApprovalRequest()` (both the server action in
+  `lib/approval_request/actions_core.ts` and the REST route
+  `app/api/approval_request/[id]/resubmit/route.ts`) transitions status back to `pending` by
+  re-using the existing `approval_request` row rather than creating a new one, so
+  `notifyApprovalRequestCreated()` — wired only into the creation path — never re-fired for a
+  resubmission; approver-role holders were never told a rejected request needed their attention
+  again. Both paths now call it again after the status flip. A related payload bug was fixed
+  alongside it: the rejection notification's `status` field was hard-coded to `'rejected'` even
+  for a `terminal_rejected` outcome (the notification itself always fired; only the payload was
+  wrong). See `docs/knowledge/appendix/approval-flow.md` §16.6 and
+  `docs/knowledge/notification-triggers.md`.
+
 ### Added
 - **Post-login redirect-back with open-redirect protection** (cmd_525): unauthenticated
   page requests were already redirected to `/login` by `proxy.ts` before this change, but
