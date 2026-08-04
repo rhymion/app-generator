@@ -103,9 +103,13 @@
   },
   "overrides": {
     "postcss": ">=8.5.10",
-    "fast-uri": "^3.1.4",
+    "fast-uri": "^3.1.5",
     "fast-xml-parser": "^5.10.1",
     "sharp": "^0.35.3",
+    "@vercel/blob": {
+      "undici": "^6.28.0"
+    },
+    "uuid": "^11.1.1",
     "eslint-config-next": {
       "minimatch": "^10.2.5"
     }
@@ -115,7 +119,7 @@
     "@marp-team/marp-cli": "^4.2.3",
     "@prisma/adapter-pg": "^7.4.2",
     "@tailwindcss/postcss": "^4",
-    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.1",
     "@testing-library/user-event": "^14.6.1",
     "@types/js-yaml": "^4.0.9",
@@ -129,7 +133,7 @@
     "cypress": "^15.9.0",
     "eslint": "^10.0.2",
     "eslint-config-next": "^16.1.6",
-    "jsdom": "^27.4.0",
+    "jsdom": "^30.0.1",
     "npm-run-all2": "^9.0.3",
     "prisma": "^7.5.0",
     "start-server-and-test": "^2.1.3",
