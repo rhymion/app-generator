@@ -134,6 +134,7 @@ from helpers.schema_helpers import (
     derive_text_fields,
     get_entity_properties,
     get_entity_required,
+    get_self_only_flags,
 )
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import (
@@ -3338,6 +3339,26 @@ def api_spec_context(
     exportable_bridge_fk_names = sorted(_api_internal_bridge_fk_names)
     has_exportable_bridge_fks = bool(exportable_bridge_fk_names)
 
+    # x-self-only: creator_id is exported (read-only diagnostic column, see
+    # build_context.py) but rejected by the import route if present in the
+    # CSV header (import_unimportable_columns). The N11-N13 round-trip tests
+    # below re-submit the exported CSV verbatim to prove the natural key
+    # round-trips — they must strip this column first, or every self-only
+    # entity's round-trip fails on UNIMPORTABLE_COLUMN by construction, not
+    # from a real regression.
+    #
+    # Checked at the def_key level first, same reasoning as build_context.py:
+    # a pass-through proxy view (e.g. `setting`) declares x-self-only on its
+    # own view-level dict, not on the shared raw entity model_def resolves
+    # to — falling back to model_def only covers entities with an exclusive
+    # raw twin (or no raw/view split at all).
+    _api_is_self_only, _ = get_self_only_flags(
+        schema.get('definitions', {}).get(definition_key or parent, {})
+    )
+    if not _api_is_self_only:
+        _api_is_self_only, _ = get_self_only_flags(model_def)
+    round_trip_unimportable_columns = ['creator_id'] if _api_is_self_only else []
+
     # cmd_421 Domain 4 (M1, subtask_421i): x-mention name resolution after
     # save. Mirrors build_context.py's comment_has_mention detection exactly
     # (the shared 'comment' model has an x-mention: true field AND this
@@ -3763,6 +3784,8 @@ def api_spec_context(
         # CSV Export (cmd_421 N9): internal bridge FK exclusion
         'has_exportable_bridge_fks': has_exportable_bridge_fks,
         'exportable_bridge_fk_names': exportable_bridge_fk_names,
+        'round_trip_unimportable_columns': round_trip_unimportable_columns,
+        'is_self_only': _api_is_self_only,
         # Search coverage (cmd_421 Domain 5)
         'is_searchable': is_searchable,
         'search_sample_field': search_sample_field,

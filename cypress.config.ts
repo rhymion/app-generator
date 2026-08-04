@@ -284,6 +284,16 @@ export default defineConfig({
           const { getPendingApprovalRequest } = require('./cypress/support/approval_test_helpers');
           return await getPendingApprovalRequest(params.approvable_id);
         },
+        async 'db:setupMultiStageApprovalFixture'() {
+          const { setupMultiStageApprovalFixture } = require('./cypress/support/approval_test_helpers');
+          return await setupMultiStageApprovalFixture();
+        },
+        // cmd_539: approval_request notification regression fixture (see
+        // cypress/support/approval_test_helpers.ts for details).
+        async 'db:setupApprovalNotificationFixture'() {
+          const { setupApprovalNotificationFixture } = require('./cypress/support/approval_test_helpers');
+          return await setupApprovalNotificationFixture();
+        },
         async 'db:populateAuditLog'(length: number) {
           const { populateAuditLogData } = require('./cypress/support/audit_log/helper');
           return await populateAuditLogData(length);

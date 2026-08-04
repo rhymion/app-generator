@@ -2,6 +2,23 @@
 import { TEST_API_KEY, TEST_CREDENTIALS } from '../../support/test-credentials';
 
 const API_BASE = '{{ api_path }}';
+{% if round_trip_unimportable_columns %}
+
+// {{ round_trip_unimportable_columns | join(', ') }}: present in export (read-only
+// diagnostic column(s)) but rejected by the import route if present in the CSV
+// header (UNIMPORTABLE_COLUMN). The N11-N13 round-trip tests below prove the
+// *importable* columns survive a re-import, not that literally every exported
+// column does — so they strip these columns from the exported CSV first.
+function _stripRoundTripUnimportableCsvColumns(csv: string): string {
+  const strip: string[] = {{ round_trip_unimportable_columns | tojson }};
+  const noBom = csv.charCodeAt(0) === 0xfeff ? csv.slice(1) : csv;
+  const lines = noBom.split('\r\n').filter((l) => l.length > 0);
+  const headers = lines[0].split(',');
+  const keepIdx = headers.reduce<number[]>((acc, h, i) => (strip.includes(h) ? acc : [...acc, i]), []);
+  const rebuild = (line: string) => keepIdx.map((i) => line.split(',')[i]).join(',');
+  return lines.map(rebuild).join('\r\n');
+}
+{% endif %}
 
 // FK Permission / Cross-org Test Coverage (cmd_520 batch A): 7.3(PUT denied)={{ 'yes' if can_edit else 'no(can_edit=false)' }}, 7.4(DELETE denied)={{ 'yes' if can_delete else 'no(can_delete=false)' }}, 7.5(export denied)={{ 'yes' if (can_list and can_export) else 'no(can_export=false)' }}, 7.6(import denied)={{ 'yes' if import_eligible else 'no(import_eligible=false)' }}, G3(cross-org isolation)={{ 'yes' if should_filter_by_org else 'no(should_filter_by_org=false)' }}
 
@@ -1173,7 +1190,14 @@ describe('API: {{ title }}', () => {
           expect(headers).to.not.include('id');
           expect(headers).to.not.include('created_at');
           expect(headers).to.not.include('updated_at');
+{% if is_self_only %}
+          // x-self-only: creator_id IS exported here \u2014 a deliberate exception
+          // (read-only diagnostic column, never accepted back on import; see
+          // docs/knowledge/self-only-entity.md), not a system-column leak.
+          expect(headers).to.include('creator_id');
+{% else %}
           expect(headers).to.not.include('creator_id');
+{% endif %}
           expect(headers).to.not.include('updater_id');
           expect(headers).to.not.include('organization_id');
         });
@@ -1192,9 +1216,15 @@ describe('API: {{ title }}', () => {
 {% for rel in x_relationships_list %}
           expect(headers).to.include('{{ rel.display_col }}');
 {% endfor %}
+{% if is_self_only %}
+          // x-self-only: creator_id IS exported here \u2014 see the N5 comment above.
+          expect(headers).to.include('creator_id');
+{% endif %}
           // Negative: system columns must not appear
           expect(headers).to.not.include('id');
+{% if not is_self_only %}
           expect(headers).to.not.include('creator_id');
+{% endif %}
           expect(headers).to.not.include('updater_id');
           expect(headers).to.not.include('organization_id');
           expect(headers).to.not.include('tenant_id');
@@ -1270,7 +1300,11 @@ describe('API: {{ title }}', () => {
       cy.task('db:populate{{ pascal }}', 1).then(() => {
         cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
           expect(exportRes.status).to.eq(200);
+{% if round_trip_unimportable_columns %}
+          const csv = _stripRoundTripUnimportableCsvColumns(exportRes.body as string);
+{% else %}
           const csv = exportRes.body as string;
+{% endif %}
           cy.request({
             method: 'POST',
             url: `{{ api_path }}/import`,
@@ -1290,7 +1324,11 @@ describe('API: {{ title }}', () => {
     it('N12 CSV import round-trip: confirming the dry run (dryRun=false) commits with zero write failures', () => {
       cy.task('db:populate{{ pascal }}', 1).then(() => {
         cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+{% if round_trip_unimportable_columns %}
+          const csv = _stripRoundTripUnimportableCsvColumns(exportRes.body as string);
+{% else %}
           const csv = exportRes.body as string;
+{% endif %}
           cy.request({
             method: 'POST',
             url: `{{ api_path }}/import`,
@@ -1315,7 +1353,11 @@ describe('API: {{ title }}', () => {
     it('N13 CSV import rejects an unconfirmed commit (dryRun=false without a valid confirmToken)', () => {
       cy.task('db:populate{{ pascal }}', 1).then(() => {
         cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+{% if round_trip_unimportable_columns %}
+          const csv = _stripRoundTripUnimportableCsvColumns(exportRes.body as string);
+{% else %}
           const csv = exportRes.body as string;
+{% endif %}
           cy.request({
             method: 'POST',
             url: `{{ api_path }}/import`,

@@ -1240,18 +1240,42 @@ class TestImportFkSpecsScreenEditableGeneralization:
             "must NOT gain a write path just because it's exported"
         )
 
-    def test_composite_labelfield_fk_excluded_from_import_fk_specs(self):
+    def test_composite_labelfield_fk_importable_via_full_label_match(self):
+        """cmd_548 (option 甲): a composite/dotted labelField has no single
+        lookup field, but it IS import-resolvable by matching the whole
+        rendered label text against a pre-built label→id map — see
+        subtask_547a design + is_composite/import_label_expr/prisma_include
+        below."""
         ctx = build_context(self._entity(), self._schema())
         specs = self._specs_by_result_col(ctx)
-        assert "composite_role_id" not in specs, (
-            "a composite/dotted labelField has no single lookup field to "
-            "resolve a CSV cell back to — must stay export-only"
-        )
+        assert "composite_role_id" in specs
+        spec = specs["composite_role_id"]
+        assert spec["is_composite"] is True
+        assert spec["is_dotted"] is False
+        assert spec["is_key"] is False
+        assert spec["csv_col"] == "composite_role_name"
+        assert spec["import_label_expr"], "candidate-rooted label expression must be present"
+        assert spec["lookup_entity"] == "role"
+        assert isinstance(spec["prisma_include"], dict)
 
-    def test_unimportable_columns_lists_readonly_and_composite_display_cols(self):
+    def test_composite_labelfield_import_label_expr_rooted_at_candidate_var(self):
+        """The import-side expression must be rooted at the candidate row
+        variable ('c', matching the generated map-building loop var), NOT at
+        'row.<relation>' like the export label_expr — they read the same
+        underlying value through the identical helper/inputs, only the root
+        variable differs (cmd_548 あ: export/import symmetry)."""
+        ctx = build_context(self._entity(), self._schema())
+        specs = self._specs_by_result_col(ctx)
+        spec = specs["composite_role_id"]
+        assert "c." in spec["import_label_expr"] or "c?." in spec["import_label_expr"]
+        assert "row." not in spec["import_label_expr"]
+
+    def test_unimportable_columns_lists_only_readonly_display_cols(self):
+        """readonly stays unimportable; composite is now importable (cmd_548)
+        so it must NOT appear in import_unimportable_columns any more."""
         ctx = build_context(self._entity(), self._schema())
         assert "readonly_role_name" in ctx["import_unimportable_columns"]
-        assert "composite_role_name" in ctx["import_unimportable_columns"]
+        assert "composite_role_name" not in ctx["import_unimportable_columns"]
         assert "requestor_role_name" not in ctx["import_unimportable_columns"]
         assert "approver_role_name" not in ctx["import_unimportable_columns"]
 
@@ -1443,6 +1467,144 @@ class TestImportKeySpecsLookupEntityFilterByOrg:
         specs = {s["raw"]: s for s in ctx["import_key_specs"] if s["is_dotted"]}
         assert specs["organization.name"]["lookup_entity_filter_by_org"] is False
         assert specs["user.name"]["lookup_entity_filter_by_org"] is False
+
+
+# ---------------------------------------------------------------------------
+# cmd_548 (subtask_547a design, option ko): composite/dotted labelField FKs
+# become importable via full-label-text matching. Org isolation must apply
+# to the composite candidate-row map exactly like it does to the simple
+# dotted-FK lookup above — an org-scoped lookup entity must be filtered, a
+# system-global one must not.
+# ---------------------------------------------------------------------------
+
+class TestCompositeLabelFieldImportOrgFilter:
+    SCHEMA = {
+        "definitions": {
+            "organization": {
+                "type": "object",
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "product": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "location": {
+                "type": "object",
+                "required": ["id", "name", "organization_id"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "organization_id": _fk_field("organization", label="name"),
+                },
+            },
+            "inventory": {
+                "type": "object",
+                "required": ["id", "product_id", "location_id", "organization_id"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "product_id": _fk_field("product", label="name"),
+                    "location_id": _fk_field("location", label="name"),
+                    "organization_id": _fk_field("organization", label="name"),
+                },
+            },
+            "inventory_movement": {
+                "type": "object",
+                "required": ["id", "name", "organization_id"],
+                "x-import-key": ["name"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "organization_id": _fk_field("organization", label="name"),
+                    "from_inventory_id": _fk_field(
+                        "inventory", nullable=True, label=["product.name", "location.name"],
+                    ),
+                },
+            },
+        }
+    }
+
+    ENTITY = _entity(model="inventory_movement")
+
+    def _spec(self):
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        specs = {s["result_col"]: s for s in ctx["import_fk_specs"]}
+        return ctx, specs["from_inventory_id"]
+
+    def test_composite_fk_marked_is_composite(self):
+        _, spec = self._spec()
+        assert spec["is_composite"] is True
+        assert spec["csv_col"] == "from_inventory_name"
+
+    def test_composite_fk_lookup_entity_with_org_id_is_filtered(self):
+        """inventory has organization_id -> the pre-built candidate map must
+        be org-scoped, or a cross-org row's label could resolve the FK
+        (the organization boundary failure mode cmd_548 guards against)."""
+        _, spec = self._spec()
+        assert spec["lookup_entity_filter_by_org"] is True
+
+    def test_composite_fk_pulls_in_any_dotted_fk_needs_org_filter(self):
+        ctx, _ = self._spec()
+        assert ctx["any_dotted_fk_needs_org_filter"] is True
+
+    def test_composite_fk_prisma_include_covers_nested_relations(self):
+        """The candidate-row query needs product+location included to
+        compute the label — this is the same prisma_include the export
+        side already resolves via the identical helper call."""
+        _, spec = self._spec()
+        assert spec["prisma_include"].get("product") is True
+        assert spec["prisma_include"].get("location") is True
+
+    def test_composite_fk_not_in_unimportable_columns(self):
+        ctx, _ = self._spec()
+        assert "from_inventory_name" not in ctx["import_unimportable_columns"]
+
+    def test_system_global_lookup_entity_composite_fk_not_org_filtered(self):
+        """A composite-label FK into a system-global entity (no
+        organization_id) must NOT be org-filtered — filtering it would
+        return zero candidates for every row (same trap as cmd_521's
+        dotted-FK case, generalized to the composite map)."""
+        schema = {
+            "definitions": {
+                "permission_a": {
+                    "type": "object",
+                    "required": ["id", "code"],
+                    "properties": {"id": _base_props()["id"], "code": {"type": "string"}},
+                },
+                "permission_b": {
+                    "type": "object",
+                    "required": ["id", "code"],
+                    "properties": {"id": _base_props()["id"], "code": {"type": "string"}},
+                },
+                "role_bundle": {
+                    "type": "object",
+                    "required": ["id", "code"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "code": {"type": "string"},
+                        "permission_a_id": _fk_field("permission_a", label="code"),
+                        "permission_b_id": _fk_field("permission_b", label="code"),
+                    },
+                },
+                "grant": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "x-import-key": ["name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "role_bundle_id": _fk_field(
+                            "role_bundle", nullable=True,
+                            label=["permission_a.code", "permission_b.code"],
+                        ),
+                    },
+                },
+            }
+        }
+        ctx = build_context(_entity(model="grant"), schema)
+        specs = {s["result_col"]: s for s in ctx["import_fk_specs"]}
+        assert specs["role_bundle_id"]["is_composite"] is True
+        assert specs["role_bundle_id"]["lookup_entity_filter_by_org"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -1781,3 +1943,49 @@ class TestDefaultPropsPrismaNativeEnum:
     def test_plain_string_field_default_is_empty_string(self):
         ctx = build_context(_entity("widget"), self._schema({"type": "string"}))
         assert "status: '',"  in ctx["parent_default_props"]
+
+
+class TestSelfOnlyContextFlags:
+    """cmd_536: is_self_only / self_only_admin_bypass, as seen by templates
+    via build_context()'s actual output — not just the schema_helpers
+    function in isolation. The shorthand form's admin_bypass must default
+    to False (the loose/permissive direction is never the implicit
+    default) — verified end-to-end through build_context(), matching what
+    getters.ts.jinja2 etc. actually receive."""
+
+    def _schema(self, x_self_only) -> dict:
+        defs = {
+            "widget": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {**_base_props(), "creator_id": {"type": "string"}},
+            },
+        }
+        if x_self_only is not None:
+            defs["widget"]["x-self-only"] = x_self_only
+        return {"definitions": defs}
+
+    def test_no_x_self_only_both_flags_false(self):
+        ctx = build_context(_entity("widget"), self._schema(None))
+        assert ctx["is_self_only"] is False
+        assert ctx["self_only_admin_bypass"] is False
+
+    def test_shorthand_true_is_self_only_but_admin_bypass_defaults_false(self):
+        ctx = build_context(_entity("widget"), self._schema(True))
+        assert ctx["is_self_only"] is True
+        assert ctx["self_only_admin_bypass"] is False
+
+    def test_dict_form_without_admin_bypass_key_defaults_false(self):
+        ctx = build_context(_entity("widget"), self._schema({}))
+        assert ctx["is_self_only"] is True
+        assert ctx["self_only_admin_bypass"] is False
+
+    def test_dict_form_admin_bypass_true_is_honored(self):
+        ctx = build_context(_entity("widget"), self._schema({"admin_bypass": True}))
+        assert ctx["is_self_only"] is True
+        assert ctx["self_only_admin_bypass"] is True
+
+    def test_dict_form_admin_bypass_false_explicit(self):
+        ctx = build_context(_entity("widget"), self._schema({"admin_bypass": False}))
+        assert ctx["is_self_only"] is True
+        assert ctx["self_only_admin_bypass"] is False

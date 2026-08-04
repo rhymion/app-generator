@@ -17,7 +17,7 @@ from helpers.schema_helpers import (
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
     derive_text_fields, derive_searchable_relation_fields,
     get_internal_bridge_fk_prop_names,
-    get_entity_properties,
+    get_entity_properties, get_self_only_flags,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -1204,6 +1204,28 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     has_org_rel          = any(r['target'] == 'organization' for r in parent_rels)
     should_filter_by_org = has_org_rel and model not in ('organization', 'user')
 
+    # is_self_only / self_only_admin_bypass: entity-level access invariant
+    # ("only the record's creator can access it") that no permission setting
+    # can widen. Declared on the base entity (`x-self-only`) — see
+    # get_self_only_flags() for the shorthand-vs-dict resolution rule.
+    # Combines with should_filter_by_org via AND (both an org and a creator
+    # scope may apply to the same entity) — never OR.
+    #
+    # Checked at TWO levels, not just model_def: for most entities def_key's
+    # own definition IS model_def (or model_def is that entity's exclusive
+    # raw '__'-prefixed twin), so either lookup finds the same declaration.
+    # But a pass-through proxy view (`setting`, whose allOf resolves to the
+    # *shared* `__user` raw entity also backing the real `user` entity) is
+    # never merged into model_def — it keeps its own x-self-only declaration
+    # on its own view-level dict (schema['definitions']['setting']).
+    # Reading model_def alone would either miss it entirely, or — far worse
+    # — if ever declared on the shared raw entity instead, leak the
+    # restriction onto `user` too. Checking the def_key-level dict first
+    # keeps `x-self-only: true` on `setting` scoped to `setting` alone.
+    is_self_only, self_only_admin_bypass = get_self_only_flags(schema['definitions'].get(def_key, {}))
+    if not is_self_only:
+        is_self_only, self_only_admin_bypass = get_self_only_flags(model_def)
+
     # x-import-key: natural key fields (CSV export column guarantee, Phase 1;
     # natural-key import matching, Phase 2). Dotted FK paths (e.g. role.name)
     # are Phase 2-only — Phase 1 export only needs the non-dotted portion.
@@ -1237,29 +1259,41 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # to the "_name" suffix — those are not expected to serve as dotted
     # x-import-key sources.
     from helpers.label_field import build_label_expression as _xrl_build_label_expression
-    x_relationships_list = []
-    export_uses_format_label_value = False
-    for r in parent_rels:
-        _xrl_simple_label = (
-            r['label_field'] if isinstance(r['label_field'], str) and '.' not in r['label_field'] else None
-        )
+
+    def _xrl_build(_item_var: str, _label_field, _target: str) -> dict:
         try:
-            _xrl_built = _xrl_build_label_expression(
-                f"row.{r['relation_name']}", r['label_field'], r['target'], schema,
-            )
+            return _xrl_build_label_expression(_item_var, _label_field, _target, schema)
         except ValueError:
             # Malformed/unresolvable labelField path — never silently drop the
             # column (that's the exact failure mode this fix exists for). Fall
             # back to the target's own display-fallback chain (mirrors
             # bridge_parent_options' AP-1-B fallback above); 'id' always
             # exists, so this second attempt cannot itself raise.
-            _xrl_tprops = _raw_def(r['target'], schema).get('properties') or {}
+            _xrl_tprops = _raw_def(_target, schema).get('properties') or {}
             _xrl_fallback = next((f for f in ('name', 'title', 'label', 'id') if f in _xrl_tprops), 'id')
-            _xrl_built = _xrl_build_label_expression(
-                f"row.{r['relation_name']}", _xrl_fallback, r['target'], schema,
-            )
+            return _xrl_build_label_expression(_item_var, _xrl_fallback, _target, schema)
+
+    x_relationships_list = []
+    export_uses_format_label_value = False
+    for r in parent_rels:
+        _xrl_simple_label = (
+            r['label_field'] if isinstance(r['label_field'], str) and '.' not in r['label_field'] else None
+        )
+        _xrl_built = _xrl_build(f"row.{r['relation_name']}", r['label_field'], r['target'])
         if _xrl_built['has_format']:
             export_uses_format_label_value = True
+        # cmd_548: composite/dotted labelFields also need a candidate-rooted
+        # ('c') variant of the SAME expression for import-side label
+        # matching — the import map is built from `prisma.<target>.findMany()`
+        # results directly, not nested under a parent row, so the root
+        # variable must differ. This is the SAME helper call with the SAME
+        # label_field/target/schema/join_separator inputs as the export
+        # expression above (only item_var differs) — export and import can
+        # never render the label text differently for the same values, since
+        # both are one call away from identical inputs.
+        _xrl_import_built = (
+            _xrl_build('c', r['label_field'], r['target']) if _xrl_simple_label is None else None
+        )
         x_relationships_list.append({
             'field': r['relation_name'],
             'display_col': (
@@ -1268,12 +1302,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             ),
             'label_expr': _xrl_built['expression'],
             # cmd_530: needed to build import_fk_specs below — a relation is
-            # only import-resolvable when its labelField is a single field
-            # (simple_label is None for composite/dotted labelFields, which
-            # can't be resolved back to a unique lookup value).
+            # only import-resolvable-by-scalar-field when its labelField is a
+            # single field (simple_label is None for composite/dotted
+            # labelFields). cmd_548: composite/dotted labelFields are still
+            # import-resolvable via full-label-text matching — see
+            # import_label_expr/prisma_include below.
             'prop_name': r['prop_name'],
             'target': r['target'],
             'simple_label': _xrl_simple_label,
+            'import_label_expr': _xrl_import_built['expression'] if _xrl_import_built else None,
+            'prisma_include': _xrl_import_built['prisma_include'] if _xrl_import_built else None,
         })
 
     # export_scalar_fields: explicit allowlist of CSV export columns (cmd_324 V1).
@@ -1408,38 +1446,64 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # only merged into CREATE data via keyWhere) by routing every entry here
     # — key or not — into updateData in the template.
     #
-    # Composite/dotted labelFields (x_relationships_list['simple_label'] is
-    # None) are excluded — there's no single lookup field to resolve a CSV
-    # cell back to. Non-editable (x-readonly) FKs are excluded too — they
-    # have no business being writable via import just because they're
-    # visible in export. Both classes remain exported but become
-    # import_unimportable_columns below (fail loud instead of silent drop).
-    _key_relation_names = {s['var_prefix'] for s in import_key_specs if s['is_dotted']}
-    import_fk_specs = [
-        {**s, 'is_key': True} for s in import_key_specs if s['is_dotted']
-    ]
-    for r in x_relationships_list:
-        if r['simple_label'] is None:
-            continue
-        if r['field'] in _key_relation_names:
-            continue
-        if r['prop_name'] in readonly_fields:
-            continue
-        _fk_prop  = model_def.get('properties', {}).get(r['prop_name'], {})
+    # cmd_548: composite/dotted labelFields (x_relationships_list['simple_label']
+    # is None) used to be excluded here entirely — there's no single lookup
+    # field to resolve a CSV cell back to. They're now import-resolvable via
+    # full-label-text matching (is_composite=True; see
+    # option_ko_label_match design, subtask_547a): the pre-built
+    # label→id map (import_label_expr/prisma_include, computed above with
+    # the same helper/inputs as the export label_expr) is matched against
+    # the whole CSV cell instead of a single scalar field. Non-editable
+    # (x-readonly) FKs are still excluded — they have no business being
+    # writable via import just because they're visible in export. Both
+    # exclusion classes remain exported but become import_unimportable_columns
+    # below (fail loud instead of silent drop).
+    def _fk_nullable_and_org_filter(_prop_name: str, _lookup_entity: str) -> tuple[bool, bool]:
+        _fk_prop  = model_def.get('properties', {}).get(_prop_name, {})
         _fk_types = _fk_prop.get('type', [])
         if isinstance(_fk_types, str):
             _fk_types = [_fk_types]
         _fk_nullable = 'null' in _fk_types
-        _lookup_entity = r['target']
         _lookup_entity_def = (
             schema['definitions'].get(f'__{_lookup_entity}', {})
             or schema['definitions'].get(_lookup_entity, {})
         )
         _lookup_has_org = 'organization_id' in _lookup_entity_def.get('properties', {})
         _lookup_entity_filter_by_org = _lookup_has_org and _lookup_entity not in ('organization', 'user')
+        return _fk_nullable, _lookup_entity_filter_by_org
+
+    _key_relation_names = {s['var_prefix'] for s in import_key_specs if s['is_dotted']}
+    import_fk_specs = [
+        {**s, 'is_key': True, 'is_composite': False} for s in import_key_specs if s['is_dotted']
+    ]
+    for r in x_relationships_list:
+        if r['field'] in _key_relation_names:
+            continue
+        if r['prop_name'] in readonly_fields:
+            continue
+        _lookup_entity = r['target']
+        _fk_nullable, _lookup_entity_filter_by_org = _fk_nullable_and_org_filter(r['prop_name'], _lookup_entity)
+        if r['simple_label'] is None:
+            import_fk_specs.append({
+                'raw':                  r['field'],
+                'is_dotted':            False,
+                'is_composite':         True,
+                'csv_col':              r['display_col'],
+                'var_prefix':           r['field'],
+                'lookup_entity':        _lookup_entity,
+                'lookup_entity_pascal': to_pascal_case(_lookup_entity),
+                'result_col':           r['prop_name'],
+                'fk_nullable':          _fk_nullable,
+                'lookup_entity_filter_by_org': _lookup_entity_filter_by_org,
+                'is_key':               False,
+                'import_label_expr':    r['import_label_expr'],
+                'prisma_include':       r['prisma_include'],
+            })
+            continue
         import_fk_specs.append({
             'raw':                  f"{r['field']}.{r['simple_label']}",
             'is_dotted':            True,
+            'is_composite':         False,
             'csv_col':              r['display_col'],
             'var_prefix':           r['field'],
             'lookup_entity':        _lookup_entity,
@@ -1473,6 +1537,13 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         rel['display_col'] for rel in x_relationships_list
         if rel['display_col'] not in _import_fk_csv_cols
     ]
+    # x-self-only: creator_id is exported (read-only, for diagnostics — see
+    # export_scalar_fields below) but must never be settable from a CSV. A
+    # CSV header naming it is a hard reject, not a silently-ignored column,
+    # matching the "import cannot do more than the screen" invariant —
+    # creator_id is never screen-editable either.
+    if is_self_only:
+        import_unimportable_columns = import_unimportable_columns + ['creator_id']
 
     # _create_feasible: True if all required non-system fields can be provided via CSV.
     # Required fields that are NOT in export_scalar_fields and NOT resolvable via
@@ -2440,6 +2511,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         parent_rels_raw=parent_rels_raw,
         relationship_targets=relationship_targets,
         should_filter_by_org=should_filter_by_org,
+        is_self_only=is_self_only,
+        self_only_admin_bypass=self_only_admin_bypass,
         # CSV export (Phase 1): natural-key columns + FK flatten metadata
         import_key_fields=import_key_fields,
         has_import_key=has_import_key,

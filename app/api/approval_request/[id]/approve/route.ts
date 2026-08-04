@@ -3,10 +3,11 @@ import { requireSession, handleApiError } from '@/lib/api-auth';
 import { ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 import { getUserRoleIds } from '@/lib/authz';
-import { assertApprovalOrder } from '@/lib/approval_request/order-check';
+import { assertApprovalOrder, findNewlyActionableFollowFlowIds } from '@/lib/approval_request/order-check';
 import { dispatchOnApproved } from '@/lib/approval_request/on_approved_dispatch';
 import { getApprovalRequestRecipient } from '@/lib/approval_request/actions';
 import { notify } from '@/lib/_notifier';
+import { notifyApprovalOrderReached } from '@/lib/_notifyApprovalRequest';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -29,7 +30,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const body = await request.json().catch(() => ({}));
     const message: string | undefined = body?.message || undefined;
 
+    let orderReachedFlowIds: string[] = [];
+    let orderReachedApprovableId: string | undefined;
     const updated = await prisma.$transaction(async (tx) => {
+      const before = await tx.approval_request.findUnique({
+        where: { id },
+        select: { status: true, approval_flow_id: true },
+      });
       const result = await tx.approval_request.update({
         where: { id },
         data: { status: 'approved' },
@@ -58,6 +65,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         await tx.approvable.update({ where: { id: approvableData.id }, data: { approved_at: new Date() } });
         await dispatchOnApproved(tx, result.approval_flow.entity_name, approvableData.id, userId);
       }
+      // cmd_541: notify approvers of any follow-on preceded_by flow that
+      // just became actionable — see the parity note in
+      // lib/approval_request/actions_core.ts's approveApprovalRequest() for
+      // why `before.status !== 'approved'` guards against re-notifying on a
+      // repeated approve call.
+      if (before && before.status !== 'approved') {
+        orderReachedFlowIds = await findNewlyActionableFollowFlowIds(tx, result.approvable_id, before.approval_flow_id);
+        orderReachedApprovableId = result.approvable_id;
+      }
       return result;
     }, { isolationLevel: 'Serializable' });
     // cmd_479: this REST route duplicates lib/approval_request/actions.ts's
@@ -66,7 +82,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // — so approving via the API (as opposed to the UI's ApprovalSection.tsx,
     // which calls the server action) silently never notified the requestor.
     // Mirrors that function's post-transaction notify block exactly.
-    const { recipientId, entityName, href } = await getApprovalRequestRecipient(id);
+    const { recipientId, entityName, targetId, href } = await getApprovalRequestRecipient(id);
     if (recipientId && recipientId !== userId) {
       notify(recipientId, 'approval_responded', {
         title: `Your ${entityName ?? 'request'} was approved`,
@@ -74,6 +90,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         approvalRequestId: id,
         status: 'approved',
         message: message ?? null,
+      });
+    }
+    // cmd_541 (trigger #4): mirrors actions_core.ts's approveApprovalRequest() — see cmd_479 note above on why both implementations must be kept in parity.
+    if (orderReachedApprovableId && orderReachedFlowIds.length > 0) {
+      await notifyApprovalOrderReached(prisma, orderReachedApprovableId, orderReachedFlowIds, {
+        excludeUserId: userId,
+        targetEntityName: entityName,
+        targetId,
       });
     }
     return NextResponse.json(updated);

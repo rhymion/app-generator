@@ -32,6 +32,7 @@ from helpers.schema_helpers import derive_text_fields as _derive_text_fields
 from helpers.schema_helpers import get_splittable_bridge_field
 from helpers.schema_helpers import resolve_ledger_domain
 from helpers.schema_helpers import get_entity_properties
+from helpers.schema_helpers import get_self_only_flags
 from generators import (
     chart_context,
     page_list_context,
@@ -54,7 +55,10 @@ from generators_i18n import (
     _collect_custom_component_sections,
     _merge_file_wins_messages,
 )
-from validate import validate_schema, validate_prisma_indexes, SchemaValidationError
+from validate import (
+    validate_schema, validate_prisma_indexes,
+    validate_self_only_creator_id_columns, SchemaValidationError,
+)
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
 from generators_test import (
     helper_context,
@@ -425,6 +429,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     try:
         validate_schema(schema)
         validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_self_only_creator_id_columns(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
     except SchemaValidationError as exc:
         print(f'\n{exc}', file=sys.stderr)
         sys.exit(1)
@@ -488,6 +493,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     doc_dir = out / 'docs' / 'generated'
     entity_doc_summaries: list[dict] = []
+    self_only_admin_bypass_entities: list[str] = []
 
     for entity in entities:
         parent     = entity['parent']
@@ -526,6 +532,8 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # Base context for all other generators
         ctx = build_context(entity, schema, has_reactions=bool(named_constants))
+        if ctx.get('is_self_only') and ctx.get('self_only_admin_bypass'):
+            self_only_admin_bypass_entities.append(parent)
 
         # --- docs/{parent}.md + app/[locale]/docs/{parent}/page.mdx ---
         doc_ctx = build_doc_entity_context(ctx)
@@ -1018,6 +1026,25 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         print(f'  Named constants → lib/reaction_constants.ts ({len(named_constants)} constant(s))')
 
+    # --- Self-only admin-bypass entity list (lib/self_only_admin_bypass_entities.ts) ---
+    # x-self-only entities with admin_bypass:true (cmd_536) — the privileged
+    # role's item-level bypass is granted by trySelfOnlyAdminBypass() inside
+    # each entity's own getters, but the separate, coarser
+    # requireApiPermission()/getModelPermissions() gate has no permission
+    # row to check (these entities are deliberately excluded from
+    # cypress/support/db-helpers.ts's ALL_ENTITIES-driven grants, and in
+    # production nobody grants a permission row for a self-service entity
+    # either) — without this list, that coarse gate 403s before the
+    # item-level bypass ever gets a chance to run. Always written (even
+    # empty) so `lib/authz.ts`'s import never dangles.
+    _write(
+        out / 'lib' / 'self_only_admin_bypass_entities.ts',
+        _render(env, 'self_only_admin_bypass_entities.ts.jinja2', {
+            'entities': self_only_admin_bypass_entities,
+        }),
+    )
+    print(f'  Self-only admin-bypass entities → lib/self_only_admin_bypass_entities.ts ({len(self_only_admin_bypass_entities)} entities)')
+
     # --- anonymize_user.ts (lib/compliance/anonymize_user.ts) ---
     # Emitted when the user entity has at least one x-pii annotated field.
     # Generates GDPR Art.17 right-to-erasure scrub function from x-pii annotations.
@@ -1340,6 +1367,14 @@ def generate(schema_path: str, output_dir: str) -> None:
         # creator_id is always auto-injected by the code generator (present in every Prisma model)
         # assignee_id is entity-specific; check schema properties
         has_assignee_id = 'assignee_id' in all_props
+        # x-self-only: same invariant as build<Entity>AccessWhere — the global
+        # cross-entity search union must not surface another user's rows
+        # through a side channel just because the per-entity page filters
+        # them. Global search intentionally has no admin_bypass path (only
+        # the dedicated get<Entity>Page/Detail/search<Entity>Options getters
+        # do) — cross-entity full-text search is not the audited
+        # investigation surface the bypass exists for.
+        is_self_only, _ = get_self_only_flags(base_def if isinstance(base_def, dict) else {})
 
         # Phase1+2: non-independent child entities searchable via the parent's page
         # (inline grid / embedded list children, and non-m2o flattened OTO relations).
@@ -1409,6 +1444,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'should_filter_by_org':  should_filter_by_org,
             'org_id_field':          effective_org_id_field,
             'has_assignee_id':       has_assignee_id,
+            'is_self_only':          is_self_only,
             # Pre-computed TypeScript identifiers (avoids Jinja2/TypeScript ${{{...}}} delimiter conflict)
             'perms_ts_var':          f'{parent}Perms',
             'general_read_ts_var':   f'{parent}GeneralRead',

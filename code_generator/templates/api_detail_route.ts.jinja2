@@ -21,7 +21,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId: actorId } = await authenticateApiKey(request);
-    const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org %}, actorId{% endif %});
+    const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org or is_self_only %}, actorId{% endif %});
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
@@ -90,7 +90,16 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
+{% if is_self_only %}
+    // x-self-only: no general.update/Creator-role override — ownership is
+    // the sole gate, unconditionally (no admin bypass on write). "Not
+    // found" (not 403) for a non-owner's row, per the cmd_523 pattern.
+    if (existing.creator_id !== actorId) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+{% else %}
     await requireApiPermission(actorId, '{{ parent }}', 'update', existing);
+{% endif %}
     const body = await request.json();
     const { {{ all_body_fields_create }} } = body;
 {% if readonly_fields_api %}
@@ -131,7 +140,15 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
+{% if is_self_only %}
+    // x-self-only: no general.delete/Creator-role override — ownership is
+    // the sole gate, unconditionally (no admin bypass on delete).
+    if (existing.creator_id !== actorId) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+{% else %}
     await requireApiPermission(actorId, '{{ parent }}', 'delete', existing);
+{% endif %}
     await delete{{ parent_pascal }}({% if is_audited %}actorId, {% endif %}[id]);
     return new NextResponse(null, { status: 204 });
   } catch (error) {

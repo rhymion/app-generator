@@ -173,6 +173,20 @@ definitions:
       roles:
         type: many-to-many
         target: role
+    # x-self-only (cmd_536): `setting` is a proxy view of the acting
+    # user's OWN `user` row — id === creator_id always holds for every
+    # real account (see lib/auth/creator-id-self-reference-guard.test.ts),
+    # so creator_id is exactly the right unconditional ownership filter
+    # here, same as any other x-self-only entity. admin_bypass: true lets
+    # an Administrator read another user's settings for support purposes,
+    # but only with an audit row written for the access (see
+    # lib/self_only.ts) — this scope is entity-name-keyed (`setting`), so
+    # it applies ONLY to settings pages/routes/getters and never touches
+    # the `user` entity itself or any other entity's FK reference to
+    # `user` (mentions, comment creators, approvers, etc. all stay fully
+    # visible).
+    x-self-only:
+      admin_bypass: true
     allOf:
       - $ref: "#/definitions/user"
       - type: object
@@ -465,70 +479,6 @@ definitions:
             width: 200
         - status:
             width: 100
-  __approvable:
-    type: object
-    required:
-      - id
-    properties:
-      id:
-        type: string
-        pattern: ^c[a-z0-9]{24,}$
-      approved_at:
-        type: string
-        nullable: true
-        format: date-time
-  approvable:
-    x-generate:
-      list: false
-      view: false
-      new: false
-      edit: false
-      delete: false
-      invalidate: false
-      api: false
-      test: false
-    allOf:
-      - $ref: '#/definitions/__approvable'
-      - type: object
-        required:
-          - approval_requests
-        properties:
-          approval_requests:
-            type: array
-            x-outputType: list
-            items:
-              $ref: "#/definitions/approval_request"
-
-  __commentable:
-    type: object
-    required:
-      - id
-    properties:
-      id:
-        type: string
-        pattern: ^c[a-z0-9]{24,}$
-  commentable:
-    x-generate:
-      list: false
-      view: false
-      new: false
-      edit: false
-      delete: false
-      invalidate: false
-      api: false
-      test: false
-    allOf:
-      - $ref: '#/definitions/__commentable'
-      - type: object
-        required:
-          - comments
-        properties:
-          comments:
-            type: array
-            x-outputType: comments
-            items:
-              $ref: "#/definitions/comment"
-
   comment:
     type: object
     required:
@@ -583,36 +533,6 @@ definitions:
       page: false
       embed: false
       api: custom
-  __attachable:
-    type: object
-    required:
-      - id
-    properties:
-      id:
-        type: string
-        pattern: ^c[a-z0-9]{24,}$
-  attachable:
-    x-generate:
-      list: false
-      view: false
-      new: false
-      edit: false
-      delete: false
-      invalidate: false
-      api: false
-      test: false
-    allOf:
-      - $ref: '#/definitions/__attachable'
-      - type: object
-        required:
-          - attachments
-        properties:
-          attachments:
-            type: array
-            x-outputType: list
-            items:
-              $ref: "#/definitions/attachment"
-
   attachment:
     type: object
     required:
@@ -759,6 +679,145 @@ definitions:
             type: array
             items:
               $ref: "#/definitions/dashboard_widget"
+
+  # Sample x-self-only entity: a private per-user note. Only its creator can
+  # ever read/write it, regardless of any permission grant — see
+  # docs/knowledge/self-only-entity.md. admin_bypass:true additionally lets a
+  # privileged (Administrator) role read across all users' notes, but only
+  # with an audit row written for the access — if that write fails, the
+  # bypass is denied (fail-closed).
+  __personal_note:
+    type: object
+    required:
+      - id
+      - title
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      title:
+        type: string
+      content:
+        type:
+          - string
+          - 'null'
+        x-ui:
+          width: 8
+
+    x-import-key: [title]
+    x-display:
+      table:
+        - title:
+            primary: true
+            width: 200
+    x-self-only:
+      admin_bypass: true
+  personal_note:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+      search: false
+    allOf:
+      - $ref: '#/definitions/__personal_note'
+  __approvable:
+    type: object
+    required:
+      - id
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+      approved_at:
+        type: string
+        nullable: true
+        format: date-time
+  approvable:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    allOf:
+      - $ref: '#/definitions/__approvable'
+      - type: object
+        required:
+          - approval_requests
+        properties:
+          approval_requests:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/approval_request"
+
+  __commentable:
+    type: object
+    required:
+      - id
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+  commentable:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    allOf:
+      - $ref: '#/definitions/__commentable'
+      - type: object
+        required:
+          - comments
+        properties:
+          comments:
+            type: array
+            x-outputType: comments
+            items:
+              $ref: "#/definitions/comment"
+
+  __attachable:
+    type: object
+    required:
+      - id
+    properties:
+      id:
+        type: string
+        pattern: ^c[a-z0-9]{24,}$
+  attachable:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    allOf:
+      - $ref: '#/definitions/__attachable'
+      - type: object
+        required:
+          - attachments
+        properties:
+          attachments:
+            type: array
+            x-outputType: list
+            items:
+              $ref: "#/definitions/attachment"
 
   __notification:
     type: object

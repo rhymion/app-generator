@@ -157,6 +157,20 @@ definitions:
       roles:
         type: many-to-many
         target: role
+    # x-self-only (cmd_536): `setting` is a proxy view of the acting
+    # user's OWN `user` row — id === creator_id always holds for every
+    # real account (see lib/auth/creator-id-self-reference-guard.test.ts),
+    # so creator_id is exactly the right unconditional ownership filter
+    # here, same as any other x-self-only entity. admin_bypass: true lets
+    # an Administrator read another user's settings for support purposes,
+    # but only with an audit row written for the access (see
+    # lib/self_only.ts) — this scope is entity-name-keyed (`setting`), so
+    # it applies ONLY to settings pages/routes/getters and never touches
+    # the `user` entity itself or any other entity's FK reference to
+    # `user` (mentions, comment creators, approvers, etc. all stay fully
+    # visible).
+    x-self-only:
+      admin_bypass: true
     allOf:
       - $ref: "#/definitions/user"
       - type: object
@@ -446,4 +460,35 @@ definitions:
         type: array
         items:
           $ref: "#/definitions/dashboard_widget"
+
+  # Sample x-self-only entity: a private per-user note. Only its creator can
+  # ever read/write it, regardless of any permission grant — see
+  # docs/knowledge/self-only-entity.md. admin_bypass:true additionally lets a
+  # privileged (Administrator) role read across all users' notes, but only
+  # with an audit row written for the access — if that write fails, the
+  # bypass is denied (fail-closed).
+  personal_note:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+      search: false
+    x-self-only:
+      admin_bypass: true
+    x-import-key: [title]
+    x-display:
+      table:
+        - title:
+            primary: true
+            width: 200
+    fields:
+      title: {}
+      content:
+        x-ui:
+          width: 8
 

@@ -56,6 +56,7 @@ export type NotificationType =
   | 'assigned'
   | 'approval_requested'
   | 'approval_responded'
+  | 'approval_order_reached'
   | 'comment_created'
   | string;
 

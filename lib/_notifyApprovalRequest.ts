@@ -98,3 +98,74 @@ export async function notifyApprovalRequestCreated(
     });
   }
 }
+
+interface OrderReachedOptions {
+  /** Entity-name shown in the notification title. Falls back to the flow's entity_name. */
+  entityLabel?: string | null;
+  /** Acting approver of the just-approved flow — skipped in case they also hold a follow-on flow's approver role. */
+  excludeUserId?: string | null;
+  /** Same link-target convention as notifyApprovalRequestCreated (cmd_479) — the approvable's own detail page. */
+  targetEntityName?: string | null;
+  targetId?: string | null;
+}
+
+/**
+ * Trigger #4 (cmd_541): a preceded_by chain creates every flow's
+ * approval_request up front (Trigger #2 notifies all of their approvers at
+ * that point), but a follow-on flow isn't actually actionable until its
+ * preceding flow(s) are approved — and until now, nothing told its
+ * approvers when that moment arrived. They only found out by checking back
+ * on their own.
+ *
+ * Called after a preceding flow's approval_request transitions to
+ * 'approved' and lib/approval_request/order-check.ts's
+ * findNewlyActionableFollowFlowIds() has determined which follow-on
+ * flows (identified by approval_flow id) just became fully unblocked for
+ * this approvable. Notifies every user holding each of those flows'
+ * approver role — the same audience Trigger #2 already notified once, at
+ * creation time, before they could act.
+ */
+export async function notifyApprovalOrderReached(
+  tx: unknown,
+  approvableId: string,
+  flowIds: string[],
+  options: OrderReachedOptions = {},
+): Promise<void> {
+  if (flowIds.length === 0) return;
+
+  const db = tx as Tx;
+  const requests = await db.approval_request.findMany({
+    where: { approvable_id: approvableId, approval_flow_id: { in: flowIds } },
+    select: {
+      id: true,
+      approval_flow: { select: { approver_role_id: true, entity_name: true } },
+    },
+  });
+
+  const excludeUserId = options.excludeUserId ?? null;
+  const href =
+    options.targetEntityName && options.targetId
+      ? `/${options.targetEntityName}/view/${options.targetId}`
+      : undefined;
+
+  for (const req of requests) {
+    if (!req.approval_flow?.approver_role_id) continue;
+    const role = await db.role.findUnique({
+      where: { id: req.approval_flow.approver_role_id },
+      select: { users: { select: { id: true } } },
+    });
+    if (!role) continue;
+
+    const entityLabel = options.entityLabel ?? req.approval_flow.entity_name ?? 'request';
+
+    for (const u of role.users) {
+      if (u.id === excludeUserId) continue;
+      notify(u.id, 'approval_order_reached', {
+        title: `Your approval is now needed: ${entityLabel}`,
+        href,
+        approvalRequestId: req.id,
+        entityName: req.approval_flow.entity_name,
+      });
+    }
+  }
+}
