@@ -159,6 +159,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `.github/dependabot.yml` from the default branch, not `develop`, so `develop`'s copy of the
   setting was inert; ported to `main`'s copy (PR #248). See
   `docs/knowledge/dependabot-config-read-from-default-branch.md`.
+- **MUI major-update PRs grouped into one; missing Dependabot labels created** (cmd_537): added
+  an `npm-mui-major` group to `.github/dependabot.yml` (PR #256, the copy on `main` that
+  Dependabot reads) so major-version bumps across the whole `@mui/*` scope land as one PR
+  instead of one per package. Also created the `dependencies`/`npm`/`python`/`github-actions`
+  repo labels that Dependabot's config referenced but that never existed, so future PRs stop
+  reporting a missing-label warning.
 
 ## [3.0.0] - 2026-07-30
 
