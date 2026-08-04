@@ -233,6 +233,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   and added `validate_schema()` Section 10 (`code_generator/validate.py`) to reject a non-mapping
   `set_fields` before generation runs, naming the entity, the offending field key(s), and the
   correct form.
+- **`npm run lint` now enforces a warning ceiling** (`eslint --max-warnings 20`, follow-up to
+  cmd_529): a prior triage found 216 unused-vars/expressions warnings had silently accumulated
+  behind a config gap, one of which was a genuine dead branch — a ceiling that only ratchets down
+  (never silently raised) stops that from recurring unnoticed. Seeded 5 warnings above the
+  measured `develop`-tip count (15) rather than an exact match, so one incidental warning doesn't
+  turn an unrelated PR red. See `docs/knowledge/lint-warning-ceiling-ratchet.md`.
 
 ## [3.0.0] - 2026-07-30
 
