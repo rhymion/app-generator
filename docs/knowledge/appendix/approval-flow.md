@@ -317,9 +317,14 @@ purchase_order:
   x-approval:
     on_approved:
       set_fields:
-        - field: status         # target field name on this entity
-          value: "1"            # string label (resolved to integer index for Int fields)
+        status: "approved"   # string label (resolved to integer index for Int fields)
 ```
+
+`set_fields` is a **mapping** of `field_name: value` — matching §16.11's `on_rejected.set_fields`
+below, and the only form `_resolve_set_fields()` (`code_generator/generate.py:289`) accepts (it
+iterates `raw.items()`). A list-of-`{field, value}` form is rejected before generation runs by
+`validate_schema()`'s `x-approval.set_fields` check (`code_generator/validate.py`), with an error
+naming the entity, the offending key, and the correct mapping form.
 
 The generator resolves enum labels to integer indices when the target field type is `integer`,
 preventing TypeScript build errors in the generated dispatch file.
