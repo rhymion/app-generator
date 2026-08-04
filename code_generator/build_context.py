@@ -17,7 +17,7 @@ from helpers.schema_helpers import (
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
     derive_text_fields, derive_searchable_relation_fields,
     get_internal_bridge_fk_prop_names,
-    get_entity_properties,
+    get_entity_properties, get_self_only_flags,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -1204,6 +1204,28 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     has_org_rel          = any(r['target'] == 'organization' for r in parent_rels)
     should_filter_by_org = has_org_rel and model not in ('organization', 'user')
 
+    # is_self_only / self_only_admin_bypass: entity-level access invariant
+    # ("only the record's creator can access it") that no permission setting
+    # can widen. Declared on the base entity (`x-self-only`) — see
+    # get_self_only_flags() for the shorthand-vs-dict resolution rule.
+    # Combines with should_filter_by_org via AND (both an org and a creator
+    # scope may apply to the same entity) — never OR.
+    #
+    # Checked at TWO levels, not just model_def: for most entities def_key's
+    # own definition IS model_def (or model_def is that entity's exclusive
+    # raw '__'-prefixed twin), so either lookup finds the same declaration.
+    # But a pass-through proxy view (`setting`, whose allOf resolves to the
+    # *shared* `__user` raw entity also backing the real `user` entity) is
+    # never merged into model_def — it keeps its own x-self-only declaration
+    # on its own view-level dict (schema['definitions']['setting']).
+    # Reading model_def alone would either miss it entirely, or — far worse
+    # — if ever declared on the shared raw entity instead, leak the
+    # restriction onto `user` too. Checking the def_key-level dict first
+    # keeps `x-self-only: true` on `setting` scoped to `setting` alone.
+    is_self_only, self_only_admin_bypass = get_self_only_flags(schema['definitions'].get(def_key, {}))
+    if not is_self_only:
+        is_self_only, self_only_admin_bypass = get_self_only_flags(model_def)
+
     # x-import-key: natural key fields (CSV export column guarantee, Phase 1;
     # natural-key import matching, Phase 2). Dotted FK paths (e.g. role.name)
     # are Phase 2-only — Phase 1 export only needs the non-dotted portion.
@@ -1473,6 +1495,13 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         rel['display_col'] for rel in x_relationships_list
         if rel['display_col'] not in _import_fk_csv_cols
     ]
+    # x-self-only: creator_id is exported (read-only, for diagnostics — see
+    # export_scalar_fields below) but must never be settable from a CSV. A
+    # CSV header naming it is a hard reject, not a silently-ignored column,
+    # matching the "import cannot do more than the screen" invariant —
+    # creator_id is never screen-editable either.
+    if is_self_only:
+        import_unimportable_columns = import_unimportable_columns + ['creator_id']
 
     # _create_feasible: True if all required non-system fields can be provided via CSV.
     # Required fields that are NOT in export_scalar_fields and NOT resolvable via
@@ -2440,6 +2469,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         parent_rels_raw=parent_rels_raw,
         relationship_targets=relationship_targets,
         should_filter_by_org=should_filter_by_org,
+        is_self_only=is_self_only,
+        self_only_admin_bypass=self_only_admin_bypass,
         # CSV export (Phase 1): natural-key columns + FK flatten metadata
         import_key_fields=import_key_fields,
         has_import_key=has_import_key,

@@ -33,6 +33,7 @@
     "dashboard": "ダッシュボード",
     "organization": "組織",
     "permission": "権限",
+    "personalNote": "Personal Note",
     "role": "ロール",
     "setting": "設定",
     "user": "ユーザ"
@@ -47,8 +48,10 @@
     "approve": "承認",
     "approverRole": "承認者ロール",
     "attachments": "添付ファイル",
+    "body": "Body",
     "chartType": "チャート種別",
     "comments": "コメント",
+    "content": "Content",
     "create": "作成",
     "created_at": "作成日時",
     "dashboard": "ダッシュボード",
@@ -124,6 +127,7 @@
     "home": "ホーム",
     "organization": "組織",
     "permission": "権限",
+    "personalNote": "Personal Note",
     "role": "ロール",
     "user": "ユーザ"
   },

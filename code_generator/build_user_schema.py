@@ -114,6 +114,7 @@ _ENTITY_LEVEL_DATA_KEYS = (
     "x-splittable",
     "x-reservation",
     "x-gdpr-mode",
+    "x-self-only",
 )
 
 # Category D: unchanged location, stay on the view entity as before. Also

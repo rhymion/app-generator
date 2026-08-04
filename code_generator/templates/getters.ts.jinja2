@@ -2,7 +2,7 @@
 
 import prisma from '@/lib/prisma';
 import type { {{ parent_pascal }}, {{ parent_pascal }}Detail } from '@/lib/{{ parent }}/types';
-import { assertPermission, getModelPermissions, resolvePermissions, toPermissions{% if should_filter_by_org %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions{% if should_filter_by_org or is_self_only %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
 import type { Operation, RichPermissions } from '@/lib/authz';
 import {
   type PageOpts, type PageResult,
@@ -10,6 +10,9 @@ import {
 } from '@/lib/_pagination';
 {% if should_filter_by_org %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}
+{% if is_self_only and self_only_admin_bypass %}
+import { trySelfOnlyAdminBypass } from '@/lib/self_only';
 {% endif %}
 {% if non_creator_virtual_columns %}
 import { resolveVirtualColumns } from '@/lib/{{ parent }}/virtual_resolvers';
@@ -31,18 +34,31 @@ import { formatLabelValue } from '@/lib/_format';
 const SORTABLE_FIELDS = new Set<string>([{{ sortable_fields_quoted }}]);
 const FILTERABLE_FIELDS = new Set<string>([{{ filterable_fields_quoted }}]);
 
-/** Build the where clauses that enforce read scope (org + Creator/Assignee). */
-function build{{ parent_pascal }}AccessWhere(
+/** Build the where clauses that enforce read scope (org + Creator/Assignee{% if is_self_only %} / self-only{% endif %}). */
+async function build{{ parent_pascal }}AccessWhere(
   perms: RichPermissions,
   userId: string | null,
 {% if should_filter_by_org %}
   associatedOrganizationIds: string[],
 {% endif %}
-): Record<string, unknown>[] {
+): Promise<Record<string, unknown>[]> {
   const and: Record<string, unknown>[] = [];
 {% if should_filter_by_org %}
   and.push({ organization_id: { in: associatedOrganizationIds } });
 {% endif %}
+{% if is_self_only %}
+  // x-self-only: creator_id is unconditional — no permission setting
+  // (general.read, Creator/Assignee role) can widen or bypass it.
+  if (!userId) {
+    and.push({ id: '__no_access__' });
+{% if self_only_admin_bypass %}
+  } else if (await trySelfOnlyAdminBypass('{{ parent }}', userId)) {
+    // Bypass granted (and audited) — no creator_id restriction.
+{% endif %}
+  } else {
+    and.push({ creator_id: userId });
+  }
+{% else %}
   if (!perms.general.read) {
     const or: Record<string, unknown>[] = [];
     if (perms.creator?.read && userId) or.push({ creator_id: userId });
@@ -56,19 +72,30 @@ function build{{ parent_pascal }}AccessWhere(
       and.push({ OR: or });
     }
   }
+{% endif %}
   return and;
 }
 
-export async function get{{ parent_pascal }}Detail(id: string{% if should_filter_by_org %}, userId: string{% endif %}): Promise<{{ parent_pascal }}Detail | null> {
+export async function get{{ parent_pascal }}Detail(id: string{% if should_filter_by_org or is_self_only %}, userId: string{% endif %}): Promise<{{ parent_pascal }}Detail | null> {
 {% if should_filter_by_org %}
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 {% endif %}
-  const {{ parent_camel }} = await prisma.{{ model }}.{% if should_filter_by_org %}findFirst{% else %}findUnique{% endif %}({
+{% if is_self_only and self_only_admin_bypass %}
+  const _selfOnlyBypass = await trySelfOnlyAdminBypass('{{ parent }}', userId);
+{% endif %}
+  const {{ parent_camel }} = await prisma.{{ model }}.{% if should_filter_by_org or is_self_only %}findFirst{% else %}findUnique{% endif %}({
     where: {
       id,
 {% if should_filter_by_org %}
       organization_id: { in: associatedOrganizationIds },
+{% endif %}
+{% if is_self_only %}
+{% if self_only_admin_bypass %}
+      ...(!_selfOnlyBypass ? { creator_id: userId } : {}),
+{% else %}
+      creator_id: userId,
+{% endif %}
 {% endif %}
     },
 {% if include_props_detail %}
@@ -175,7 +202,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 }
 
 export async function get{{ parent_pascal }}DetailPageData(id: string, operation: Operation = 'read') {
-{% if should_filter_by_org %}
+{% if should_filter_by_org or is_self_only %}
   const userId = await getSessionUserIdOrThrow();
   const [{{ parent_camel }}, { permissions: basePermissions }] = await Promise.all([
     get{{ parent_pascal }}Detail(id, userId),
@@ -251,7 +278,7 @@ export async function get{{ parent_pascal }}Page(
   const associatedOrganizations = userId ? await getAssociatedOrganizations(userId) : [];
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 {% endif %}
-  const accessAnd = build{{ parent_pascal }}AccessWhere(perms, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+  const accessAnd = await build{{ parent_pascal }}AccessWhere(perms, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
   const filterAnd = buildFilter(opts.filter, FILTERABLE_FIELDS);
   const customWhere = filterListQuery(opts.filter ?? {});
   const where = {
@@ -363,7 +390,7 @@ export async function search{{ parent_pascal }}Options(
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 {% endif %}
-  const accessAnd = build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+  const accessAnd = await build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
 
   const trimmed = query.trim();
   // Token-split AND search: each whitespace-separated token must match at
@@ -507,7 +534,7 @@ export async function get{{ parent_pascal }}ChunkForExport(
 {% else %}
   const { permissions } = await getModelPermissions('{{ parent }}');
 {% endif %}
-  const accessAnd = build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+  const accessAnd = await build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
   const rows = await prisma.{{ model }}.findMany({
     where: { AND: accessAnd },
     orderBy: { created_at: 'asc' },
@@ -523,6 +550,11 @@ export async function get{{ parent_pascal }}ChunkForExport(
       '{{ field }}': (row as Record<string, unknown>)['{{ field }}'],
 {% endfor %}
     };
+{% if is_self_only %}
+    // x-self-only: creator_id is exported as a read-only diagnostic column —
+    // it is never accepted back on import (see import_unimportable_columns).
+    result['creator_id'] = (row as Record<string, unknown>)['creator_id'];
+{% endif %}
 {% for rel in x_relationships_list %}
     // Flatten {{ rel.field }}_id → display value (joined across all labelField
     // segments when composite/dotted). Always set so the CSV header stays

@@ -5,6 +5,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- **Server-action path can no longer bypass multi-stage approval ordering** (cmd_540): the
+  REST route (`app/api/approval_request/[id]/{approve,reject}/route.ts`) enforced
+  `preceded_by` ordering via `assertApprovalOrder()`, but the server action
+  (`lib/approval_request/actions_core.ts`'s `approveApprovalRequest`/`rejectApprovalRequest`,
+  reachable directly via Next.js Server Action RPC from any authenticated client) did not —
+  `ApprovalSection.tsx`'s `precedingApproved` check only hides the button client-side, it is
+  not an authorization boundary. Reproduced against a real database (a later-stage approval
+  succeeded while its preceding stage was still pending) before fixing; both entry points now
+  call the same `assertApprovalOrder()` gate, so rejection wording is identical. See
+  `docs/knowledge/appendix/approval-flow.md` §16.6.1 and
+  `test/flows/approval_order_bypass.test.ts`.
+
 ### Fixed
 - **Re-submitting a rejected approval request never notified the approver** (cmd_539):
   `resubmitApprovalRequest()` (both the server action in
@@ -20,6 +33,25 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Added
+- **`x-self-only`: permission-independent per-user data isolation, Stage 1** (cmd_536): a new
+  entity-level schema flag for data that must be visible/editable only by its own creator as a
+  fixed invariant — no permission grant (including `general.read`) can widen it, unlike the
+  existing `creator` permission scope which is just a configurable option. Every affected
+  generated code path (`getters.ts`, `search_helpers.ts`, `actions.ts`, `api_bulk_route.ts`,
+  `api_detail_route.ts`, `service.ts`, CSV import/export, FK-candidate search) drops the
+  `general.*` escape and checks `creator_id === actorId` unconditionally; a non-owner's row reads
+  as `404 Not Found`. `x-self-only: { admin_bypass: true }` lets a privileged (`Administrator`)
+  role read across all rows, but only with an audit row written for the access — the write and the
+  bypass are inseparable (fail-closed: if the audit write fails, the bypass is denied too).
+  `validate.py` rejects a self-only entity whose backing Prisma model lacks `creator_id`, and
+  rejects `creator_id` appearing in `x-import-key`. The account **Settings** page (`setting`) now
+  uses this mechanism (`admin_bypass: true`) — other users' settings are no longer reachable
+  through any permission grant, while other entities' references to `user` (mentions, comment
+  authorship, approver pickers, etc.) are unaffected. A new `personal_note` sample entity ships as
+  the generator's own worked example and regression fixture. See
+  `docs/knowledge/self-only-entity.md`. Row-Level Security (Stage 2) is not implemented — the
+  current dev/test DB role is a superuser and bypasses RLS regardless, so it requires a dedicated
+  non-superuser DB role as a prerequisite (an operations task, out of scope here).
 - **Post-login redirect-back with open-redirect protection** (cmd_525): unauthenticated
   page requests were already redirected to `/login` by `proxy.ts` before this change, but
   always landed on `/` after signing in, losing the user's original destination. `proxy.ts`
@@ -184,6 +216,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Deliberately did not use `npm audit fix --force`, which pulls in a `@google-cloud/storage`
   downgrade. Verified with a clean `rm -rf node_modules && npm ci` (exit 0) and
   `npm audit --omit=dev --audit-level=high` (0 vulnerabilities).
+- **`x-approval.set_fields` docs contradicted the implementation** (cmd_544): `docs/knowledge/appendix/approval-flow.md`
+  §16.9 showed `on_approved.set_fields` as a list-of-`{field, value}` entries, contradicting
+  §16.11's mapping form and the only shape `_resolve_set_fields()` (`code_generator/generate.py:289`)
+  accepts (it iterates `raw.items()`). A schema author following §16.9 as written hit an
+  uninformative `AttributeError` deep inside `generate()`. Fixed the doc example to mapping form
+  and added `validate_schema()` Section 10 (`code_generator/validate.py`) to reject a non-mapping
+  `set_fields` before generation runs, naming the entity, the offending field key(s), and the
+  correct form.
 
 ## [3.0.0] - 2026-07-30
 
