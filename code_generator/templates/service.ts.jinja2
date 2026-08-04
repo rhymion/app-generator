@@ -39,6 +39,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% if reservation_allocation_code %}
 {{ reservation_allocation_code }}
 {% endif %}
+{% if item_reservation_create_code %}
+{{ item_reservation_create_code }}
+{% endif %}
 {% if approval_lines_post_create_code %}
 {{ approval_lines_post_create_code }}
 {% endif %}
@@ -59,7 +62,11 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     });
 {% endif %}
     return { id: created.id };
+{% if item_reservation_create_code %}
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+{% else %}
   });
+{% endif %}
 {% if has_assignee_id %}
   // Trigger #1 (notification design 2026-05-11): the new assignee learns
   // they were assigned. Skipped when self-assigned.
@@ -120,6 +127,9 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     await validateOnUpdate(tx, id, {
 {{ validation_data_obj }}
     });
+{% if item_reservation_update_check_code %}
+{{ item_reservation_update_check_code }}
+{% endif %}
 {% if has_assignee_id %}
     // Capture the previous assignee so the post-transaction notify can
     // fire only on actual change (trigger #1, design 2026-05-11).
@@ -156,7 +166,11 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
       tx,
     });
 {% endif %}
+{% if item_reservation_update_check_code %}
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+{% else %}
   });
+{% endif %}
 {% if has_assignee_id %}
   if (assigneeId && assigneeId !== _prevAssigneeId && assigneeId !== actorId) {
     notify(assigneeId, 'assigned', {
@@ -216,15 +230,18 @@ export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
 {% if reservation_config and reservation_config.mode == 'item' %}
 
 // Reservation: item mode — find an available {{ reservation_config.pool.entity }}, then link it to {{ model }}.
-// Isolation: serializable transaction (avoids raw SQL while preventing concurrent double-booking).
-export const reserve{{ parent_pascal }} = async (
+// Extracted as a *Core function (takes an existing tx) so add{{ parent_pascal }}/update{{ parent_pascal }}
+// can run it inside their own transaction instead of opening a second, unrelated one
+// (cmd_555: reserve{{ parent_pascal }} previously had no caller at all — the duplicate-reservation
+// check below never ran).
+async function reserve{{ parent_pascal }}Core(
+  tx: Prisma.TransactionClient,
   requestId: string,
 {% if reservation_config.dateRange %}
   dateRange: { {{ reservation_config.dateRange.startField }}: Date; {{ reservation_config.dateRange.endField }}: Date },
 {% endif %}
   criteria: Record<string, unknown> = {}
-): Promise<{ success: boolean; {{ reservation_config.allocatedField }}: string }> => {
-  return await prisma.$transaction(async (tx) => {
+): Promise<{ success: boolean; {{ reservation_config.allocatedField }}: string }> {
 {% if reservation_config.usesOverlapAvailability %}
     const _startMs = new Date(dateRange.{{ reservation_config.dateRange.startField }} as unknown as string).getTime();
     const _endMs = new Date(dateRange.{{ reservation_config.dateRange.endField }} as unknown as string).getTime();
@@ -311,8 +328,22 @@ export const reserve{{ parent_pascal }} = async (
     });
     return { success: true, {{ reservation_config.allocatedField }}: candidate.id };
 {% endif %}
-  }, {
-    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-  });
+}
+
+// Standalone entry point (own serializable transaction) — kept for callers that don't
+// already have an open tx. add{{ parent_pascal }}/update{{ parent_pascal }} call
+// reserve{{ parent_pascal }}Core directly instead, so allocation stays atomic with the
+// row write.
+export const reserve{{ parent_pascal }} = async (
+  requestId: string,
+{% if reservation_config.dateRange %}
+  dateRange: { {{ reservation_config.dateRange.startField }}: Date; {{ reservation_config.dateRange.endField }}: Date },
+{% endif %}
+  criteria: Record<string, unknown> = {}
+): Promise<{ success: boolean; {{ reservation_config.allocatedField }}: string }> => {
+  return await prisma.$transaction(
+    (tx) => reserve{{ parent_pascal }}Core(tx, requestId, {% if reservation_config.dateRange %}dateRange, {% endif %}criteria),
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+  );
 };
 {% endif %}
