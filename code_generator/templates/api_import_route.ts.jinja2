@@ -137,6 +137,33 @@ export async function POST(request: NextRequest) {
     const _importAssocOrgs = await getAssociatedOrganizations(actorId);
     const _importOrgIds = _importAssocOrgs.map((o) => o.id);
 {% endif %}
+{% for spec in import_fk_specs %}
+{% if spec.is_composite %}
+    // cmd_548: composite/dotted labelField FK — {{ spec.raw }}. There is no
+    // single scalar to look up by, so the whole rendered label is matched
+    // instead: build a label->id[] map once (NOT per row) from every
+    // candidate {{ spec.lookup_entity }} row, using the SAME label
+    // expression the export getter renders (see x_relationships_list /
+    // import_label_expr in build_context.py) — export and import can never
+    // disagree on what a label looks like. Skipped entirely when the CSV
+    // header doesn't include this column, so an import that doesn't touch
+    // this FK never pays for the full-table read.
+    const _{{ spec.var_prefix }}_label_map = new Map<string, string[]>();
+    if (headerFields.includes('{{ spec.csv_col }}')) {
+      const _{{ spec.var_prefix }}_candidates = await prisma.{{ spec.lookup_entity }}.findMany({
+        include: {{ spec.prisma_include | tojson }},
+{% if spec.lookup_entity_filter_by_org %}
+        where: { organization_id: { in: _importOrgIds } },
+{% endif %}
+      });
+      for (const c of _{{ spec.var_prefix }}_candidates) {
+        const _lbl = ({{ spec.import_label_expr }}).trim();
+        if (!_{{ spec.var_prefix }}_label_map.has(_lbl)) _{{ spec.var_prefix }}_label_map.set(_lbl, []);
+        _{{ spec.var_prefix }}_label_map.get(_lbl)!.push(c.id);
+      }
+    }
+{% endif %}
+{% endfor %}
 
     for (let i = 0; i < rows.length; i++) {
       const rowNum = i + 2; // 1-indexed CSV row, +1 for the header row
@@ -184,6 +211,33 @@ export async function POST(request: NextRequest) {
       const fkData: Record<string, unknown> = {};
 {% for spec in import_fk_specs %}
 {% if not spec.is_key %}
+{% if spec.is_composite %}
+      // Composite-label FK (map lookup, cmd_548): {{ spec.raw }} → {{ spec.lookup_entity }}
+      let _{{ spec.result_col }}: string | null = null;
+      const _{{ spec.var_prefix }}_csv_val = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '').trim();
+{% if spec.fk_nullable %}
+      if (_{{ spec.var_prefix }}_csv_val === '') {
+        // Empty → FK = null (nullable FK is allowed to be unset)
+        _{{ spec.result_col }} = null;
+      } else {
+{% else %}
+      {
+{% endif %}
+        const _{{ spec.var_prefix }}_ids = _{{ spec.var_prefix }}_label_map.get(_{{ spec.var_prefix }}_csv_val);
+        if (!_{{ spec.var_prefix }}_ids || _{{ spec.var_prefix }}_ids.length === 0) {
+          errors.push({ row: rowNum, code: 'NOT_FOUND',
+            message: `Row ${rowNum}: no {{ spec.lookup_entity }} matches label '${_{{ spec.var_prefix }}_csv_val}' (column {{ spec.csv_col }})` });
+          continue;
+        }
+        if (_{{ spec.var_prefix }}_ids.length > 1) {
+          errors.push({ row: rowNum, code: 'MULTI_MATCH',
+            message: `Row ${rowNum}: ${_{{ spec.var_prefix }}_ids.length} {{ spec.lookup_entity }} rows share label '${_{{ spec.var_prefix }}_csv_val}' (column {{ spec.csv_col }}) — ensure each {{ spec.lookup_entity }} record has a unique label, or use the '{{ spec.result_col }}' column to identify rows by ID` });
+          continue;
+        }
+        _{{ spec.result_col }} = _{{ spec.var_prefix }}_ids[0];
+      }
+      fkData.{{ spec.result_col }} = _{{ spec.result_col }};
+{% else %}
       // Non-key FK: {{ spec.raw }} → lookup {{ spec.lookup_entity }} by {{ spec.lookup_field }}
       let _{{ spec.result_col }}: string | null = null;
       const _{{ spec.var_prefix }}_csv_val = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '');
@@ -212,6 +266,7 @@ export async function POST(request: NextRequest) {
         _{{ spec.result_col }} = _{{ spec.var_prefix }}_rows[0].id;
       }
       fkData.{{ spec.result_col }} = _{{ spec.result_col }};
+{% endif %}
 {% endif %}
 {% endfor %}
 

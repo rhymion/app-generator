@@ -1259,29 +1259,41 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # to the "_name" suffix — those are not expected to serve as dotted
     # x-import-key sources.
     from helpers.label_field import build_label_expression as _xrl_build_label_expression
-    x_relationships_list = []
-    export_uses_format_label_value = False
-    for r in parent_rels:
-        _xrl_simple_label = (
-            r['label_field'] if isinstance(r['label_field'], str) and '.' not in r['label_field'] else None
-        )
+
+    def _xrl_build(_item_var: str, _label_field, _target: str) -> dict:
         try:
-            _xrl_built = _xrl_build_label_expression(
-                f"row.{r['relation_name']}", r['label_field'], r['target'], schema,
-            )
+            return _xrl_build_label_expression(_item_var, _label_field, _target, schema)
         except ValueError:
             # Malformed/unresolvable labelField path — never silently drop the
             # column (that's the exact failure mode this fix exists for). Fall
             # back to the target's own display-fallback chain (mirrors
             # bridge_parent_options' AP-1-B fallback above); 'id' always
             # exists, so this second attempt cannot itself raise.
-            _xrl_tprops = _raw_def(r['target'], schema).get('properties') or {}
+            _xrl_tprops = _raw_def(_target, schema).get('properties') or {}
             _xrl_fallback = next((f for f in ('name', 'title', 'label', 'id') if f in _xrl_tprops), 'id')
-            _xrl_built = _xrl_build_label_expression(
-                f"row.{r['relation_name']}", _xrl_fallback, r['target'], schema,
-            )
+            return _xrl_build_label_expression(_item_var, _xrl_fallback, _target, schema)
+
+    x_relationships_list = []
+    export_uses_format_label_value = False
+    for r in parent_rels:
+        _xrl_simple_label = (
+            r['label_field'] if isinstance(r['label_field'], str) and '.' not in r['label_field'] else None
+        )
+        _xrl_built = _xrl_build(f"row.{r['relation_name']}", r['label_field'], r['target'])
         if _xrl_built['has_format']:
             export_uses_format_label_value = True
+        # cmd_548: composite/dotted labelFields also need a candidate-rooted
+        # ('c') variant of the SAME expression for import-side label
+        # matching — the import map is built from `prisma.<target>.findMany()`
+        # results directly, not nested under a parent row, so the root
+        # variable must differ. This is the SAME helper call with the SAME
+        # label_field/target/schema/join_separator inputs as the export
+        # expression above (only item_var differs) — export and import can
+        # never render the label text differently for the same values, since
+        # both are one call away from identical inputs.
+        _xrl_import_built = (
+            _xrl_build('c', r['label_field'], r['target']) if _xrl_simple_label is None else None
+        )
         x_relationships_list.append({
             'field': r['relation_name'],
             'display_col': (
@@ -1290,12 +1302,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             ),
             'label_expr': _xrl_built['expression'],
             # cmd_530: needed to build import_fk_specs below — a relation is
-            # only import-resolvable when its labelField is a single field
-            # (simple_label is None for composite/dotted labelFields, which
-            # can't be resolved back to a unique lookup value).
+            # only import-resolvable-by-scalar-field when its labelField is a
+            # single field (simple_label is None for composite/dotted
+            # labelFields). cmd_548: composite/dotted labelFields are still
+            # import-resolvable via full-label-text matching — see
+            # import_label_expr/prisma_include below.
             'prop_name': r['prop_name'],
             'target': r['target'],
             'simple_label': _xrl_simple_label,
+            'import_label_expr': _xrl_import_built['expression'] if _xrl_import_built else None,
+            'prisma_include': _xrl_import_built['prisma_include'] if _xrl_import_built else None,
         })
 
     # export_scalar_fields: explicit allowlist of CSV export columns (cmd_324 V1).
@@ -1430,38 +1446,64 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # only merged into CREATE data via keyWhere) by routing every entry here
     # — key or not — into updateData in the template.
     #
-    # Composite/dotted labelFields (x_relationships_list['simple_label'] is
-    # None) are excluded — there's no single lookup field to resolve a CSV
-    # cell back to. Non-editable (x-readonly) FKs are excluded too — they
-    # have no business being writable via import just because they're
-    # visible in export. Both classes remain exported but become
-    # import_unimportable_columns below (fail loud instead of silent drop).
-    _key_relation_names = {s['var_prefix'] for s in import_key_specs if s['is_dotted']}
-    import_fk_specs = [
-        {**s, 'is_key': True} for s in import_key_specs if s['is_dotted']
-    ]
-    for r in x_relationships_list:
-        if r['simple_label'] is None:
-            continue
-        if r['field'] in _key_relation_names:
-            continue
-        if r['prop_name'] in readonly_fields:
-            continue
-        _fk_prop  = model_def.get('properties', {}).get(r['prop_name'], {})
+    # cmd_548: composite/dotted labelFields (x_relationships_list['simple_label']
+    # is None) used to be excluded here entirely — there's no single lookup
+    # field to resolve a CSV cell back to. They're now import-resolvable via
+    # full-label-text matching (is_composite=True; see
+    # option_ko_label_match design, subtask_547a): the pre-built
+    # label→id map (import_label_expr/prisma_include, computed above with
+    # the same helper/inputs as the export label_expr) is matched against
+    # the whole CSV cell instead of a single scalar field. Non-editable
+    # (x-readonly) FKs are still excluded — they have no business being
+    # writable via import just because they're visible in export. Both
+    # exclusion classes remain exported but become import_unimportable_columns
+    # below (fail loud instead of silent drop).
+    def _fk_nullable_and_org_filter(_prop_name: str, _lookup_entity: str) -> tuple[bool, bool]:
+        _fk_prop  = model_def.get('properties', {}).get(_prop_name, {})
         _fk_types = _fk_prop.get('type', [])
         if isinstance(_fk_types, str):
             _fk_types = [_fk_types]
         _fk_nullable = 'null' in _fk_types
-        _lookup_entity = r['target']
         _lookup_entity_def = (
             schema['definitions'].get(f'__{_lookup_entity}', {})
             or schema['definitions'].get(_lookup_entity, {})
         )
         _lookup_has_org = 'organization_id' in _lookup_entity_def.get('properties', {})
         _lookup_entity_filter_by_org = _lookup_has_org and _lookup_entity not in ('organization', 'user')
+        return _fk_nullable, _lookup_entity_filter_by_org
+
+    _key_relation_names = {s['var_prefix'] for s in import_key_specs if s['is_dotted']}
+    import_fk_specs = [
+        {**s, 'is_key': True, 'is_composite': False} for s in import_key_specs if s['is_dotted']
+    ]
+    for r in x_relationships_list:
+        if r['field'] in _key_relation_names:
+            continue
+        if r['prop_name'] in readonly_fields:
+            continue
+        _lookup_entity = r['target']
+        _fk_nullable, _lookup_entity_filter_by_org = _fk_nullable_and_org_filter(r['prop_name'], _lookup_entity)
+        if r['simple_label'] is None:
+            import_fk_specs.append({
+                'raw':                  r['field'],
+                'is_dotted':            False,
+                'is_composite':         True,
+                'csv_col':              r['display_col'],
+                'var_prefix':           r['field'],
+                'lookup_entity':        _lookup_entity,
+                'lookup_entity_pascal': to_pascal_case(_lookup_entity),
+                'result_col':           r['prop_name'],
+                'fk_nullable':          _fk_nullable,
+                'lookup_entity_filter_by_org': _lookup_entity_filter_by_org,
+                'is_key':               False,
+                'import_label_expr':    r['import_label_expr'],
+                'prisma_include':       r['prisma_include'],
+            })
+            continue
         import_fk_specs.append({
             'raw':                  f"{r['field']}.{r['simple_label']}",
             'is_dotted':            True,
+            'is_composite':         False,
             'csv_col':              r['display_col'],
             'var_prefix':           r['field'],
             'lookup_entity':        _lookup_entity,
