@@ -131,6 +131,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   safe because `build_context.py` unconditionally includes the `creator`
   relation on every comment fetch that can reach these loops. See
   `docs/knowledge/mention-system.md`.
+- **Multi-stage approval chains never notified the next approver when their
+  turn arrived** (cmd_541): a `preceded_by` chain creates every flow's
+  `approval_request` up front, and every flow's approver role is notified
+  once at that point — but a follow-on flow isn't actually actionable until
+  its preceding flow(s) are approved, and nothing told those approvers when
+  that moment came; they only found out by checking back themselves.
+  `approveApprovalRequest()` (both independent implementations — the server
+  action and the REST route, per cmd_479) now sends a new
+  `approval_order_reached` notification, distinct from the creation-time
+  one, to any follow-on flow's approvers once its ordering constraint is
+  satisfied. See `docs/knowledge/notification-triggers.md` "Approval
+  order-reached notification (cmd_541)".
 
 ### Security
 - **Enforce MFA on the Google OAuth sign-in path** (cmd_527) — previously,

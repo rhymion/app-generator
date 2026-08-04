@@ -1,7 +1,8 @@
 import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow, getUserRoleIds } from '@/lib/authz';
 import { notify } from '@/lib/_notifier';
-import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
+import { notifyApprovalOrderReached, notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
+import { findNewlyActionableFollowFlowIds } from '@/lib/approval_request/order-check';
 import { revalidatePath } from 'next/cache';
 import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 
@@ -148,7 +149,13 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     await assertApproverRole(id);
     await assertApprovalOrder(id);
     const userId = await getSessionUserIdOrThrow();
+    let orderReachedFlowIds: string[] = [];
+    let orderReachedApprovableId: string | undefined;
     await prisma.$transaction(async (tx) => {
+      const before = await tx.approval_request.findUnique({
+        where: { id },
+        select: { status: true, approval_flow_id: true },
+      });
       const req = await tx.approval_request.update({
         where: { id },
         data: { status: 'approved' },
@@ -186,6 +193,17 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
         });
         await deps.dispatchOnApproved(tx, req.approval_flow.entity_name, approvableData.id, userId);
       }
+      // cmd_541: a preceded_by chain creates every flow's approval_request
+      // up front, but a follow-on flow isn't actionable until its preceding
+      // flow(s) are approved. `before.status !== 'approved'` guards against
+      // re-notifying if this same request is approved a second time (e.g. a
+      // retried request) — findNewlyActionableFollowFlowIds() would
+      // otherwise recompute the same already-satisfied ordering as "new"
+      // every time.
+      if (before && before.status !== 'approved') {
+        orderReachedFlowIds = await findNewlyActionableFollowFlowIds(tx, req.approvable_id, before.approval_flow_id);
+        orderReachedApprovableId = req.approvable_id;
+      }
     });
     // Fire-and-forget notification (trigger #3): the requester learns the
     // outcome without sharing the approval_history transaction.
@@ -197,6 +215,16 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
         approvalRequestId: id,
         status: 'approved',
         message: message ?? null,
+      });
+    }
+    // Fire-and-forget notification (trigger #4, cmd_541): approvers of any
+    // follow-on flow that just became actionable. Reuses the same
+    // approvable-target link (entityName/targetId) already resolved above.
+    if (orderReachedApprovableId && orderReachedFlowIds.length > 0) {
+      await notifyApprovalOrderReached(prisma, orderReachedApprovableId, orderReachedFlowIds, {
+        excludeUserId: userId,
+        targetEntityName: entityName,
+        targetId,
       });
     }
     revalidateApprovableTarget(entityName, targetId);

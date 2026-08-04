@@ -182,6 +182,24 @@ the Trigger #3 rejection notification's payload `status` field was hard-coded to
 for a `terminal_rejected` outcome — the notification always fired either way, but the payload
 misreported the outcome; both REST and server-action paths now report the actual status.
 
+**cmd_541 — re-notification when a preceded_by chain advances**: in a multi-stage chain, every
+flow's `approval_request` is created up front when the approvable entity is created (§16.4/16.8),
+and every flow's approver role is notified then — even flows that aren't actionable yet because a
+preceding flow hasn't been approved (§16.5's `preceded_by`). Approving a flow used to be silent
+for the *next* flow's approvers: nothing told them their turn had arrived, short of checking the
+item themselves. `approveApprovalRequest()` (both this file's server action and the REST route's
+independent implementation, per the "two independent implementations" note in
+`docs/knowledge/notification-triggers.md`) now calls
+`lib/approval_request/order-check.ts`'s `findNewlyActionableFollowFlowIds()` after updating status
+— it walks the just-approved flow's `followed_by` set and checks, for each follow-on flow, whether
+*all* of its `preceded_by` flows now have an approved `approval_request` on the same approvable.
+Any flow that just crossed that threshold gets its approver role notified via
+`lib/_notifyApprovalRequest.ts`'s `notifyApprovalOrderReached()` (type `approval_order_reached`) —
+a distinct notification from the creation-time `approval_requested` one those same approvers
+already hold, not a duplicate of it. A `before.status !== 'approved'` guard, checked inside the
+same transaction as the status update, prevents re-notifying if the same request is ever approved
+more than once. See `docs/knowledge/notification-triggers.md` for the full trigger list.
+
 #### 16.6.1 Ordering enforcement (`assertApprovalOrder`)
 
 `lib/approval_request/order-check.ts` (manually maintained, not generated) exports

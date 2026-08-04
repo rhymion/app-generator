@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const {
   findUnique, arUpdate, historyCreate, approvableFindUnique, approvableUpdate, transactionMock, revalidatePathMock,
+  txFlowFindUnique, txArFindMany, prismaArFindMany, prismaRoleFindUnique,
   notifyMock, notifyApprovalRequestCreatedMock,
 } = vi.hoisted(() => ({
   findUnique: vi.fn(),
@@ -24,29 +25,52 @@ const {
   approvableUpdate: vi.fn(),
   transactionMock: vi.fn(),
   revalidatePathMock: vi.fn(),
+  // cmd_541: findNewlyActionableFollowFlowIds() (called inside the tx) and
+  // notifyApprovalOrderReached() (called after, against the top-level
+  // prisma client) each need their own approval_flow/approval_request/role
+  // lookups — separate mocks so the tx-scoped call and the post-tx call
+  // don't shadow each other's return values.
+  txFlowFindUnique: vi.fn(),
+  txArFindMany: vi.fn(),
+  prismaArFindMany: vi.fn(),
+  prismaRoleFindUnique: vi.fn(),
   notifyMock: vi.fn(),
   notifyApprovalRequestCreatedMock: vi.fn(),
 }));
 
 vi.mock('@/lib/prisma', () => ({
   default: {
-    approval_request: { findUnique, update: arUpdate },
+    approval_request: { findUnique, update: arUpdate, findMany: prismaArFindMany },
+    role: { findUnique: prismaRoleFindUnique },
     $transaction: transactionMock,
   },
 }));
 vi.mock('@/lib/authz', () => ({ getSessionUserIdOrThrow: vi.fn(), getUserRoleIds: vi.fn() }));
 vi.mock('@/lib/_notifier', () => ({ notify: notifyMock }));
-vi.mock('@/lib/_notifyApprovalRequest', () => ({ notifyApprovalRequestCreated: notifyApprovalRequestCreatedMock }));
+// notifyApprovalOrderReached (cmd_541) is intentionally NOT mocked here — its
+// real implementation runs, calling through to the mocked notify() above, so
+// the order-reached tests can assert on that call directly. Only
+// notifyApprovalRequestCreated (cmd_539) is replaced.
+vi.mock('@/lib/_notifyApprovalRequest', async (importOriginal) => ({
+  ...(await importOriginal()),
+  notifyApprovalRequestCreated: notifyApprovalRequestCreatedMock,
+}));
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 // cmd_540: assertApprovalOrder() (lib/approval_request/order-check.ts) queries
 // prisma.approval_request.findMany() directly, which this file's minimal
 // prisma mock (above) doesn't define — mocked to a no-op here since order
 // enforcement itself is covered by test/flows/approval_order_bypass.test.ts
 // (real DB) and this file's own focus (recipient/revalidate targeting) is
-// orthogonal to it.
-vi.mock('@/lib/approval_request/order-check', () => ({ assertApprovalOrder: vi.fn().mockResolvedValue(undefined) }));
+// orthogonal to it. Preserves the module's other export
+// (findNewlyActionableFollowFlowIds, cmd_541) via importOriginal — a bare
+// factory here would replace the whole module and break that test group.
+vi.mock('@/lib/approval_request/order-check', async (importOriginal) => ({
+  ...(await importOriginal()),
+  assertApprovalOrder: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { getSessionUserIdOrThrow, getUserRoleIds } from '@/lib/authz';
+import { notify } from '@/lib/_notifier';
 import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 import { createApprovalActions } from './actions_core';
 
@@ -67,9 +91,10 @@ const {
 // Fake tx client shared by every prisma.$transaction(cb) call in
 // approve/reject/resubmit — cb receives this in place of a real transaction.
 const fakeTx = {
-  approval_request: { update: arUpdate, findUnique },
+  approval_request: { update: arUpdate, findUnique, findMany: txArFindMany },
   approval_history: { create: historyCreate },
   approvable: { findUnique: approvableFindUnique, update: approvableUpdate },
+  approval_flow: { findUnique: txFlowFindUnique },
 };
 
 beforeEach(() => {
@@ -86,6 +111,14 @@ beforeEach(() => {
   transactionMock.mockReset().mockImplementation(async (cb) => cb(fakeTx));
   vi.mocked(getSessionUserIdOrThrow).mockReset().mockResolvedValue('user-1');
   vi.mocked(getUserRoleIds).mockReset().mockResolvedValue(['approver-role']);
+  // Default: no follow-on flows for the just-approved flow, so existing
+  // tests that don't care about cmd_541's order-reached notification see no
+  // behavior change (findNewlyActionableFollowFlowIds() short-circuits on
+  // an empty `followed_by`).
+  txFlowFindUnique.mockReset().mockResolvedValue({ followed_by: [] });
+  txArFindMany.mockReset().mockResolvedValue([]);
+  prismaArFindMany.mockReset().mockResolvedValue([]);
+  prismaRoleFindUnique.mockReset().mockResolvedValue(null);
   vi.mocked(assertApprovalOrder).mockReset().mockResolvedValue(undefined);
   notifyMock.mockReset();
   notifyApprovalRequestCreatedMock.mockReset();
@@ -324,6 +357,97 @@ describe('revalidatePath targeting (cmd_491)', () => {
   });
 });
 
+// cmd_541: a preceded_by chain creates every flow's approval_request up
+// front (Trigger #2 notifies all their approvers then), but a follow-on
+// flow isn't actionable until its preceding flow(s) are approved — and
+// nothing told those approvers when that moment arrived. Covers the server
+// action path (ApprovalSection.tsx -> actions.ts -> actions_core.ts);
+// the REST route (app/api/approval_request/[id]/approve/route.ts) is
+// covered by cypress/e2e/api/multi_stage_approval_order_reached.cy.ts —
+// see cmd_479 on why both independent implementations need this.
+describe('approveApprovalRequest order-reached notification (cmd_541)', () => {
+  function stubApprovingFlow1() {
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      approval_flow_id: 'flow-1',
+      status: 'pending',
+      approval_flow: { approver_role_id: 'approver-role', entity_name: 'user' },
+      approvable: { creator_id: 'requester-1' },
+    });
+    arUpdate.mockResolvedValue({
+      status: 'approved',
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'user' },
+    });
+    approvableFindUnique.mockResolvedValue({
+      id: 'appr-1',
+      approved_at: null,
+      approval_requests: [{ status: 'approved' }, { status: 'pending' }],
+    });
+    resolveApprovableTarget.mockResolvedValue({ id: 'user-99' });
+  }
+
+  it('notifies the newly-actionable follow-on flow\'s approver role', async () => {
+    stubApprovingFlow1();
+    // flow-2 is preceded_by only flow-1 (the one just approved), and
+    // flow-1's sibling approval_request is already 'approved' — so flow-2
+    // just became fully unblocked.
+    txFlowFindUnique.mockResolvedValue({ followed_by: [{ id: 'flow-2', preceded_by: [{ id: 'flow-1' }] }] });
+    txArFindMany.mockResolvedValue([{ approval_flow_id: 'flow-1', status: 'approved' }]);
+    prismaArFindMany.mockResolvedValue([
+      { id: 'req-2', approval_flow: { approver_role_id: 'approver-2-role', entity_name: 'user' } },
+    ]);
+    prismaRoleFindUnique.mockResolvedValue({ users: [{ id: 'approver-2-user' }] });
+
+    await approveApprovalRequest('req-1');
+
+    expect(txFlowFindUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'flow-1' } }));
+    expect(notify).toHaveBeenCalledWith(
+      'approver-2-user',
+      'approval_order_reached',
+      expect.objectContaining({ approvalRequestId: 'req-2', entityName: 'user', href: '/user/view/user-99' }),
+    );
+    expect(vi.mocked(notify).mock.calls.filter((c) => c[1] === 'approval_order_reached')).toHaveLength(1);
+  });
+
+  it('does not notify when no follow-on flow is unblocked yet (default: no followed_by)', async () => {
+    stubApprovingFlow1();
+    // Default beforeEach mocks: followed_by: [] — nothing depends on flow-1.
+
+    await approveApprovalRequest('req-1');
+
+    expect(vi.mocked(notify).mock.calls.filter((c) => c[1] === 'approval_order_reached')).toHaveLength(0);
+  });
+
+  it('does not re-notify when the request was already approved (idempotency guard)', async () => {
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      approval_flow_id: 'flow-1',
+      status: 'approved', // already approved before this call
+      approval_flow: { approver_role_id: 'approver-role', entity_name: 'user' },
+      approvable: { creator_id: 'requester-1' },
+    });
+    arUpdate.mockResolvedValue({
+      status: 'approved',
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'user' },
+    });
+    approvableFindUnique.mockResolvedValue({
+      id: 'appr-1',
+      approved_at: new Date(),
+      approval_requests: [{ status: 'approved' }, { status: 'approved' }],
+    });
+    // Even if a follow-on flow would otherwise look unblocked, the
+    // before.status !== 'approved' guard must skip the lookup entirely.
+    txFlowFindUnique.mockResolvedValue({ followed_by: [{ id: 'flow-2', preceded_by: [{ id: 'flow-1' }] }] });
+    txArFindMany.mockResolvedValue([{ approval_flow_id: 'flow-1', status: 'approved' }]);
+
+    await approveApprovalRequest('req-1');
+
+    expect(txFlowFindUnique).not.toHaveBeenCalled();
+    expect(vi.mocked(notify).mock.calls.filter((c) => c[1] === 'approval_order_reached')).toHaveLength(0);
+  });
+});
 // cmd_540: the REST route (app/api/approval_request/[id]/{approve,reject}/
 // route.ts) enforces multi-stage ordering via assertApprovalOrder(), but
 // this server action didn't call it at all — reachable directly via Next.js
