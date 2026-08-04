@@ -1290,6 +1290,36 @@ def validate_schema(schema: dict) -> None:
             )
 
     # -----------------------------------------------------------------------
+    # 14. x-relationship.searchField retired (cmd_552)
+    # -----------------------------------------------------------------------
+    # searchField used to opt an FK into cross-relation substring search
+    # independently of labelField, which let the two drift apart (a field
+    # shown on screen that differs from the field actually searched).
+    # derive_searchable_relation_fields() (schema_helpers.py) now derives
+    # search eligibility from labelField itself, so a schema that still
+    # declares searchField is stale config with no effect — silently
+    # ignoring it would leave the author believing search still works.
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        for prop_name, prop_def in defn.get('properties', {}).items():
+            if not isinstance(prop_def, dict):
+                continue
+            rel = prop_def.get('x-relationship')
+            if isinstance(rel, dict) and 'searchField' in rel:
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"x-relationship.searchField is retired (cmd_552) and no "
+                    f"longer read by the generator. Delete it — cross-relation "
+                    f"substring search is now derived automatically from "
+                    f"x-relationship.labelField (the same field already shown "
+                    f"in the autocomplete label). If the field that used to be "
+                    f"named in searchField differs from labelField, move it "
+                    f"into labelField instead. See "
+                    f"docs/knowledge/label-field-search-semantics.md."
+                )
+
+    # -----------------------------------------------------------------------
     # Report
     # -----------------------------------------------------------------------
     if errors:

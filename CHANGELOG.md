@@ -33,6 +33,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Added
+- **FK autocomplete search now derives from `labelField`, `searchField` retired** (cmd_552): the
+  generated `search{Entity}Options` getter's cross-relation substring match (e.g. searching
+  `booking` also matching on `resource.name`) used to require a separate
+  `x-relationship.searchField` declaration, independent of the `labelField` that actually
+  renders on screen — nothing stopped the two from drifting apart. `searchField` is removed;
+  `derive_searchable_relation_fields()` (`helpers/schema_helpers.py`) now derives the same
+  `{relation, field}` list from `labelField` itself, sharing its origin with cmd_548's CSV-import
+  full-match (`build_label_expression`), so the searched field and the displayed field can never
+  disagree. Only string-typed, non-dotted `labelField` elements qualify — enum (translated
+  on-screen label vs. untranslated stored value, same trap as cmd_493), date/time, number, and
+  CUID-pattern id fields are excluded, and a composite `labelField` is evaluated per element.
+  `validate.py` now rejects any schema that still declares `searchField` by name. See
+  `docs/knowledge/schema-yaml-configuration.md` §5 ("`labelField` is also the autocomplete
+  search source").
 - **CSV import for composite/dotted labelField FK columns** (cmd_548): a FK relation whose
   display label is composite (`[product.name, location.name]`) or a single dotted path used to be
   export-only — there was no single scalar to resolve a CSV cell back to, so the column landed in

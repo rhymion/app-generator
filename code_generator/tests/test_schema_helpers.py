@@ -8,6 +8,7 @@ from helpers.schema_helpers import (
     get_detail_relation_name,
     get_detail_ref_rels,
     get_flatten_rels,
+    derive_searchable_relation_fields,
 )
 
 
@@ -743,3 +744,216 @@ class TestGetFlattenRelsRefToDetail:
         rels = get_flatten_rels("checkup", parent_def, schema)
         pre_check_entry = next(r for r in rels if r["prop_name"] == "pre_check")
         assert pre_check_entry["target"] == "pre_check"
+
+
+# ---------------------------------------------------------------------------
+# derive_searchable_relation_fields (cmd_552: labelField-derived, searchField retired)
+# ---------------------------------------------------------------------------
+
+class TestDeriveSearchableRelationFields:
+    def _schema(self, extra_definitions=None):
+        definitions = {
+            "purchase_order": {"properties": {"po_number": {"type": "string"}}},
+            "item": {"properties": {"sku": {"type": "string"}}},
+            "asn": {"properties": {"asn_number": {"type": "string"}}},
+            "goods_receipt": {"properties": {"receipt_number": {"type": "string"}}},
+            "destination_bin": {"properties": {"code": {"type": "string"}}},
+            "purchase_order_line": {
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                }
+            },
+            "purchase_order_status": {
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["draft", "approved"],
+                    }
+                }
+            },
+            "supplier": {
+                "properties": {
+                    "founded_on": {"type": "string", "format": "date"},
+                    "employee_count": {"type": "integer"},
+                    "approver_role": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "role"},
+                    },
+                }
+            },
+        }
+        if extra_definitions:
+            definitions.update(extra_definitions)
+        return {"definitions": definitions}
+
+    def test_reproduces_proj_g_goods_receipt_line_cases(self):
+        """cmd_552 zero-loss requirement: the 5 FK+labelField pairs that used
+        to also carry an explicit (identical) searchField must still resolve
+        to the same {relation, field} once searchField is gone."""
+        schema = self._schema()
+        properties = {
+            "purchase_order_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "purchase_order", "labelField": "po_number"},
+            },
+            "item_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "item", "labelField": "sku"},
+            },
+            "goods_receipt_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "goods_receipt", "labelField": "receipt_number"},
+            },
+            "destination_bin_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "destination_bin", "labelField": "code"},
+            },
+        }
+        result = derive_searchable_relation_fields(properties, schema)
+        assert {"relation": "purchase_order", "field": "po_number"} in result
+        assert {"relation": "item", "field": "sku"} in result
+        assert {"relation": "goods_receipt", "field": "receipt_number"} in result
+        assert {"relation": "destination_bin", "field": "code"} in result
+        assert len(result) == 4
+
+    def test_reproduces_proj_g_asn_line_cases(self):
+        schema = self._schema()
+        properties = {
+            "asn_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "asn", "labelField": "asn_number"},
+            },
+            "item_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "item", "labelField": "sku"},
+            },
+        }
+        result = derive_searchable_relation_fields(properties, schema)
+        assert result == [
+            {"relation": "asn", "field": "asn_number"},
+            {"relation": "item", "field": "sku"},
+        ]
+
+    def test_cuid_id_labelfield_excluded(self):
+        """purchase_order_line_id.labelField: id — id matches the CUID
+        pattern derive_text_fields already treats as non-searchable noise;
+        an opaque identifier is not a meaningful substring-search target."""
+        schema = self._schema()
+        properties = {
+            "purchase_order_line_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "purchase_order_line", "labelField": "id"},
+            },
+        }
+        assert derive_searchable_relation_fields(properties, schema) == []
+
+    def test_enum_labelfield_excluded(self):
+        """cmd_493-style trap: the screen shows the i18n-translated enum
+        label, the DB stores the untranslated literal — a substring search
+        against the raw value could never match what the user typed."""
+        schema = self._schema()
+        properties = {
+            "status_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "purchase_order_status", "labelField": "status"},
+            },
+        }
+        assert derive_searchable_relation_fields(properties, schema) == []
+
+    def test_date_labelfield_excluded(self):
+        schema = self._schema()
+        properties = {
+            "supplier_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "supplier", "labelField": "founded_on"},
+            },
+        }
+        assert derive_searchable_relation_fields(properties, schema) == []
+
+    def test_number_labelfield_excluded(self):
+        schema = self._schema()
+        properties = {
+            "supplier_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "supplier", "labelField": "employee_count"},
+            },
+        }
+        assert derive_searchable_relation_fields(properties, schema) == []
+
+    def test_dotted_labelfield_path_excluded(self):
+        """One-hop only: getters.ts.jinja2 renders a single nested `where`
+        level. A dotted labelField would need a second hop the template
+        doesn't emit, so it's excluded rather than silently mis-rendered."""
+        schema = self._schema()
+        properties = {
+            "supplier_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "supplier", "labelField": "approver_role.name"},
+            },
+        }
+        assert derive_searchable_relation_fields(properties, schema) == []
+
+    def test_composite_labelfield_evaluated_per_element(self):
+        """A composite labelField mixes a searchable element (sku) with a
+        non-searchable one (employee_count) — only the qualifying element
+        contributes an entry."""
+        schema = self._schema()
+        properties = {
+            "item_id": {
+                "type": "string",
+                "x-relationship": {
+                    "type": "many-to-one",
+                    "target": "item",
+                    "labelField": ["sku"],
+                },
+            },
+            "supplier_id": {
+                "type": "string",
+                "x-relationship": {
+                    "type": "many-to-one",
+                    "target": "supplier",
+                    "labelField": ["employee_count", "founded_on"],
+                },
+            },
+        }
+        result = derive_searchable_relation_fields(properties, schema)
+        assert result == [{"relation": "item", "field": "sku"}]
+
+    def test_no_labelfield_yields_no_entry(self):
+        schema = self._schema()
+        properties = {
+            "purchase_order_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "purchase_order"},
+            },
+        }
+        assert derive_searchable_relation_fields(properties, schema) == []
+
+    def test_no_x_relationship_skipped(self):
+        schema = self._schema()
+        properties = {"note": {"type": "string"}}
+        assert derive_searchable_relation_fields(properties, schema) == []
+
+    def test_searchfield_key_alone_no_longer_recognized(self):
+        """searchField is retired — a schema that (incorrectly) still only
+        declares searchField without labelField derives nothing; validate.py
+        is what must catch and reject this case (see TestValidateSearchField
+        in test_validate.py), not silent tolerance here."""
+        schema = self._schema()
+        properties = {
+            "purchase_order_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "purchase_order", "searchField": "po_number"},
+            },
+        }
+        assert derive_searchable_relation_fields(properties, schema) == []
+
+    def test_missing_target_definition_returns_empty_not_crash(self):
+        schema = self._schema()
+        properties = {
+            "ghost_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "nonexistent_entity", "labelField": "name"},
+            },
+        }
+        assert derive_searchable_relation_fields(properties, schema) == []

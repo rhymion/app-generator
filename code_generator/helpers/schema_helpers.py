@@ -57,26 +57,70 @@ def derive_text_fields(properties: dict) -> list[str]:
     return result
 
 
-def derive_searchable_relation_fields(properties: dict) -> list[dict]:
-    """FK relation fields opted into cross-relation substring search.
+def _label_field_paths(label_field) -> list[str]:
+    if isinstance(label_field, str):
+        return [label_field] if label_field else []
+    if isinstance(label_field, list):
+        return [str(p) for p in label_field if p]
+    return []
 
-    A property with `x-relationship.searchField: <name>` contributes a
-    `{relation, field}` pair so the generated searchXxxOptions getter can
-    additionally match rows by a field on the related entity (e.g. inventory
-    matching by its product's name), via a one-hop Prisma nested `where`.
-    Opt-in (schema-driven) — no relation is joined into search unless
-    explicitly marked, so existing autocomplete behaviour is unaffected.
+
+def derive_searchable_relation_fields(properties: dict, schema: dict) -> list[dict]:
+    """FK relation fields whose `x-relationship.labelField` resolves to a
+    searchable string field on the target entity, opted into cross-relation
+    substring search for the generated searchXxxOptions getter (a one-hop
+    Prisma nested `where`, e.g. inventory matching by its product's name).
+
+    Reads `labelField` — the SAME source `build_label_expression()` uses for
+    the CSV-import full-match (cmd_548) and for the label rendered on
+    screen — rather than a separate `searchField` attribute. There used to
+    be a `searchField`, declared independently on the FK; it was retired
+    (cmd_552) because nothing stopped it from drifting away from
+    `labelField`, at which point the field shown to the user and the field
+    actually searched would silently differ. Deriving from `labelField`
+    makes that divergence structurally impossible. Any schema still
+    declaring `searchField` is now a validation error — see validate.py.
+
+    A composite `labelField` ([f1, f2]) is evaluated element by element —
+    each qualifying element contributes its own `{relation, field}` entry.
+    Two kinds of element are excluded:
+      - dotted paths (`approver_role.name`): resolving the FK's *own*
+        FK to another entity would need a second nested `where` hop, which
+        getters.ts.jinja2 does not render (one-hop only; no schema case
+        needs it today — see docs/knowledge/label-field-search-semantics.md).
+      - non-string-searchable fields: same filter as `derive_text_fields`
+        (string type, no `enum`, not a date/uri `format`, not a CUID-pattern
+        id) — `contains` is a string-only Prisma operator, and an enum's
+        screen label is translated while its stored value is not, so a
+        substring match against the raw value would never hit (cmd_493).
     """
     result = []
     for field_name, prop in properties.items():
         if not isinstance(prop, dict):
             continue
         rel = prop.get('x-relationship') or {}
-        search_field = rel.get('searchField')
-        if not search_field or not rel.get('target'):
+        target = rel.get('target')
+        label_field = rel.get('labelField')
+        if not target or not label_field:
             continue
         relation_name = field_name.removesuffix('_id') if field_name.endswith('_id') else field_name
-        result.append({'relation': relation_name, 'field': search_field})
+        target_props = get_entity_properties(target, schema)
+        for path in _label_field_paths(label_field):
+            if '.' in path:
+                continue
+            final_prop = target_props.get(path)
+            if not isinstance(final_prop, dict):
+                continue
+            if not is_string_prop(final_prop):
+                continue
+            if isinstance(final_prop.get('enum'), list):
+                continue
+            if final_prop.get('format') in ('date', 'date-time', 'time', 'uri'):
+                continue
+            pattern = final_prop.get('pattern', '')
+            if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
+                continue
+            result.append({'relation': relation_name, 'field': path})
     return result
 
 
