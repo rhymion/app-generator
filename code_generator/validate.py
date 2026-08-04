@@ -1250,6 +1250,46 @@ def validate_schema(schema: dict) -> None:
                     )
 
     # -----------------------------------------------------------------------
+    # 10. x-approval.{on_approved,on_rejected}.set_fields must be a mapping
+    # -----------------------------------------------------------------------
+    # _resolve_set_fields() (generate.py) iterates `raw.items()` -- a mapping
+    # is the only form it accepts. A list-of-{field, value} entries (the form
+    # once shown, in error, by docs/knowledge/appendix/approval-flow.md §16.9,
+    # cmd_544) raises an uninformative AttributeError deep inside generate()
+    # instead of failing here with the offending entity and key named.
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        x_approval = defn.get('x-approval')
+        if not x_approval:
+            continue
+        for stage in ('on_approved', 'on_rejected'):
+            stage_cfg = x_approval.get(stage)
+            if not isinstance(stage_cfg, dict):
+                continue
+            set_fields = stage_cfg.get('set_fields')
+            if set_fields is None or isinstance(set_fields, dict):
+                continue
+            # If it's the list-of-{field, value} form, name the specific
+            # field keys found so the user can see exactly what to fold into
+            # the mapping — not just "it's the wrong type".
+            found_fields = [
+                entry.get('field') for entry in set_fields
+                if isinstance(set_fields, list) and isinstance(entry, dict) and 'field' in entry
+            ] if isinstance(set_fields, list) else []
+            fields_note = (
+                f" Field key(s) found: {found_fields}." if found_fields else ""
+            )
+            errors.append(
+                f"Definition '{def_key}': x-approval.{stage}.set_fields must be a "
+                f"mapping of field_name: value (got {type(set_fields).__name__})."
+                f"{fields_note} Write it as:\n"
+                f"      set_fields:\n"
+                f"        <field_name>: <value>\n"
+                f"    not as a list of {{field, value}} entries."
+            )
+
+    # -----------------------------------------------------------------------
     # Report
     # -----------------------------------------------------------------------
     if errors:
