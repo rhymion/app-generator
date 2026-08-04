@@ -343,6 +343,10 @@ def _get_ledger_service_context() -> dict:
             "pool": "inventory",
             "ledger": "inventory_transaction",
             "transactionable": "inventory_transactionable",
+            "itemField": "product_id",
+            "locationField": "location_id",
+            "lotField": "lot_number",
+            "expirationField": "expiration_date",
         }
     }
     entity = {

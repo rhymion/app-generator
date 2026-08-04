@@ -1252,6 +1252,10 @@ def _make_ledger_schema() -> dict:
             "pool": "inventory",
             "ledger": "inventory_transaction",
             "transactionable": "inventory_transactionable",
+            "itemField": "product_id",
+            "locationField": "location_id",
+            "lotField": "lot_number",
+            "expirationField": "expiration_date",
         }
     }
     return schema

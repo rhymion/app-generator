@@ -973,6 +973,15 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     pool_entity           = _domain['pool']
     ledger_entity         = _domain['ledger']
     transactionable_entity = _domain['transactionable']
+    # cmd_546: pool entity's own item/location/lot/expiration column names
+    # (OD-1 domain config) — replaces literal 'product_id'/'location'/
+    # 'lot_number'/'expiration_date' hardcodes in the ledger row below, which
+    # silently broke (TypeScript error, not a generator-time failure) for any
+    # consumer naming these columns differently.
+    item_field       = _domain['item_field']
+    location_relation = _domain['location_relation']
+    lot_field        = _domain['lot_field']
+    expiration_field = _domain['expiration_field']
 
     pool_qty_field = pool.get('quantityField', 'quantity')
     pool_res_field = pool.get('reservedField', 'reserved_quantity')
@@ -1016,7 +1025,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"{where_clause}\n"
         f"        }},\n"
         + (f"        orderBy: [{order_str}],\n" if order_str else '') +
-        f"        include: {{ location: true }},\n"
+        f"        include: {{ {location_relation}: true }},\n"
         f"      }});\n"
         f"      const bridge = await tx.{transactionable_entity}.create({{ data: {{}} }});\n"
         f"      for (const _candidate of _candidates) {{\n"
@@ -1036,10 +1045,10 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"              event_type: 'reserve',\n"
         f"              quantity_delta: 0,\n"
         f"              reserved_delta: _claim,\n"
-        f"              product_id: _candidate.product_id,\n"
-        f"              location: _candidate.location?.name ?? '',\n"
-        f"              lot_number: _candidate.lot_number,\n"
-        f"              expiration_date: _candidate.expiration_date,\n"
+        f"              {item_field}: _candidate.{item_field},\n"
+        f"              {location_relation}: _candidate.{location_relation}?.name ?? '',\n"
+        f"              {lot_field}: _candidate.{lot_field},\n"
+        f"              {expiration_field}: _candidate.{expiration_field},\n"
         f"              created_by_id: actorId,\n"
         f"              creator_id: actorId,\n"
         f"              updater_id: actorId,\n"
@@ -1414,7 +1423,7 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
         f"      }}",
         f"      if (_remaining > 0) {{",
         f"        throw new InsufficientPoolCapacityError(",
-        f"          `Insufficient inventory for product ${{(_line as Record<string, unknown>).product_id}}`",
+        f"          `Insufficient inventory for line ${{(_line as Record<string, unknown>).id}}`",
         f"        );",
         f"      }}",
         f"    }}",

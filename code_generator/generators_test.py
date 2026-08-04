@@ -2006,8 +2006,22 @@ def helper_context(
             'search_differs': search_differs,
             'prisma_include_str': prisma_include_str,
             'label_has_format': label_has_format,
-            # needs_second only for transitive (non-direct) deps matching primary FK target
-            'needs_second': not is_direct and dep['target'] == primary_fk_dep_target,
+            # needs_second only for transitive (non-direct) deps matching primary FK target.
+            # Compare on var_name (reference-name axis, e.g. 'product'), not dep['target']
+            # (entity-name axis, e.g. 'item') — primary_fk_dep_target is always a reference
+            # name (the x-display.table key, snake_case). The single_fk_target_aliases pass
+            # above already renames var_name to the camelCase reference-name stem whenever it
+            # differs from the target entity name, so var_name (camelCase) is on the same axis
+            # as to_camel_case(primary_fk_dep_target) in every case, including when the
+            # relation's reference name differs from its target entity name (e.g. reference
+            # `product` -> entity `item`) or is multi-word (e.g. reference `patient_rel`,
+            # var_name `patientRel` — comparing the raw snake_case value here would always
+            # miss for multi-word reference names).
+            'needs_second': (
+                not is_direct
+                and primary_fk_dep_target is not None
+                and dep['var_name'] == to_camel_case(primary_fk_dep_target)
+            ),
             # one-to-one FK pre-creates needed when creating this dep record (e.g. commentable_id)
             'internal_fk_deps': get_all_internal_fk_deps(dep['target'], schema),
             'lookup_field': lookup_field,

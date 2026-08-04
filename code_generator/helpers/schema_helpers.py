@@ -197,22 +197,54 @@ def get_splittable_bridge_field(entity_def: dict) -> str:
 
 
 def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
-    """Resolve x-ledger-entities[domain_key] to {pool, ledger, transactionable}.
+    """Resolve x-ledger-entities[domain_key] to
+    {pool, ledger, transactionable, item_field, location_field,
+    location_relation, lot_field, expiration_field}.
 
     OD-1 underlying idea: config required, no defaults. Raises ValueError if
     the domain or any of its required keys is not declared in the schema.
+
+    item_field/location_field/lot_field/expiration_field are the pool
+    entity's own column names for its item-master FK, location FK, lot
+    number, and expiration date (e.g. 'product_id', 'location_id',
+    'lot_number', 'expiration_date'). cmd_546: previously these were
+    hardcoded literals throughout generators.py and the ledger_* stub /
+    split_action_route templates, which silently broke (no error) for any
+    consumer naming these columns differently (e.g. proj_g's item-master FK
+    is named 'product_id' as a workaround specifically because it was
+    hardcoded here). The ledger entity's own denormalized columns reuse
+    these same names (current schemas — proj_c, proj_g — declare them
+    identically on both sides; no consumer has ever diverged the two).
+
+    location_relation is derived (not separately declared) by stripping the
+    conventional '_id' suffix from location_field — the Prisma relation
+    accessor name for that FK (e.g. 'location_id' -> 'location'), needed
+    wherever the generated code reads the *related* location row (its name)
+    rather than just the FK id. item/lot/expiration have no such accessor
+    requirement: item is denormalized by id, lot/expiration are plain
+    scalars, so only location needs it (see split_action_route.ts.jinja2 /
+    the ledger_* stub templates' `include: { location: true }` reads).
     """
     domains = schema.get('x-ledger-entities') or {}
     if domain_key not in domains:
         raise ValueError(f"x-ledger-entities.{domain_key!r} not declared in schema")
     domain = domains[domain_key]
-    for required_key in ('pool', 'ledger', 'transactionable'):
+    for required_key in (
+        'pool', 'ledger', 'transactionable',
+        'itemField', 'locationField', 'lotField', 'expirationField',
+    ):
         if required_key not in domain:
             raise ValueError(f"x-ledger-entities.{domain_key!r}.{required_key!r} is required")
+    location_field = domain['locationField']
     return {
         'pool': domain['pool'],
         'ledger': domain['ledger'],
         'transactionable': domain['transactionable'],
+        'item_field': domain['itemField'],
+        'location_field': location_field,
+        'location_relation': re.sub(r'_id$', '', location_field),
+        'lot_field': domain['lotField'],
+        'expiration_field': domain['expirationField'],
     }
 
 
