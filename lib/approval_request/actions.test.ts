@@ -61,8 +61,13 @@ vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 // prisma mock (above) doesn't define — mocked to a no-op here since order
 // enforcement itself is covered by test/flows/approval_order_bypass.test.ts
 // (real DB) and this file's own focus (recipient/revalidate targeting) is
-// orthogonal to it.
-vi.mock('@/lib/approval_request/order-check', () => ({ assertApprovalOrder: vi.fn().mockResolvedValue(undefined) }));
+// orthogonal to it. Preserves the module's other export
+// (findNewlyActionableFollowFlowIds, cmd_541) via importOriginal — a bare
+// factory here would replace the whole module and break that test group.
+vi.mock('@/lib/approval_request/order-check', async (importOriginal) => ({
+  ...(await importOriginal()),
+  assertApprovalOrder: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { getSessionUserIdOrThrow, getUserRoleIds } from '@/lib/authz';
 import { notify } from '@/lib/_notifier';
