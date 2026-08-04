@@ -172,6 +172,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Deliberately did not use `npm audit fix --force`, which pulls in a `@google-cloud/storage`
   downgrade. Verified with a clean `rm -rf node_modules && npm ci` (exit 0) and
   `npm audit --omit=dev --audit-level=high` (0 vulnerabilities).
+- **`x-approval.set_fields` docs contradicted the implementation** (cmd_544): `docs/knowledge/appendix/approval-flow.md`
+  §16.9 showed `on_approved.set_fields` as a list-of-`{field, value}` entries, contradicting
+  §16.11's mapping form and the only shape `_resolve_set_fields()` (`code_generator/generate.py:289`)
+  accepts (it iterates `raw.items()`). A schema author following §16.9 as written hit an
+  uninformative `AttributeError` deep inside `generate()`. Fixed the doc example to mapping form
+  and added `validate_schema()` Section 10 (`code_generator/validate.py`) to reject a non-mapping
+  `set_fields` before generation runs, naming the entity, the offending field key(s), and the
+  correct form.
 
 ## [3.0.0] - 2026-07-30
 
