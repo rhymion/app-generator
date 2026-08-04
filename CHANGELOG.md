@@ -33,6 +33,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Added
+- **CSV import for composite/dotted labelField FK columns** (cmd_548): a FK relation whose
+  display label is composite (`[product.name, location.name]`) or a single dotted path used to be
+  export-only — there was no single scalar to resolve a CSV cell back to, so the column landed in
+  `UNIMPORTABLE_COLUMN`. It is now resolved by matching the CSV cell against the full rendered
+  label text, via a lookup map built once per import (not per row) from the same label-building
+  helper the export getter already uses, so export and import can never disagree on what a label
+  looks like. Ambiguous labels (two rows sharing the same rendered text) are rejected at row
+  granularity (`MULTI_MATCH`, naming the column/value/match-count), not for the whole CSV. See
+  `docs/knowledge/csv-import-composite-labelfield.md`.
 - **`x-self-only`: permission-independent per-user data isolation, Stage 1** (cmd_536): a new
   entity-level schema flag for data that must be visible/editable only by its own creator as a
   fixed invariant — no permission grant (including `general.read`) can widen it, unlike the
