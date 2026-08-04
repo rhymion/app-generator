@@ -1422,6 +1422,70 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
     return '\n'.join(lines)
 
 
+def _build_item_reservation_create_code(rc: dict, parent_pascal: str) -> str:
+    """Item mode (cmd_555): reserve{Entity}() previously had no caller anywhere in
+    generated code, so the assertNoDuplicateReservation() check inside it never ran.
+    Call reserve{Entity}Core() inline, inside add{Entity}'s own transaction, right
+    after the row is created — allocation failure (no candidate / overlap) rolls the
+    create back instead of leaving an unallocated row."""
+    date_range = rc.get('dateRange')
+    criteria = rc.get('criteria') or {}
+    lines = [
+        f"    await reserve{parent_pascal}Core(",
+        f"      tx,",
+        f"      created.id,",
+    ]
+    if date_range:
+        start_field = date_range['startField']
+        end_field = date_range['endField']
+        lines.append(
+            f"      {{ {start_field}: created.{start_field} as unknown as Date, "
+            f"{end_field}: created.{end_field} as unknown as Date }},"
+        )
+    if criteria:
+        lines.append(f"      {{")
+        for pool_field, req_field in criteria.items():
+            lines.append(f"        {pool_field}: created.{req_field},")
+        lines.append(f"      }}")
+    else:
+        lines.append(f"      {{}}")
+    lines.append(f"    );")
+    return '\n'.join(lines)
+
+
+def _build_item_reservation_update_check_code(rc: dict, model: str) -> str:
+    """Item mode (cmd_555), dateRange only: re-validate that the *existing* allocation
+    doesn't overlap another booking after this update's (possibly changed) date range —
+    excluding this row's own prior reservation (excludeId), or a no-op edit that doesn't
+    touch the dates would be rejected as "overlapping itself"."""
+    date_range = rc.get('dateRange')
+    if not date_range:
+        return ''
+    allocated_field = rc['allocatedField']
+    start_field = date_range['startField']
+    end_field = date_range['endField']
+    # Update params are camelCase (e.g. checkIn), while dateRange keys are the
+    # schema's snake_case field names (e.g. check_in) — must map, not reuse verbatim.
+    start_var = to_camel_case(start_field)
+    end_var = to_camel_case(end_field)
+    return (
+        f"    {{\n"
+        f"      const _existingReservation = await tx.{model}.findUnique({{\n"
+        f"        where: {{ id }},\n"
+        f"        select: {{ {allocated_field}: true }},\n"
+        f"      }});\n"
+        f"      if (_existingReservation?.{allocated_field}) {{\n"
+        f"        await assertNoDuplicateReservation(\n"
+        f"          tx,\n"
+        f"          _existingReservation.{allocated_field} as string,\n"
+        f"          {{ {start_field}: {start_var}, {end_field}: {end_var} }},\n"
+        f"          id\n"
+        f"        );\n"
+        f"      }}\n"
+        f"    }}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # x-approval-lines: pre-create approval on new:false embedded line children
 # ---------------------------------------------------------------------------
@@ -1955,6 +2019,16 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     if has_reservation and reservation_config is not None:
         reservation_allocation_code = _build_reservation_allocation_code(reservation_config, model, schema)
 
+    # Reservation item mode (cmd_555): reserve{Entity}() had no caller — wire it into
+    # add{Entity}'s own transaction (allocation) and update{Entity}'s own transaction
+    # (re-validate the existing allocation against the row's own prior booking excluded).
+    item_reservation_create_code = ''
+    item_reservation_update_check_code = ''
+    if has_item_reservation and reservation_config is not None:
+        item_reservation_create_code = _build_item_reservation_create_code(reservation_config, parent_pascal)
+        if can_update:
+            item_reservation_update_check_code = _build_item_reservation_update_check_code(reservation_config, model)
+
     # x-approval-lines: pre-create/post-create approval for embedded line
     # children that are new:false (see docs/knowledge/appendix/approval-flow.md §16.10).
     approval_lines_pre_create_code  = ''
@@ -2058,6 +2132,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'flatten_nested_updates':             flatten_nested_updates,
         'flatten_nested_creates':             flatten_nested_creates,
         'reservation_allocation_code':        reservation_allocation_code,
+        'item_reservation_create_code':       item_reservation_create_code,
+        'item_reservation_update_check_code': item_reservation_update_check_code,
         'has_reservation':                    has_reservation,
         'has_item_reservation':               has_item_reservation,
         'reservation_mutation_guard_update':  reservation_mutation_guard_update,
