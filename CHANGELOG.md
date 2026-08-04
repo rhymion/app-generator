@@ -18,6 +18,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/appendix/approval-flow.md` §16.6.1 and
   `test/flows/approval_order_bypass.test.ts`.
 
+### Fixed
+- **Re-submitting a rejected approval request never notified the approver** (cmd_539):
+  `resubmitApprovalRequest()` (both the server action in
+  `lib/approval_request/actions_core.ts` and the REST route
+  `app/api/approval_request/[id]/resubmit/route.ts`) transitions status back to `pending` by
+  re-using the existing `approval_request` row rather than creating a new one, so
+  `notifyApprovalRequestCreated()` — wired only into the creation path — never re-fired for a
+  resubmission; approver-role holders were never told a rejected request needed their attention
+  again. Both paths now call it again after the status flip. A related payload bug was fixed
+  alongside it: the rejection notification's `status` field was hard-coded to `'rejected'` even
+  for a `terminal_rejected` outcome (the notification itself always fired; only the payload was
+  wrong). See `docs/knowledge/appendix/approval-flow.md` §16.6 and
+  `docs/knowledge/notification-triggers.md`.
+
 ### Added
 - **Post-login redirect-back with open-redirect protection** (cmd_525): unauthenticated
   page requests were already redirected to `/login` by `proxy.ts` before this change, but
@@ -159,6 +173,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   instead of one per package. Also created the `dependencies`/`npm`/`python`/`github-actions`
   repo labels that Dependabot's config referenced but that never existed, so future PRs stop
   reporting a missing-label warning.
+- **fast-uri HIGH CVE (GHSA-7p8r-x3mc-p8w7) blocking the Dependency Audit gate** (cmd_542):
+  transitive via `prisma` → `@prisma/dev` → `@prisma/streams-local` → `ajv@8.20.0` →
+  `fast-uri@3.1.4`; the existing `overrides.fast-uri` pin (`^3.1.4`) had itself frozen the
+  lockfile on the last vulnerable patch. Bumped the override floor to `^3.1.5` (still within
+  ajv's own `^3.0.1` requirement, so no forced major bump). Also closed the 6 moderate
+  advisories reported alongside it with narrow, non-breaking overrides: `undici` scoped to the
+  `@vercel/blob` subtree only (`^6.28.0`, leaving `jsdom`'s separate `undici@8.9.0` untouched)
+  and a global `uuid` bump (`^11.1.1`) for the `gaxios`/`teeny-request` chain under
+  `@google-cloud/storage`, verified those two only call the stable `uuid.v4()` export.
+  Deliberately did not use `npm audit fix --force`, which pulls in a `@google-cloud/storage`
+  downgrade. Verified with a clean `rm -rf node_modules && npm ci` (exit 0) and
+  `npm audit --omit=dev --audit-level=high` (0 vulnerabilities).
 
 ## [3.0.0] - 2026-07-30
 

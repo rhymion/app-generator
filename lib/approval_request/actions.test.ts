@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const {
   findUnique, arUpdate, historyCreate, approvableFindUnique, approvableUpdate, transactionMock, revalidatePathMock,
+  notifyMock, notifyApprovalRequestCreatedMock,
 } = vi.hoisted(() => ({
   findUnique: vi.fn(),
   arUpdate: vi.fn(),
@@ -23,6 +24,8 @@ const {
   approvableUpdate: vi.fn(),
   transactionMock: vi.fn(),
   revalidatePathMock: vi.fn(),
+  notifyMock: vi.fn(),
+  notifyApprovalRequestCreatedMock: vi.fn(),
 }));
 
 vi.mock('@/lib/prisma', () => ({
@@ -32,7 +35,8 @@ vi.mock('@/lib/prisma', () => ({
   },
 }));
 vi.mock('@/lib/authz', () => ({ getSessionUserIdOrThrow: vi.fn(), getUserRoleIds: vi.fn() }));
-vi.mock('@/lib/_notifier', () => ({ notify: vi.fn() }));
+vi.mock('@/lib/_notifier', () => ({ notify: notifyMock }));
+vi.mock('@/lib/_notifyApprovalRequest', () => ({ notifyApprovalRequestCreated: notifyApprovalRequestCreatedMock }));
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 // cmd_540: assertApprovalOrder() (lib/approval_request/order-check.ts) queries
 // prisma.approval_request.findMany() directly, which this file's minimal
@@ -83,6 +87,95 @@ beforeEach(() => {
   vi.mocked(getSessionUserIdOrThrow).mockReset().mockResolvedValue('user-1');
   vi.mocked(getUserRoleIds).mockReset().mockResolvedValue(['approver-role']);
   vi.mocked(assertApprovalOrder).mockReset().mockResolvedValue(undefined);
+  notifyMock.mockReset();
+  notifyApprovalRequestCreatedMock.mockReset();
+});
+
+// cmd_539: resubmitApprovalRequest() reuses the existing approval_request
+// row (only its status changes back to 'pending') instead of creating a
+// new one, so notifyApprovalRequestCreated() — wired only into the
+// *creation* path elsewhere — never re-fired for a resubmission, leaving
+// approver-role holders untold that the request needs their attention
+// again. See cypress/e2e/api/approval_request_resubmit_notification.cy.ts
+// for the delivery-level (real DB, real notification row) proof; this test
+// pins the call-site contract at the unit level.
+describe('resubmitApprovalRequest notifies approvers (cmd_539)', () => {
+  it('calls notifyApprovalRequestCreated with the resolved target and excludes the resubmitter', async () => {
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      approval_flow: {
+        entity_name: 'leave_request',
+        approver_role_id: 'approver-role',
+        requestor_role_id: 'requestor-role',
+      },
+      approvable: { creator_id: 'user-1' },
+      status: 'rejected',
+    });
+    resolveApprovableTarget.mockResolvedValue({ id: 'lr-42' });
+
+    await resubmitApprovalRequest('req-1', 'here is the fix');
+
+    expect(notifyApprovalRequestCreatedMock).toHaveBeenCalledWith(expect.anything(), 'req-1', {
+      excludeUserId: 'user-1',
+      targetEntityName: 'leave_request',
+      targetId: 'lr-42',
+    });
+  });
+});
+
+// cmd_539: the post-transaction Trigger #3 notify() call hard-coded
+// `status: 'rejected'` even when the actual outcome was
+// `terminal_rejected` — the notification fired either way, but its
+// payload misreported the outcome. Pins the fix: the payload's status
+// must match what isTerminalReject() decided.
+describe('rejectApprovalRequest notify payload status (cmd_539)', () => {
+  // rejectApprovalRequest() reads approval_request via findUnique three
+  // times in sequence: (1) assertApproverRole's permission check, (2) the
+  // in-transaction lookup used to decide terminal vs non-terminal, (3)
+  // getApprovalRequestRecipient() after the transaction commits. Each call
+  // only needs a subset of fields, but all three must resolve for the
+  // whole flow to complete without throwing.
+  const stubRejectLookups = () => {
+    findUnique.mockReset();
+    findUnique
+      .mockResolvedValueOnce({ approval_flow: { approver_role_id: 'approver-role' } })
+      .mockResolvedValueOnce({ approval_flow: { entity_name: 'leave_request' } })
+      .mockResolvedValueOnce({
+        approvable_id: 'appr-1',
+        approval_flow: { entity_name: 'leave_request' },
+        approvable: { creator_id: 'creator-1' },
+      });
+    approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: null });
+    resolveApprovableTarget.mockResolvedValue({ id: 'lr-42' });
+  };
+
+  it('reports status: rejected for a non-terminal rejection', async () => {
+    stubRejectLookups();
+    isTerminalReject.mockReturnValue(false);
+    arUpdate.mockResolvedValue({ id: 'req-1', status: 'rejected', approvable_id: 'appr-1' });
+
+    await rejectApprovalRequest('req-1');
+
+    expect(notifyMock).toHaveBeenCalledWith(
+      'creator-1',
+      'approval_responded',
+      expect.objectContaining({ status: 'rejected' }),
+    );
+  });
+
+  it('reports status: terminal_rejected for a terminal rejection', async () => {
+    stubRejectLookups();
+    isTerminalReject.mockReturnValue(true);
+    arUpdate.mockResolvedValue({ id: 'req-1', status: 'terminal_rejected', approvable_id: 'appr-1' });
+
+    await rejectApprovalRequest('req-1');
+
+    expect(notifyMock).toHaveBeenCalledWith(
+      'creator-1',
+      'approval_responded',
+      expect.objectContaining({ status: 'terminal_rejected' }),
+    );
+  });
 });
 
 describe('getApprovalRequestRecipient (cmd_479)', () => {

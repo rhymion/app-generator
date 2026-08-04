@@ -163,12 +163,24 @@ generated). Three server actions are provided:
 
 | Action | Permission check | Result |
 |---|---|---|
-| `approveApprovalRequest(id, message?)` | User must have `approver_role_id`; all `preceded_by` flows for this approvable must already be `approved` (`assertApprovalOrder()`, §16.6.1) | Sets status → `approved` |
-| `rejectApprovalRequest(id, message?, options?)` | User must have `approver_role_id`; same `assertApprovalOrder()` ordering check as approve | Sets status → `rejected`, or `terminal_rejected` if `isTerminalReject()` says so (§16.11) |
-| `resubmitApprovalRequest(id, message?)` | Creator or user with `requestor_role_id`; only from `rejected` (not `terminal_rejected`) — ordering does not apply, resubmit is requester-initiated | Sets status → `pending` |
+| `approveApprovalRequest(id, message?)` | User must have `approver_role_id`; all `preceded_by` flows for this approvable must already be `approved` (`assertApprovalOrder()`, §16.6.1) | Sets status → `approved`; notifies the entity creator (Trigger #3, §16.9 note below) |
+| `rejectApprovalRequest(id, message?, options?)` | User must have `approver_role_id`; same `assertApprovalOrder()` ordering check as approve | Sets status → `rejected`, or `terminal_rejected` if `isTerminalReject()` says so (§16.11); either way, notifies the entity creator (Trigger #3) with a payload `status` matching the actual outcome |
+| `resubmitApprovalRequest(id, message?)` | Creator or user with `requestor_role_id`; only from `rejected` (not `terminal_rejected`) — ordering does not apply, resubmit is requester-initiated | Sets status → `pending`; re-notifies the approver-role holders (cmd_539, see below) |
 
 Each action creates an `approval_history` row recording `pre_status`, `post_status`, `message`,
 and `creator_id` (the acting user).
+
+**cmd_539**: `resubmitApprovalRequest()` reuses the existing `approval_request` row (only its
+`status` flips back to `pending`) rather than creating a new one, so the create-path notification
+(`notifyApprovalRequestCreated()`, Trigger #2, §16.4/next section) never re-fired on resubmission
+until this fix — approver-role holders were never told a rejected request needed their attention
+again. Both implementations (`lib/approval_request/actions_core.ts`'s `resubmitApprovalRequest()`
+and the REST route `app/api/approval_request/[id]/resubmit/route.ts`, see the "two independent
+approve/reject implementations" note in `docs/knowledge/notification-triggers.md`) now call
+`notifyApprovalRequestCreated()` again after the status flip, excluding the resubmitter. Separately,
+the Trigger #3 rejection notification's payload `status` field was hard-coded to `'rejected'` even
+for a `terminal_rejected` outcome — the notification always fired either way, but the payload
+misreported the outcome; both REST and server-action paths now report the actual status.
 
 #### 16.6.1 Ordering enforcement (`assertApprovalOrder`)
 
