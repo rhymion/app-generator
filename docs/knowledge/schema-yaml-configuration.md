@@ -1315,7 +1315,14 @@ booking:
 | `primary: true` | This column's cell links to the view or edit page |
 | `width` | Pixel width of the DataGrid column |
 
-If `x-display` is omitted entirely, the list page shows all fields in definition order.
+If `x-display.table` is omitted entirely, the generated list page (`page_list.tsx.jinja2`) emits
+no `displayFields`/`primaryField` props at all, and `ResponsiveListClient`/`DataGridClient` fall
+back to their own hardcoded default columns — `name` and `description` — **not** "all fields in
+definition order". If the entity has neither of those two exact field names (e.g. its primary
+display field is called `title`), the list page silently renders blank/id-only cells for every
+row with no build or type error (found via `personal_note`, cmd_536 — see
+`docs/knowledge/self-only-entity.md`). Always declare `x-display.table` with a `primary: true`
+column whenever the entity's natural label field isn't literally named `name`.
 
 When a table column refers to a relationship name (e.g., `resource`), the generator renders
 `resource.name` (the `labelField`) in that column.

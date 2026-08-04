@@ -6,6 +6,25 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`x-self-only`: permission-independent per-user data isolation, Stage 1** (cmd_536): a new
+  entity-level schema flag for data that must be visible/editable only by its own creator as a
+  fixed invariant — no permission grant (including `general.read`) can widen it, unlike the
+  existing `creator` permission scope which is just a configurable option. Every affected
+  generated code path (`getters.ts`, `search_helpers.ts`, `actions.ts`, `api_bulk_route.ts`,
+  `api_detail_route.ts`, `service.ts`, CSV import/export, FK-candidate search) drops the
+  `general.*` escape and checks `creator_id === actorId` unconditionally; a non-owner's row reads
+  as `404 Not Found`. `x-self-only: { admin_bypass: true }` lets a privileged (`Administrator`)
+  role read across all rows, but only with an audit row written for the access — the write and the
+  bypass are inseparable (fail-closed: if the audit write fails, the bypass is denied too).
+  `validate.py` rejects a self-only entity whose backing Prisma model lacks `creator_id`, and
+  rejects `creator_id` appearing in `x-import-key`. The account **Settings** page (`setting`) now
+  uses this mechanism (`admin_bypass: true`) — other users' settings are no longer reachable
+  through any permission grant, while other entities' references to `user` (mentions, comment
+  authorship, approver pickers, etc.) are unaffected. A new `personal_note` sample entity ships as
+  the generator's own worked example and regression fixture. See
+  `docs/knowledge/self-only-entity.md`. Row-Level Security (Stage 2) is not implemented — the
+  current dev/test DB role is a superuser and bypasses RLS regardless, so it requires a dedicated
+  non-superuser DB role as a prerequisite (an operations task, out of scope here).
 - **Post-login redirect-back with open-redirect protection** (cmd_525): unauthenticated
   page requests were already redirected to `/login` by `proxy.ts` before this change, but
   always landed on `/` after signing in, losing the user's original destination. `proxy.ts`
