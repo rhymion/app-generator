@@ -441,6 +441,8 @@ describe('approveApprovalRequest order-reached notification (cmd_541)', () => {
 
     expect(txFlowFindUnique).not.toHaveBeenCalled();
     expect(vi.mocked(notify).mock.calls.filter((c) => c[1] === 'approval_order_reached')).toHaveLength(0);
+  });
+});
 // cmd_540: the REST route (app/api/approval_request/[id]/{approve,reject}/
 // route.ts) enforces multi-stage ordering via assertApprovalOrder(), but
 // this server action didn't call it at all — reachable directly via Next.js
