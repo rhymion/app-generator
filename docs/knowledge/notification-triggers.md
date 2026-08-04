@@ -95,6 +95,36 @@ post-transaction `getApprovalRequestRecipient()` + `notify()` block from
 its post-approval/rejection side effects, check whether the other needs
 the same change — there's no shared code path enforcing parity.
 
+## Approval order-reached notification (cmd_541)
+
+A `preceded_by` chain (§16.5 of `docs/knowledge/appendix/approval-flow.md`) creates every flow's
+`approval_request` up front, when the approvable entity is created — so the "approval request
+creation notification" above already fires once for every flow's approver role at that point,
+including flows that aren't actionable yet because a preceding flow hasn't been approved. That
+earlier notification told them a request exists; it did not tell them when they could actually
+act on it. Approving a preceding flow used to be silent for the next flow's approvers — nothing
+told them their turn had arrived.
+
+`findNewlyActionableFollowFlowIds()` (`lib/approval_request/order-check.ts`) is called from inside
+`approveApprovalRequest()`'s transaction, after the status update, in **both** independent
+implementations (`lib/approval_request/actions_core.ts`'s server action and
+`app/api/approval_request/[id]/approve/route.ts`'s REST route — see the "Two independent
+approve/reject implementations" note above; this trigger needed the same duplication). It walks
+the just-approved flow's `followed_by` set and, for each follow-on flow, checks whether *all* of
+its `preceded_by` flows now have an approved `approval_request` on the same approvable — the same
+check `assertApprovalOrder()` runs in the opposite direction (backward from the flow being acted
+on, instead of forward from the flow that just completed).
+
+Any follow-on flow whose ordering constraint just became satisfied gets its approver role notified
+via `notifyApprovalOrderReached()` (`lib/_notifyApprovalRequest.ts`, type
+`approval_order_reached`) — fired after the transaction commits, using the plain `prisma` client
+(not `tx`), the same pattern Trigger #3 above uses. This is a distinct notification type from the
+creation-time `approval_requested` one those same approvers already hold, not a duplicate of it —
+the two are asserted separately (by type) in
+`cypress/e2e/api/multi_stage_approval_order_reached.cy.ts`. A `before.status !== 'approved'` check,
+read inside the same transaction as the status update, guards against re-sending this notification
+if the same request is ever approved more than once.
+
 ## Delivery mechanism
 
 Both triggers share the same notification plumbing:

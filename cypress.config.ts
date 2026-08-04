@@ -284,6 +284,10 @@ export default defineConfig({
           const { getPendingApprovalRequest } = require('./cypress/support/approval_test_helpers');
           return await getPendingApprovalRequest(params.approvable_id);
         },
+        async 'db:setupMultiStageApprovalFixture'() {
+          const { setupMultiStageApprovalFixture } = require('./cypress/support/approval_test_helpers');
+          return await setupMultiStageApprovalFixture();
+        },
         async 'db:populateAuditLog'(length: number) {
           const { populateAuditLogData } = require('./cypress/support/audit_log/helper');
           return await populateAuditLogData(length);
