@@ -223,6 +223,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/notification_approval.cy.ts
 !cypress/e2e/api/receiving_receipt_notification.cy.ts
 !cypress/e2e/api/multi_stage_approval_order_reached.cy.ts
+!cypress/e2e/api/approval_request_resubmit_notification.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/
