@@ -62,6 +62,24 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
       {{ entity.access_clauses_ts_var }}.push(Prisma.sql`1=0`);
     }
 {% endif %}
+{% if entity.is_self_only %}
+    // x-self-only: any explicit read grant (general or Creator/Assignee)
+    // only ever exposes the caller's OWN rows here — general.read must
+    // never widen this to every user's rows, unlike the ordinary branch
+    // below. No admin_bypass path in cross-entity search (see build_context/
+    // generate.py comment) — only the dedicated per-entity getters offer it.
+    if (
+      {{ entity.general_read_ts_var }}
+      || {{ entity.perms_ts_var }}.permissions.creator?.read
+{% if entity.has_assignee_id %}
+      || {{ entity.perms_ts_var }}.permissions.assignee?.read
+{% endif %}
+    ) {
+      {{ entity.access_clauses_ts_var }}.push(userId ? Prisma.sql`creator_id = ${ userId }` : Prisma.sql`1=0`);
+    } else {
+      {{ entity.access_clauses_ts_var }}.push(Prisma.sql`1=0`);
+    }
+{% else %}
     if (!{{ entity.general_read_ts_var }}) {
       const {{ entity.or_clauses_ts_var }}: Prisma.Sql[] = [];
       if ({{ entity.perms_ts_var }}.permissions.creator?.read && userId) {{ entity.or_clauses_ts_var }}.push(Prisma.sql`creator_id = ${ userId }`);
@@ -70,6 +88,7 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
 {% endif %}
       {{ entity.access_clauses_ts_var }}.push({{ entity.or_clauses_ts_var }}.length > 0 ? Prisma.sql`(${ Prisma.join({{ entity.or_clauses_ts_var }}, ' OR ') })` : Prisma.sql`1=0`);
     }
+{% endif %}
     const {{ entity.access_where_ts_var }}: Prisma.Sql = {{ entity.access_clauses_ts_var }}.length > 0
       ? Prisma.sql`(${ Prisma.join({{ entity.access_clauses_ts_var }}, ' AND ') })`
       : Prisma.sql`1=1`;
@@ -83,6 +102,21 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
       {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`1=0`);
     }
 {% endif %}
+{% if entity.is_self_only %}
+    // x-self-only: same unconditional-restriction rule as above, qualified
+    // to the parent row (the child has no creator_id of its own).
+    if (
+      {{ entity.general_read_ts_var }}
+      || {{ entity.perms_ts_var }}.permissions.creator?.read
+{% if entity.has_assignee_id %}
+      || {{ entity.perms_ts_var }}.permissions.assignee?.read
+{% endif %}
+    ) {
+      {{ entity.parent_access_clauses_ts_var }}.push(userId ? Prisma.sql`parent.creator_id = ${ userId }` : Prisma.sql`1=0`);
+    } else {
+      {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`1=0`);
+    }
+{% else %}
     if (!{{ entity.general_read_ts_var }}) {
       const {{ entity.parent_or_clauses_ts_var }}: Prisma.Sql[] = [];
       if ({{ entity.perms_ts_var }}.permissions.creator?.read && userId) {{ entity.parent_or_clauses_ts_var }}.push(Prisma.sql`parent.creator_id = ${ userId }`);
@@ -91,6 +125,7 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
 {% endif %}
       {{ entity.parent_access_clauses_ts_var }}.push({{ entity.parent_or_clauses_ts_var }}.length > 0 ? Prisma.sql`(${ Prisma.join({{ entity.parent_or_clauses_ts_var }}, ' OR ') })` : Prisma.sql`1=0`);
     }
+{% endif %}
     const {{ entity.parent_access_where_ts_var }}: Prisma.Sql = {{ entity.parent_access_clauses_ts_var }}.length > 0
       ? Prisma.sql`(${ Prisma.join({{ entity.parent_access_clauses_ts_var }}, ' AND ') })`
       : Prisma.sql`1=1`;

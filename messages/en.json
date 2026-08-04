@@ -33,6 +33,7 @@
     "dashboard": "Dashboard",
     "organization": "Organization",
     "permission": "Permission",
+    "personalNote": "Personal Note",
     "role": "Role",
     "setting": "Setting",
     "user": "User"
@@ -47,8 +48,10 @@
     "approve": "Approve",
     "approverRole": "Approver Role",
     "attachments": "Attachments",
+    "body": "Body",
     "chartType": "Chart Type",
     "comments": "Comments",
+    "content": "Content",
     "create": "Create",
     "created_at": "Created At",
     "dashboard": "Dashboard",
@@ -124,6 +127,7 @@
     "home": "Home",
     "organization": "Organization",
     "permission": "Permission",
+    "personalNote": "Personal Note",
     "role": "Role",
     "user": "User"
   },

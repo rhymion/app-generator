@@ -160,6 +160,23 @@ def get_approval_lines_props(parent_def: dict, model: str, schema: dict) -> list
     return props
 
 
+def get_self_only_flags(entity_def: dict) -> tuple[bool, bool]:
+    """Resolve an entity's `x-self-only` declaration to (is_self_only, admin_bypass).
+
+    Accepts both the shorthand (`x-self-only: true`) and the explicit dict
+    form (`x-self-only: {admin_bypass: true}`). The shorthand's admin_bypass
+    always defaults to False: the loose/permissive direction must never be
+    the implicit default, so a schema reader can tell who can see a
+    self-only entity's rows without checking elsewhere.
+    """
+    x_self_only = entity_def.get('x-self-only')
+    if x_self_only is True:
+        return True, False
+    if isinstance(x_self_only, dict):
+        return True, bool(x_self_only.get('admin_bypass', False))
+    return False, False
+
+
 def get_splittable_bridge_field(entity_def: dict) -> str:
     """The property name on an x-splittable entity that holds its per-child
     ledger/reservation bridge FK (e.g. purchase_per_item / receiving_receipt_line's

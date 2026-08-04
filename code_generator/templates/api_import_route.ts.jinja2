@@ -228,9 +228,32 @@ export async function POST(request: NextRequest) {
       }
       if (rowHasError) continue;
 
-{% if should_filter_by_org %}
+{% if should_filter_by_org and is_self_only %}
+      // Built as a separately-typed const (not spread inline into the call)
+      // so TS doesn't have to jointly infer this object's type and the
+      // Prisma findMany() overload in one step — inline spreads here can
+      // hit TS7022 (self-referential implicit-any) against generic Prisma
+      // args typing.
+      const _matchWhere: Record<string, unknown> = { ...keyWhere, organization_id: { in: _importOrgIds }, creator_id: actorId };
       const matches = await prisma.{{ model }}.findMany({
-        where: { ...keyWhere, organization_id: { in: _importOrgIds } },
+        where: _matchWhere,
+        select: {{ item_context_select }},
+      });
+{% elif should_filter_by_org %}
+      const _matchWhere: Record<string, unknown> = { ...keyWhere, organization_id: { in: _importOrgIds } };
+      const matches = await prisma.{{ model }}.findMany({
+        where: _matchWhere,
+        select: {{ item_context_select }},
+      });
+{% elif is_self_only %}
+      // x-self-only: import can only see/match the caller's own rows — a
+      // natural-key collision with another user's row must not surface as
+      // MULTI_MATCH or silently update it; it's treated as no match (falls
+      // through to CREATE, which then fails on the DB's own uniqueness
+      // constraint if one exists — a generic write error, not a leak).
+      const _matchWhere: Record<string, unknown> = { ...keyWhere, creator_id: actorId };
+      const matches = await prisma.{{ model }}.findMany({
+        where: _matchWhere,
         select: {{ item_context_select }},
       });
 {% else %}
@@ -262,7 +285,14 @@ export async function POST(request: NextRequest) {
       // matches.length === 1
 {% if import_can_update %}
       const existing = matches[0];
+{% if is_self_only %}
+      // x-self-only: ownership is the sole gate — matches was already
+      // creator_id-scoped above, so this always holds here; kept explicit
+      // rather than relying on the query, per the "no escape" invariant.
+      const canUpdate = existing.creator_id === actorId;
+{% else %}
       const canUpdate = await canAccess('{{ parent }}', 'update', actorId, existing);
+{% endif %}
       if (!canUpdate) {
         errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to update this row' });
         continue;

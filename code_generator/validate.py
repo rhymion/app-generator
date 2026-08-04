@@ -14,7 +14,7 @@ from pathlib import Path
 from helpers.label_field import resolve_label_paths
 from helpers.schema_helpers import (
     get_parent_relationships, get_internal_bridge_fk_prop_names,
-    get_entity_properties, get_entity_required,
+    get_entity_properties, get_entity_required, get_self_only_flags,
 )
 
 _SNAKE_CASE = re.compile(r'^(__)?[a-z][a-z0-9_]*$')
@@ -152,6 +152,72 @@ def validate_prisma_indexes(schema_path: str | Path) -> None:
         raise SchemaValidationError(
             f"Prisma index validation failed — {len(errors)} model(s) missing "
             f"required indexes:\n\n{bullet_list}\n"
+        )
+
+
+def _resolve_backing_model_name(def_key: str, defs: dict, _seen: frozenset = frozenset()) -> str:
+    """Resolve the Prisma model name that actually backs `def_key`.
+
+    Usually the entity name IS the model name (`role` -> `role`, `__role` ->
+    `role`). But a pass-through proxy view like `setting` has no Prisma model
+    of its own — its `allOf` $ref chain (`setting` -> `user` -> `__user`)
+    ultimately lands on a *different* model (`user`). Stripping the `__`
+    prefix from `def_key` alone (the old logic) would look for a
+    nonexistent `setting` model in schema.prisma and false-positive an
+    error. Walking the chain, same as generate_types.py's
+    `_resolve_raw_key`, finds the real backing model instead.
+    """
+    if def_key in _seen:
+        return def_key[2:] if def_key.startswith('__') else def_key
+    defn = defs.get(def_key) or {}
+    for item in defn.get('allOf', []):
+        ref = item.get('$ref')
+        if ref:
+            return _resolve_backing_model_name(ref.split('/')[-1], defs, _seen | {def_key})
+    return def_key[2:] if def_key.startswith('__') else def_key
+
+
+def validate_self_only_creator_id_columns(schema: dict, prisma_schema_path: str | Path) -> None:
+    """Verify every x-self-only entity's underlying Prisma model actually has
+    a creator_id column to filter on.
+
+    This can't be checked from the JSON schema alone (like the rest of
+    validate_schema() below): creator_id is boilerplate added directly to
+    schema.prisma for every generated model and is never listed under a
+    definition's 'properties' (see derive_raw_entity in schema_deriver.py) —
+    so, like validate_prisma_indexes() above, this reads the real Prisma
+    schema text rather than get_entity_properties().
+    """
+    path = Path(prisma_schema_path)
+    if not path.exists():
+        raise SchemaValidationError(
+            f"Prisma schema not found at {path} — required for x-self-only validation."
+        )
+    text = path.read_text()
+    model_bodies = dict(_iter_model_blocks(text))
+    defs = schema.get('definitions') or {}
+
+    errors: list[str] = []
+    for def_key, defn in defs.items():
+        if not isinstance(defn, dict) or not _SNAKE_CASE.match(def_key):
+            continue
+        is_self_only, _ = get_self_only_flags(defn)
+        if not is_self_only:
+            continue
+        model_name = _resolve_backing_model_name(def_key, defs)
+        body = model_bodies.get(model_name)
+        if body is None or not _model_has_column(body, 'creator_id'):
+            errors.append(
+                f"Definition '{def_key}': x-self-only requires the underlying "
+                f"Prisma model '{model_name}' to have a creator_id column to "
+                f"filter on, but none was found in schema.prisma."
+            )
+
+    if errors:
+        bullet_list = '\n'.join(f"  • {e}" for e in errors)
+        raise SchemaValidationError(
+            f"x-self-only validation failed — {len(errors)} entity(ies) missing "
+            f"a creator_id column:\n\n{bullet_list}\n"
         )
 
 
@@ -1129,6 +1195,33 @@ def validate_schema(schema: dict) -> None:
             f"set x-generate.import: false on '{_model_key}' to make the "
             f"opt-out explicit."
         )
+
+    # -----------------------------------------------------------------------
+    # 13. x-self-only schema rules
+    # -----------------------------------------------------------------------
+    # An entity declaring x-self-only ("only the record's creator can access
+    # it" is a fixed, permission-independent invariant) must never let CSV
+    # import set creator_id directly — the app layer always stamps it from
+    # the session, never from user-supplied input (see
+    # import_unimportable_columns in build_context.py). The companion check
+    # — the underlying Prisma model must actually HAVE a creator_id column —
+    # lives in validate_self_only_creator_id_columns() above: creator_id is
+    # never listed in a definition's 'properties' (it's schema.prisma
+    # boilerplate, not a JSON-schema property), so it can't be checked here.
+    for _so_key, _so_defn in defs.items():
+        if not isinstance(_so_defn, dict) or not _SNAKE_CASE.match(_so_key):
+            continue
+        _is_self_only, _ = get_self_only_flags(_so_defn)
+        if not _is_self_only:
+            continue
+        _so_import_key = _so_defn.get('x-import-key') or []
+        if 'creator_id' in _so_import_key:
+            errors.append(
+                f"Definition '{_so_key}': x-self-only entity cannot list "
+                f"'creator_id' in x-import-key — it must never be settable "
+                f"from user-supplied CSV input, only stamped from the "
+                f"session (see import_unimportable_columns)."
+            )
 
     # -----------------------------------------------------------------------
     # 9. nativeEnum member naming convention (cmd_493)
