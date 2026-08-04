@@ -44,6 +44,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `types.ts.jinja2`-only context builder) never normalized either x-bridge form before detecting
   one-to-one relations, so bridge-based comment threads were invisible to it — now mirrors
   `build_context.py`'s normalization. See `docs/knowledge/mention-system.md`.
+- **`@mention` comment-compose picker wiring** (cmd_538): the "write a comment"/edit-comment
+  textareas inside `CommentListWrapper` now use `MentionInput` — typing `@` opens real candidate
+  suggestions — instead of a plain `TextField`, completing the client-UI scope cmd_522c explicitly
+  deferred. `form_upsert.tsx.jinja2` now passes `searchMentionUserOptions` down and threads
+  `canViewUserProfile`/`mentionUserContext` to the edit page (previously wired only for the
+  read-only `form_view.tsx.jinja2` path). See `docs/knowledge/mention-system.md`.
 - **Generated permission-denial and cross-org isolation API tests** (cmd_520 batch A): every
   generated `cypress/e2e/api/<entity>.cy.ts` now includes PUT/DELETE/export/import
   permission-denial tests (7.3–7.6, gated on `can_edit`/`can_delete`/`can_export`/
@@ -85,6 +91,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   safe because `build_context.py` unconditionally includes the `creator`
   relation on every comment fetch that can reach these loops. See
   `docs/knowledge/mention-system.md`.
+- **`searchMentionUserOptions()`'s permission-denied flag never reached the client** (cmd_538):
+  the function returned an array with an ad-hoc `permissionDenied` property
+  (`Object.assign([], { permissionDenied: true })`). Next.js Server Actions serialize return
+  values through the RSC "flight" protocol, which — like `JSON.stringify` — only preserves an
+  array's indexed elements, so the flag was silently dropped in transit and the picker's
+  "suggestions unavailable" message never rendered even though the server correctly computed the
+  denial. A component-level unit test couldn't catch this, since it calls the function in-process
+  with no serialization boundary to cross. Contract changed to a plain
+  `{ options, permissionDenied }` object. The identical pattern in `getters.ts.jinja2`'s
+  `searchXxxOptions()` (cmd_516) is presumed to share this bug and was **not** fixed here —
+  flagged for a follow-up cmd. Also fixed: `generators_test.py`'s `comment_has_mention`
+  test-generation gate missed the commentable one-to-one bridge form, so any entity using that
+  (recommended) pattern silently got zero generated mention-UI test coverage; and `lib/prisma.ts`'s
+  dynamic `import('@prisma/adapter-pg')` — which made client init depend on a top-level `await` —
+  broke any Cypress Node task that transitively imports it, since Cypress's esbuild CJS bundling
+  rejects top-level await outright. Switched to a static import (already the established pattern in
+  `cypress/support/db-helpers.ts`). See `docs/knowledge/mention-system.md`.
 
 ### Security
 - **Enforce MFA on the Google OAuth sign-in path** (cmd_527) — previously,

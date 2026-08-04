@@ -1,5 +1,6 @@
 import { PrismaClient, type Prisma } from '@/app/generated/prisma/client'
 import { withAccelerate } from '@prisma/extension-accelerate';
+import { PrismaPg } from '@prisma/adapter-pg';
 
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 
@@ -39,7 +40,7 @@ function attachSlowQueryListener(client: PrismaClient<'query'>): void {
 // TLS verification fails (rca_266a/267a). Doreen is following up with
 // Prisma support after other urgent work; once resolved, set PRISMA_DATABASE_URL
 // again to switch back to this branch without further code changes.
-const createPrismaClient = async () => {
+const createPrismaClient = () => {
   if (process.env.PRISMA_DATABASE_URL) {
     const accelerateUrl = process.env.PRISMA_DATABASE_URL;
     // Fail fast if PRISMA_DATABASE_URL is a placeholder (e.g. created by
@@ -87,8 +88,13 @@ const createPrismaClient = async () => {
       connectionString = u.toString();
     } catch { /* malformed URL — fall through with original values */ }
 
-    // Dynamic import to avoid bundling @prisma/adapter-pg in production
-    const { PrismaPg } = await import('@prisma/adapter-pg');
+    // Statically imported (see top of file) rather than dynamically: a
+    // dynamic import here made this function async, which forced a
+    // top-level `await createPrismaClient()` below — and Cypress's Node
+    // task runner transforms required modules to CJS via esbuild, which
+    // rejects top-level await outright. cypress/support/db-helpers.ts
+    // already imports PrismaPg statically with no bundling issues, so
+    // this mirrors an established, safe pattern (cmd_538).
     // Pool cap for the socket path (rca_267a §6, Option A): Cloud Run
     // max-instances=10 × pool max=2 = 20 connections < Cloud SQL db-f1-micro
     // max_connections=25, leaving headroom for admin/migration connections.
@@ -114,7 +120,7 @@ const createPrismaClient = async () => {
   }
 };
 
-const prisma = globalForPrisma.prisma || await createPrismaClient();
+const prisma = globalForPrisma.prisma || createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
