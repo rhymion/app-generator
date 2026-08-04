@@ -222,6 +222,8 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/fk_read_permission_graceful_degradation.cy.ts
 !cypress/e2e/api/notification_approval.cy.ts
 !cypress/e2e/api/receiving_receipt_notification.cy.ts
+!cypress/e2e/api/self_only_access_control.cy.ts
+!cypress/e2e/api/self_only_setting_access_control.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/
