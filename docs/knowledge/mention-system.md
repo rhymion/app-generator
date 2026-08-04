@@ -466,26 +466,139 @@ procedure is:
    the next reader gets an honest, current picture -- this document rots
    fast if left as a one-time snapshot.
 
-### Deferred: comment-compose mention picker (not wired in this cmd)
+### Resolved by cmd_538: comment-compose mention picker
 
-The comment "write a comment"/"edit comment" textareas inside
-`CommentListWrapper` (used by `form_upsert.tsx.jinja2`'s
-`comment_children_jsx`) still render a plain `TextField` — not
-`MentionInput`. Typing `@` while composing a comment does not open the
-picker; a user must know the `@[user_id:<id>]` syntax to trigger a real
-mention. This is a deliberate scope cut, not an oversight: the design
-doc's implementation-plan table lists `MentionText` wiring for
-`form_view.tsx.jinja2` explicitly but never lists a comment-compose-box
+Previously deferred (see history below): the comment "write a
+comment"/"edit comment" textareas inside `CommentListWrapper` rendered a
+plain `TextField`, not `MentionInput` — typing `@` while composing a
+comment never opened the picker. cmd_538 wired it: `CommentListWrapper`
+grows an optional `searchUsers` prop (both the compose box and the
+per-comment edit box use `MentionInput` when it's passed), and
+`form_upsert.tsx.jinja2` passes `searchMentionUserOptions` down alongside
+`canViewUserProfile`/`mentionUserContext` (previously threaded only to
+`form_view.tsx.jinja2`'s read-only path). See "cmd_538" below for the full
+account, including two real defects the required live-browser behavioral
+test surfaced along the way.
+
+<details>
+<summary>Original deferred-scope note (pre-cmd_538, kept for history)</summary>
+
+This was a deliberate scope cut, not an oversight: the design doc's
+implementation-plan table listed `MentionText` wiring for
+`form_view.tsx.jinja2` explicitly but never listed a comment-compose-box
 wiring point for `MentionInput`, and the `mention_fields` mechanism (used
-for wiring #1 above) only applies to a regular entity's own field — the
-shared `comment` entity is never a top-level entity that flows through
-`build_context()`/`mention_fields`, so there's no existing
+for an entity's own `x-mention` fields) only applies to a regular entity's
+own field — the shared `comment` entity is never a top-level entity that
+flows through `build_context()`/`mention_fields`, so there was no existing
 annotation-driven hook for "make the comment box itself mention-aware."
-Extending `CommentListWrapper` with an equivalent `renderMessageInput`-style
-prop (mirroring `renderMessage`) is a reasonable, small follow-up if
-comment-box mention composition is wanted too — flagged for a future cmd
-rather than done here to keep this cmd's blast radius to what was
-explicitly scoped.
+
+</details>
+
+### cmd_538: comment-compose wiring implemented; two real defects found and fixed
+
+**Symptom reported (2026-08-03, proj_c production)**: notifications worked,
+but typing `@` in a comment produced no candidate suggestions, and stored
+mentions never rendered as links.
+
+**Reconciling "notification worked" with "picker didn't"**: `notify()` /
+`extractMentionedUserIds()` only ever look at the raw `@[user_id:<id>]`
+marker already present in stored text — never the picker UI. So a working
+notification alongside a non-functional picker is fully consistent with
+the marker having been inserted by a route that bypasses the picker (most
+likely: editing the entity's own `x-mention` field via cmd_522c's
+already-wired path, or hand-typing the marker with knowledge of its
+format) — not evidence against the "compose box has no entry point"
+diagnosis. Confirmed by reading `lib/mention/search.ts` / `lib/_notifier.ts`:
+neither has any code path that depends on `MentionInput`.
+
+**Fix**: see "Resolved by cmd_538" above.
+
+**Two additional real defects found while building the required
+behavioral test** (candidate appears → select → marker inserted → link
+renders → notification delivered, driven through a real browser against a
+live dev server — not a direct-DB-insert shortcut):
+
+1. **`searchMentionUserOptions`'s `permissionDenied` flag was silently
+   dropped in transit.** The function returned
+   `Object.assign([], { permissionDenied: true })` — an array with an
+   ad-hoc non-indexed property. Next.js Server Actions serialize return
+   values through the RSC "flight" protocol, which (like `JSON.stringify`)
+   only preserves an array's indexed elements; the `permissionDenied`
+   property never reached the client, so the "suggestions unavailable"
+   message never rendered even when the server correctly computed
+   `permissionDenied: true`. `MentionInput.test.tsx` could not catch this:
+   it calls `searchUsers` as a plain in-process function with no
+   serialization boundary to cross — exactly the gap a live-browser test
+   was needed to expose. **Fixed**: the contract is now a plain
+   `{ options: MentionUserOption[]; permissionDenied: boolean }` object
+   (JSON/RSC-safe, no ad-hoc array property). Updated
+   `mention_search.ts.jinja2`, `MentionInput.tsx`'s `MentionSearchFn` type
+   and its one caller, and `MentionInput.test.tsx`'s mocks accordingly.
+   **Not fixed here (flagged, out of scope)**: `lib/*/getters.ts.jinja2`'s
+   `searchXxxOptions()` — the cmd_516 pattern this mention-search function
+   was explicitly modeled on — uses the *identical*
+   `Object.assign([], { permissionDenied: true })` trick, and is presumed
+   to share the same bug for every entity's FK-autocomplete
+   permission-denied path. Nothing in this repo currently exercises that
+   path via a live-browser round trip either, so the bug (if confirmed) has
+   likely never fired end-to-end. A follow-up cmd should audit and fix it
+   separately — this cmd's fix is scoped to the mention picker only.
+
+2. **`code_generator/generators_test.py`'s `comment_has_mention` (the
+   test-generation gate) didn't recognize the commentable one-to-one
+   bridge form** — it only checked for a direct child-comment relation
+   (`x-outputType: comments`). Every entity using the *recommended* bridge
+   pattern (`docs/knowledge/appendix/comment-bridge.md` §17.2) therefore
+   got zero mention-UI test coverage from the standard generated spec, even
+   though `tasks_registry_context()`'s own `has_mention_comments` signal
+   already recognized the OTO-bridge form — an asymmetry between the two
+   detectors. **Fixed**: added the same `get_internal_one_to_one_fks`-based
+   bridge detection, OR'd with the existing direct-child check.
+
+**Also fixed — unrelated to mention, but blocking the behavioral test's
+harness**: `lib/prisma.ts`'s `createPrismaClient()` used a dynamic
+`import('@prisma/adapter-pg')`, which made module init depend on a
+top-level `await`. Next.js's own webpack/Turbopack build tolerates this
+fine, but Cypress's Node-side task runner bundles required modules through
+esbuild targeting CJS output, which rejects top-level await outright — any
+Cypress task that imports `lib/prisma.ts` transitively (here:
+`lib/_notifier.ts` → `lib/prisma.ts`, needed to verify a real notification
+row got created) failed immediately with an esbuild syntax error. Fixed by
+switching to a static top-level `import { PrismaPg } from '@prisma/adapter-pg'`
+— already the established pattern in `cypress/support/db-helpers.ts`, so no
+new dependency or bundling behavior — making `createPrismaClient()`
+synchronous and eliminating the top-level await. No other consumer of
+`lib/prisma.ts` (22 files, grepped) changes behavior: they all just read
+the exported `prisma` client synchronously, as before.
+
+**Also found — generator-adjacent, unrelated to mention**:
+`code_generator/templates/test_spec.cy.ts.jinja2`'s new `8.1`
+permission-denied UI test called
+`cy.task<{ email: string }>('db:createSessionUserWithPermission', ...)`
+and used `sessionUser.email` / a hardcoded `'test-password'` literal — but
+that task actually resolves to a bare `string` (the email), and the
+session user's real password is `TEST_CREDENTIALS.password`
+(`'password123'`), not `'test-password'`. Every other call site in this
+codebase (`test_api_spec.cy.ts.jinja2` and all its generated consumers)
+already uses `cy.task<string>(...).then((email) => cy.login(email, TEST_CREDENTIALS.password))`.
+Fixed to match the established convention.
+
+**Verification**: the standard-generated spec for a temporary fixture
+entity (`mention_probe_item`: commentable one-to-one bridge,
+`x-mention: true` on `comment.message`; reverted before this PR per the
+usual fixture convention — see "cmd_535") ran 15/15 green, including
+`3.1b` (full live-browser candidate search → select → marker insertion →
+link render → notification delivery, no DB-insert shortcut) and `8.1`
+(permission-denied graceful degradation, now genuinely reachable end to
+end).
+
+**Scope note**: (a) the compose-box wiring itself was a known, explicitly
+deferred scope cut from cmd_522c, not a regression — see the collapsed
+note above. (b) The two contract-shape defects (RSC serialization,
+OTO-bridge test-gate asymmetry) are genuine pre-existing defects that had
+never been exercised end-to-end until this cmd's behavioral test forced a
+live-browser round trip; cmd_535's type-check-only fixture gate could not
+have caught either, since it never runs a browser.
 
 ### Tests
 
@@ -494,7 +607,7 @@ explicitly scoped.
 | `components/_standard/MentionInput.test.tsx` (7 tests) | `test:vitest` (mandatory) | Trigger detection, dropdown open/search/debounce, marker insertion + caret, email-like `@` non-trigger, `permissionDenied` message, disabled/required passthrough. Actually executes — no schema/DB dependency, unlike the Cypress items below. |
 | `components/_standard/MentionText.test.tsx` (5 tests) | `test:vitest` (mandatory) | Plain text passthrough, link vs chip by `canViewUserProfile`, deleted-user fallback, multiple interleaved mentions. Actually executes. |
 | `code_generator/tests/test_mention_ui_wiring.py` (6 tests) | `pytest` (mandatory) | `form_view_context()`'s `renderMessage` wiring, `form_upsert_context()`'s `mention_fields` → `MentionInput` wiring, `context.py`'s new `comment_has_mention` flag — all via fixture schemas (same convention as `test_bridge_migration.py`/`test_mention_notifications.py`), true/false paired for each. |
-| `test_spec.cy.ts.jinja2` additions (self-mention insert+link-render scenario in "3.1"; a dedicated "8.1" `permissionDenied` graceful-degradation spec) | Not in mandatory gate (non-API UI spec) | Same structural limitation as M1/M2: gated on `comment_has_mention`, which is false for every entity in this repo's own schema — renders correctly (verified via the full `test:e2e:build` compile) but never executes here. Ready for the next schema that adopts a commentable/child comment thread with `x-mention` to exercise and, if needed, adjust selectors against a live page. |
+| `test_spec.cy.ts.jinja2` additions (mention insert+link-render scenario "3.1"/dedicated cross-user "3.1b" notification scenario; a dedicated "8.1" `permissionDenied` graceful-degradation spec) | Not in mandatory gate (non-API UI spec) | Same structural limitation as M1/M2: gated on `comment_has_mention`, which is false for every entity in this repo's own schema, so it never executes as part of this repo's own gate. Unlike the cmd_535-era state, this is no longer just compile-checked: cmd_538 ran all 15 generated tests (including 3.1/3.1b/8.1) green against a temporary fixture entity with a real live browser, proving the scenarios actually pass, not just render. Ready for the next schema that adopts a commentable/child comment thread with `x-mention` to exercise for real. |
 
 Entity-name independence re-verified for the client UI: this repo's own
 `json_schema.yaml` has `comment.message: x-mention: true` (so

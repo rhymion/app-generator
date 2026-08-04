@@ -53,12 +53,16 @@ export async function assertPermission(_permissions: OperationFlags, _operation:
 export async function requirePermission(
   _model: ModelName,
   _operation: Operation,
-  _item: ItemContext,
+  _item?: ItemContext,
   _userId?: string | null,
 ): Promise<RichPermissions> {
   throw new Error('fixture stub');
 }
 
 export async function getSessionUserId(): Promise<string | null> {
+  throw new Error('fixture stub');
+}
+
+export async function getSessionUserIdOrThrow(): Promise<string> {
   throw new Error('fixture stub');
 }

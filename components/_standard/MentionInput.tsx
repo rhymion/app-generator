@@ -38,9 +38,19 @@ export interface MentionUserOption {
   email: string;
 }
 
+// A plain object, not `MentionUserOption[] & { permissionDenied?: boolean }` —
+// a Server Action's return value crosses the server/client boundary through
+// Next's RSC "flight" serialization, which (like JSON.stringify) only
+// preserves an array's indexed elements. An ad-hoc property attached via
+// `Object.assign([], { permissionDenied: true })` is silently dropped in
+// transit, so the client never sees the flag even though the server set it
+// (cmd_538 — this broke the picker's graceful-degradation message end-to-end
+// despite MentionInput.test.tsx passing, since that test calls searchUsers
+// as a plain in-process function with no serialization boundary to expose
+// the gap; see docs/knowledge/mention-system.md's cmd_538 section).
 export type MentionSearchFn = (
   query: string,
-) => Promise<MentionUserOption[] & { permissionDenied?: boolean }>;
+) => Promise<{ options: MentionUserOption[]; permissionDenied: boolean }>;
 
 interface MentionInputProps {
   value: string;
@@ -104,8 +114,8 @@ export default function MentionInput({
       try {
         const results = await searchUsers(trigger.query);
         if (cancelled || mySeq !== seqRef.current) return;
-        setPermissionDenied(Boolean(results.permissionDenied));
-        setOptions(results.permissionDenied ? [] : results);
+        setPermissionDenied(results.permissionDenied);
+        setOptions(results.permissionDenied ? [] : results.options);
         setHighlighted(0);
       } catch {
         // Best-effort — component may have unmounted mid-flight.

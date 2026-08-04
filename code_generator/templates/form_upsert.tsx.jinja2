@@ -27,9 +27,12 @@ import { {% if uses_app_field_text %}AppFieldText, {% endif %}{% if uses_app_fie
 {% if has_comment_children %}
 import CommentListWrapper from '@/components/_standard/CommentListWrapper';
 {% endif %}
-{% if has_mention_fields %}
+{% if has_mention_fields or comment_has_mention %}
 import MentionInput from '@/components/_standard/MentionInput';
 import { searchMentionUserOptions } from '@/lib/mention/search';
+{% endif %}
+{% if comment_has_mention %}
+import MentionText from '@/components/_standard/MentionText';
 {% endif %}
 {% if child_imports %}
 {{ child_imports }}

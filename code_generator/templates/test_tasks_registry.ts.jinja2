@@ -121,6 +121,34 @@ export function getGeneratedTasks() {
       const notifications = await prisma.notification.findMany({ where: { user_id: userId } });
       return JSON.parse(JSON.stringify(notifications));
     },
+    // cmd_538: a second user sharing an organization with the seeded test
+    // user, so searchMentionUserOptions's org-scope filter surfaces them as
+    // a real "@" candidate — needed to prove mention notifications reach
+    // someone other than the (self-mentioning) actor.
+    async 'db:createMentionCandidateInSameOrg'(name: string) {
+      const { prisma } = require('./db-helpers');
+      const { TEST_CREDENTIALS } = require('./test-credentials');
+      const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+      if (!testUser) throw new Error('Test user not found. Run db:seed first.');
+      const candidate = await prisma.user.create({
+        data: {
+          name,
+          email: `mention-candidate-${Date.now()}-${Math.random()}@example.com`,
+          password: 'test-password',
+          creator_id: testUser.id,
+          updater_id: testUser.id,
+        },
+      });
+      await prisma.organization.create({
+        data: {
+          name: `Mention Org ${Date.now()}`,
+          creator_id: testUser.id,
+          updater_id: testUser.id,
+          users: { connect: [{ id: testUser.id }, { id: candidate.id }] },
+        },
+      });
+      return JSON.parse(JSON.stringify(candidate));
+    },
 {% endif %}
   };
 }

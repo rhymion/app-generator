@@ -300,6 +300,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.get('textarea[placeholder="Write a comment..."]').type('Hi @Test');
         cy.get('[role="menuitem"]').contains(TEST_CREDENTIALS.name).click();
         cy.get('button[aria-label="Submit"]').click();
+        // cmd_538: the marker must resolve to a colored profile link on the
+        // EDIT page itself, immediately after the comment is posted — not
+        // only after a later round-trip through the view page (form_upsert.tsx
+        // previously never received canViewUserProfile/mentionUserContext/
+        // renderMessage, so this rendered as raw @[user_id:<id>] marker text
+        // here until cmd_538 wired it).
+        cy.get('.mention-link').should('contain.text', TEST_CREDENTIALS.name);
 {% endif %}
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}');
@@ -337,6 +344,31 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endif %}
       });
     });
+{% endif %}
+{% if comment_has_mention %}
+
+    // cmd_538: 3.1 above only proves the self-mention path (candidates include
+    // the actor). Self-mentions never notify, so that alone can't prove
+    // notification delivery. This drives the full chain — candidate suggest ->
+    // select -> marker -> link -> notification — for a genuinely different
+    // user, and confirms the notification actually reaches its recipient
+    // (not just that the notify() call fires in isolation).
+    it('3.1b mentioning a different user in a comment notifies that user', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<{ id: string; name: string }>('db:createMentionCandidateInSameOrg', 'Mention Target Person').then((otherUser) => {
+          cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
+          cy.get('textarea[placeholder="Write a comment..."]').type('Hi @Mention');
+          cy.get('[role="menuitem"]').contains(otherUser.name).click();
+          cy.get('button[aria-label="Submit"]').click();
+          cy.get('.mention-link').should('contain.text', otherUser.name);
+          cy.task<Array<{ type: string }>>('db:getNotificationsForUser', otherUser.id).then((notifications) => {
+            expect(notifications.some((n) => n.type === 'mentioned_in_comment')).to.eq(true);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if has_optional or has_children %}
 
     it('3.2 removes optional data and child items', () => {
 {% if has_optional %}
@@ -1149,13 +1181,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
       // to attach comments to), so this needs an existing record + a
       // session user with edit access to it but no `user` read permission.
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
-        cy.task<{ email: string }>('db:createSessionUserWithPermission', {
+        cy.task<string>('db:createSessionUserWithPermission', {
           entityName: '{{ parent }}',
           flags: { create: true, read: true, update: true },
-        }).then((sessionUser) => {
+        }).then((email) => {
           Cypress.session.clearAllSavedSessions();
           cy.clearCookies();
-          cy.login(sessionUser.email, 'test-password');
+          cy.login(email, TEST_CREDENTIALS.password);
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
           cy.get('textarea[placeholder="Write a comment..."]').type('Hi @Test');
           cy.contains('Mention suggestions unavailable.').should('be.visible');

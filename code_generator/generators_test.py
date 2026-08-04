@@ -2840,8 +2840,23 @@ def spec_context(
     # mirrors build_context.py's/context.py's identical computation. Drives
     # the @mention picker/link UI scenario appended to the "Add comment"
     # step below.
+    #
+    # cmd_538: `comment_children_data` alone only covers the direct-child
+    # shape (a property with x-outputType: comments declared straight on
+    # this entity). It misses the commentable-bridge shape (one-to-one_bridge
+    # FK to `commentable`, per docs/knowledge/appendix/comment-bridge.md
+    # §17.2 — the recommended pattern and the one this fixture/probe uses).
+    # Before this fix, ANY entity using that shape got zero "Add comment"/
+    # mention UI test coverage from the standard generated spec, silently —
+    # comment_has_mention was always False for it. tasks_registry_context's
+    # has_mention_comments (M1/M2 API tests) already ORs in this same
+    # OTO-bridge signal via get_internal_one_to_one_fks; this brings the UI
+    # spec's detection in line with it.
+    _has_commentable_oto_for_mention = any(
+        d['target'] == 'commentable' for d in get_internal_one_to_one_fks(model_name, schema)
+    )
     _comment_def_for_mention = _raw_def('comment', schema)
-    comment_has_mention = bool(comment_children_data) and any(
+    comment_has_mention = (bool(comment_children_data) or _has_commentable_oto_for_mention) and any(
         isinstance(fp, dict) and fp.get('x-mention') is True
         for fp in (_comment_def_for_mention.get('properties') or {}).values()
     )
