@@ -211,6 +211,33 @@ the current on-disk file when the four keys match existing names) — the only i
 effect is that the previously-dead lot/product-mismatch guard and `primary: true` support (below)
 switch on wherever a name mismatch had been silently suppressing them.
 
+### 7.1 Location ledger-row label rendering (cmd_550)
+
+The ledger row's `locationField` column (§7) is a denormalized snapshot — "what the location was
+called at the time" — written when a reservation claims pool inventory. Before cmd_550, this
+write hardcoded `_candidate.{location_relation}?.name ?? ''`: it assumed the location entity's
+display field is always literally named `name`. Any consumer whose location entity displays a
+different field (e.g. `label`, `code`) got no error — a TypeScript compile error (`.name` doesn't
+exist on the Prisma type), the same silent-until-build-time failure mode as §7's four fields.
+
+Fixed to read the pool entity's own `x-relationship.labelField` declared on `locationField` —
+`resolve_ledger_domain()` now also returns `location_label_field` / `location_label_target`,
+resolved from that same `x-relationship` block (no new schema key). The ledger row is rendered via
+`build_label_expression()`, the identical helper `helper_context()`'s dependency/autocomplete label
+rendering already uses elsewhere in this generator (§5) — so the ledger snapshot and what a user
+sees in an autocomplete/list-view for the same relation always come from one source, not two that
+can drift apart independently.
+
+**Composite labelField**: if `locationField`'s `labelField` is a list (e.g. `[building, shelf]`),
+the full composite string (e.g. `"Warehouse A Shelf 3"`) is written to the ledger row, not
+truncated to a single segment. The ledger column is already a non-normalized text snapshot, and
+using the exact same rendering the UI shows keeps the audit trail consistent with what the user
+actually saw at claim time — a single-segment truncation would create a second, divergent notion
+of "the" location label with no clear rule for which segment to keep.
+
+**Fails closed** if `locationField` has no `x-relationship.target` at all (e.g. a bare string
+column, not a relation) — see §10.1 for that shape, which this resolver does not yet support.
+
 ## 8. Reference-name vs. entity-name mismatch and `primary: true` (cmd_545)
 
 `helper_context()`'s dependency resolution distinguishes a **reference name** (the property name
@@ -236,3 +263,92 @@ to classify each key as generator-read vs. dead and remove/replace unused keys (
 `count` mode) is pending review and approval (dashboard action item) as of this writing — it has not
 been designed into code. Do not assume any `x-reservation` key documented here has been removed
 or replaced until that design lands and a follow-up doc update reflects the actual diff.
+
+## 10. When a consumer's location/lot column doesn't fit the current shape (design notes, cmd_550)
+
+§7.1's fix assumes `locationField` is always a many-to-one relation to a real location entity with
+a `name`-or-declared `labelField`. This section works through what happens for the three shapes
+that assumption doesn't cover, and whether/how a future consumer could be supported. **Design
+notes only — none of this is implemented.** A consumer hitting one of these today gets
+`resolve_ledger_domain`'s fail-closed `ValueError` (§7.1), not silent wrong behavior.
+
+### 10.1 Location is a plain string, not a relation
+
+If `locationField` (e.g. `location`) is declared as a bare `type: string` column with no
+`x-relationship` at all — no location *entity* exists, just free text — then:
+
+- **Does it work today?** No. `resolve_ledger_domain()` requires `x-relationship.target` on
+  `locationField` (§7.1) and raises `ValueError` naming the field and the missing key.
+- **What would be needed?** `resolve_ledger_domain` would need a declared flag (e.g. checking
+  whether `locationField`'s schema property itself carries `x-relationship`, vs. not) to pick a
+  different code path: instead of `build_label_expression('_candidate.{relation}', ...)`, the
+  ledger row would read the pool entity's own scalar directly — `_candidate.{location_field}`
+  (no relation hop, no `include` needed at all). This is a strict *simplification* of the current
+  path, not a new mechanism — the two paths could share the same call site with a branch on
+  whether `x-relationship` is present.
+- **Stopgap today**: none needed *for existing consumers* — proj_c and proj_g's location columns
+  are both real FK relations. A consumer that genuinely has no location entity can currently only
+  be modeled by pointing `locationField` at some relation anyway (e.g. a trivial single-column
+  lookup entity), which is a real workaround, not a clean fit — flagged here so a future consumer
+  doesn't have to rediscover it.
+
+### 10.2 Lot number is a table (FK), not a scalar
+
+If `lotField` (e.g. `lot_number`) is itself a many-to-one relation to a `lot` entity (lot numbers
+issued from a registry, carrying their own metadata) rather than a free-text/numeric scalar
+column, then:
+
+- **Does it work today?** No — cleanly, but not correctly for this shape. `lot_field` is read as
+  `_candidate.{lot_field}` (§7, a direct scalar property access) and written to the ledger row's
+  own scalar `lotField` column unchanged. If `lot_field` on the pool entity is actually a FK
+  (`lot_id`), this reads the *foreign key id*, not a display value — the ledger row would silently
+  store an opaque id string where §7.1's location fix stores a rendered label. No error, because a
+  FK column and a scalar column are both just TypeScript `string`/`string | null` — nothing
+  type-checks against "this must be a label, not an id."
+- **What would be needed?** The same treatment §7.1 gave `locationField`: detect
+  `x-relationship` on `lotField`, and if present, resolve `lot_label_field`/`lot_label_target` the
+  identical way, rendering through `build_label_expression()` instead of a bare property read.
+  This is a direct structural copy of §7.1's fix, not a new design.
+- **Stopgap today**: a consumer with a lot-registry FK would need to keep a denormalized scalar
+  lot-number column on the pool entity *in addition to* the FK relation (populated by whatever
+  writes the FK), and point `lotField` at the scalar column — the ledger row then snapshots a
+  human-readable value, at the cost of a second column the schema author must keep in sync.
+
+### 10.3 The consumer doesn't track this dimension at all
+
+If a consumer's pool entity has no location concept whatsoever (e.g. a single-warehouse consumer
+with no location/shelf/bin distinction), then:
+
+- **Does it work today?** No — `locationField` (like `itemField`/`lotField`/`expirationField`) is
+  OD-1 required with no default (§7); a domain missing the key fails `resolve_ledger_domain` before
+  any code generates.
+- **What would be needed?** See §10.4 — an explicit "not tracked" declaration, not merely omitting
+  the key.
+- **Stopgap today**: none — every current consumer (proj_c, proj_g) tracks location, lot, and
+  expiration. A consumer that doesn't would need §10.4 designed and implemented first; there is no
+  workaround available today that doesn't require adding an unused placeholder column.
+
+### 10.4 Representing "not tracked" under OD-1
+
+OD-1 (§7, "declare, don't infer") means every one of `itemField`/`locationField`/`lotField`/
+`expirationField` is currently **required** — omitting one is indistinguishable from forgetting to
+add it; the domain simply fails to resolve. That's the right default for the common case (every
+current consumer tracks all four), but it gives §10.3's consumer no way to say "I have decided not
+to track this dimension" versus "I haven't finished configuring this domain yet."
+
+**Recommended direction (not implemented)**: keep every key required, but accept an explicit
+sentinel value meaning "intentionally not tracked" — e.g. `locationField: null` (a JSON Schema/YAML
+null, not simply absent) — rather than making the key optional. `resolve_ledger_domain` would then
+resolve `location_relation`/`location_label_field`/`location_label_target` to `None`, and every
+call site that currently assumes `location_relation` is always a real Prisma field (the `include`
+clause, the ledger row's own key) would need an explicit `if location_relation:` branch that omits
+that field/include entirely rather than resolving it to a broken empty string.
+
+Why an explicit sentinel over an optional key: an optional key that silently defaults to "not
+tracked" when absent reintroduces exactly the bug class §7/§7.1 fixed — a schema author who simply
+forgets the key gets no error, just a domain that silently stops tracking location. Requiring the
+key to be *present* with an explicit `null` forces the decision to be visible in the schema diff
+and reviewable, the same way `x-self-only`'s `admin_bypass` shorthand deliberately never defaults
+to the permissive direction (`docs/knowledge` cross-reference: see the self-only-entity design
+note). No consumer needs this today, so it has not been built — recorded here so the next time
+this question comes up, it doesn't need re-litigating from scratch.

@@ -31,6 +31,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   add these four keys (matching its current column names) before its next `generate-code` run, or
   generation fails immediately with a named error; no generated-code content changes as a result
   of adding them alone. See `docs/knowledge/appendix/inventory-reservation-split.md` §7–8.
+- **Ledger row's location snapshot hardcoded `.name` instead of the pool entity's declared
+  `x-relationship.labelField`** (cmd_550, found in review of the above): the reserve-phase ledger
+  row write assumed every location entity's display field is literally named `name`; a consumer
+  whose location entity displays a different field (e.g. `label`, `code`) got a TypeScript compile
+  error at `next build` time, the same silent-until-build-time failure class as cmd_545/546.
+  `resolve_ledger_domain()` now also resolves `location_label_field`/`location_label_target` from
+  that same `x-relationship` block (no new schema key), and the ledger row renders through
+  `build_label_expression()` — the identical helper this generator's autocomplete/list-view label
+  rendering already uses, so the audit-trail snapshot and what a user actually saw at claim time
+  can never drift apart. Fails closed (no fallback to `'name'`) if `locationField` isn't declared
+  as a relation at all. Reproduced against a location entity with no `name` property before fixing.
+  See `docs/knowledge/appendix/inventory-reservation-split.md` §7.1, §10.
 
 ### Security
 - **Server-action path can no longer bypass multi-stage approval ordering** (cmd_540): the
