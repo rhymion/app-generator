@@ -158,7 +158,76 @@ is **always terminal** — there is no "temporary rejection / resubmit" path for
 receiving entities (that pattern exists only for `leave_request`); re-assigning quantity to a
 different lot goes through split instead.
 
-## 7. Not yet implemented — do not treat as current behavior
+## 7. `x-ledger-entities` domain config — item/location/lot/expiration field names (cmd_545/546)
+
+`x-ledger-entities.<domain_key>` aggregates the three entities a ledger domain touches — `pool`
+(e.g. `inventory`), `ledger` (e.g. `inventory_transaction`), `transactionable` (the per-event
+bridge, e.g. `inventory_transactionable`) — resolved via `resolve_ledger_domain()`
+(`helpers/schema_helpers.py`) and referenced by `x-splittable.ledgerDomain` / `x-ledger-source
+.ledgerDomain` / `x-reservation.transaction.ledgerDomain`.
+
+As of cmd_545/546, the domain also **requires** four more keys naming the pool entity's own
+columns — no defaults, matching OD-1 (§ cmd_310's "declare, don't infer" precedent):
+
+- `itemField` — the pool entity's FK column to the item-master entity (e.g. `product_id`).
+- `locationField` — the pool entity's FK column to the location entity (e.g. `location_id`).
+- `lotField` — the pool entity's lot-number scalar column (e.g. `lot_number`).
+- `expirationField` — the pool entity's expiration-date scalar column (e.g. `expiration_date`).
+
+```yaml
+x-ledger-entities:
+  inventory_domain:
+    pool: inventory
+    ledger: inventory_transaction
+    transactionable: inventory_transactionable
+    itemField: product_id
+    locationField: location_id
+    lotField: lot_number
+    expirationField: expiration_date
+```
+
+**Why this exists**: every one of `generators.py`'s ledger-transaction reservation code,
+`split_action_route.ts.jinja2`'s auto-allocate/lot-mismatch logic, and the three
+`ledger_*_stub.ts.jinja2` once-stub templates used to hardcode these four column names as the
+literal strings `product_id`/`location`/`location_id`/`lot_number`/`expiration_date`. Any
+consumer naming the item-master entity or these columns differently (e.g. `item`/`item_id`) got
+**no error** — the split auto-allocate WHERE clause silently rendered a permanently-undefined
+`.None` property access (Prisma treats it as "no filter", not a type error), and the
+lot/product-mismatch guard (§4) silently never ran at all. `location_relation` (the Prisma
+relation accessor for `locationField`, e.g. `location`) is *derived* by stripping the
+conventional `_id` suffix, not separately declared — same convention `pool_fk_field`/
+`bridge_fk_field` already use elsewhere in this file.
+
+The item-master entity a split entity's own FK must target (used by the split-route
+lot/product-mismatch check, §4) is likewise resolved from `itemField`'s `x-relationship.target`
+on the pool entity, not from a literal `target == 'product'` comparison — so it works regardless
+of what the item-master entity, or the split entity's own FK to it, happen to be named.
+
+**Migration note for an existing consumer already using `x-ledger-entities`**: this is a breaking
+schema-config change — `generate-code` fails immediately (naming the domain and the missing key)
+until all four keys are added. Adding them with values matching the consumer's *current* column
+names changes no generated output (verified: the once-stub templates render byte-identical to
+the current on-disk file when the four keys match existing names) — the only immediately visible
+effect is that the previously-dead lot/product-mismatch guard and `primary: true` support (below)
+switch on wherever a name mismatch had been silently suppressing them.
+
+## 8. Reference-name vs. entity-name mismatch and `primary: true` (cmd_545)
+
+`helper_context()`'s dependency resolution distinguishes a **reference name** (the property name
+minus `_id`, e.g. `product`, also the `x-display.table` key when that FK is the primary display
+column) from the **entity name** it targets (e.g. `item`) — these coincide for most schemas
+(`product` entity referenced as `product`) but are independent by design (`x-relationTarget`
+lets a relation's Prisma name diverge from its property name; nothing requires the entity name to
+match either). Before cmd_545, the `needs_second` check comparing these two used the wrong
+axis entirely (entity name vs. reference name, snake_case vs. camelCase) and so only worked by
+coincidence for single-word, self-matching names — any entity whose primary FK's reference name
+differed from its target entity name, or was multi-word, silently lost `primary: true` support
+(the generated create/update test assertions fall back to a plain `id`-based check instead of the
+richer name-based one). Fixed to compare on a single, consistent axis (`var_name`, camelCase,
+resolved through the same reference-name-stem logic already used for multi-FK-to-the-same-target
+disambiguation elsewhere in this file).
+
+## 9. Not yet implemented — do not treat as current behavior
 
 **x-reservation key reduction (item2) is unapproved and unimplemented.** The `x-reservation`
 key structure documented in §1 above (`pool`/`request`/`policy`/`result`, three current uses:

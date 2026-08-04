@@ -5,6 +5,33 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Item-master entity naming was silently hardcoded to `product`/`product_id` throughout the
+  ledger/split generator** (cmd_545/cmd_546): any consumer naming its item-master entity or its
+  pool entity's location/lot/expiration columns differently got no error — three independent
+  breaks, all traced to literal-name comparisons instead of schema-derived resolution.
+  1. `helper_context()`'s `needs_second` compared a reference name (the `x-display.table` key,
+     e.g. `product`) against an entity name (e.g. `item`) on mismatched axes (snake_case vs
+     camelCase on top of the name mismatch), so `primary: true` silently stopped working for any
+     FK primary display field whose reference name differed from its target entity name, or was
+     multi-word.
+  2. `generate.py`'s item-field detector compared a relation's target entity literally against
+     `'product'`, always returning `None` for any other name (e.g. `item`) — this disabled the
+     split-route lot/product-mismatch check with no error, and the auto-allocate WHERE clause
+     silently rendered a literal `.None` (an always-undefined property access Prisma treats as
+     "no item filter"), reproduced and fixed with test coverage.
+  3. `generators.py`'s ledger-transaction reservation code, `split_action_route.ts.jinja2`, and
+     the three `ledger_*_stub.ts.jinja2` once-stub templates hardcoded the pool entity's own
+     item/location/lot/expiration column names as literal `product_id`/`location`/`location_id`/
+     `lot_number`/`expiration_date`.
+  All three now resolve through `x-ledger-entities.<domain>`, extended with four new **required**
+  keys (no defaults — a domain missing any of them fails loudly, naming the domain and the
+  missing key): `itemField`, `locationField`, `lotField`, `expirationField`. This is a breaking
+  schema-config change for any existing consumer already declaring `x-ledger-entities` — it must
+  add these four keys (matching its current column names) before its next `generate-code` run, or
+  generation fails immediately with a named error; no generated-code content changes as a result
+  of adding them alone. See `docs/knowledge/appendix/inventory-reservation-split.md` §7–8.
+
 ### Security
 - **Server-action path can no longer bypass multi-stage approval ordering** (cmd_540): the
   REST route (`app/api/approval_request/[id]/{approve,reject}/route.ts`) enforced
