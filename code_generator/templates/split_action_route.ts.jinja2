@@ -111,13 +111,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           where: { {{ bridge_fk_field }}: _parentBridgeId, event_type: 'reserve' },
         });
         for (const _row of _parentReserveRows) {
-          // Phase4: inventory.{{ pool_location_field }} FK — denormalized name
-          // from the ledger needs to be reverse-looked-up to a
+          // Phase4/cmd_550: inventory.{{ pool_location_field }} FK —
+          // denormalized {{ pool_location_label_field }} label from the
+          // ledger needs to be reverse-looked-up to a
           // {{ pool_location_field }} before re-identifying the parent's
           // reserved inventory row.
           const _rowLocName = _row.{{ pool_location_relation }} === '' ? null : _row.{{ pool_location_relation }};
           const _rowLoc = _rowLocName
-            ? await tx.{{ pool_location_target_entity }}.findFirst({ where: { name: _rowLocName } })
+            ? await tx.{{ pool_location_target_entity }}.findFirst({ where: { {{ pool_location_label_field }}: _rowLocName } })
             : null;
           await tx.{{ pool_entity }}.updateMany({
             where: {
@@ -181,7 +182,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           const _childInv = await tx.{{ pool_entity }}.findUnique({
             where: { id: _childInventoryId },
             select: { id: true, quantity: true, reserved_quantity: true,
-                      {{ pool_item_field }}: true, {{ pool_location_field }}: true, {{ pool_location_relation }}: { select: { name: true } },
+                      {{ pool_item_field }}: true, {{ pool_location_field }}: true, {{ pool_location_relation }}: true,
                       {{ pool_lot_field }}: true, {{ pool_expiration_field }}: true },
           });
           if (!_childInv) throw new ApiError(400, `Inventory not found: ${_childInventoryId}`);
@@ -211,7 +212,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               quantity_delta: 0,
               reserved_delta: _childQty,
               {{ pool_item_field }}: _childInv.{{ pool_item_field }},
-              {{ pool_location_relation }}: _childInv.{{ pool_location_relation }}?.name ?? '',
+              {{ pool_location_relation }}: {{ pool_location_label_exprs['_childInv'] }},
               {{ pool_lot_field }}: _childInv.{{ pool_lot_field }},
               {{ pool_expiration_field }}: _childInv.{{ pool_expiration_field }},
               creator_id: userId, updater_id: userId, created_by_id: userId,
@@ -247,7 +248,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                   quantity_delta: 0,
                   reserved_delta: _claim,
                   {{ pool_item_field }}: _cand.{{ pool_item_field }},
-                  {{ pool_location_relation }}: _cand.{{ pool_location_relation }}?.name ?? '',
+                  {{ pool_location_relation }}: {{ pool_location_label_exprs['_cand'] }},
                   {{ pool_lot_field }}: _cand.{{ pool_lot_field }},
                   {{ pool_expiration_field }}: _cand.{{ pool_expiration_field }},
                   creator_id: userId, updater_id: userId, created_by_id: userId,

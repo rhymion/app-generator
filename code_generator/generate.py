@@ -450,16 +450,91 @@ def _ledger_stub_field_vars(domain: dict, schema: dict) -> dict:
     """Template context for the pool entity's item/location/lot/expiration
     columns, shared by the ledger_write/move/adjust once-stub templates and
     the split_action_route template (see the `pool_*` context vars built
-    alongside `_ledger_domain_vars` in the x-splittable loop below)."""
+    alongside `_ledger_domain_vars` in the x-splittable loop below).
+
+    cmd_550 (follow-up, PR #269 review): also builds `pool_location_label_exprs`
+    and `pool_location_label_field`, replacing what were bare `.name` accesses
+    (forward: write a display value into the ledger's denormalized string
+    column) and hardcoded `where: { name: ... }` lookups (reverse: recover the
+    location row from that denormalized string) hardcoded into these jinja2
+    templates. Renders through `build_label_expression()` — the identical
+    helper generators.py's reserve-phase ledger row write already uses (see
+    resolve_ledger_domain's location_label_field/location_label_target) —
+    instead of assuming the location entity's display field is always
+    literally named `name`.
+
+    `pool_location_label_exprs` is a dict keyed by the fixed small set of row
+    variable names these templates' call sites actually use (`inventory`,
+    `fromInventory`, `toInventory`, `_childInv`, `_cand`) — computing all five
+    here keeps every call site a plain dict lookup instead of duplicating
+    build_label_expression's logic in Jinja.
+
+    Fails closed (ValueError) at generate time, before any template renders,
+    if the declared labelField:
+      - resolves to a date/time field (formatLabelValue is not imported in
+        these generated modules — same guard generators.py's fix applies);
+      - resolves through a relation beyond the location entity itself (these
+        templates only ever fetch the location row itself, `{{ relation }}:
+        true` — never its own nested relations);
+      - is composite (more than one path/field). Forward rendering supports
+        composite labelFields fine (concatenation) but the *reverse* lookup
+        (denormalized string -> row) cannot unambiguously invert a
+        concatenated string back into per-field equality, so a composite
+        labelField is rejected for the whole domain rather than only at the
+        specific reverse-lookup call sites — see docs/knowledge write-up for
+        the reasoning.
+    """
+    _label_field = domain['location_label_field']
+    _label_target = domain['location_label_target']
+    _location_relation = domain['location_relation']
+
+    _probe = build_label_expression(
+        f"__probe__.{_location_relation}", _label_field, _label_target, schema,
+    )
+    if _probe['has_format']:
+        raise ValueError(
+            f"x-ledger-entities: location labelField {_label_field!r} on {_label_target!r} "
+            f"resolves to a date/time field — unsupported for the ledger stub / split-route "
+            f"templates' plain-string location snapshot (formatLabelValue is not imported in "
+            f"these generated modules)."
+        )
+    if _probe['prisma_include']:
+        raise ValueError(
+            f"x-ledger-entities: location labelField {_label_field!r} on {_label_target!r} "
+            f"resolves through a relation beyond the location entity itself "
+            f"({_location_relation!r}) — unsupported by the ledger stub / split-route "
+            f"templates, which fetch only the location row itself "
+            f"({_location_relation!r}: true), not its own relations."
+        )
+    if len(_probe['paths']) != 1:
+        raise ValueError(
+            f"x-ledger-entities: location labelField {_label_field!r} on {_label_target!r} is "
+            f"composite (multiple paths) — unsupported by the ledger write-stub's / "
+            f"split-route's reverse lookup (denormalized label string -> row), which can only "
+            f"invert a single field. A composite labelField's rendered forward snapshot cannot "
+            f"be unambiguously matched back to one field on the location entity."
+        )
+    _reverse_lookup_field = _probe['paths'][0]['final_field']
+
+    _row_vars = ('inventory', 'fromInventory', 'toInventory', '_childInv', '_cand')
+    _label_exprs = {
+        _row_var: build_label_expression(
+            f"{_row_var}.{_location_relation}", _label_field, _label_target, schema,
+        )['expression']
+        for _row_var in _row_vars
+    }
+
     return {
         'pool_item_field': domain['item_field'],
         'pool_location_field': domain['location_field'],
-        'pool_location_relation': domain['location_relation'],
+        'pool_location_relation': _location_relation,
         'pool_location_target_entity': pool_relation_target(
             domain['pool'], domain['location_field'], schema,
         ),
         'pool_lot_field': domain['lot_field'],
         'pool_expiration_field': domain['expiration_field'],
+        'pool_location_label_exprs': _label_exprs,
+        'pool_location_label_field': _reverse_lookup_field,
     }
 
 

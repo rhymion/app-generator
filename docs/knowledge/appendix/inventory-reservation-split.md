@@ -228,15 +228,64 @@ rendering already uses elsewhere in this generator (§5) — so the ledger snaps
 sees in an autocomplete/list-view for the same relation always come from one source, not two that
 can drift apart independently.
 
-**Composite labelField**: if `locationField`'s `labelField` is a list (e.g. `[building, shelf]`),
-the full composite string (e.g. `"Warehouse A Shelf 3"`) is written to the ledger row, not
-truncated to a single segment. The ledger column is already a non-normalized text snapshot, and
-using the exact same rendering the UI shows keeps the audit trail consistent with what the user
-actually saw at claim time — a single-segment truncation would create a second, divergent notion
-of "the" location label with no clear rule for which segment to keep.
+**Composite labelField** (generators.py's reserve-phase write only — see "Once-stub / split-route
+templates" below for a narrower rule): if `locationField`'s `labelField` is a list (e.g.
+`[building, shelf]`), the full composite string (e.g. `"Warehouse A Shelf 3"`) is written to the
+ledger row, not truncated to a single segment. The ledger column is already a non-normalized text
+snapshot, and using the exact same rendering the UI shows keeps the audit trail consistent with
+what the user actually saw at claim time — a single-segment truncation would create a second,
+divergent notion of "the" location label with no clear rule for which segment to keep.
 
-**Fails closed** if `locationField` has no `x-relationship.target` at all (e.g. a bare string
-column, not a relation) — see §10.1 for that shape, which this resolver does not yet support.
+**Two distinct failure/default behaviors** — read together, not as one blanket "fails closed"
+claim (an earlier version of this note, and the CHANGELOG entry, conflated them; corrected as part
+of the follow-up below after PR #269 review flagged the discrepancy):
+- **Fails closed** (`ValueError`, no default) only if `locationField` has no `x-relationship.target`
+  at all (e.g. a bare string column, not a relation) — see §10.1 for that shape, which this
+  resolver does not yet support.
+- **Defaults to `'name'`** — deliberately, not a bug — if `locationField` *is* declared as a
+  relation but its `labelField` sub-key is absent (`location_rel.get('labelField', 'name')` in
+  `resolve_ledger_domain()`, pinned by
+  `test_location_label_field_defaults_to_name_when_undeclared`). Confirmed acceptable in PR #269
+  review (2026-08-04, cmd_550 follow-up): most location-like entities do display a `name` field,
+  and requiring every consumer to declare `labelField` explicitly even for the common case would
+  be pure ceremony. The requirement is only that this default be *documented* precisely (this
+  paragraph) rather than described as "no fallback to name" (which was true for the
+  undeclared-relation case but false for this one).
+
+### 7.2 Once-stub / split-route templates read the same declaration (cmd_550 follow-up)
+
+§7.1 above only fixed `generators.py`'s reserve-phase ledger-row write. Four more files rendered
+the same `_row.{location_relation}?.name ?? ''` hardcode directly in their Jinja2 source —
+undetected by §7.1's own review because the affected-site count was undercounted twice in a row
+(the once-stub templates were missed entirely on the first pass; a further *reverse*-lookup site
+was found only on a second recount). All nine sites across four files (`ledger_adjust_stub.ts.jinja2`,
+`ledger_move_stub.ts.jinja2` ×2, `ledger_write_stub.ts.jinja2` ×2 forward+reverse,
+`split_action_route.ts.jinja2` ×3 — two forward, one reverse) now render through
+`generate.py`'s `_ledger_stub_field_vars()`, which calls the same `build_label_expression()` §7.1
+uses, exposed as a `pool_location_label_exprs` dict keyed by each site's row variable name
+(`inventory`, `fromInventory`, `toInventory`, `_childInv`, `_cand`).
+
+**Narrower support than §7.1's reserve-phase write**: these four templates also contain *reverse*
+lookups (`tx.<location>.findFirst({ where: { <label field>: <denormalized string> } })`) that
+recover a location row from the ledger's previously-written string — a shape §7.1's write-only
+fix never had to handle. A reverse lookup cannot unambiguously invert a **composite** (multi-field)
+label string back into per-field equality, so `_ledger_stub_field_vars()` fails closed
+(generation-time `ValueError`, before any file is written) for the *whole domain* if the declared
+`labelField` is composite, resolves through a relation beyond the location entity itself, or
+resolves to a date/time field — even for the templates here that only ever do a forward write.
+This is a stricter, template-specific rule layered on top of §7.1's domain-level resolution, not a
+change to what `resolve_ledger_domain()` itself returns.
+
+**Reverse-lookup uniqueness — known, pre-existing, explicitly out of this fix's scope**: even with
+the field name corrected, `findFirst({ where: { <field>: <value> } })` has no uniqueness
+guarantee — if two location rows share the same display value, one is picked silently and
+arbitrarily. This is not a regression introduced by this fix (the pre-fix `where: { name: ... }`
+had the exact same property whenever two locations shared a `name`); it is the same class of
+ambiguity documented for autocomplete/list-view label resolution (cmd_547/548). Recorded here,
+judged as a separate design question (does a reverse lookup need a stored FK instead of a
+denormalized-string round-trip?) rather than folded into this naming-generalization fix, per the
+PR #269 review request to record the fact and let scope be judged independently rather than
+silently bundled in.
 
 ## 8. Reference-name vs. entity-name mismatch and `primary: true` (cmd_545)
 

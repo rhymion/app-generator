@@ -388,6 +388,20 @@ _BASE_SPLIT_CTX = {
     "pool_location_target_entity": "location",
     "pool_lot_field": "lot_number",
     "pool_expiration_field": "expiration_date",
+    # cmd_550 follow-up: split_action_route.ts.jinja2 now reads the pool
+    # entity's declared location labelField through these two context vars
+    # (see generate.py's _ledger_stub_field_vars) instead of hardcoding
+    # `.name` / `where: { name: ... }`. This fixture's location entity
+    # displays 'name' (the common case) — see
+    # test_ledger_stub_location_label_field.py for the 'code' deviation.
+    "pool_location_label_exprs": {
+        "inventory": "(inventory.location?.name ?? '')",
+        "fromInventory": "(fromInventory.location?.name ?? '')",
+        "toInventory": "(toInventory.location?.name ?? '')",
+        "_childInv": "(_childInv.location?.name ?? '')",
+        "_cand": "(_cand.location?.name ?? '')",
+    },
+    "pool_location_label_field": "name",
 }
 
 
