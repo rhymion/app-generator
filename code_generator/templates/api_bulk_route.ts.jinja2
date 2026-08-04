@@ -94,11 +94,17 @@ export async function PUT(request: NextRequest) {
         bulkResults.push({ index: i, success: false, error: `Not found: ${id}` });
         continue;
       }
+{% if is_self_only %}
+      // x-self-only: no general.update/Creator-role override — ownership is
+      // the sole gate, unconditionally (no admin bypass on bulk write).
+      const canUpdate = existing.creator_id === actorId;
+{% else %}
       const canUpdate =
         richPerms.general.update ||
         (richPerms.creator?.update && existing.creator_id === actorId) ||
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (richPerms.assignee?.update && (existing as any).assignee_id === actorId);
+{% endif %}
       if (!canUpdate) {
         bulkResults.push({ index: i, success: false, error: `Access denied: ${id}` });
         continue;
@@ -147,11 +153,17 @@ export async function DELETE(request: NextRequest) {
         results.push({ index: i, success: false, error: `Not found: ${id}` });
         continue;
       }
+{% if is_self_only %}
+      // x-self-only: no general.delete/Creator-role override — ownership is
+      // the sole gate, unconditionally (no admin bypass on bulk delete).
+      const canDelete = existing.creator_id === actorId;
+{% else %}
       const canDelete =
         richPerms.general.delete ||
         (richPerms.creator?.delete && existing.creator_id === actorId) ||
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (richPerms.assignee?.delete && (existing as any).assignee_id === actorId);
+{% endif %}
       if (!canDelete) {
         results.push({ index: i, success: false, error: `Access denied: ${id}` });
         continue;

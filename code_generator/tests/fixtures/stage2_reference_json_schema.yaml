@@ -219,6 +219,8 @@ definitions:
       roles:
         type: many-to-many
         target: role
+    x-self-only:
+      admin_bypass: true
     allOf:
       - $ref: "#/definitions/user"
       - type: object

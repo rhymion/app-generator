@@ -28,7 +28,7 @@ export async function upsert{{ parent_pascal }}(data: FormData) {
 {% if can_delete %}
 export async function remove{{ parent_pascal }}(ids: string[]) {
 {% if should_filter_by_org %}
-  const { permissions: userPermissions, userId } = await getModelPermissions('{{ parent }}');
+  const {% if is_self_only %}{ userId }{% else %}{ permissions: userPermissions, userId }{% endif %} = await getModelPermissions('{{ parent }}');
   if (!userId) throw new Error('No permission to delete');
   const _assocOrgs = await getAssociatedOrganizations(userId);
   const _assocOrgIds = _assocOrgs.map((o) => o.id);
@@ -37,11 +37,16 @@ export async function remove{{ parent_pascal }}(ids: string[]) {
     select: { id: true, creator_id: true },
   });
 {% else %}
-  const [{ permissions: userPermissions, userId }, {{ parent_camel }}s] = await Promise.all([
+  const [{% if is_self_only %}{ userId }{% else %}{ permissions: userPermissions, userId }{% endif %}, {{ parent_camel }}s] = await Promise.all([
     getModelPermissions('{{ parent }}'),
     await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
   ]);
 {% endif %}
+{% if is_self_only %}
+  // x-self-only: no general.delete/Creator-role override — ownership is
+  // the sole gate, unconditionally (no admin bypass on delete).
+  const filtered{{ parent_pascal }}s = {{ parent_camel }}s.filter(item => item.creator_id === userId);
+{% else %}
   const filtered{{ parent_pascal }}s = userPermissions.general.delete
     ? {{ parent_camel }}s
     : {{ parent_camel }}s.filter(item =>
@@ -49,6 +54,7 @@ export async function remove{{ parent_pascal }}(ids: string[]) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
       );
+{% endif %}
   if (filtered{{ parent_pascal }}s.length === 0) {
     throw new Error('No permission to delete');
   }

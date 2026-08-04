@@ -92,6 +92,16 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     }
   }
 {% endif %}
+{% if is_self_only %}
+  // x-self-only: verify ownership at the actual write, not just at the
+  // caller's item-permission check — a bypass of the getter/route layer
+  // (or a future caller that skips it) must not reach another user's row.
+  // No admin_bypass here: bypass (where declared) only widens reads.
+  const _selfOnlyExisting = await prisma.{{ model }}.findUnique({ where: { id }, select: { creator_id: true } });
+  if (!_selfOnlyExisting || _selfOnlyExisting.creator_id !== actorId) {
+    throw new ApiError(404, 'Not found');
+  }
+{% endif %}
   await prisma.$transaction(async (tx) => {
 {% if reservation_mutation_guard_update %}
 {{ reservation_mutation_guard_update }}

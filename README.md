@@ -39,6 +39,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - Account linking (multiple OAuth providers per user)
 - Role-based access control (per-model CRUD permissions)
 - Creator/Assignee-based access control
+- `x-self-only` — permission-independent per-user data isolation: unlike Creator/Assignee scoping (a configurable option a permission grant can widen), `x-self-only` entities restrict every row to its own creator unconditionally, with an optional audited admin bypass (`admin_bypass: true`) for a privileged role; see [`docs/knowledge/self-only-entity.md`](docs/knowledge/self-only-entity.md)
 - Organization-based access scoping — entities with organization_id are automatically filtered to organizations the user belongs to, including CSV import's dotted natural-key FK lookups (e.g. `role.name`) when the lookup target is itself organization-scoped; see [`docs/knowledge/csv-import-dotted-fk-org-filter.md`](docs/knowledge/csv-import-dotted-fk-org-filter.md)
 - Graceful degradation for foreign-key read-permission gaps — if a role can create/edit an entity but lacks read on one of its FK targets (e.g. can manage `approval_flow` but not `role`), the affected field renders disabled instead of crashing the page; see [`docs/knowledge/fk-read-permission-graceful-degradation.md`](docs/knowledge/fk-read-permission-graceful-degradation.md) when assigning permissions
 

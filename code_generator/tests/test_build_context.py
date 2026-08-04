@@ -1781,3 +1781,49 @@ class TestDefaultPropsPrismaNativeEnum:
     def test_plain_string_field_default_is_empty_string(self):
         ctx = build_context(_entity("widget"), self._schema({"type": "string"}))
         assert "status: '',"  in ctx["parent_default_props"]
+
+
+class TestSelfOnlyContextFlags:
+    """cmd_536: is_self_only / self_only_admin_bypass, as seen by templates
+    via build_context()'s actual output — not just the schema_helpers
+    function in isolation. The shorthand form's admin_bypass must default
+    to False (the loose/permissive direction is never the implicit
+    default) — verified end-to-end through build_context(), matching what
+    getters.ts.jinja2 etc. actually receive."""
+
+    def _schema(self, x_self_only) -> dict:
+        defs = {
+            "widget": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {**_base_props(), "creator_id": {"type": "string"}},
+            },
+        }
+        if x_self_only is not None:
+            defs["widget"]["x-self-only"] = x_self_only
+        return {"definitions": defs}
+
+    def test_no_x_self_only_both_flags_false(self):
+        ctx = build_context(_entity("widget"), self._schema(None))
+        assert ctx["is_self_only"] is False
+        assert ctx["self_only_admin_bypass"] is False
+
+    def test_shorthand_true_is_self_only_but_admin_bypass_defaults_false(self):
+        ctx = build_context(_entity("widget"), self._schema(True))
+        assert ctx["is_self_only"] is True
+        assert ctx["self_only_admin_bypass"] is False
+
+    def test_dict_form_without_admin_bypass_key_defaults_false(self):
+        ctx = build_context(_entity("widget"), self._schema({}))
+        assert ctx["is_self_only"] is True
+        assert ctx["self_only_admin_bypass"] is False
+
+    def test_dict_form_admin_bypass_true_is_honored(self):
+        ctx = build_context(_entity("widget"), self._schema({"admin_bypass": True}))
+        assert ctx["is_self_only"] is True
+        assert ctx["self_only_admin_bypass"] is True
+
+    def test_dict_form_admin_bypass_false_explicit(self):
+        ctx = build_context(_entity("widget"), self._schema({"admin_bypass": False}))
+        assert ctx["is_self_only"] is True
+        assert ctx["self_only_admin_bypass"] is False
