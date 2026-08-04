@@ -748,6 +748,34 @@ model booking {
 The resolved-object property (`resource`) must appear under `properties:` as a `$ref`.
 If it is missing, the generator will not include it in `include:` clauses.
 
+### `labelField` is also the autocomplete search source (cmd_552)
+
+The generated `search{Entity}Options` getter (`getters.ts.jinja2`) substring-matches not only
+the entity's own text columns but also, for each FK, the field named in that FK's
+`x-relationship.labelField` — a one-hop nested Prisma `where` (e.g. searching `booking` also
+matches on `resource.name`). This is auto-derived
+(`helpers/schema_helpers.py: derive_searchable_relation_fields`); there is nothing to opt into
+beyond declaring `labelField` itself, and nothing to name separately — a retired `searchField`
+attribute used to serve this role independently, but letting the searched field and the
+displayed field diverge was the exact failure mode that got it removed (`validate.py` now
+rejects any schema that still declares it).
+
+Not every `labelField` qualifies:
+
+| labelField shape | Searchable? |
+|---|---|
+| Plain string field (`name`, `order_no`, ...) | Yes |
+| `enum` field, even if `type: string` (Prisma nativeEnum) | No — the screen shows the i18n-translated label, the DB stores the untranslated literal; a substring match against the raw value can never hit what the user typed |
+| `date` / `date-time` / `time` format field | No — `contains` is a string-only Prisma operator |
+| `integer` / `number` field | No |
+| CUID-pattern id field (e.g. `labelField: id`) | No — same exclusion `derive_text_fields` applies to a bare `id` |
+| Dotted path (`approver_role.name`) | No today — the template renders one nested `where` hop only; a second hop would need a template change (no schema currently needs it) |
+| Composite list (`[f1, f2]`) | Evaluated per element — only the qualifying elements become searchable |
+
+There is no UI affordance today for telling a user which part of a composite/mixed label is
+actually searchable — schema authors should keep this table in mind when choosing `labelField`
+for a relation likely to be searched by autocomplete.
+
 ---
 
 ## 6. Many-to-Many Relationships (`x-relationships`)

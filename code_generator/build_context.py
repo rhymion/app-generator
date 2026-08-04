@@ -1642,10 +1642,12 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # rule in generate.py:_derive_text_fields) so callers don't accidentally
     # search across freeform fields, FKs, enums, or write-only properties.
     searchable_text_fields = derive_text_fields(filtered_props)
-    # Relation fields opted into cross-relation search via
-    # x-relationship.searchField (e.g. inventory matching by product name) —
-    # rendered as a one-hop nested Prisma `where` alongside the plain fields.
-    searchable_relation_fields = derive_searchable_relation_fields(filtered_props)
+    # Relation fields auto-derived from x-relationship.labelField (e.g.
+    # inventory matching by product name) — rendered as a one-hop nested
+    # Prisma `where` alongside the plain fields. Same source as the label
+    # shown on screen and as cmd_548's CSV-import full-match, so the search
+    # target can never drift from the display (cmd_552).
+    searchable_relation_fields = derive_searchable_relation_fields(filtered_props, schema)
     searchable_fields_display = searchable_text_fields + [
         f"{rf['relation']}.{rf['field']}" for rf in searchable_relation_fields
     ]
