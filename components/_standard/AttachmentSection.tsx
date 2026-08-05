@@ -70,11 +70,11 @@ function ReadOnlyAttachmentList({
             </Link>
             {variant === 'image' && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img
+              (<img
                 src={a.path}
                 alt={a.name}
                 style={{ display: 'block', maxWidth: 80, maxHeight: 80, objectFit: 'contain', marginTop: 4 }}
-              />
+              />)
             )}
           </Box>
         ))}
