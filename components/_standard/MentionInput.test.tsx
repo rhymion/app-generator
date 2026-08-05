@@ -10,7 +10,7 @@ const bob: MentionUserOption = { id: 'u2', name: 'Bob', email: 'bob@example.com'
 // MentionInput is a controlled component (value/onChange) — a thin
 // stateful wrapper lets tests type into it and observe the resulting value,
 // the same way the generated MentionInput/comment textarea usage does.
-type SearchFn = (q: string) => Promise<MentionUserOption[] & { permissionDenied?: boolean }>;
+type SearchFn = (q: string) => Promise<{ options: MentionUserOption[]; permissionDenied: boolean }>;
 
 function Controlled({ initial = '', searchUsers }: { initial?: string; searchUsers: SearchFn }) {
   const [value, setValue] = useState(initial);
@@ -23,14 +23,14 @@ describe('MentionInput', () => {
   });
 
   it('renders a labeled multiline text field with no dropdown initially', () => {
-    const searchUsers = vi.fn().mockResolvedValue([]);
+    const searchUsers = vi.fn().mockResolvedValue({ options: [], permissionDenied: false });
     render(<Controlled searchUsers={searchUsers} />);
     expect(screen.getByLabelText('Message')).toBeInTheDocument();
     expect(screen.queryByRole('menuitem')).not.toBeInTheDocument();
   });
 
   it('opens the dropdown and calls searchUsers with the query after typing "@word"', async () => {
-    const searchUsers = vi.fn().mockResolvedValue([alice, bob]);
+    const searchUsers = vi.fn().mockResolvedValue({ options: [alice, bob], permissionDenied: false });
     render(<Controlled searchUsers={searchUsers} />);
     const input = screen.getByLabelText('Message') as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: 'Hi @al', selectionStart: 6 } });
@@ -40,7 +40,7 @@ describe('MentionInput', () => {
   });
 
   it('inserts the @[user_id:<id>] marker and closes the dropdown on selecting a candidate', async () => {
-    const searchUsers = vi.fn().mockResolvedValue([alice]);
+    const searchUsers = vi.fn().mockResolvedValue({ options: [alice], permissionDenied: false });
     render(<Controlled searchUsers={searchUsers} />);
     const input = screen.getByLabelText('Message') as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: 'Hi @al', selectionStart: 6 } });
@@ -51,7 +51,7 @@ describe('MentionInput', () => {
   });
 
   it('does not treat an email-like "@" (no preceding whitespace) as a mention trigger', () => {
-    const searchUsers = vi.fn().mockResolvedValue([alice]);
+    const searchUsers = vi.fn().mockResolvedValue({ options: [alice], permissionDenied: false });
     render(<Controlled searchUsers={searchUsers} />);
     const input = screen.getByLabelText('Message') as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: 'user@example.com', selectionStart: 17 } });
@@ -59,7 +59,7 @@ describe('MentionInput', () => {
   });
 
   it('shows a non-crashing "unavailable" message instead of candidates when permissionDenied is true', async () => {
-    const searchUsers = vi.fn().mockResolvedValue(Object.assign([], { permissionDenied: true }));
+    const searchUsers = vi.fn().mockResolvedValue({ options: [], permissionDenied: true });
     render(<Controlled searchUsers={searchUsers} />);
     const input = screen.getByLabelText('Message') as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: 'Hi @al', selectionStart: 6 } });
@@ -70,7 +70,7 @@ describe('MentionInput', () => {
   });
 
   it('is disabled when disabled prop is true', () => {
-    const searchUsers = vi.fn().mockResolvedValue([]);
+    const searchUsers = vi.fn().mockResolvedValue({ options: [], permissionDenied: false });
     render(
       <MentionInput label="Message" value="" onChange={vi.fn()} searchUsers={searchUsers} disabled />,
     );
@@ -78,7 +78,7 @@ describe('MentionInput', () => {
   });
 
   it('renders required attribute when required=true', () => {
-    const searchUsers = vi.fn().mockResolvedValue([]);
+    const searchUsers = vi.fn().mockResolvedValue({ options: [], permissionDenied: false });
     render(
       <MentionInput label="Message" value="" onChange={vi.fn()} searchUsers={searchUsers} required />,
     );

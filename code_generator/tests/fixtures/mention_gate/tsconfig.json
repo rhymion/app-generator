@@ -15,15 +15,21 @@
     "paths": {
       "@/lib/mention_gate_item/*": ["./lib/mention_gate_item/*"],
       "@/lib/mention/*": ["./lib/mention/*"],
+      "@/lib/reaction_constants": ["./lib/reaction_constants.ts"],
+      "@/components/mention_gate_item/*": ["./components/mention_gate_item/*"],
       "@/lib/prisma": ["./lib/prisma.ts"],
       "@/lib/authz": ["./lib/authz.ts"],
       "@/lib/api-auth": ["./lib/api-auth.ts"],
+      "@/lib/_notifier": ["./lib/_notifier.ts"],
+      "@/lib/organization/getters_associated": ["./lib/organization/getters_associated.ts"],
       "@/*": ["../*"]
     }
   },
   "include": [
     "lib/mention_gate_item/getters.ts",
-    "app/api/mention_gate_item/[id]/route.ts"
+    "app/api/mention_gate_item/[id]/route.ts",
+    "components/mention_gate_item/FormUpsert.tsx",
+    "app/[locale]/mention_gate_item/edit/[id]/page.tsx"
   ],
   "exclude": ["node_modules"]
 }

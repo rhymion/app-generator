@@ -5,6 +5,81 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Item-master entity naming was silently hardcoded to `product`/`product_id` throughout the
+  ledger/split generator** (cmd_545/cmd_546): any consumer naming its item-master entity or its
+  pool entity's location/lot/expiration columns differently got no error — three independent
+  breaks, all traced to literal-name comparisons instead of schema-derived resolution.
+  1. `helper_context()`'s `needs_second` compared a reference name (the `x-display.table` key,
+     e.g. `product`) against an entity name (e.g. `item`) on mismatched axes (snake_case vs
+     camelCase on top of the name mismatch), so `primary: true` silently stopped working for any
+     FK primary display field whose reference name differed from its target entity name, or was
+     multi-word.
+  2. `generate.py`'s item-field detector compared a relation's target entity literally against
+     `'product'`, always returning `None` for any other name (e.g. `item`) — this disabled the
+     split-route lot/product-mismatch check with no error, and the auto-allocate WHERE clause
+     silently rendered a literal `.None` (an always-undefined property access Prisma treats as
+     "no item filter"), reproduced and fixed with test coverage.
+  3. `generators.py`'s ledger-transaction reservation code, `split_action_route.ts.jinja2`, and
+     the three `ledger_*_stub.ts.jinja2` once-stub templates hardcoded the pool entity's own
+     item/location/lot/expiration column names as literal `product_id`/`location`/`location_id`/
+     `lot_number`/`expiration_date`.
+  All three now resolve through `x-ledger-entities.<domain>`, extended with four new **required**
+  keys (no defaults — a domain missing any of them fails loudly, naming the domain and the
+  missing key): `itemField`, `locationField`, `lotField`, `expirationField`. This is a breaking
+  schema-config change for any existing consumer already declaring `x-ledger-entities` — it must
+  add these four keys (matching its current column names) before its next `generate-code` run, or
+  generation fails immediately with a named error; no generated-code content changes as a result
+  of adding them alone. See `docs/knowledge/appendix/inventory-reservation-split.md` §7–8.
+- **Ledger row's location snapshot hardcoded `.name` instead of the pool entity's declared
+  `x-relationship.labelField`** (cmd_550, found in review of the above): the reserve-phase ledger
+  row write assumed every location entity's display field is literally named `name`; a consumer
+  whose location entity displays a different field (e.g. `label`, `code`) got a TypeScript compile
+  error at `next build` time, the same silent-until-build-time failure class as cmd_545/546.
+  `resolve_ledger_domain()` now also resolves `location_label_field`/`location_label_target` from
+  that same `x-relationship` block (no new schema key), and the ledger row renders through
+  `build_label_expression()` — the identical helper this generator's autocomplete/list-view label
+  rendering already uses, so the audit-trail snapshot and what a user actually saw at claim time
+  can never drift apart. **Two distinct failure/default behaviors, not one** (corrected from the
+  original, overclaiming "fails closed, no fallback to `'name'`" wording): fails closed
+  (`ValueError`, no fallback) only if `locationField` isn't declared as a relation **at all**; if
+  the relation *is* declared but its `labelField` sub-key is not, `resolve_ledger_domain()`
+  deliberately defaults that one sub-key to `'name'` (pinned by
+  `test_location_label_field_defaults_to_name_when_undeclared` — the common case, since most
+  location-like entities do display a `name` field). Reproduced against a location entity with no
+  `name` property before fixing. See `docs/knowledge/appendix/inventory-reservation-split.md`
+  §7.1, §10.
+- **Four more `.name` hardcodes survived cmd_550's own fix, in the once-stub /
+  split-route templates it didn't touch** (cmd_550 follow-up, found in PR #269 review): the
+  reserve-phase fix above only touched `generators.py`'s reservation-allocation code path.
+  `ledger_adjust_stub.ts.jinja2`, `ledger_move_stub.ts.jinja2` (×2), `ledger_write_stub.ts.jinja2`,
+  and `split_action_route.ts.jinja2` (×2) still wrote `_row.{location}?.name ?? ''` into the
+  ledger's denormalized location column directly — the exact same "assumes the display field is
+  named `name`" bug, in four more files, undetected by cmd_550's own review because the count of
+  affected sites was undercounted twice in a row (three call sites initially missed entirely,
+  `split_action_route.ts.jinja2`; a fourth found only on the second recount,
+  `ledger_write_stub.ts.jinja2`'s *reverse* lookup — see below). All six now render through
+  `pool_location_label_exprs[<row var>]` (`generate.py`'s `_ledger_stub_field_vars`), built via the
+  identical `build_label_expression()` call as the fix above.
+
+  A **second, worse-natured class** of the same assumption also survived, only found on this
+  recount: three *reverse* lookups (`tx.<location>.findFirst({ where: { name: ... } })` in
+  `ledger_write_stub.ts.jinja2`'s `afterReject` and `split_action_route.ts.jinja2`'s reserved-row
+  release, plus a `select: { name: true } }` projection narrowing what `split_action_route.ts.jinja2`
+  fetches before rendering it) recover a location *row* from the ledger's denormalized string —
+  the same "assumes `name`" bug, but for a consumer whose display field is something else, this
+  either throws (`name` isn't a queryable column) or, worse, silently matches nothing / an
+  unrelated row (`findFirst` has no correctness guarantee against duplicate display-field values —
+  a pre-existing, separate ambiguity this fix does not attempt to resolve; see
+  `docs/knowledge/appendix/inventory-reservation-split.md` §7.1 "reverse lookup" subsection for why
+  that's judged out of this fix's scope). Now reads `pool_location_label_field` (the declared
+  field name) instead of the literal `name`. **Fails closed** (generation-time `ValueError`,
+  before any file is written) if the declared `labelField` is composite (a list) — a concatenated
+  multi-field label cannot be unambiguously inverted back into a single-field lookup — or resolves
+  through a relation beyond the location entity itself, or to a date/time field. Deviation-injection
+  proof (a location entity displaying `code`, not `name`) added in
+  `code_generator/tests/test_ledger_stub_location_label_field.py`.
+
 ### Security
 - **Server-action path can no longer bypass multi-stage approval ordering** (cmd_540): the
   REST route (`app/api/approval_request/[id]/{approve,reject}/route.ts`) enforced
@@ -113,6 +188,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `types.ts.jinja2`-only context builder) never normalized either x-bridge form before detecting
   one-to-one relations, so bridge-based comment threads were invisible to it — now mirrors
   `build_context.py`'s normalization. See `docs/knowledge/mention-system.md`.
+- **`@mention` comment-compose picker wiring** (cmd_538): the "write a comment"/edit-comment
+  textareas inside `CommentListWrapper` now use `MentionInput` — typing `@` opens real candidate
+  suggestions — instead of a plain `TextField`, completing the client-UI scope cmd_522c explicitly
+  deferred. `form_upsert.tsx.jinja2` now passes `searchMentionUserOptions` down and threads
+  `canViewUserProfile`/`mentionUserContext` to the edit page (previously wired only for the
+  read-only `form_view.tsx.jinja2` path). See `docs/knowledge/mention-system.md`.
 - **Generated permission-denial and cross-org isolation API tests** (cmd_520 batch A): every
   generated `cypress/e2e/api/<entity>.cy.ts` now includes PUT/DELETE/export/import
   permission-denial tests (7.3–7.6, gated on `can_edit`/`can_delete`/`can_export`/
@@ -154,6 +235,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   safe because `build_context.py` unconditionally includes the `creator`
   relation on every comment fetch that can reach these loops. See
   `docs/knowledge/mention-system.md`.
+- **`searchMentionUserOptions()`'s permission-denied flag never reached the client** (cmd_538):
+  the function returned an array with an ad-hoc `permissionDenied` property
+  (`Object.assign([], { permissionDenied: true })`). Next.js Server Actions serialize return
+  values through the RSC "flight" protocol, which — like `JSON.stringify` — only preserves an
+  array's indexed elements, so the flag was silently dropped in transit and the picker's
+  "suggestions unavailable" message never rendered even though the server correctly computed the
+  denial. A component-level unit test couldn't catch this, since it calls the function in-process
+  with no serialization boundary to cross. Contract changed to a plain
+  `{ options, permissionDenied }` object. The identical pattern in `getters.ts.jinja2`'s
+  `searchXxxOptions()` (cmd_516) is presumed to share this bug and was **not** fixed here —
+  flagged for a follow-up cmd. Also fixed: `generators_test.py`'s `comment_has_mention`
+  test-generation gate missed the commentable one-to-one bridge form, so any entity using that
+  (recommended) pattern silently got zero generated mention-UI test coverage; and `lib/prisma.ts`'s
+  dynamic `import('@prisma/adapter-pg')` — which made client init depend on a top-level `await` —
+  broke any Cypress Node task that transitively imports it, since Cypress's esbuild CJS bundling
+  rejects top-level await outright. Switched to a static import (already the established pattern in
+  `cypress/support/db-helpers.ts`). See `docs/knowledge/mention-system.md`.
 - **Multi-stage approval chains never notified the next approver when their
   turn arrived** (cmd_541): a `preceded_by` chain creates every flow's
   `approval_request` up front, and every flow's approver role is notified

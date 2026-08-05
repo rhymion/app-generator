@@ -19,6 +19,7 @@ import SendIcon from '@mui/icons-material/Send';
 import type { ModelPermissions } from '@/lib/authz';
 import CommentReactionBar from '@/components/_standard/CommentReactionBar';
 import type { CommentReactionSummary, ReactionType } from '@/components/_standard/CommentReactionBar';
+import MentionInput, { type MentionSearchFn } from '@/components/_standard/MentionInput';
 
 export type CommentItem = {
   id: string;
@@ -48,13 +49,29 @@ interface CommentListWrapperProps {
   onToggleReaction?: (commentId: string, type: string | number) => Promise<CommentReactionSummary>;
   /**
    * Renders a comment's message body. Defaults to plain text. Pass this to
-   * enable mention-aware rendering (cmd_522) — this component never imports
-   * MentionText itself (that lives at `@/lib/mention/MentionText`, only
-   * generated when the schema has ≥1 `x-mention: true` field), so schemas
-   * with zero mention usage never pull in lib/mention/* code via this
-   * always-present static component.
+   * enable mention-aware rendering (cmd_522) — this component imports
+   * MentionText directly (`@/components/_standard/MentionText`, itself an
+   * always-present static component like this one — see its own file for why
+   * that's schema-safe), so callers don't need to pass the component itself,
+   * only the render-prop that supplies each comment's `userContext`/
+   * `canViewUserProfile` (those two are schema/permission-conditional, this
+   * component never computes them).
    */
   renderMessage?: (comment: CommentItem) => React.ReactNode;
+  /**
+   * Enables the @mention candidate picker (cmd_538) in both the new-comment
+   * compose box and the per-comment edit box, by swapping the plain
+   * multiline TextField for `MentionInput`. Generated per-entity code passes
+   * the schema-generated `searchMentionUserOptions` here (same
+   * dependency-injection pattern `form_upsert_context()` already uses for an
+   * entity's own `x-mention` fields) — this component itself never imports
+   * `lib/mention/search` (schema-conditional), only the always-present
+   * `MentionInput` component, so a schema with zero mentions never triggers
+   * `searchMentionUserOptions` in this component's dependency graph (it's
+   * simply never passed, `searchUsers` stays undefined, and the plain
+   * TextField path is used below).
+   */
+  searchUsers?: MentionSearchFn;
 }
 
 function getInitials(name: string): string {
@@ -79,9 +96,10 @@ interface CommentItemComponentProps {
   reactionTypes?: ReactionType[];
   onToggleReaction?: (commentId: string, type: string | number) => Promise<CommentReactionSummary>;
   renderMessage?: (comment: CommentItem) => React.ReactNode;
+  searchUsers?: MentionSearchFn;
 }
 
-function CommentItemComponent({ comment, canDelete, onUpdate, onDelete, reactionTypes, onToggleReaction, renderMessage }: CommentItemComponentProps) {
+function CommentItemComponent({ comment, canDelete, onUpdate, onDelete, reactionTypes, onToggleReaction, renderMessage, searchUsers }: CommentItemComponentProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editMessage, setEditMessage] = useState(comment.message);
   const [isPending, startTransition] = useTransition();
@@ -139,15 +157,25 @@ function CommentItemComponent({ comment, canDelete, onUpdate, onDelete, reaction
           </Box>
           {isEditing ? (
             <>
-              <TextField
-                value={editMessage}
-                onChange={(e) => setEditMessage(e.target.value)}
-                fullWidth
-                multiline
-                rows={3}
-                size="small"
-                disabled={isPending}
-              />
+              {searchUsers ? (
+                <MentionInput
+                  value={editMessage}
+                  onChange={setEditMessage}
+                  searchUsers={searchUsers}
+                  rows={3}
+                  disabled={isPending}
+                />
+              ) : (
+                <TextField
+                  value={editMessage}
+                  onChange={(e) => setEditMessage(e.target.value)}
+                  fullWidth
+                  multiline
+                  rows={3}
+                  size="small"
+                  disabled={isPending}
+                />
+              )}
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5, mt: 1 }}>
                 <Tooltip title="Cancel">
                   <IconButton size="small" onClick={handleCancel} disabled={isPending} aria-label="Cancel">
@@ -221,6 +249,7 @@ export default function CommentListWrapper({
   reactionTypes,
   onToggleReaction,
   renderMessage,
+  searchUsers,
 }: CommentListWrapperProps) {
   const [newMessage, setNewMessage] = useState('');
   const [isPending, startTransition] = useTransition();
@@ -256,6 +285,7 @@ export default function CommentListWrapper({
                   reactionTypes={reactionTypes}
                   onToggleReaction={onToggleReaction}
                   renderMessage={renderMessage}
+                  searchUsers={searchUsers}
                 />
                 {index < comments.length - 1 && <Divider component="li" />}
               </Fragment>
@@ -266,16 +296,29 @@ export default function CommentListWrapper({
           <>
             <Divider sx={{ my: 2 }} />
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-              <TextField
-                placeholder="Write a comment..."
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                fullWidth
-                multiline
-                rows={2}
-                size="small"
-                disabled={isPending}
-              />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                {searchUsers ? (
+                  <MentionInput
+                    value={newMessage}
+                    onChange={setNewMessage}
+                    searchUsers={searchUsers}
+                    placeholder="Write a comment..."
+                    rows={2}
+                    disabled={isPending}
+                  />
+                ) : (
+                  <TextField
+                    placeholder="Write a comment..."
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    fullWidth
+                    multiline
+                    rows={2}
+                    size="small"
+                    disabled={isPending}
+                  />
+                )}
+              </Box>
               <Tooltip title="Submit">
                 <span>
                   <IconButton
