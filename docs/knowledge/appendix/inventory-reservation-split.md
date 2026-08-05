@@ -234,8 +234,8 @@ entirely independent of this ledger-domain resolver). `generate.py`'s `_ledger_s
 now returns only `pool_location_field`, the same shape as `pool_item_field`/`pool_lot_field`/
 `pool_expiration_field`.
 
-**Migration note for an existing consumer still on the string-column design** (proj_c, proj_g as
-of cmd_562): this is a schema + data migration, not just a config change — see
+**Migration note for an existing consumer still on the string-column design** (as of cmd_562):
+this is a schema + data migration, not just a config change — see
 `docs/knowledge/appendix/cmd562-location-id-fk-consumer-migration.md` for the concrete Prisma
 migration, backfill classification query, and json_schema.yaml diff. Unlike §7's four-key
 addition (config-only, no generated-output change when values match existing names), this one
@@ -262,7 +262,8 @@ Two related decisions from the same cmd_562 ruling:
   `test_audit_logging.py`) already wraps every `update{Entity}`/`delete{Entity}` call in
   `recordAuditEvent()`, writing an `audit_log` row with the actor, the target table/id, and a
   timestamp. Declaring `x-audit: true` on the `location` entity is sufficient — a schema-only
-  change (the migration doc adds it for proj_c/proj_g). It records that a rename happened, by
+  change (the migration doc adds it for any consumer still on the pre-cmd_562 design). It records
+  that a rename happened, by
   whom, and when; it does not (yet) capture the old/new name values or offer a per-entity history
   UI — both explicitly deferred to future work.
 
@@ -295,7 +296,7 @@ or replaced until that design lands and a follow-up doc update reflects the actu
 ## 10. When a consumer's location/lot column doesn't fit the current shape (design notes, cmd_550/562)
 
 This section works through what happens for shapes `locationField`/`lotField` might take beyond
-the current consumers' (proj_c, proj_g) shape, and whether/how a future consumer could be
+the current consumers' shape, and whether/how a future consumer could be
 supported. **Design notes only for §10.2-10.4 — none of that is implemented.** §10.1 was resolved
 by cmd_562.
 
@@ -345,7 +346,7 @@ with no location/shelf/bin distinction), then:
   any code generates.
 - **What would be needed?** See §10.4 — an explicit "not tracked" declaration, not merely omitting
   the key.
-- **Stopgap today**: none — every current consumer (proj_c, proj_g) tracks location, lot, and
+- **Stopgap today**: none — every current consumer tracks location, lot, and
   expiration. A consumer that doesn't would need §10.4 designed and implemented first; there is no
   workaround available today that doesn't require adding an unused placeholder column.
 

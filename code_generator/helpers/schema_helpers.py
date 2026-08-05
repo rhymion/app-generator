@@ -254,11 +254,11 @@ def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
     'lot_number', 'expiration_date'). cmd_546: previously these were
     hardcoded literals throughout generators.py and the ledger_* stub /
     split_action_route templates, which silently broke (no error) for any
-    consumer naming these columns differently (e.g. proj_g's item-master FK
-    is named 'product_id' as a workaround specifically because it was
-    hardcoded here). The ledger entity's own columns reuse these same names
-    (current schemas — proj_c, proj_g — declare them identically on both
-    sides; no consumer has ever diverged the two).
+    consumer naming these columns differently (e.g. one consumer's
+    item-master FK is named 'product_id' as a workaround specifically
+    because it was hardcoded here). The ledger entity's own columns reuse
+    these same names (current consumer schemas declare them identically on
+    both sides; no consumer has ever diverged the two).
 
     cmd_562: location_field is now an id-FK on *both* the pool and the
     ledger entity (matching item_field's existing shape) — the ledger row

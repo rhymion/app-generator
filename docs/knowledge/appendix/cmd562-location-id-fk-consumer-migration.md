@@ -1,17 +1,17 @@
-# cmd_562: location id-FK migration — consumer patch (proj_c, proj_g)
+# cmd_562: location id-FK migration — consumer patch
 
 > Ready-to-apply reference for any consumer still on the pre-cmd_562 string-column design for the
-> ledger entity's `location` column (`inventory_transaction.location`). Written against the
-> proj_c and proj_g consumer app repos as they stood on 2026-08-05 — re-verify current
-> column/model names against the target repo's own `prj/prisma/schema.prisma` /
+> ledger entity's `location` column (`inventory_transaction.location`). Written against two
+> consumer app repos ("Consumer A" and "Consumer B" below) as they stood on 2026-08-05 —
+> re-verify current column/model names against the target repo's own `prj/prisma/schema.prisma` /
 > `prj/code_generator/json_schema.yaml` before applying, since both were read-only at the time
 > this doc was written (this generator repo's own tasks must not modify either consumer's working
 > tree directly).
 
 ## 0. Prerequisite: both consumers' submodule pointer predates cmd_546
 
-As of 2026-08-05, proj_c's `app-generator` submodule is pinned at `2605998d` and proj_g's at
-`20557b8c` — both before cmd_545/546 (the `x-ledger-entities.<domain>` required `itemField`/
+As of 2026-08-05, Consumer A's `app-generator` submodule is pinned at `2605998d` and Consumer B's
+at `20557b8c` — both before cmd_545/546 (the `x-ledger-entities.<domain>` required `itemField`/
 `locationField`/`lotField`/`expirationField` keys). Bumping either submodule pointer past cmd_546
 (a prerequisite for reaching cmd_562's generator, independent of this migration) requires adding
 those four keys to the domain declaration *first*, or `generate-code` fails immediately
@@ -39,7 +39,7 @@ default.
 
 ### 1.1 `prisma/schema.prisma` — `inventory_transaction` model
 
-**proj_c** (`prj/prisma/schema.prisma`, current `inventory_transaction.location`):
+**Consumer A** (`prj/prisma/schema.prisma`, current `inventory_transaction.location`):
 
 ```diff
 -  location                      String
@@ -47,7 +47,7 @@ default.
 +  location                      location?                 @relation(fields: [location_id], references: [id], onDelete: Restrict)
 ```
 
-**proj_g** (`prj/prisma/schema.prisma`, current `inventory_transaction.location`):
+**Consumer B** (`prj/prisma/schema.prisma`, current `inventory_transaction.location`):
 
 ```diff
 -  // Denormalized location *name* (O-6), '' when the lot has no location.
@@ -59,7 +59,7 @@ default.
 Both: add the reverse relation field on the `location` model (e.g.
 `inventory_transactions inventory_transaction[]`) if Prisma's validator requires it for the new
 relation (it will — an unnamed relation needs both sides declared once there is more than one
-relation between the same two models; proj_g's `location` model already has an `inventories
+relation between the same two models; Consumer B's `location` model already has an `inventories
 inventory[]` back-relation from the pool side, so this new one needs its own relation name, e.g.
 `@relation("InventoryTransactionLocation")` on both sides, to disambiguate from that existing one).
 
@@ -67,7 +67,7 @@ Do **not** drop the old `location` string column in this same migration — see 
 
 ### 1.2 `code_generator/json_schema.yaml` — `inventory_transaction` fields
 
-**proj_c** (`prj/code_generator/json_schema.yaml`, replacing the `location: {}` entry under
+**Consumer A** (`prj/code_generator/json_schema.yaml`, replacing the `location: {}` entry under
 `inventory_transaction.fields`):
 
 ```diff
@@ -85,7 +85,7 @@ Do **not** drop the old `location` string column in this same migration — see 
 +        $ref: "#/definitions/location"
 ```
 
-**proj_g** (replacing the `location: {default: ""}` entry):
+**Consumer B** (replacing the `location: {default: ""}` entry):
 
 ```diff
    inventory_transaction:
@@ -109,13 +109,13 @@ Do **not** drop the old `location` string column in this same migration — see 
 +        $ref: "#/definitions/location"
 ```
 
-(proj_g's old comment about needing an explicit `default: ""` no longer applies — the column is
+(Consumer B's old comment about needing an explicit `default: ""` no longer applies — the column is
 nullable now, so there's no non-nullable/`FormViewProps` type mismatch to route around.)
 
 ### 1.3 `location` entity — add `x-audit: true`
 
-Neither consumer's `location` entity currently declares `x-audit`. Add it (proj_c: near line 1196
-`definitions.location`; proj_g: near line 550 `definitions.location`):
+Neither consumer's `location` entity currently declares `x-audit`. Add it (Consumer A: near line
+1196 `definitions.location`; Consumer B: near line 550 `definitions.location`):
 
 ```diff
    location:
@@ -208,9 +208,9 @@ WHERE it.id = c.id AND c.bucket = 'safe_unique_match' AND it.location_id IS NULL
 ```
 
 **Real-data measurement (2026-08-05, re-verified at the start of this task — do not reuse older
-numbers)**: proj_g's only reachable test database (a docker-compose Postgres test container)
+numbers)**: Consumer B's only reachable test database (a docker-compose Postgres test container)
 holds exactly 1 `inventory_transaction` row with an empty-string `location` (Cypress seed/teardown
-residue, not accumulated ledger history) — 0 rows need backfilling there today. proj_c has no
+residue, not accumulated ledger history) — 0 rows need backfilling there today. Consumer A has no
 running database container to query. Neither consumer currently has real ledger history requiring
 backfill; the classification query above was demonstrated against a 6-row synthetic fixture (2
 safe_unique_match, 2 safe_null, 1 ambiguous, 1 unmatched) in an isolated scratch database,
@@ -219,7 +219,7 @@ accumulates ledger rows worth migrating.
 
 ## 3. onDelete: Restrict — reproduced against a real database
 
-Demonstrated in an isolated scratch Postgres container (not proj_c/proj_g's own):
+Demonstrated in an isolated scratch Postgres container (not either consumer's own):
 
 ```
 === attempt to delete REFERENCED location ===
