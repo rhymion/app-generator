@@ -279,6 +279,37 @@ API routes are **not** locale-prefixed — they stay at `app/api/[entity]/`:
 api_dir = out / 'app' / 'api' / parent
 ```
 
+### `messages/*.json` are append-only, never generator-truncated (cmd_560)
+
+`code_generator/generators_i18n.py::update_i18n_and_config` (called at the end
+of every `generate-code` run) treats every `messages/*.json` file as
+append-only: `_update_json` adds a key only when it is genuinely missing and
+never removes or overwrites an existing one, so a manually-translated
+`messages/ja.json` value always survives a normal `generate-code` run. `en.json`
+is the source-of-truth locale (`i18n/routing.ts` `defaultLocale`); any key
+newly added to a *different* locale file carries that same English text as an
+untranslated placeholder, and the build log prints a `WARNING: untranslated
+keys added` line naming exactly which keys still need translation — check for
+that line after `generate-code`, don't assume a clean "Updated: messages/ja.json"
+line means everything is translated.
+
+**`code_generator/cleanup.py` must never delete entries from `messages/*.json`.**
+It used to: `_clean_appended_files` computed the Fields/EntityLabel/Nav keys
+belonging to whatever schema was passed and deleted every matching key from
+`messages/*.json` — including entries for real, still-in-use entities, because
+`npm run cleanup` always rebuilds its schema argument fresh from whatever
+`json_schema.yaml` currently says (there is no "only the removed entity" input
+available to it). Running `npm run cleanup` while a temp fixture entity was
+still present in the schema (e.g. to remove that fixture's generated files
+before reverting the schema file — a normal fixture-testing workflow) wiped
+every real entity's translated keys too. A subsequent `generate-code` then
+looked at those now-missing keys as "genuinely missing" and refilled them with
+the English schema default — the observed symptom was `messages/ja.json`
+turning wholesale English. `cleanup.py` now leaves `messages/*.json` alone
+entirely (it still cleans `lib/site-config.ts` and
+`app/[locale]/@sidebar/page.tsx`, which are pure schema-derived href/label
+pairs with no human-edited content, so re-deriving them is safe).
+
 ---
 
 ## Testing

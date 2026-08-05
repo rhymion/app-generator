@@ -19,6 +19,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `test/flows/approval_order_bypass.test.ts`.
 
 ### Fixed
+- **`npm run cleanup` could wipe every translated `messages/ja.json` entry** (cmd_560):
+  `cleanup.py` deleted every Fields/EntityLabel/Nav key belonging to any entity in the
+  passed schema from `messages/*.json` — including entries for entities still in
+  production use, not just genuinely removed ones. Since `npm run cleanup` always
+  rebuilds its schema argument from whatever `json_schema.yaml` currently says, running
+  it while a temp fixture entity was still present in the schema (a normal
+  fixture-testing workflow — remove the fixture's generated files before reverting the
+  schema file) wiped every real entity's translated keys too; a subsequent
+  `generate-code` then refilled them with the English schema default, since
+  `generators_i18n.py`'s own `_update_json` only fills genuinely missing keys.
+  `cleanup.py` no longer touches `messages/*.json` at all. `generate-code` also now
+  prints a `WARNING: untranslated keys added` line in the build log naming any key
+  freshly added to a non-English locale file, so a partial translation gap is visible
+  instead of silently looking like a fully-translated run. See
+  `docs/knowledge/i18n-locale-routing.md` "`messages/*.json` are append-only, never
+  generator-truncated".
+
 - **Re-submitting a rejected approval request never notified the approver** (cmd_539):
   `resubmitApprovalRequest()` (both the server action in
   `lib/approval_request/actions_core.ts` and the REST route
@@ -31,6 +48,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   for a `terminal_rejected` outcome (the notification itself always fired; only the payload was
   wrong). See `docs/knowledge/appendix/approval-flow.md` §16.6 and
   `docs/knowledge/notification-triggers.md`.
+
+### Internal
+- **`cypress/support/db-helpers.ts`/`generated-tasks.ts` were stale, missing `personal_note`**
+  (cmd_560): these committed, generator-written files predate the `personal_note` entity
+  (added later in the `x-self-only` Stage 1 work) and were never regenerated afterward —
+  `resetTestDatabase()`'s cleanup ordering never deleted `personal_note` rows, so its later
+  `user.deleteMany()` step hit `Foreign key constraint violated on the constraint:
+  personal_note_creator_id_fkey` in the `before each` hook of any spec running after
+  `personal_note` rows existed, cascading into 8 of 19 `test:e2e:cy:api` spec files failing.
+  Unrelated to the `messages/*.json` fix above; discovered only because it blocked verifying
+  that fix's own e2e gate, and bundled into the same PR to keep the gate green. Re-ran
+  `npm run generate-code` and committed the resulting `db-helpers.ts`/`generated-tasks.ts`
+  (now include `personal_note` in the Level-2 delete order, `ALL_ENTITIES`, and the three
+  `db:populatePersonalNote*` tasks).
 
 ### Added
 - **FK autocomplete search now derives from `labelField`, `searchField` retired** (cmd_552): the

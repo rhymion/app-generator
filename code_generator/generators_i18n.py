@@ -17,6 +17,11 @@ from pathlib import Path
 from helpers.naming import to_camel_case, to_title_case
 from helpers.schema_helpers import filter_fields
 
+# The locale whose messages/*.json values ARE the schema-computed defaults
+# (see i18n/routing.ts defaultLocale). Every other locale file's newly-added
+# key carries that same English text as an untranslated placeholder.
+_SOURCE_LOCALE_FILENAME = 'en.json'
+
 
 def _raw_def(entity_name: str, schema: dict) -> dict:
     """Resolve a bare/view model name to its raw entity dict (mirrors
@@ -249,16 +254,19 @@ def _merge_file_wins_messages(
 # JSON file updater
 # ---------------------------------------------------------------------------
 
-def _update_json(path: Path, additions: dict[str, dict[str, str]]) -> bool:
+def _update_json(path: Path, additions: dict[str, dict[str, str]]) -> tuple[bool, dict[str, list[str]]]:
     """
     Deep-merge additions into the JSON file at `path`.
     `additions` is {sectionName: {key: value}}.
-    Returns True if the file was changed.
+    Returns (changed, added_keys) where `added_keys` is {sectionName: [key, ...]}
+    for every key that did not already exist in the file (i.e. was actually
+    written by this call, as opposed to a key the file already had).
     """
     with open(path, encoding='utf-8') as f:
         data = json.load(f)
 
     changed = False
+    added_keys: dict[str, list[str]] = {}
     for section, entries in additions.items():
         if section not in data:
             data[section] = {}
@@ -267,6 +275,7 @@ def _update_json(path: Path, additions: dict[str, dict[str, str]]) -> bool:
             if key not in data[section]:
                 data[section][key] = value
                 changed = True
+                added_keys.setdefault(section, []).append(key)
 
     # Sort keys within each section that has additions
     for section in additions:
@@ -281,7 +290,7 @@ def _update_json(path: Path, additions: dict[str, dict[str, str]]) -> bool:
             json.dump(data, f, indent=2, ensure_ascii=False)
             f.write('\n')
 
-    return changed
+    return changed, added_keys
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +398,13 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
             namespace_sections.setdefault(ns, {}).update(ns_entries)
 
     # --- messages/*.json ---
+    # `_SOURCE_LOCALE_FILENAME` is the locale whose values ARE the schema
+    # defaults (see module docstring / i18n/routing.ts defaultLocale). Any key
+    # newly added to a *different* locale file carries that same English
+    # default text as a placeholder — it has never been translated. Surface
+    # those so a partial translation gap is visible in the build log instead
+    # of silently looking like a successful, fully-translated run (cmd_560).
+    untranslated_report: dict[str, dict[str, list[str]]] = {}
     messages_dir = output_dir / 'messages'
     for lang_file in sorted(messages_dir.glob('*.json')):
         additions: dict[str, dict[str, str]] = {
@@ -397,9 +413,17 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
             'Fields': field_keys,
             **namespace_sections,
         }
-        changed = _update_json(lang_file, additions)
+        changed, added_keys = _update_json(lang_file, additions)
         status = 'Updated' if changed else 'No changes'
         print(f'  {status}: {lang_file.relative_to(output_dir)}')
+        if lang_file.name != _SOURCE_LOCALE_FILENAME and added_keys:
+            untranslated_report[lang_file.name] = added_keys
+
+    if untranslated_report:
+        print(f'\n  WARNING: untranslated keys added (English placeholder, needs manual translation):')
+        for filename, sections in untranslated_report.items():
+            for section, keys in sections.items():
+                print(f'    {filename} [{section}]: {", ".join(sorted(keys))}')
 
     # --- lib/site-config.ts ---
     site_config = output_dir / 'lib' / 'site-config.ts'
