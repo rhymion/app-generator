@@ -241,22 +241,82 @@ def get_splittable_bridge_field(entity_def: dict) -> str:
 
 
 def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
-    """Resolve x-ledger-entities[domain_key] to {pool, ledger, transactionable}.
+    """Resolve x-ledger-entities[domain_key] to
+    {pool, ledger, transactionable, item_field, location_field,
+    location_relation, location_label_field, location_label_target,
+    lot_field, expiration_field}.
 
     OD-1 underlying idea: config required, no defaults. Raises ValueError if
     the domain or any of its required keys is not declared in the schema.
+
+    item_field/location_field/lot_field/expiration_field are the pool
+    entity's own column names for its item-master FK, location FK, lot
+    number, and expiration date (e.g. 'product_id', 'location_id',
+    'lot_number', 'expiration_date'). cmd_546: previously these were
+    hardcoded literals throughout generators.py and the ledger_* stub /
+    split_action_route templates, which silently broke (no error) for any
+    consumer naming these columns differently (e.g. proj_g's item-master FK
+    is named 'product_id' as a workaround specifically because it was
+    hardcoded here). The ledger entity's own denormalized columns reuse
+    these same names (current schemas — proj_c, proj_g — declare them
+    identically on both sides; no consumer has ever diverged the two).
+
+    location_relation is derived (not separately declared) by stripping the
+    conventional '_id' suffix from location_field — the Prisma relation
+    accessor name for that FK (e.g. 'location_id' -> 'location'), needed
+    wherever the generated code reads the *related* location row (its name)
+    rather than just the FK id. item/lot/expiration have no such accessor
+    requirement: item is denormalized by id, lot/expiration are plain
+    scalars, so only location needs it (see split_action_route.ts.jinja2 /
+    the ledger_* stub templates' `include: { location: true }` reads).
+
+    location_label_field/location_label_target (cmd_550): the pool entity's
+    own `x-relationship.labelField`/`.target` declared on location_field —
+    the same source cmd_547/548's autocomplete/list-view label rendering
+    reads. Previously the ledger row write hardcoded `.name` directly
+    instead of going through this declaration, silently mis-rendering (or
+    crashing) for any location entity whose display field isn't literally
+    named `name`. Fails closed (no fallback to `'name'`) if location_field
+    isn't declared as a many-to-one/one-to-one relation with a `target` —
+    a location field that is a plain string (not a relation at all) is a
+    different domain shape, out of scope for this resolver (see
+    docs/knowledge/appendix/inventory-reservation-split.md for the
+    non-relational-location design note).
     """
     domains = schema.get('x-ledger-entities') or {}
     if domain_key not in domains:
         raise ValueError(f"x-ledger-entities.{domain_key!r} not declared in schema")
     domain = domains[domain_key]
-    for required_key in ('pool', 'ledger', 'transactionable'):
+    for required_key in (
+        'pool', 'ledger', 'transactionable',
+        'itemField', 'locationField', 'lotField', 'expirationField',
+    ):
         if required_key not in domain:
             raise ValueError(f"x-ledger-entities.{domain_key!r}.{required_key!r} is required")
+    pool_entity = domain['pool']
+    location_field = domain['locationField']
+    pool_props = get_entity_properties(pool_entity, schema)
+    location_rel = (pool_props.get(location_field) or {}).get('x-relationship') or {}
+    location_label_target = location_rel.get('target')
+    if not location_label_target:
+        raise ValueError(
+            f"x-ledger-entities.{domain_key!r}: pool entity {pool_entity!r}'s "
+            f"{location_field!r} must declare x-relationship.target (the "
+            f"location entity read for the ledger row's denormalized label). "
+            f"A plain-string (non-relation) location column is a different "
+            f"domain shape not yet supported by this resolver."
+        )
     return {
-        'pool': domain['pool'],
+        'pool': pool_entity,
         'ledger': domain['ledger'],
         'transactionable': domain['transactionable'],
+        'item_field': domain['itemField'],
+        'location_field': location_field,
+        'location_relation': re.sub(r'_id$', '', location_field),
+        'location_label_field': location_rel.get('labelField', 'name'),
+        'location_label_target': location_label_target,
+        'lot_field': domain['lotField'],
+        'expiration_field': domain['expirationField'],
     }
 
 

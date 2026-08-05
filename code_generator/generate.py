@@ -409,6 +409,135 @@ def _append_no_page_child(
     })
 
 
+def pool_relation_target(pool_entity: str, field_name: str, schema: dict) -> str | None:
+    """The entity targeted by `field_name` (a many-to-one FK) on `pool_entity`.
+
+    cmd_546: used to resolve the item-master entity a ledger domain's
+    `item_field` targets (e.g. inventory.product_id -> 'item'), and the
+    location entity its `location_field` targets — both schema-derived
+    instead of a literal `'product'` / `'location'` entity-name comparison,
+    which is what makes `detect_product_id_field` below (and the
+    `tx.<entity>.findFirst` lookups in the ledger_* stub / split_action_route
+    templates) entity-name-independent.
+    """
+    pool_props = get_entity_properties(pool_entity, schema) or {}
+    rel = (pool_props.get(field_name) or {}).get('x-relationship') or {}
+    return rel.get('target')
+
+
+def detect_product_id_field(props: dict, pool_item_target: str | None) -> str | None:
+    """Many-to-one FK on the split entity pointing at the same item-master
+    entity the ledger domain's `item_field` (on the pool entity) references,
+    for split auto-allocate queries and lot/product-mismatch validation.
+
+    Resolves the target entity via `pool_item_target` (schema-derived, see
+    `pool_relation_target`) instead of a literal `target == 'product'`
+    comparison — the previous literal comparison silently returned None
+    (disabling these checks with no error, no warning) for any consumer
+    naming the item-master entity something other than `product` (e.g.
+    `item` — see proj_g's goods_receipt_line).
+    """
+    if not pool_item_target:
+        return None
+    for prop_name, prop_def in props.items():
+        rel = (prop_def or {}).get('x-relationship') or {}
+        if rel.get('type') == 'many-to-one' and rel.get('target') == pool_item_target:
+            return prop_name
+    return None
+
+
+def _ledger_stub_field_vars(domain: dict, schema: dict) -> dict:
+    """Template context for the pool entity's item/location/lot/expiration
+    columns, shared by the ledger_write/move/adjust once-stub templates and
+    the split_action_route template (see the `pool_*` context vars built
+    alongside `_ledger_domain_vars` in the x-splittable loop below).
+
+    cmd_550 (follow-up, PR #269 review): also builds `pool_location_label_exprs`
+    and `pool_location_label_field`, replacing what were bare `.name` accesses
+    (forward: write a display value into the ledger's denormalized string
+    column) and hardcoded `where: { name: ... }` lookups (reverse: recover the
+    location row from that denormalized string) hardcoded into these jinja2
+    templates. Renders through `build_label_expression()` — the identical
+    helper generators.py's reserve-phase ledger row write already uses (see
+    resolve_ledger_domain's location_label_field/location_label_target) —
+    instead of assuming the location entity's display field is always
+    literally named `name`.
+
+    `pool_location_label_exprs` is a dict keyed by the fixed small set of row
+    variable names these templates' call sites actually use (`inventory`,
+    `fromInventory`, `toInventory`, `_childInv`, `_cand`) — computing all five
+    here keeps every call site a plain dict lookup instead of duplicating
+    build_label_expression's logic in Jinja.
+
+    Fails closed (ValueError) at generate time, before any template renders,
+    if the declared labelField:
+      - resolves to a date/time field (formatLabelValue is not imported in
+        these generated modules — same guard generators.py's fix applies);
+      - resolves through a relation beyond the location entity itself (these
+        templates only ever fetch the location row itself, `{{ relation }}:
+        true` — never its own nested relations);
+      - is composite (more than one path/field). Forward rendering supports
+        composite labelFields fine (concatenation) but the *reverse* lookup
+        (denormalized string -> row) cannot unambiguously invert a
+        concatenated string back into per-field equality, so a composite
+        labelField is rejected for the whole domain rather than only at the
+        specific reverse-lookup call sites — see docs/knowledge write-up for
+        the reasoning.
+    """
+    _label_field = domain['location_label_field']
+    _label_target = domain['location_label_target']
+    _location_relation = domain['location_relation']
+
+    _probe = build_label_expression(
+        f"__probe__.{_location_relation}", _label_field, _label_target, schema,
+    )
+    if _probe['has_format']:
+        raise ValueError(
+            f"x-ledger-entities: location labelField {_label_field!r} on {_label_target!r} "
+            f"resolves to a date/time field — unsupported for the ledger stub / split-route "
+            f"templates' plain-string location snapshot (formatLabelValue is not imported in "
+            f"these generated modules)."
+        )
+    if _probe['prisma_include']:
+        raise ValueError(
+            f"x-ledger-entities: location labelField {_label_field!r} on {_label_target!r} "
+            f"resolves through a relation beyond the location entity itself "
+            f"({_location_relation!r}) — unsupported by the ledger stub / split-route "
+            f"templates, which fetch only the location row itself "
+            f"({_location_relation!r}: true), not its own relations."
+        )
+    if len(_probe['paths']) != 1:
+        raise ValueError(
+            f"x-ledger-entities: location labelField {_label_field!r} on {_label_target!r} is "
+            f"composite (multiple paths) — unsupported by the ledger write-stub's / "
+            f"split-route's reverse lookup (denormalized label string -> row), which can only "
+            f"invert a single field. A composite labelField's rendered forward snapshot cannot "
+            f"be unambiguously matched back to one field on the location entity."
+        )
+    _reverse_lookup_field = _probe['paths'][0]['final_field']
+
+    _row_vars = ('inventory', 'fromInventory', 'toInventory', '_childInv', '_cand')
+    _label_exprs = {
+        _row_var: build_label_expression(
+            f"{_row_var}.{_location_relation}", _label_field, _label_target, schema,
+        )['expression']
+        for _row_var in _row_vars
+    }
+
+    return {
+        'pool_item_field': domain['item_field'],
+        'pool_location_field': domain['location_field'],
+        'pool_location_relation': _location_relation,
+        'pool_location_target_entity': pool_relation_target(
+            domain['pool'], domain['location_field'], schema,
+        ),
+        'pool_lot_field': domain['lot_field'],
+        'pool_expiration_field': domain['expiration_field'],
+        'pool_location_label_exprs': _label_exprs,
+        'pool_location_label_field': _reverse_lookup_field,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
@@ -774,14 +903,6 @@ def generate(schema_path: str, output_dir: str) -> None:
                 return prop_name
         return None
 
-    def _detect_product_id_field(props: dict) -> str | None:
-        """Many-to-one FK pointing at product, for split auto-allocate queries."""
-        for prop_name, prop_def in props.items():
-            rel = (prop_def or {}).get('x-relationship') or {}
-            if rel.get('type') == 'many-to-one' and rel.get('target') == 'product':
-                return prop_name
-        return None
-
     _splittable_defs = schema.get('definitions', {})
     for _def_key, _def_val in _splittable_defs.items():
         if not _def_key.startswith('__'):
@@ -818,7 +939,6 @@ def generate(schema_path: str, output_dir: str) -> None:
             _bridge_field in _split_entity_props
             and (_def_val.get('x-approval', {}) or {}).get('on_approved', {}).get('emit_hook')
         )
-        _product_id_f = _detect_product_id_field(_split_entity_props)
 
         # cmd_307 FIX-β: entities whose x-ledger-source has event_type 'receive'
         # (e.g. receiving_receipt_line) add inventory on approval — they never
@@ -850,7 +970,41 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'pool_entity': _domain['pool'],
                 'bridge_fk_field': _bridge_field,
                 'pool_fk_field': _pool_fk_field,
+                # cmd_546: pool entity's own item/location/lot/expiration column
+                # names (OD-1 domain config), replacing what were literal
+                # 'product_id'/'location'/'lot_number'/'expiration_date'
+                # hardcodes throughout split_action_route.ts.jinja2.
+                **_ledger_stub_field_vars(_domain, schema),
             }
+
+        # Detect the split entity's own FK to the item-master entity (used for
+        # split auto-allocate queries and lot/product-mismatch validation).
+        # Only meaningful when there's a pool entity to resolve the item
+        # target from — no bridge means no split_item_field consumer in the
+        # template either (every use is nested inside `{% if has_inventory_bridge %}`).
+        _split_item_f = (
+            detect_product_id_field(
+                _split_entity_props,
+                pool_relation_target(_domain['pool'], _domain['item_field'], schema),
+            )
+            if _has_inventory_bridge else None
+        )
+        # cmd_546/545b: fail loud instead of silently rendering `.None` in the
+        # auto-allocate WHERE clause (split_action_route.ts.jinja2) — a
+        # reserve-type splittable entity with an inventory bridge always
+        # needs an item FK to filter candidate pool rows by; unlike the
+        # receive-type lot-mismatch check (gated by `{% if split_item_field %}`,
+        # safe to skip), the reserve-type auto-allocate query has no such
+        # guard and silently returning inventory across all items would be a
+        # correctness bug, not a degraded-but-safe feature.
+        if _has_inventory_bridge and _split_reserves_inventory and not _split_item_f:
+            raise ValueError(
+                f"x-splittable for {_def_key!r}: no many-to-one FK on {_def_key!r} targets "
+                f"{pool_relation_target(_domain['pool'], _domain['item_field'], schema)!r} "
+                f"(the entity x-ledger-entities.{_domain_key!r}.itemField targets on the pool "
+                f"entity {_domain['pool']!r}) — required to filter split auto-allocate "
+                f"candidates by item (OD-1)"
+            )
 
         # perPartRequired mandatory validation:
         #   receive-type entities (not split_reserves_inventory): ALL perPartRequired fields
@@ -912,7 +1066,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'inherited_fields': [f for f in _split_entity_props if f not in _always_exclude],
             'has_inventory_bridge': _has_inventory_bridge,
             'split_reserves_inventory': _split_reserves_inventory,
-            'product_id_field': _product_id_f,
+            'split_item_field': _split_item_f,
             'per_part_required_mandatory': _per_part_req_mandatory,
             **_ledger_domain_vars,
         }
@@ -1133,6 +1287,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                 # split-route bridge field (get_splittable_bridge_field), since
                 # a ledger-source entity's bridge FK is declared identically.
                 'bridge_fk_field': get_splittable_bridge_field(def_val),
+                **_ledger_stub_field_vars(_ent_domain, schema),
             }
         elif x_splittable.get('ledgerDomain'):
             # Phase 3 / OD-3 (Option B): a splittable, approval-driven entity with
@@ -1149,6 +1304,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'pool_entity': _ent_domain['pool'],
                 'bridge_fk_field': get_splittable_bridge_field(def_val),
                 'is_ship_skeleton': True,
+                **_ledger_stub_field_vars(_ent_domain, schema),
             }
         approvable_entities.append({
             'snake_name': def_key,
