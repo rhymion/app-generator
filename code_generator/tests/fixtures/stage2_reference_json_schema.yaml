@@ -493,6 +493,7 @@ definitions:
       status:
         type: string
         _prisma_native_enum_type: ApprovalRequestStatus
+        default: pending
         enum:
           - pending
           - approved
@@ -667,6 +668,7 @@ definitions:
       type:
         type: string
         _prisma_native_enum_type: AttachmentType
+        default: image
         enum:
           - image
           - file

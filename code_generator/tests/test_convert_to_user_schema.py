@@ -74,7 +74,17 @@ def test_convert_then_build_reconstructs_legacy_schema(tmp_path):
 
     rebuilt = build_intermediate_schema(converted, prisma_models)
 
-    assert rebuilt["definitions"]["__widget"] == legacy["definitions"]["widget"]
+    # cmd_574: `is_active` has a static Prisma `@default(true)` and no
+    # `default:` override in the legacy fixture -- the builder now
+    # auto-reflects that Category A fact (see schema_deriver.derive_property),
+    # so the round trip legitimately gains this one key rather than
+    # reproducing the legacy input byte-for-byte.
+    expected_widget = dict(legacy["definitions"]["widget"])
+    expected_widget["properties"] = dict(expected_widget["properties"])
+    expected_widget["properties"]["is_active"] = {
+        **expected_widget["properties"]["is_active"], "default": True,
+    }
+    assert rebuilt["definitions"]["__widget"] == expected_widget
 
     # The only content difference Stage 4 intentionally introduces on a
     # paired view: its `allOf[0].$ref` now points at the renamed raw entity
