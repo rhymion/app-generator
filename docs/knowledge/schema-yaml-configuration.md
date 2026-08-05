@@ -1816,6 +1816,17 @@ respected in most contexts:
 or set `labelField` explicitly in every `x-relationship` / `x-relationships` referencing it.
 The generator validates this and reports an error if neither is present.
 
+**`labelField` is a display-only declaration, but CSV import also uses it for row lookup
+(cmd_572).** When a many-to-one FK has no `x-import-key`, CSV import resolves the referenced row
+by querying on the FK's `labelField` value (`import_fk_specs.lookup_field` in
+`build_context.py`), the same field the CSV export column is named after. This is within the
+declaration's intended scope as long as `labelField` points to a human-readable field that is
+effectively unique (`name`, `code`, etc.) — the common case today. If a schema ever points
+`labelField` at a field that is mutable or not unique, this dual use breaks down the same way the
+pre-cmd_562 ledger reverse-lookup did; at that point, consider a dedicated identification-only
+declaration rather than continuing to overload `labelField`. Not needed today (cmd_572 surveyed
+every call site and recommended keeping this as-is).
+
 ---
 
 ### 15.3 Definition naming conventions
