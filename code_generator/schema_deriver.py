@@ -327,14 +327,18 @@ def derive_property(
     if fk_target is not None and not user_field_overrides.get("_no_fk_pattern"):
         prop["pattern"] = _CUID_PATTERN
 
-    # `default:` is NOT auto-derived from Prisma's `@default(...)` -- the
-    # legacy schema sometimes omits it even when Prisma has one (e.g.
-    # attachment.type has `@default(0)` in Prisma but no `default:` in the
-    # legacy JSON schema), so its presence is a Category C, user-authored
-    # decision. Only Prisma's *nullability* (used for `required`, below)
-    # is Category A.
+    # `default:` (cmd_574): a static Prisma `@default(...)` is now auto-
+    # reflected into the derived json schema property (Category A) unless
+    # the user schema already declares its own `default:` (Category C,
+    # which always wins -- e.g. attachment.type intentionally omits
+    # `default:` even though Prisma has `@default(0)`, to keep the UI from
+    # auto-filling it). Dynamic Prisma defaults (now(), cuid(), uuid(),
+    # autoincrement()) are excluded -- they're server-generated and have no
+    # meaning as a UI default.
     if "default" in user_field_overrides:
         prop["default"] = user_field_overrides["default"]
+    elif pf.has_default and not pf.default_is_dynamic:
+        prop["default"] = pf.default_value
 
     # Layer Category C overrides (everything the user schema specified for
     # this field) on top -- these are never derivable from Prisma, so a

@@ -16,6 +16,7 @@ from helpers.schema_helpers import (
     get_parent_relationships, get_internal_bridge_fk_prop_names,
     get_entity_properties, get_entity_required, get_self_only_flags,
 )
+from schema_deriver import parse_prisma_schema
 
 _SNAKE_CASE = re.compile(r'^(__)?[a-z][a-z0-9_]*$')
 _ID_SUFFIX  = re.compile(r'_id$')
@@ -218,6 +219,74 @@ def validate_self_only_creator_id_columns(schema: dict, prisma_schema_path: str 
         raise SchemaValidationError(
             f"x-self-only validation failed — {len(errors)} entity(ies) missing "
             f"a creator_id column:\n\n{bullet_list}\n"
+        )
+
+
+def _own_properties(defn: dict) -> dict:
+    """Properties declared directly on `defn`, including inline (non-$ref)
+    allOf branches, but NOT recursing into $ref'd definitions.
+
+    Used instead of get_entity_properties() (which merges the *whole* allOf
+    chain) so a paired entity's view (`inventory`, `allOf: [{$ref: __inventory},
+    {...}]`) does not re-report fields already owned by its raw counterpart
+    (`__inventory`) — each field is checked exactly once, from whichever
+    definition actually declares it.
+    """
+    props = dict(defn.get('properties') or {})
+    for item in defn.get('allOf', []):
+        if '$ref' not in item:
+            props.update(item.get('properties') or {})
+    return props
+
+
+def validate_defaults_cross_schema(schema: dict, prisma_schema_path: str | Path) -> None:
+    """Fail if any json_schema.yaml field declares `default:` but the
+    corresponding Prisma column has no `@default(...)`.
+
+    The two schemas independently carry `default` values (json `fields.X.default:`
+    vs Prisma `@default(...)`) with no automatic sync between them — a json
+    `default:` with no matching Prisma `@default()` silently produces a form
+    that appears to have a default in the UI but inserts NULL/nothing at the
+    DB layer on create. The reverse (Prisma has `@default()`, json doesn't) is
+    NOT an error: that's a valid Category C decision to not auto-fill the UI
+    field (e.g. attachment.type has `@default(0)` in Prisma with no matching
+    json `default:`, deliberately). (cmd_574, 2026-08-05)
+    """
+    path = Path(prisma_schema_path)
+    if not path.exists():
+        raise SchemaValidationError(
+            f"Prisma schema not found at {path} — required for default cross-schema validation."
+        )
+    prisma_models = parse_prisma_schema(path)
+    defs = schema.get('definitions') or {}
+
+    errors: list[str] = []
+    for def_key, defn in defs.items():
+        if not isinstance(defn, dict) or not _SNAKE_CASE.match(def_key):
+            continue
+        model_name = _resolve_backing_model_name(def_key, defs)
+        model = prisma_models.get(model_name)
+        if model is None:
+            continue
+        props = _own_properties(defn)
+        for field_name, field_def in props.items():
+            if not isinstance(field_def, dict) or 'default' not in field_def:
+                continue
+            pf = model.fields.get(field_name)
+            if pf is None or not pf.has_default:
+                errors.append(
+                    f"Definition '{def_key}', property '{field_name}': json schema declares "
+                    f"default={field_def['default']!r} but Prisma model '{model_name}' has no "
+                    f"@default() for this column."
+                )
+
+    if errors:
+        bullet_list = '\n'.join(f"  • {e}" for e in errors)
+        raise SchemaValidationError(
+            f"json_schema.yaml `default:` entries without a matching Prisma @default() — "
+            f"{len(errors)} field(s):\n\n{bullet_list}\n\n"
+            f"Fix by either adding @default(...) to the Prisma column in schema.prisma, "
+            f"or removing default: from the json schema field.\n"
         )
 
 
