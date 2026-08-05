@@ -91,6 +91,7 @@ definitions:
       roles:
         type: many-to-many
         target: role
+        labelField: name
     x-custom-components:
       - name: MfaToggle
         path: "@/components/_standard/MfaToggle"
@@ -157,6 +158,7 @@ definitions:
       roles:
         type: many-to-many
         target: role
+        labelField: name
     # x-self-only (cmd_536): `setting` is a proxy view of the acting
     # user's OWN `user` row — id === creator_id always holds for every
     # real account (see lib/auth/creator-id-self-reference-guard.test.ts),
@@ -201,6 +203,7 @@ definitions:
       users:
         type: many-to-many
         target: user
+        labelField: name
     x-import-key: [name]
     fields:
       name: {}
@@ -229,6 +232,7 @@ definitions:
       users:
         type: many-to-many
         target: user
+        labelField: name
     x-search:
       org_id_field: id
     x-import-key: [name]
@@ -277,6 +281,9 @@ definitions:
       delete: {}
       import:
         default: false
+      role_id:
+        x-relationship:
+          labelField: name
     properties:
       role:
         $ref: "#/definitions/role"
@@ -316,6 +323,12 @@ definitions:
     fields:
       entity_name:
         x-entity-select: true
+      requestor_role_id:
+        x-relationship:
+          labelField: name
+      approver_role_id:
+        x-relationship:
+          labelField: name
     required:
       - approver_role
       - preceding_transitions
@@ -375,7 +388,8 @@ definitions:
           - surprised
           - sad
       user_id:
-        x-relationship: {}
+        x-relationship:
+          labelField: name
       comment_id:
         x-relationship:
           labelField: id
@@ -398,7 +412,8 @@ definitions:
   dashboard_widget:
     fields:
       dashboard_id:
-        x-relationship: {}
+        x-relationship:
+          labelField: name
       name: {}
       entity_name: {}
       chart_type:

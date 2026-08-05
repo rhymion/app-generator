@@ -838,7 +838,7 @@ def get_field_metas(
                 'category': 'autocomplete',
                 'required': prop_name in required_fields,
                 'dep_target': rel['target'],
-                'dep_label_field': rel.get('label_field', 'name'),
+                'dep_label_field': rel.get('label_field'),
                 'dep_label_field_is_date': rel.get('label_field_is_date', False),
             })
             continue
@@ -1890,7 +1890,7 @@ def helper_context(
                 and r['prop_name'] in fk_prop_to_dep_var
             ]
             # label_field key is snake_case in the extracted entity relationship dict
-            label_field = rel.get('label_field', 'name')
+            label_field = rel.get('label_field')
             deps.append({
                 'target': rel_target,
                 'var_name': var_name,
@@ -1950,7 +1950,7 @@ def helper_context(
             _render_lookup_where(lookup_columns, 'prisma_val_unique', fk_prefix='deps.')
             if lookup_columns else None
         )
-        label_field = dep_label_info.get('label_field', 'name') if dep_label_info else dep.get('label_field', 'name')
+        label_field = dep_label_info.get('label_field') if dep_label_info else dep.get('label_field')
         label_field_is_date = dep_label_info.get('label_field_is_date', False) if dep_label_info else dep.get('label_field_is_date', False)
         # Pre-compute the TS expression and Prisma include so the template
         # doesn't have to splice list-form labelField (which would break:
@@ -2475,7 +2475,7 @@ def spec_context(
         dep_var = fk_dep_vars.get(r['prop_name'])
         if not dep_var:
             continue
-        label_field = r.get('label_field', 'name')
+        label_field = r.get('label_field')
         search_differs = False
         if label_field and label_field != 'name':
             item_var = f'{dep_var}Record'
@@ -2592,7 +2592,7 @@ def spec_context(
         dep_title = to_title_case(prim)
         list_id_1 = _seed_relation_label_value(
             primary_rel['target'],
-            primary_rel.get('label_field', 'name'),
+            primary_rel.get('label_field'),
             primary_rel.get('label_field_is_date', False),
             schema,
             unique_index=1,
@@ -2603,7 +2603,7 @@ def spec_context(
         primary_dep_var_for_list = to_camel_case(prim)
         list_id_updated = _seed_relation_label_value(
             primary_rel['target'],
-            primary_rel.get('label_field', 'name'),
+            primary_rel.get('label_field'),
             primary_rel.get('label_field_is_date', False),
             schema,
             unique_index=2,
@@ -2620,7 +2620,7 @@ def spec_context(
         # into the inner label-field TextField.
         if f'{prim}_id' in flatten_m2o_props_view and primary_rel:
             check_field_use_accordion = True
-            inner = primary_rel.get('label_field', 'name')
+            inner = primary_rel.get('label_field')
             # List-form label collapses to the leaf of its first path so the
             # inner TextField label rendered by FormView is matched exactly.
             if isinstance(inner, list):
@@ -2820,7 +2820,7 @@ def spec_context(
         # Compute expected autocomplete label for seed index 1
         # name fields: seed uses `${entity_title} ${i}` → 'Character 1' for character
         # other string fields: seed uses `Test ${field_title} ${i}` → 'Test Title 1' for music.title
-        _ac_lf = rel.get('label_field', 'name') or 'name'
+        _ac_lf = (rel.get('label_field') if rel else 'name') or 'name'
         if not rel_target:
             _ac_label_1 = ''
         elif _ac_lf == 'name':

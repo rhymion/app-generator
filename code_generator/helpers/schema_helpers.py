@@ -394,7 +394,7 @@ def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
             continue
         target = rel['target']
         relation_name = prop_name[:-3] if prop_name.endswith('_id') else prop_name
-        label_field = rel.get('labelField', 'name')
+        label_field = rel.get('labelField')
 
         is_selector = relation_type == 'one-to-one'
 
@@ -576,7 +576,7 @@ def _extract_flatten_fields(target_props: dict, parent_model: str) -> list[dict]
                     'enum': None,
                     'is_fk': True,
                     'fk_target': rel_target,
-                    'fk_label_field': rel.get('labelField', 'name'),
+                    'fk_label_field': rel.get('labelField'),
                     'relation_name': field_name.removesuffix('_id'),
                 })
                 continue
@@ -780,7 +780,7 @@ def get_parent_relationships(parent_def: dict, schema: dict | None = None) -> li
         if prop_name == 'creator_id':
             continue
         target = rel['target']
-        lf = rel.get('labelField', 'name')
+        lf = rel.get('labelField')
         result.append({
             'prop_name': prop_name,
             'target': target,

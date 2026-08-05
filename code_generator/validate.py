@@ -342,8 +342,6 @@ def validate_schema(schema: dict) -> None:
             if not target:
                 continue
 
-            target_props = get_entity_properties(target, schema)
-
             # 2c. labelField (string | dotted path | list of either) must
             # resolve through the target's properties / outbound relations.
             if label_field:
@@ -354,16 +352,22 @@ def validate_schema(schema: dict) -> None:
                         f"Definition '{def_key}', property '{prop_name}': {exc}"
                     )
 
-            # 2d. If no labelField, the target must have a 'name' field (fallback label)
-            if not label_field and 'name' not in target_props:
+            # 2d. labelField is mandatory (cmd_563) -- the generator no longer
+            # defaults to 'name' when it's unset, since a target that merely
+            # happens to have a 'name' field is not the same as a declared
+            # display field, and silently picking it produced wrong labels
+            # for consumers whose display field is named differently.
+            if not label_field:
                 errors.append(
                     f"Definition '{def_key}', property '{prop_name}': "
-                    f"relationship target '{target}' has no 'name' field and no "
-                    f"labelField is set in x-relationship.  "
-                    f"The generator falls back to '.name' in DataGrid columns and "
-                    f"autocomplete displays; without it those will render empty.  "
-                    f"Either add a 'name: {{type: string}}' field to '{target}' "
-                    f"or set labelField to the correct display field."
+                    f"x-relationship to '{target}' has no labelField declared.  "
+                    f"Add 'labelField: <field>' under this property's "
+                    f"x-relationship (a single field name, a dotted path through "
+                    f"'{target}'s own m2o/one-to-one relations, e.g. "
+                    f"'{target}.name', or a list of either) naming the field(s) "
+                    f"of '{target}' to render as its display label in DataGrid "
+                    f"columns and autocomplete displays.  The generator no "
+                    f"longer defaults this to 'name'."
                 )
 
             # 2e. x-autocomplete-context (DP-5, cmd_377/379): field names must
@@ -441,7 +445,10 @@ def validate_schema(schema: dict) -> None:
             )
 
     # -----------------------------------------------------------------------
-    # 3. Many-to-many x-relationships labelField checks
+    # 3. x-relationships labelField checks (many-to-many and one-to-many --
+    # generate_types.py's children extraction reads labelField uniformly off
+    # every x-relationships entry regardless of type, so every type needs
+    # the same mandatory check)
     # -----------------------------------------------------------------------
     for def_key, defn in defs.items():
         if not _SNAKE_CASE.match(def_key):
@@ -450,13 +457,12 @@ def validate_schema(schema: dict) -> None:
         for rel_prop, rel_info in x_rels.items():
             if not isinstance(rel_info, dict):
                 continue
-            if rel_info.get('type') != 'many-to-many':
+            if rel_info.get('type') not in ('many-to-many', 'one-to-many'):
                 continue
             target      = rel_info.get('target', '')
             label_field = rel_info.get('labelField')
             if not target or target not in defs:
                 continue
-            target_props = get_entity_properties(target, schema)
             if label_field:
                 try:
                     resolve_label_paths(label_field, target, schema)
@@ -464,12 +470,18 @@ def validate_schema(schema: dict) -> None:
                     errors.append(
                         f"Definition '{def_key}', x-relationships '{rel_prop}': {exc}"
                     )
-            elif not label_field and 'name' not in target_props:
+            else:
+                # cmd_563: mandatory, same as the m2o/o2o check in section 2 --
+                # no default to 'name'.
                 errors.append(
                     f"Definition '{def_key}', x-relationships '{rel_prop}': "
-                    f"many-to-many target '{target}' has no 'name' field and no "
-                    f"labelField is set.  Autocomplete labels in FormUpsert will be "
-                    f"empty.  Add 'name' to '{target}' or set labelField."
+                    f"{rel_info.get('type')} relationship to '{target}' has no "
+                    f"labelField declared.  Add 'labelField: <field>' under this "
+                    f"x-relationships entry (a single field name, a dotted path "
+                    f"through '{target}'s own m2o/one-to-one relations, or a "
+                    f"list of either) naming the field(s) of '{target}' to "
+                    f"render as its display label.  The generator no longer "
+                    f"defaults this to 'name'."
                 )
 
     # -----------------------------------------------------------------------
@@ -936,6 +948,18 @@ def validate_schema(schema: dict) -> None:
                     errors.append(
                         f"Definition '{def_key}': x-bridge parents[{i}] target "
                         f"'{p_target}' not found in definitions."
+                    )
+                # cmd_563: labelField mandatory here too -- bridge_direction.py
+                # renders this parent's display label from it, same as any
+                # other relationship, and must not default to 'name'.
+                if p_target and not p_entry.get('labelField'):
+                    errors.append(
+                        f"Definition '{def_key}': x-bridge parents[{i}] "
+                        f"(target '{p_target}') has no labelField declared.  "
+                        f"Add 'labelField: <field>' to this parent entry "
+                        f"naming the field of '{p_target}' to render as its "
+                        f"display label.  The generator no longer defaults "
+                        f"this to 'name'."
                     )
 
     # -----------------------------------------------------------------------

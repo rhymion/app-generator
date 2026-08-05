@@ -376,7 +376,12 @@ def _derive_relationship(model: PrismaModel, field_name: str, fk_target, user_re
     # genuine Category C content, not a derivable fact to cross-check, so
     # an explicit `type` is used as-is rather than validated.
     rel = {"type": user_rel.get("type", "many-to-one"), "target": fk_target}
-    label_field = user_rel.get("labelField", "name")  # DP-R4-1: default 'name'
+    # cmd_563: no default -- an undeclared labelField must surface as a
+    # validate_schema() error (see validate.py), not silently resolve to
+    # 'name'. Injecting a default here would make that check unreachable,
+    # since validate_schema() only ever sees schemas already run through
+    # this deriver.
+    label_field = user_rel.get("labelField")
     rel["labelField"] = label_field
     for key, value in user_rel.items():
         if key in ("target", "type", "labelField"):

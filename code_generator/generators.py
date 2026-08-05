@@ -152,8 +152,11 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
             rel = prop.get('x-relationship') or {}
             if rel.get('type') == 'many-to-one' and rel.get('target'):
                 stem = prop_name[:-3] if prop_name.endswith('_id') else prop_name
-                label_field = rel.get('labelField', 'name')
-                # v1 supports string labelField only; fall back to 'name' for list labels
+                label_field = rel.get('labelField')
+                # v1 dashboard grouping supports a single string labelField
+                # only (not a composite/dotted-path list) -- this is a real
+                # shape limitation of this feature, not a missing
+                # declaration, so it keeps its own fallback.
                 if not isinstance(label_field, str):
                     label_field = 'name'
                 groupable.append({
@@ -296,7 +299,7 @@ def chart_context(ctx: dict, schema: dict) -> dict:
         rel = prop.get('x-relationship', {})
         if rel.get('target') == row_by:
             fk_field    = prop_name
-            label_field = rel.get('labelField', 'name')
+            label_field = rel.get('labelField')
             break
 
     exclude = {fk_field, start_field, end_field, 'id', 'created_at', 'updated_at', 'creator_id'}
@@ -2242,7 +2245,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                 header_camel = to_camel_case(label_base)
                 prop_camel   = to_camel_case(key)
                 param_name   = f'{prop_camel}Config'
-                label_field  = rel.get('labelField', 'name')
+                label_field  = rel.get('labelField')
                 # label_field may be a single field name or a composite path list
                 # (e.g. ['product.name', 'location', 'lot_number']) — always go
                 # through build_label_expression rather than raw `row.{label_base}.
@@ -2464,7 +2467,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 f"        readOnly\n      />"
             )
         elif rel:
-            label_f       = rel.get('label_field', 'name')
+            label_f       = rel.get('label_field')
             label_fk      = fk.removesuffix('Id')
             rel_name      = rel.get('relation_name', p.removesuffix('_id'))
             target        = rel.get('target', p.removesuffix('_id'))
@@ -2793,7 +2796,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 )
             else:
                 _rel = child.get('relationship') or {}
-                _lf = _rel.get('label_field', 'name') if _rel else 'name'
+                _lf = _rel.get('label_field') if _rel else 'name'
                 _slf = _rel.get('secondary_label_field') if _rel else None
                 _target = _rel.get('target', child.get('name', '')) if _rel else child.get('name', '')
                 _built = build_label_expression('f', _lf, _target, schema)
@@ -3302,7 +3305,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         prop_name     = r['prop_name']
         target        = r['target']
         target_pascal = to_pascal_case(target)
-        label_field   = r.get('label_field', 'name')
+        label_field   = r.get('label_field')
         rel_name      = prop_name.removesuffix('_id') if prop_name.endswith('_id') else prop_name
         sn            = safe_var_name(prop_name)
         initial_var   = f'{sn}InitialOptions'
@@ -3626,12 +3629,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             # Derive label_field: m2m uses x-relationships labelField, self-ref uses own rel, else 'name'
             _rel = c.get('relationship') or {}
             if _rel.get('type') == 'many-to-many':
-                _uc_label = _rel.get('label_field', 'name')
+                _uc_label = _rel.get('label_field')
                 _uc_target = _rel.get('target', child_name)
                 _uc_secondary = _rel.get('secondary_label_field')
             elif child_name == model:
                 _sr = next((r for r in ctx.get('parent_rels_raw', []) if r['target'] == model), None)
-                _uc_label = _sr.get('label_field', 'name') if _sr else 'name'
+                _uc_label = _sr.get('label_field') if _sr else 'name'
                 _uc_target = model
                 _uc_secondary = None
             else:
@@ -3676,7 +3679,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 )
             else:
                 _list_rel = c.get('relationship') or {}
-                _list_lf = _list_rel.get('label_field', 'name')
+                _list_lf = _list_rel.get('label_field') if _list_rel else 'name'
                 _list_target = _list_rel.get('target', child_name)
                 _list_built = build_label_expression('f', _list_lf, _list_target, schema)
                 if _list_built['has_format']:
@@ -3781,7 +3784,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             prop_camel    = to_camel_case(r['prop_name'])
             target        = r['target']
             target_pascal = to_pascal_case(target)
-            label_field   = r.get('label_field', 'name')
+            label_field   = r.get('label_field')
             label_base    = r['prop_name'].removesuffix('_id') if r['prop_name'].endswith('_id') else r['prop_name']
             label_camel   = to_camel_case(label_base)
             config_var    = f'{prop_camel}Config'
@@ -3972,12 +3975,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             if is_m2m:
                 autocomplete_target = rel['target']
                 # label_field for m2m comes from x-relationships labelField config
-                ac_label_field = rel.get('label_field', 'name')
+                ac_label_field = rel.get('label_field')
             elif is_self:
                 autocomplete_target = model
                 # self-referential: use the self-relationship's label_field
                 self_rel_info = next((r for r in parent_rels_raw if r['target'] == model), None)
-                ac_label_field = self_rel_info.get('label_field', 'name') if self_rel_info else 'name'
+                ac_label_field = self_rel_info.get('label_field') if self_rel_info else 'name'
             else:  # optional FK list
                 autocomplete_target = child_name
                 # for optional-FK lists, look for a labelField in the child's x-relationship back to this entity,
@@ -4116,7 +4119,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"      )}}"
             )
         else:
-            _lf = rel.get('label_field', 'name')
+            _lf = rel.get('label_field') if rel else 'name'
             _target = rel.get('target', c.get('name', ''))
             _built = build_label_expression('f', _lf, _target, schema)
             _view_val = _built['expression']

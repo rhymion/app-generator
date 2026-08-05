@@ -252,30 +252,43 @@ JSON Schema properties.)
 A many-to-one FK scalar (e.g. `role_id`) does **not** always need its own `fields:` entry. Two
 cases, verified directly against `code_generator/build_user_schema.py`:
 
-**1. Auto-derived — zero `fields:` entry needed.** If the entity's `properties:` block declares
-the *resolved relation object* (e.g. `role: {$ref: "#/definitions/role"}`) and the corresponding
-FK scalar column (`role_id`) is **not** listed under `fields:` at all, `_auto_infer_fk_fields()`
-(`code_generator/build_user_schema.py:181-198`) detects it: it scans `properties:` for relation-
-object entries, looks up the Prisma model's `relation_fk_fields` for that relation
-(`code_generator/schema_deriver.py`'s `PrismaField.relation_fk_fields`, populated by parsing the
-Prisma `@relation(fields: [...])` clause), and injects `{role_id: {"x-relationship": {}}}` into
-the field spec before derivation runs. `_derive_relationship()`
-(`code_generator/schema_deriver.py:332-356`) then fills the empty override with the only two
-Prisma-derivable defaults: `type: many-to-one` and `labelField: name`.
+**1. Auto-derived type/target — zero `fields:` entry needed for those two.** If the entity's
+`properties:` block declares the *resolved relation object* (e.g. `role: {$ref:
+"#/definitions/role"}`) and the corresponding FK scalar column (`role_id`) is **not** listed
+under `fields:` at all, `_auto_infer_fk_fields()` (`code_generator/build_user_schema.py:181-198`)
+detects it: it scans `properties:` for relation-object entries, looks up the Prisma model's
+`relation_fk_fields` for that relation (`code_generator/schema_deriver.py`'s
+`PrismaField.relation_fk_fields`, populated by parsing the Prisma `@relation(fields: [...])`
+clause), and injects `{role_id: {"x-relationship": {}}}` into the field spec before derivation
+runs. `_derive_relationship()` (`code_generator/schema_deriver.py:332-356`) then fills in the one
+Prisma-derivable default, `type: many-to-one` — `target` is always Prisma-derived regardless.
 
-  This is the live default schema's actual `permission` entity — `role_id` never appears under
-  `permission`'s `fields:` (verified: `grep` of `code_generator/json_schema.yaml` shows no
-  `role_id` key anywhere in that entity), only `properties: { role: { $ref: "#/definitions/role" } }`.
+  **`labelField` is never defaulted (cmd_563)** — `_derive_relationship()` no longer substitutes
+  `'name'` when it's absent. `validate_schema()` (`code_generator/validate.py`, §2d) rejects any
+  m2o/o2o/o2o_bridge `x-relationship` with a resolvable target and no `labelField`, so *every*
+  such FK needs an explicit `labelField`, even when it would have inherited `name` under the old
+  default. For an auto-inferred FK like `permission.role_id` above (no `fields:` entry at all
+  before cmd_563), the declaration now has to move into an explicit `fields:` entry just to carry
+  `labelField`:
+  ```yaml
+  permission:
+    fields:
+      role_id:
+        x-relationship:
+          labelField: name   # target is still Prisma-derived; only labelField needs declaring
+    properties:
+      role:
+        $ref: "#/definitions/role"
+  ```
 
 **2. Still requires an explicit `fields:` entry.** Any of:
-  - **A non-default relationship.** `type` other than `many-to-one` (e.g. `one-to-one`,
+  - **A non-default relationship type.** `type` other than `many-to-one` (e.g. `one-to-one`,
     `one-to-one_bridge`, §12.5) is never inferred — the auto-inferred default is always
     `many-to-one`. A one-to-one FK whose resolved object also appears in `properties:` **must**
     be declared explicitly with `x-relationship: {type: one-to-one, ...}`, or it will be silently
     treated as many-to-one.
-  - **A non-default `labelField`.** The inferred default is always `name`. Example from the live
-    schema — `approval_request` explicitly declares both its FKs because neither uses the
-    default label:
+  - **Any `labelField` at all** (cmd_563) — see above; there is no default to omit it in favor of.
+    Example from the live schema — `approval_request` declares both its FKs' labels explicitly:
     ```yaml
     approval_request:
       fields:
@@ -289,12 +302,14 @@ Prisma-derivable defaults: `type: many-to-one` and `labelField: name`.
   - **An FK scalar with no resolved-object `properties:` entry at all** — e.g. a hidden or
     auto-detected internal-bridge FK (§4.5) that is never rendered as a resolved object. Since
     `fields:` is the sole source of truth for exposure (not `properties:`), such a column needs
-    an explicit entry, even an empty one, just to be included:
+    an explicit entry just to be included — and, per the labelField rule above, that entry can
+    never be empty:
     ```yaml
     dashboard_widget:
       fields:
         dashboard_id:
-          x-relationship: {}   # structural parent FK; no `dashboard:` object in properties:
+          x-relationship:
+            labelField: name   # structural parent FK; no `dashboard:` object in properties:
     ```
   - **Any other field-level override** — `x-ui`, `format`, `default`, `enum`, `_required`, a
     non-default `x-custom-component`, etc. — regardless of relationship status.
@@ -679,8 +694,9 @@ fields:
 
 ## 5. Many-to-One Relationships (`x-relationship`)
 
-Declare a many-to-one FK field under `fields:` — or, when its resolved object also appears in
-`properties:` (below), omit it entirely and let auto-derivation fill it in (see §2):
+Declare a many-to-one FK field under `fields:`. `type` and `target` are Prisma-derivable and can
+be omitted when the resolved object also appears in `properties:` (see §2), but `labelField`
+cannot — it has no default and must always be declared explicitly (cmd_563):
 
 ```yaml
 booking:
@@ -788,6 +804,7 @@ user:
     roles:                      # property name under properties:
       type: many-to-many
       target: role
+      labelField: name         # mandatory (cmd_563) — no default, even when it's just "name"
   required: [roles]
   properties:
     roles:
@@ -797,12 +814,13 @@ user:
         $ref: "#/definitions/role"
 ```
 
-### `labelField` for targets without a `name` property
+### `labelField`
 
-By default the generator uses `name` as the display label for autocomplete options and
-column values. When the target entity uses a **different field** as its primary label (e.g.
-`title`, `code`, `order_no`), declare the relationship in `x-relationships` with
-`labelField`:
+`labelField` declares the display label for autocomplete options and column values, and is
+**mandatory on every `x-relationships` entry** (many-to-many and one-to-many alike) — there is
+no default, even for a target whose label field happens to be named `name` (cmd_563; see
+§15.2). When the target entity uses a **different field** as its primary label (e.g. `title`,
+`code`, `order_no`), point `labelField` at it:
 
 ```yaml
 work:
@@ -814,6 +832,7 @@ work:
     followers:
       type: many-to-many
       target: user
+      labelField: name
   properties:
     fundings:
       type: array
@@ -1138,7 +1157,7 @@ note:
 | `parentCardinality` | `exactlyOne` — every child row resolves to exactly one parent. |
 | `parents[].role` | Unique label for the parent edge (used for Prisma `@relation` names). |
 | `parents[].target` | A parent entity that may own this child. |
-| `parents[].labelField` | Field on that parent shown as the bridge label (label may differ per parent type — see the bridge-interface design doc). |
+| `parents[].labelField` | **Mandatory** (cmd_563, no default). Field on that parent shown as the bridge label (label may differ per parent type — see the bridge-interface design doc). |
 
 Parents do **not** declare the bridge child; the relationship is driven entirely from the
 child's `x-bridge.parents`.
@@ -1669,7 +1688,8 @@ resource:
   fields:
     name: {}
     organization_id:
-      x-relationship: {}   # target: organization, labelField: name — both Prisma-derivable defaults
+      x-relationship:
+        labelField: name   # target: organization is Prisma-derived; labelField still must be declared
 
 booking:
   x-generate:
@@ -1790,22 +1810,27 @@ will not be confused with the structural link as long as the conventional name e
 
 ### 15.2 The `name` field and `labelField`
 
-`labelField` in `x-relationship` / `x-relationships` controls the display label and is now
-respected in most contexts:
+`labelField` in `x-relationship` / `x-relationships` controls the display label. **It has no
+default (cmd_563)** — every relationship that needs one must declare `labelField` explicitly,
+even when the target's display field is literally named `name`:
 
 | Location | Behaviour |
 |---|---|
-| `FormUpsert` Autocomplete (many-to-one) | Uses `labelField` (default `name`) |
-| `FormUpsert` many-to-many autocomplete | Uses `labelField` from `x-relationships` (default `name`) |
-| `FormUpsert` self-referential autocomplete | Uses `labelField` from the self-ref relation (default `name`) |
-| DataGrid FK column fallback (no `valueOptions`) | Uses `labelField` from `x-relationship` (default `name`) |
-| Test generation fixtures | Uses `name` field when no explicit primary field is set |
+| `FormUpsert` Autocomplete (many-to-one) | Uses the declared `labelField` |
+| `FormUpsert` many-to-many autocomplete | Uses the declared `labelField` from `x-relationships` |
+| `FormUpsert` self-referential autocomplete | Uses the declared `labelField` from the self-ref relation |
+| DataGrid FK column fallback (no `valueOptions`) | Uses the declared `labelField` from `x-relationship` |
+| Test generation fixtures | Uses the declared `labelField`; falls back to `name` only for children with no `x-relationships` entry at all (e.g. plain owned CRUD rows, not entity references) |
 | Comment thread creator display | `user.name` and `.avatar` — hardcoded |
 | Plain text list children (`x-outputType: list`, no file_type) | `f.name` — these children are text containers whose field IS `name` |
 
-**[Strong guideline] Every entity used as a relationship target should have a `name: string` field**
-or set `labelField` explicitly in every `x-relationship` / `x-relationships` referencing it.
-The generator validates this and reports an error if neither is present.
+**`labelField` is mandatory wherever a relationship needs a display label** — a target having a
+`name: string` field does *not* excuse the declaration; before cmd_563 it did (the generator
+silently used `name`), which is exactly the defect cmd_563 closed (a target whose display field
+happened to be named something else, or that had no `name` field at all, rendered wrong or empty
+labels with no warning). `validate_schema()` rejects generation with a clear per-field message
+when `labelField` is missing from any `x-relationship` (many-to-one/one-to-one/one-to-one_bridge),
+`x-relationships` entry (many-to-many/one-to-many), or `x-bridge.parents[]` entry.
 
 ---
 
@@ -1925,7 +1950,7 @@ FK fields.
 | `message` on comment child | **Hard constraint** (validated) | Required for `x-outputType: comments` |
 | Chart start/end fields | **Hard constraint** (validated) | Must exist; configurable via `start_field`/`end_field` |
 | Child-to-parent FK naming | **Strong guideline** | `{parent_model}_id` strongly recommended; generator falls back to x-relationship scanning if absent |
-| `name` field on targets | **Strong guideline** (validated) | Needed wherever `labelField` is not explicitly set |
+| `labelField` on every relationship | **Hard constraint** (validated) | `x-relationship` / `x-relationships` / `x-bridge.parents[]` must declare `labelField` explicitly — no default, even when the target's field is named `name` (cmd_563) |
 | Timestamp fields | **Strong guideline** | `created_at` / `updated_at` must exist in Prisma for every generated entity |
 | Creator/updater fields | **Strong guideline** | `creator_id` / `updater_id` must exist in Prisma for entities using `x-generate`; comment children (`x-outputType: comments`) need only `creator_id` — **no `updater_id`** |
 | FK to embedded entity | **Hard constraint** | A FK (`x-relationship`) must not target an embedded child entity (one without `x-generate`) — see §15.9 |
@@ -1989,11 +2014,14 @@ For detailed subsystem documentation, see:
 
 ### FK auto-derivation (§2)
 
+`type` and `target` can be auto-inferred; `labelField` never can (cmd_563) — so in practice
+every FK ends up with an explicit `fields:` entry carrying at least `labelField`.
+
 | Situation | `fields:` entry needed? |
 |---|---|
-| Resolved object in `properties:`, default `many-to-one` type + `name` labelField | No — auto-inferred |
-| Resolved object in `properties:`, non-default `labelField` or `type` | Yes, explicit `x-relationship` override |
-| FK column with no resolved object in `properties:` | Yes, at least `{}` — `fields:` is the sole exposure signal |
+| Resolved object in `properties:`, default `many-to-one` type | Only for `labelField` — `type`/`target` auto-infer |
+| Resolved object in `properties:`, non-default `type` | Yes, explicit `x-relationship` override (plus `labelField`) |
+| FK column with no resolved object in `properties:` | Yes — `fields:` is the sole exposure signal, and `labelField` is mandatory once present |
 | `type: one-to-one` / `one-to-one_bridge` | Always explicit — never an inferred default |
 
 ### Array rendering (`x-outputType` on array properties)

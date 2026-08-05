@@ -186,6 +186,7 @@ definitions:
       roles:
         type: many-to-many
         target: role
+        labelField: name
     allOf:
       - $ref: "#/definitions/user"
       - type: object
@@ -219,6 +220,7 @@ definitions:
       roles:
         type: many-to-many
         target: role
+        labelField: name
     x-self-only:
       admin_bypass: true
     allOf:
@@ -251,6 +253,7 @@ definitions:
       users:
         type: many-to-many
         target: user
+        labelField: name
     allOf:
       - $ref: "#/definitions/role"
       - type: object
@@ -299,6 +302,7 @@ definitions:
       users:
         type: many-to-many
         target: user
+        labelField: name
     allOf:
       - $ref: "#/definitions/organization"
       - type: object

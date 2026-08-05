@@ -44,7 +44,7 @@ def get_new_form_bridge(entity_def: dict) -> dict | None:
         {
             'role': p.get('role', ''),
             'target': p.get('target', ''),
-            'label_field': p.get('labelField', 'name'),
+            'label_field': p.get('labelField'),
         }
         for p in parents_raw
         if isinstance(p, dict) and p.get('target')

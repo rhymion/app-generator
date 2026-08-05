@@ -135,6 +135,7 @@ definitions:
       roles:
         type: many-to-many
         target: role
+        labelField: name
     x-custom-components:
       - name: MfaToggle
         path: "@/components/_standard/MfaToggle"
@@ -173,6 +174,7 @@ definitions:
       roles:
         type: many-to-many
         target: role
+        labelField: name
     # x-self-only (cmd_536): `setting` is a proxy view of the acting
     # user's OWN `user` row — id === creator_id always holds for every
     # real account (see lib/auth/creator-id-self-reference-guard.test.ts),
@@ -233,6 +235,7 @@ definitions:
       users:
         type: many-to-many
         target: user
+        labelField: name
     allOf:
       - $ref: '#/definitions/__role'
       - type: object
@@ -279,6 +282,7 @@ definitions:
       users:
         type: many-to-many
         target: user
+        labelField: name
     x-search:
       org_id_field: id
     allOf:

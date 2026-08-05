@@ -71,6 +71,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   entity-agnostic mechanism, not new) recording who renamed it and when. See
   `docs/knowledge/appendix/inventory-reservation-split.md` §7.1–7.2 and
   `docs/knowledge/appendix/cmd562-location-id-fk-consumer-migration.md` for the consumer migration.
+- **`labelField` is now mandatory on every relationship — no default to `'name'`** (cmd_563):
+  `x-relationship`, `x-relationships` (many-to-many and one-to-many), and `x-bridge.parents[]`
+  entries that omitted `labelField` silently rendered the target's `name` field as the display
+  label — wrong or empty whenever the target's actual display field was named something else, or
+  had no `name` field at all, with no warning anywhere in the pipeline. The root cause was
+  `schema_deriver.py`'s `_derive_relationship()`, which injected the `'name'` default into every
+  undeclared `x-relationship` *before* `validate_schema()` ever ran, making that check's existing
+  "target has no `name` field" carve-out unreachable for the far more common case — a target that
+  *does* have an unrelated `name` field, silently mislabeled. The deriver no longer injects a
+  default; `validate_schema()` now rejects any of the three declaration surfaces above that lack
+  `labelField`, naming the entity/field and how to declare it (a field name, a dotted path through
+  the target's own m2o/one-to-one relations, or a list of either). This is a breaking
+  schema-config change for any existing consumer relying on the old default — it must add an
+  explicit `labelField: name` (or the correct field) to every relationship that was previously
+  unlabeled before its next `generate-code` run, or generation fails immediately with a named
+  error; the label itself does not change for a consumer whose target's display field actually is
+  `name`. See `docs/knowledge/schema-yaml-configuration.md` §5, §6, and §15.2.
 
 ### Security
 - **Server-action path can no longer bypass multi-stage approval ordering** (cmd_540): the
