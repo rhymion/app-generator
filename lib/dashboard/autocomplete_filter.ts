@@ -1,0 +1,21 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+// Autocomplete candidate filter for dashboard.
+//
+// filterAutocompleteOptions() returns a WHERE contribution that is ANDed
+// after the existing authorization (accessAnd) and search-token (matchOr)
+// clauses inside searchDashboardOptions() — it can only NARROW the
+// candidate set, never widen or replace the authorization scope.
+//
+// WARNING: `context.formValues` is untrusted client input. Use it only to
+// narrow results (e.g. filter by a sibling FK selected in the same form).
+// Never use it to widen the result set or to bypass authorization.
+export type AutocompleteFilterContext = {
+  callerEntity?: string;
+  formValues?: Record<string, unknown>;
+};
+
+export function filterAutocompleteOptions(
+  _context: AutocompleteFilterContext,
+): Record<string, unknown> {
+  return {};
+}

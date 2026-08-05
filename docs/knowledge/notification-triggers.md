@@ -33,14 +33,34 @@ built to notify every user holding the approving role for a newly
 created `approval_request`, excluding the requester and optionally
 scoped to an organization.
 
-It is called from `lib/leave_request/service_after_create.ts:53` and
-`lib/receiving_receipt/service.ts:91,196` (both inside the entity's
-`$transaction()`, using `tx` for the role/user lookup reads only —
-`notify()` itself is fire-and-forget and not part of that transaction).
-Wiring a new entity's approval flow up to this trigger is a matter of
-calling `notifyApprovalRequestCreated(tx, approvalRequestId, options)`
-from that entity's own `service_after_create.ts` once its
-`approval_request` row is created.
+For a top-level entity, it is wired into the generated
+`service_after_create_stub.ts.jinja2` afterCreate hook (called once inside
+the entity's `$transaction()`, using `tx` for the role/user lookup reads
+only — `notify()` itself is fire-and-forget and not part of that
+transaction) — `leave_request`/`receiving_receipt` below are illustrative
+example entity names for a consuming schema (this repo's own default
+`json_schema.yaml` declares no entity with a `one-to-one_bridge` to
+`approvable`, so neither actually exists in this repo's own generated
+`lib/`; see `docs/knowledge/appendix/approval-flow.md` §16.2). Wiring a
+new entity's approval flow up to this trigger is a matter of calling
+`notifyApprovalRequestCreated(tx, approvalRequestId, options)` from that
+entity's own `service_after_create.ts` (e.g.
+`lib/leave_request/service_after_create.ts`) once its `approval_request`
+row is created — the same call also appears in the split-action route
+(`code_generator/templates/split_action_route.ts.jinja2`) for
+`x-approval-lines` children (§16.10).
+
+**cmd_539**: this trigger also fires on **resubmission** — re-submitting a
+rejected `approval_request` reuses the existing row (only its `status`
+flips back to `pending`) rather than creating a new one, so this trigger
+did not originally re-fire for that transition; approver-role holders were
+never told a rejected request needed their attention again after a
+resubmit. Both `resubmitApprovalRequest()` implementations (the server
+action in `lib/approval_request/actions_core.ts` and the REST route
+`app/api/approval_request/[id]/resubmit/route.ts`) now call
+`notifyApprovalRequestCreated()` again after the status flip, excluding
+the resubmitter. See `docs/knowledge/appendix/approval-flow.md` §16.6 for
+the full before/after.
 
 ### Link target convention (cmd_479)
 
@@ -94,6 +114,36 @@ post-transaction `getApprovalRequestRecipient()` + `notify()` block from
 `actions.ts` into both route handlers. If either implementation changes
 its post-approval/rejection side effects, check whether the other needs
 the same change — there's no shared code path enforcing parity.
+
+## Approval order-reached notification (cmd_541)
+
+A `preceded_by` chain (§16.5 of `docs/knowledge/appendix/approval-flow.md`) creates every flow's
+`approval_request` up front, when the approvable entity is created — so the "approval request
+creation notification" above already fires once for every flow's approver role at that point,
+including flows that aren't actionable yet because a preceding flow hasn't been approved. That
+earlier notification told them a request exists; it did not tell them when they could actually
+act on it. Approving a preceding flow used to be silent for the next flow's approvers — nothing
+told them their turn had arrived.
+
+`findNewlyActionableFollowFlowIds()` (`lib/approval_request/order-check.ts`) is called from inside
+`approveApprovalRequest()`'s transaction, after the status update, in **both** independent
+implementations (`lib/approval_request/actions_core.ts`'s server action and
+`app/api/approval_request/[id]/approve/route.ts`'s REST route — see the "Two independent
+approve/reject implementations" note above; this trigger needed the same duplication). It walks
+the just-approved flow's `followed_by` set and, for each follow-on flow, checks whether *all* of
+its `preceded_by` flows now have an approved `approval_request` on the same approvable — the same
+check `assertApprovalOrder()` runs in the opposite direction (backward from the flow being acted
+on, instead of forward from the flow that just completed).
+
+Any follow-on flow whose ordering constraint just became satisfied gets its approver role notified
+via `notifyApprovalOrderReached()` (`lib/_notifyApprovalRequest.ts`, type
+`approval_order_reached`) — fired after the transaction commits, using the plain `prisma` client
+(not `tx`), the same pattern Trigger #3 above uses. This is a distinct notification type from the
+creation-time `approval_requested` one those same approvers already hold, not a duplicate of it —
+the two are asserted separately (by type) in
+`cypress/e2e/api/multi_stage_approval_order_reached.cy.ts`. A `before.status !== 'approved'` check,
+read inside the same transaction as the status update, guards against re-sending this notification
+if the same request is ever approved more than once.
 
 ## Delivery mechanism
 

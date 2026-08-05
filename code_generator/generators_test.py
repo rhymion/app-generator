@@ -134,6 +134,7 @@ from helpers.schema_helpers import (
     derive_text_fields,
     get_entity_properties,
     get_entity_required,
+    get_self_only_flags,
 )
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import (
@@ -2005,8 +2006,22 @@ def helper_context(
             'search_differs': search_differs,
             'prisma_include_str': prisma_include_str,
             'label_has_format': label_has_format,
-            # needs_second only for transitive (non-direct) deps matching primary FK target
-            'needs_second': not is_direct and dep['target'] == primary_fk_dep_target,
+            # needs_second only for transitive (non-direct) deps matching primary FK target.
+            # Compare on var_name (reference-name axis, e.g. 'product'), not dep['target']
+            # (entity-name axis, e.g. 'item') — primary_fk_dep_target is always a reference
+            # name (the x-display.table key, snake_case). The single_fk_target_aliases pass
+            # above already renames var_name to the camelCase reference-name stem whenever it
+            # differs from the target entity name, so var_name (camelCase) is on the same axis
+            # as to_camel_case(primary_fk_dep_target) in every case, including when the
+            # relation's reference name differs from its target entity name (e.g. reference
+            # `product` -> entity `item`) or is multi-word (e.g. reference `patient_rel`,
+            # var_name `patientRel` — comparing the raw snake_case value here would always
+            # miss for multi-word reference names).
+            'needs_second': (
+                not is_direct
+                and primary_fk_dep_target is not None
+                and dep['var_name'] == to_camel_case(primary_fk_dep_target)
+            ),
             # one-to-one FK pre-creates needed when creating this dep record (e.g. commentable_id)
             'internal_fk_deps': get_all_internal_fk_deps(dep['target'], schema),
             'lookup_field': lookup_field,
@@ -2839,8 +2854,23 @@ def spec_context(
     # mirrors build_context.py's/context.py's identical computation. Drives
     # the @mention picker/link UI scenario appended to the "Add comment"
     # step below.
+    #
+    # cmd_538: `comment_children_data` alone only covers the direct-child
+    # shape (a property with x-outputType: comments declared straight on
+    # this entity). It misses the commentable-bridge shape (one-to-one_bridge
+    # FK to `commentable`, per docs/knowledge/appendix/comment-bridge.md
+    # §17.2 — the recommended pattern and the one this fixture/probe uses).
+    # Before this fix, ANY entity using that shape got zero "Add comment"/
+    # mention UI test coverage from the standard generated spec, silently —
+    # comment_has_mention was always False for it. tasks_registry_context's
+    # has_mention_comments (M1/M2 API tests) already ORs in this same
+    # OTO-bridge signal via get_internal_one_to_one_fks; this brings the UI
+    # spec's detection in line with it.
+    _has_commentable_oto_for_mention = any(
+        d['target'] == 'commentable' for d in get_internal_one_to_one_fks(model_name, schema)
+    )
     _comment_def_for_mention = _raw_def('comment', schema)
-    comment_has_mention = bool(comment_children_data) and any(
+    comment_has_mention = (bool(comment_children_data) or _has_commentable_oto_for_mention) and any(
         isinstance(fp, dict) and fp.get('x-mention') is True
         for fp in (_comment_def_for_mention.get('properties') or {}).values()
     )
@@ -3323,6 +3353,26 @@ def api_spec_context(
     exportable_bridge_fk_names = sorted(_api_internal_bridge_fk_names)
     has_exportable_bridge_fks = bool(exportable_bridge_fk_names)
 
+    # x-self-only: creator_id is exported (read-only diagnostic column, see
+    # build_context.py) but rejected by the import route if present in the
+    # CSV header (import_unimportable_columns). The N11-N13 round-trip tests
+    # below re-submit the exported CSV verbatim to prove the natural key
+    # round-trips — they must strip this column first, or every self-only
+    # entity's round-trip fails on UNIMPORTABLE_COLUMN by construction, not
+    # from a real regression.
+    #
+    # Checked at the def_key level first, same reasoning as build_context.py:
+    # a pass-through proxy view (e.g. `setting`) declares x-self-only on its
+    # own view-level dict, not on the shared raw entity model_def resolves
+    # to — falling back to model_def only covers entities with an exclusive
+    # raw twin (or no raw/view split at all).
+    _api_is_self_only, _ = get_self_only_flags(
+        schema.get('definitions', {}).get(definition_key or parent, {})
+    )
+    if not _api_is_self_only:
+        _api_is_self_only, _ = get_self_only_flags(model_def)
+    round_trip_unimportable_columns = ['creator_id'] if _api_is_self_only else []
+
     # cmd_421 Domain 4 (M1, subtask_421i): x-mention name resolution after
     # save. Mirrors build_context.py's comment_has_mention detection exactly
     # (the shared 'comment' model has an x-mention: true field AND this
@@ -3748,6 +3798,8 @@ def api_spec_context(
         # CSV Export (cmd_421 N9): internal bridge FK exclusion
         'has_exportable_bridge_fks': has_exportable_bridge_fks,
         'exportable_bridge_fk_names': exportable_bridge_fk_names,
+        'round_trip_unimportable_columns': round_trip_unimportable_columns,
+        'is_self_only': _api_is_self_only,
         # Search coverage (cmd_421 Domain 5)
         'is_searchable': is_searchable,
         'search_sample_field': search_sample_field,

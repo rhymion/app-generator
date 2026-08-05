@@ -92,7 +92,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         title: `Your ${entityName ?? 'request'} was rejected`,
         href,
         approvalRequestId: id,
-        status: 'rejected',
+        // cmd_539: was hard-coded to 'rejected' even for a terminal
+        // rejection — the notification fired either way, but its payload
+        // misreported the actual outcome.
+        status: newStatus,
         message: message ?? null,
       });
     }

@@ -137,6 +137,33 @@ export async function POST(request: NextRequest) {
     const _importAssocOrgs = await getAssociatedOrganizations(actorId);
     const _importOrgIds = _importAssocOrgs.map((o) => o.id);
 {% endif %}
+{% for spec in import_fk_specs %}
+{% if spec.is_composite %}
+    // cmd_548: composite/dotted labelField FK — {{ spec.raw }}. There is no
+    // single scalar to look up by, so the whole rendered label is matched
+    // instead: build a label->id[] map once (NOT per row) from every
+    // candidate {{ spec.lookup_entity }} row, using the SAME label
+    // expression the export getter renders (see x_relationships_list /
+    // import_label_expr in build_context.py) — export and import can never
+    // disagree on what a label looks like. Skipped entirely when the CSV
+    // header doesn't include this column, so an import that doesn't touch
+    // this FK never pays for the full-table read.
+    const _{{ spec.var_prefix }}_label_map = new Map<string, string[]>();
+    if (headerFields.includes('{{ spec.csv_col }}')) {
+      const _{{ spec.var_prefix }}_candidates = await prisma.{{ spec.lookup_entity }}.findMany({
+        include: {{ spec.prisma_include | tojson }},
+{% if spec.lookup_entity_filter_by_org %}
+        where: { organization_id: { in: _importOrgIds } },
+{% endif %}
+      });
+      for (const c of _{{ spec.var_prefix }}_candidates) {
+        const _lbl = ({{ spec.import_label_expr }}).trim();
+        if (!_{{ spec.var_prefix }}_label_map.has(_lbl)) _{{ spec.var_prefix }}_label_map.set(_lbl, []);
+        _{{ spec.var_prefix }}_label_map.get(_lbl)!.push(c.id);
+      }
+    }
+{% endif %}
+{% endfor %}
 
     for (let i = 0; i < rows.length; i++) {
       const rowNum = i + 2; // 1-indexed CSV row, +1 for the header row
@@ -184,6 +211,33 @@ export async function POST(request: NextRequest) {
       const fkData: Record<string, unknown> = {};
 {% for spec in import_fk_specs %}
 {% if not spec.is_key %}
+{% if spec.is_composite %}
+      // Composite-label FK (map lookup, cmd_548): {{ spec.raw }} → {{ spec.lookup_entity }}
+      let _{{ spec.result_col }}: string | null = null;
+      const _{{ spec.var_prefix }}_csv_val = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '').trim();
+{% if spec.fk_nullable %}
+      if (_{{ spec.var_prefix }}_csv_val === '') {
+        // Empty → FK = null (nullable FK is allowed to be unset)
+        _{{ spec.result_col }} = null;
+      } else {
+{% else %}
+      {
+{% endif %}
+        const _{{ spec.var_prefix }}_ids = _{{ spec.var_prefix }}_label_map.get(_{{ spec.var_prefix }}_csv_val);
+        if (!_{{ spec.var_prefix }}_ids || _{{ spec.var_prefix }}_ids.length === 0) {
+          errors.push({ row: rowNum, code: 'NOT_FOUND',
+            message: `Row ${rowNum}: no {{ spec.lookup_entity }} matches label '${_{{ spec.var_prefix }}_csv_val}' (column {{ spec.csv_col }})` });
+          continue;
+        }
+        if (_{{ spec.var_prefix }}_ids.length > 1) {
+          errors.push({ row: rowNum, code: 'MULTI_MATCH',
+            message: `Row ${rowNum}: ${_{{ spec.var_prefix }}_ids.length} {{ spec.lookup_entity }} rows share label '${_{{ spec.var_prefix }}_csv_val}' (column {{ spec.csv_col }}) — ensure each {{ spec.lookup_entity }} record has a unique label, or use the '{{ spec.result_col }}' column to identify rows by ID` });
+          continue;
+        }
+        _{{ spec.result_col }} = _{{ spec.var_prefix }}_ids[0];
+      }
+      fkData.{{ spec.result_col }} = _{{ spec.result_col }};
+{% else %}
       // Non-key FK: {{ spec.raw }} → lookup {{ spec.lookup_entity }} by {{ spec.lookup_field }}
       let _{{ spec.result_col }}: string | null = null;
       const _{{ spec.var_prefix }}_csv_val = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '');
@@ -213,6 +267,7 @@ export async function POST(request: NextRequest) {
       }
       fkData.{{ spec.result_col }} = _{{ spec.result_col }};
 {% endif %}
+{% endif %}
 {% endfor %}
 
       let rowHasError = false;
@@ -228,9 +283,32 @@ export async function POST(request: NextRequest) {
       }
       if (rowHasError) continue;
 
-{% if should_filter_by_org %}
+{% if should_filter_by_org and is_self_only %}
+      // Built as a separately-typed const (not spread inline into the call)
+      // so TS doesn't have to jointly infer this object's type and the
+      // Prisma findMany() overload in one step — inline spreads here can
+      // hit TS7022 (self-referential implicit-any) against generic Prisma
+      // args typing.
+      const _matchWhere: Record<string, unknown> = { ...keyWhere, organization_id: { in: _importOrgIds }, creator_id: actorId };
       const matches = await prisma.{{ model }}.findMany({
-        where: { ...keyWhere, organization_id: { in: _importOrgIds } },
+        where: _matchWhere,
+        select: {{ item_context_select }},
+      });
+{% elif should_filter_by_org %}
+      const _matchWhere: Record<string, unknown> = { ...keyWhere, organization_id: { in: _importOrgIds } };
+      const matches = await prisma.{{ model }}.findMany({
+        where: _matchWhere,
+        select: {{ item_context_select }},
+      });
+{% elif is_self_only %}
+      // x-self-only: import can only see/match the caller's own rows — a
+      // natural-key collision with another user's row must not surface as
+      // MULTI_MATCH or silently update it; it's treated as no match (falls
+      // through to CREATE, which then fails on the DB's own uniqueness
+      // constraint if one exists — a generic write error, not a leak).
+      const _matchWhere: Record<string, unknown> = { ...keyWhere, creator_id: actorId };
+      const matches = await prisma.{{ model }}.findMany({
+        where: _matchWhere,
         select: {{ item_context_select }},
       });
 {% else %}
@@ -262,7 +340,14 @@ export async function POST(request: NextRequest) {
       // matches.length === 1
 {% if import_can_update %}
       const existing = matches[0];
+{% if is_self_only %}
+      // x-self-only: ownership is the sole gate — matches was already
+      // creator_id-scoped above, so this always holds here; kept explicit
+      // rather than relying on the query, per the "no escape" invariant.
+      const canUpdate = existing.creator_id === actorId;
+{% else %}
       const canUpdate = await canAccess('{{ parent }}', 'update', actorId, existing);
+{% endif %}
       if (!canUpdate) {
         errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to update this row' });
         continue;

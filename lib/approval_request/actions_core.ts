@@ -1,7 +1,10 @@
 import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow, getUserRoleIds } from '@/lib/authz';
 import { notify } from '@/lib/_notifier';
+import { notifyApprovalOrderReached, notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
+import { findNewlyActionableFollowFlowIds } from '@/lib/approval_request/order-check';
 import { revalidatePath } from 'next/cache';
+import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 
 // approval_history.pre_status/post_status are separate legacy Int columns
 // (ordinal snapshot, out of Class A Batch A1 scope) — this maps the
@@ -135,10 +138,24 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     revalidatePath(`/[locale]/${entityName}/edit/${targetId}`, 'page');
   }
 
+  // cmd_540: this server action is reachable directly (Next.js Server Action
+  // RPC) from any authenticated client — ApprovalSection.tsx's
+  // `precedingApproved` check only hides the button, it enforces nothing
+  // server-side. assertApprovalOrder() is the same ordering gate the REST
+  // route (app/api/approval_request/[id]/approve/route.ts) already calls;
+  // reusing it here (rather than reimplementing) keeps the rejection wording
+  // identical between both entry points.
   async function approveApprovalRequest(id: string, message?: string): Promise<void> {
     await assertApproverRole(id);
+    await assertApprovalOrder(id);
     const userId = await getSessionUserIdOrThrow();
+    let orderReachedFlowIds: string[] = [];
+    let orderReachedApprovableId: string | undefined;
     await prisma.$transaction(async (tx) => {
+      const before = await tx.approval_request.findUnique({
+        where: { id },
+        select: { status: true, approval_flow_id: true },
+      });
       const req = await tx.approval_request.update({
         where: { id },
         data: { status: 'approved' },
@@ -176,6 +193,17 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
         });
         await deps.dispatchOnApproved(tx, req.approval_flow.entity_name, approvableData.id, userId);
       }
+      // cmd_541: a preceded_by chain creates every flow's approval_request
+      // up front, but a follow-on flow isn't actionable until its preceding
+      // flow(s) are approved. `before.status !== 'approved'` guards against
+      // re-notifying if this same request is approved a second time (e.g. a
+      // retried request) — findNewlyActionableFollowFlowIds() would
+      // otherwise recompute the same already-satisfied ordering as "new"
+      // every time.
+      if (before && before.status !== 'approved') {
+        orderReachedFlowIds = await findNewlyActionableFollowFlowIds(tx, req.approvable_id, before.approval_flow_id);
+        orderReachedApprovableId = req.approvable_id;
+      }
     });
     // Fire-and-forget notification (trigger #3): the requester learns the
     // outcome without sharing the approval_history transaction.
@@ -189,6 +217,16 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
         message: message ?? null,
       });
     }
+    // Fire-and-forget notification (trigger #4, cmd_541): approvers of any
+    // follow-on flow that just became actionable. Reuses the same
+    // approvable-target link (entityName/targetId) already resolved above.
+    if (orderReachedApprovableId && orderReachedFlowIds.length > 0) {
+      await notifyApprovalOrderReached(prisma, orderReachedApprovableId, orderReachedFlowIds, {
+        excludeUserId: userId,
+        targetEntityName: entityName,
+        targetId,
+      });
+    }
     revalidateApprovableTarget(entityName, targetId);
   }
 
@@ -198,7 +236,9 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     options?: { reason?: string; reasonKind?: number },
   ): Promise<void> {
     await assertApproverRole(id);
+    await assertApprovalOrder(id);
     const userId = await getSessionUserIdOrThrow();
+    let newStatus: 'rejected' | 'terminal_rejected' = 'rejected';
     await prisma.$transaction(async (tx) => {
       const req = await tx.approval_request.findUnique({
         where: { id },
@@ -207,7 +247,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
       if (!req?.approval_flow) throw new Error('Approval request not found');
 
       const terminal = deps.isTerminalReject(req.approval_flow.entity_name);
-      const newStatus = terminal ? 'terminal_rejected' : 'rejected';
+      newStatus = terminal ? 'terminal_rejected' : 'rejected';
 
       const result = await tx.approval_request.update({
         where: { id },
@@ -256,7 +296,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
         title: `Your ${entityName ?? 'request'} was rejected`,
         href,
         approvalRequestId: id,
-        status: 'rejected',
+        status: newStatus,
         message: message ?? null,
       });
     }
@@ -286,6 +326,17 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
       });
     });
     const { entityName, targetId } = await getApprovalRequestRecipient(id);
+    // cmd_539: resubmission reuses the existing approval_request row (only
+    // its status changes, pending again) rather than creating a new one, so
+    // the create-path notification (notifyApprovalRequestCreated, wired
+    // into service_after_create_stub.ts.jinja2 / split_action_route.ts.jinja2)
+    // never re-fires here on its own — the approver-role holders were never
+    // told the request needs their attention again.
+    await notifyApprovalRequestCreated(prisma, id, {
+      excludeUserId: userId,
+      targetEntityName: entityName,
+      targetId,
+    });
     revalidateApprovableTarget(entityName, targetId);
   }
 

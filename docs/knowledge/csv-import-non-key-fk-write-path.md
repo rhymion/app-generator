@@ -52,22 +52,27 @@ entity gets the same org-filtered lookup cmd_521 gives key FKs, and a *required*
 [entity_name]` schema) now counts toward CREATE feasibility — proj_b's own `approval_flow` went
 from `import_can_create: false` (every row hit `ENTITY_IMPORT_CREATE_NOT_SUPPORTED`) to `true`.
 
-## Excluded on purpose: composite/dotted labelFields and read-only FKs
+## Excluded on purpose: read-only FKs (composite/dotted labelFields — see cmd_548)
 
-A relation whose `labelField` is a list or a dotted path (e.g. a composite display column) has
-no single lookup field to resolve a CSV cell back to — it stays export-only. Same for a
-`x-readonly` FK: visible in export, but there's no reason to make it writable via import just
-because it's writable via export. Both classes are collected into
+A `x-readonly` FK stays export-only: visible in export, but there's no reason to make it writable
+via import just because it's writable via export. It is collected into
 `import_unimportable_columns` (see below) instead of silently disappearing.
+
+A relation whose `labelField` is a list or a dotted path (e.g. a composite display column) was
+**also** excluded here at the time this task shipped — there was no single lookup field to
+resolve a CSV cell back to. This is **no longer true**: cmd_548 made composite/dotted labelFields
+import-resolvable via full-label-text matching against a pre-built map. See
+`docs/knowledge/csv-import-composite-labelfield.md`.
 
 ## Fail-loud companion: `UNIMPORTABLE_COLUMN`
 
 Independent of root cause, a route that answers `200 succeeded` while quietly discarding a
 column it can't write is a trap for the next schema author. `import_unimportable_columns` lists
-every exported FK display column that has **no** entry in `import_fk_specs` (composite labelField
-or read-only). The generated route checks the CSV header against this list **before** processing
-any row — same convention as the existing `MISSING_COLUMN` check (`row: 0`, blocks the whole
-request) — and returns a new `UNIMPORTABLE_COLUMN` error instead of a false "succeeded".
+every exported FK display column that has **no** entry in `import_fk_specs` (read-only; composite
+labelField no longer lands here as of cmd_548). The generated route checks the CSV header against
+this list **before** processing any row — same convention as the existing `MISSING_COLUMN` check
+(`row: 0`, blocks the whole request) — and returns a new `UNIMPORTABLE_COLUMN` error instead of a
+false "succeeded".
 
 ## Known gap NOT fixed by this task: KEY-field null→value creates a phantom duplicate row
 
@@ -104,8 +109,9 @@ documented KEY-field gap above (asserted as a known limitation, not a false "fix
 ## Permanent regression coverage
 
 `code_generator/tests/test_build_context.py::TestImportFkSpecsScreenEditableGeneralization` —
-non-key FK becomes importable, key FK marked `is_key`, readonly/composite-labelField FKs excluded
-and land in `import_unimportable_columns`, required non-key FK makes CREATE feasible.
+non-key FK becomes importable, key FK marked `is_key`, readonly FK excluded and lands in
+`import_unimportable_columns` (composite-labelField FK is importable as of cmd_548 — see
+`docs/knowledge/csv-import-composite-labelfield.md`), required non-key FK makes CREATE feasible.
 
 `code_generator/tests/test_build_context.py::TestImportKeySpecsLookupEntityFilterByOrg
 ::test_any_dotted_fk_needs_org_filter_true_for_non_key_fk_too` — org-filter detection (cmd_521)

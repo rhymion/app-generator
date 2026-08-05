@@ -973,6 +973,47 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     pool_entity           = _domain['pool']
     ledger_entity         = _domain['ledger']
     transactionable_entity = _domain['transactionable']
+    # cmd_546: pool entity's own item/location/lot/expiration column names
+    # (OD-1 domain config) — replaces literal 'product_id'/'location'/
+    # 'lot_number'/'expiration_date' hardcodes in the ledger row below, which
+    # silently broke (TypeScript error, not a generator-time failure) for any
+    # consumer naming these columns differently.
+    item_field       = _domain['item_field']
+    location_relation = _domain['location_relation']
+    lot_field        = _domain['lot_field']
+    expiration_field = _domain['expiration_field']
+    # cmd_550: render the ledger row's location snapshot through the pool
+    # entity's declared x-relationship.labelField — the same source
+    # cmd_547/548's autocomplete/list-view labels read — instead of a bare
+    # `.name` access, which silently mis-rendered (or crashed) for any
+    # location entity whose display field isn't literally `name`. A
+    # composite labelField (e.g. `[location_name, shelf_code]`) is rendered
+    # in full rather than truncated to a single segment: the ledger column
+    # is a denormalized snapshot of "what the location was called at the
+    # time", and using the identical rendering the user already sees in
+    # autocomplete/list views keeps that snapshot consistent with the UI
+    # rather than growing a second, divergent notion of "the" location label.
+    location_label_built = build_label_expression(
+        f"_candidate.{location_relation}",
+        _domain['location_label_field'],
+        _domain['location_label_target'],
+        schema or {},
+    )
+    if location_label_built['has_format']:
+        raise ValueError(
+            f"x-ledger-entities for {model!r}: location labelField "
+            f"{_domain['location_label_field']!r} on {_domain['location_label_target']!r} "
+            f"resolves to a date/time field — unsupported for the ledger row's "
+            f"plain-string location snapshot (formatLabelValue is not imported "
+            f"in this generated module)."
+        )
+    location_label_expr = location_label_built['expression']
+    _location_nested_include = location_label_built['prisma_include']
+    location_include_str = (
+        f"{location_relation}: {{ include: {{ {render_prisma_include(_location_nested_include)} }} }}"
+        if _location_nested_include
+        else f"{location_relation}: true"
+    )
 
     pool_qty_field = pool.get('quantityField', 'quantity')
     pool_res_field = pool.get('reservedField', 'reserved_quantity')
@@ -1016,7 +1057,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"{where_clause}\n"
         f"        }},\n"
         + (f"        orderBy: [{order_str}],\n" if order_str else '') +
-        f"        include: {{ location: true }},\n"
+        f"        include: {{ {location_include_str} }},\n"
         f"      }});\n"
         f"      const bridge = await tx.{transactionable_entity}.create({{ data: {{}} }});\n"
         f"      for (const _candidate of _candidates) {{\n"
@@ -1036,10 +1077,10 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"              event_type: 'reserve',\n"
         f"              quantity_delta: 0,\n"
         f"              reserved_delta: _claim,\n"
-        f"              product_id: _candidate.product_id,\n"
-        f"              location: _candidate.location?.name ?? '',\n"
-        f"              lot_number: _candidate.lot_number,\n"
-        f"              expiration_date: _candidate.expiration_date,\n"
+        f"              {item_field}: _candidate.{item_field},\n"
+        f"              {location_relation}: {location_label_expr},\n"
+        f"              {lot_field}: _candidate.{lot_field},\n"
+        f"              {expiration_field}: _candidate.{expiration_field},\n"
         f"              created_by_id: actorId,\n"
         f"              creator_id: actorId,\n"
         f"              updater_id: actorId,\n"
@@ -1414,12 +1455,76 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
         f"      }}",
         f"      if (_remaining > 0) {{",
         f"        throw new InsufficientPoolCapacityError(",
-        f"          `Insufficient inventory for product ${{(_line as Record<string, unknown>).product_id}}`",
+        f"          `Insufficient inventory for line ${{(_line as Record<string, unknown>).id}}`",
         f"        );",
         f"      }}",
         f"    }}",
     ]
     return '\n'.join(lines)
+
+
+def _build_item_reservation_create_code(rc: dict, parent_pascal: str) -> str:
+    """Item mode (cmd_555): reserve{Entity}() previously had no caller anywhere in
+    generated code, so the assertNoDuplicateReservation() check inside it never ran.
+    Call reserve{Entity}Core() inline, inside add{Entity}'s own transaction, right
+    after the row is created — allocation failure (no candidate / overlap) rolls the
+    create back instead of leaving an unallocated row."""
+    date_range = rc.get('dateRange')
+    criteria = rc.get('criteria') or {}
+    lines = [
+        f"    await reserve{parent_pascal}Core(",
+        f"      tx,",
+        f"      created.id,",
+    ]
+    if date_range:
+        start_field = date_range['startField']
+        end_field = date_range['endField']
+        lines.append(
+            f"      {{ {start_field}: created.{start_field} as unknown as Date, "
+            f"{end_field}: created.{end_field} as unknown as Date }},"
+        )
+    if criteria:
+        lines.append(f"      {{")
+        for pool_field, req_field in criteria.items():
+            lines.append(f"        {pool_field}: created.{req_field},")
+        lines.append(f"      }}")
+    else:
+        lines.append(f"      {{}}")
+    lines.append(f"    );")
+    return '\n'.join(lines)
+
+
+def _build_item_reservation_update_check_code(rc: dict, model: str) -> str:
+    """Item mode (cmd_555), dateRange only: re-validate that the *existing* allocation
+    doesn't overlap another booking after this update's (possibly changed) date range —
+    excluding this row's own prior reservation (excludeId), or a no-op edit that doesn't
+    touch the dates would be rejected as "overlapping itself"."""
+    date_range = rc.get('dateRange')
+    if not date_range:
+        return ''
+    allocated_field = rc['allocatedField']
+    start_field = date_range['startField']
+    end_field = date_range['endField']
+    # Update params are camelCase (e.g. checkIn), while dateRange keys are the
+    # schema's snake_case field names (e.g. check_in) — must map, not reuse verbatim.
+    start_var = to_camel_case(start_field)
+    end_var = to_camel_case(end_field)
+    return (
+        f"    {{\n"
+        f"      const _existingReservation = await tx.{model}.findUnique({{\n"
+        f"        where: {{ id }},\n"
+        f"        select: {{ {allocated_field}: true }},\n"
+        f"      }});\n"
+        f"      if (_existingReservation?.{allocated_field}) {{\n"
+        f"        await assertNoDuplicateReservation(\n"
+        f"          tx,\n"
+        f"          _existingReservation.{allocated_field} as string,\n"
+        f"          {{ {start_field}: {start_var}, {end_field}: {end_var} }},\n"
+        f"          id\n"
+        f"        );\n"
+        f"      }}\n"
+        f"    }}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1689,6 +1794,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     child_assignee_notify_update_code = ctx.get('child_assignee_notify_update_code', '')
     is_audited              = ctx.get('is_audited', False)
     should_filter_by_org    = bool(ctx.get('should_filter_by_org'))
+    is_self_only            = bool(ctx.get('is_self_only'))
     reservation_config      = ctx.get('reservation_config')
     has_reservation         = bool(reservation_config and reservation_config.get('mode') == 'count')
     has_item_reservation    = bool(reservation_config and reservation_config.get('mode') == 'item')
@@ -1954,6 +2060,16 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     if has_reservation and reservation_config is not None:
         reservation_allocation_code = _build_reservation_allocation_code(reservation_config, model, schema)
 
+    # Reservation item mode (cmd_555): reserve{Entity}() had no caller — wire it into
+    # add{Entity}'s own transaction (allocation) and update{Entity}'s own transaction
+    # (re-validate the existing allocation against the row's own prior booking excluded).
+    item_reservation_create_code = ''
+    item_reservation_update_check_code = ''
+    if has_item_reservation and reservation_config is not None:
+        item_reservation_create_code = _build_item_reservation_create_code(reservation_config, parent_pascal)
+        if can_update:
+            item_reservation_update_check_code = _build_item_reservation_update_check_code(reservation_config, model)
+
     # x-approval-lines: pre-create/post-create approval for embedded line
     # children that are new:false (see docs/knowledge/appendix/approval-flow.md §16.10).
     approval_lines_pre_create_code  = ''
@@ -2028,7 +2144,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
            if approval_lines_post_create_code or approval_lines_post_update_code else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if should_filter_by_org and (can_create or can_update) else '')
-        + (f"\nimport {{ ApiError }} from '@/lib/api-auth';" if should_filter_by_org and (can_create or can_update) else '')
+        + (f"\nimport {{ ApiError }} from '@/lib/api-auth';" if (should_filter_by_org and (can_create or can_update)) or (is_self_only and can_update) else '')
         + insufficient_inventory_error_class +
         f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"
         f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
@@ -2057,6 +2173,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'flatten_nested_updates':             flatten_nested_updates,
         'flatten_nested_creates':             flatten_nested_creates,
         'reservation_allocation_code':        reservation_allocation_code,
+        'item_reservation_create_code':       item_reservation_create_code,
+        'item_reservation_update_check_code': item_reservation_update_check_code,
         'has_reservation':                    has_reservation,
         'has_item_reservation':               has_item_reservation,
         'reservation_mutation_guard_update':  reservation_mutation_guard_update,
@@ -3406,6 +3524,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     else:
         comment_children = [c for c in children_raw if c.get('output_type') == 'comments']
     has_comment_children = bool(comment_children)
+    # comment_has_mention (cmd_538): whether the shared `comment` model has an
+    # x-mention field, computed once upstream (context.py/build_context.py) and
+    # already available on the master ctx — read here (not re-derived) so this
+    # stays in lockstep with the same flag form_view_context()/types.ts.jinja2
+    # already gate on. Drives searchUsers/renderMessage wiring below, so
+    # comment-compose/edit boxes on the edit page get mention support too, not
+    # just the read-only view page (cmd_522c only wired form_view.tsx.jinja2 —
+    # see docs/knowledge/mention-system.md's cmd_538 section for why that left
+    # the edit page's CommentListWrapper both un-suggestable and un-linked).
+    comment_has_mention_fu = ctx.get('comment_has_mention', False)
     has_children = bool(non_comment_ch)
     has_many_to_many = any((c.get('relationship') or {}).get('type') == 'many-to-many' for c in children_raw)
     has_many_to_one = bool(parent_rels_raw) or bool(selector_oto_rels)
@@ -4055,17 +4183,28 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # parent-embedded grid via /new?parentType=&parentId=).
     _is_bridge_child = bool(_bridge_child_ir)
     _bridge_params = ', initialParentType, initialParentId' if _is_bridge_child else ''
-    # `permissions` is only read by the `canDelete` line (itself gated on
-    # can_delete/can_invalidate, cmd_529) and by the entity_edit_components
-    # JSX below — an entity with neither leaves it dead. Still part of
+    # `permissions` is read by the `canDelete` line (itself gated on
+    # can_delete/can_invalidate, cmd_529), the entity_edit_components JSX
+    # below, and the comment_jsx_parts block further down (every
+    # has_comment_children entity's CommentListWrapper reads
+    # `permissions?.update` unconditionally, regardless of mentions) — an
+    # entity with none of the three leaves it dead. Still part of
     # FormUpsertProps (the caller still passes it), so alias rather than drop
-    # the destructured binding.
-    _permissions_used = bool(can_delete) or bool(ctx.get('can_invalidate')) or has_current_user_role_ids
+    # the destructured binding. has_comment_children was missing from this
+    # condition until cmd_538 (masked pre-cmd_538 because nothing type-checked
+    # a has_comment_children entity's rendered FormUpsert.tsx against real
+    # Prisma/FormUpsertProps types — see the mention-gate fixture's cmd_538
+    # section in docs/knowledge/mention-system.md — every has_comment_children
+    # entity with neither can_delete/can_invalidate/entity_edit_components
+    # would have hit a "Cannot find name 'permissions'" tsc error on this
+    # exact branch, mention-unrelated).
+    _permissions_used = bool(can_delete) or bool(ctx.get('can_invalidate')) or has_current_user_role_ids or has_comment_children
     _permissions_binding = 'permissions' if _permissions_used else 'permissions: _permissions'
     if extra_default_props or has_comment_children or has_current_user_role_ids or _is_bridge_child:
         form_upsert_params = (
             f"{{ src, isEdit, {_permissions_binding}"
             + (', currentUserId' if has_comment_children else '')
+            + (', canViewUserProfile, mentionUserContext' if comment_has_mention_fu else '')
             + (', currentUserRoleIds' if has_current_user_role_ids else '')
             + (f', {extra_default_props}' if extra_default_props else '')
             + _bridge_params
@@ -4106,6 +4245,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"          onToggleReaction={{toggle{parent_pascal}CommentReaction as (commentId: string, type: string | number) => Promise<CommentReactionSummary>}}\n"
         if has_reactions else ""
     )
+    # Mention support on the edit page's comment thread (cmd_538): searchUsers
+    # wires MentionInput into CommentListWrapper's compose/edit textareas (the
+    # candidate picker cmd_522c only ever wired onto an entity's own fields,
+    # never the comment box — this closes that gap). renderMessage wires
+    # MentionText into the same display cmd_522c already wired for
+    # form_view.tsx.jinja2, so a comment's mentions render as links here too
+    # instead of showing the raw @[user_id:<id>] marker.
+    _mention_props = (
+        f"          searchUsers={{searchMentionUserOptions}}\n"
+        f"          renderMessage={{(c) => <MentionText text={{c.message}} userContext={{mentionUserContext ?? {{}}}} canViewUserProfile={{Boolean(canViewUserProfile)}} />}}\n"
+        if comment_has_mention_fu else ""
+    )
     for c in comment_children:
         if c.get('bridge'):
             prop = c['property_name']
@@ -4121,6 +4272,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"          onCreateComment={{handleCreateComment}}\n"
                 f"          onUpdateComment={{handleUpdateComment}}\n"
                 f"          onDeleteComment={{handleDeleteComment}}\n"
+                f"{_mention_props}"
                 f"{_reaction_props}"
                 f"        />\n"
                 f"      )}}"
@@ -4139,6 +4291,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"          onCreateComment={{handleCreateComment}}\n"
                 f"          onUpdateComment={{handleUpdateComment}}\n"
                 f"          onDeleteComment={{handleDeleteComment}}\n"
+                f"{_mention_props}"
                 f"{_reaction_props}"
                 f"        />\n"
                 f"      )}}"

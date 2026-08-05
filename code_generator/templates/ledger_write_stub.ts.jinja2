@@ -60,7 +60,7 @@ export async function afterApprove(
   // Step 3: Get inventory identity (O-6 non-normalized fields)
   const inventory = await tx.{{ pool_entity }}.findUniqueOrThrow({
     where: { id: entity.{{ ledger_source.poolIdField }} },
-    include: { location: true },
+    include: { {{ pool_location_relation }}: true },
   });
 
   // Step 4: INSERT inventory_transaction
@@ -70,10 +70,10 @@ export async function afterApprove(
       event_type: '{{ ledger_source.event_type }}',
       quantity_delta: {% if ledger_source.quantity_delta_field %}entity.{{ ledger_source.quantity_delta_field }}{% else %}{{ ledger_source.quantity_delta | default(0) }}{% endif %}, // O-4
       reserved_delta: {% if ledger_source.reserved_delta_field %}entity.{{ ledger_source.reserved_delta_field }}{% else %}{{ ledger_source.reserved_delta | default(0) }}{% endif %}, // O-4
-      product_id: inventory.product_id,    // O-6
-      location: inventory.location?.name ?? '',   // O-6
-      lot_number: inventory.lot_number,     // O-6
-      expiration_date: inventory.expiration_date, // O-6
+      {{ pool_item_field }}: inventory.{{ pool_item_field }},    // O-6
+      {{ pool_location_relation }}: {{ pool_location_label_exprs['inventory'] }},   // O-6
+      {{ pool_lot_field }}: inventory.{{ pool_lot_field }},     // O-6
+      {{ pool_expiration_field }}: inventory.{{ pool_expiration_field }}, // O-6
       approved_via: approvableId,           // audit trail (R2)
       created_by_id: approvedByUserId,
       creator_id: approvedByUserId,
@@ -129,28 +129,29 @@ export async function afterReject(
       event_type: '{{ ledger_source.reject_event_type }}',
       quantity_delta: 0,
       reserved_delta: -reservedQty,
-      product_id: source.product_id,
-      location: source.location,
-      lot_number: source.lot_number,
-      expiration_date: source.expiration_date,
+      {{ pool_item_field }}: source.{{ pool_item_field }},
+      {{ pool_location_relation }}: source.{{ pool_location_relation }},
+      {{ pool_lot_field }}: source.{{ pool_lot_field }},
+      {{ pool_expiration_field }}: source.{{ pool_expiration_field }},
       created_by_id: rejectedByUserId,
       creator_id: rejectedByUserId,
       updater_id: rejectedByUserId,
     },
   });
 
-  // Phase4: inventory.location_id FK — denormalized name from the ledger
-  // needs to be reverse-looked-up to a location_id before re-identifying.
-  const _sourceLocName = source.location === '' ? null : source.location;
+  // Phase4/cmd_550: inventory.{{ pool_location_field }} FK — denormalized
+  // {{ pool_location_label_field }} label from the ledger needs to be
+  // reverse-looked-up to a {{ pool_location_field }} before re-identifying.
+  const _sourceLocName = source.{{ pool_location_relation }} === '' ? null : source.{{ pool_location_relation }};
   const _sourceLoc = _sourceLocName
-    ? await tx.location.findFirst({ where: { name: _sourceLocName } })
+    ? await tx.{{ pool_location_target_entity }}.findFirst({ where: { {{ pool_location_label_field }}: _sourceLocName } })
     : null;
   const inventoryCache = await tx.{{ pool_entity }}.findFirst({
     where: {
-      product_id: source.product_id,
-      location_id: _sourceLoc?.id ?? null,
-      lot_number: source.lot_number,
-      expiration_date: source.expiration_date,
+      {{ pool_item_field }}: source.{{ pool_item_field }},
+      {{ pool_location_field }}: _sourceLoc?.id ?? null,
+      {{ pool_lot_field }}: source.{{ pool_lot_field }},
+      {{ pool_expiration_field }}: source.{{ pool_expiration_field }},
     },
   });
   if (inventoryCache) {

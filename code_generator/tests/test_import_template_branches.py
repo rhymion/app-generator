@@ -195,3 +195,113 @@ def test_no_unimportable_columns_renders_empty_array(env):
     ctx = _ctx(import_unimportable_columns=[])
     rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
     assert 'const UNIMPORTABLE_COLUMNS: string[] = [];' in rendered
+
+
+# ---------------------------------------------------------------------------
+# cmd_548 (subtask_547a design, option ko): composite/dotted labelField FKs
+# are import-resolvable via a pre-built label->id map instead of a per-row
+# scalar lookup. See TestCompositeLabelFieldImportOrgFilter /
+# TestImportFkSpecsScreenEditableGeneralization in test_build_context.py for
+# the Python-side spec-shape coverage; these tests cover the emitted
+# TypeScript.
+# ---------------------------------------------------------------------------
+
+_COMPOSITE_SPEC = {
+    'raw': 'inventory', 'is_dotted': False, 'is_composite': True,
+    'csv_col': 'inventory_name', 'var_prefix': 'inventory',
+    'lookup_entity': 'inventory', 'lookup_entity_pascal': 'Inventory',
+    'result_col': 'inventory_id', 'fk_nullable': True,
+    'lookup_entity_filter_by_org': True, 'is_key': False,
+    'import_label_expr': "`${(c.product?.name ?? '')} ${(c.location?.name ?? '')}`",
+    'prisma_include': {'product': True, 'location': True},
+}
+
+
+def test_composite_fk_map_built_once_outside_row_loop(env):
+    """The label->id map must be built ONCE (per-import, not per-row) — the
+    whole point of the pre-built-map design (cmd_548 judgment_2_cost) is a
+    fixed per-column cost regardless of CSV row count."""
+    ctx = _ctx(import_fk_specs=[_COMPOSITE_SPEC])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert rendered.count('await prisma.inventory.findMany(') == 1
+    map_pos = rendered.index('_inventory_label_map = new Map')
+    loop_pos = rendered.index('for (let i = 0; i < rows.length; i++)')
+    assert map_pos < loop_pos, 'map construction must precede the per-row loop'
+
+
+def test_composite_fk_map_build_skipped_when_header_lacks_column(env):
+    """cmd_548 requirement 六: an import whose CSV never touches this FK
+    must not pay for the full-candidate-table read. Asserted at the
+    template level (not just by runtime behavior) so this guarantee is
+    machine-checked on every future template edit, not just observed once
+    in a live server probe."""
+    ctx = _ctx(import_fk_specs=[_COMPOSITE_SPEC])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    guard = "if (headerFields.includes('inventory_name')) {"
+    assert guard in rendered
+    # The candidate findMany must be textually INSIDE that guard block, not
+    # before it — assert via source position of the guard vs. the query.
+    guard_pos = rendered.index(guard)
+    query_pos = rendered.index('await prisma.inventory.findMany(')
+    assert guard_pos < query_pos
+
+
+def test_composite_fk_candidate_query_org_filtered(env):
+    """lookup_entity_filter_by_org=True must carry into the candidate
+    findMany's where clause (cmd_548 requirement い — org isolation)."""
+    ctx = _ctx(import_fk_specs=[_COMPOSITE_SPEC])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert 'where: { organization_id: { in: _importOrgIds } },' in rendered
+
+
+def test_composite_fk_candidate_query_not_org_filtered_when_flag_false(env):
+    """System-global lookup entities (e.g. role) must NOT be org-filtered —
+    the composite map generalizes the same org-filter flag the simple
+    dotted-FK lookup already respects."""
+    ctx = _ctx(import_fk_specs=[{**_COMPOSITE_SPEC, 'lookup_entity_filter_by_org': False}])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert 'organization_id: { in: _importOrgIds }' not in rendered
+
+
+def test_composite_fk_uses_import_label_expr_not_export_label_expr(env):
+    """cmd_548 requirement あ: the map is built from import_label_expr
+    (candidate-rooted, e.g. `c.product?.name`), never from an
+    export-side/row-rooted expression — they come from the same helper call
+    with only the root variable differing (see build_context.py), so
+    asserting the emitted expression text is present is a direct check that
+    codegen wired the correct (candidate-rooted) variant through."""
+    ctx = _ctx(import_fk_specs=[_COMPOSITE_SPEC])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert "const _lbl = (`${(c.product?.name ?? '')} ${(c.location?.name ?? '')}`).trim();" in rendered
+    assert 'row.inventory' not in rendered
+
+
+def test_composite_fk_not_found_and_multi_match_messages_include_column_and_value(env):
+    """cmd_548 judgment_1: ambiguity is rejected at ROW granularity with a
+    message carrying column name + value (+ count for MULTI_MATCH) — not a
+    bare 'ambiguous' with no actionable detail."""
+    ctx = _ctx(import_fk_specs=[_COMPOSITE_SPEC])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert "no inventory matches label '${_inventory_csv_val}' (column inventory_name)" in rendered
+    assert "${_inventory_ids.length} inventory rows share label '${_inventory_csv_val}' (column inventory_name)" in rendered
+    assert "use the 'inventory_id' column to identify rows by ID" in rendered
+
+
+def test_composite_fk_nullable_empty_value_skips_map_lookup(env):
+    """An empty CSV cell on a nullable composite FK resolves straight to
+    null without touching the map (mirrors the existing simple dotted-FK
+    nullable branch)."""
+    ctx = _ctx(import_fk_specs=[_COMPOSITE_SPEC])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert "if (_inventory_csv_val === '') {" in rendered
+    assert '_inventory_id = null;' in rendered
+
+
+def test_composite_fk_written_to_fkdata_and_updatedata(env):
+    """Composite specs are always non-key (is_key=False) — write path is
+    identical in shape to the existing non-key simple-dotted FK: fkData on
+    CREATE, updateData on UPDATE."""
+    ctx = _ctx(import_fk_specs=[_COMPOSITE_SPEC])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert 'fkData.inventory_id = _inventory_id;' in rendered
+    assert 'updateData.inventory_id = _inventory_id;' in rendered

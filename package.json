@@ -32,7 +32,7 @@
     "migrate:dev:create-only": "prisma migrate dev --create-only",
     "migrate:deploy": "prisma migrate deploy",
     "migrate:reset:test": "cross-env NODE_ENV=test prisma migrate reset",
-    "lint": "eslint",
+    "lint": "eslint --max-warnings 20",
     "test:pytest": "pytest code_generator/tests",
     "test:mention-gate": "bash scripts/check_mention_gate_fixture.sh",
     "start": "node scripts/run-next-start.js",

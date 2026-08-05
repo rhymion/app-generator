@@ -52,6 +52,7 @@ definitions:
       test: false
     fields:
       name: {}
+      email: {}
       image: {}
   commentable:
     x-generate:
@@ -106,7 +107,14 @@ definitions:
       list: false
       view: true
       new: false
-      edit: false
+      # edit: true (cmd_538): also generate FormUpsert.tsx + page_edit.tsx.jinja2's
+      # edit page for this entity, so the mention-gate check covers the
+      # comment-compose/edit-box wiring (searchUsers/renderMessage on
+      # CommentListWrapper, canViewUserProfile/mentionUserContext threading
+      # through FormUpsertProps) alongside the pre-existing getters.ts/
+      # api_detail_route.ts coverage. See docs/knowledge/mention-system.md's
+      # cmd_538 section.
+      edit: true
       delete: false
       invalidate: false
       api: true

@@ -12,10 +12,24 @@
 // membership gets an empty candidate list — they may still write comments,
 // they just cannot mention anyone (org-isolation policy).
 //
-// Permission: uses the same Option B graceful-degradation contract as
-// searchXxxOptions() (cmd_516) — a `user` read-permission denial returns an
-// empty array with `permissionDenied: true` rather than throwing, so the
-// picker can render a "suggestions unavailable" message instead of crashing.
+// Permission: intends the same Option B graceful-degradation contract as
+// searchXxxOptions() (cmd_516) — a `user` read-permission denial should
+// return an empty list with permissionDenied: true rather than throwing, so
+// the picker can render a "suggestions unavailable" message instead of
+// crashing. The return type is a plain `{ options, permissionDenied }`
+// object, NOT `MentionUserOption[] & { permissionDenied?: boolean }`: this
+// crosses the server/client boundary as a Server Action return value, and
+// Next's RSC "flight" serialization (like JSON.stringify) only preserves an
+// array's indexed elements — an ad-hoc property tacked onto a plain array
+// via Object.assign is silently dropped in transit, so the client never
+// sees the flag even though the server set it correctly. This is why the
+// naive array-with-extra-property version of this contract (cmd_538 found
+// it here; searchXxxOptions() in getters.ts uses the identical pattern and
+// is presumed to share the bug, but fixing that is out of this template's
+// scope — see docs/knowledge/mention-system.md's cmd_538 section) can pass
+// a unit test that calls searchUsers as a plain in-process function (no
+// serialization boundary) while still being broken end-to-end in a real
+// browser.
 
 import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow, getModelPermissions } from '@/lib/authz';
@@ -27,13 +41,18 @@ export interface MentionUserOption {
   email: string;
 }
 
+export interface MentionSearchResult {
+  options: MentionUserOption[];
+  permissionDenied: boolean;
+}
+
 export async function searchMentionUserOptions(
   query: string,
-): Promise<MentionUserOption[] & { permissionDenied?: boolean }> {
+): Promise<MentionSearchResult> {
   const userId = await getSessionUserIdOrThrow();
   const { permissions } = await getModelPermissions('user', userId);
   if (!permissions.read) {
-    return Object.assign([], { permissionDenied: true });
+    return { options: [], permissionDenied: true };
   }
 
   const actorOrgs = await getAssociatedOrganizations(userId);
@@ -47,10 +66,11 @@ export async function searchMentionUserOptions(
     ? { name: { contains: trimmed, mode: 'insensitive' as const } }
     : {};
 
-  return prisma.user.findMany({
+  const options = await prisma.user.findMany({
     where: { ...orgFilter, ...nameFilter },
     select: { id: true, name: true, email: true },
     take: 20,
     orderBy: { name: 'asc' },
   });
+  return { options, permissionDenied: false };
 }

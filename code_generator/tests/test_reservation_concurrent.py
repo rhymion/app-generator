@@ -337,12 +337,31 @@ def _get_ledger_service_context() -> dict:
         "type": ["string", "null"],
         "pattern": "^c[a-z0-9]{24,}$",
     }
+    # cmd_550: inventory's own location relation (resolve_ledger_domain now
+    # reads x-relationship.target/labelField off this to render the ledger
+    # row's location snapshot, instead of hardcoding `.name`).
+    schema["definitions"]["inventory"]["properties"]["location_id"] = {
+        "type": "string",
+        "x-relationship": {"type": "many-to-one", "target": "location", "labelField": "name"},
+    }
+    schema["definitions"]["location"] = {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+            "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+            "name": {"type": "string"},
+        },
+    }
     # OD-1: top-level domain declaration resolved via transaction.ledgerDomain
     schema["x-ledger-entities"] = {
         "inventory_domain": {
             "pool": "inventory",
             "ledger": "inventory_transaction",
             "transactionable": "inventory_transactionable",
+            "itemField": "product_id",
+            "locationField": "location_id",
+            "lotField": "lot_number",
+            "expirationField": "expiration_date",
         }
     }
     entity = {

@@ -163,12 +163,63 @@ generated). Three server actions are provided:
 
 | Action | Permission check | Result |
 |---|---|---|
-| `approveApprovalRequest(id, message?)` | User must have `approver_role_id` | Sets status → `approved` |
-| `rejectApprovalRequest(id, message?, options?)` | User must have `approver_role_id` | Sets status → `rejected`, or `terminal_rejected` if `isTerminalReject()` says so (§16.11) |
-| `resubmitApprovalRequest(id, message?)` | Creator or user with `requestor_role_id`; only from `rejected` (not `terminal_rejected`) | Sets status → `pending` |
+| `approveApprovalRequest(id, message?)` | User must have `approver_role_id`; all `preceded_by` flows for this approvable must already be `approved` (`assertApprovalOrder()`, §16.6.1) | Sets status → `approved`; notifies the entity creator (Trigger #3, §16.9 note below) |
+| `rejectApprovalRequest(id, message?, options?)` | User must have `approver_role_id`; same `assertApprovalOrder()` ordering check as approve | Sets status → `rejected`, or `terminal_rejected` if `isTerminalReject()` says so (§16.11); either way, notifies the entity creator (Trigger #3) with a payload `status` matching the actual outcome |
+| `resubmitApprovalRequest(id, message?)` | Creator or user with `requestor_role_id`; only from `rejected` (not `terminal_rejected`) — ordering does not apply, resubmit is requester-initiated | Sets status → `pending`; re-notifies the approver-role holders (cmd_539, see below) |
 
 Each action creates an `approval_history` row recording `pre_status`, `post_status`, `message`,
 and `creator_id` (the acting user).
+
+**cmd_539**: `resubmitApprovalRequest()` reuses the existing `approval_request` row (only its
+`status` flips back to `pending`) rather than creating a new one, so the create-path notification
+(`notifyApprovalRequestCreated()`, Trigger #2, §16.4/next section) never re-fired on resubmission
+until this fix — approver-role holders were never told a rejected request needed their attention
+again. Both implementations (`lib/approval_request/actions_core.ts`'s `resubmitApprovalRequest()`
+and the REST route `app/api/approval_request/[id]/resubmit/route.ts`, see the "two independent
+approve/reject implementations" note in `docs/knowledge/notification-triggers.md`) now call
+`notifyApprovalRequestCreated()` again after the status flip, excluding the resubmitter. Separately,
+the Trigger #3 rejection notification's payload `status` field was hard-coded to `'rejected'` even
+for a `terminal_rejected` outcome — the notification always fired either way, but the payload
+misreported the outcome; both REST and server-action paths now report the actual status.
+
+**cmd_541 — re-notification when a preceded_by chain advances**: in a multi-stage chain, every
+flow's `approval_request` is created up front when the approvable entity is created (§16.4/16.8),
+and every flow's approver role is notified then — even flows that aren't actionable yet because a
+preceding flow hasn't been approved (§16.5's `preceded_by`). Approving a flow used to be silent
+for the *next* flow's approvers: nothing told them their turn had arrived, short of checking the
+item themselves. `approveApprovalRequest()` (both this file's server action and the REST route's
+independent implementation, per the "two independent implementations" note in
+`docs/knowledge/notification-triggers.md`) now calls
+`lib/approval_request/order-check.ts`'s `findNewlyActionableFollowFlowIds()` after updating status
+— it walks the just-approved flow's `followed_by` set and checks, for each follow-on flow, whether
+*all* of its `preceded_by` flows now have an approved `approval_request` on the same approvable.
+Any flow that just crossed that threshold gets its approver role notified via
+`lib/_notifyApprovalRequest.ts`'s `notifyApprovalOrderReached()` (type `approval_order_reached`) —
+a distinct notification from the creation-time `approval_requested` one those same approvers
+already hold, not a duplicate of it. A `before.status !== 'approved'` guard, checked inside the
+same transaction as the status update, prevents re-notifying if the same request is ever approved
+more than once. See `docs/knowledge/notification-triggers.md` for the full trigger list.
+
+#### 16.6.1 Ordering enforcement (`assertApprovalOrder`)
+
+`lib/approval_request/order-check.ts` (manually maintained, not generated) exports
+`assertApprovalOrder(id)`: given an `approval_request` id, it loads the request's
+`approval_flow.preceded_by` flow ids and confirms every sibling `approval_request` on the
+same `approvable` for those flows already has `status: 'approved'`; otherwise it throws
+(`'Preceding approval requests must be approved first'`).
+
+Both entry points that can transition an `approval_request` call this same function — the
+REST route (`app/api/approval_request/[id]/{approve,reject}/route.ts`) and the server action
+(`lib/approval_request/actions_core.ts`'s `approveApprovalRequest`/`rejectApprovalRequest`,
+called via `approve`/`reject` in `lib/approval_request/actions.ts`) — so the rejection wording
+is identical regardless of which path a caller uses (cmd_540). Before cmd_540, only the REST
+route enforced this; the server action was reachable directly (any authenticated client can
+invoke a `'use server'` export via Next.js's Server Action RPC) and had no ordering check at
+all — `ApprovalSection.tsx`'s `precedingApproved` computation only controls whether the
+Approve/Reject buttons render, it is not an authorization boundary. See
+`test/flows/approval_order_bypass.test.ts` for the real-database regression test (calls the
+server action directly, bypassing the UI) and `lib/approval_request/actions.test.ts`'s
+"assertApprovalOrder gate (cmd_540)" describe block for the mocked-collaborator unit coverage.
 
 ### 16.7 Prisma models required
 
@@ -272,6 +323,7 @@ View/edit page renders ApprovalSection with:
 Approver clicks Approve:
   approveApprovalRequest(id)
     → checks user has approver_role_id
+    → assertApprovalOrder(id): all preceded_by flows' approval_requests must be 'approved' (§16.6.1)
     → updates approval_request.status = 'approved'
     → creates approval_history { pre_status: 0, post_status: 1, ... }  (legacy Int columns, §16.7)
     → if ALL of this approvable's approval_requests are now 'approved' AND approved_at is
@@ -305,9 +357,14 @@ purchase_order:
   x-approval:
     on_approved:
       set_fields:
-        - field: status         # target field name on this entity
-          value: "1"            # string label (resolved to integer index for Int fields)
+        status: "approved"   # string label (resolved to integer index for Int fields)
 ```
+
+`set_fields` is a **mapping** of `field_name: value` — matching §16.11's `on_rejected.set_fields`
+below, and the only form `_resolve_set_fields()` (`code_generator/generate.py:289`) accepts (it
+iterates `raw.items()`). A list-of-`{field, value}` form is rejected before generation runs by
+`validate_schema()`'s `x-approval.set_fields` check (`code_generator/validate.py`), with an error
+naming the entity, the offending key, and the correct mapping form.
 
 The generator resolves enum labels to integer indices when the target field type is `integer`,
 preventing TypeScript build errors in the generated dispatch file.

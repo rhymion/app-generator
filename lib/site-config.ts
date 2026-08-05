@@ -58,6 +58,7 @@ export const siteConfig = {
     { label: "Permission", href: "/permission" },
     { label: "Approval Flow", href: "/approval_flow" },
     { label: "Dashboard", href: "/dashboard" },
+      { label: "Personal Note", href: "/personal_note" },
   ] satisfies NavLink[],
 };
 
