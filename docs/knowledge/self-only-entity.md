@@ -214,11 +214,24 @@ additional depth once the DB role exists.
 
 ## Sample entities
 
-- `personal_note` (in the default `json_schema.yaml`/`schema.prisma`) is a minimal worked example
-  — a private per-user note, `admin_bypass: true` — with its own independent table and
-  `creator_id` column. It doubles as the generator's own regression-test fixture for the mechanism
-  in general.
 - `setting` — the acting user's own account settings — is the proxy-view case: a real,
   production-shipped entity applying `x-self-only: { admin_bypass: true }` to a `user`-backed view
   rather than its own table. See "Applying `x-self-only` to a non-generator-owned entity" above
-  for what's different about it.
+  for what's different about it. Its own-table regression coverage
+  (`cypress/e2e/api/self_only_setting_access_control.cy.ts`) is the primary behavioral proof this
+  repo's own CI carries for the mechanism today.
+- `personal_note` — a private per-user note with its own independent table and `creator_id`
+  column, `admin_bypass: true` — was this repo's original minimal worked example and doubled as
+  its own-table regression-test fixture. Removed from the default `json_schema.yaml`/
+  `schema.prisma` (cmd_575): it existed only to give a hand-written cypress spec
+  (`self_only_access_control.cy.ts`, since deleted from this repo) something to exercise, not
+  because it's a feature every consumer should inherit by default. Both the entity and its spec
+  now live in `app-template`'s `prj/` (the one consumer that actually wants a personal-note
+  feature), where they keep proving the mechanism end-to-end for that project. One coverage
+  narrowing is a known, explicitly accepted trade-off of this move: no entity in this repo's own
+  default schema combines `x-self-only` with `list: true` any more (`setting` is `list: false`),
+  so the self-only **list-query** filter's behavior (unlike its detail/edit/admin_bypass behavior,
+  still proven via `setting`) is no longer runtime-proven by this repo's own CI — only
+  type-checked, via `setting`'s always-generated (but unreachable, since `setting` has no list
+  page) `getSettingPage`/`buildSettingAccessWhere`. See cmd_575's completion report for the full
+  reasoning.

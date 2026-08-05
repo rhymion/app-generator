@@ -461,34 +461,3 @@ definitions:
         items:
           $ref: "#/definitions/dashboard_widget"
 
-  # Sample x-self-only entity: a private per-user note. Only its creator can
-  # ever read/write it, regardless of any permission grant — see
-  # docs/knowledge/self-only-entity.md. admin_bypass:true additionally lets a
-  # privileged (Administrator) role read across all users' notes, but only
-  # with an audit row written for the access — if that write fails, the
-  # bypass is denied (fail-closed).
-  personal_note:
-    x-generate:
-      list: true
-      view: true
-      new: true
-      edit: true
-      delete: true
-      invalidate: false
-      api: true
-      test: true
-      search: false
-    x-self-only:
-      admin_bypass: true
-    x-import-key: [title]
-    x-display:
-      table:
-        - title:
-            primary: true
-            width: 200
-    fields:
-      title: {}
-      content:
-        x-ui:
-          width: 8
-

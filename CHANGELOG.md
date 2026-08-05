@@ -5,6 +5,17 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+- **`personal_note` removed from the default schema** (cmd_575): it was a demo `x-self-only`
+  entity added only to give a hand-written regression spec
+  (`cypress/e2e/api/self_only_access_control.cy.ts`, also removed) something to exercise — not a
+  feature every consumer should inherit by default. It broke consumers whose own `prj/` schema
+  fork predates it: the spec shipped unconditionally regardless of the consumer's schema, so any
+  consumer without `personal_note` got 404s from a spec exercising a nonexistent entity. See
+  `docs/knowledge/self-only-entity.md` "Sample entities" for the coverage trade-off this leaves in
+  this repo's own CI, and for where the entity and its spec now live for the one consumer that
+  wants them.
+
 ### Added
 - **`x-server-value` now supports actor delegation** (cmd_565, extending cmd_556): a field
   declared `x-server-value: {source: actor, override_permission: <Operation>}` still defaults to

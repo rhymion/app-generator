@@ -33,7 +33,6 @@
     "dashboard": "Dashboard",
     "organization": "Organization",
     "permission": "Permission",
-    "personalNote": "Personal Note",
     "role": "Role",
     "setting": "Setting",
     "user": "User"
@@ -127,7 +126,6 @@
     "home": "Home",
     "organization": "Organization",
     "permission": "Permission",
-    "personalNote": "Personal Note",
     "role": "Role",
     "user": "User"
   },
