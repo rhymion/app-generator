@@ -321,6 +321,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (never silently raised) stops that from recurring unnoticed. Seeded 5 warnings above the
   measured `develop`-tip count (15) rather than an exact match, so one incidental warning doesn't
   turn an unrelated PR red. See `docs/knowledge/lint-warning-ceiling-ratchet.md`.
+- **`components/*/form_validation.ts` untracked from version control** (cmd_562 follow-up):
+  `.gitignore` negated this generated file as if it were a customizable stub, but `generate.py`
+  writes it via the unconditional-overwrite `_write()` (not `_write_stub()`), and its template has
+  never had a customization marker even at the file's original commit — so tracking it in git gave
+  a false impression of preservable hand-edits while the generator silently clobbered them every
+  run. Removed the negation and untracked all 8 previously-committed instances; verified a full
+  delete + `generate-code` + `tsc --noEmit` + `check:generated` cycle reproduces them identically
+  with nothing else affected.
 
 ## [3.0.0] - 2026-07-30
 
