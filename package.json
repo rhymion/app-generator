@@ -130,7 +130,7 @@
     "@vitejs/plugin-react": "^6.0.5",
     "@vitest/coverage-v8": "^4.1.10",
     "cross-env": "^10.1.0",
-    "cypress": "^15.19.0",
+    "cypress": "^15.9.0",
     "eslint": "^10.8.0",
     "eslint-config-next": "^16.1.6",
     "jsdom": "^30.0.1",
