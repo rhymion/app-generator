@@ -445,9 +445,12 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
                 >
                   <Typography
                     variant="body2"
-                    color="text.secondary"
-                    sx={{ minWidth: 28, mr: 1, flexShrink: 0 }}
-                  >
+                    sx={{
+                      color: "text.secondary",
+                      minWidth: 28,
+                      mr: 1,
+                      flexShrink: 0
+                    }}>
                     {item.order}.
                   </Typography>
                   {renderItem ? renderItem(item) : defaultRenderItem(item)}

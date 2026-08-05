@@ -152,7 +152,7 @@ export default function NotificationBell() {
               <ListItemText
                 primary={item.payload.title}
                 secondary={new Date(item.createdAt).toLocaleString()}
-                primaryTypographyProps={{ fontWeight: item.read ? 400 : 600 }}
+                slotProps={{ primary: { sx: { fontWeight: item.read ? 400 : 600 } } }}
               />
             );
             return (

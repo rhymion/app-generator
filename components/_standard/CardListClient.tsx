@@ -168,7 +168,9 @@ export default function CardListClient<T extends BaseEntity>({
 
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {items.length === 0 ? (
-          <Typography color="text.secondary">No items found.</Typography>
+          <Typography sx={{
+            color: "text.secondary"
+          }}>No items found.</Typography>
         ) : (
           items.map((item) => {
             const isSelected = selectedIds.has(item.id);
@@ -204,7 +206,9 @@ export default function CardListClient<T extends BaseEntity>({
                       if (!href) return null;
                       return (
                         <Box key={String(fieldConfig.field)} sx={{ mt: 0.5 }}>
-                          <Typography variant="caption" color="text.secondary" component="span">
+                          <Typography variant="caption" component="span" sx={{
+                            color: "text.secondary"
+                          }}>
                             {fieldConfig.headerName}:{' '}
                           </Typography>
                           <a href={href} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.875rem', wordBreak: 'break-all' }}>
@@ -217,7 +221,9 @@ export default function CardListClient<T extends BaseEntity>({
                     if (!value) return null;
                     return (
                       <Box key={String(fieldConfig.field)} sx={{ mt: 0.5 }}>
-                        <Typography variant="caption" color="text.secondary" component="span">
+                        <Typography variant="caption" component="span" sx={{
+                          color: "text.secondary"
+                        }}>
                           {fieldConfig.headerName}:{' '}
                         </Typography>
                         <Typography variant="body2" component="span">
@@ -255,7 +261,9 @@ export default function CardListClient<T extends BaseEntity>({
           >
             {tc('previousPage')}
           </Button>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" sx={{
+            color: "text.secondary"
+          }}>
             {page + 1}
           </Typography>
           <Button

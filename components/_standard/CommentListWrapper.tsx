@@ -139,17 +139,31 @@ function CommentItemComponent({ comment, canDelete, onUpdate, onDelete, reaction
         </Avatar>
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5, gap: 1 }}>
-            <Typography variant="subtitle2" fontWeight="bold" noWrap>
+            <Typography variant="subtitle2" noWrap sx={{
+              fontWeight: "bold"
+            }}>
               {creatorName}
             </Typography>
             <Box sx={{ textAlign: 'right', flexShrink: 0 }}>
               {comment.created_at && (
-                <Typography variant="caption" color="text.secondary" display="block" suppressHydrationWarning>
+                <Typography
+                  variant="caption"
+                  suppressHydrationWarning
+                  sx={{
+                    color: "text.secondary",
+                    display: "block"
+                  }}>
                   {formatDate(comment.created_at)}
                 </Typography>
               )}
               {wasEdited && comment.updated_at && (
-                <Typography variant="caption" color="text.secondary" display="block" suppressHydrationWarning>
+                <Typography
+                  variant="caption"
+                  suppressHydrationWarning
+                  sx={{
+                    color: "text.secondary",
+                    display: "block"
+                  }}>
                   Edited: {formatDate(comment.updated_at)}
                 </Typography>
               )}
@@ -269,7 +283,9 @@ export default function CommentListWrapper({
         <List disablePadding>
           {comments.length === 0 ? (
             <ListItem sx={{ px: 0 }}>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" sx={{
+                color: "text.secondary"
+              }}>
                 No comments yet.
               </Typography>
             </ListItem>
