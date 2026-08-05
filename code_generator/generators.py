@@ -559,6 +559,19 @@ def actions_context(ctx: dict) -> dict:
     has_reservation = bool(reservation_config and reservation_config.get('mode') == 'count')
     should_filter_by_org = bool(ctx.get('should_filter_by_org'))
 
+    # cmd_565 乙: mirror the REST POST guard — a plain read-only field can never
+    # be supplied by the client, even on create. x-server-value fields are
+    # excluded (own dedicated resolution, see service.ts.jinja2).
+    readonly_fields_create_reject = ctx.get('readonly_fields_create_reject') or []
+    _ro_reject_lines = '\n'.join(
+        f"    if (data.get('{f}') !== null) {{ throw new Error('Field {f} is read-only and cannot be set'); }}"
+        for f in readonly_fields_create_reject
+    )
+    # Guarded form: only checked on the create branch (`id` absent) of a
+    # combined create+update action. Unguarded form: the action is create-only.
+    _ro_reject_guarded   = f"  if (!id) {{\n{_ro_reject_lines}\n  }}\n" if _ro_reject_lines else ''
+    _ro_reject_unguarded = f"{_ro_reject_lines}\n" if _ro_reject_lines else ''
+
     sep = ', ' if (parent_params and child_args) else ''
     full_child_args = f'{sep}{child_args}' if child_args else ''
 
@@ -689,7 +702,8 @@ def actions_context(ctx: dict) -> dict:
                         f"  }}\n"
                         f"{form_data_gets}\n"
                         + (f"{child_form_data_extractions}\n" if has_ch else "")
-                        + _flatten_block +
+                        + _flatten_block
+                        + _ro_reject_guarded +
                         f"\n  let _serviceError: string | null = null;\n"
                         f"  if (id) {{\n"
                         f"    try {{\n"
@@ -727,7 +741,8 @@ def actions_context(ctx: dict) -> dict:
                     f"  }}\n"
                     f"{form_data_gets}\n"
                     + (f"{child_form_data_extractions}\n" if has_ch else "")
-                    + _flatten_block +
+                    + _flatten_block
+                    + _ro_reject_guarded +
                     f"  const actorId = await getSessionUserIdOrThrow();\n\n"
                     f"  let _serviceError: string | null = null;\n"
                     f"  if (id) {{\n"
@@ -768,7 +783,8 @@ def actions_context(ctx: dict) -> dict:
                     f"  }}\n"
                     f"{form_data_gets}\n"
                     + (f"{child_form_data_extractions}\n" if has_ch else "")
-                    + _flatten_block +
+                    + _flatten_block
+                    + _ro_reject_guarded +
                     f"\n  if (id) {{\n"
                     f"    {update_call}\n"
                     f"  }} else {{\n"
@@ -786,7 +802,8 @@ def actions_context(ctx: dict) -> dict:
                 f"  }}\n"
                 f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
-                + _flatten_block +
+                + _flatten_block
+                + _ro_reject_guarded +
                 f"  const actorId = await getSessionUserIdOrThrow();\n\n"
                 f"  if (id) {{\n"
                 f"    {update_call}\n"
@@ -824,7 +841,8 @@ def actions_context(ctx: dict) -> dict:
             return (
                 f"  await requirePermission('{parent}', 'create');\n"
                 f"{form_data_gets}\n"
-                + (f"{child_form_data_extractions}\n" if has_ch else "") +
+                + (f"{child_form_data_extractions}\n" if has_ch else "")
+                + _ro_reject_unguarded +
                 f"\n  const actorId = await getSessionUserIdOrThrow();\n"
                 f"  await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});"
             )
@@ -1799,6 +1817,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     has_reservation         = bool(reservation_config and reservation_config.get('mode') == 'count')
     has_item_reservation    = bool(reservation_config and reservation_config.get('mode') == 'item')
     has_item_daterange      = has_item_reservation and bool(reservation_config.get('dateRange'))
+    server_value_override_fields = ctx.get('server_value_override_fields') or []
 
     has_non_comment_ch = bool(non_comment_ch)
 
@@ -2145,6 +2164,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if should_filter_by_org and (can_create or can_update) else '')
         + (f"\nimport {{ ApiError }} from '@/lib/api-auth';" if (should_filter_by_org and (can_create or can_update)) or (is_self_only and can_update) else '')
+        + (f"\nimport {{ getModelPermissions }} from '@/lib/authz';" if server_value_override_fields and can_create else '')
         + insufficient_inventory_error_class +
         f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"
         f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"

@@ -1,6 +1,6 @@
 {{ utility_code }}
 {% if can_create %}
-export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string }> {
+export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string{% if server_value_override_fields %}; _server_value_overrides?: Record<string, string>{% endif %} }> {
 {% if should_filter_by_org %}
   const _createOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
   if (!_createOrgIds.includes(organizationId)) {
@@ -20,6 +20,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% if approval_lines_pre_create_code %}
 {{ approval_lines_pre_create_code }}
 {% endif %}
+{% if server_value_pre_create_code %}
+{{ server_value_pre_create_code }}
+{% endif %}
     const created = await tx.{{ model }}.create({
       data: {
         creator_id: actorId,
@@ -28,6 +31,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {{ bridge_child_fk_data_line }}
 {% endif %}
 {{ parent_data_obj }}
+{% if server_value_data_lines %}
+{{ server_value_data_lines }}
+{% endif %}
 {% if child_nested_create %}
 {{ child_nested_create }}
 {% endif %}
@@ -61,7 +67,12 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
       tx,
     });
 {% endif %}
+{% if server_value_overrides_build_code %}
+{{ server_value_overrides_build_code }}
+    return { id: created.id, ...(Object.keys(_serverValueOverrides).length ? { _server_value_overrides: _serverValueOverrides } : {}) };
+{% else %}
     return { id: created.id };
+{% endif %}
 {% if item_reservation_create_code %}
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 {% else %}
