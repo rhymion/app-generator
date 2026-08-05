@@ -423,6 +423,15 @@ Files that are **never overwritten** (extension points):
 
 These stubs are created once on first generation and then left alone.
 
+> **Naming note (cmd_570):** `x-generate` is reserved for this entity-level generation-flags
+> block. Don't reuse the `x-generate` key name for a property-level control (e.g. under a
+> `properties.{field}` entry) even if the intent is unrelated — the two meanings collide and
+> confuse readers, and no generator code reads an `x-generate` key placed under `properties`
+> anyway. If property-level generation control is ever needed, give it its own key name. Also:
+> a field that never renders in the UI needs no schema declaration at all as long as it's
+> defined in `prisma/schema.prisma` (see §3.1 below) — don't add a `properties` entry just to
+> mark a field hidden.
+
 ### 3.1 Field whitelist (`x-generate.fields`)
 
 When `x-generate.fields` is provided only those properties appear in the form and view pages.

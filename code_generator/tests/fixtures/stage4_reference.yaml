@@ -151,12 +151,6 @@ definitions:
             x-outputType: list
             items:
               $ref: "#/definitions/role"
-          invalidated_at:
-            type: string
-            format: date-time
-            readOnly: true
-            x-generate:
-              hidden_from_form: true
 
   setting:
     x-generate:

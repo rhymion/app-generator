@@ -34,13 +34,6 @@ definitions:
       test: false
     fields:
       name: {}
-    properties:
-      invalidated_at:
-        type: string
-        format: date-time
-        readOnly: true
-        x-generate:
-          hidden_from_form: true
 
   # Negative control: no invalidate config at all -- must NOT gain the
   # invalidated_at filter.

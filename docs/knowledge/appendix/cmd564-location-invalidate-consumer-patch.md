@@ -23,7 +23,8 @@ on any entity, same convention already in place for `user`/`anonymizeUser`.
 
 ### 1.1 `code_generator/json_schema.yaml` — `location` entity
 
-Add the field declaration and the `invalidate` config to `definitions.location`:
+Add only the `invalidate` config to `definitions.location`'s existing entity-level `x-generate`
+block. Do **not** add a `properties.invalidated_at` declaration (see the note below):
 
 ```diff
    location:
@@ -35,17 +36,19 @@ Add the field declaration and the `invalidate` config to `definitions.location`:
 +        handler: invalidateLocation
      fields:
        name: {}
-+    properties:
-+      invalidated_at:
-+        type: string
-+        format: date-time
-+        readOnly: true
-+        x-generate:
-+          hidden_from_form: true
 ```
 
 No `filter_field` key is needed — the mechanism is convention-based: `enabled: true` alone makes
 `searchLocationOptions()`'s WHERE clause exclude `invalidated_at IS NOT NULL` rows automatically.
+It reads the column-name convention off the entity-level `x-generate.invalidate` block only; it
+never reads a `json_schema.yaml` property named `invalidated_at`. A field/property that never
+displays on screen needs no schema declaration at all as long as it's defined in
+`prisma/schema.prisma` (§1.2) — declaring it anyway caused two problems fixed in cmd_570: it
+collided with the entity-level `x-generate` key already used for a different purpose (same key
+name, different meaning, on the same entity), and its `x-generate.hidden_from_form: true` sub-key
+was never read by any generator code (dead config). **Do not reintroduce a `properties.invalidated_at`
+block, and do not reuse the `x-generate` key name for property-level generation control if that is
+ever added in the future — pick a different key name.**
 
 ### 1.2 `prisma/schema.prisma` — `location` model
 
