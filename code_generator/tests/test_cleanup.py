@@ -1,6 +1,8 @@
-"""Tests for cleanup.py — HANDWRITTEN_ALLOWLIST protection in prune_orphans."""
+"""Tests for cleanup.py — HANDWRITTEN_ALLOWLIST protection in prune_orphans,
+and messages/*.json preservation (cmd_560)."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -159,3 +161,57 @@ def test_prune_orphans_keep_stubs_preserves_stubs(tmp_path: Path) -> None:
     # Fully regenerated files are still deleted
     assert not files['types.ts'].exists(), 'types.ts deleted even with --keep-stubs'
     assert not files['FormUpsert.tsx'].exists(), 'FormUpsert.tsx deleted even with --keep-stubs'
+
+
+# ---------------------------------------------------------------------------
+# messages/*.json must never be modified by cleanup (cmd_560)
+#
+# `_clean_appended_files` used to delete every Fields/EntityLabel/Nav key
+# belonging to any entity in the passed schema from messages/*.json —
+# including entities still very much in production use, not just genuinely
+# orphaned ones. Since `npm run cleanup` always builds its schema argument
+# fresh from whatever `json_schema.yaml` currently says (see cleanup.py's own
+# module docstring), a cleanup run performed while a temp fixture entity was
+# still present in the schema (e.g. to remove that fixture's generated files
+# before reverting the schema file) wiped every real entity's translated
+# entries too. A subsequent `generate-code` then re-filled those now-missing
+# keys with English schema defaults, since generators_i18n.py's own
+# `_update_json` only fills genuinely *missing* keys and had no way to know
+# they used to hold a real translation. Net effect: `messages/ja.json` went
+# wholesale English. See docs/knowledge/i18n-locale-routing.md.
+# ---------------------------------------------------------------------------
+
+def test_clean_appended_files_never_touches_messages_json(tmp_path: Path) -> None:
+    """A cleanup run against a schema that still lists a real, translated
+    entity must leave messages/*.json byte-for-byte untouched."""
+    messages_dir = tmp_path / 'messages'
+    messages_dir.mkdir()
+    ja_path = messages_dir / 'ja.json'
+    ja_content = json.dumps(
+        {'EntityLabel': {'widget': 'ウィジェット'}, 'Fields': {'name': '名前'}, 'Nav': {'widget': 'ウィジェット'}},
+        ensure_ascii=False, indent=2,
+    ) + '\n'
+    ja_path.write_text(ja_content, encoding='utf-8')
+    en_path = messages_dir / 'en.json'
+    en_content = json.dumps(
+        {'EntityLabel': {'widget': 'Widget'}, 'Fields': {'name': 'Name'}, 'Nav': {'widget': 'Widget'}},
+        indent=2,
+    ) + '\n'
+    en_path.write_text(en_content, encoding='utf-8')
+
+    # 'widget' is a real, currently-in-schema entity (not an orphan) — the
+    # exact scenario that previously triggered wholesale deletion.
+    entity = {
+        'parent': 'widget', 'model': 'widget',
+        'generate_config': {'list': True}, 'children': [],
+    }
+
+    cleanup._clean_appended_files(tmp_path, [entity])
+
+    assert ja_path.read_text(encoding='utf-8') == ja_content, (
+        'messages/ja.json must be byte-for-byte unchanged by cleanup — '
+        'deleting entries here previously destroyed human translations'
+    )
+    assert en_path.read_text(encoding='utf-8') == en_content, (
+        'messages/en.json must also be left untouched by cleanup'
+    )

@@ -79,6 +79,18 @@ export function getGeneratedTasks() {
       const { populateDashboardDashboardWidgetData } = require('./dashboard/helper');
       return await populateDashboardDashboardWidgetData(params.parentId, params.length || 1);
     },
+    async 'db:populatePersonalNoteDependencies'() {
+      const { populatePersonalNoteDependencies } = require('./personal_note/helper');
+      return await populatePersonalNoteDependencies();
+    },
+    async 'db:populatePersonalNote'(length: number) {
+      const { populatePersonalNoteData } = require('./personal_note/helper');
+      return await populatePersonalNoteData(length);
+    },
+    async 'db:populatePersonalNoteFull'(length: number) {
+      const { populatePersonalNoteFullData } = require('./personal_note/helper');
+      return await populatePersonalNoteFullData(length);
+    },
     async 'db:getNotificationsForUser'(userId: string) {
       const { prisma } = require('./db-helpers');
       const notifications = await prisma.notification.findMany({ where: { user_id: userId } });
