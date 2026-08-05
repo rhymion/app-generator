@@ -5,6 +5,28 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`x-server-value` now supports actor delegation** (cmd_565, extending cmd_556): a field
+  declared `x-server-value: {source: actor, override_permission: <Operation>}` still defaults to
+  writing the authenticated actor's id on create, but an actor holding `override_permission` (any
+  `lib/authz.ts` `Operation`) may now supply an explicit value that is honored as-is — e.g. an
+  admin filing a request on someone else's behalf. An actor without that permission who submits a
+  value has it silently replaced with their own id rather than the request being rejected (the
+  create still succeeds, just attributed to the real actor); the REST create response gains an
+  optional `_server_value_overrides` flag so a caller can tell when this happened. The original
+  string form `x-server-value: "actor"` is unchanged (no override capability, client value fully
+  discarded). See `docs/knowledge/x-server-value-actor-delegation.md`.
+
+### Security
+- **CREATE had no read-only field enforcement at all** (cmd_565): PUT's existing AP-3=B rejects a
+  submitted read-only field value that mismatches the persisted row, but CREATE has no row to
+  compare against, so a plain `x-readonly`/`x-readonly-fields` field's client-submitted value flowed
+  straight into the database on create, via both the REST route and the server action — reproduced
+  against a real database before fixing. Both entry points now reject any client-submitted value
+  for such a field on create outright (no legitimate fallback value the way `x-server-value` has
+  actorId). `x-server-value` fields are exempted from this reject; they have their own dedicated
+  resolution (see Added, above). See `docs/knowledge/x-server-value-actor-delegation.md`.
+
 ### Fixed
 - **Item-master entity naming was silently hardcoded to `product`/`product_id` throughout the
   ledger/split generator** (cmd_545/cmd_546): any consumer naming its item-master entity or its

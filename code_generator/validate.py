@@ -389,6 +389,58 @@ def validate_schema(schema: dict) -> None:
                             )
 
     # -----------------------------------------------------------------------
+    # 2f. x-server-value shape checks (cmd_556/cmd_565)
+    # -----------------------------------------------------------------------
+    _SERVER_VALUE_OPERATIONS = {'create', 'read', 'update', 'delete', 'import'}
+    _SERVER_VALUE_DICT_KEYS = {'source', 'override_permission'}
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        props = defn.get('properties', {})
+        for prop_name, prop_def in props.items():
+            if not isinstance(prop_def, dict) or 'x-server-value' not in prop_def:
+                continue
+            sv = prop_def['x-server-value']
+            if isinstance(sv, str):
+                if sv != 'actor':
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': "
+                        f"x-server-value string form only supports 'actor', got '{sv}'.  "
+                        f"Use the dict form {{source: {sv!r}, ...}} once other sources "
+                        f"are implemented, or correct the value to 'actor'."
+                    )
+                continue
+            if isinstance(sv, dict):
+                unknown_keys = set(sv.keys()) - _SERVER_VALUE_DICT_KEYS
+                if unknown_keys:
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': "
+                        f"x-server-value has unknown key(s) {sorted(unknown_keys)}.  "
+                        f"Allowed keys are {sorted(_SERVER_VALUE_DICT_KEYS)}."
+                    )
+                if sv.get('source') != 'actor':
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': "
+                        f"x-server-value.source must be 'actor' (the only implemented "
+                        f"source today), got {sv.get('source')!r}."
+                    )
+                _override = sv.get('override_permission')
+                if _override is not None and _override not in _SERVER_VALUE_OPERATIONS:
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': "
+                        f"x-server-value.override_permission must be one of "
+                        f"{sorted(_SERVER_VALUE_OPERATIONS)} (lib/authz.ts Operation), "
+                        f"got {_override!r}."
+                    )
+                continue
+            errors.append(
+                f"Definition '{def_key}', property '{prop_name}': "
+                f"x-server-value must be the string 'actor' or a dict "
+                f"{{source: 'actor', override_permission?: <Operation>}}, "
+                f"got {type(sv).__name__}."
+            )
+
+    # -----------------------------------------------------------------------
     # 3. Many-to-many x-relationships labelField checks
     # -----------------------------------------------------------------------
     for def_key, defn in defs.items():

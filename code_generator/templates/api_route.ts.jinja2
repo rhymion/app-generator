@@ -37,6 +37,16 @@ export async function POST(request: NextRequest) {
     const { userId: actorId } = await authenticateApiKey(request);
     await requireApiPermission(actorId, '{{ parent }}', 'create');
     const body = await request.json();
+{% if readonly_fields_create_reject %}
+    // Read-only fields can never be supplied by the client, even on create
+    // (cmd_565 乙 — CREATE has no existing row to compare against, unlike
+    // PUT's AP-3=B, so any submitted value is rejected outright).
+{% for f in readonly_fields_create_reject %}
+    if (body.{{ f }} !== undefined) {
+      return NextResponse.json({ error: 'Field {{ f }} is read-only and cannot be set' }, { status: 400 });
+    }
+{% endfor %}
+{% endif %}
     const { {{ all_body_fields_create }} } = body;
     const result = await add{{ parent_pascal }}({{ service_args_for_create }});
     return NextResponse.json(result, { status: 201 });
