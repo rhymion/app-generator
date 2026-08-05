@@ -46,6 +46,20 @@
 # default branch regardless of `target-branch`, so a security-advisory PR
 # will still land on `main` and needs manual retargeting/porting to
 # `develop`.
+#
+# Exception: cypress is excluded from routine minor/patch grouping/updates
+# (cmd_561, 2026-08-05). Root cause (cmd_551, confirmed via a single-variable
+# isolated-worktree control experiment — cypress binary swapped alone,
+# everything else held fixed): cypress 15.16.0 -> 15.19.0 alone breaks
+# cypress/e2e/dashboard.cy.ts (`div[data-field="group_by_field"]` never
+# found — a DataGrid column-virtualization/scrollIntoView timing change in
+# Cypress itself, not a product-code or MUI regression). See
+# docs/knowledge/testing-cypress.md for the full writeup. `exclude-patterns`
+# alone only keeps cypress out of the weekly group PR — it still gets
+# proposed as its own separate PR every week — so the `ignore:` block below
+# additionally silences routine minor/patch bumps outright. Scoped to
+# `update-types` minor/patch only, so a cypress CVE still reaches us via
+# `npm-security` (ignore does not apply to security-update PRs).
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -63,6 +77,8 @@ updates:
         update-types:
           - "minor"
           - "patch"
+        exclude-patterns:
+          - "cypress"
       npm-mui-major:
         applies-to: version-updates
         update-types:
@@ -75,6 +91,15 @@ updates:
           - "minor"
           - "patch"
           - "major"
+    ignore:
+      # cmd_561, 2026-08-05: cypress minor/patch version-update alone broke
+      # dashboard.cy.ts (see comment block above / testing-cypress.md).
+      # Held back until a follow-up cmd re-verifies dashboard.cy.ts against
+      # a newer cypress. Does not suppress security-update PRs.
+      - dependency-name: "cypress"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
     labels:
       - "dependencies"
       - "npm"
