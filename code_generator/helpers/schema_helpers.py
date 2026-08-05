@@ -243,7 +243,6 @@ def get_splittable_bridge_field(entity_def: dict) -> str:
 def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
     """Resolve x-ledger-entities[domain_key] to
     {pool, ledger, transactionable, item_field, location_field,
-    location_relation, location_label_field, location_label_target,
     lot_field, expiration_field}.
 
     OD-1 underlying idea: config required, no defaults. Raises ValueError if
@@ -257,31 +256,26 @@ def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
     split_action_route templates, which silently broke (no error) for any
     consumer naming these columns differently (e.g. proj_g's item-master FK
     is named 'product_id' as a workaround specifically because it was
-    hardcoded here). The ledger entity's own denormalized columns reuse
-    these same names (current schemas — proj_c, proj_g — declare them
-    identically on both sides; no consumer has ever diverged the two).
+    hardcoded here). The ledger entity's own columns reuse these same names
+    (current schemas — proj_c, proj_g — declare them identically on both
+    sides; no consumer has ever diverged the two).
 
-    location_relation is derived (not separately declared) by stripping the
-    conventional '_id' suffix from location_field — the Prisma relation
-    accessor name for that FK (e.g. 'location_id' -> 'location'), needed
-    wherever the generated code reads the *related* location row (its name)
-    rather than just the FK id. item/lot/expiration have no such accessor
-    requirement: item is denormalized by id, lot/expiration are plain
-    scalars, so only location needs it (see split_action_route.ts.jinja2 /
-    the ledger_* stub templates' `include: { location: true }` reads).
-
-    location_label_field/location_label_target (cmd_550): the pool entity's
-    own `x-relationship.labelField`/`.target` declared on location_field —
-    the same source cmd_547/548's autocomplete/list-view label rendering
-    reads. Previously the ledger row write hardcoded `.name` directly
-    instead of going through this declaration, silently mis-rendering (or
-    crashing) for any location entity whose display field isn't literally
-    named `name`. Fails closed (no fallback to `'name'`) if location_field
-    isn't declared as a many-to-one/one-to-one relation with a `target` —
-    a location field that is a plain string (not a relation at all) is a
-    different domain shape, out of scope for this resolver (see
-    docs/knowledge/appendix/inventory-reservation-split.md for the
-    non-relational-location design note).
+    cmd_562: location_field is now an id-FK on *both* the pool and the
+    ledger entity (matching item_field's existing shape) — the ledger row
+    write is a plain id copy (`ledger.location_id = pool.location_id`), not
+    a denormalized display-string snapshot. This resolver previously also
+    derived location_relation (the Prisma relation accessor, e.g.
+    'location_id' -> 'location') and location_label_field/
+    location_label_target (the pool entity's x-relationship.labelField/
+    .target on location_field) so the ledger stub / split-route templates
+    could render a `.name`-equivalent snapshot string and later reverse-look
+    -up that string back to a location row. None of that machinery is
+    needed once the ledger column is an id itself: there is no display
+    string to render and no reverse lookup to invert. PR #269 (cmd_550)
+    built exactly that machinery to fix the previous hardcoded-`.name`
+    plain-string design; cmd_562 removes both the old bug and the fix
+    wholesale in favor of the strictly simpler id-FK design (see
+    docs/knowledge/appendix/inventory-reservation-split.md).
     """
     domains = schema.get('x-ledger-entities') or {}
     if domain_key not in domains:
@@ -293,28 +287,12 @@ def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
     ):
         if required_key not in domain:
             raise ValueError(f"x-ledger-entities.{domain_key!r}.{required_key!r} is required")
-    pool_entity = domain['pool']
-    location_field = domain['locationField']
-    pool_props = get_entity_properties(pool_entity, schema)
-    location_rel = (pool_props.get(location_field) or {}).get('x-relationship') or {}
-    location_label_target = location_rel.get('target')
-    if not location_label_target:
-        raise ValueError(
-            f"x-ledger-entities.{domain_key!r}: pool entity {pool_entity!r}'s "
-            f"{location_field!r} must declare x-relationship.target (the "
-            f"location entity read for the ledger row's denormalized label). "
-            f"A plain-string (non-relation) location column is a different "
-            f"domain shape not yet supported by this resolver."
-        )
     return {
-        'pool': pool_entity,
+        'pool': domain['pool'],
         'ledger': domain['ledger'],
         'transactionable': domain['transactionable'],
         'item_field': domain['itemField'],
-        'location_field': location_field,
-        'location_relation': re.sub(r'_id$', '', location_field),
-        'location_label_field': location_rel.get('labelField', 'name'),
-        'location_label_target': location_label_target,
+        'location_field': domain['locationField'],
         'lot_field': domain['lotField'],
         'expiration_field': domain['expirationField'],
     }

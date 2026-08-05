@@ -31,54 +31,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   add these four keys (matching its current column names) before its next `generate-code` run, or
   generation fails immediately with a named error; no generated-code content changes as a result
   of adding them alone. See `docs/knowledge/appendix/inventory-reservation-split.md` §7–8.
-- **Ledger row's location snapshot hardcoded `.name` instead of the pool entity's declared
-  `x-relationship.labelField`** (cmd_550, found in review of the above): the reserve-phase ledger
-  row write assumed every location entity's display field is literally named `name`; a consumer
-  whose location entity displays a different field (e.g. `label`, `code`) got a TypeScript compile
-  error at `next build` time, the same silent-until-build-time failure class as cmd_545/546.
-  `resolve_ledger_domain()` now also resolves `location_label_field`/`location_label_target` from
-  that same `x-relationship` block (no new schema key), and the ledger row renders through
-  `build_label_expression()` — the identical helper this generator's autocomplete/list-view label
-  rendering already uses, so the audit-trail snapshot and what a user actually saw at claim time
-  can never drift apart. **Two distinct failure/default behaviors, not one** (corrected from the
-  original, overclaiming "fails closed, no fallback to `'name'`" wording): fails closed
-  (`ValueError`, no fallback) only if `locationField` isn't declared as a relation **at all**; if
-  the relation *is* declared but its `labelField` sub-key is not, `resolve_ledger_domain()`
-  deliberately defaults that one sub-key to `'name'` (pinned by
-  `test_location_label_field_defaults_to_name_when_undeclared` — the common case, since most
-  location-like entities do display a `name` field). Reproduced against a location entity with no
-  `name` property before fixing. See `docs/knowledge/appendix/inventory-reservation-split.md`
-  §7.1, §10.
-- **Four more `.name` hardcodes survived cmd_550's own fix, in the once-stub /
-  split-route templates it didn't touch** (cmd_550 follow-up, found in PR #269 review): the
-  reserve-phase fix above only touched `generators.py`'s reservation-allocation code path.
-  `ledger_adjust_stub.ts.jinja2`, `ledger_move_stub.ts.jinja2` (×2), `ledger_write_stub.ts.jinja2`,
-  and `split_action_route.ts.jinja2` (×2) still wrote `_row.{location}?.name ?? ''` into the
-  ledger's denormalized location column directly — the exact same "assumes the display field is
-  named `name`" bug, in four more files, undetected by cmd_550's own review because the count of
-  affected sites was undercounted twice in a row (three call sites initially missed entirely,
-  `split_action_route.ts.jinja2`; a fourth found only on the second recount,
-  `ledger_write_stub.ts.jinja2`'s *reverse* lookup — see below). All six now render through
-  `pool_location_label_exprs[<row var>]` (`generate.py`'s `_ledger_stub_field_vars`), built via the
-  identical `build_label_expression()` call as the fix above.
-
-  A **second, worse-natured class** of the same assumption also survived, only found on this
-  recount: three *reverse* lookups (`tx.<location>.findFirst({ where: { name: ... } })` in
-  `ledger_write_stub.ts.jinja2`'s `afterReject` and `split_action_route.ts.jinja2`'s reserved-row
-  release, plus a `select: { name: true } }` projection narrowing what `split_action_route.ts.jinja2`
-  fetches before rendering it) recover a location *row* from the ledger's denormalized string —
-  the same "assumes `name`" bug, but for a consumer whose display field is something else, this
-  either throws (`name` isn't a queryable column) or, worse, silently matches nothing / an
-  unrelated row (`findFirst` has no correctness guarantee against duplicate display-field values —
-  a pre-existing, separate ambiguity this fix does not attempt to resolve; see
-  `docs/knowledge/appendix/inventory-reservation-split.md` §7.1 "reverse lookup" subsection for why
-  that's judged out of this fix's scope). Now reads `pool_location_label_field` (the declared
-  field name) instead of the literal `name`. **Fails closed** (generation-time `ValueError`,
-  before any file is written) if the declared `labelField` is composite (a list) — a concatenated
-  multi-field label cannot be unambiguously inverted back into a single-field lookup — or resolves
-  through a relation beyond the location entity itself, or to a date/time field. Deviation-injection
-  proof (a location entity displaying `code`, not `name`) added in
-  `code_generator/tests/test_ledger_stub_location_label_field.py`.
+- **Ledger row's location column is now an id-FK, not a denormalized display string**
+  (cmd_562, superseding cmd_550/PR #269 before either shipped in a release): cmd_550 taught the
+  ledger row's location write to render the pool entity's declared `x-relationship.labelField`
+  into a display-string snapshot (instead of hardcoding `.name`), plus a *reverse*
+  `findFirst({ where: { <labelField>: <string> } })` lookup everywhere that string needed to be
+  turned back into a location row. Decided instead to hold location by id on the ledger entity too
+  (matching how the item-master FK already worked) — every write is now a plain id copy
+  (`ledger.location_id = pool.location_id`), and no reverse lookup exists at all, in
+  `ledger_adjust_stub.ts.jinja2`, `ledger_move_stub.ts.jinja2` (×2), `ledger_write_stub.ts.jinja2`
+  (forward + `afterReject` re-identification), `split_action_route.ts.jinja2` (×3), and
+  `generators.py`'s reserve-phase allocation code. `resolve_ledger_domain()` no longer resolves or
+  returns `location_relation`/`location_label_field`/`location_label_target` — it no longer
+  inspects the pool entity's `x-relationship` declaration at all for this purpose. The FK is
+  `onDelete: Restrict` (a referenced location cannot be deleted, reproduced against a real
+  database); renaming a location remains possible, with `x-audit: true` (an existing,
+  entity-agnostic mechanism, not new) recording who renamed it and when. See
+  `docs/knowledge/appendix/inventory-reservation-split.md` §7.1–7.2 and
+  `docs/knowledge/appendix/cmd562-location-id-fk-consumer-migration.md` for the consumer migration.
 
 ### Security
 - **Server-action path can no longer bypass multi-stage approval ordering** (cmd_540): the

@@ -193,10 +193,7 @@ literal strings `product_id`/`location`/`location_id`/`lot_number`/`expiration_d
 consumer naming the item-master entity or these columns differently (e.g. `item`/`item_id`) got
 **no error** — the split auto-allocate WHERE clause silently rendered a permanently-undefined
 `.None` property access (Prisma treats it as "no filter", not a type error), and the
-lot/product-mismatch guard (§4) silently never ran at all. `location_relation` (the Prisma
-relation accessor for `locationField`, e.g. `location`) is *derived* by stripping the
-conventional `_id` suffix, not separately declared — same convention `pool_fk_field`/
-`bridge_fk_field` already use elsewhere in this file.
+lot/product-mismatch guard (§4) silently never ran at all.
 
 The item-master entity a split entity's own FK must target (used by the split-route
 lot/product-mismatch check, §4) is likewise resolved from `itemField`'s `x-relationship.target`
@@ -211,81 +208,63 @@ the current on-disk file when the four keys match existing names) — the only i
 effect is that the previously-dead lot/product-mismatch guard and `primary: true` support (below)
 switch on wherever a name mismatch had been silently suppressing them.
 
-### 7.1 Location ledger-row label rendering (cmd_550)
+### 7.1 Location is an id-FK on the ledger entity too (cmd_562 — supersedes cmd_550/PR #269)
 
-The ledger row's `locationField` column (§7) is a denormalized snapshot — "what the location was
-called at the time" — written when a reservation claims pool inventory. Before cmd_550, this
-write hardcoded `_candidate.{location_relation}?.name ?? ''`: it assumed the location entity's
-display field is always literally named `name`. Any consumer whose location entity displays a
-different field (e.g. `label`, `code`) got no error — a TypeScript compile error (`.name` doesn't
-exist on the Prisma type), the same silent-until-build-time failure mode as §7's four fields.
+**This section describes the current design.** `locationField` (§7) is now an id-FK column on
+*both* the pool entity and the ledger entity (the same shape `itemField` already had on both
+sides) — every ledger row write is a plain id copy (`ledger.location_id = pool.location_id`), not
+a denormalized display-string snapshot.
 
-Fixed to read the pool entity's own `x-relationship.labelField` declared on `locationField` —
-`resolve_ledger_domain()` now also returns `location_label_field` / `location_label_target`,
-resolved from that same `x-relationship` block (no new schema key). The ledger row is rendered via
-`build_label_expression()`, the identical helper `helper_context()`'s dependency/autocomplete label
-rendering already uses elsewhere in this generator (§5) — so the ledger snapshot and what a user
-sees in an autocomplete/list-view for the same relation always come from one source, not two that
-can drift apart independently.
+cmd_550/PR #269 (described in prior revisions of this doc, now removed) took a different approach:
+it kept the ledger's `locationField` column a denormalized display string and taught the write to
+render it through the pool entity's declared `x-relationship.labelField` instead of hardcoding
+`.name`, plus a *reverse* `findFirst({ where: { <labelField>: <string> } })` lookup wherever the
+ledger's own string needed to be turned back into a location row (afterReject re-identification,
+split's parent-reserved-row release). Decision (2026-08-04, cmd_558 to cmd_562): don't keep
+patching the string-snapshot design — hold location by id, exactly like item already is. This
+makes the entire labelField-rendering/reverse-lookup mechanism moot: there's no display string to
+render at write time and no string to invert back to a row at read time, since the row already
+carries the id directly.
 
-**Composite labelField** (generators.py's reserve-phase write only — see "Once-stub / split-route
-templates" below for a narrower rule): if `locationField`'s `labelField` is a list (e.g.
-`[building, shelf]`), the full composite string (e.g. `"Warehouse A Shelf 3"`) is written to the
-ledger row, not truncated to a single segment. The ledger column is already a non-normalized text
-snapshot, and using the exact same rendering the UI shows keeps the audit trail consistent with
-what the user actually saw at claim time — a single-segment truncation would create a second,
-divergent notion of "the" location label with no clear rule for which segment to keep.
+`resolve_ledger_domain()` reflects this — it no longer returns `location_relation`,
+`location_label_field`, or `location_label_target`, and no longer inspects the pool entity's
+`x-relationship` declaration on `locationField` at all (that declaration still exists on the pool
+entity for the *generic* schema-driven UI label system — autocomplete, list views, CSV export —
+entirely independent of this ledger-domain resolver). `generate.py`'s `_ledger_stub_field_vars()`
+now returns only `pool_location_field`, the same shape as `pool_item_field`/`pool_lot_field`/
+`pool_expiration_field`.
 
-**Two distinct failure/default behaviors** — read together, not as one blanket "fails closed"
-claim (an earlier version of this note, and the CHANGELOG entry, conflated them; corrected as part
-of the follow-up below after PR #269 review flagged the discrepancy):
-- **Fails closed** (`ValueError`, no default) only if `locationField` has no `x-relationship.target`
-  at all (e.g. a bare string column, not a relation) — see §10.1 for that shape, which this
-  resolver does not yet support.
-- **Defaults to `'name'`** — deliberately, not a bug — if `locationField` *is* declared as a
-  relation but its `labelField` sub-key is absent (`location_rel.get('labelField', 'name')` in
-  `resolve_ledger_domain()`, pinned by
-  `test_location_label_field_defaults_to_name_when_undeclared`). Confirmed acceptable in PR #269
-  review (2026-08-04, cmd_550 follow-up): most location-like entities do display a `name` field,
-  and requiring every consumer to declare `labelField` explicitly even for the common case would
-  be pure ceremony. The requirement is only that this default be *documented* precisely (this
-  paragraph) rather than described as "no fallback to name" (which was true for the
-  undeclared-relation case but false for this one).
+**Migration note for an existing consumer still on the string-column design** (proj_c, proj_g as
+of cmd_562): this is a schema + data migration, not just a config change — see
+`docs/knowledge/appendix/cmd562-location-id-fk-consumer-migration.md` for the concrete Prisma
+migration, backfill classification query, and json_schema.yaml diff. Unlike §7's four-key
+addition (config-only, no generated-output change when values match existing names), this one
+does change generated output: every `ledger_*_stub.ts.jinja2` / `split_action_route.ts.jinja2` call
+site and `generators.py`'s reserve-phase write switch from string-snapshot to id-copy, and the
+Prisma schema itself gains a real FK relation + `onDelete: Restrict` constraint on the ledger's
+location column where none existed before.
 
-### 7.2 Once-stub / split-route templates read the same declaration (cmd_550 follow-up)
+### 7.2 onDelete: Restrict and rename auditing (cmd_562)
 
-§7.1 above only fixed `generators.py`'s reserve-phase ledger-row write. Four more files rendered
-the same `_row.{location_relation}?.name ?? ''` hardcode directly in their Jinja2 source —
-undetected by §7.1's own review because the affected-site count was undercounted twice in a row
-(the once-stub templates were missed entirely on the first pass; a further *reverse*-lookup site
-was found only on a second recount). All nine sites across four files (`ledger_adjust_stub.ts.jinja2`,
-`ledger_move_stub.ts.jinja2` ×2, `ledger_write_stub.ts.jinja2` ×2 forward+reverse,
-`split_action_route.ts.jinja2` ×3 — two forward, one reverse) now render through
-`generate.py`'s `_ledger_stub_field_vars()`, which calls the same `build_label_expression()` §7.1
-uses, exposed as a `pool_location_label_exprs` dict keyed by each site's row variable name
-(`inventory`, `fromInventory`, `toInventory`, `_childInv`, `_cand`).
+Two related decisions from the same cmd_562 ruling:
 
-**Narrower support than §7.1's reserve-phase write**: these four templates also contain *reverse*
-lookups (`tx.<location>.findFirst({ where: { <label field>: <denormalized string> } })`) that
-recover a location row from the ledger's previously-written string — a shape §7.1's write-only
-fix never had to handle. A reverse lookup cannot unambiguously invert a **composite** (multi-field)
-label string back into per-field equality, so `_ledger_stub_field_vars()` fails closed
-(generation-time `ValueError`, before any file is written) for the *whole domain* if the declared
-`labelField` is composite, resolves through a relation beyond the location entity itself, or
-resolves to a date/time field — even for the templates here that only ever do a forward write.
-This is a stricter, template-specific rule layered on top of §7.1's domain-level resolution, not a
-change to what `resolve_ledger_domain()` itself returns.
-
-**Reverse-lookup uniqueness — known, pre-existing, explicitly out of this fix's scope**: even with
-the field name corrected, `findFirst({ where: { <field>: <value> } })` has no uniqueness
-guarantee — if two location rows share the same display value, one is picked silently and
-arbitrarily. This is not a regression introduced by this fix (the pre-fix `where: { name: ... }`
-had the exact same property whenever two locations shared a `name`); it is the same class of
-ambiguity documented for autocomplete/list-view label resolution (cmd_547/548). Recorded here,
-judged as a separate design question (does a reverse lookup need a stored FK instead of a
-denormalized-string round-trip?) rather than folded into this naming-generalization fix, per the
-PR #269 review request to record the fact and let scope be judged independently rather than
-silently bundled in.
+- **A referenced location cannot be deleted.** The new `inventory_transaction.location_id` FK is
+  declared `onDelete: Restrict` (matching the existing `product_id`/`item_id` FK on the same
+  entity — both are identity dimensions of the append-only ledger row; letting either disappear
+  out from under a historical transaction row would corrupt the ledger's meaning). This is a
+  Postgres-level constraint, verified by attempting to delete a referenced vs. unreferenced
+  location row against a real database (not inferred from the schema declaration alone) — see the
+  migration doc referenced above for the reproduction.
+- **A location rename leaves a record.** Renaming a location entity is permitted (unlike delete,
+  which Restrict blocks outright) on the condition that a record of who renamed it and when
+  survives. This does **not** require new generator work: `x-audit: true` (an existing,
+  entity-agnostic flag — see `build_context.py`'s `is_audited`, proven generic by
+  `test_audit_logging.py`) already wraps every `update{Entity}`/`delete{Entity}` call in
+  `recordAuditEvent()`, writing an `audit_log` row with the actor, the target table/id, and a
+  timestamp. Declaring `x-audit: true` on the `location` entity is sufficient — a schema-only
+  change (the migration doc adds it for proj_c/proj_g). It records that a rename happened, by
+  whom, and when; it does not (yet) capture the old/new name values or offer a per-entity history
+  UI — both explicitly deferred to future work.
 
 ## 8. Reference-name vs. entity-name mismatch and `primary: true` (cmd_545)
 
@@ -313,33 +292,29 @@ to classify each key as generator-read vs. dead and remove/replace unused keys (
 been designed into code. Do not assume any `x-reservation` key documented here has been removed
 or replaced until that design lands and a follow-up doc update reflects the actual diff.
 
-## 10. When a consumer's location/lot column doesn't fit the current shape (design notes, cmd_550)
+## 10. When a consumer's location/lot column doesn't fit the current shape (design notes, cmd_550/562)
 
-§7.1's fix assumes `locationField` is always a many-to-one relation to a real location entity with
-a `name`-or-declared `labelField`. This section works through what happens for the three shapes
-that assumption doesn't cover, and whether/how a future consumer could be supported. **Design
-notes only — none of this is implemented.** A consumer hitting one of these today gets
-`resolve_ledger_domain`'s fail-closed `ValueError` (§7.1), not silent wrong behavior.
+This section works through what happens for shapes `locationField`/`lotField` might take beyond
+the current consumers' (proj_c, proj_g) shape, and whether/how a future consumer could be
+supported. **Design notes only for §10.2-10.4 — none of that is implemented.** §10.1 was resolved
+by cmd_562.
 
-### 10.1 Location is a plain string, not a relation
+### 10.1 Location is a plain string, not a relation (resolved by cmd_562)
 
 If `locationField` (e.g. `location`) is declared as a bare `type: string` column with no
-`x-relationship` at all — no location *entity* exists, just free text — then:
+`x-relationship` at all — no location *entity* exists, just free text:
 
-- **Does it work today?** No. `resolve_ledger_domain()` requires `x-relationship.target` on
-  `locationField` (§7.1) and raises `ValueError` naming the field and the missing key.
-- **What would be needed?** `resolve_ledger_domain` would need a declared flag (e.g. checking
-  whether `locationField`'s schema property itself carries `x-relationship`, vs. not) to pick a
-  different code path: instead of `build_label_expression('_candidate.{relation}', ...)`, the
-  ledger row would read the pool entity's own scalar directly — `_candidate.{location_field}`
-  (no relation hop, no `include` needed at all). This is a strict *simplification* of the current
-  path, not a new mechanism — the two paths could share the same call site with a branch on
-  whether `x-relationship` is present.
-- **Stopgap today**: none needed *for existing consumers* — proj_c and proj_g's location columns
-  are both real FK relations. A consumer that genuinely has no location entity can currently only
-  be modeled by pointing `locationField` at some relation anyway (e.g. a trivial single-column
-  lookup entity), which is a real workaround, not a clean fit — flagged here so a future consumer
-  doesn't have to rediscover it.
+- **Does it work today? Yes**, as of cmd_562. §7.1's id-copy design doesn't inspect
+  `x-relationship` on `locationField` at all — it only ever reads
+  `pool_row.{location_field}`/writes `ledger_row.{location_field}` as a plain property copy,
+  regardless of whether that property happens to be a FK or a bare scalar. This was a side effect
+  of cmd_562's simplification, not a dedicated fix for this shape — recorded here because it
+  changes this section's older "no" answer (from the cmd_550-era label-rendering design, which did
+  require `x-relationship.target`).
+- **What changed**: `resolve_ledger_domain()` no longer looks up the pool entity's properties or
+  its `x-relationship` block at all (§7.1) — it purely passes through the four declared field
+  names. There is no relation-vs-scalar branch left to need, because there is no relation-aware
+  code path left at all.
 
 ### 10.2 Lot number is a table (FK), not a scalar
 
@@ -347,21 +322,18 @@ If `lotField` (e.g. `lot_number`) is itself a many-to-one relation to a `lot` en
 issued from a registry, carrying their own metadata) rather than a free-text/numeric scalar
 column, then:
 
-- **Does it work today?** No — cleanly, but not correctly for this shape. `lot_field` is read as
-  `_candidate.{lot_field}` (§7, a direct scalar property access) and written to the ledger row's
-  own scalar `lotField` column unchanged. If `lot_field` on the pool entity is actually a FK
-  (`lot_id`), this reads the *foreign key id*, not a display value — the ledger row would silently
-  store an opaque id string where §7.1's location fix stores a rendered label. No error, because a
-  FK column and a scalar column are both just TypeScript `string`/`string | null` — nothing
-  type-checks against "this must be a label, not an id."
-- **What would be needed?** The same treatment §7.1 gave `locationField`: detect
-  `x-relationship` on `lotField`, and if present, resolve `lot_label_field`/`lot_label_target` the
-  identical way, rendering through `build_label_expression()` instead of a bare property read.
-  This is a direct structural copy of §7.1's fix, not a new design.
-- **Stopgap today**: a consumer with a lot-registry FK would need to keep a denormalized scalar
-  lot-number column on the pool entity *in addition to* the FK relation (populated by whatever
-  writes the FK), and point `lotField` at the scalar column — the ledger row then snapshots a
-  human-readable value, at the cost of a second column the schema author must keep in sync.
+- **Does it work today?** Yes, in the same sense §10.1 now does — `lot_field` is read as
+  `_candidate.{lot_field}` (§7, a direct scalar property copy) and written to the ledger row's own
+  `lotField` column unchanged, whether that value is a FK id or a free-text lot number. Unlike
+  §10.1's old (cmd_550-era) shape, there was never a label-rendering branch for `lotField` to begin
+  with — this row has always been a plain copy, so there's nothing left to resolve here beyond
+  noting the symmetry with location post-cmd_562.
+- **Stopgap for a lot-registry FK wanting a human-readable ledger snapshot**: since the copy is
+  now always an id-or-whatever-the-column-is (matching item/location's post-cmd_562 shape), a
+  consumer wanting a *display* value in the ledger row rather than an opaque id would need a
+  separate denormalized scalar column on the pool entity (populated by whatever writes the FK),
+  with `lotField` pointed at that scalar column instead of the FK. This is unchanged from before
+  cmd_562 — it was never in scope for either fix.
 
 ### 10.3 The consumer doesn't track this dimension at all
 
@@ -388,10 +360,10 @@ to track this dimension" versus "I haven't finished configuring this domain yet.
 **Recommended direction (not implemented)**: keep every key required, but accept an explicit
 sentinel value meaning "intentionally not tracked" — e.g. `locationField: null` (a JSON Schema/YAML
 null, not simply absent) — rather than making the key optional. `resolve_ledger_domain` would then
-resolve `location_relation`/`location_label_field`/`location_label_target` to `None`, and every
-call site that currently assumes `location_relation` is always a real Prisma field (the `include`
-clause, the ledger row's own key) would need an explicit `if location_relation:` branch that omits
-that field/include entirely rather than resolving it to a broken empty string.
+resolve `location_field` to `None`, and every call site that currently assumes `location_field` is
+always a real column (the ledger row's own write key, post-cmd_562) would need an explicit
+`if location_field:` branch that omits that field entirely rather than writing a broken `None`
+key.
 
 Why an explicit sentinel over an optional key: an optional key that silently defaults to "not
 tracked" when absent reintroduces exactly the bug class §7/§7.1 fixed — a schema author who simply

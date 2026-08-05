@@ -220,7 +220,14 @@ class TestResolveLedgerDomainRequiredKeys:
     """itemField/locationField/lotField/expirationField are required with no
     defaults — a domain missing any of them must fail loud, naming the
     domain and the missing key, not silently fall back to
-    'product'/'location'/etc."""
+    'product'/'location'/etc.
+
+    cmd_562: location_field is now an id-FK column name only (same shape as
+    item_field) — resolve_ledger_domain no longer reaches into the pool
+    entity's own x-relationship declaration at all (no location_relation /
+    location_label_field / location_label_target derivation; see
+    test_ledger_location_id_fk.py for the id-copy behavior those used to
+    gate)."""
 
     def _domain(self, **overrides):
         base = {
@@ -232,45 +239,11 @@ class TestResolveLedgerDomainRequiredKeys:
         base.update(overrides)
         return base
 
-    def _schema(self, location_target_entity="location", label_field="name", **domain_overrides):
-        """Full schema: x-ledger-entities domain plus the pool entity's own
-        definition declaring x-relationship.target/labelField on its
-        locationField — cmd_550's resolve_ledger_domain reads this the same
-        way build_label_expression's other call sites do, instead of
-        hardcoding `.name`."""
-        domain = self._domain(**domain_overrides)
-        location_field = domain["locationField"]
-        return {
-            "x-ledger-entities": {"inventory_domain": domain},
-            "definitions": {
-                domain["pool"]: {
-                    "type": "object",
-                    "properties": {
-                        location_field: {
-                            "type": "string",
-                            "x-relationship": {
-                                "type": "many-to-one",
-                                "target": location_target_entity,
-                                "labelField": label_field,
-                            },
-                        },
-                    },
-                },
-                location_target_entity: {
-                    "type": "object",
-                    "properties": {"id": {"type": "string"}, label_field: {"type": "string"}},
-                },
-            },
-        }
-
     def test_fully_declared_domain_resolves(self):
-        schema = self._schema()
+        schema = {"x-ledger-entities": {"inventory_domain": self._domain()}}
         resolved = resolve_ledger_domain(schema, "inventory_domain")
         assert resolved["item_field"] == "product_id"
         assert resolved["location_field"] == "location_id"
-        assert resolved["location_relation"] == "location"
-        assert resolved["location_label_field"] == "name"
-        assert resolved["location_label_target"] == "location"
         assert resolved["lot_field"] == "lot_number"
         assert resolved["expiration_field"] == "expiration_date"
 
@@ -283,66 +256,6 @@ class TestResolveLedgerDomainRequiredKeys:
             resolve_ledger_domain(schema, "inventory_domain")
         assert "inventory_domain" in str(exc_info.value)
         assert missing_key in str(exc_info.value)
-
-    def test_location_relation_strips_id_suffix_not_literal_location(self):
-        """Regression guard: location_relation must be *derived* from
-        locationField (strip '_id'), not hardcoded to 'location' — proven by
-        a domain that names its location FK column something else."""
-        schema = self._schema(locationField="warehouse_slot_id")
-        resolved = resolve_ledger_domain(schema, "inventory_domain")
-        assert resolved["location_relation"] == "warehouse_slot"
-
-    def test_location_label_field_defaults_to_name_when_undeclared(self):
-        """A location FK relation with no explicit labelField falls back to
-        'name' — the same fallback build_label_expression itself applies,
-        not a second independent default."""
-        domain = self._domain()
-        schema = {
-            "x-ledger-entities": {"inventory_domain": domain},
-            "definitions": {
-                domain["pool"]: {
-                    "type": "object",
-                    "properties": {
-                        domain["locationField"]: {
-                            "type": "string",
-                            "x-relationship": {"type": "many-to-one", "target": "location"},
-                        },
-                    },
-                },
-                "location": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}}},
-            },
-        }
-        resolved = resolve_ledger_domain(schema, "inventory_domain")
-        assert resolved["location_label_field"] == "name"
-        assert resolved["location_label_target"] == "location"
-
-    def test_non_relation_location_field_fails_loud(self):
-        """cmd_550: a locationField declared without x-relationship.target
-        (e.g. a bare string column, not a FK/relation) must fail loud rather
-        than silently falling back to a broken `.name` access on a string."""
-        domain = self._domain()
-        schema = {
-            "x-ledger-entities": {"inventory_domain": domain},
-            "definitions": {
-                domain["pool"]: {
-                    "type": "object",
-                    "properties": {domain["locationField"]: {"type": "string"}},
-                },
-            },
-        }
-        with pytest.raises(ValueError) as exc_info:
-            resolve_ledger_domain(schema, "inventory_domain")
-        assert "location_id" in str(exc_info.value)
-        assert "x-relationship.target" in str(exc_info.value)
-
-    def test_location_label_field_reads_declared_non_name_display_field(self):
-        """Deviation injection: a location entity whose display field is
-        'label', not 'name' — resolve_ledger_domain must surface the
-        declared labelField ('label'), not silently assume 'name'."""
-        schema = self._schema(location_target_entity="warehouse_slot", label_field="label")
-        resolved = resolve_ledger_domain(schema, "inventory_domain")
-        assert resolved["location_label_field"] == "label"
-        assert resolved["location_label_target"] == "warehouse_slot"
 
 
 # ---------------------------------------------------------------------------
@@ -384,24 +297,8 @@ _BASE_SPLIT_CTX = {
     "pool_entity": "inventory",
     "pool_item_field": "product_id",
     "pool_location_field": "location_id",
-    "pool_location_relation": "location",
-    "pool_location_target_entity": "location",
     "pool_lot_field": "lot_number",
     "pool_expiration_field": "expiration_date",
-    # cmd_550 follow-up: split_action_route.ts.jinja2 now reads the pool
-    # entity's declared location labelField through these two context vars
-    # (see generate.py's _ledger_stub_field_vars) instead of hardcoding
-    # `.name` / `where: { name: ... }`. This fixture's location entity
-    # displays 'name' (the common case) — see
-    # test_ledger_stub_location_label_field.py for the 'code' deviation.
-    "pool_location_label_exprs": {
-        "inventory": "(inventory.location?.name ?? '')",
-        "fromInventory": "(fromInventory.location?.name ?? '')",
-        "toInventory": "(toInventory.location?.name ?? '')",
-        "_childInv": "(_childInv.location?.name ?? '')",
-        "_cand": "(_cand.location?.name ?? '')",
-    },
-    "pool_location_label_field": "name",
 }
 
 

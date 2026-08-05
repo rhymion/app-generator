@@ -34,7 +34,6 @@ from helpers.label_field import (
     build_label_expression,
     first_label_format,
     first_label_path,
-    render_prisma_include,
 )
 
 
@@ -979,41 +978,15 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     # silently broke (TypeScript error, not a generator-time failure) for any
     # consumer naming these columns differently.
     item_field       = _domain['item_field']
-    location_relation = _domain['location_relation']
+    location_field   = _domain['location_field']
     lot_field        = _domain['lot_field']
     expiration_field = _domain['expiration_field']
-    # cmd_550: render the ledger row's location snapshot through the pool
-    # entity's declared x-relationship.labelField — the same source
-    # cmd_547/548's autocomplete/list-view labels read — instead of a bare
-    # `.name` access, which silently mis-rendered (or crashed) for any
-    # location entity whose display field isn't literally `name`. A
-    # composite labelField (e.g. `[location_name, shelf_code]`) is rendered
-    # in full rather than truncated to a single segment: the ledger column
-    # is a denormalized snapshot of "what the location was called at the
-    # time", and using the identical rendering the user already sees in
-    # autocomplete/list views keeps that snapshot consistent with the UI
-    # rather than growing a second, divergent notion of "the" location label.
-    location_label_built = build_label_expression(
-        f"_candidate.{location_relation}",
-        _domain['location_label_field'],
-        _domain['location_label_target'],
-        schema or {},
-    )
-    if location_label_built['has_format']:
-        raise ValueError(
-            f"x-ledger-entities for {model!r}: location labelField "
-            f"{_domain['location_label_field']!r} on {_domain['location_label_target']!r} "
-            f"resolves to a date/time field — unsupported for the ledger row's "
-            f"plain-string location snapshot (formatLabelValue is not imported "
-            f"in this generated module)."
-        )
-    location_label_expr = location_label_built['expression']
-    _location_nested_include = location_label_built['prisma_include']
-    location_include_str = (
-        f"{location_relation}: {{ include: {{ {render_prisma_include(_location_nested_include)} }} }}"
-        if _location_nested_include
-        else f"{location_relation}: true"
-    )
+    # cmd_562: location_field is an id-FK on both the pool and ledger
+    # entities (same shape as item_field) — the ledger row write is a plain
+    # id copy, not a denormalized display-string snapshot. This removes the
+    # build_label_expression/prisma-include machinery cmd_550 (PR #269)
+    # built to render a `.name`-equivalent snapshot string; that whole
+    # design (and its fix) is obsolete once the column is an id itself.
 
     pool_qty_field = pool.get('quantityField', 'quantity')
     pool_res_field = pool.get('reservedField', 'reserved_quantity')
@@ -1057,7 +1030,6 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"{where_clause}\n"
         f"        }},\n"
         + (f"        orderBy: [{order_str}],\n" if order_str else '') +
-        f"        include: {{ {location_include_str} }},\n"
         f"      }});\n"
         f"      const bridge = await tx.{transactionable_entity}.create({{ data: {{}} }});\n"
         f"      for (const _candidate of _candidates) {{\n"
@@ -1078,7 +1050,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"              quantity_delta: 0,\n"
         f"              reserved_delta: _claim,\n"
         f"              {item_field}: _candidate.{item_field},\n"
-        f"              {location_relation}: {location_label_expr},\n"
+        f"              {location_field}: _candidate.{location_field},\n"
         f"              {lot_field}: _candidate.{lot_field},\n"
         f"              {expiration_field}: _candidate.{expiration_field},\n"
         f"              created_by_id: actorId,\n"
