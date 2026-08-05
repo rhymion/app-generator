@@ -33,10 +33,22 @@ block. Do **not** add a `properties.invalidated_at` declaration (see the note be
 +      invalidate:
 +        enabled: true
 +        module: lib/location/invalidate_location
-+        handler: invalidateLocation
++        # NOT invalidateLocation (see note below) — must differ from the
++        # generated invalidate{Entity} wrapper name.
++        handler: doInvalidateLocation
      fields:
        name: {}
 ```
+
+**Root cause / do not use `invalidate{Entity}` as the handler name.** The generated
+`actions.ts.jinja2` wrapper always exports a function named `invalidate{Entity}`
+(here, `invalidateLocation`) and statically imports the configured `module`/`handler`
+under that same import. If `handler` is also literally `invalidateLocation`, the two
+same-named declarations collide — `next build` fails with "the name 'invalidateLocation'
+is defined multiple times." No existing test catches this (it's a static-import
+collision, not a runtime behavior difference), so it surfaces only as a build break.
+Pick any handler name distinct from `invalidate{Entity}` (this doc uses
+`doInvalidateLocation`, the name actually applied in proj_c's consumer patch).
 
 No `filter_field` key is needed — the mechanism is convention-based: `enabled: true` alone makes
 `searchLocationOptions()`'s WHERE clause exclude `invalidated_at IS NOT NULL` rows automatically.
@@ -68,13 +80,15 @@ ever added in the future — pick a different key name.**
 
 import prisma from '@/lib/prisma';
 
-export async function invalidateLocation(id: string): Promise<void> {
+export async function doInvalidateLocation(id: string): Promise<void> {
   await prisma.location.update({ where: { id }, data: { invalidated_at: new Date() } });
 }
 ```
 
 This is a hand-written file (like `lib/compliance/anonymize_user.ts`'s handler pattern), not
 generated — the generator only imports and calls it via the `module`/`handler` config above.
+The function name here must match whatever `handler` is set to in §1.1's config (see that
+section's note on why it cannot be `invalidateLocation`).
 
 ## 2. Migration SQL
 
