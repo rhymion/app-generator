@@ -66,7 +66,7 @@ def _field_notes_str(defn: dict) -> str:
     rel = defn.get('x-relationship')
     if rel:
         target = rel.get('target', '')
-        label = rel.get('labelField')
+        label = rel.get('labelField', 'name')
         parts.append(f'FK → [{target}]({target}.md) (label: `{label}`)')
     pattern = defn.get('pattern')
     if pattern and 'c[a-z0-9]' in pattern:

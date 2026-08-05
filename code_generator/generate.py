@@ -1030,7 +1030,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                     # No FK relation declared for this field — plain text input.
                     _split_ui_parts.append({'field': _f, 'is_relation': False, 'context_fields': []})
                     continue
-                _f_label_field = _f_rel.get('labelField')
+                _f_label_field = _f_rel.get('labelField', 'id')
                 _f_built = build_label_expression('item', _f_label_field, _f_target, schema)
                 if _f_built['has_format']:
                     _split_uses_format_label_value = True

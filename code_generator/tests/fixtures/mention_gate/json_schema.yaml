@@ -91,8 +91,7 @@ definitions:
           - surprised
           - sad
       user_id:
-        x-relationship:
-          labelField: name
+        x-relationship: {}
       comment_id:
         x-relationship:
           labelField: id

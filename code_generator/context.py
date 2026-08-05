@@ -227,7 +227,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         RelInfo(
             relation_name=r['prop_name'].removesuffix('_id'),
             target=r['target'],
-            label_field=r.get('label_field'),
+            label_field=r.get('label_field', 'name'),
         )
         for r in rels_raw
     ]
@@ -402,7 +402,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             RelInfo(
                 relation_name=r['prop_name'].removesuffix('_id'),
                 target=r['target'],
-                label_field=r.get('label_field'),
+                label_field=r.get('label_field', 'name'),
             )
             for r in get_parent_relationships(child_def)
         ]
@@ -469,7 +469,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
                 RelInfo(
                     relation_name=r['prop_name'].removesuffix('_id'),
                     target=r['target'],
-                    label_field=r.get('label_field'),
+                    label_field=r.get('label_field', 'name'),
                 )
                 for r in c['child_rels']
                 if r['target'] != oto['target']  # exclude back-ref to one-to-one parent
