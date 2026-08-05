@@ -70,26 +70,28 @@ export default function ImageUpload({
           margin="normal"
           helperText={error || helperText}
           error={!!error}
-          InputProps={{
-            endAdornment: (
-              <span style={{ marginLeft: '8px', whiteSpace: 'nowrap' }}>
-                <button
-                  type="button"
-                  onClick={() => document.getElementById('image-upload-button')?.click()}
-                  disabled={uploading}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: uploading ? '#ccc' : '#1976d2',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: uploading ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {uploading ? 'Uploading...' : 'Upload'}
-                </button>
-              </span>
-            ),
+          slotProps={{
+            input: {
+              endAdornment: (
+                <span style={{ marginLeft: '8px', whiteSpace: 'nowrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById('image-upload-button')?.click()}
+                    disabled={uploading}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: uploading ? '#ccc' : '#1976d2',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: uploading ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {uploading ? 'Uploading...' : 'Upload'}
+                  </button>
+                </span>
+              ),
+            },
           }}
         />
       </label>

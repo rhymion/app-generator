@@ -241,10 +241,15 @@ Cypress.Commands.add('setCheckbox', (label: string, checked: boolean) => {
  * Fill MUI DateTimePicker by label using direct keyboard input.
  * Accepts dateString in "MM/DD/YYYY HH:MM AM|PM" format.
  *
- * MUI X v8 with enableAccessibleFieldDOMStructure=false renders a single <input>
- * with section-based keyboard handling. Typing digits auto-advances through each
- * section (MM → DD → YYYY → HH → MM → AM/PM), which works reliably in both
- * headed and headless Chromium without needing the calendar picker UI.
+ * MUI X v9 always renders the accessible field DOM structure (the
+ * `enableAccessibleFieldDOMStructure` escape hatch to the old single-<input>
+ * structure was removed in v9). The visible field is a `[role="group"]`
+ * container of per-section contentEditable spans; the field's native <input>
+ * is visually hidden (aria-hidden, tabindex=-1) and not clickable. Clicking
+ * the group container focuses the first section, and typing digits
+ * auto-advances through each section (MM → DD → YYYY → HH → MM → AM/PM),
+ * which works reliably in both headed and headless Chromium without needing
+ * the calendar picker UI.
  */
 Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
   const parts = dateString.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})\s+(AM|PM)$/i);
@@ -254,8 +259,8 @@ Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
 
   // Break the chain: MUI X re-renders the input on focus, detaching the original DOM node.
   // Re-querying after click ensures .type() gets the live element.
-  getFormLabel(label).parent().find('input').click();
-  getFormLabel(label).parent().find('input').type(month + day + year + hour + minute + ampmChar);
+  getFormLabel(label).parent().find('[role="group"]').click();
+  getFormLabel(label).parent().find('[role="group"]').type(month + day + year + hour + minute + ampmChar);
 });
 
 Cypress.Commands.add('fillDate', (label: string, dateString: string) => {
@@ -263,8 +268,8 @@ Cypress.Commands.add('fillDate', (label: string, dateString: string) => {
   if (!parts) throw new Error(`fillDate: Expected "MM/DD/YYYY", got "${dateString}"`);
   const [, month, day, year] = parts;
 
-  getFormLabel(label).parent().find('input').click();
-  getFormLabel(label).parent().find('input').type(month + day + year);
+  getFormLabel(label).parent().find('[role="group"]').click();
+  getFormLabel(label).parent().find('[role="group"]').type(month + day + year);
 });
 
 Cypress.Commands.add('fillTime', (label: string, dateString: string) => {
@@ -273,8 +278,8 @@ Cypress.Commands.add('fillTime', (label: string, dateString: string) => {
   const [, hour, minute, ampm] = parts;
   const ampmChar = ampm.toUpperCase() === 'AM' ? 'a' : 'p';
 
-  getFormLabel(label).parent().find('input').click();
-  getFormLabel(label).parent().find('input').type(hour + minute + ampmChar);
+  getFormLabel(label).parent().find('[role="group"]').click();
+  getFormLabel(label).parent().find('[role="group"]').type(hour + minute + ampmChar);
 });
 
 /**
