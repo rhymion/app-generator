@@ -109,6 +109,7 @@ model user {
   audit_logs                audit_log[]
   notifications             notification[]      @relation("NotificationUser")
   anonymized_at             DateTime?            // Timestamp when PII was scrubbed (GDPR anonymization)
+  invalidated_at            DateTime?            // Generic invalidate mechanism (cmd_564); set alongside anonymized_at by anonymizeUser()
 
   @@index([api_key])
   @@index([creator_id])

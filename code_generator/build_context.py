@@ -964,6 +964,7 @@ def build_anonymize_user_context(schema: dict) -> dict:
         lines.append(f"{INDENT}mfa_secret: null,")
 
     lines.append(f"{INDENT}anonymized_at: anonymizedAt,")
+    lines.append(f"{INDENT}invalidated_at: anonymizedAt,")
 
     return {
         'has_pii_user': True,

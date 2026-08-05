@@ -24,7 +24,7 @@ import Button from '@mui/material/Button';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import PersonOffIcon from '@mui/icons-material/PersonOff';
+import BlockIcon from '@mui/icons-material/Block';
 import type { ModelPermissions } from '@/lib/authz';
 import type { PageOpts, PageResult } from '@/lib/_pagination';
 
@@ -259,7 +259,7 @@ export default function DataGridClient<T extends BaseEntity>({
                   color="warning"
                   onClick={() => handleInvalidateClick(params.id as string)}
                 >
-                  <PersonOffIcon fontSize="small" />
+                  <BlockIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
             )}
