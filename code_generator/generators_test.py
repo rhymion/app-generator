@@ -784,6 +784,30 @@ def get_all_internal_fk_deps(model_name: str, schema: dict) -> list[dict]:
     return deps
 
 
+def _date_range_fields(model_def: dict) -> dict | None:
+    """Extract {'start': field_name, 'end': field_name} from an entity's
+    x-reservation item-mode dateRange declaration (mirrors build_context.py's
+    reservation_config['dateRange'] parsing — dateRange may sit at request
+    level (legacy) or inside request.criteria).
+
+    This is the generator's one schema-driven signal that two date/datetime
+    fields on the same entity form an ordered pair (start must be before
+    end). Test-value generation uses it instead of guessing pairing from
+    field names (e.g. 'check_in'/'check_out' — a name pattern specific to
+    one consumer that no keyword heuristic could reasonably cover; cmd_577).
+    Returns None when the model has no such declaration.
+    """
+    xres = model_def.get('x-reservation')
+    if not isinstance(xres, dict) or xres.get('mode') != 'item':
+        return None
+    request = xres.get('request') or {}
+    criteria = request.get('criteria') or {}
+    date_range = request.get('dateRange') or criteria.get('dateRange')
+    if not isinstance(date_range, dict):
+        return None
+    return {'start': date_range.get('start', 'start'), 'end': date_range.get('end', 'end')}
+
+
 # ---------------------------------------------------------------------------
 # Field analysis
 # ---------------------------------------------------------------------------
@@ -794,12 +818,18 @@ def get_field_metas(
     relationships: list,
     fields_filter: list | None = None,
     entity_options: list | None = None,
+    range_end_field: str | None = None,
 ) -> list[dict]:
     """Port of getFieldMetas().
 
     Returns list of FieldMeta dicts with keys:
       prop_name, label, category, required,
-      enum_values, format, dep_target, min, max, entity_options
+      enum_values, format, dep_target, min, max, entity_options, is_range_end
+
+    range_end_field: prop_name of the entity's x-reservation dateRange end
+    field (see _date_range_fields), if any. Tagged onto that field's meta as
+    is_range_end=True so value generators can produce a value guaranteed
+    later than its paired start field, instead of guessing from the name.
     """
     filtered = filter_fields(properties, fields_filter)
     # Exclude *able_id FKs with no x-relationship (system-managed internal bridge FKs,
@@ -859,6 +889,7 @@ def get_field_metas(
                 'category': 'datetime',
                 'required': prop_name in required_fields,
                 'format': fmt,
+                'is_range_end': range_end_field is not None and prop_name == range_end_field,
             })
         elif prop_type in ('integer', 'number'):
             if prop.get('enum'):
@@ -994,7 +1025,11 @@ def analyze_children(children: list, schema: dict, parent_model_name: str) -> li
         exclude_keys = {'id', parent_fk_prop, 'order'} | _child_system_managed_fk_excludes(child_def)
         child_properties = {k: v for k, v in child_def['properties'].items() if k not in exclude_keys}
 
-        fields = get_field_metas(child_properties, child_required, child_rels)
+        _child_date_range = _date_range_fields(child_def)
+        fields = get_field_metas(
+            child_properties, child_required, child_rels,
+            range_end_field=_child_date_range['end'] if _child_date_range else None,
+        )
 
         result.append({
             'child': child,
@@ -1056,10 +1091,16 @@ def prisma_value(field: dict, index: str, entity_title: str) -> str:
 
     elif cat == 'datetime':
         fmt = field.get('format')
+        # is_range_end (x-reservation dateRange.end, see _date_range_fields) is a
+        # schema-driven pairing signal and takes priority over the name-keyword
+        # heuristic below — the keyword list can't cover every consumer's naming
+        # (e.g. 'check_out' matches neither 'end'/'logout'/'finish'; cmd_577).
+        is_end = field.get('is_range_end', False)
         if fmt == 'date':
             # Use UTC to avoid timezone shift: local midnight in e.g. JST would be stored as prev day
-            return f'new Date(Date.UTC(2025, 0, {index})).toISOString()'
-        if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+            day = f'{index} + 1' if is_end else index
+            return f'new Date(Date.UTC(2025, 0, {day})).toISOString()'
+        if is_end or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
             return f'new Date(2025, 0, {index}, 17, 0).toISOString()'
         return f'new Date(2025, 0, {index}, 9, 0).toISOString()'
 
@@ -1104,15 +1145,16 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
 
     elif cat == 'datetime':
         fmt = field.get('format')
+        is_end = field.get('is_range_end', False)
         if fmt == 'date':
-            if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+            if is_end or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
                 return '01/16/2025'
             return '01/15/2025'
         if fmt == 'time':
-            if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+            if is_end or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
                 return '05:00 PM'
             return '09:00 AM'
-        if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+        if is_end or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
             return '01/15/2025 05:00 PM'
         return '01/15/2025 09:00 AM'
 
@@ -1160,15 +1202,19 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
 
     elif cat == 'datetime':
         fmt = field.get('format')
+        is_end = field.get('is_range_end', False)
         if fmt == 'date':
-            return '06/15/2025'
+            # Range-end fields (x-reservation dateRange.end) get a distinct later
+            # day — editing both fields in a pair to the same date would trip the
+            # same start<end validation the create-value fix guards against (cmd_577).
+            return '06/16/2025' if is_end else '06/15/2025'
         if fmt == 'time':
             # `cy.fillTime` requires "HH:MM AM/PM" only — datetime format
             # would crash the helper. Mirror the create_value time branch.
-            if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+            if is_end or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
                 return '06:00 PM'
             return '02:00 PM'
-        if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+        if is_end or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
             return '06/15/2025 06:00 PM'
         return '06/15/2025 02:00 PM'
 
@@ -1214,7 +1260,7 @@ def api_value(field: dict, entity_title: str) -> str:
         return 'true'
 
     elif cat == 'datetime':
-        if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+        if field.get('is_range_end', False) or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
             return "'2025-01-15T17:00:00.000Z'"
         return "'2025-01-15T09:00:00.000Z'"
 
@@ -1626,7 +1672,11 @@ def helper_context(
     required_fields = parent_def.get('required') or []
     relationships = get_parent_relationships(parent_def, schema)
     entity_options = _get_entity_options(schema)
-    fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'), entity_options)
+    _date_range = _date_range_fields(parent_def)
+    fields = get_field_metas(
+        properties, required_fields, relationships, generate_config.get('fields'), entity_options,
+        range_end_field=_date_range['end'] if _date_range else None,
+    )
     # Detect outbound one-to-one FK fields (e.g. approvable_id on leave_request).
     # These are internal bridge records the service creates automatically — not user-facing.
     # Exclude from fill/assert commands and from prisma data field lists; handle separately.
@@ -2424,7 +2474,11 @@ def spec_context(
     required_fields = parent_def.get('required') or []
     relationships = get_parent_relationships(parent_def, schema)
     entity_options = _get_entity_options(schema)
-    fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'), entity_options)
+    _date_range = _date_range_fields(parent_def)
+    fields = get_field_metas(
+        properties, required_fields, relationships, generate_config.get('fields'), entity_options,
+        range_end_field=_date_range['end'] if _date_range else None,
+    )
     # Exclude outbound one-to-one FK fields (internal bridge records, not user-facing).
     _internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model_name, schema)}
     fields = [f for f in fields if f['prop_name'] not in _internal_fk_prop_names]
@@ -3412,7 +3466,11 @@ def api_spec_context(
 
     required_fields_list = model_def.get('required') or []
     _api_entity_options = _get_entity_options(schema)
-    all_field_metas = get_field_metas(filtered_props, required_fields_list, relationships, gen_cfg.get('fields'), _api_entity_options)
+    _api_date_range = _date_range_fields(model_def)
+    all_field_metas = get_field_metas(
+        filtered_props, required_fields_list, relationships, gen_cfg.get('fields'), _api_entity_options,
+        range_end_field=_api_date_range['end'] if _api_date_range else None,
+    )
     # Exclude outbound one-to-one FK fields (internal bridge records — service creates them automatically).
     _api_internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model, schema)}
     all_field_metas = [f for f in all_field_metas if f['prop_name'] not in _api_internal_fk_prop_names]
@@ -3591,14 +3649,17 @@ def api_spec_context(
     elif ua_fk_fields_for_api:
         field_to_skip_5_1 = ua_fk_fields_for_api[0]['prop_name']
 
-    def _post_body_impl(skip_field: str | None, indent: str) -> list[str]:
+    def _post_body_impl(skip_field: str | None, indent: str, override: dict | None = None) -> list[str]:
+        override = override or {}
         out = []
         for field in all_field_metas:
             if not field['required']:
                 continue
             if field['prop_name'] == skip_field:
                 continue
-            if field['category'] == 'autocomplete':
+            if field['prop_name'] in override:
+                out.append(f"{indent}{field['prop_name']}: {override[field['prop_name']]},")
+            elif field['category'] == 'autocomplete':
                 dep = next((d for d in entity_fk_deps if d['prop_name'] == field['prop_name']), None)
                 if dep:
                     out.append(f"{indent}{field['prop_name']}: deps.{dep['dep_var_name']}.id,")
@@ -3733,6 +3794,31 @@ def api_spec_context(
     else:
         seed_count = 0
 
+    # cmd_577: boundary test for x-reservation item-mode dateRange entities
+    # (e.g. room_reservation's check_in/check_out) — "start equals end" must
+    # be rejected by the same start<end check the create-value fix above
+    # keeps out of everyday test data (see reserve{Entity}Core in
+    # service.ts.jinja2). Only emitted when the schema actually declares a
+    # dateRange pair and both fields survived into all_field_metas.
+    date_range_boundary = None
+    post_body_daterange_boundary = _post_body_impl(None, f'{I}    ')
+    if _api_date_range:
+        _drb_start_meta = next(
+            (f for f in all_field_metas if f['prop_name'] == _api_date_range['start']), None,
+        )
+        _drb_end_meta = next(
+            (f for f in all_field_metas if f['prop_name'] == _api_date_range['end']), None,
+        )
+        if _drb_start_meta and _drb_end_meta:
+            date_range_boundary = {
+                'start_field': _api_date_range['start'],
+                'end_field': _api_date_range['end'],
+            }
+            post_body_daterange_boundary = _post_body_impl(
+                None, f'{I}    ',
+                override={_api_date_range['end']: api_value(_drb_start_meta, title)},
+            )
+
     return {
         'parent': parent,
         'pascal': parent_pascal,
@@ -3755,6 +3841,8 @@ def api_spec_context(
         'assert_update': assert_update,
         'post_body_create': _post_body_impl(None, f'{I}    '),
         'post_body_missing_field': _post_body_impl(field_to_skip_5_1, f'{I}    '),
+        'date_range_boundary': date_range_boundary,
+        'post_body_daterange_boundary': post_body_daterange_boundary,
         'put_body_update': _put_body_impl('            '),
         'put_body_update_fk': _put_body_impl('              '),
         'i7_post_body': _post_body_impl(None, f'{I}      '),

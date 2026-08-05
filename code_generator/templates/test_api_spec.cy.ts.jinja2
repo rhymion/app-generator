@@ -138,6 +138,31 @@ describe('API: {{ title }}', () => {
       });
 {% endif %}
     });
+{% if date_range_boundary %}
+
+    it('5.2 rejects reservation when {{ date_range_boundary.start_field }} equals {{ date_range_boundary.end_field }} (start must be before end)', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I }}cy.request({
+{{ I }}  method: 'POST',
+{{ I }}  url: API_BASE,
+{{ I }}  headers: { 'X-API-Key': TEST_API_KEY },
+{{ I }}  body: {
+{% for ln in post_body_daterange_boundary %}
+{{ ln }}
+{% endfor %}
+{{ I }}  },
+{{ I }}  failOnStatusCode: false,
+{{ I }}}).then((res) => {
+{{ I }}  expect(res.status).to.be.gte(400);
+{{ I }}  expect(res.body.error).to.eq('Start date must be before end date');
+{{ I }}});
+{% if has_deps %}
+      });
+{% endif %}
+    });
+{% endif %}
   });
 {% endif %}
 {% if can_edit %}
