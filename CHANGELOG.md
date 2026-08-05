@@ -351,6 +351,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (never silently raised) stops that from recurring unnoticed. Seeded 5 warnings above the
   measured `develop`-tip count (15) rather than an exact match, so one incidental warning doesn't
   turn an unrelated PR red. See `docs/knowledge/lint-warning-ceiling-ratchet.md`.
+- **cypress excluded from routine `npm-minor-and-patch` bumps** (cmd_561):
+  cypress 15.16.0 → 15.19.0 alone (isolated via a single-variable control
+  experiment) broke `dashboard.cy.ts`'s DataGrid cell lookup, unrelated to
+  the product code or any MUI package. `.github/dependabot.yml` (`main` and
+  `develop` copies) now excludes cypress from grouping and ignores its
+  routine minor/patch bumps; security-update PRs are unaffected. See
+  `docs/knowledge/testing-cypress.md` ("Cypress version held back").
 
 ## [3.0.0] - 2026-07-30
 
