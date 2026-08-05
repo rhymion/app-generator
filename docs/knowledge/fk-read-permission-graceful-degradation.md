@@ -31,6 +31,18 @@ crash was a UX accident, not something the security check itself intended.
 | (e) | Self-referential FK (e.g. `category.parent_id → category`) | Yes, technically, but rarely an issue — a user who can list an entity almost always already has read on it |
 | (f) | FK introduced by `x-approval` / `x-reservation` | Yes for the FK'd entity itself (e.g. `approval_flow`); one level deeper (e.g. `approval_flow.approver_role_id`) is `include`-fetched, same rule as (b) |
 | (g) | Selector one-to-one (`getAvailable{Target}sFor{Parent}()`) | No — this getter calls `prisma.{target}.findMany()` directly and never called `assertPermission` at all, which is its own (adjacent) bug: an unchecked read, not a crash |
+| (h) | `organization_id` (a `should_filter_by_org` entity's org-isolation boundary FK) | **Not applicable — excluded, see below.** This is not an RBAC read-permission case at all. |
+
+### (h) is a different mechanism, not a variant of graceful degradation
+
+An entity with `should_filter_by_org` (any relation targeting `organization`) has its PUT/DELETE
+existence lookup scoped by `getAssociatedOrganizations(actorId)` — actual organization
+**membership** — not by any `read` permission row on the `organization` model (cmd_515). An actor
+can hold full CRUD permission on the entity itself and *still* be scoped out entirely if they
+belong to zero organizations: the row is never found, so the request 404s before the FK is ever
+evaluated. This is org isolation working as designed, not a denied-read UX problem, and it must
+never be given the "field is preserved" treatment described below — that would assert success
+(HTTP 200) for a request cmd_515 correctly rejects. See cmd_576.
 
 ## Option B: what changed
 
@@ -86,8 +98,18 @@ only a component that silently behaves as if the flag were always unset.
 ## Testing
 
 - `cypress/e2e/api/{entity}.cy.ts` (generated, mandatory gate): a regression test is generated for
-  any entity with a required many-to-one or non-nullable selector one-to-one relation, verifying
-  that a PUT omitting that FK preserves its existing value.
+  any entity with a required many-to-one relation *other than* `organization_id` (`4.4 preserves
+  {fk} ...`), verifying that a PUT omitting that FK preserves its existing value. The relation
+  picked is `next(r for r in relationships if r['required'] and r['target'] not in (model,
+  'organization'))` (`code_generator/generators_test.py`) — self-referential FKs are excluded for
+  the reason in row (e) above, `organization_id` is excluded for the reason in row (h). If an
+  entity's *only* required non-self relation targets `organization`, no 4.4 test is generated for
+  it at all (there is no other FK left to exercise the graceful-degradation scenario against).
+- `cypress/e2e/api/{entity}.cy.ts` also generates `G3.4 PUT by an actor with no organization
+  membership returns 404` for every `should_filter_by_org` entity (independent of which relation,
+  if any, got picked for 4.4) — this is the case row (h) actually asserts: the same
+  `db:createApiUserWithPermission` fixture used for 4.4 (full CRUD, zero org memberships), but the
+  expectation is rejection, not preservation.
 - `cypress/e2e/api/fk_read_permission_graceful_degradation.cy.ts` (hand-written, mandatory gate):
   browser-session coverage proving the edit page doesn't crash, that unrelated field changes can
   still be saved, and that the optional/required clear-button asymmetry actually renders as

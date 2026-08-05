@@ -728,6 +728,33 @@ describe('API: {{ title }}', () => {
         });
       });
     });
+
+    // cmd_576: a required organization_id FK is the org-isolation boundary
+    // itself, not an ordinary FK — it must never be given the FK read-
+    // permission graceful-degradation treatment (section above). An actor
+    // can hold full CRUD permission on {{ parent }} yet belong to zero
+    // organizations; cmd_515's existence lookup is scoped by actual
+    // membership (getAssociatedOrganizations), not by any RBAC permission
+    // row, so this actor must never reach an existing row at all.
+    it('G3.4 PUT by an actor with no organization membership returns 404 (existence hidden)', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<string>('db:createApiUserWithPermission', {
+          entityName: '{{ parent }}',
+          flags: { create: true, read: true, update: true, delete: true },
+          label: 'org_isolation_no_membership',
+        }).then((restrictedKey) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': restrictedKey },
+            body: {},
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(404);
+          });
+        });
+      });
+    });
 {% endif %}
   });
 {% endif %}

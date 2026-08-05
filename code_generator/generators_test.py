@@ -3689,8 +3689,19 @@ def api_spec_context(
     # Excludes self-referential relations (target == model): granting the test
     # actor full CRUD on this entity would also grant read on the "denied"
     # target in that case, defeating the scenario.
+    # Excludes relations targeting 'organization' (cmd_576): the fixture this
+    # test relies on (db:createApiUserWithPermission) builds an actor with RBAC
+    # permission on the parent entity but zero organization memberships. For
+    # a normal FK target, membership is irrelevant and the PUT reaches the row.
+    # For target == 'organization', cmd_515's should_filter_by_org existence
+    # lookup (getAssociatedOrganizations, scoped by actual membership — not by
+    # any RBAC permission row) rejects the PUT outright with 404 before the FK
+    # is ever evaluated. That is org isolation working correctly, not FK
+    # read-permission graceful degradation, so this scenario must not be
+    # asserted as "the field is preserved" — see the org-isolation-boundary
+    # rejection test below instead.
     _fk_preservation_relation = next(
-        (r for r in relationships if r['required'] and r['target'] != model), None,
+        (r for r in relationships if r['required'] and r['target'] not in (model, 'organization')), None,
     )
 
     def _put_body_fk_zero_impl(indent: str) -> list[str]:
