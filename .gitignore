@@ -190,13 +190,13 @@ app/api/approval_request/bulk/route.ts
 
 # ── components/ ──
 components/*/*
-!components/*/form_validation.ts
 !components/_standard/**
 !components/ui/**
 !components/setting/**
 components/setting/FormUpsert.tsx
 components/setting/FormView.tsx
 components/setting/column_def.tsx
+components/setting/form_validation.ts
 !components/audit_log/FormView.tsx
 !components/legal/**
 

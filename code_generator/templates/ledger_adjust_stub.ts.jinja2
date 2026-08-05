@@ -46,7 +46,6 @@ export async function afterApprove(
 
   const inventory = await tx.{{ pool_entity }}.findUniqueOrThrow({
     where: { id: entity.{{ ledger_source.poolIdField }} },
-    include: { {{ pool_location_relation }}: true },
   });
 
   const delta = entity.{{ ledger_source.quantity_delta_field }};
@@ -58,7 +57,7 @@ export async function afterApprove(
       quantity_delta: delta,
       reserved_delta: 0,
       {{ pool_item_field }}: inventory.{{ pool_item_field }},
-      {{ pool_location_relation }}: {{ pool_location_label_exprs['inventory'] }},
+      {{ pool_location_field }}: inventory.{{ pool_location_field }},
       {{ pool_lot_field }}: inventory.{{ pool_lot_field }},
       {{ pool_expiration_field }}: inventory.{{ pool_expiration_field }},
       approved_via: approvableId,

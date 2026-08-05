@@ -1238,7 +1238,7 @@ def _po_def_ledger_transaction() -> dict:
     return base
 
 
-def _make_ledger_schema(location_label_field: str = "code") -> dict:
+def _make_ledger_schema() -> dict:
     schema = _make_schema({"purchase_order": _po_def_ledger_transaction()})
     # Ledger strategy's lineTransactionableField has no x-relationship (build_context.py
     # excludes it from the nested-create body by name, not by relationship type).
@@ -1246,22 +1246,21 @@ def _make_ledger_schema(location_label_field: str = "code") -> dict:
         "type": ["string", "null"],
         "pattern": "^c[a-z0-9]{24,}$",
     }
-    # cmd_550: inventory's own location relation, declared with an
-    # x-relationship.labelField that is deliberately NOT 'name' — deviation
-    # injection proving the ledger row write reads the declared labelField
-    # (e.g. 'code') instead of hardcoding `.name` (which would silently
-    # render `undefined` / `''` for this entity, since `location` has no
-    # `name` property at all).
+    # cmd_562: inventory's own location_id FK — location identity is copied
+    # by id, not rendered as a denormalized display string, so the ledger
+    # domain resolver no longer inspects this x-relationship at all. It's
+    # still declared here for realism (generic UI label rendering elsewhere
+    # reads it independently of the ledger domain).
     schema["definitions"]["inventory"]["properties"]["location_id"] = {
         "type": "string",
-        "x-relationship": {"type": "many-to-one", "target": "location", "labelField": location_label_field},
+        "x-relationship": {"type": "many-to-one", "target": "location", "labelField": "name"},
     }
     schema["definitions"]["location"] = {
         "type": "object",
-        "required": ["id", location_label_field],
+        "required": ["id", "name"],
         "properties": {
             "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
-            location_label_field: {"type": "string"},
+            "name": {"type": "string"},
         },
     }
     # OD-1: top-level domain declaration resolved via transaction.ledgerDomain
@@ -1279,16 +1278,16 @@ def _make_ledger_schema(location_label_field: str = "code") -> dict:
     return schema
 
 
-def _ledger_reservation_config(location_label_field: str = "code") -> dict:
-    schema = _make_ledger_schema(location_label_field)
+def _ledger_reservation_config() -> dict:
+    schema = _make_ledger_schema()
     entity = _entity_spec("purchase_order", schema, children=[_line_child()])
     ctx = build_context(entity, schema)
     return ctx["reservation_config"]
 
 
-def _ledger_allocation_code(location_label_field: str = "code") -> str:
-    rc = _ledger_reservation_config(location_label_field)
-    schema = _make_ledger_schema(location_label_field)
+def _ledger_allocation_code() -> str:
+    rc = _ledger_reservation_config()
+    schema = _make_ledger_schema()
     return _build_reservation_allocation_code(rc, "purchase_order", schema)
 
 
@@ -1347,53 +1346,27 @@ class TestLedgerTransactionReservePath:
             assert field in code
 
 
-class TestLedgerTransactionLocationLabelDeviationInjection:
-    """cmd_550 deviation injection: the ledger row's location snapshot used to
-    be written via a hardcoded `_candidate.{location_relation}?.name ?? ''`
-    access, assuming every location-like entity's display field is literally
-    named 'name'. This schema's `location` entity is declared with its
-    display field named 'code' instead (no 'name' property exists at all) —
-    the exact shape that broke the hardcode.
+class TestLedgerTransactionLocationIdCopy:
+    """cmd_562: the ledger row's location column is an id-FK
+    (location_id) copied verbatim from the claimed pool row — not a
+    denormalized display-string snapshot (cmd_550/PR #269's now-removed
+    labelField rendering), and not gated by any location entity's display
+    field naming at all."""
 
-    Per this codebase's established characterization of this class of bug
-    (see resolve_ledger_domain's cmd_546 docstring: "silently broke —
-    TypeScript error, not a generator-time failure"), the pre-fix hardcode
-    would have compiled a `.name` property access against Prisma's generated
-    type for `location`, which has no `name` field — a TS2339 compile error
-    surfacing only at `next build` time, far from the schema authoring step
-    that caused it.
-    """
+    def test_location_id_copied_verbatim_from_candidate(self):
+        code = _ledger_allocation_code()
+        assert "location_id: _candidate.location_id" in code
 
-    def test_location_entity_has_no_name_field_pre_fix_hardcode_would_break(self):
-        """Confirms the deviation: this schema's location display field is
-        'code', not 'name' — the removed hardcode's assumption does not hold."""
-        schema = _make_ledger_schema(location_label_field="code")
-        location_props = schema["definitions"]["location"]["properties"]
-        assert "name" not in location_props
-        assert "code" in location_props
+    def test_no_label_rendering_or_null_coalescing_on_location(self):
+        code = _ledger_allocation_code()
+        assert "location?." not in code
+        assert "location_id: _candidate.location_id ?? ''" not in code
 
-    def test_post_fix_renders_declared_label_field_not_name(self):
-        """Post-fix: the ledger row reads the pool entity's declared
-        x-relationship.labelField ('code'), matching what cmd_547/548's
-        autocomplete/list-view rendering would show for the same relation —
-        not a hardcoded, possibly-nonexistent `.name`."""
-        code = _ledger_allocation_code(location_label_field="code")
-        assert "_candidate.location?.code ?? ''" in code
-        assert "_candidate.location?.name" not in code
-
-    def test_post_fix_default_name_label_field_still_works(self):
-        """Regression guard: the common case (labelField declared as 'name',
-        or a relation with no explicit labelField at all — falls back to
-        'name') still renders exactly as before this fix."""
-        code = _ledger_allocation_code(location_label_field="name")
-        assert "_candidate.location?.name ?? ''" in code
-
-    def test_post_fix_include_clause_still_present(self):
-        """The findMany's include clause must still pull in the location
-        relation so the label expression has data to read, regardless of
-        which field it ultimately renders."""
-        code = _ledger_allocation_code(location_label_field="code")
-        assert "location: true" in code
+    def test_no_include_clause_needed_for_location(self):
+        """location_id is a plain scalar column on the pool entity — no
+        Prisma relation include is needed to read it."""
+        code = _ledger_allocation_code()
+        assert "include:" not in code
 
 
 class TestLedgerTransactionMutationGuards:
