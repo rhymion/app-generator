@@ -29,6 +29,8 @@ model user {
   updated_gadgets   gadget[]   @relation("GadgetUpdater")
   created_sprockets sprocket[] @relation("SprocketCreator")
   updated_sprockets sprocket[] @relation("SprocketUpdater")
+  created_cogs      cog[]      @relation("CogCreator")
+  updated_cogs      cog[]      @relation("CogUpdater")
 }
 
 // x-generate.invalidate.enabled: true -- must gain `{ invalidated_at: null }`
@@ -75,6 +77,24 @@ model sprocket {
   creator        user      @relation("SprocketCreator", fields: [creator_id], references: [id])
   updater_id     String
   updater        user      @relation("SprocketUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// cmd_587: same invalidate:true bool shorthand as sprocket, but this model
+// deliberately has NO `invalidated_at` column -- generate.py must read the
+// real Prisma column set and fall back to a #290-style throw stub instead of
+// emitting `prisma.cog.update({ data: { invalidated_at: ... } })` against a
+// column that doesn't exist (which next build would reject).
+model cog {
+  id         String   @id @default(cuid())
+  name       String
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("CogCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("CogUpdater", fields: [updater_id], references: [id])
   @@index([creator_id])
   @@index([updater_id])
 }
