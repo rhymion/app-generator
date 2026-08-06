@@ -168,3 +168,35 @@ def test_derive_property_without_prisma_enums_raises_on_native_enum_type(tmp_pat
 
     with pytest.raises(SchemaDivergenceError):
         derive_property(models["inventory_movement"], "status", {})
+
+
+# ---------------------------------------------------------------------------
+# cmd_574: static Prisma @default() auto-reflected into the derived json
+# schema property (Category A), unless the user schema already declares its
+# own default: (Category C, which always wins).
+# ---------------------------------------------------------------------------
+
+def test_b1_static_default_is_derived_into_json_property(prisma_models):
+    """B-1: `permission.active` has `@default(true)` in Prisma and no
+    `default:` override in the user schema -- the derived prop must pick up
+    Prisma's static default."""
+    prop = derive_property(prisma_models["permission"], "active", {})
+    assert prop["default"] is True
+
+
+def test_b2_dynamic_default_is_not_derived(prisma_models):
+    """B-2: `role.id` has `@default(cuid())` in Prisma (dynamic, server-
+    generated) -- it must NOT appear as a `default:` in the derived
+    property; a dynamic default has no meaning as a UI form default."""
+    prop = derive_property(prisma_models["role"], "id", {})
+    assert "default" not in prop
+
+
+def test_b3_user_field_overrides_default_wins_over_prisma_default(prisma_models):
+    """B-3: user schema explicitly declares `default: False` for
+    `permission.active`, even though Prisma's `@default(true)` differs --
+    the user-authored value must win, not Prisma's."""
+    prop = derive_property(
+        prisma_models["permission"], "active", {"default": False}
+    )
+    assert prop["default"] is False

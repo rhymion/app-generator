@@ -964,6 +964,7 @@ def build_anonymize_user_context(schema: dict) -> dict:
         lines.append(f"{INDENT}mfa_secret: null,")
 
     lines.append(f"{INDENT}anonymized_at: anonymizedAt,")
+    lines.append(f"{INDENT}invalidated_at: anonymizedAt,")
 
     return {
         'has_pii_user': True,
@@ -1001,6 +1002,37 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         }
     filtered_props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
 
+    # x-server-value: server-computed field values the client can never set directly
+    # (cmd_556/cmd_565). Accepts the legacy string form `"actor"` (client value
+    # always discarded, actorId written unconditionally) or the dict form
+    # `{source: actor, override_permission: <Operation>}` (cmd_565 revision):
+    # an actor holding `override_permission` may supply an explicit value that is
+    # accepted as-is; anyone else's supplied value is silently replaced with
+    # actorId (not rejected — the request still succeeds as *their own* action).
+    # Only source 'actor' is implemented today; other sources (e.g. a future
+    # 'org'/'now') are simply skipped here as an unrecognized declaration would
+    # otherwise silently disable the field's protection.
+    _server_value_fields_raw: dict[str, dict] = {}
+    for _svfn, _svfp in filtered_props.items():
+        if not isinstance(_svfp, dict):
+            continue
+        _sv_raw = _svfp.get('x-server-value')
+        if _sv_raw is None:
+            continue
+        if isinstance(_sv_raw, str):
+            _sv_source, _sv_override = _sv_raw, None
+        elif isinstance(_sv_raw, dict):
+            _sv_source, _sv_override = _sv_raw.get('source'), _sv_raw.get('override_permission')
+        else:
+            continue
+        if _sv_source != 'actor':
+            continue
+        _server_value_fields_raw[_svfn] = {'override_permission': _sv_override}
+    _server_value_prop_names: set[str] = set(_server_value_fields_raw)
+    _server_value_no_override_props: set[str] = {
+        fn for fn, meta in _server_value_fields_raw.items() if not meta['override_permission']
+    }
+
     # Mention fields: fields annotated with x-mention: true (Phase 2 template generation).
     mention_fields: list[str] = [
         fn for fn, fp in filtered_props.items()
@@ -1017,12 +1049,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     }
 
     # Collect explicit readonly fields: x-readonly per-field OR x-readonly-fields entity-level.
+    # x-server-value fields are always readonly too (server-computed, never
+    # client-editable through the normal form path).
     _ro_from_entity: set[str] = set(model_def.get('x-readonly-fields') or [])
     _ro_from_props: set[str] = {
         fn for fn, fp in filtered_props.items()
         if isinstance(fp, dict) and fp.get('x-readonly')
     }
-    readonly_fields: list[str] = sorted(_ro_from_entity | _ro_from_props)
+    readonly_fields: list[str] = sorted(_ro_from_entity | _ro_from_props | _server_value_prop_names)
     # API route: select clause string and field list for AP-3=B readonly reject check.
     _api_ro_in_props = [f for f in readonly_fields if f in filtered_props]
     readonly_fields_api: list[str] = _api_ro_in_props
@@ -1030,6 +1064,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         '{ ' + ', '.join(f'{f}: true' for f in _api_ro_in_props) + ' }'
         if _api_ro_in_props else None
     )
+    # CREATE-time reject list (cmd_565 乙): unlike PUT's AP-3=B (compare against
+    # the persisted row), POST has no existing row to compare against — any
+    # client-submitted value for a plain readonly field is rejected outright.
+    # x-server-value fields are excluded here: they have their own dedicated
+    # resolution (silently discarded for the plain-actor form, permission-gated
+    # override for the dict form) rather than a hard reject.
+    readonly_fields_create_reject: list[str] = [
+        f for f in readonly_fields_api if f not in _server_value_prop_names
+    ]
 
     # Config flags
     can_create = gen_cfg.get('new',    True) is not False
@@ -1143,6 +1186,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 readonly_fields_api = sorted(set(readonly_fields_api) | {_bridge_fk_prop})
                 readonly_fields_api_select = (
                     '{ ' + ', '.join(f'{f}: true' for f in readonly_fields_api) + ' }'
+                )
+                readonly_fields_create_reject = sorted(
+                    set(readonly_fields_create_reject) | {_bridge_fk_prop}
                 )
 
     # Collect bridge targets from new-form x-bridge declarations in the schema.
@@ -1328,7 +1374,22 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # (approvable_id, inventory_transactionable_id, ...) — see
     # get_internal_bridge_fk_prop_names() docstring for why.
     _fk_prop_names = {r['prop_name'] for r in parent_rels_raw} | get_internal_bridge_fk_prop_names(model_def, schema)
-    _export_candidates = gen_cfg.get('fields') or list(model_def.get('properties', {}).keys())
+    # Order source: x-display.form (if declared) takes the declared order,
+    # followed by any remaining scalar properties in schema order (x-display.form
+    # may deliberately omit rarely-edited fields from the form without meaning
+    # to drop them from CSV export too). Without x-display.form, plain schema
+    # declaration order applies. x-generate.fields no longer doubles as an
+    # order source here — cmd_568: it is filter-only, so a declared fields
+    # allowlist can no longer silently reorder CSV export columns relative
+    # to the form/view display order.
+    _form_order = (model_def.get('x-display') or {}).get('form')
+    if _form_order:
+        _export_order_source = list(_form_order) + [
+            k for k in model_def.get('properties', {}) if k not in _form_order
+        ]
+    else:
+        _export_order_source = list(model_def.get('properties', {}).keys())
+    _export_allowlist = set(gen_cfg['fields']) if gen_cfg.get('fields') else None
 
     def _is_export_scalar(_prop: dict) -> bool:
         _ptype = _prop.get('type')
@@ -1337,11 +1398,12 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         return _ptype in ('string', 'integer', 'number', 'boolean')
 
     export_scalar_fields = [
-        f for f in _export_candidates
+        f for f in _export_order_source
         if f not in _SYSTEM_FIELDS
         and f not in _fk_prop_names
         and f in model_def.get('properties', {})
         and _is_export_scalar(model_def['properties'][f])
+        and (_export_allowlist is None or f in _export_allowlist)
     ]
 
     # DP-1 (cmd_394 §3, Option B — conservative UNION): non-dotted x-import-key
@@ -1709,9 +1771,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # all OTO FK props are excluded from field categorisation (never treated as plain text fields)
     all_oto_fk_props = {r['prop_name'] for r in one_to_one_rels}
 
-    # Parent prop infos: exclude id, timestamps, and auto-create OTO FK props
+    # Parent prop infos: exclude id, timestamps, auto-create OTO FK props, and
+    # x-server-value fields with no override_permission (client can never supply
+    # them at all — see server_value_fields below). Fields WITH override_permission
+    # stay in parent_prop_infos so the raw client value still flows through as a
+    # service parameter (the service decides whether to honor or discard it).
     # Selector OTO FK props ARE included — they flow through the form as autocomplete values
-    parent_props = [k for k in filtered_props if k not in _EXCLUDE_ID_TS and k not in auto_create_oto_fk_props]
+    parent_props = [
+        k for k in filtered_props
+        if k not in _EXCLUDE_ID_TS and k not in auto_create_oto_fk_props
+        and k not in _server_value_no_override_props
+    ]
     parent_prop_infos = [
         {'prop': p, 'var_name': safe_var_name(p), 'def': filtered_props[p]}
         for p in parent_props
@@ -1720,7 +1790,64 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     parent_params_with_types = ', '.join(
         f"{p['var_name']}: {get_ts_type(p['def'])}" for p in parent_prop_infos
     )
-    _base_data_lines = [f"        {p['prop']}: {p['var_name']}," for p in parent_prop_infos]
+    # x-server-value fields never go through the generic "just write the client
+    # value" line below — server_value_data_lines (built further down) supplies
+    # a dedicated, server-resolved line for each of them instead.
+    _base_data_lines = [
+        f"        {p['prop']}: {p['var_name']},"
+        for p in parent_prop_infos if p['prop'] not in _server_value_prop_names
+    ]
+
+    # server_value_fields: template-facing list for service.ts.jinja2's per-field
+    # actorId resolution (cmd_565). Built here (not earlier) because it needs
+    # var_name, which parent_prop_infos above already derived consistently via
+    # safe_var_name() for the override_permission-bearing subset.
+    _pp_var_by_prop = {p['prop']: p['var_name'] for p in parent_prop_infos}
+    server_value_fields = [
+        {
+            'prop': _svfn,
+            'var_name': _pp_var_by_prop.get(_svfn, safe_var_name(_svfn)),
+            'override_permission': _svmeta['override_permission'],
+        }
+        for _svfn, _svmeta in _server_value_fields_raw.items()
+    ]
+    server_value_override_fields = [f for f in server_value_fields if f['override_permission']]
+
+    _svc_pre_lines: list[str] = []
+    _svc_data_lines: list[str] = []
+    for _svf in server_value_fields:
+        _sv_prop, _sv_var, _sv_op = _svf['prop'], _svf['var_name'], _svf['override_permission']
+        _sv_value_var = f'_{_sv_var}Value'
+        if _sv_op:
+            _sv_perms_var = f'_{_sv_var}Perms'
+            _svc_pre_lines.append(
+                f"    const {{ permissions: {_sv_perms_var} }} = await getModelPermissions('{model}', actorId);"
+            )
+            _svc_pre_lines.append(
+                f"    const {_sv_value_var} = ({_sv_var} && {_sv_perms_var}.{_sv_op}) ? {_sv_var} : actorId;"
+            )
+            _svc_pre_lines.append(
+                f"    const _{_sv_var}Overridden = Boolean({_sv_var}) && {_sv_value_var} !== {_sv_var};"
+            )
+        else:
+            _svc_pre_lines.append(f"    const {_sv_value_var} = actorId;")
+        _svc_data_lines.append(f"        {_sv_prop}: {_sv_value_var},")
+    server_value_pre_create_code = '\n'.join(_svc_pre_lines)
+    server_value_data_lines = '\n'.join(_svc_data_lines)
+
+    # _server_value_overrides (cmd_565 【四】): REST callers learn when their
+    # submitted value for an override-capable field was silently replaced with
+    # actorId for lack of permission — "黙って捨てるな". Not built for the
+    # plain-actor form (no override capability => nothing to be transparent
+    # about; that field's client value was never accepted, unchanged since cmd_556).
+    server_value_overrides_build_code = ''
+    if server_value_override_fields:
+        _svo_lines = ["    const _serverValueOverrides: Record<string, string> = {};"]
+        for _svof in server_value_override_fields:
+            _svo_lines.append(
+                f"    if (_{_svof['var_name']}Overridden) _serverValueOverrides['{_svof['prop']}'] = 'overridden';"
+            )
+        server_value_overrides_build_code = '\n'.join(_svo_lines)
     # Explicit pre-create statements for auto-create OTO targets (e.g. const approvable = await tx.approvable.create({ data: {} });)
     one_to_one_pre_creates = '\n'.join(
         f"    const {r['relation_name']} = await tx.{r['target']}.create({{ data: {{}} }});"
@@ -2655,6 +2782,13 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         readonly_fields=readonly_fields,
         readonly_fields_api=readonly_fields_api,
         readonly_fields_api_select=readonly_fields_api_select,
+        readonly_fields_create_reject=readonly_fields_create_reject,
+        # x-server-value: server-computed field values (cmd_556/cmd_565).
+        server_value_fields=server_value_fields,
+        server_value_override_fields=server_value_override_fields,
+        server_value_pre_create_code=server_value_pre_create_code,
+        server_value_data_lines=server_value_data_lines,
+        server_value_overrides_build_code=server_value_overrides_build_code,
         # Mention fields: x-mention: true annotations. Phase 2 templates use this list.
         mention_fields=mention_fields,
         # GDPR mode: model-level and field-level x-gdpr-mode annotations.

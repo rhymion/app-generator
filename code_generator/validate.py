@@ -16,6 +16,7 @@ from helpers.schema_helpers import (
     get_parent_relationships, get_internal_bridge_fk_prop_names,
     get_entity_properties, get_entity_required, get_self_only_flags,
 )
+from schema_deriver import parse_prisma_schema
 
 _SNAKE_CASE = re.compile(r'^(__)?[a-z][a-z0-9_]*$')
 _ID_SUFFIX  = re.compile(r'_id$')
@@ -221,6 +222,74 @@ def validate_self_only_creator_id_columns(schema: dict, prisma_schema_path: str 
         )
 
 
+def _own_properties(defn: dict) -> dict:
+    """Properties declared directly on `defn`, including inline (non-$ref)
+    allOf branches, but NOT recursing into $ref'd definitions.
+
+    Used instead of get_entity_properties() (which merges the *whole* allOf
+    chain) so a paired entity's view (`inventory`, `allOf: [{$ref: __inventory},
+    {...}]`) does not re-report fields already owned by its raw counterpart
+    (`__inventory`) — each field is checked exactly once, from whichever
+    definition actually declares it.
+    """
+    props = dict(defn.get('properties') or {})
+    for item in defn.get('allOf', []):
+        if '$ref' not in item:
+            props.update(item.get('properties') or {})
+    return props
+
+
+def validate_defaults_cross_schema(schema: dict, prisma_schema_path: str | Path) -> None:
+    """Fail if any json_schema.yaml field declares `default:` but the
+    corresponding Prisma column has no `@default(...)`.
+
+    The two schemas independently carry `default` values (json `fields.X.default:`
+    vs Prisma `@default(...)`) with no automatic sync between them — a json
+    `default:` with no matching Prisma `@default()` silently produces a form
+    that appears to have a default in the UI but inserts NULL/nothing at the
+    DB layer on create. The reverse (Prisma has `@default()`, json doesn't) is
+    NOT an error: that's a valid Category C decision to not auto-fill the UI
+    field (e.g. attachment.type has `@default(0)` in Prisma with no matching
+    json `default:`, deliberately). (cmd_574, 2026-08-05)
+    """
+    path = Path(prisma_schema_path)
+    if not path.exists():
+        raise SchemaValidationError(
+            f"Prisma schema not found at {path} — required for default cross-schema validation."
+        )
+    prisma_models = parse_prisma_schema(path)
+    defs = schema.get('definitions') or {}
+
+    errors: list[str] = []
+    for def_key, defn in defs.items():
+        if not isinstance(defn, dict) or not _SNAKE_CASE.match(def_key):
+            continue
+        model_name = _resolve_backing_model_name(def_key, defs)
+        model = prisma_models.get(model_name)
+        if model is None:
+            continue
+        props = _own_properties(defn)
+        for field_name, field_def in props.items():
+            if not isinstance(field_def, dict) or 'default' not in field_def:
+                continue
+            pf = model.fields.get(field_name)
+            if pf is None or not pf.has_default:
+                errors.append(
+                    f"Definition '{def_key}', property '{field_name}': json schema declares "
+                    f"default={field_def['default']!r} but Prisma model '{model_name}' has no "
+                    f"@default() for this column."
+                )
+
+    if errors:
+        bullet_list = '\n'.join(f"  • {e}" for e in errors)
+        raise SchemaValidationError(
+            f"json_schema.yaml `default:` entries without a matching Prisma @default() — "
+            f"{len(errors)} field(s):\n\n{bullet_list}\n\n"
+            f"Fix by either adding @default(...) to the Prisma column in schema.prisma, "
+            f"or removing default: from the json schema field.\n"
+        )
+
+
 # ---------------------------------------------------------------------------
 # x-import-key visibility contract (cmd_394 §8, DP-1a)
 # ---------------------------------------------------------------------------
@@ -387,6 +456,58 @@ def validate_schema(schema: dict) -> None:
                                 f"formValues are pulled from this entity's own form state, "
                                 f"not from the relationship target '{target}'."
                             )
+
+    # -----------------------------------------------------------------------
+    # 2f. x-server-value shape checks (cmd_556/cmd_565)
+    # -----------------------------------------------------------------------
+    _SERVER_VALUE_OPERATIONS = {'create', 'read', 'update', 'delete', 'import'}
+    _SERVER_VALUE_DICT_KEYS = {'source', 'override_permission'}
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        props = defn.get('properties', {})
+        for prop_name, prop_def in props.items():
+            if not isinstance(prop_def, dict) or 'x-server-value' not in prop_def:
+                continue
+            sv = prop_def['x-server-value']
+            if isinstance(sv, str):
+                if sv != 'actor':
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': "
+                        f"x-server-value string form only supports 'actor', got '{sv}'.  "
+                        f"Use the dict form {{source: {sv!r}, ...}} once other sources "
+                        f"are implemented, or correct the value to 'actor'."
+                    )
+                continue
+            if isinstance(sv, dict):
+                unknown_keys = set(sv.keys()) - _SERVER_VALUE_DICT_KEYS
+                if unknown_keys:
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': "
+                        f"x-server-value has unknown key(s) {sorted(unknown_keys)}.  "
+                        f"Allowed keys are {sorted(_SERVER_VALUE_DICT_KEYS)}."
+                    )
+                if sv.get('source') != 'actor':
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': "
+                        f"x-server-value.source must be 'actor' (the only implemented "
+                        f"source today), got {sv.get('source')!r}."
+                    )
+                _override = sv.get('override_permission')
+                if _override is not None and _override not in _SERVER_VALUE_OPERATIONS:
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': "
+                        f"x-server-value.override_permission must be one of "
+                        f"{sorted(_SERVER_VALUE_OPERATIONS)} (lib/authz.ts Operation), "
+                        f"got {_override!r}."
+                    )
+                continue
+            errors.append(
+                f"Definition '{def_key}', property '{prop_name}': "
+                f"x-server-value must be the string 'actor' or a dict "
+                f"{{source: 'actor', override_permission?: <Operation>}}, "
+                f"got {type(sv).__name__}."
+            )
 
     # -----------------------------------------------------------------------
     # 3. Many-to-many x-relationships labelField checks
@@ -767,6 +888,39 @@ def validate_schema(schema: dict) -> None:
                 errors.append(
                     f"Entity '{model}': list primary field '{primary_field}' must be "
                     f"required (non-nullable)."
+                )
+
+    # -----------------------------------------------------------------------
+    # 6d. x-display.form field name validation (cmd_568): the declared
+    # create/edit-form + detail-view display order. Every entry must name an
+    # actual property on the model — fail-closed, since a typo would
+    # silently drop that field from the rendered form/view/CSV export
+    # (form_upsert_context/form_view_context/export_scalar_fields only
+    # render/emit fields they can find in this list).
+    # -----------------------------------------------------------------------
+    for entity in entities:
+        model     = entity['model']
+        model_def = defs.get(f'__{model}', defs.get(model, {}))
+        props     = get_entity_properties(model, schema)
+
+        xdisplay = model_def.get('x-display') or {}
+        if not isinstance(xdisplay, dict):
+            continue
+        form_order = xdisplay.get('form')
+        if form_order is None:
+            continue
+        if not isinstance(form_order, list) or not all(isinstance(f, str) for f in form_order):
+            errors.append(
+                f"Entity '{model}': x-display.form must be a list of field name "
+                f"strings, got {type(form_order).__name__}."
+            )
+            continue
+        for field_name in form_order:
+            if field_name not in props:
+                errors.append(
+                    f"Entity '{model}': x-display.form references field "
+                    f"'{field_name}' but that field does not exist on the model. "
+                    f"Fix the field name or remove it from x-display.form."
                 )
 
     # -----------------------------------------------------------------------

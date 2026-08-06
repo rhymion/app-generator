@@ -1,4 +1,12 @@
-// AUTO-GENERATED - DO NOT EDIT
+// Handwritten test spec — not auto-generated. `audit_log` is not declared
+// as an entity in json_schema.yaml, so no generator template renders this
+// file (confirmed cmd_554, re-confirmed cmd_566).
+//
+// Pitfall: if audit_log is ever added to json_schema.yaml with
+// x-generate.test: true, generate.py's _write() (code_generator/generate.py)
+// overwrites unconditionally — no exists() check — and will silently
+// replace this file with generated content. No conflict error is raised;
+// the only signal would be a diff after the next generate-code run.
 //
 // Mobile-viewport spec (Audit Log). The list page renders a different
 // component below 768px: ResponsiveListClient swaps in CardListClient (cards

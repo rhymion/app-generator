@@ -3,8 +3,15 @@
 import { redirect } from 'next/navigation';
 {% if comment_actions_code or (can_list and can_delete) or can_invalidate %}import { revalidatePath } from 'next/cache';
 {% endif %}import { getSessionUserIdOrThrow, requirePermission{% if can_delete %}, getModelPermissions{% endif %} } from '@/lib/authz';
-{% if can_invalidate and invalidate_module %}
+{% if can_invalidate %}
+{% if invalidate_module %}
 import { {{ invalidate_handler }} } from '@/{{ invalidate_module }}';
+{% else %}
+{# no handler/module configured: fall back to the write-once stub (cmd_583).
+   Aliased on import -- the stub's export is also named invalidate{{ parent_pascal }},
+   which collides with this file's own wrapper function of the same name below. #}
+import { invalidate{{ parent_pascal }} as _invalidate{{ parent_pascal }}Stub } from '@/lib/{{ parent }}/invalidate_handler';
+{% endif %}
 {% endif %}
 import prisma from '@/lib/prisma';
 {% if comment_actions_code %}import { notify } from '@/lib/_notifier';
@@ -75,8 +82,7 @@ export async function invalidate{{ parent_pascal }}(id: string): Promise<void> {
   {% if invalidate_module %}
   await {{ invalidate_handler }}(id);
   {% else %}
-  // write-once stub: implement invalidate{{ parent_pascal }} in lib/{{ parent }}/invalidate_handler.ts
-  throw new Error('invalidate{{ parent_pascal }}: handler not configured');
+  await _invalidate{{ parent_pascal }}Stub(id);
   {% endif %}
   revalidatePath('/[locale]/{{ parent }}', 'page');
 }

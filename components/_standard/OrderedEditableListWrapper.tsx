@@ -445,9 +445,12 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
                 >
                   <Typography
                     variant="body2"
-                    color="text.secondary"
-                    sx={{ minWidth: 28, mr: 1, flexShrink: 0 }}
-                  >
+                    sx={{
+                      color: "text.secondary",
+                      minWidth: 28,
+                      mr: 1,
+                      flexShrink: 0
+                    }}>
                     {item.order}.
                   </Typography>
                   {renderItem ? renderItem(item) : defaultRenderItem(item)}
@@ -500,12 +503,13 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
                     error={!!error}
                     helperText={error}
                     slotProps={{
+                      ...params.slotProps,
                       input: {
-                        ...params.InputProps,
+                        ...params.slotProps.input,
                         endAdornment: (
                           <>
                             {searchLoading ? <CircularProgress color="inherit" size={16} /> : null}
-                            {params.InputProps.endAdornment}
+                            {params.slotProps.input.endAdornment}
                           </>
                         ),
                       },

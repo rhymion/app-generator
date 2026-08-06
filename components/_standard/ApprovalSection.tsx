@@ -200,7 +200,9 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
                         <Box sx={{ p: 1 }}>
                           {histories.map((h) => (
                             <Box key={h.id} sx={{ mb: 0.5 }}>
-                              <Typography variant="caption" color="text.secondary">
+                              <Typography variant="caption" sx={{
+                                color: "text.secondary"
+                              }}>
                                 {new Date(h.created_at).toLocaleString()} — {h.creator?.name ?? '—'} :
                                 {' '}{STATUS_LABELS[h.pre_status] ?? h.pre_status} → {STATUS_LABELS[h.post_status] ?? h.post_status}
                               </Typography>

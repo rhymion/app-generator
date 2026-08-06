@@ -102,13 +102,12 @@ model user {
   created_approvables       approvable[]        @relation("ApprovableCreator")
   created_dashboards        dashboard[]         @relation("DashboardCreator")
   updated_dashboards        dashboard[]         @relation("DashboardUpdater")
-  created_personal_notes    personal_note[]     @relation("PersonalNoteCreator")
-  updated_personal_notes    personal_note[]     @relation("PersonalNoteUpdater")
   created_tenants           tenant[]            @relation("TenantCreator")
   updated_tenants           tenant[]            @relation("TenantUpdater")
   audit_logs                audit_log[]
   notifications             notification[]      @relation("NotificationUser")
   anonymized_at             DateTime?            // Timestamp when PII was scrubbed (GDPR anonymization)
+  invalidated_at            DateTime?            // Generic invalidate mechanism (cmd_564); set alongside anonymized_at by anonymizeUser()
 
   @@index([api_key])
   @@index([creator_id])
@@ -365,25 +364,6 @@ model dashboard_widget {
   created_at     DateTime  @default(now()) @db.Timestamptz(0)
   updated_at     DateTime  @updatedAt @db.Timestamptz(0)
   @@index([dashboard_id])
-}
-
-// Sample x-self-only entity (see json_schema.yaml + docs/knowledge/
-// self-only-entity.md): a private per-user note. Only its creator can ever
-// read/write it — the access invariant is enforced unconditionally in the
-// generated code, independent of any permission grant. Doubles as the
-// generator's own regression-test fixture for the x-self-only mechanism.
-model personal_note {
-  id         String   @id @default(cuid())
-  title      String
-  content    String?
-  created_at DateTime @default(now()) @db.Timestamptz(0)
-  updated_at DateTime @updatedAt @db.Timestamptz(0)
-  creator_id String
-  creator    user     @relation("PersonalNoteCreator", fields: [creator_id], references: [id])
-  updater_id String
-  updater    user     @relation("PersonalNoteUpdater", fields: [updater_id], references: [id])
-  @@index([creator_id])
-  @@index([updater_id])
 }
 
 // Per-user notification store (framework default, mirrored from

@@ -28,13 +28,14 @@ export default function AppStack({
     <Stack
       direction={direction}
       spacing={spacing}
-      alignItems={alignItems}
-      flexWrap={flexWrap}
-      mt={mt}
-      mb={mb}
-      maxWidth={maxWidth}
       className={className}
-    >
+      sx={{
+        alignItems: alignItems,
+        flexWrap: flexWrap,
+        mt: mt,
+        mb: mb,
+        maxWidth: maxWidth
+      }}>
       {children}
     </Stack>
   );

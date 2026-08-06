@@ -13,14 +13,18 @@ export default function SettingPage() {
 
   return (
     <Box sx={{ maxWidth: 600, mt: 2, mb: 3 }}>
-      <Box display="flex" flexDirection="column" gap={2}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         <Card variant="outlined">
           <CardActionArea component={Link} href="/setting/mfa">
             <CardContent>
-              <Typography variant="subtitle1" fontWeight="bold">
+              <Typography variant="subtitle1" sx={{
+                fontWeight: "bold"
+              }}>
                 {t('mfaTitle')}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" sx={{
+                color: "text.secondary"
+              }}>
                 {t('mfaBody')}
               </Typography>
             </CardContent>
@@ -29,10 +33,14 @@ export default function SettingPage() {
         <Card variant="outlined">
           <CardActionArea component={Link} href="/setting/accounts">
             <CardContent>
-              <Typography variant="subtitle1" fontWeight="bold">
+              <Typography variant="subtitle1" sx={{
+                fontWeight: "bold"
+              }}>
                 {t('accountsTitle')}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" sx={{
+                color: "text.secondary"
+              }}>
                 {t('accountsBody')}
               </Typography>
             </CardContent>

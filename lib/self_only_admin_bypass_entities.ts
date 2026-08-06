@@ -5,5 +5,4 @@
 // — see the comment there for why the coarse permission check needs it.
 export const SELF_ONLY_ADMIN_BYPASS_ENTITIES = new Set<string>([
   'setting',
-  'personal_note',
 ]);

@@ -7,7 +7,7 @@ import { invalidate{{ parent_pascal }} } from '@/lib/{{ parent }}/invalidate_han
 {% endif %}
 
 // POST /api/{{ parent }}/[id]/actions/invalidate
-// Anonymizes all PII for the given {{ parent }} record. Irreversible.
+// Invalidates the given {{ parent }} record via the configured handler.
 // TODO: separate 'invalidate' permission from 'delete' in future
 export async function POST(
   request: NextRequest,

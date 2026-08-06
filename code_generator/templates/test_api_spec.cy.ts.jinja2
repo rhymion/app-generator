@@ -138,6 +138,31 @@ describe('API: {{ title }}', () => {
       });
 {% endif %}
     });
+{% if date_range_boundary %}
+
+    it('5.2 rejects reservation when {{ date_range_boundary.start_field }} equals {{ date_range_boundary.end_field }} (start must be before end)', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I }}cy.request({
+{{ I }}  method: 'POST',
+{{ I }}  url: API_BASE,
+{{ I }}  headers: { 'X-API-Key': TEST_API_KEY },
+{{ I }}  body: {
+{% for ln in post_body_daterange_boundary %}
+{{ ln }}
+{% endfor %}
+{{ I }}  },
+{{ I }}  failOnStatusCode: false,
+{{ I }}}).then((res) => {
+{{ I }}  expect(res.status).to.be.gte(400);
+{{ I }}  expect(res.body.error).to.eq('Start date must be before end date');
+{{ I }}});
+{% if has_deps %}
+      });
+{% endif %}
+    });
+{% endif %}
   });
 {% endif %}
 {% if can_edit %}
@@ -720,6 +745,33 @@ describe('API: {{ title }}', () => {
             method: 'PUT',
             url: `${API_BASE}/${scenario.entityInOrgB.id}`,
             headers: { 'X-API-Key': TEST_API_KEY },
+            body: {},
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(404);
+          });
+        });
+      });
+    });
+
+    // cmd_576: a required organization_id FK is the org-isolation boundary
+    // itself, not an ordinary FK — it must never be given the FK read-
+    // permission graceful-degradation treatment (section above). An actor
+    // can hold full CRUD permission on {{ parent }} yet belong to zero
+    // organizations; cmd_515's existence lookup is scoped by actual
+    // membership (getAssociatedOrganizations), not by any RBAC permission
+    // row, so this actor must never reach an existing row at all.
+    it('G3.4 PUT by an actor with no organization membership returns 404 (existence hidden)', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<string>('db:createApiUserWithPermission', {
+          entityName: '{{ parent }}',
+          flags: { create: true, read: true, update: true, delete: true },
+          label: 'org_isolation_no_membership',
+        }).then((restrictedKey) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': restrictedKey },
             body: {},
             failOnStatusCode: false,
           }).then((res) => {

@@ -426,6 +426,9 @@ export async function search{{ parent_pascal }}Options(
     AND: [
       ...accessAnd,
       ...(matchOr.length > 0 ? [{ OR: matchOr }] : []),
+{% if can_invalidate %}
+      { invalidated_at: null },
+{% endif %}
       ...(customWhere && Object.keys(customWhere).length > 0 ? [customWhere] : []),
     ],
   };

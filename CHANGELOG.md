@@ -5,7 +5,41 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`x-server-value` now supports actor delegation** (cmd_565, extending cmd_556): a field
+  declared `x-server-value: {source: actor, override_permission: <Operation>}` still defaults to
+  writing the authenticated actor's id on create, but an actor holding `override_permission` (any
+  `lib/authz.ts` `Operation`) may now supply an explicit value that is honored as-is — e.g. an
+  admin filing a request on someone else's behalf. An actor without that permission who submits a
+  value has it silently replaced with their own id rather than the request being rejected (the
+  create still succeeds, just attributed to the real actor); the REST create response gains an
+  optional `_server_value_overrides` flag so a caller can tell when this happened. The original
+  string form `x-server-value: "actor"` is unchanged (no override capability, client value fully
+  discarded). See `docs/knowledge/x-server-value-actor-delegation.md`.
+
+### Security
+- **CREATE had no read-only field enforcement at all** (cmd_565): PUT's existing AP-3=B rejects a
+  submitted read-only field value that mismatches the persisted row, but CREATE has no row to
+  compare against, so a plain `x-readonly`/`x-readonly-fields` field's client-submitted value flowed
+  straight into the database on create, via both the REST route and the server action — reproduced
+  against a real database before fixing. Both entry points now reject any client-submitted value
+  for such a field on create outright (no legitimate fallback value the way `x-server-value` has
+  actorId). `x-server-value` fields are exempted from this reject; they have their own dedicated
+  resolution (see Added, above). See `docs/knowledge/x-server-value-actor-delegation.md`.
+
 ### Fixed
+- **`x-generate.invalidate` enabled with no handler/module produced code that could not build**
+  (cmd_583): `actions.ts.jinja2`'s fallback branch never imported anything (a bare runtime
+  `throw`), while `invalidate_action_route.ts.jinja2`'s fallback branch unconditionally imported
+  a file `generate.py` never wrote — `next build` failed the moment any entity took this branch.
+  This repo's only `invalidate` consumer (`user`) always supplies an explicit handler/module, so
+  the branch had never actually been generated before a downstream consumer hit it. `generate.py`
+  now writes a write-once stub at `lib/{entity}/invalidate_handler.ts` (same convention as the
+  existing `service_after_create.ts`/`service_after_approve.ts` extension-point stubs) that both
+  templates now consistently import; the stub throws a clear, actionable error until a human
+  implements real invalidate logic, so no default soft-delete behavior is introduced. Also
+  generalized `invalidate_action_route.ts.jinja2`'s docstring, which hardcoded `user`-specific PII
+  wording. See `docs/knowledge/invalidate-no-handler-write-once-stub.md`.
 - **Item-master entity naming was silently hardcoded to `product`/`product_id` throughout the
   ledger/split generator** (cmd_545/cmd_546): any consumer naming its item-master entity or its
   pool entity's location/lot/expiration columns differently got no error — three independent
@@ -31,54 +65,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   add these four keys (matching its current column names) before its next `generate-code` run, or
   generation fails immediately with a named error; no generated-code content changes as a result
   of adding them alone. See `docs/knowledge/appendix/inventory-reservation-split.md` §7–8.
-- **Ledger row's location snapshot hardcoded `.name` instead of the pool entity's declared
-  `x-relationship.labelField`** (cmd_550, found in review of the above): the reserve-phase ledger
-  row write assumed every location entity's display field is literally named `name`; a consumer
-  whose location entity displays a different field (e.g. `label`, `code`) got a TypeScript compile
-  error at `next build` time, the same silent-until-build-time failure class as cmd_545/546.
-  `resolve_ledger_domain()` now also resolves `location_label_field`/`location_label_target` from
-  that same `x-relationship` block (no new schema key), and the ledger row renders through
-  `build_label_expression()` — the identical helper this generator's autocomplete/list-view label
-  rendering already uses, so the audit-trail snapshot and what a user actually saw at claim time
-  can never drift apart. **Two distinct failure/default behaviors, not one** (corrected from the
-  original, overclaiming "fails closed, no fallback to `'name'`" wording): fails closed
-  (`ValueError`, no fallback) only if `locationField` isn't declared as a relation **at all**; if
-  the relation *is* declared but its `labelField` sub-key is not, `resolve_ledger_domain()`
-  deliberately defaults that one sub-key to `'name'` (pinned by
-  `test_location_label_field_defaults_to_name_when_undeclared` — the common case, since most
-  location-like entities do display a `name` field). Reproduced against a location entity with no
-  `name` property before fixing. See `docs/knowledge/appendix/inventory-reservation-split.md`
-  §7.1, §10.
-- **Four more `.name` hardcodes survived cmd_550's own fix, in the once-stub /
-  split-route templates it didn't touch** (cmd_550 follow-up, found in PR #269 review): the
-  reserve-phase fix above only touched `generators.py`'s reservation-allocation code path.
-  `ledger_adjust_stub.ts.jinja2`, `ledger_move_stub.ts.jinja2` (×2), `ledger_write_stub.ts.jinja2`,
-  and `split_action_route.ts.jinja2` (×2) still wrote `_row.{location}?.name ?? ''` into the
-  ledger's denormalized location column directly — the exact same "assumes the display field is
-  named `name`" bug, in four more files, undetected by cmd_550's own review because the count of
-  affected sites was undercounted twice in a row (three call sites initially missed entirely,
-  `split_action_route.ts.jinja2`; a fourth found only on the second recount,
-  `ledger_write_stub.ts.jinja2`'s *reverse* lookup — see below). All six now render through
-  `pool_location_label_exprs[<row var>]` (`generate.py`'s `_ledger_stub_field_vars`), built via the
-  identical `build_label_expression()` call as the fix above.
-
-  A **second, worse-natured class** of the same assumption also survived, only found on this
-  recount: three *reverse* lookups (`tx.<location>.findFirst({ where: { name: ... } })` in
-  `ledger_write_stub.ts.jinja2`'s `afterReject` and `split_action_route.ts.jinja2`'s reserved-row
-  release, plus a `select: { name: true } }` projection narrowing what `split_action_route.ts.jinja2`
-  fetches before rendering it) recover a location *row* from the ledger's denormalized string —
-  the same "assumes `name`" bug, but for a consumer whose display field is something else, this
-  either throws (`name` isn't a queryable column) or, worse, silently matches nothing / an
-  unrelated row (`findFirst` has no correctness guarantee against duplicate display-field values —
-  a pre-existing, separate ambiguity this fix does not attempt to resolve; see
-  `docs/knowledge/appendix/inventory-reservation-split.md` §7.1 "reverse lookup" subsection for why
-  that's judged out of this fix's scope). Now reads `pool_location_label_field` (the declared
-  field name) instead of the literal `name`. **Fails closed** (generation-time `ValueError`,
-  before any file is written) if the declared `labelField` is composite (a list) — a concatenated
-  multi-field label cannot be unambiguously inverted back into a single-field lookup — or resolves
-  through a relation beyond the location entity itself, or to a date/time field. Deviation-injection
-  proof (a location entity displaying `code`, not `name`) added in
-  `code_generator/tests/test_ledger_stub_location_label_field.py`.
+- **Ledger row's location column is now an id-FK, not a denormalized display string**
+  (cmd_562, superseding cmd_550/PR #269 before either shipped in a release): cmd_550 taught the
+  ledger row's location write to render the pool entity's declared `x-relationship.labelField`
+  into a display-string snapshot (instead of hardcoding `.name`), plus a *reverse*
+  `findFirst({ where: { <labelField>: <string> } })` lookup everywhere that string needed to be
+  turned back into a location row. Decided instead to hold location by id on the ledger entity too
+  (matching how the item-master FK already worked) — every write is now a plain id copy
+  (`ledger.location_id = pool.location_id`), and no reverse lookup exists at all, in
+  `ledger_adjust_stub.ts.jinja2`, `ledger_move_stub.ts.jinja2` (×2), `ledger_write_stub.ts.jinja2`
+  (forward + `afterReject` re-identification), `split_action_route.ts.jinja2` (×3), and
+  `generators.py`'s reserve-phase allocation code. `resolve_ledger_domain()` no longer resolves or
+  returns `location_relation`/`location_label_field`/`location_label_target` — it no longer
+  inspects the pool entity's `x-relationship` declaration at all for this purpose. The FK is
+  `onDelete: Restrict` (a referenced location cannot be deleted, reproduced against a real
+  database); renaming a location remains possible, with `x-audit: true` (an existing,
+  entity-agnostic mechanism, not new) recording who renamed it and when. See
+  `docs/knowledge/appendix/inventory-reservation-split.md` §7.1–7.2 and
+  `docs/knowledge/appendix/cmd562-location-id-fk-consumer-migration.md` for the consumer migration.
 
 ### Security
 - **Server-action path can no longer bypass multi-stage approval ordering** (cmd_540): the
@@ -94,6 +98,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `test/flows/approval_order_bypass.test.ts`.
 
 ### Fixed
+- **`npm run cleanup` could wipe every translated `messages/ja.json` entry** (cmd_560):
+  `cleanup.py` deleted every Fields/EntityLabel/Nav key belonging to any entity in the
+  passed schema from `messages/*.json` — including entries for entities still in
+  production use, not just genuinely removed ones. Since `npm run cleanup` always
+  rebuilds its schema argument from whatever `json_schema.yaml` currently says, running
+  it while a temp fixture entity was still present in the schema (a normal
+  fixture-testing workflow — remove the fixture's generated files before reverting the
+  schema file) wiped every real entity's translated keys too; a subsequent
+  `generate-code` then refilled them with the English schema default, since
+  `generators_i18n.py`'s own `_update_json` only fills genuinely missing keys.
+  `cleanup.py` no longer touches `messages/*.json` at all. `generate-code` also now
+  prints a `WARNING: untranslated keys added` line in the build log naming any key
+  freshly added to a non-English locale file, so a partial translation gap is visible
+  instead of silently looking like a fully-translated run. See
+  `docs/knowledge/i18n-locale-routing.md` "`messages/*.json` are append-only, never
+  generator-truncated".
+
 - **Re-submitting a rejected approval request never notified the approver** (cmd_539):
   `resubmitApprovalRequest()` (both the server action in
   `lib/approval_request/actions_core.ts` and the REST route
@@ -106,6 +127,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   for a `terminal_rejected` outcome (the notification itself always fired; only the payload was
   wrong). See `docs/knowledge/appendix/approval-flow.md` §16.6 and
   `docs/knowledge/notification-triggers.md`.
+
+### Internal
+- **`cypress/support/db-helpers.ts`/`generated-tasks.ts` were stale, missing `personal_note`**
+  (cmd_560): these committed, generator-written files predate the `personal_note` entity
+  (added later in the `x-self-only` Stage 1 work) and were never regenerated afterward —
+  `resetTestDatabase()`'s cleanup ordering never deleted `personal_note` rows, so its later
+  `user.deleteMany()` step hit `Foreign key constraint violated on the constraint:
+  personal_note_creator_id_fkey` in the `before each` hook of any spec running after
+  `personal_note` rows existed, cascading into 8 of 19 `test:e2e:cy:api` spec files failing.
+  Unrelated to the `messages/*.json` fix above; discovered only because it blocked verifying
+  that fix's own e2e gate, and bundled into the same PR to keep the gate green. Re-ran
+  `npm run generate-code` and committed the resulting `db-helpers.ts`/`generated-tasks.ts`
+  (now include `personal_note` in the Level-2 delete order, `ALL_ENTITIES`, and the three
+  `db:populatePersonalNote*` tasks).
 
 ### Added
 - **FK autocomplete search now derives from `labelField`, `searchField` retired** (cmd_552): the
@@ -351,6 +386,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (never silently raised) stops that from recurring unnoticed. Seeded 5 warnings above the
   measured `develop`-tip count (15) rather than an exact match, so one incidental warning doesn't
   turn an unrelated PR red. See `docs/knowledge/lint-warning-ceiling-ratchet.md`.
+- **`components/*/form_validation.ts` untracked from version control** (cmd_562 follow-up):
+  `.gitignore` negated this generated file as if it were a customizable stub, but `generate.py`
+  writes it via the unconditional-overwrite `_write()` (not `_write_stub()`), and its template has
+  never had a customization marker even at the file's original commit — so tracking it in git gave
+  a false impression of preservable hand-edits while the generator silently clobbered them every
+  run. Removed the negation and untracked all 8 previously-committed instances; verified a full
+  delete + `generate-code` + `tsc --noEmit` + `check:generated` cycle reproduces them identically
+  with nothing else affected.
+- **cypress excluded from routine `npm-minor-and-patch` bumps** (cmd_561):
+  cypress 15.16.0 → 15.19.0 alone (isolated via a single-variable control
+  experiment) broke `dashboard.cy.ts`'s DataGrid cell lookup, unrelated to
+  the product code or any MUI package. `.github/dependabot.yml` (`main` and
+  `develop` copies) now excludes cypress from grouping and ignores its
+  routine minor/patch bumps; security-update PRs are unaffected. See
+  `docs/knowledge/testing-cypress.md` ("Cypress version held back").
 
 ## [3.0.0] - 2026-07-30
 

@@ -34,7 +34,6 @@ from helpers.label_field import (
     build_label_expression,
     first_label_format,
     first_label_path,
-    render_prisma_include,
 )
 
 
@@ -559,6 +558,19 @@ def actions_context(ctx: dict) -> dict:
     has_reservation = bool(reservation_config and reservation_config.get('mode') == 'count')
     should_filter_by_org = bool(ctx.get('should_filter_by_org'))
 
+    # cmd_565 乙: mirror the REST POST guard — a plain read-only field can never
+    # be supplied by the client, even on create. x-server-value fields are
+    # excluded (own dedicated resolution, see service.ts.jinja2).
+    readonly_fields_create_reject = ctx.get('readonly_fields_create_reject') or []
+    _ro_reject_lines = '\n'.join(
+        f"    if (data.get('{f}') !== null) {{ throw new Error('Field {f} is read-only and cannot be set'); }}"
+        for f in readonly_fields_create_reject
+    )
+    # Guarded form: only checked on the create branch (`id` absent) of a
+    # combined create+update action. Unguarded form: the action is create-only.
+    _ro_reject_guarded   = f"  if (!id) {{\n{_ro_reject_lines}\n  }}\n" if _ro_reject_lines else ''
+    _ro_reject_unguarded = f"{_ro_reject_lines}\n" if _ro_reject_lines else ''
+
     sep = ', ' if (parent_params and child_args) else ''
     full_child_args = f'{sep}{child_args}' if child_args else ''
 
@@ -689,7 +701,8 @@ def actions_context(ctx: dict) -> dict:
                         f"  }}\n"
                         f"{form_data_gets}\n"
                         + (f"{child_form_data_extractions}\n" if has_ch else "")
-                        + _flatten_block +
+                        + _flatten_block
+                        + _ro_reject_guarded +
                         f"\n  let _serviceError: string | null = null;\n"
                         f"  if (id) {{\n"
                         f"    try {{\n"
@@ -727,7 +740,8 @@ def actions_context(ctx: dict) -> dict:
                     f"  }}\n"
                     f"{form_data_gets}\n"
                     + (f"{child_form_data_extractions}\n" if has_ch else "")
-                    + _flatten_block +
+                    + _flatten_block
+                    + _ro_reject_guarded +
                     f"  const actorId = await getSessionUserIdOrThrow();\n\n"
                     f"  let _serviceError: string | null = null;\n"
                     f"  if (id) {{\n"
@@ -768,7 +782,8 @@ def actions_context(ctx: dict) -> dict:
                     f"  }}\n"
                     f"{form_data_gets}\n"
                     + (f"{child_form_data_extractions}\n" if has_ch else "")
-                    + _flatten_block +
+                    + _flatten_block
+                    + _ro_reject_guarded +
                     f"\n  if (id) {{\n"
                     f"    {update_call}\n"
                     f"  }} else {{\n"
@@ -786,7 +801,8 @@ def actions_context(ctx: dict) -> dict:
                 f"  }}\n"
                 f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
-                + _flatten_block +
+                + _flatten_block
+                + _ro_reject_guarded +
                 f"  const actorId = await getSessionUserIdOrThrow();\n\n"
                 f"  if (id) {{\n"
                 f"    {update_call}\n"
@@ -824,7 +840,8 @@ def actions_context(ctx: dict) -> dict:
             return (
                 f"  await requirePermission('{parent}', 'create');\n"
                 f"{form_data_gets}\n"
-                + (f"{child_form_data_extractions}\n" if has_ch else "") +
+                + (f"{child_form_data_extractions}\n" if has_ch else "")
+                + _ro_reject_unguarded +
                 f"\n  const actorId = await getSessionUserIdOrThrow();\n"
                 f"  await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});"
             )
@@ -979,41 +996,15 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     # silently broke (TypeScript error, not a generator-time failure) for any
     # consumer naming these columns differently.
     item_field       = _domain['item_field']
-    location_relation = _domain['location_relation']
+    location_field   = _domain['location_field']
     lot_field        = _domain['lot_field']
     expiration_field = _domain['expiration_field']
-    # cmd_550: render the ledger row's location snapshot through the pool
-    # entity's declared x-relationship.labelField — the same source
-    # cmd_547/548's autocomplete/list-view labels read — instead of a bare
-    # `.name` access, which silently mis-rendered (or crashed) for any
-    # location entity whose display field isn't literally `name`. A
-    # composite labelField (e.g. `[location_name, shelf_code]`) is rendered
-    # in full rather than truncated to a single segment: the ledger column
-    # is a denormalized snapshot of "what the location was called at the
-    # time", and using the identical rendering the user already sees in
-    # autocomplete/list views keeps that snapshot consistent with the UI
-    # rather than growing a second, divergent notion of "the" location label.
-    location_label_built = build_label_expression(
-        f"_candidate.{location_relation}",
-        _domain['location_label_field'],
-        _domain['location_label_target'],
-        schema or {},
-    )
-    if location_label_built['has_format']:
-        raise ValueError(
-            f"x-ledger-entities for {model!r}: location labelField "
-            f"{_domain['location_label_field']!r} on {_domain['location_label_target']!r} "
-            f"resolves to a date/time field — unsupported for the ledger row's "
-            f"plain-string location snapshot (formatLabelValue is not imported "
-            f"in this generated module)."
-        )
-    location_label_expr = location_label_built['expression']
-    _location_nested_include = location_label_built['prisma_include']
-    location_include_str = (
-        f"{location_relation}: {{ include: {{ {render_prisma_include(_location_nested_include)} }} }}"
-        if _location_nested_include
-        else f"{location_relation}: true"
-    )
+    # cmd_562: location_field is an id-FK on both the pool and ledger
+    # entities (same shape as item_field) — the ledger row write is a plain
+    # id copy, not a denormalized display-string snapshot. This removes the
+    # build_label_expression/prisma-include machinery cmd_550 (PR #269)
+    # built to render a `.name`-equivalent snapshot string; that whole
+    # design (and its fix) is obsolete once the column is an id itself.
 
     pool_qty_field = pool.get('quantityField', 'quantity')
     pool_res_field = pool.get('reservedField', 'reserved_quantity')
@@ -1057,7 +1048,6 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"{where_clause}\n"
         f"        }},\n"
         + (f"        orderBy: [{order_str}],\n" if order_str else '') +
-        f"        include: {{ {location_include_str} }},\n"
         f"      }});\n"
         f"      const bridge = await tx.{transactionable_entity}.create({{ data: {{}} }});\n"
         f"      for (const _candidate of _candidates) {{\n"
@@ -1078,7 +1068,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"              quantity_delta: 0,\n"
         f"              reserved_delta: _claim,\n"
         f"              {item_field}: _candidate.{item_field},\n"
-        f"              {location_relation}: {location_label_expr},\n"
+        f"              {location_field}: _candidate.{location_field},\n"
         f"              {lot_field}: _candidate.{lot_field},\n"
         f"              {expiration_field}: _candidate.{expiration_field},\n"
         f"              created_by_id: actorId,\n"
@@ -1799,6 +1789,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     has_reservation         = bool(reservation_config and reservation_config.get('mode') == 'count')
     has_item_reservation    = bool(reservation_config and reservation_config.get('mode') == 'item')
     has_item_daterange      = has_item_reservation and bool(reservation_config.get('dateRange'))
+    server_value_override_fields = ctx.get('server_value_override_fields') or []
 
     has_non_comment_ch = bool(non_comment_ch)
 
@@ -2145,6 +2136,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if should_filter_by_org and (can_create or can_update) else '')
         + (f"\nimport {{ ApiError }} from '@/lib/api-auth';" if (should_filter_by_org and (can_create or can_update)) or (is_self_only and can_update) else '')
+        + (f"\nimport {{ getModelPermissions }} from '@/lib/authz';" if server_value_override_fields and can_create else '')
         + insufficient_inventory_error_class +
         f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"
         f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
@@ -2450,13 +2442,19 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     def _tf(p: str):
         return to_camel_case(p)
 
+    # jsx_by_field: every rendered field's JSX keyed by field name, regardless
+    # of type bucket. Final assembly order comes from x-display.form (if
+    # declared) or plain schema declaration order (parent_props) — see the
+    # `all_parent_fields` assembly below. The per-type loops below only
+    # decide HOW to render a field, never WHERE it lands.
+    jsx_by_field: dict[str, str] = {}
+
     # Text fields (incl. relationship display)
     entity_select_props_view = {
         p for p in other_flds
         if filtered_props.get(p, {}).get('x-entity-select')
     }
     entity_select_options = ctx.get('entity_select_options', [])
-    text_jsxs = []
     for p in other_flds:
         fk = _tf(p)
         rel = rel_by_prop.get(p)
@@ -2466,7 +2464,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 f"{{ value: '{o['value']}', label: '{o['label']}' }}"
                 for o in entity_select_options
             )
-            text_jsxs.append(
+            jsx_by_field[p] = (
                 f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
                 f"        value={{[{opts_items}].find((o) => o.value === src.{p})?.label ?? src.{p} ?? ''}}\n"
                 f"        readOnly\n      />"
@@ -2491,7 +2489,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 value_expr = rel_value_expr
             else:
                 value_expr = f"({rel_value_expr}) || src.{p} || ''"
-            text_jsxs.append(
+            jsx_by_field[p] = (
                 f"      <AppFieldRelation\n"
                 f"        label={{tf('{label_fk}')}}\n"
                 f"        value={{{value_expr}}}\n"
@@ -2502,14 +2500,13 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         else:
             fallback_actual = _get_actual_type(filtered_props.get(p, {}))
             fallback_op = '??' if fallback_actual in ('integer', 'number') else '||'
-            text_jsxs.append(
+            jsx_by_field[p] = (
                 f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
                 f"        value={{src.{p} {fallback_op} ''}}\n"
                 f"        readOnly\n      />"
             )
 
     # DateTime fields
-    dt_jsxs = []
     for p in date_time_flds:
         fk  = _tf(p)
         fmt = filtered_props[p].get('format')
@@ -2522,23 +2519,23 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             date_time_expr = f"{{src.{p} ? dayjs(new Date(src.{p}).toISOString().slice(0, 10) + 'T00:00:00').toDate() : null}}"
         else:
             date_time_expr = f"{{src.{p}}}"
-        dt_jsxs.append(
+        jsx_by_field[p] = (
             f"      <DateTimeWrapper label={{tf('{fk}')}} date_time={date_time_expr}{show_time_attr}{show_date_attr} readOnly />"
         )
 
     # Image fields
-    img_jsxs = [f"      <ImageDisplay url={{src.{p}}} alt={{tf('{_tf(p)}')}} />" for p in image_flds]
+    for p in image_flds:
+        jsx_by_field[p] = f"      <ImageDisplay url={{src.{p}}} alt={{tf('{_tf(p)}')}} />"
 
     # Boolean fields
-    bool_jsxs = [
-        f"      <AppFieldBoolean\n        label={{tf('{_tf(p)}')}}\n        checked={{Boolean(src.{p})}}\n        readOnly\n      />"
-        for p in boolean_flds
-    ]
+    for p in boolean_flds:
+        jsx_by_field[p] = (
+            f"      <AppFieldBoolean\n        label={{tf('{_tf(p)}')}}\n        checked={{Boolean(src.{p})}}\n        readOnly\n      />"
+        )
 
     # Enum integer fields
     enum_ns_hooks  = []
     enum_opt_setups = []
-    enum_int_jsxs  = []
     seen_ns = set()
     for p in enum_integer_flds:
         prop       = filtered_props[p]
@@ -2558,14 +2555,13 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
         enum_opt_setups.append(f"  const {state_name}Options = [{opts}];")
         fk = _tf(p)
-        enum_int_jsxs.append(
+        jsx_by_field[p] = (
             f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
             f"        value={{{state_name}Options.find(o => o.value === src.{p})?.label ?? ''}}\n"
             f"        readOnly\n      />"
         )
 
     # Enum nativeEnum fields (string-backed Prisma enum, always translated)
-    enum_native_jsxs = []
     for p in enum_native_flds:
         prop       = filtered_props[p]
         state_name = safe_var_name(p)
@@ -2580,30 +2576,31 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         )
         enum_opt_setups.append(f"  const {state_name}Options = [{opts}];")
         fk = _tf(p)
-        enum_native_jsxs.append(
+        jsx_by_field[p] = (
             f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
             f"        value={{{state_name}Options.find(o => o.value === src.{p})?.label ?? ''}}\n"
             f"        readOnly\n      />"
         )
 
     # Custom view fields
-    custom_jsxs = [
-        f"      <{to_pascal_case(p)} value={{src.{safe_var_name(p)}}} />"
-        for p in custom_view_props
-    ]
+    for p in custom_view_props:
+        jsx_by_field[p] = f"      <{to_pascal_case(p)} value={{src.{safe_var_name(p)}}} />"
     custom_view_imports = '\n'.join(
         f"import {to_pascal_case(p)} from './{p}';" for p in custom_view_props
     )
 
-    all_parent_fields = '\n'.join(filter(None, [
-        '\n'.join(text_jsxs),
-        '\n'.join(enum_int_jsxs),
-        '\n'.join(enum_native_jsxs),
-        '\n'.join(bool_jsxs),
-        '\n'.join(dt_jsxs),
-        '\n'.join(img_jsxs),
-        '\n'.join(custom_jsxs),
-    ]))
+    # Display order: x-display.form (if declared) takes the declared order;
+    # otherwise plain schema declaration order (parent_props already carries
+    # that order — filter_fields()/parent_props preserve dict insertion
+    # order). Either way, the type-bucket concatenation that used to
+    # override this (text -> enum_int -> enum_native -> bool -> dt -> img ->
+    # custom) is gone — the writer's declared order is authoritative.
+    _x_display_form = (model_def.get('x-display') or {}).get('form')
+    if _x_display_form:
+        _ordered_fields = [f for f in _x_display_form if f in jsx_by_field]
+    else:
+        _ordered_fields = [f for f in parent_props if f in jsx_by_field]
+    all_parent_fields = '\n'.join(jsx_by_field[f] for f in _ordered_fields)
 
     # Reverse OTO rels (FK in target): display as labeled fields with view links
     reverse_oto_rels = ctx.get('reverse_oto_rels', [])
@@ -2900,7 +2897,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # Relation fields (parent_rels_raw / selector_oto_rels) are filtered here too, matching
     # every other category below — without this, an x-readonly relation field renders BOTH
     # a fully-interactive AppFieldRelation (unfiltered) AND a duplicate readonly display
-    # (readonly_edit_jsxs, edit-mode only), defeating the readonly annotation entirely on
+    # (readonly display, edit-mode only), defeating the readonly annotation entirely on
     # the interactive copy (cmd_355 subtask_355b finding; cmd_477e inventory_movement.
     # from_inventory_id: the unfiltered required AppFieldRelation blocked every UI-driven
     # create via native "please fill out this field" validation since the field is never
@@ -3042,8 +3039,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     def _tf(p):
         return to_camel_case(p)
 
+    # jsx_by_field: every rendered field's JSX keyed by field name, regardless
+    # of type bucket. Final assembly order comes from x-display.form (if
+    # declared) or plain schema declaration order (filtered_props) — see the
+    # `all_parent_fields_jsx` assembly below. The per-type loops below only
+    # decide HOW to render a field, never WHERE it lands.
+    jsx_by_field: dict[str, str] = {}
+
     # Text fields
-    text_jsxs = []
     for p in text_props:
         prop    = filtered_props[p]
         fk      = _tf(p)
@@ -3073,10 +3076,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        rows={{{rows}}}\n"
             f"      />"
         )
-        text_jsxs.append(_maybe_box_wrap(_text_jsx, _text_width_cols))
+        jsx_by_field[p] = _maybe_box_wrap(_text_jsx, _text_width_cols)
 
     # Mention fields (cmd_522c): x-mention: true text fields use the @picker.
-    mention_jsxs = []
     for p in mention_props:
         prop = filtered_props[p]
         fk = _tf(p)
@@ -3097,7 +3099,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        rows={{{rows}}}\n"
             f"      />"
         )
-        mention_jsxs.append(_maybe_box_wrap(_mention_jsx, _mention_width_cols))
+        jsx_by_field[p] = _maybe_box_wrap(_mention_jsx, _mention_width_cols)
 
     def _autocomplete_rel_jsx(prop_name: str, target: str, required: bool) -> str:
         label_base    = prop_name.removesuffix('_id')
@@ -3124,23 +3126,21 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         )
 
     # Relationship fields (Autocomplete) — many-to-one and selector OTO
-    rel_jsxs = []
     for r in parent_rels_raw:
         _rel_width_cols = _ui_width_cols(filtered_props.get(r['prop_name'], {}))
         if _rel_width_cols:
             has_box_import = True
         _rel_jsx = _autocomplete_rel_jsx(r['prop_name'], r['target'], bool(r.get('required')))
-        rel_jsxs.append(_maybe_box_wrap(_rel_jsx, _rel_width_cols))
+        jsx_by_field[r['prop_name']] = _maybe_box_wrap(_rel_jsx, _rel_width_cols)
     for r in selector_oto_rels:
         # Selector OTO: required = FK is not nullable
         _rel_width_cols = _ui_width_cols(filtered_props.get(r['prop_name'], {}))
         if _rel_width_cols:
             has_box_import = True
         _rel_jsx = _autocomplete_rel_jsx(r['prop_name'], r['target'], not r.get('nullable', True))
-        rel_jsxs.append(_maybe_box_wrap(_rel_jsx, _rel_width_cols))
+        jsx_by_field[r['prop_name']] = _maybe_box_wrap(_rel_jsx, _rel_width_cols)
 
     # Number fields
-    num_jsxs = []
     for p in number_props:
         prop   = filtered_props[p]
         fk     = _tf(p)
@@ -3149,7 +3149,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         mx     = prop.get('maximum', 2147483647)  # JS max safe int / float
         is_float = _get_actual_type(prop) == 'number'
         step_str = '\n        step={0.01}' if is_float else ''
-        num_jsxs.append(
+        jsx_by_field[p] = (
             f"      <NumberField\n"
             f"        label={{tf('{fk}')}}\n"
             f"        inputRef={{{p}Ref}}\n"
@@ -3161,7 +3161,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         )
 
     # DateTime fields
-    dt_jsxs = []
     for p in date_time_props:
         prop    = filtered_props[p]
         fk      = _tf(p)
@@ -3171,7 +3170,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         fmt     = prop.get('format')
         show_date_str = '\n        show_date={false}' if fmt == 'time' else ''
         show_time_str = '\n        show_time={false}' if fmt == 'date' else ''
-        dt_jsxs.append(
+        jsx_by_field[p] = (
             f"      <DateTimeWrapper\n"
             f"        label={{tf('{fk}')}} {show_date_str}{show_time_str}\n"
             f"        date_time={{{sn} ? {sn}.toDate() : null}}\n"
@@ -3181,19 +3180,17 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         )
 
     # Image fields
-    img_jsxs = []
     for p in image_props:
         sn     = safe_var_name(p)
         setter = _setter(sn)
-        img_jsxs.append(f"      <ImageUpload\n        value={{{sn}}}\n        onChange={{set{setter}}}\n      />")
+        jsx_by_field[p] = f"      <ImageUpload\n        value={{{sn}}}\n        onChange={{set{setter}}}\n      />"
 
     # Boolean fields
-    bool_jsxs = []
     for p in boolean_props:
         fk     = _tf(p)
         sn     = safe_var_name(p)
         setter = _setter(sn)
-        bool_jsxs.append(
+        jsx_by_field[p] = (
             f"      <AppFieldBoolean\n"
             f"        label={{tf('{fk}')}}\n"
             f"        checked={{{sn}}}\n"
@@ -3206,7 +3203,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     enum_ns_hooks = []
     enum_opt_setups = []
     rel_opt_setups  = []
-    enum_int_jsxs = []
 
     for p in enum_int_props:
         prop      = filtered_props[p]
@@ -3249,10 +3245,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        {'required' if req else ''}\n"
             f"      />"
         )
-        enum_int_jsxs.append(_maybe_box_wrap(_enum_int_jsx, _enum_int_width_cols))
+        jsx_by_field[p] = _maybe_box_wrap(_enum_int_jsx, _enum_int_width_cols)
 
     # Enum string fields (string discriminator with fixed enum values)
-    enum_str_jsxs = []
     for p in enum_str_props:
         prop      = filtered_props[p]
         fk        = _tf(p)
@@ -3299,7 +3294,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        {'required' if req else ''}\n"
             f"      />"
         )
-        enum_str_jsxs.append(_maybe_box_wrap(_enum_str_jsx, _enum_str_width_cols))
+        jsx_by_field[p] = _maybe_box_wrap(_enum_str_jsx, _enum_str_width_cols)
 
     # For each many-to-one (and selector OTO) relation, emit:
     #   - {prop}InitialOptions  : useMemo over the limited initial set (initial{Target}s)
@@ -3364,7 +3359,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # Entity select fields (static options embedded in the file)
     entity_select_opt_setups = []
-    entity_select_jsxs = []
     entity_select_options = ctx.get('entity_select_options', [])
     for p in entity_select_props:
         fk      = _tf(p)
@@ -3377,7 +3371,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             for o in entity_select_options
         )
         entity_select_opt_setups.append(f"  const {opts_var} = [{opts_items}];")
-        entity_select_jsxs.append(
+        jsx_by_field[p] = (
             f"      <AppFieldSelect\n"
             f"        options={{{opts_var}}}\n"
             f"        value={{{opts_var}.find((o) => o.value === {sn}) ?? null}}\n"
@@ -3388,20 +3382,20 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         )
 
     # Custom upsert fields
-    custom_jsxs = []
     for p in custom_upsert_props:
         comp  = to_pascal_case(p)
         sn    = safe_var_name(p)
         setter = _setter(sn)
-        custom_jsxs.append(f"      <{comp} value={{{sn}}} onChange={{set{setter}}} isEdit={{isEdit}} />")
+        jsx_by_field[p] = f"      <{comp} value={{{sn}}} onChange={{set{setter}}} isEdit={{isEdit}} />"
 
     # Readonly fields: displayed as readOnly text fields in edit mode, omitted in new mode.
-    readonly_edit_jsxs = []
-    for _ro_fn in sorted(readonly_field_names):
+    # Ordered the same as every other field (schema declaration order, or
+    # x-display.form) — no longer forced to the trailing position.
+    for _ro_fn in readonly_field_names:
         if _ro_fn not in filtered_props:
             continue
         _ro_fk = _tf(_ro_fn)
-        readonly_edit_jsxs.append(
+        jsx_by_field[_ro_fn] = (
             f"      {{isEdit && (\n"
             f"        <AppFieldText\n"
             f"          label={{tf('{_ro_fk}')}}\n"
@@ -3411,20 +3405,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      )}}"
         )
 
-    all_parent_fields_jsx = '\n'.join(filter(None, [
-        '\n'.join(text_jsxs),
-        '\n'.join(mention_jsxs),
-        '\n'.join(entity_select_jsxs),
-        '\n'.join(rel_jsxs),
-        '\n'.join(num_jsxs),
-        '\n'.join(enum_int_jsxs),
-        '\n'.join(enum_str_jsxs),
-        '\n'.join(bool_jsxs),
-        '\n'.join(dt_jsxs),
-        '\n'.join(img_jsxs),
-        '\n'.join(custom_jsxs),
-        '\n'.join(readonly_edit_jsxs),
-    ]))
+    # Display order: x-display.form (if declared) takes the declared order;
+    # otherwise plain schema declaration order (filtered_props preserves
+    # dict insertion order). The type-bucket concatenation that used to
+    # override this (text -> mention -> entity_select -> rel -> num ->
+    # enum_int -> enum_str -> bool -> dt -> img -> custom -> readonly) is
+    # gone — the writer's declared order is authoritative.
+    _x_display_form = (model_def.get('x-display') or {}).get('form')
+    if _x_display_form:
+        _ordered_fields = [f for f in _x_display_form if f in jsx_by_field]
+    else:
+        _ordered_fields = [f for f in filtered_props if f in jsx_by_field]
+    all_parent_fields_jsx = '\n'.join(jsx_by_field[f] for f in _ordered_fields)
 
     if _bridge_child_ir:
         # Stage 2: bridge parent UI.

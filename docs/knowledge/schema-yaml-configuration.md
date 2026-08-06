@@ -423,6 +423,15 @@ Files that are **never overwritten** (extension points):
 
 These stubs are created once on first generation and then left alone.
 
+> **Naming note (cmd_570):** `x-generate` is reserved for this entity-level generation-flags
+> block. Don't reuse the `x-generate` key name for a property-level control (e.g. under a
+> `properties.{field}` entry) even if the intent is unrelated — the two meanings collide and
+> confuse readers, and no generator code reads an `x-generate` key placed under `properties`
+> anyway. If property-level generation control is ever needed, give it its own key name. Also:
+> a field that never renders in the UI needs no schema declaration at all as long as it's
+> defined in `prisma/schema.prisma` (see §3.1 below) — don't add a `properties` entry just to
+> mark a field hidden.
+
 ### 3.1 Field whitelist (`x-generate.fields`)
 
 When `x-generate.fields` is provided only those properties appear in the form and view pages.
@@ -1806,6 +1815,17 @@ respected in most contexts:
 **[Strong guideline] Every entity used as a relationship target should have a `name: string` field**
 or set `labelField` explicitly in every `x-relationship` / `x-relationships` referencing it.
 The generator validates this and reports an error if neither is present.
+
+**`labelField` is a display-only declaration, but CSV import also uses it for row lookup
+(cmd_572).** When a many-to-one FK has no `x-import-key`, CSV import resolves the referenced row
+by querying on the FK's `labelField` value (`import_fk_specs.lookup_field` in
+`build_context.py`), the same field the CSV export column is named after. This is within the
+declaration's intended scope as long as `labelField` points to a human-readable field that is
+effectively unique (`name`, `code`, etc.) — the common case today. If a schema ever points
+`labelField` at a field that is mutable or not unique, this dual use breaks down the same way the
+pre-cmd_562 ledger reverse-lookup did; at that point, consider a dedicated identification-only
+declaration rather than continuing to overload `labelField`. Not needed today (cmd_572 surveyed
+every call site and recommended keeping this as-is).
 
 ---
 

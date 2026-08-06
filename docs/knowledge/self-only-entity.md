@@ -214,11 +214,47 @@ additional depth once the DB role exists.
 
 ## Sample entities
 
-- `personal_note` (in the default `json_schema.yaml`/`schema.prisma`) is a minimal worked example
-  — a private per-user note, `admin_bypass: true` — with its own independent table and
-  `creator_id` column. It doubles as the generator's own regression-test fixture for the mechanism
-  in general.
 - `setting` — the acting user's own account settings — is the proxy-view case: a real,
   production-shipped entity applying `x-self-only: { admin_bypass: true }` to a `user`-backed view
   rather than its own table. See "Applying `x-self-only` to a non-generator-owned entity" above
-  for what's different about it.
+  for what's different about it. Its own-table regression coverage
+  (`cypress/e2e/api/self_only_setting_access_control.cy.ts`) is the primary behavioral proof this
+  repo's own CI carries for the mechanism today, and covers everything `list: false, new: false,
+  delete: false` allows a proxy-view entity to exercise: view/edit ownership scoping (404, never
+  403), the unauthenticated-401-vs-authenticated-non-owner-404 distinction, and admin_bypass with
+  its audit trail.
+- `personal_note` — a private per-user note with its own independent table and `creator_id`
+  column, `admin_bypass: true` — was this repo's original minimal worked example and doubled as
+  its own-table regression-test fixture. Removed from the default `json_schema.yaml`/
+  `schema.prisma` (cmd_575): it existed only to give a hand-written cypress spec
+  (`self_only_access_control.cy.ts`, since deleted from this repo) something to exercise, not
+  because it's a feature every consumer should inherit by default. Both the entity and its spec
+  now live in `app-template`'s `prj/` (the one consumer that actually wants a personal-note
+  feature), where they keep proving the mechanism end-to-end for that project.
+
+  One coverage narrowing is a known, explicitly accepted trade-off of this move: no entity in this
+  repo's own default schema combines `x-self-only` with `list: true` any more (`setting` is
+  `list: false`), so the self-only **list-query filter**'s runtime behavior is no longer proven by
+  this repo's own CI — only type-checked, via `setting`'s always-generated (but unreachable, since
+  `setting` has no list page) `getSettingPage`/`buildSettingAccessWhere`. Everything else
+  personal_note's removed spec covered (view/edit scoping, the 401-vs-404 distinction,
+  admin_bypass + audit) has a home in this repo's own CI via `setting`, added/confirmed as part of
+  cmd_575's addendum.
+
+  Three options were weighed for the list-filter gap: (i) a static fixture in the mention_gate/
+  invalidate_gate style (`code_generator/tests/fixtures/`, `scripts/check_*_fixture.sh`) — rejected
+  for *this* gap specifically, because that pattern only proves the generated code compiles
+  (`tsc --noEmit` against a hand-picked branch), not that it behaves correctly at runtime; the
+  list-filter invariant this repo lost is exactly a runtime one (real DB rows, real HTTP requests,
+  asserting who does and doesn't see a row), which a compile-only fixture cannot stand in for. (ii)
+  proving it in `app-template`'s own CI via the relocated `personal_note` + spec — this is what
+  cmd_575 actually did, and it is real, DB-backed, behavioral coverage, just scoped to one
+  consumer rather than this generator's own self-hosted gate. (iii) accepting the gap outright with
+  no replacement — not chosen, since (ii) was available at no extra cost (the entity and spec had
+  to move somewhere regardless). **Recommendation: (ii)**, already in place. The one honest
+  residual: (ii) proves the mechanism works when a consumer's schema has a `list: true`
+  self-only entity, not that this generator's own CI would catch a regression in that code path
+  before a consumer ever hits it — the same "self-hosted gate blind spot" pattern noted for
+  `mention_gate`/`invalidate_gate` themselves. Revisit only if a future default-schema entity
+  naturally combines `x-self-only` with `list: true` (at which point this gap closes for free), or
+  if list-filter regressions in this path start recurring in the wild.

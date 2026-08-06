@@ -1,4 +1,21 @@
-// AUTO-GENERATED - DO NOT EDIT
+// Handwritten test helper — not auto-generated. `audit_log` is not declared
+// as an entity in json_schema.yaml, so no generator template renders this
+// file (confirmed cmd_554, re-confirmed cmd_566).
+//
+// Pitfall #1: if audit_log is ever added to json_schema.yaml with
+// x-generate.test: true, generate.py's _write() (code_generator/generate.py)
+// overwrites unconditionally — no exists() check — and will silently
+// replace this file with generated content. No conflict error is raised;
+// the only signal would be a diff after the next generate-code run.
+//
+// Pitfall #2: this header deliberately avoids the sentinel comment that
+// marks genuinely generated files elsewhere in this repo (see e.g. the
+// first line of lib/db-init.ts). cleanup.py's orphan sweep
+// (_delete_if_generated, applied to every cypress/support/<dir>/*.ts whose
+// <dir> has no matching schema entity) deletes any file carrying that
+// sentinel outright. Since audit_log matches no schema entity, carrying
+// that sentinel here would make a plain `npm run cleanup` — no schema
+// change required — delete this file today.
 import { prisma, ALL_ENTITIES } from '../db-helpers';
 import { TEST_CREDENTIALS } from '../test-credentials';
 

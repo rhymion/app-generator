@@ -9,7 +9,9 @@ interface AppFieldExternalLinkProps {
 export default function AppFieldExternalLink({ label, href }: AppFieldExternalLinkProps) {
   return (
     <Box sx={{ mt: 1, mb: 0.5 }}>
-      <Typography variant="caption" color="text.secondary" component="div">
+      <Typography variant="caption" component="div" sx={{
+        color: "text.secondary"
+      }}>
         {label}
       </Typography>
       {href ? (
@@ -17,7 +19,9 @@ export default function AppFieldExternalLink({ label, href }: AppFieldExternalLi
           {href}
         </a>
       ) : (
-        <Typography variant="body1" color="text.disabled">—</Typography>
+        <Typography variant="body1" sx={{
+          color: "text.disabled"
+        }}>—</Typography>
       )}
     </Box>
   );

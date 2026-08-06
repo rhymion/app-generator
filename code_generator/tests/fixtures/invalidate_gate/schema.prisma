@@ -1,0 +1,80 @@
+// Self-contained fixture Prisma schema for the invalidate-gate check
+// (subtask_564c / cmd_564). NOT the project's real prisma/schema.prisma --
+// this file exists only to run a minimal `widget` (x-generate.invalidate.
+// enabled: true) and `gadget` (no invalidate) pair of standalone entities
+// through the real build_user_schema.py -> generate.py pipeline in
+// isolation, proving the generic `{ invalidated_at: null }` WHERE-clause
+// mechanism actually fires end-to-end (schema declaration -> build_context.py
+// -> getters.ts.jinja2), not just at the build_context()-unit-test level.
+//
+// Modeled on code_generator/tests/fixtures/mention_gate/schema.prisma's
+// self-contained-fixture pattern (subtask_535a/cmd_535).
+
+generator client {
+  provider = "prisma-client"
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model user {
+  id                String     @id @default(cuid())
+  name              String
+  email             String     @unique
+  created_widgets   widget[]   @relation("WidgetCreator")
+  updated_widgets   widget[]   @relation("WidgetUpdater")
+  created_gadgets   gadget[]   @relation("GadgetCreator")
+  updated_gadgets   gadget[]   @relation("GadgetUpdater")
+  created_sprockets sprocket[] @relation("SprocketCreator")
+  updated_sprockets sprocket[] @relation("SprocketUpdater")
+}
+
+// x-generate.invalidate.enabled: true -- must gain `{ invalidated_at: null }`
+// in search{{ Widget }}Options()'s WHERE clause.
+model widget {
+  id             String    @id @default(cuid())
+  name           String
+  invalidated_at DateTime?
+  created_at     DateTime  @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime  @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user      @relation("WidgetCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user      @relation("WidgetUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// No invalidate config -- negative control. search{{ Gadget }}Options()
+// must NOT gain the invalidated_at filter.
+model gadget {
+  id         String   @id @default(cuid())
+  name       String
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("GadgetCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("GadgetUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// cmd_583: invalidate:true bool shorthand, no handler/module -- the
+// never-before-generated branch. Must still produce a buildable
+// lib/sprocket/invalidate_handler.ts write-once stub.
+model sprocket {
+  id             String    @id @default(cuid())
+  name           String
+  invalidated_at DateTime?
+  created_at     DateTime  @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime  @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user      @relation("SprocketCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user      @relation("SprocketUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}

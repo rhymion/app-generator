@@ -238,13 +238,64 @@ Cypress.Commands.add('setCheckbox', (label: string, checked: boolean) => {
 });
 
 /**
+ * Type into each per-section contentEditable span of a MUI X date/time field,
+ * in DOM order (month/day/year/hours/minutes/meridiem, as applicable).
+ *
+ * MUI X v9's accessible field DOM structure puts `contentEditable` and the
+ * `onInput` handler on each individual section span
+ * (`[role="spinbutton"]`, one per MM/DD/YYYY/HH/MM/AM-PM segment) — NOT on
+ * the outer `[role="group"]` wrapper. Only the first section has
+ * `tabIndex=0`; the rest are `tabIndex=-1` (focusable via click, not via
+ * Tab). Typing on the group itself sends keyboard events to the wrong DOM
+ * node: the browser's contentEditable input handling — and therefore MUI's
+ * `onInput`-driven `applyCharacterEditing` — only fires for the section that
+ * is actually focused, so the group never receives it and the Dayjs value
+ * stays null. Clicking + typing each section individually targets the
+ * correct focused node every time.
+ *
+ * Re-queries by index on every step (rather than caching a jQuery
+ * reference): MUI X re-renders each section span as its value changes, so a
+ * stale reference from an earlier step can point at a detached node.
+ *
+ * Uses Cypress's default per-keystroke delay (do NOT pass `{ delay: 0 }`).
+ * Each keystroke's `input` event handler synchronously overwrites the
+ * section's `innerHTML` and re-syncs the DOM selection to match React's
+ * state (see MUI X's `revertDOMSectionChange`/`syncSelectionToDOM`), so the
+ * *next* keystroke's native "replace selected text" behavior depends on
+ * that sync having actually settled first. `delay: 0` fires keystrokes
+ * faster than that cycle completes, which was observed to corrupt input
+ * (e.g. typing day "15" landed as "05", year "2025" as "0005", and the
+ * very first field of a page ended up completely untouched).
+ */
+function typeDateSections(label: string, values: string[]) {
+  values.forEach((value, i) => {
+    getFormLabel(label).parent().find('[role="group"] [role="spinbutton"]').eq(i).click();
+    getFormLabel(label).parent().find('[role="group"] [role="spinbutton"]').eq(i).type(value);
+  });
+}
+
+/**
+ * Assert every section of a MUI X date/time field actually holds a value
+ * before the caller proceeds (e.g. to `cy.clickButton('Save')`). Each
+ * section reports its parsed value via `aria-valuenow`, which MUI leaves
+ * unset while the section is still empty/placeholder — so this catches a
+ * silently-failed fill immediately, instead of surfacing later as a stuck
+ * `/new` URL (required field) or a null value saved to the DB (optional
+ * field), both harder to diagnose from a downstream assertion failure.
+ * `.should()` retries the callback, tolerating the section span re-render
+ * after the last keystroke.
+ */
+function assertDateSectionsFilled(label: string) {
+  getFormLabel(label).parent().find('[role="group"] [role="spinbutton"]').should(($sections) => {
+    $sections.each((_, el) => {
+      expect(el.getAttribute('aria-valuenow'), `date/time section value for "${label}"`).to.not.equal(null);
+    });
+  });
+}
+
+/**
  * Fill MUI DateTimePicker by label using direct keyboard input.
  * Accepts dateString in "MM/DD/YYYY HH:MM AM|PM" format.
- *
- * MUI X v8 with enableAccessibleFieldDOMStructure=false renders a single <input>
- * with section-based keyboard handling. Typing digits auto-advances through each
- * section (MM → DD → YYYY → HH → MM → AM/PM), which works reliably in both
- * headed and headless Chromium without needing the calendar picker UI.
  */
 Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
   const parts = dateString.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})\s+(AM|PM)$/i);
@@ -252,10 +303,8 @@ Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
   const [, month, day, year, hour, minute, ampm] = parts;
   const ampmChar = ampm.toUpperCase() === 'AM' ? 'a' : 'p';
 
-  // Break the chain: MUI X re-renders the input on focus, detaching the original DOM node.
-  // Re-querying after click ensures .type() gets the live element.
-  getFormLabel(label).parent().find('input').click();
-  getFormLabel(label).parent().find('input').type(month + day + year + hour + minute + ampmChar);
+  typeDateSections(label, [month, day, year, hour, minute, ampmChar]);
+  assertDateSectionsFilled(label);
 });
 
 Cypress.Commands.add('fillDate', (label: string, dateString: string) => {
@@ -263,8 +312,8 @@ Cypress.Commands.add('fillDate', (label: string, dateString: string) => {
   if (!parts) throw new Error(`fillDate: Expected "MM/DD/YYYY", got "${dateString}"`);
   const [, month, day, year] = parts;
 
-  getFormLabel(label).parent().find('input').click();
-  getFormLabel(label).parent().find('input').type(month + day + year);
+  typeDateSections(label, [month, day, year]);
+  assertDateSectionsFilled(label);
 });
 
 Cypress.Commands.add('fillTime', (label: string, dateString: string) => {
@@ -273,8 +322,8 @@ Cypress.Commands.add('fillTime', (label: string, dateString: string) => {
   const [, hour, minute, ampm] = parts;
   const ampmChar = ampm.toUpperCase() === 'AM' ? 'a' : 'p';
 
-  getFormLabel(label).parent().find('input').click();
-  getFormLabel(label).parent().find('input').type(hour + minute + ampmChar);
+  typeDateSections(label, [hour, minute, ampmChar]);
+  assertDateSectionsFilled(label);
 });
 
 /**

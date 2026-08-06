@@ -65,27 +65,27 @@ export default function AppBox({
 
   return (
     <Box
-      display={display}
-      flexDirection={flexDirection}
-      justifyContent={justifyContent}
-      alignItems={alignItems}
-      gap={gap}
-      minHeight={minHeight}
-      textAlign={textAlign}
-      maxWidth={maxWidth}
-      p={p}
-      px={px}
-      py={py}
-      pt={pt}
-      pb={pb}
-      mx={mx}
-      mt={mt}
-      mb={mb}
       onSubmit={onSubmit}
       className={className}
-      sx={Object.keys(sx).length > 0 ? sx : undefined}
       {...(component !== undefined ? { component } : {})}
-    >
+      sx={[{
+        display: display,
+        flexDirection: flexDirection,
+        justifyContent: justifyContent,
+        alignItems: alignItems,
+        gap: gap,
+        minHeight: minHeight,
+        textAlign: textAlign,
+        maxWidth: maxWidth,
+        p: p,
+        px: px,
+        py: py,
+        pt: pt,
+        pb: pb,
+        mx: mx,
+        mt: mt,
+        mb: mb
+      }, Object.keys(sx).length > 0 ? sx : false]}>
       {children}
     </Box>
   );
