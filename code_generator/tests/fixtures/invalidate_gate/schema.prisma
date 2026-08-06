@@ -20,13 +20,15 @@ datasource db {
 }
 
 model user {
-  id              String    @id @default(cuid())
-  name            String
-  email           String    @unique
-  created_widgets widget[]  @relation("WidgetCreator")
-  updated_widgets widget[]  @relation("WidgetUpdater")
-  created_gadgets gadget[]  @relation("GadgetCreator")
-  updated_gadgets gadget[]  @relation("GadgetUpdater")
+  id                String     @id @default(cuid())
+  name              String
+  email             String     @unique
+  created_widgets   widget[]   @relation("WidgetCreator")
+  updated_widgets   widget[]   @relation("WidgetUpdater")
+  created_gadgets   gadget[]   @relation("GadgetCreator")
+  updated_gadgets   gadget[]   @relation("GadgetUpdater")
+  created_sprockets sprocket[] @relation("SprocketCreator")
+  updated_sprockets sprocket[] @relation("SprocketUpdater")
 }
 
 // x-generate.invalidate.enabled: true -- must gain `{ invalidated_at: null }`
@@ -56,6 +58,23 @@ model gadget {
   creator    user     @relation("GadgetCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user     @relation("GadgetUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// cmd_583: invalidate:true bool shorthand, no handler/module -- the
+// never-before-generated branch. Must still produce a buildable
+// lib/sprocket/invalidate_handler.ts write-once stub.
+model sprocket {
+  id             String    @id @default(cuid())
+  name           String
+  invalidated_at DateTime?
+  created_at     DateTime  @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime  @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user      @relation("SprocketCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user      @relation("SprocketUpdater", fields: [updater_id], references: [id])
   @@index([creator_id])
   @@index([updater_id])
 }

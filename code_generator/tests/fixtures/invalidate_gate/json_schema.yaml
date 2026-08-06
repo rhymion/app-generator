@@ -49,3 +49,21 @@ definitions:
       test: false
     fields:
       name: {}
+
+  # cmd_583: invalidate enabled via bare bool shorthand (no handler/module) --
+  # the branch that was never generated before json_schema.yaml's only real
+  # consumer (`user`) always supplied a handler/module. Both actions.ts and
+  # the invalidate API route must still build: the write-once stub at
+  # lib/sprocket/invalidate_handler.ts must actually exist on disk.
+  sprocket:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: true
+      api: true
+      test: false
+    fields:
+      name: {}

@@ -28,6 +28,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   resolution (see Added, above). See `docs/knowledge/x-server-value-actor-delegation.md`.
 
 ### Fixed
+- **`x-generate.invalidate` enabled with no handler/module produced code that could not build**
+  (cmd_583): `actions.ts.jinja2`'s fallback branch never imported anything (a bare runtime
+  `throw`), while `invalidate_action_route.ts.jinja2`'s fallback branch unconditionally imported
+  a file `generate.py` never wrote — `next build` failed the moment any entity took this branch.
+  This repo's only `invalidate` consumer (`user`) always supplies an explicit handler/module, so
+  the branch had never actually been generated before a downstream consumer hit it. `generate.py`
+  now writes a write-once stub at `lib/{entity}/invalidate_handler.ts` (same convention as the
+  existing `service_after_create.ts`/`service_after_approve.ts` extension-point stubs) that both
+  templates now consistently import; the stub throws a clear, actionable error until a human
+  implements real invalidate logic, so no default soft-delete behavior is introduced. Also
+  generalized `invalidate_action_route.ts.jinja2`'s docstring, which hardcoded `user`-specific PII
+  wording. See `docs/knowledge/invalidate-no-handler-write-once-stub.md`.
 - **Item-master entity naming was silently hardcoded to `product`/`product_id` throughout the
   ledger/split generator** (cmd_545/cmd_546): any consumer naming its item-master entity or its
   pool entity's location/lot/expiration columns differently got no error — three independent

@@ -1,0 +1,15 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+
+'use server';
+
+// {{ parent }} declared x-generate.invalidate without a handler/module
+// (cmd_583). Implement the domain-specific invalidate logic here — e.g. set
+// an `invalidated_at` column via prisma — then either keep this file, or
+// point x-generate.invalidate.module/handler in json_schema.yaml at a
+// differently-named handler elsewhere (do not name it invalidate{{ parent_pascal }}:
+// that collides with the generated wrapper of the same name in actions.ts).
+export async function invalidate{{ parent_pascal }}(id: string): Promise<void> {
+  throw new Error(
+    'invalidate{{ parent_pascal }}: not implemented -- edit lib/{{ parent }}/invalidate_handler.ts'
+  );
+}
