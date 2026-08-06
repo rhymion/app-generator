@@ -68,6 +68,34 @@ def test_no_module_branch_writes_invalidate_handler_stub(tmp_path):
     assert 'export async function invalidateSprocket' in content
 
 
+# cmd_587: sprocket's Prisma model HAS an `invalidated_at` column -- its
+# write-once stub must contain the default update, not the #290-style throw.
+# (#290's own fixture test only checked file existence + import statements,
+# never the stub body -- that gap is why the 53ad010e regression below wasn't
+# caught by it. This test reads the actual content.)
+def test_no_module_branch_with_column_writes_update_stub(tmp_path):
+    out = _run_pipeline(tmp_path)
+    content = (out / 'lib' / 'sprocket' / 'invalidate_handler.ts').read_text()
+    assert 'prisma.sprocket.update(' in content
+    assert 'invalidated_at: new Date()' in content
+    assert 'throw new Error(' not in content
+
+
+# cmd_587: cog's Prisma model has NO `invalidated_at` column -- its
+# write-once stub must fall back to the #290-style throw instead of emitting
+# a prisma call against a column that doesn't exist (which would break the
+# build -- the exact regression 53ad010e introduced for columnless entities).
+def test_no_module_branch_without_column_writes_throw_stub(tmp_path):
+    out = _run_pipeline(tmp_path)
+    stub = out / 'lib' / 'cog' / 'invalidate_handler.ts'
+    assert stub.exists()
+    content = stub.read_text()
+    assert 'export async function invalidateCog' in content
+    assert 'throw new Error(' in content
+    assert 'prisma.cog.update(' not in content
+    assert "import prisma from '@/lib/prisma';" not in content
+
+
 def test_no_module_branch_actions_ts_imports_stub(tmp_path):
     out = _run_pipeline(tmp_path)
     actions = (out / 'lib' / 'sprocket' / 'actions.ts').read_text()

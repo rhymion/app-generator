@@ -543,9 +543,8 @@ def generate(schema_path: str, output_dir: str) -> None:
     # above so freshly injected bridge models are included. Uniqueness is not
     # part of the derived JSON schema (see schema_deriver.collect_unique_columns),
     # so it is threaded in here rather than through `schema`.
-    set_prisma_uniques(collect_unique_columns(
-        parse_prisma_schema(out / 'prisma' / 'schema.prisma')
-    ))
+    _prisma_models = parse_prisma_schema(out / 'prisma' / 'schema.prisma')
+    set_prisma_uniques(collect_unique_columns(_prisma_models))
 
     print(f'Found {len(entities)} entities in {schema_path}')
 
@@ -681,12 +680,21 @@ def generate(schema_path: str, output_dir: str) -> None:
         # in that case — write it so the import target actually exists.
         if can_invalidate and not invalidate_module:
             inv_stub_path = lib_dir / 'invalidate_handler.ts'
-            _write_stub(inv_stub_path, _render(env, 'invalidate_handler_stub.ts.jinja2', ctx))
+            # cmd_587: only the default `{ invalidated_at: new Date() }` update is
+            # safe to emit when the Prisma model actually has that column -- read
+            # the real column set (not an assumption) so entities without it fall
+            # back to the #290-style throw instead of a build-breaking prisma call.
+            _model_fields = _prisma_models[model].fields if model in _prisma_models else {}
+            inv_stub_ctx = {**ctx, 'has_invalidated_at_column': 'invalidated_at' in _model_fields}
+            _write_stub(inv_stub_path, _render(env, 'invalidate_handler_stub.ts.jinja2', inv_stub_ctx))
             _note_stub_created(
                 inv_stub_path,
                 f'Entity "{parent}" has x-generate.invalidate enabled with no handler/module.',
-                'Implement domain-specific invalidate logic here (the stub throws), or '
-                'configure x-generate.invalidate.module/handler to point elsewhere.',
+                ('Review the default `invalidated_at` update written here, or '
+                 if inv_stub_ctx['has_invalidated_at_column'] else
+                 'Implement domain-specific invalidate logic here (the stub throws) -- '
+                 'this model has no `invalidated_at` column, so no default was written -- or ')
+                + 'configure x-generate.invalidate.module/handler to point elsewhere.',
             )
 
         # --- actions.ts ---

@@ -40,6 +40,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   implements real invalidate logic, so no default soft-delete behavior is introduced. Also
   generalized `invalidate_action_route.ts.jinja2`'s docstring, which hardcoded `user`-specific PII
   wording. See `docs/knowledge/invalidate-no-handler-write-once-stub.md`.
+- **The no-handler/module invalidate stub called `prisma.<model>.update()` unconditionally, even
+  when the Prisma model has no `invalidated_at` column** (cmd_587, regressing the cmd_583 fix
+  above): a later change to `invalidate_handler_stub.ts.jinja2` replaced the safe `throw` with an
+  unconditional default update against an `invalidated_at` column — for any entity whose model
+  lacks that column, the write-once stub no longer throws a clear error, it fails to build.
+  `generate.py` now reads the entity's actual Prisma column set (via `schema_deriver.
+  parse_prisma_schema`, already parsed once per run) and only emits the default update when
+  `invalidated_at` is present; otherwise it falls back to the original throw. Fixture coverage
+  (`code_generator/tests/fixtures/invalidate_gate`) gained a `cog` entity (no `invalidated_at`
+  column) alongside `sprocket` (has the column), and
+  `test_invalidate_mechanism_fixture.py` now asserts on stub file *content* for both branches —
+  the earlier fixture test only checked file existence and import statements, which is why this
+  regression wasn't caught.
 - **Item-master entity naming was silently hardcoded to `product`/`product_id` throughout the
   ledger/split generator** (cmd_545/cmd_546): any consumer naming its item-master entity or its
   pool entity's location/lot/expiration columns differently got no error — three independent

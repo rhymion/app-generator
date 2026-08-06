@@ -54,8 +54,27 @@ definitions:
   # the branch that was never generated before json_schema.yaml's only real
   # consumer (`user`) always supplied a handler/module. Both actions.ts and
   # the invalidate API route must still build: the write-once stub at
-  # lib/sprocket/invalidate_handler.ts must actually exist on disk.
+  # lib/sprocket/invalidate_handler.ts must actually exist on disk. The
+  # Prisma model for this entity HAS an `invalidated_at` column, so the
+  # write-once stub must contain the default update (cmd_587).
   sprocket:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: true
+      api: true
+      test: false
+    fields:
+      name: {}
+
+  # cmd_587: same no-handler/module shorthand as sprocket, but this Prisma
+  # model has NO `invalidated_at` column -- the write-once stub must fall
+  # back to the #290-style throw instead of emitting a prisma call against a
+  # column that doesn't exist (which would break the build).
+  cog:
     x-generate:
       list: true
       view: true

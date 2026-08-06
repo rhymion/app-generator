@@ -105,3 +105,33 @@ import); the route-imports-stub assertion already passed, since that
 template's unconditional import was correct all along — the missing piece
 was only that `generate.py` never wrote the file it imports. All three pass
 after the fix.
+
+## Addendum (cmd_587): stub now branches on the actual `invalidated_at` column
+
+The "does not implement any invalidate behavior (it only throws)" claim
+above no longer holds unconditionally. A follow-up change to
+`invalidate_handler_stub.ts.jinja2` (on `doreen/invalidate_stub`, ahead of
+this doc) replaced the unconditional throw with an unconditional
+`prisma.{{ model }}.update({ data: { invalidated_at: new Date() } })` —
+useful as a real default for models that do carry that column, but a build
+break (regression of the very problem this doc describes) for any
+`can_invalidate` entity whose Prisma model doesn't.
+
+`generate.py` now checks the entity's actual Prisma model (reusing the
+`schema_deriver.parse_prisma_schema()` parse already done once per
+`generate()` run for `set_prisma_uniques`, not a new parse) and passes
+`has_invalidated_at_column` into the stub's render context:
+
+- column present → the default `prisma.{{ model }}.update(...)` (the plug-in
+  point still exists; a human may still replace it with domain logic)
+- column absent → falls back to the original throw described above
+
+Fixture coverage: `code_generator/tests/fixtures/invalidate_gate/` gained a
+fourth entity, `cog` (`invalidate: true`, no handler/module, **no**
+`invalidated_at` column), alongside `sprocket` (same config, but its model
+**has** the column). `test_invalidate_mechanism_fixture.py` now asserts on
+the stub file's actual body content for both — `sprocket` must contain the
+update call and no throw, `cog` must contain the throw and no prisma call.
+The original three assertions above only checked file existence and import
+statements, never the body, which is why the regression this addendum fixes
+wasn't caught by them.
