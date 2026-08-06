@@ -2097,6 +2097,20 @@ def helper_context(
     # split for setup{{pascal}}ApprovalFlow).
     non_self_deps_by_var = {d['var_name']: d for d in non_self_deps}
     seen_self_ref_fk_vars = set()
+    # Pre-seed with the primary-display FK's dep var (e.g. goods_receipt_line's
+    # `item`): a self-ref dep that binds the SAME instance (e.g. the
+    # parent_goods_receipt_line_id decoy record also referencing baseDeps.item)
+    # renders an identical list row to whatever a Create/Approval test creates
+    # via that same instance — cy.contains(deps.<var>.name) then matches
+    # whichever row the DataGrid puts first, which is often the decoy, not the
+    # record the test just created (cmd_590; e.g. goods_receipt_line
+    # 2.1/7.1/7.2 clicking the decoy's row and asserting against its stale
+    # quantity_received / missing approval_requests). Treating it as
+    # already-seen here routes the self-ref dep onto the existing '2' instance
+    # in the loop below — the same mechanism that already separates 2+
+    # self-ref deps sharing an fk (see docstring above).
+    if primary_fk_dep_target is not None:
+        seen_self_ref_fk_vars.add(to_camel_case(primary_fk_dep_target))
     for s_dep in self_ref_deps:
         for fk in s_dep['fk_deps']:
             dep_var = fk['dep_var_name']
