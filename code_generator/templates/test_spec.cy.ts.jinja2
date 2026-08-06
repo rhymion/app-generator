@@ -1024,6 +1024,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
           cy.clickButton('Save');
           cy.url().should('include', '/{{ parent }}');
+          cy.url().should('not.include', '/new');
 {% if after_create_id_is_expr %}
           cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
 {% else %}
@@ -1048,6 +1049,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
           cy.clickButton('Save');
           cy.url().should('include', '/{{ parent }}');
+          cy.url().should('not.include', '/new');
 {% if after_create_id_is_expr %}
           cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
 {% else %}
