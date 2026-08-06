@@ -288,7 +288,7 @@ function typeDateSections(label: string, values: string[]) {
 function assertDateSectionsFilled(label: string) {
   getFormLabel(label).parent().find('[role="group"] [role="spinbutton"]').should(($sections) => {
     $sections.each((_, el) => {
-      expect(el.getAttribute('aria-valuenow'), `date/time section value for "${label}"`).to.exist;
+      expect(el.getAttribute('aria-valuenow'), `date/time section value for "${label}"`).to.not.equal(null);
     });
   });
 }
