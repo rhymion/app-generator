@@ -256,11 +256,21 @@ Cypress.Commands.add('setCheckbox', (label: string, checked: boolean) => {
  * Re-queries by index on every step (rather than caching a jQuery
  * reference): MUI X re-renders each section span as its value changes, so a
  * stale reference from an earlier step can point at a detached node.
+ *
+ * Uses Cypress's default per-keystroke delay (do NOT pass `{ delay: 0 }`).
+ * Each keystroke's `input` event handler synchronously overwrites the
+ * section's `innerHTML` and re-syncs the DOM selection to match React's
+ * state (see MUI X's `revertDOMSectionChange`/`syncSelectionToDOM`), so the
+ * *next* keystroke's native "replace selected text" behavior depends on
+ * that sync having actually settled first. `delay: 0` fires keystrokes
+ * faster than that cycle completes, which was observed to corrupt input
+ * (e.g. typing day "15" landed as "05", year "2025" as "0005", and the
+ * very first field of a page ended up completely untouched).
  */
 function typeDateSections(label: string, values: string[]) {
   values.forEach((value, i) => {
     getFormLabel(label).parent().find('[role="group"] [role="spinbutton"]').eq(i).click();
-    getFormLabel(label).parent().find('[role="group"] [role="spinbutton"]').eq(i).type(value, { delay: 0 });
+    getFormLabel(label).parent().find('[role="group"] [role="spinbutton"]').eq(i).type(value);
   });
 }
 
