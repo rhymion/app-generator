@@ -414,6 +414,61 @@ Run E2E suites sequentially, not in parallel.
 
 ---
 
+## Cypress version held back (cmd_561)
+
+`.github/dependabot.yml` excludes `cypress` from `npm-minor-and-patch` grouping
+and additionally `ignore`s its routine minor/patch updates (both the `main`
+and `develop` copies — see the comment block above `version: 2` in either
+file for the mechanics). This section is the "why", so a future "can we
+upgrade cypress now?" decision doesn't have to re-run the investigation.
+
+**What broke**: a dependency-update PR bumping 26 npm packages together,
+including cypress 15.16.0 → 15.19.0, failed CI with 3 `dashboard.cy.ts`
+failures, all the same assertion:
+
+```
+AssertionError: Timed out retrying after 10000ms: Expected to find element:
+`div[data-field="group_by_field"]`, but never found it.
+  at getDataGridCell (cypress/support/datagrid-helpers.ts:19)
+```
+
+**Root cause (cmd_551)**: cypress itself, not the product code or any MUI
+package. Confirmed with a single-variable control experiment in an isolated
+worktree (not the shared working tree):
+
+1. develop tip, no changes → `dashboard.cy.ts` 15/15 pass.
+2. All 24 non-cypress packages from the PR applied (cypress still 15.19.0)
+   → 3/15 fail, same `group_by_field` timeout as CI.
+3. Identical build/server as (2), but `cypress@15.16.0` swapped in via
+   `npm install --no-save cypress@15.16.0` (no rebuild) → 15/15 pass again.
+
+Only the cypress binary changed between (2) and (3), so cypress is the sole
+variable that flips the result. An initial hypothesis that a shared MUI
+dependency (`@mui/x-internals`, pulled forward by `@mui/x-charts`) was the
+cause was tested and **refuted** — pinning `@mui/x-charts` back while
+keeping cypress at 15.19.0 did not fix the failures.
+
+**Why this is plausible**: `getDataGridCell` (`cypress/support/datagrid-helpers.ts`)
+does `cy.get('div[role="row"]...').find('div[data-field=...]').scrollIntoView()`.
+`group_by_field` is a rearward DataGrid column that can be unrendered while
+off-screen due to column virtualization. The Cypress 15.16.0→15.19.0
+CHANGELOG doesn't call out a `scrollIntoView`/visibility change by name, but
+includes timing/layout-adjacent items (e.g. 15.18.1 keyup deferred to a
+microtask, 15.19.0 ResizeObserver-loop crash fix) — plausible contributors,
+not confirmed by name. The control experiment above is the actual evidence;
+the CHANGELOG scan is supporting color, not proof.
+
+**Scope**: only `dashboard.cy.ts` was affected — the product code and every
+other spec were green in that same PR's CI run. This is a test-infra
+regression, not a product regression.
+
+**Un-holding cypress later**: `datagrid-helpers.ts` likely needs a
+robustness fix (e.g. an explicit horizontal scroll before
+`scrollIntoView()`) before cypress can move again. That fix is out of
+scope for this investigation and not yet scheduled.
+
+---
+
 ## Gotchas and known issues
 
 ### Test data values

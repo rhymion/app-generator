@@ -3,6 +3,14 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+
+### Internal
+- Dependabot no longer proposes routine cypress minor/patch bumps — the
+  15.16.0 -> 15.19.0 jump broke `dashboard.cy.ts` in CI (test-infra only, no
+  product regression). See
+  [docs/knowledge/testing-cypress.md](docs/knowledge/testing-cypress.md#cypress-version-held-back-cmd_561).
+
 ## [3.0.0] - 2026-07-30
 
 > Consolidates the feature areas added since 2.0.0: GCP Cloud Run deployment,
