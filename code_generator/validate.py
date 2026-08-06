@@ -891,6 +891,39 @@ def validate_schema(schema: dict) -> None:
                 )
 
     # -----------------------------------------------------------------------
+    # 6d. x-display.form field name validation (cmd_568): the declared
+    # create/edit-form + detail-view display order. Every entry must name an
+    # actual property on the model — fail-closed, since a typo would
+    # silently drop that field from the rendered form/view/CSV export
+    # (form_upsert_context/form_view_context/export_scalar_fields only
+    # render/emit fields they can find in this list).
+    # -----------------------------------------------------------------------
+    for entity in entities:
+        model     = entity['model']
+        model_def = defs.get(f'__{model}', defs.get(model, {}))
+        props     = get_entity_properties(model, schema)
+
+        xdisplay = model_def.get('x-display') or {}
+        if not isinstance(xdisplay, dict):
+            continue
+        form_order = xdisplay.get('form')
+        if form_order is None:
+            continue
+        if not isinstance(form_order, list) or not all(isinstance(f, str) for f in form_order):
+            errors.append(
+                f"Entity '{model}': x-display.form must be a list of field name "
+                f"strings, got {type(form_order).__name__}."
+            )
+            continue
+        for field_name in form_order:
+            if field_name not in props:
+                errors.append(
+                    f"Entity '{model}': x-display.form references field "
+                    f"'{field_name}' but that field does not exist on the model. "
+                    f"Fix the field name or remove it from x-display.form."
+                )
+
+    # -----------------------------------------------------------------------
     # 7. x-internal entity validation
     # -----------------------------------------------------------------------
     _REQUIRED_INTERNAL_KEYS = ('page', 'embed', 'api')
