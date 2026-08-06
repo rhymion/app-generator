@@ -1374,7 +1374,22 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # (approvable_id, inventory_transactionable_id, ...) — see
     # get_internal_bridge_fk_prop_names() docstring for why.
     _fk_prop_names = {r['prop_name'] for r in parent_rels_raw} | get_internal_bridge_fk_prop_names(model_def, schema)
-    _export_candidates = gen_cfg.get('fields') or list(model_def.get('properties', {}).keys())
+    # Order source: x-display.form (if declared) takes the declared order,
+    # followed by any remaining scalar properties in schema order (x-display.form
+    # may deliberately omit rarely-edited fields from the form without meaning
+    # to drop them from CSV export too). Without x-display.form, plain schema
+    # declaration order applies. x-generate.fields no longer doubles as an
+    # order source here — cmd_568: it is filter-only, so a declared fields
+    # allowlist can no longer silently reorder CSV export columns relative
+    # to the form/view display order.
+    _form_order = (model_def.get('x-display') or {}).get('form')
+    if _form_order:
+        _export_order_source = list(_form_order) + [
+            k for k in model_def.get('properties', {}) if k not in _form_order
+        ]
+    else:
+        _export_order_source = list(model_def.get('properties', {}).keys())
+    _export_allowlist = set(gen_cfg['fields']) if gen_cfg.get('fields') else None
 
     def _is_export_scalar(_prop: dict) -> bool:
         _ptype = _prop.get('type')
@@ -1383,11 +1398,12 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         return _ptype in ('string', 'integer', 'number', 'boolean')
 
     export_scalar_fields = [
-        f for f in _export_candidates
+        f for f in _export_order_source
         if f not in _SYSTEM_FIELDS
         and f not in _fk_prop_names
         and f in model_def.get('properties', {})
         and _is_export_scalar(model_def['properties'][f])
+        and (_export_allowlist is None or f in _export_allowlist)
     ]
 
     # DP-1 (cmd_394 §3, Option B — conservative UNION): non-dotted x-import-key
