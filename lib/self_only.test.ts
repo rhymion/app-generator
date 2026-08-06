@@ -20,7 +20,7 @@ describe('trySelfOnlyAdminBypass', () => {
   it('denies bypass when the actor does not hold the privileged role', async () => {
     roleCount.mockResolvedValueOnce(0);
 
-    const granted = await trySelfOnlyAdminBypass('personal_note', 'user-1');
+    const granted = await trySelfOnlyAdminBypass('setting', 'user-1');
 
     expect(granted).toBe(false);
     expect(roleCount).toHaveBeenCalledWith({
@@ -33,14 +33,14 @@ describe('trySelfOnlyAdminBypass', () => {
     roleCount.mockResolvedValueOnce(1);
     auditCreate.mockResolvedValueOnce({ id: 'audit-row-1' });
 
-    const granted = await trySelfOnlyAdminBypass('personal_note', 'admin-1');
+    const granted = await trySelfOnlyAdminBypass('setting', 'admin-1');
 
     expect(granted).toBe(true);
     expect(auditCreate).toHaveBeenCalledTimes(1);
     const [{ data }] = auditCreate.mock.calls[0];
     expect(data.action).toBe('self_only:admin_bypass');
     expect(data.actor_user_id).toBe('admin-1');
-    expect(data.target_table).toBe('personal_note');
+    expect(data.target_table).toBe('setting');
   });
 
   it('fail-closed: denies bypass when the actor is privileged but the audit write fails', async () => {
@@ -48,14 +48,14 @@ describe('trySelfOnlyAdminBypass', () => {
     roleCount.mockResolvedValueOnce(1);
     auditCreate.mockRejectedValueOnce(new Error('db unavailable'));
 
-    const granted = await trySelfOnlyAdminBypass('personal_note', 'admin-1');
+    const granted = await trySelfOnlyAdminBypass('setting', 'admin-1');
 
     expect(granted).toBe(false);
     expect(warn).toHaveBeenCalledTimes(1);
     const [tag, payloadJson] = warn.mock.calls[0];
     expect(tag).toBe('[self_only:admin_bypass_denied]');
     const payload = JSON.parse(payloadJson as string);
-    expect(payload.entity).toBe('personal_note');
+    expect(payload.entity).toBe('setting');
     expect(payload.actor_user_id).toBe('admin-1');
     expect(payload.error).toBe('db unavailable');
     warn.mockRestore();

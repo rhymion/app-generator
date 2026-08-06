@@ -215,8 +215,8 @@ export const getModelPermissions = cache(async (
     // operation-level check would deny first. Only a READ shortcut is granted
     // (mirroring audit_log above) — there is no admin bypass on write for these
     // entities. Checked only in the no-rows branch so it can never shadow a real
-    // grant (e.g. `personal_note`, which IS in ALL_ENTITIES and can have full
-    // CRUD granted through the ordinary path above).
+    // grant (e.g. `dashboard`, an ordinary entity that IS in ALL_ENTITIES and can
+    // have full CRUD granted through the ordinary path above).
     if (SELF_ONLY_ADMIN_BYPASS_ENTITIES.has(model)) {
       const adminRoleCount = await prisma.role.count({
         where: { name: 'Administrator', users: { some: { id: resolvedUserId } } },

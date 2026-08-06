@@ -33,7 +33,6 @@
     "dashboard": "ダッシュボード",
     "organization": "組織",
     "permission": "権限",
-    "personalNote": "Personal Note",
     "role": "ロール",
     "setting": "設定",
     "user": "ユーザ"
@@ -127,7 +126,6 @@
     "home": "ホーム",
     "organization": "組織",
     "permission": "権限",
-    "personalNote": "Personal Note",
     "role": "ロール",
     "user": "ユーザ"
   },

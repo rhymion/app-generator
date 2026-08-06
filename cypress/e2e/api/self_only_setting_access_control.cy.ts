@@ -109,6 +109,51 @@ describe('x-self-only access control (setting)', () => {
     });
   });
 
+  it('unauthenticated request gets 401; authenticated non-owner gets 404 — never confused', () => {
+    cy.task<string>('db:createApiUserWithPermission', {
+      entityName: 'setting',
+      flags: { read: true },
+      label: 'owner_401_vs_404',
+    }).then((ownerKey) => {
+      const ownerId = userIdFromApiKey(ownerKey);
+
+      // No API key at all -> 401 (missing credentials).
+      cy.request({
+        url: `/api/setting/${ownerId}`,
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(res.status).to.eq(401);
+      });
+
+      // Invalid API key -> 401 (bad credentials) - never 404, which would
+      // leak "this id exists" to an unauthenticated caller.
+      cy.request({
+        url: `/api/setting/${ownerId}`,
+        headers: { 'X-API-Key': 'not_a_real_key' },
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(res.status).to.eq(401);
+      });
+
+      // Authenticated, but not the owner and no admin_bypass role -> 404,
+      // never 401 (they ARE authenticated) and never 403 (would confirm the
+      // id exists but is someone else's - 404 also denies that).
+      cy.task<string>('db:createApiUserWithPermission', {
+        entityName: 'setting',
+        flags: { read: true },
+        label: 'non_owner_401_vs_404',
+      }).then((nonOwnerKey) => {
+        cy.request({
+          url: `/api/setting/${ownerId}`,
+          headers: { 'X-API-Key': nonOwnerKey },
+          failOnStatusCode: false,
+        }).then((res) => {
+          expect(res.status).to.eq(404);
+        });
+      });
+    });
+  });
+
   it('other users\' names stay visible through the `user` entity itself (self-only never touches user)', () => {
     cy.task<string>('db:createApiUserWithPermission', {
       entityName: 'user',

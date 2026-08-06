@@ -26,14 +26,13 @@ export async function resetTestDatabase() {
   await prisma.audit_log.deleteMany();
   await prisma.mfa_recovery_code.deleteMany();
 
-  // Level 2: approval_request, attachment, dashboard_widget, notification, organization, permission, personal_note, reaction
+  // Level 2: approval_request, attachment, dashboard_widget, notification, organization, permission, reaction
   await prisma.approval_request.deleteMany();
   await prisma.attachment.deleteMany();
   await prisma.dashboard_widget.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.organization.deleteMany();
   await prisma.permission.deleteMany();
-  await prisma.personal_note.deleteMany();
   await prisma.reaction.deleteMany();
 
   // Level 3: approvable, approval_flow, attachable, comment, dashboard
@@ -109,7 +108,6 @@ export const ALL_ENTITIES = [
   'dashboard',
   'organization',
   'permission',
-  'personal_note',
   'role',
   'user',
 ];
