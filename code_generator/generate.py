@@ -674,6 +674,21 @@ def generate(schema_path: str, output_dir: str) -> None:
                     _render(env, 'service_after_create_stub.ts.jinja2', ctx),
                 )
 
+        # --- invalidate handler write-once stub (cmd_583) ---
+        # x-generate.invalidate enabled without a configured handler/module:
+        # both actions.ts.jinja2 and invalidate_action_route.ts.jinja2 import
+        # invalidate{{ parent_pascal }} from lib/{{ parent }}/invalidate_handler
+        # in that case — write it so the import target actually exists.
+        if can_invalidate and not invalidate_module:
+            inv_stub_path = lib_dir / 'invalidate_handler.ts'
+            _write_stub(inv_stub_path, _render(env, 'invalidate_handler_stub.ts.jinja2', ctx))
+            _note_stub_created(
+                inv_stub_path,
+                f'Entity "{parent}" has x-generate.invalidate enabled with no handler/module.',
+                'Implement domain-specific invalidate logic here (the stub throws), or '
+                'configure x-generate.invalidate.module/handler to point elsewhere.',
+            )
+
         # --- actions.ts ---
         if can_new or can_edit or can_delete or can_invalidate:
             act_ctx = {**ctx, **actions_context(ctx)}
