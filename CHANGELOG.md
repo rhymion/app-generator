@@ -5,6 +5,28 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`npm run cleanup`'s defaults deleted write-once stubs while leaving true orphans behind, and a
+  reordered `generate-code` → `cleanup` run silently deleted the entire just-generated tree**
+  (cmd_450, building on cmd_469's earlier fix that pointed cleanup at the Stage-4 built schema):
+  `cleanup` now passes `--prune-orphans --keep-stubs` (the safe default — sweep stale entity
+  boilerplate, keep customizable stubs) where it previously passed neither (orphans ignored, stubs
+  deleted); `cleanup:all` keeps `--prune-orphans` alone (full clean-slate, stubs deleted too).
+  `cleanup.py` also fails fast with an actionable message instead of a raw traceback when its
+  schema argument doesn't exist, and now warns (without blocking) when
+  `.generated-manifest.json` was written under a minute ago — running `cleanup` immediately after
+  `generate-code` deletes every just-generated file, since they all hash-match and therefore all
+  read as pristine-deletable; correct order is `cleanup` → `generate-code`, not the reverse.
+  Separately, `build_user_schema.py`'s raw/view split silently dropped a bridge-child entity's
+  `x-bridge` declaration whenever that entity also carried `x-generate` (neither the resulting raw
+  nor view entity retained it), which would have made `generate.py` skip `<Child>BridgeGrid.tsx`
+  generation for any Stage-4 schema combining `x-bridge` with `x-generate`; `x-bridge` is now
+  carried onto the raw entity like `x-display` and the other entity-level annotations, and
+  `generate.py`'s own `BridgeGrid.tsx` emission now reads the raw entity via `_raw_def()` instead
+  of the view entity directly. No consumer of this generator currently combines `x-bridge` with
+  `x-generate`, so this had not yet surfaced as a build failure. See `docs/knowledge/cleanup.md`
+  and `docs/knowledge/schema-restructuring-build-order.md`.
+
 ### Added
 - **`x-server-value` now supports actor delegation** (cmd_565, extending cmd_556): a field
   declared `x-server-value: {source: actor, override_permission: <Operation>}` still defaults to

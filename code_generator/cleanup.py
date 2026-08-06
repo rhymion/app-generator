@@ -42,6 +42,7 @@ Examples:
 import json
 import re
 import sys
+import time
 from pathlib import Path
 
 import yaml
@@ -50,6 +51,11 @@ from generate_types import extract_entities
 from manifest import MANIFEST_FILENAME, sha256_file
 
 _SYSTEM_PROPS = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
+
+# generate-code -> cleanup (wrong order) leaves every just-written file
+# pristine (hash-matching), so it reads as safe-to-delete even though none
+# of it was actually stale.
+_MANIFEST_FRESH_THRESHOLD_S = 60
 
 # Handwritten files that happen to look like generator-shaped paths.
 # prune_orphans() will never delete these, even if no schema entity matches.
@@ -165,6 +171,18 @@ def _clean_from_manifest(out: Path, keep_stubs: bool = False) -> bool:
     manifest_path = out / MANIFEST_FILENAME
     if not manifest_path.exists():
         return False
+
+    manifest_age_s = time.time() - manifest_path.stat().st_mtime
+    if manifest_age_s < _MANIFEST_FRESH_THRESHOLD_S:
+        print(
+            f'\nWARNING: {MANIFEST_FILENAME} was updated {manifest_age_s:.0f}s ago.\n'
+            'Running cleanup immediately after generate-code will delete all just-generated '
+            'files (they all hash-match, so they are all pristine-deletable).\n'
+            'Correct order: cleanup -> generate-code (clean-slate), not generate-code -> cleanup.\n'
+            'Continuing in 3 seconds -- Ctrl-C to abort.',
+            file=sys.stderr,
+        )
+        time.sleep(3)
 
     print(f'\nDeleting generated files from {manifest_path}...')
     data = json.loads(manifest_path.read_text(encoding='utf-8'))
@@ -378,6 +396,19 @@ def _prune_orphans(out: Path, entities: list, keep_stubs: bool = False) -> None:
 
 
 def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_orphans: bool = False) -> None:
+    schema_path_obj = Path(schema_path)
+    if not schema_path_obj.exists():
+        print(
+            f'ERROR: Schema not found at {schema_path}\n'
+            'This script expects the built schema (code_generator/.generated/json_schema.yaml), '
+            'the same file generate.py consumes. Run it via `npm run cleanup` / `npm run '
+            'cleanup:all`, which build it automatically -- or, if invoking cleanup.py directly, '
+            'run `python3 code_generator/build_user_schema.py code_generator/json_schema.yaml '
+            'prisma/schema.prisma --out code_generator/.generated/json_schema.yaml` first.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     with open(schema_path) as f:
         schema = yaml.safe_load(f)
 

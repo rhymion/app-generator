@@ -4,12 +4,40 @@
 it when you want to wipe a generated output tree or when you have changed
 the schema and need old generated files to disappear.
 
+`cleanup.py` must be pointed at the **built** schema
+(`code_generator/.generated/json_schema.yaml`, the same file `generate.py`
+consumes), not the hand-authored `code_generator/json_schema.yaml` — the
+Stage-4 raw/view split synthesizes the `__`-prefixed raw entities
+`extract_entities()` needs, and the hand-authored schema lacks them. Passing
+a missing or wrong-shaped schema fails fast with an actionable error instead
+of silently cleaning up nothing. The `npm run cleanup` / `npm run
+cleanup:all` scripts build it automatically:
+
+```bash
+# Preferred — builds the schema, then runs cleanup with the safe defaults below
+npm run cleanup       # --prune-orphans --keep-stubs
+npm run cleanup:all   # --prune-orphans (stubs deleted too — full clean-slate)
+
+# Direct invocation (schema must already be built)
+python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma \
+  --out code_generator/.generated/json_schema.yaml
+python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml .
+python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml . --keep-stubs
+python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml . --prune-orphans
 ```
-# From the repo root
-python -m code_generator.cleanup code_generator/json_schema.yaml .
-python -m code_generator.cleanup code_generator/json_schema.yaml . --keep-stubs
-python -m code_generator.cleanup code_generator/json_schema.yaml . --prune-orphans
-```
+
+---
+
+## Order matters: `cleanup` → `generate-code`, not the reverse
+
+Running `cleanup` *immediately* after `generate-code` deletes every
+just-written file: manifest-driven deletion only checks that a file's bytes
+still hash-match the recorded value, and a file generated seconds ago always
+does. `cleanup.py` detects this — when `.generated-manifest.json` is younger
+than 60 seconds it prints a WARNING and pauses 3 seconds (Ctrl-C to abort)
+before continuing; it does not block, since some automation may legitimately
+chain the two on purpose. If you didn't mean to, this is your window to
+cancel.
 
 ---
 
@@ -110,31 +138,36 @@ so a safe automated check is non-trivial.
 
 ## When to use `--prune-orphans`
 
-Run `--prune-orphans` after you **remove an entity from the schema** and
-regenerate. Without it, the stale `lib/<entity>/` and `components/<entity>/`
-boilerplate from the removed entity will persist on disk indefinitely.
-
-You do not need `--prune-orphans` for routine `generate-code` → `cleanup`
-cycles where the entity set is stable.
+`npm run cleanup` and `npm run cleanup:all` both pass `--prune-orphans` by
+default, so routine use already sweeps stale `lib/<entity>/` and
+`components/<entity>/` boilerplate left behind by a schema change — you do
+not need to pass it yourself when using the npm scripts. It matters mainly
+for **direct** `cleanup.py` invocation, where it must be passed explicitly
+after removing an entity from the schema and regenerating.
 
 ---
 
 ## Symptom analysis: boilerplate remaining after schema change
 
 **Symptom:** after removing an entity from the schema, running `generate-code`,
-and then running `cleanup`, per-entity files such as `lib/<entity>/types.ts` or
-`components/<entity>/FormUpsert.tsx` still exist on disk.
+and then running `cleanup.py` **without `--prune-orphans`** (e.g. a direct
+invocation, or an npm script predating the current defaults), per-entity
+files such as `lib/<entity>/types.ts` or `components/<entity>/FormUpsert.tsx`
+still exist on disk.
 
-**Root cause:** this is **designed behavior** — default cleanup only deletes
-files it knows about from the current manifest or schema. Orphan files from
-removed entities are outside that scope.
+**Root cause:** this is **designed behavior** — the regular (non-orphan-pruning)
+cleanup pass only deletes files it knows about from the current manifest or
+schema. Orphan files from removed entities are outside that scope.
 
 **Conclusion: [A] — designed behavior, not a bug.**
 
-**Advice:** always follow a schema entity removal with:
+**Advice:** `npm run cleanup` / `npm run cleanup:all` already pass
+`--prune-orphans` by default, so this symptom should not occur via the npm
+scripts. For a direct `cleanup.py` invocation, always follow a schema entity
+removal with:
 
 ```bash
-python -m code_generator.cleanup code_generator/json_schema.yaml . --prune-orphans
+python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml . --prune-orphans
 ```
 
 This sweeps `lib/<entity>/` and `components/<entity>/` boilerplate for any
