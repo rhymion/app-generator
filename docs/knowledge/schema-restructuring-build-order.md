@@ -248,11 +248,17 @@ outcomes, all handled in `build_intermediate_schema()`
    key** (`__role`) so it can never collide with a user-chosen name; the
    user's own entry becomes the view, wrapped as
    `allOf: [{$ref: "#/definitions/__role"}, {...}]`. Category C
-   entity-level annotations (`x-import-key`, `x-display`,
+   entity-level annotations (`x-import-key`, `x-bridge`, `x-display`,
    `x-readonly-fields`, `x-internal`, `x-approval`, `x-approval-lines`,
-   `x-ledger-source`, `x-splittable`, `x-reservation`, `x-gdpr-mode`) move
-   from the user's entry onto the synthesized raw entity, matching where
-   the legacy `_detail` split kept them.
+   `x-ledger-source`, `x-splittable`, `x-reservation`, `x-gdpr-mode`,
+   `x-self-only`) move from the user's entry onto the synthesized raw
+   entity, matching where the legacy `_detail` split kept them (see
+   `_ENTITY_LEVEL_DATA_KEYS` in `code_generator/build_user_schema.py`
+   for the authoritative list — `x-bridge` was missing from both this
+   list and the code until cmd_450, so a bridge-child entity that also
+   carried `x-generate` silently lost its `x-bridge` declaration on the
+   paired path above; only standalone-raw entities (outcome 2 below)
+   were unaffected, since that path copies every key through).
 2. **Standalone raw** — a Prisma-model entity with no view-level key at
    all (e.g. `comment`, `reaction`, `attachment`). Fully reconstructed
    from Prisma in place, with the user's own annotations merged directly

@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 import cleanup
 
 
@@ -215,3 +217,58 @@ def test_clean_appended_files_never_touches_messages_json(tmp_path: Path) -> Non
     assert en_path.read_text(encoding='utf-8') == en_content, (
         'messages/en.json must also be left untouched by cleanup'
     )
+
+
+# ---------------------------------------------------------------------------
+# cleanup() fail-fast on a missing (unbuilt) schema path
+# ---------------------------------------------------------------------------
+
+def test_cleanup_fails_fast_on_missing_schema(tmp_path: Path, capsys) -> None:
+    """cleanup() exits with a clear error instead of a raw FileNotFoundError
+    traceback when the built schema (.generated/json_schema.yaml) is absent."""
+    missing_schema = tmp_path / 'does_not_exist.yaml'
+
+    with pytest.raises(SystemExit) as exc_info:
+        cleanup.cleanup(str(missing_schema), str(tmp_path))
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert 'Schema not found' in err
+    assert str(missing_schema) in err
+
+
+# ---------------------------------------------------------------------------
+# _clean_from_manifest() — order guard against generate-code -> cleanup
+# ---------------------------------------------------------------------------
+
+def test_clean_from_manifest_warns_on_fresh_manifest(tmp_path: Path, capsys) -> None:
+    """A manifest younger than the freshness threshold triggers a WARNING
+    and a pause, but does not block the cleanup from proceeding."""
+    manifest_path = tmp_path / cleanup.MANIFEST_FILENAME
+    manifest_path.write_text(json.dumps({'files': []}))
+
+    with patch.object(cleanup.time, 'sleep') as mock_sleep:
+        result = cleanup._clean_from_manifest(tmp_path)
+
+    assert result is True
+    mock_sleep.assert_called_once_with(3)
+    err = capsys.readouterr().err
+    assert 'WARNING' in err
+    assert cleanup.MANIFEST_FILENAME in err
+
+
+def test_clean_from_manifest_no_warning_on_stale_manifest(tmp_path: Path, capsys) -> None:
+    """A manifest older than the freshness threshold triggers no WARNING/pause."""
+    manifest_path = tmp_path / cleanup.MANIFEST_FILENAME
+    manifest_path.write_text(json.dumps({'files': []}))
+    old_time = cleanup.time.time() - (cleanup._MANIFEST_FRESH_THRESHOLD_S + 10)
+    import os
+    os.utime(manifest_path, (old_time, old_time))
+
+    with patch.object(cleanup.time, 'sleep') as mock_sleep:
+        result = cleanup._clean_from_manifest(tmp_path)
+
+    assert result is True
+    mock_sleep.assert_not_called()
+    err = capsys.readouterr().err
+    assert 'WARNING' not in err

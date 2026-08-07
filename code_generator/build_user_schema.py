@@ -105,6 +105,7 @@ _YAML_INDENT = {"mapping": 2, "sequence": 4, "offset": 2}
 # raw entity so the intermediate schema is unchanged.
 _ENTITY_LEVEL_DATA_KEYS = (
     "x-import-key",
+    "x-bridge",
     "x-display",
     "x-readonly-fields",
     "x-internal",

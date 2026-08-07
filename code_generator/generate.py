@@ -47,6 +47,7 @@ from generators import (
     reaction_type_ts,
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
+    _raw_def,
 )
 from generators_i18n import (
     update_i18n_and_config,
@@ -757,10 +758,10 @@ def generate(schema_path: str, output_dir: str) -> None:
         # --- <Child>BridgeGrid.tsx (parent-embedded DataGrid, cmd_167 §4) ---
         # Emitted for bridge children (entities with new-form x-bridge); the
         # component is embedded on each parent's FormView (see form_view_context).
-        _self_bridge = get_new_form_bridge(schema['definitions'].get(model, {}))
+        _self_bridge = get_new_form_bridge(_raw_def(model, schema))
         if _self_bridge:
-            _bg_cols = (schema['definitions'].get(model, {}).get('x-display') or {}).get('table') or []
-            _model_props = schema['definitions'].get(model, {}).get('properties', {}) or {}
+            _bg_cols = (_raw_def(model, schema).get('x-display') or {}).get('table') or []
+            _model_props = _raw_def(model, schema).get('properties', {}) or {}
             _df_entries = []
             for _col in _bg_cols:
                 for _fname, _fcfg in _col.items():
