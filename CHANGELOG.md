@@ -6,6 +6,41 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **x-reservation test-helper generation only ever resolved the pool entity's criteria-field FK,
+  silently omitting any OTHER required FK on the pool entity** (cmd_602): when a pool entity (e.g.
+  `inventory`) has a required FK beyond the one named in `x-reservation.request.criteria` (e.g.
+  `location_id`, added 2026-08-06 alongside `product_id`), three separate generated-test code paths
+  built `prisma.<pool>.create()` calls that omitted it, all failing at seed time with a
+  missing-required-column Prisma error: `_reservation_base()`
+  (`test_reservation_helper.ts.jinja2`'s `seedReservationXxx*` helpers), and `helper_context()`'s
+  `reservation_lines_pool_seed`/`reservation_nolines_pool_seed` blocks
+  (`test_helper.ts.jinja2`'s `populate{{Pascal}}Dependencies()` pool-seed snippet — the one actually
+  responsible for the reported failures: `cypress/support/purchase_order/helper.ts`'s
+  `prisma.inventory.create()`, driving 20/27 failures in proj_c's `purchase_order.cy.ts` plus 1 in
+  `purchase_order_reservation_gen.cy.ts`, 21 total). All three now reuse
+  `resolve_dependencies()`/`get_entity_fk_deps()` (the same machinery `helper_context()` already
+  uses for `populateXxxDependencies`) to resolve the pool entity's required FKs beyond the criteria
+  field, including transitive chains — reusing an already-resolved dep var where one exists (e.g. a
+  datagrid child's own autocomplete FK already pulled the same target in) instead of creating a
+  duplicate row. Also fixes a latent, currently-dormant adjacent bug found while tracing this:
+  `populate{{Pascal}}Dependencies()` returned `{}` unconditionally whenever `deps` and
+  `reservation_nolines_pool_seed` were both empty, without checking `reservation_lines_pool_seed`.
+  Entities whose pool has no extra required FK (the common case, e.g. `supply_request`/`supply_pool`)
+  render byte-identical output. Covered by 15 new injected-fixture tests (cmd_476 convention: render
+  the actual jinja2 template, assert generated TypeScript sets the column) across
+  `test_reservation_helper_pool_extra_fk.py` and `test_helper_pool_extra_fk.py`. Verified live in an
+  isolated proj_c worktree, both specs isolated (28/28 passing, up from 7/28 before) and as part of
+  the full 57-spec `test:e2e:cy:api` suite (976 tests: 936 passing/40 failing/9 red specs, up from
+  915/61/11 before the fix — exactly the 21 targeted failures resolved, zero new failures anywhere
+  else; SKIP=0 both runs). The 40 failures/9 red specs that remain are pre-existing and out of this
+  fix's scope (37 failures across 8 specs are the separate hand-written-helper class fixed by
+  cmd_601; 3 failures in 1 spec are an unrelated `x-self-only` 404-vs-403 issue). proj_g has zero
+  `x-reservation` consumer entities (feature unused there) — confirmed by mechanically walking its
+  schema with the fixed generator's own context builders, N/A for this bug class. Full
+  `code_generator` pytest suite: 1127 passed, 0 regressions. See
+  `docs/knowledge/x-reservation-pool-entity-extra-fk-fix.md`.
+
+### Fixed
 - **A field with a Prisma `@default(...)` but no schema `default:` marker (dynamic defaults like
   `now()`) or with a static default the generator ignored (number/boolean/plain-string) silently
   lost that default on the "new" page whenever the user left it untouched** (cmd_594): for

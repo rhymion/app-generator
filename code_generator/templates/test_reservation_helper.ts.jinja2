@@ -30,6 +30,40 @@ async function createTest{{ pool_fk_pascal }}(testUser: any, suffix: string) {
   });
 }
 
+{% for dep in pool_extra_deps %}
+async function createTestPool{{ dep.pascal }}(testUser: any, extraDeps: Record<string, any>) {
+{% for b in dep.bridge_otos %}
+  const {{ b.var_name }} = await prisma.{{ b.target }}.create({ data: {{ b.create_data }} });
+{% endfor %}
+  return prisma.{{ dep.target }}.create({
+    data: {
+{% for b in dep.bridge_otos %}
+      {{ b.prop_name }}: {{ b.var_name }}.id,
+{% endfor %}
+{% for fk in dep.fk_deps %}
+      {{ fk.prop_name }}: extraDeps['{{ fk.dep_var_name }}'].id,
+{% endfor %}
+{% for ef in dep.extra_required_fields %}
+      {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+}
+{% endfor %}
+
+{% if pool_extra_deps %}
+/** Create pool_entity ({{ pool_entity }}) required FK deps other than {{ criteria_pool_field }} (e.g. location) */
+async function createPoolExtraDeps(testUser: any): Promise<Record<string, any>> {
+  const extraDeps: Record<string, any> = {};
+{% for dep in pool_extra_deps %}
+  extraDeps['{{ dep.var_name }}'] = await createTestPool{{ dep.pascal }}(testUser, extraDeps);
+{% endfor %}
+  return extraDeps;
+}
+{% endif %}
+
 async function createTestCustomer(testUser: any) {
   let record = await prisma.{{ parent_fk_entity }}.findFirst({
     where: { name: 'Gen {{ pascal }} Customer' },
@@ -53,6 +87,9 @@ async function createPool(
   testUser: any,
   {{ criteria_pool_field }}: string,
   {{ pool_qty_field }}: number,
+{% if pool_extra_deps %}
+  extraDeps: Record<string, any>,
+{% endif %}
 {% for f in orderby_sortable %}
   {{ f.field }}{% if f.is_nullable %}: string | null{% else %}: string{% endif %} = {% if f.is_nullable %}null{% else %}''{% endif %},
 {% endfor %}
@@ -64,6 +101,9 @@ async function createPool(
       {{ pool_res_field }}: 0,
       creator_id: testUser.id,
       updater_id: testUser.id,
+{% for fk in pool_extra_fk_props %}
+      {{ fk.prop_name }}: extraDeps['{{ fk.dep_var_name }}'].id,
+{% endfor %}
 {% for f in orderby_sortable %}
       {{ f.field }}: {{ f.field }}{% if f.is_date %} ? new Date({{ f.field }}) : null{% endif %},
 {% endfor %}
@@ -76,8 +116,11 @@ export async function seedReservation{{ pascal }}Multi() {
   const testUser = await getTestUser();
   const customer = await createTestCustomer(testUser);
   const product = await createTest{{ pool_fk_pascal }}(testUser, 'MULTI-1');
-  const inv1 = await createPool(testUser, product.id, 100{% for f in orderby_sortable %}, {{ f.seed_multi_row1 }}{% endfor %});
-  const inv2 = await createPool(testUser, product.id, 100{% for f in orderby_sortable %}, {{ f.seed_multi_row2 }}{% endfor %});
+{% if pool_extra_deps %}
+  const extraDeps = await createPoolExtraDeps(testUser);
+{% endif %}
+  const inv1 = await createPool(testUser, product.id, 100{% if pool_extra_deps %}, extraDeps{% endif %}{% for f in orderby_sortable %}, {{ f.seed_multi_row1 }}{% endfor %});
+  const inv2 = await createPool(testUser, product.id, 100{% if pool_extra_deps %}, extraDeps{% endif %}{% for f in orderby_sortable %}, {{ f.seed_multi_row2 }}{% endfor %});
   return JSON.parse(JSON.stringify({
     userId: customer.id,
     product,
@@ -90,7 +133,10 @@ export async function seedReservation{{ pascal }}Insufficient() {
   const testUser = await getTestUser();
   const customer = await createTestCustomer(testUser);
   const product = await createTest{{ pool_fk_pascal }}(testUser, 'INSUF-1');
-  const inventory = await createPool(testUser, product.id, 2);
+{% if pool_extra_deps %}
+  const extraDeps = await createPoolExtraDeps(testUser);
+{% endif %}
+  const inventory = await createPool(testUser, product.id, 2{% if pool_extra_deps %}, extraDeps{% endif %});
   return JSON.parse(JSON.stringify({
     userId: customer.id,
     product,
@@ -105,8 +151,11 @@ export async function seedReservation{{ pascal }}Criteria() {
   const customer = await createTestCustomer(testUser);
   const productMatch = await createTest{{ pool_fk_pascal }}(testUser, 'CRIT-MATCH');
   const productNoMatch = await createTest{{ pool_fk_pascal }}(testUser, 'CRIT-NOMATCH');
-  const invMatch = await createPool(testUser, productMatch.id, 50);
-  const invNoMatch = await createPool(testUser, productNoMatch.id, 50);
+{% if pool_extra_deps %}
+  const extraDeps = await createPoolExtraDeps(testUser);
+{% endif %}
+  const invMatch = await createPool(testUser, productMatch.id, 50{% if pool_extra_deps %}, extraDeps{% endif %});
+  const invNoMatch = await createPool(testUser, productNoMatch.id, 50{% if pool_extra_deps %}, extraDeps{% endif %});
   return JSON.parse(JSON.stringify({
     userId: customer.id,
     productMatch,
@@ -121,9 +170,12 @@ export async function seedReservation{{ pascal }}OrderBy() {
   const testUser = await getTestUser();
   const customer = await createTestCustomer(testUser);
   const product = await createTest{{ pool_fk_pascal }}(testUser, 'ORDERBY-1');
-  const inv1 = await createPool(testUser, product.id, 100{% for f in orderby_sortable %}, {{ f.seed_orderby_row1 }}{% endfor %});
-  const inv2 = await createPool(testUser, product.id, 100{% for f in orderby_sortable %}, {{ f.seed_orderby_row2 }}{% endfor %});
-  const inv3 = await createPool(testUser, product.id, 100{% for f in orderby_sortable %}, {{ f.seed_orderby_row3 }}{% endfor %});
+{% if pool_extra_deps %}
+  const extraDeps = await createPoolExtraDeps(testUser);
+{% endif %}
+  const inv1 = await createPool(testUser, product.id, 100{% if pool_extra_deps %}, extraDeps{% endif %}{% for f in orderby_sortable %}, {{ f.seed_orderby_row1 }}{% endfor %});
+  const inv2 = await createPool(testUser, product.id, 100{% if pool_extra_deps %}, extraDeps{% endif %}{% for f in orderby_sortable %}, {{ f.seed_orderby_row2 }}{% endfor %});
+  const inv3 = await createPool(testUser, product.id, 100{% if pool_extra_deps %}, extraDeps{% endif %}{% for f in orderby_sortable %}, {{ f.seed_orderby_row3 }}{% endfor %});
   return JSON.parse(JSON.stringify({
     userId: customer.id,
     product,

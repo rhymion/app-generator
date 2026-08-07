@@ -236,7 +236,7 @@ export async function populate{{ pascal }}Dependencies() {
 }
 {% else %}
 export async function populate{{ pascal }}Dependencies() {
-{% if not deps and not reservation_nolines_pool_seed %}
+{% if not deps and not reservation_nolines_pool_seed and not reservation_lines_pool_seed %}
   return {};
 {% else %}
   const testUser = await getTestUser();
@@ -377,9 +377,32 @@ export async function populate{{ pascal }}Dependencies() {
 {% endif %}
 {% endfor %}
 {% if reservation_lines_pool_seed %}
+{% for dep in reservation_lines_pool_seed.pool_extra_deps %}
+{% for b in dep.bridge_otos %}
+  const {{ dep.var_name }}{{ b.var_name | pascal_case }} = await prisma.{{ b.target }}.create({ data: {{ b.create_data }} });
+{% endfor %}
+  const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
+    data: {
+{% for b in dep.bridge_otos %}
+      {{ b.prop_name }}: {{ dep.var_name }}{{ b.var_name | pascal_case }}.id,
+{% endfor %}
+{% for fk in dep.fk_deps %}
+      {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
+{% endfor %}
+{% for ef in dep.extra_required_fields %}
+      {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+{% endfor %}
   await prisma.{{ reservation_lines_pool_seed.pool_entity }}.create({
     data: {
       {{ reservation_lines_pool_seed.criteria_pool_field }}: {{ reservation_lines_pool_seed.pool_fk_dep_var }}.id,
+{% for fk in reservation_lines_pool_seed.pool_extra_fk_props %}
+      {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
+{% endfor %}
       {{ reservation_lines_pool_seed.pool_qty_field }}: 100,
       creator_id: testUser.id,
       updater_id: testUser.id,
@@ -387,11 +410,34 @@ export async function populate{{ pascal }}Dependencies() {
   });
 {% endif %}
 {% if reservation_nolines_pool_seed %}
+{% for dep in reservation_nolines_pool_seed.pool_extra_deps %}
+{% for b in dep.bridge_otos %}
+  const {{ dep.var_name }}{{ b.var_name | pascal_case }} = await prisma.{{ b.target }}.create({ data: {{ b.create_data }} });
+{% endfor %}
+  const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
+    data: {
+{% for b in dep.bridge_otos %}
+      {{ b.prop_name }}: {{ dep.var_name }}{{ b.var_name | pascal_case }}.id,
+{% endfor %}
+{% for fk in dep.fk_deps %}
+      {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
+{% endfor %}
+{% for ef in dep.extra_required_fields %}
+      {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+{% endfor %}
   await prisma.{{ reservation_nolines_pool_seed.pool_entity }}.create({
     data: {
 {% if reservation_nolines_pool_seed.has_name %}
       name: 'Test {{ reservation_nolines_pool_seed.pool_title }}',
 {% endif %}
+{% for fk in reservation_nolines_pool_seed.pool_extra_fk_props %}
+      {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
+{% endfor %}
       {{ reservation_nolines_pool_seed.pool_qty_field }}: 100,
       creator_id: testUser.id,
       updater_id: testUser.id,
