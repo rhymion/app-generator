@@ -285,7 +285,8 @@ async function reserve{{ parent_pascal }}Core(
         await assertNoDuplicateReservation(
           tx as unknown as Pick<typeof prisma, '{{ model }}'>,
           candidate.id,
-          dateRange
+          dateRange,
+          requestId
         );
       } catch {
         continue;
@@ -324,7 +325,8 @@ async function reserve{{ parent_pascal }}Core(
     await assertNoDuplicateReservation(
       tx as unknown as Pick<typeof prisma, '{{ model }}'>,
       candidate.id,
-      dateRange
+      dateRange,
+      requestId
     );
 {% endif %}
 {% if reservation_config.updatesPoolStatusOnReserve %}

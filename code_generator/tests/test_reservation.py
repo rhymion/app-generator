@@ -1143,6 +1143,92 @@ class TestItemModeOverlapAvailability:
 
 
 # ---------------------------------------------------------------------------
+# 6b. cmd_603: self-overlap exclude-id fix — reserve*Core's
+# assertNoDuplicateReservation calls must exclude the very row currently being
+# reserved (requestId), covering BOTH generated branches (overlap-availability
+# candidate loop, and status-mode single findFirst). Without this, add{Entity}
+# creates the row (with its allocatedField already set, e.g. a user-picked
+# room) *before* reserve*Core runs in the same transaction, so the overlap
+# check finds its own just-created row as a false self-conflict — real-DB
+# reproduction (subtask_603a report) showed this manifests as either a
+# silent reassignment to a different candidate (multiple matching candidates)
+# or InsufficientPoolCapacityError (single matching candidate) for the
+# overlap-availability branch, since that branch's try/catch swallows the
+# raw "Reservation overlaps..." error; the status-mode branch has no
+# try/catch, so it throws that raw error directly and unconditionally.
+# update{Entity}'s separate re-validation path
+# (_build_item_reservation_update_check_code) already passed the row's own
+# `id` correctly pre-cmd_603 — reserve*Core never runs on update.
+# ---------------------------------------------------------------------------
+
+class TestSelfOverlapExcludeId:
+    """cmd_603: pin the exclude-self fix at the generated-code level for both
+    branches reserve*Core can render."""
+
+    def _render(self, entity_def: dict) -> str:
+        from jinja2 import Environment, FileSystemLoader
+        import os
+        schema = _room_schema({"room_reservation": entity_def})
+        entity = _entity_spec("room_reservation", schema)
+        ctx = build_context(entity, schema)
+        svc_ctx = service_context(ctx, schema)
+        template_dir = os.path.join(os.path.dirname(__file__), "..", "templates")
+        env = Environment(loader=FileSystemLoader(template_dir), keep_trailing_newline=True)
+        tmpl = env.get_template("service.ts.jinja2")
+        return tmpl.render({**ctx, **svc_ctx})
+
+    def test_overlap_branch_candidate_loop_excludes_request_id(self):
+        """(service.ts.jinja2:285 branch, availabilitySource: overlap — proj_c's
+        real room_reservation config): the per-candidate assertNoDuplicateReservation
+        call inside the try/catch loop must pass requestId, or every add{Entity}
+        whose first-ordered candidate is the room the user picked either silently
+        reassigns to a different room or (single-candidate case) throws
+        InsufficientPoolCapacityError."""
+        code = self._render(_overlap_mode_def())
+        assert (
+            "        await assertNoDuplicateReservation(\n"
+            "          tx as unknown as Pick<typeof prisma, 'room_reservation'>,\n"
+            "          candidate.id,\n"
+            "          dateRange,\n"
+            "          requestId\n"
+            "        );\n"
+            "      } catch {"
+        ) in code
+
+    def test_status_branch_single_candidate_excludes_request_id(self):
+        """(service.ts.jinja2:324 branch, status-mode item reservation with
+        dateRange, no availabilitySource): this call is NOT wrapped in try/catch,
+        so without excludeId it throws 'Reservation overlaps with an existing
+        booking' directly and unconditionally on every create."""
+        code = self._render(_item_mode_no_lines_def(with_date_range=True))
+        assert (
+            "    await assertNoDuplicateReservation(\n"
+            "      tx as unknown as Pick<typeof prisma, 'room_reservation'>,\n"
+            "      candidate.id,\n"
+            "      dateRange,\n"
+            "      requestId\n"
+            "    );"
+        ) in code
+
+    def test_update_path_unaffected_still_uses_own_id(self):
+        """update{Entity} never calls reserve*Core (only add{Entity} and the
+        standalone exported wrapper do) — it re-validates via a separate code
+        path that already passed the row's own `id` as excludeId before
+        cmd_603. Guards against a future refactor collapsing the two paths and
+        losing this distinction."""
+        code = self._render(_item_mode_no_lines_def(with_date_range=True))
+        assert (
+            "      if (_existingReservation?.room_id) {\n"
+            "        await assertNoDuplicateReservation(\n"
+            "          tx,\n"
+            "          _existingReservation.room_id as string,\n"
+            "          { check_in: checkIn, check_out: checkOut },\n"
+            "          id\n"
+            "        );\n"
+        ) in code
+
+
+# ---------------------------------------------------------------------------
 # 7. x-reservation.actions deprecation (2026-07-30): the Q3 lifecycle-action
 # sub-feature (shipOrder/releaseReservation/cancelReservation action routes,
 # ReservationActionButtons UI, reservation_actions.ts) has been removed.
