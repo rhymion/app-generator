@@ -50,6 +50,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   resolution (see Added, above). See `docs/knowledge/x-server-value-actor-delegation.md`.
 
 ### Fixed
+- **Generated Cypress test fixtures could crash or click the wrong row for entities with a
+  self-referential FK** (cmd_592): a self-ref dependency record (e.g. a split-lineage decoy) was
+  created via an unconditional `prisma.create()` in `populate{{pascal}}Dependencies()` with no
+  find-or-create guard, so calling the populate helper more than once in the same spec (routine —
+  once per `it()` block) duplicated the row and could trip any `@@unique` constraint the entity
+  declares. The same gap existed in `populate{{pascal}}Data`/`FullData`'s own per-iteration record
+  creation. Both now reuse an existing row when the entity's own `@@unique`/`@unique` columns
+  resolve to a value already available in scope. Separately, `cy.contains(deps.X.name)` is
+  substring-based, so a self-ref decoy sharing a name prefix with the record under test (e.g.
+  "Test Sku" vs "Test Sku 2") could make a DataGrid row-lookup click the decoy instead of the new
+  record; for entities with a self-referential FK, this now uses an anchored exact-match instead.
+  See `docs/knowledge/self-ref-dep-fixture-unique-collision.md`.
 - **`x-generate.invalidate` enabled with no handler/module produced code that could not build**
   (cmd_583): `actions.ts.jinja2`'s fallback branch never imported anything (a bare runtime
   `throw`), while `invalidate_action_route.ts.jinja2`'s fallback branch unconditionally imported

@@ -11,6 +11,17 @@ import { assertDataGridEmpty, getDataGridTotalRowCount } from '../support/datagr
 import { getDataGridTotalRowCount } from '../support/datagrid-helpers';
 {% endif %}
 {% endif %}
+{% if has_self_ref_deps %}
+
+// A self-referential dependency record (e.g. a split-lineage decoy created by
+// populate{{ pascal }}Dependencies()) can share a substring with the record
+// this spec creates via the UI (cmd_592) — cy.contains() is substring-based,
+// so row lookups keyed on a dep's display name need an exact-match anchor
+// instead.
+function exactRe(text: string): RegExp {
+  return new RegExp('^' + text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$');
+}
+{% endif %}
 
 describe('Testing {{ title }} pages and their behavior', () => {
   beforeEach(() => {
@@ -99,7 +110,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list %}
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if after_create_id_is_expr %}
+{% if has_self_ref_deps %}
+{{ I }}cy.contains(exactRe(deps.{{ primary_dep_var_for_list }}.name)).scrollIntoView().should('be.visible');
+{% else %}
 {{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).scrollIntoView().should('be.visible');
+{% endif %}
 {% else %}
 {{ I }}cy.contains('{{ after_create_id }}').scrollIntoView().should('be.visible');
 {% endif %}
@@ -108,8 +123,16 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}// Verify on view page
 {% if after_create_id_is_expr %}
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
+{% if has_self_ref_deps %}
+{{ I }}cy.contains(exactRe(deps.{{ primary_dep_var_for_list }}.name)).scrollIntoView().should('be.visible');
+{% else %}
 {{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).scrollIntoView().should('be.visible');
+{% endif %}
+{% if has_self_ref_deps %}
+{{ I }}cy.contains(exactRe(deps.{{ primary_dep_var_for_list }}.name)).closest('.MuiDataGrid-row').find('a').first().click();
+{% else %}
 {{ I }}cy.contains('.MuiDataGrid-row', deps.{{ primary_dep_var_for_list }}.name).find('a').first().click();
+{% endif %}
 {% elif not list_id_is_unique %}
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {{ I }}cy.contains('.MuiDataGrid-row', '{{ after_create_id }}').find('a').first().click();
@@ -183,7 +206,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list %}
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if after_create_id_is_expr %}
+{% if has_self_ref_deps %}
+{{ I }}cy.contains(exactRe(deps.{{ primary_dep_var_for_list }}.name)).scrollIntoView().should('be.visible');
+{% else %}
 {{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).scrollIntoView().should('be.visible');
+{% endif %}
 {% else %}
 {{ I }}cy.contains('{{ after_create_id }}').scrollIntoView().should('be.visible');
 {% endif %}
@@ -783,7 +810,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}cy.url().should('include', '/{{ parent }}');
 {{ I }}cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list and can_view %}
+{% if has_self_ref_deps %}
+{{ I }}cy.contains(exactRe(deps.{{ primary_dep_var_for_list }}.name)).click();
+{% else %}
 {{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
+{% endif %}
 {{ I }}cy.url().should('include', '/{{ parent }}/view');
 {{ I }}cy.get('a[aria-label="Edit"]').click();
 {{ I }}cy.url().should('include', '/{{ parent }}/edit');
@@ -1026,7 +1057,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.url().should('include', '/{{ parent }}');
           cy.url().should('not.include', '/new');
 {% if after_create_id_is_expr %}
+{% if has_self_ref_deps %}
+          cy.contains(exactRe(deps.{{ primary_dep_var_for_list }}.name)).click();
+{% else %}
           cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
+{% endif %}
 {% else %}
           cy.contains('{{ after_create_id }}').click();
 {% endif %}
@@ -1051,7 +1086,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.url().should('include', '/{{ parent }}');
           cy.url().should('not.include', '/new');
 {% if after_create_id_is_expr %}
+{% if has_self_ref_deps %}
+          cy.contains(exactRe(deps.{{ primary_dep_var_for_list }}.name)).click();
+{% else %}
           cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
+{% endif %}
 {% else %}
           cy.contains('{{ after_create_id }}').click();
 {% endif %}

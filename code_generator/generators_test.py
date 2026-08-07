@@ -2097,6 +2097,20 @@ def helper_context(
     # split for setup{{pascal}}ApprovalFlow).
     non_self_deps_by_var = {d['var_name']: d for d in non_self_deps}
     seen_self_ref_fk_vars = set()
+    # Pre-seed with the primary-display FK's dep var (e.g. goods_receipt_line's
+    # `item`): a self-ref dep that binds the SAME instance (e.g. the
+    # parent_goods_receipt_line_id decoy record also referencing baseDeps.item)
+    # renders an identical list row to whatever a Create/Approval test creates
+    # via that same instance — cy.contains(deps.<var>.name) then matches
+    # whichever row the DataGrid puts first, which is often the decoy, not the
+    # record the test just created (cmd_590; e.g. goods_receipt_line
+    # 2.1/7.1/7.2 clicking the decoy's row and asserting against its stale
+    # quantity_received / missing approval_requests). Treating it as
+    # already-seen here routes the self-ref dep onto the existing '2' instance
+    # in the loop below — the same mechanism that already separates 2+
+    # self-ref deps sharing an fk (see docstring above).
+    if primary_fk_dep_target is not None:
+        seen_self_ref_fk_vars.add(to_camel_case(primary_fk_dep_target))
     for s_dep in self_ref_deps:
         for fk in s_dep['fk_deps']:
             dep_var = fk['dep_var_name']
@@ -2107,6 +2121,27 @@ def helper_context(
                     nd['needs_second'] = True
             else:
                 seen_self_ref_fk_vars.add(dep_var)
+
+    # Self-ref decoy records (e.g. goods_receipt_line's parent_goods_receipt_line_id)
+    # are rendered in populateXxxDependencies(), not inside _createXxxBaseDeps() —
+    # their fk_deps resolve through `baseDeps.<var>.id` rather than a bare local
+    # var, so their find-or-create lookup needs its own fk_prefix='baseDeps.'
+    # rendering (the enriched_deps pass above computed lookup_where with
+    # fk_prefix='' for the non-self-dep / local-var case only). Recomputed here,
+    # after the fk-rename loop above has settled fk_deps' final dep_var_name
+    # (e.g. item -> item2), so the lookup key matches what the create() below it
+    # actually writes. Without a lookup key, a self-ref dep with no distinguishing
+    # required field (the common case: it exists only to satisfy a self-ref FK)
+    # issues an unconditional create() every time the populate helper runs,
+    # tripping any @@unique its own required fields participate in once a spec
+    # calls the helper more than once (cmd_592; e.g. goods_receipt_line's
+    # @@unique([goods_receipt_id, item_id])).
+    for s_dep in self_ref_deps:
+        _sr_lookup_cols = _dep_lookup_columns(s_dep['target'], s_dep['extra_required_fields'], s_dep['fk_deps'])
+        s_dep['lookup_field'] = _sr_lookup_cols[0]['prop_name'] if _sr_lookup_cols else None
+        s_dep['lookup_where'] = (
+            _render_lookup_where(_sr_lookup_cols, 'prisma_val', fk_prefix='baseDeps.') if _sr_lookup_cols else None
+        )
 
     # A multi-FK-target alias (e.g. `role: approverRole`, built below purely so
     # API/UI test bodies can write `deps.role.id`) must never resolve to a dep
@@ -2302,6 +2337,37 @@ def helper_context(
         if _pool_field is not None and _pool_field.get('dep_var_name'):
             required_fields_prisma.append(_pool_field)
 
+    # Find-or-create key for populate{{pascal}}Data's own per-iteration record
+    # (cmd_592): when every column of the entity's own @@unique/@unique
+    # constraint resolves to a TS expression already available in the loop
+    # body — the primary (per-iteration) FK var or another dep-backed FK from
+    # required_fields_prisma — reuse an existing row with that key instead of
+    # an unconditional create(), which trips the constraint when the same
+    # populate helper (or a sibling call within the same spec) runs again
+    # (e.g. goods_receipt_line's @@unique([goods_receipt_id, item_id])).
+    # Deliberately excludes internal_fk_deps (bridge FKs like approvable_id):
+    # those are always fresh per iteration, so keying on one would always
+    # find nothing and silently defeat the lookup rather than fixing it.
+    _record_expr_by_prop = {}
+    if primary_fk_dep is not None:
+        _pfk_prop_for_lookup = next(
+            (fk['prop_name'] for fk in entity_fk_deps if fk['dep_var_name'] == primary_fk_dep['var_name']),
+            None,
+        )
+        if _pfk_prop_for_lookup:
+            _record_expr_by_prop[_pfk_prop_for_lookup] = f"{primary_fk_dep['var_name']}Item.id"
+    for _f in required_fields_prisma:
+        if _f['prop_name'] in _record_expr_by_prop:
+            continue
+        if _f['category'] == 'autocomplete' and _f.get('dep_var_name'):
+            _record_expr_by_prop[_f['prop_name']] = f"deps.{_f['dep_var_name']}.id"
+    _entity_uniques_for_record = _prisma_uniques.get(model_name) or {}
+    record_lookup_where = None
+    for _cols in _entity_uniques_for_record.get('composite') or []:
+        if all(c in _record_expr_by_prop for c in _cols):
+            record_lookup_where = '{ ' + ', '.join(f'{c}: {_record_expr_by_prop[c]}' for c in _cols) + ' }'
+            break
+
     # populateData needs deps when there are required FK fields not covered by per-iteration creation.
     primary_fk_dep_var = primary_fk_dep['var_name'] if primary_fk_dep else None
     primary_fk_is_ua = primary_fk_dep is not None and primary_fk_dep.get('is_user_account', False)
@@ -2440,6 +2506,7 @@ def helper_context(
         'datagrid_children': enriched_datagrid_children,
         'comment_children': enriched_comment_children,
         'primary_fk_dep': primary_fk_dep,
+        'record_lookup_where': record_lookup_where,
         'internal_fk_deps': internal_fk_deps,
         'has_approvable': has_approvable,
         'flatten_test_rels': flatten_test_rels,
@@ -2555,6 +2622,17 @@ def spec_context(
     )
     if has_m2m_self_ref and not any(d['target'] == model_name for d in deps):
         deps.append({'target': model_name, 'var_name': to_camel_case(model_name)})
+
+    # True when this entity has a dependency on itself (self-ref FK or m2m
+    # self-ref child, appended above) — gates the exact-match cy.contains()
+    # regex in test_spec.cy.ts.jinja2 (cmd_592): a self-ref dependency record
+    # created by populate{{pascal}}Dependencies() can substring-collide with
+    # the record the spec creates via the UI (e.g. goods_receipt_line's
+    # split-lineage decoy sharing "Test Sku" as a substring of its own
+    # display name), so row lookups keyed on a dep's display name need an
+    # anchor. Kept narrow: entities without a self-ref dep keep the
+    # pre-existing substring-based cy.contains().
+    has_self_ref_deps = any(d['target'] == model_name for d in deps)
 
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
     # Datagrid children may have FK deps not on the parent (e.g. field.reference_id → db_table)
@@ -3107,6 +3185,7 @@ def spec_context(
         'can_delete': can_delete,
         'can_view': can_view,
         'has_deps': has_deps,
+        'has_self_ref_deps': has_self_ref_deps,
         'needs_pool_for_create': needs_pool_for_create,
         'has_optional': bool(optional_field_metas),
         'has_children': bool(child_metas),

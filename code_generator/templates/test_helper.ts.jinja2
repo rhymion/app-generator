@@ -166,6 +166,42 @@ export async function populate{{ pascal }}Dependencies() {
   const baseDeps = await _create{{ pascal }}BaseDeps();
   const testUser = await getTestUser();
 {% for dep in self_ref_deps %}
+{% if dep.lookup_field %}
+  // Idempotent: re-use an existing row when the helper is called more than
+  // once in a single test (e.g. multiple it() blocks each calling
+  // populate{{ pascal }}Dependencies()) — without this, a self-ref decoy
+  // record with no distinguishing field issues a fresh create() every call
+  // and trips any @@unique its own required fields participate in (cmd_592).
+  let {{ dep.var_name }}Record = await prisma.{{ dep.target }}.findFirst({
+    where: {{ dep.lookup_where }},
+    orderBy: { created_at: 'asc' },
+  });
+  if (!{{ dep.var_name }}Record) {
+{% for fk in dep.internal_fk_deps %}
+    const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
+    {{ dep.var_name }}Record = await prisma.{{ dep.target }}.create({
+      data: {
+{% for fk in dep.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ dep.var_name }}{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
+{% for ef in dep.extra_required_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+{% for fk in dep.fk_deps %}
+        {{ fk.prop_name }}: baseDeps.{{ fk.dep_var_name }}.id,
+{% endfor %}
+        creator_id: testUser.id,
+{% if dep.has_updater_id %}
+        updater_id: testUser.id,
+{% endif %}
+      },
+{% if dep.prisma_include_str %}
+      include: { {{ dep.prisma_include_str }} },
+{% endif %}
+    });
+  }
+{% else %}
 {% for fk in dep.internal_fk_deps %}
   const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -189,6 +225,7 @@ export async function populate{{ pascal }}Dependencies() {
     include: { {{ dep.prisma_include_str }} },
 {% endif %}
   });
+{% endif %}
 {% if dep.label_expression %}
   const {{ dep.var_name }} = { ...{{ dep.var_name }}Record, name: {{ dep.label_expression }}{% if dep.search_differs %}, searchName: {{ dep.search_label_expression }}{% endif %} };
 {% else %}
@@ -438,6 +475,52 @@ export async function populate{{ pascal }}Data(length: number) {
     });
 {% endif %}
 {% endif %}
+{% if record_lookup_where %}
+    // Idempotent: when the entity's own @@unique/@unique constraint would
+    // otherwise be tripped by this iteration's deterministic key (e.g. this
+    // helper — or a sibling populate*Data call — running more than once in
+    // the same test), reuse the existing row instead of a fresh create()
+    // (cmd_592; e.g. goods_receipt_line's @@unique([goods_receipt_id, item_id])).
+    let record = await prisma.{{ model_name }}.findFirst({
+      where: {{ record_lookup_where }},
+      orderBy: { created_at: 'asc' },
+    });
+    if (!record) {
+{% for fk in internal_fk_deps %}
+      const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
+      record = await prisma.{{ model_name }}.create({
+        data: {
+{% for fk in internal_fk_deps %}
+          {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
+{% endfor %}
+{% for field in required_fields_prisma %}
+{% if field.category == 'autocomplete' and field.dep_var_name %}
+{% if primary_fk_dep and field.dep_var_name == primary_fk_dep.var_name %}
+          {{ field.prop_name }}: {{ field.dep_var_name }}Item.id,
+{% else %}
+          {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
+{% endif %}
+{% elif field.category != 'autocomplete' %}
+          {{ field.prop_name }}: {{ field.prisma_val }},
+{% endif %}
+{% endfor %}
+{% for ua_dep in ua_dep_fields %}
+{% if primary_fk_dep and primary_fk_dep.is_user_account and ua_dep.dep_var_name == primary_fk_dep.var_name %}
+          {{ ua_dep.prop_name }}: {{ ua_dep.dep_var_name }}Item.id,
+{% else %}
+          {{ ua_dep.prop_name }}: deps.{{ ua_dep.dep_var_name }}.id,
+{% endif %}
+{% endfor %}
+{% for ef in extra_prisma_fields %}
+          {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+          creator_id: testUser.id,
+          updater_id: testUser.id,
+        },
+      });
+    }
+{% else %}
 {% for fk in internal_fk_deps %}
     const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -471,6 +554,7 @@ export async function populate{{ pascal }}Data(length: number) {
         updater_id: testUser.id,
       },
     });
+{% endif %}
     records.push(record);
   }
   // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
@@ -588,6 +672,48 @@ export async function populate{{ pascal }}FullData(length: number) {
     });
 {% endif %}
 {% endif %}
+{% if record_lookup_where %}
+    // Idempotent — see populate{{ pascal }}Data for the rationale.
+    let record = await prisma.{{ model_name }}.findFirst({
+      where: {{ record_lookup_where }},
+      orderBy: { created_at: 'asc' },
+    });
+    if (!record) {
+{% for fk in internal_fk_deps %}
+      const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
+      record = await prisma.{{ model_name }}.create({
+        data: {
+{% for fk in internal_fk_deps %}
+          {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
+{% endfor %}
+{% for field in all_fields_prisma %}
+{% if field.category == 'autocomplete' and field.dep_var_name %}
+{% if primary_fk_dep and field.dep_var_name == primary_fk_dep.var_name %}
+          {{ field.prop_name }}: {{ field.dep_var_name }}Item.id,
+{% else %}
+          {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
+{% endif %}
+{% elif field.category != 'autocomplete' %}
+          {{ field.prop_name }}: {{ field.prisma_val }},
+{% endif %}
+{% endfor %}
+{% for ua_dep in ua_dep_fields_full %}
+{% if primary_fk_dep and primary_fk_dep.is_user_account and ua_dep.dep_var_name == primary_fk_dep.var_name %}
+          {{ ua_dep.prop_name }}: {{ ua_dep.dep_var_name }}Item.id,
+{% else %}
+          {{ ua_dep.prop_name }}: deps.{{ ua_dep.dep_var_name }}.id,
+{% endif %}
+{% endfor %}
+{% for ef in extra_prisma_fields %}
+          {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+          creator_id: testUser.id,
+          updater_id: testUser.id,
+        },
+      });
+    }
+{% else %}
 {% for fk in internal_fk_deps %}
     const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -621,6 +747,7 @@ export async function populate{{ pascal }}FullData(length: number) {
         updater_id: testUser.id,
       },
     });
+{% endif %}
     records.push(record);
   }
   // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results

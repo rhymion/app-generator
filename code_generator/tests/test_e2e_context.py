@@ -215,7 +215,14 @@ def test_helper_context_self_ref_dep_keeps_required_non_self_fk_deps():
 
     ctx = helper_context("medicine", [], schema, "medicine", "medicine_detail", _entity("medicine")["generate_config"])
     prev_dep = next(d for d in ctx["self_ref_deps"] if d["var_name"] == "prev")
-    assert prev_dep["fk_deps"] == [{"prop_name": "patient_id", "dep_var_name": "patient"}]
+    # patient is medicine's primary-display FK dep, so the self-ref decoy's
+    # patient_id is routed onto the second instance (cmd_590/6908ff49): a
+    # decoy referencing the SAME patient as the record under test would
+    # render an identical primary-display label in the list, reproducing the
+    # goods_receipt_line row-mismatch bug this mechanism exists to prevent.
+    # The prop_name -> fk_deps mapping itself (this test's original intent)
+    # is unaffected; only the routed instance changed.
+    assert prev_dep["fk_deps"] == [{"prop_name": "patient_id", "dep_var_name": "patient2"}]
 
 
 def test_helper_context_primary_fk_string_labels_are_human_readable():
