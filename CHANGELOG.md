@@ -6,6 +6,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **A reservation could be rejected as overlapping with itself, or silently reassigned to a
+  different candidate than the one the user selected** (cmd_603): `reserve{Entity}Core`
+  already received `requestId` (the id of the row it had just created) as an argument, but neither
+  call site of `assertNoDuplicateReservation()` — the item-pool candidate-loop branch or the
+  single-candidate status branch — passed it through as `excludeId`, even though the function
+  already accepted that parameter. The just-created row then matched its own overlap check: the
+  pool-mode branch either rejected the only candidate (`InsufficientPoolCapacityError`) or, with
+  multiple candidates, silently allocated a different room/resource than the one the user picked;
+  the status-mode branch rejected outright with `Reservation overlaps with an existing booking`.
+  Both call sites in `service.ts.jinja2` now pass `requestId` as `excludeId`; `update{Entity}`'s
+  existing call site already passed its own row id correctly and needed no change. Verified both
+  directions — a non-conflicting reservation now succeeds (including landing on the user's actual
+  selection), and a genuinely overlapping reservation is still rejected — via generator pytest with
+  fault injection. Affects any consumer entity declaring `x-reservation` with `mode: item` and a
+  `dateRange`; currently only proj_c's `room_reservation` (1 entity).
+
+### Fixed
 - **A field with a Prisma `@default(...)` but no schema `default:` marker (dynamic defaults like
   `now()`) or with a static default the generator ignored (number/boolean/plain-string) silently
   lost that default on the "new" page whenever the user left it untouched** (cmd_594): for

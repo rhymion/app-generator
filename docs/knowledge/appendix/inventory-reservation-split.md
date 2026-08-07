@@ -58,6 +58,22 @@ pointing at `approval_flow`'s approve/reject instead. Do not re-add an `actions`
 never needed the item3 guard below — the gap was in the *explicit*, user-picked inventory paths
 described in §3.
 
+### 1.2 `excludeId` must be threaded through on create, not just update (cmd_603)
+
+`assertNoDuplicateReservation()` (`service_validation.ts.jinja2`) accepts an `excludeId` argument
+so a reservation can be checked for overlap against every *other* row without also matching
+itself. `reserve{Parent}Core` already receives `requestId` — the id of the row it just created —
+as an argument, but until cmd_603 neither of its two call sites (the item-pool candidate-loop
+branch, used when `availabilitySource: overlap`; and the single-candidate status branch) passed
+`requestId` through as `excludeId`. The just-created row then satisfied its own overlap check,
+which (depending on branch and candidate count) either rejected a non-conflicting reservation
+outright or silently reassigned the requester to a different candidate than the one they picked.
+`update{Parent}`'s own call site was unaffected — it was already passing the row's own `id` as
+`excludeId` — so this was a create-path-only gap. The lesson generalizes: any new call site added
+to `reserve{Parent}Core` (or an analogous "create + immediately overlap-check the row you just
+created" flow) must pass its own `requestId`/row id as `excludeId`; the parameter existing on the
+function signature is not enough by itself.
+
 ## 2. `x-splittable` — dividing a line item
 
 Declared on a child line entity (`purchase_per_item`, `receiving_receipt_line`). Config:
