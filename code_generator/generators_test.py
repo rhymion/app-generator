@@ -2733,12 +2733,31 @@ def spec_context(
         after_create_id = None
         after_create_id_is_expr = True
         primary_dep_var_for_list = to_camel_case(prim)
+        # cmd_594: target the dependency helper's base (un-suffixed) instance of
+        # the primary FK's target — e.g. `deps.item` (label 'Test Sku'), not the
+        # "second instance" (`deps.item2`, label 'Test Sku 2', unique_index=2).
+        # populate{{Pascal}}Data(populate_count_3_3)'s own loop always attaches
+        # its rows to deps.<primaryVar> or deps.<primaryVar>2 depending on which
+        # deterministic name ('Test X 1'..'Test X N') a given iteration produces
+        # — and for entities whose primary FK also participates in a composite
+        # @@unique together with another field the loop holds constant across
+        # iterations (e.g. asn_line's [asn_id, item_id], purchase_order_line's
+        # [purchase_order_id, item_id]), iteration 2 always collides with and
+        # therefore reuses deps.<primaryVar>2's row (idempotent find-or-create,
+        # cmd_592) — so selecting deps.<primaryVar>2's label as the edit target
+        # just re-points row[0] at row[1]'s own (parent_fk, primary_fk) tuple and
+        # trips the same @@unique on update (P2002; cmd_593/594, asn_line 3.3 /
+        # purchase_order_line 3.3). The base instance is never produced by that
+        # loop (which only ever emits suffixed 'Test X {i}' names, i>=1) and is
+        # therefore guaranteed free of every populated row's composite key,
+        # whether or not the entity actually carries this composite unique —
+        # making it a safe, deterministic edit target unconditionally, not just
+        # for the entities currently known to collide.
         list_id_updated = _seed_relation_label_value(
             primary_rel['target'],
             primary_rel.get('label_field', 'name'),
             primary_rel.get('label_field_is_date', False),
             schema,
-            unique_index=2,
         ) if primary_rel else list_id_1
         has_edit_primary = True
         edit_field_label = dep_title

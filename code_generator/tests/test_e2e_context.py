@@ -126,7 +126,15 @@ def _schema() -> dict:
 def test_spec_context_uses_deps_for_fk_primary_edit():
     ctx = spec_context("lifestyle", [], _schema(), "lifestyle", "lifestyle_detail", _entity("lifestyle")["generate_config"])
     assert ctx["use_deps_in_3_3"] is True
-    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('Patient', 'Test Patient 2');"
+    # cmd_594: targets the dependency helper's base (un-suffixed) instance
+    # ('Test Patient'), not the "second instance" ('Test Patient 2') —
+    # populateLifestyleData(2)'s own loop can independently attach a row to
+    # the "second instance" target for entities whose primary FK also
+    # participates in a composite @@unique with another field the loop holds
+    # constant, causing an update-time P2002 against that sibling row
+    # (asn_line/purchase_order_line 3.3, cmd_593/594). The base instance is
+    # never produced by that loop, so it's collision-free unconditionally.
+    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('Patient', 'Test Patient');"
 
 
 def test_spec_context_3_3_populates_two_when_primary_is_fk():
@@ -168,7 +176,9 @@ def test_spec_context_3_3_user_account_primary_uses_select_autocomplete():
     }
     ctx = spec_context("shift", [], schema, "shift", "shift_detail", _entity("shift")["generate_config"])
     assert ctx["populate_count_3_3"] == 2
-    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User', 'Test User 2');"
+    # cmd_594: base (un-suffixed) instance, not the "second instance" — see
+    # test_spec_context_uses_deps_for_fk_primary_edit above for the rationale.
+    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User', 'Test User');"
 
 
 def test_api_spec_context_omits_required_one_to_one_fk_in_missing_field_case():

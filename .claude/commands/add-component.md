@@ -33,14 +33,25 @@ Task: $ARGUMENTS
 
 Run in this order:
 
-1. `npm run test:pytest`      — Python unit tests for code generator
-2. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-3. `npm run test:vitest`     — vitest component tests
-4. `npm run test:e2e:cy:api` — API Cypress specs only
-5. `npm run lint`
+1. `npm run lint`            — **must run before any of the generate-code steps below** (see note)
+2. `npm run test:pytest`      — Python unit tests for code generator
+3. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+4. `npm run test:vitest`     — vitest component tests
+5. `npm run test:e2e:cy:api` — API Cypress specs only
 6. `npm audit --omit=dev --audit-level=high`
 
-Step 1 runs unconditionally, with no "unchanged" exemption: CI's `pytest`
+**Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
+not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
+run lint`, no `generate-code` step, see `.github/workflows/ci.yml`). On a
+worktree where `generate-code` already ran in an earlier session, run `npm
+run cleanup` immediately before this step to remove the generated output
+first (do **not** use `git clean` — forbidden by CLAUDE.md D004). Linting
+after generate-code checks a much larger, differently-calibrated file set
+than CI ever sees and has caused false gate failures unrelated to the
+current change — see cmd_600 /
+`docs/knowledge/lint-gate-must-match-ci-precondition.md`.
+
+Step 2 runs unconditionally, with no "unchanged" exemption: CI's `pytest`
 job runs on every push/PR to `main`/`master` with no path filter (see
 `docs/knowledge/gate-exemption-must-be-machine-checkable.md` — cmd_498).
 
@@ -53,6 +64,8 @@ job runs on every push/PR to `main`/`master` with no path filter (see
 | Test fails | 1. generated test code bug |
 | Other test fails | 1. generation logic missing a case → 2. product code bug |
 
-> **Note**: When running lint or typecheck in isolation, prefix with
-> `npm run generate-code` first. See `AGENTS.md §Generated-code prerequisites
-> for gates` for the full rule.
+> **Note**: When running typecheck (`npx tsc --noEmit`) in isolation, prefix
+> with `npm run generate-code` first. See `AGENTS.md §Generated-code
+> prerequisites for gates` for the full rule. `npm run lint` is the
+> exception — never prefix it with `generate-code` (see Completion gate
+> step 1 above).

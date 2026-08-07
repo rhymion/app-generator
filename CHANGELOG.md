@@ -6,23 +6,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
-- **A reservation could be rejected as overlapping with itself, or silently reassigned to a
-  different candidate than the one the user selected** (cmd_603): `reserve{Entity}Core`
-  already received `requestId` (the id of the row it had just created) as an argument, but neither
-  call site of `assertNoDuplicateReservation()` — the item-pool candidate-loop branch or the
-  single-candidate status branch — passed it through as `excludeId`, even though the function
-  already accepted that parameter. The just-created row then matched its own overlap check: the
-  pool-mode branch either rejected the only candidate (`InsufficientPoolCapacityError`) or, with
-  multiple candidates, silently allocated a different room/resource than the one the user picked;
-  the status-mode branch rejected outright with `Reservation overlaps with an existing booking`.
-  Both call sites in `service.ts.jinja2` now pass `requestId` as `excludeId`; `update{Entity}`'s
-  existing call site already passed its own row id correctly and needed no change. Verified both
-  directions — a non-conflicting reservation now succeeds (including landing on the user's actual
-  selection), and a genuinely overlapping reservation is still rejected — via generator pytest with
-  fault injection. Affects any consumer entity declaring `x-reservation` with `mode: item` and a
-  `dateRange`; currently only proj_c's `room_reservation` (1 entity).
-
-### Fixed
 - **A field with a Prisma `@default(...)` but no schema `default:` marker (dynamic defaults like
   `now()`) or with a static default the generator ignored (number/boolean/plain-string) silently
   lost that default on the "new" page whenever the user left it untouched** (cmd_594): for
@@ -46,8 +29,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   regressions). `test:e2e:cy:api` cannot exercise this class of bug at all (it drives the REST API
   directly, never the browser form's default-seeding JS) — a gate blind spot worth keeping in mind
   for this field-default family specifically. See `docs/knowledge/writable-default-value-fix.md`.
-
-### Fixed
 - **`npm run cleanup`'s defaults deleted write-once stubs while leaving true orphans behind, and a
   reordered `generate-code` → `cleanup` run silently deleted the entire just-generated tree**
   (cmd_450, building on cmd_469's earlier fix that pointed cleanup at the Stage-4 built schema):
@@ -218,6 +199,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Internal
+- **`npm run lint` Completion gate step reordered to run before `generate-code`** (cmd_600):
+  CI's `Lint` job never runs `generate-code` (`npm ci && npm run lint` only), but four
+  `.claude/commands/*.md` gates (`update-generator`, `generate-schema`, `update-code`,
+  `add-component`) ran `npm run lint` *after* a step that triggers `generate-code`, linting a
+  much larger, uncalibrated file population (~230 additional generated files) than CI ever
+  checks. This was mistaken for a 15→93 warning regression between commits (investigated as
+  cmd_600) — independent re-measurement found no such regression: the post-generate-code count
+  was already 93 at the exact commit (`c10b1b1a`, 2026-08-04) the "15" ceiling was calibrated
+  against; "15" was itself the pre-generate-code count for that same commit, byte-for-byte
+  matching cmd_554's original per-rule breakdown. `npm run lint` is now the first Completion
+  gate step in all four affected files (and `AGENTS.md`'s generated-code-prerequisites rule is
+  corrected to name it as the one exception), guaranteeing local and CI report the same number.
+  See `docs/knowledge/lint-gate-must-match-ci-precondition.md`.
 - **`cypress/support/db-helpers.ts`/`generated-tasks.ts` were stale, missing `personal_note`**
   (cmd_560): these committed, generator-written files predate the `personal_note` entity
   (added later in the `x-self-only` Stage 1 work) and were never regenerated afterward —
