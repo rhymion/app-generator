@@ -174,11 +174,25 @@ and other tools emit **false-positive errors** that are not real bugs.
    internally as its first step. If you run gates in the standard order,
    generated code will be present for all subsequent steps.
 
-2. **Isolated runs require explicit prefixing.**
-   When running a single gate (e.g. `npm run lint` or `npx tsc --noEmit`
-   without going through `test:e2e:build` first), run `npm run generate-code`
+2. **Isolated runs require explicit prefixing — except `npm run lint`.**
+   When running `npx tsc --noEmit` (or any other type-checking tool) without
+   going through `test:e2e:build` first, run `npm run generate-code`
    manually before the gate command. Otherwise generated imports will be
    missing and false-positive TS errors will appear.
+
+   **`npm run lint` (`eslint`) is the one exception — do not prefix it with
+   `generate-code`.** `eslint.config.mjs` has no `parserOptions.project`
+   (no type-aware linting), so a missing generated import never produces a
+   false-positive here the way it does for `tsc` — proven empirically by
+   CI's `Lint` job, which runs `npm ci && npm run lint` with no
+   `generate-code` step and has always passed. Worse, running `generate-code`
+   before `npm run lint` actively breaks this gate: it makes ESLint additionally
+   lint ~230 freshly generated files (Cypress specs, support helpers) that
+   CI's `Lint` job never sees, against a `--max-warnings` ceiling calibrated
+   for CI's condition — this exact mistake produced a false "15→93 warning
+   regression" investigation (cmd_600) when there was no regression at all.
+   `npm run lint` must always run on a checkout where `generate-code` has
+   not yet run (see `docs/knowledge/lint-gate-must-match-ci-precondition.md`).
 
 3. **Restore the working tree after PASS.**
    After gates pass, return the working tree to its pre-generate-code state:
