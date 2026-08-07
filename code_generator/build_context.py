@@ -2032,9 +2032,34 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         fmt    = defn.get('format')
         is_req = k in (model_def.get('required') or [])
         is_null = _is_nullable(defn)
+        # A field excluded from `required:` while remaining DB non-nullable
+        # always has *some* Prisma `@default(...)` supplying the value on
+        # create (derive_raw_entity: `not pf.nullable and not pf.has_default`
+        # is the only path into `required:`). schema_deriver deliberately
+        # omits the `default:` json-schema key for Prisma *dynamic* defaults
+        # (now(), cuid(), uuid(), ... -- cmd_574's "server-generated, no
+        # meaning as a UI default"), so `'default' in defn` alone misses
+        # exactly the now()-backed timestamp columns this check exists for
+        # (cmd_594). This signature is the only surviving marker for that
+        # case; a static `default:` also always satisfies it.
+        has_db_default = 'default' in defn or (not is_req and not is_null)
         if actual == 'string' and fmt in ('date', 'date-time', 'time'):
+            # Previously always 'null': an untouched field then submitted ''
+            # (form_data_sets' `{sn}?.toISOString() || ''`), which the
+            # non-nullable branch of _build_form_data_gets turns into
+            # `new Date('')` (Invalid Date) -- passed straight through to
+            # Prisma's create() call and crashing it, since this whole class
+            # of field is exactly the "not required, but NOT NULL" one
+            # (proj_g occurred_at symptom, cmd_594). Seed a writable "now"
+            # instead, mirroring generators.py:_new_prop_val's DataGrid-child
+            # seed for the same field class, so the field is never blank.
+            if has_db_default:
+                return 'new Date()'
             return 'null'
         if actual in ('integer', 'number'):
+            if has_db_default and defn.get('default') is not None:
+                schema_default = defn['default']
+                return str(int(schema_default)) if actual == 'integer' else str(schema_default)
             return 'null'
         if actual == 'string':
             # Prisma nativeEnum-backed field: '' is not a member of the
@@ -2063,9 +2088,21 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 if 'default' in defn:
                     return f"'{defn['default']}'"
                 return f"'{defn['enum'][0]}'"
+            # Plain (non-enum) string field with a Prisma `@default(...)`
+            # (e.g. tenant_id String @default("default")): seed the writable
+            # default instead of '' so an untouched field doesn't silently
+            # overwrite it on create (cmd_594).
+            if 'default' in defn:
+                return f"'{defn['default']}'"
             return "''"
         if actual == 'boolean':
-            return 'false'
+            # Was hardcoded 'false', ignoring `@default(true)` entirely --
+            # an untouched field then always submitted explicit `false`
+            # (form_data_sets always sends the toString()'d state, never
+            # omits it), permanently overriding the DB default. Mirror
+            # generators.py:_new_prop_val's DataGrid-child seed, which
+            # already reads the schema default correctly (cmd_594).
+            return str(defn.get('default', False)).lower()
         return 'null'
 
     parent_default_props = '\n'.join(
