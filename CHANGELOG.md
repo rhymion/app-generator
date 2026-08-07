@@ -6,6 +6,31 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **A field with a Prisma `@default(...)` but no schema `default:` marker (dynamic defaults like
+  `now()`) or with a static default the generator ignored (number/boolean/plain-string) silently
+  lost that default on the "new" page whenever the user left it untouched** (cmd_594): for
+  `DateTime @default(now())` NOT NULL columns, the "new" page seeded `null`, the browser then
+  submitted `''`, and the server turned that into `new Date('')` (Invalid Date) — crashing
+  `create()` outright for any consumer entity with such a column (the concrete symptom this fixes:
+  `inventory_transaction.occurred_at`-style fields in downstream consumers). Number fields with a
+  nonzero default silently became `0`; boolean fields with `@default(true)` always submitted
+  `false`; plain (non-enum) string fields with a default always submitted `''` — none of these
+  crashed, but all silently discarded the schema's declared default. `_default_value()`
+  (`page_new.tsx`'s initial form state) now seeds a writable default for all four field classes —
+  `new Date()` for datetime fields excluded from `required:` while remaining DB non-nullable (the
+  only surviving signal for a dynamic default, since `schema_deriver` deliberately omits the
+  `default:` key for `now()`/`cuid()`/etc.), the schema's literal `default:` value for
+  number/boolean/plain-string. `_new_prop_val()` (DataGrid child new-row seeding) already handled
+  boolean/number correctly; only its plain-string/plain-string-enum branches needed the same fix.
+  Also fixed a related `NumberField` JSX bug where `src.p || undefined` would have silently blanked
+  a legitimate `0` default (`0 || undefined` is falsy) — changed to `??`. Verified via isolated
+  before/after Cypress UI comparisons in both proj_g (the target crash flips FAIL→PASS, zero
+  regressions) and proj_c (the full 86-spec/781-test UI suite is an exact match before/after — zero
+  regressions). `test:e2e:cy:api` cannot exercise this class of bug at all (it drives the REST API
+  directly, never the browser form's default-seeding JS) — a gate blind spot worth keeping in mind
+  for this field-default family specifically. See `docs/knowledge/writable-default-value-fix.md`.
+
+### Fixed
 - **`npm run cleanup`'s defaults deleted write-once stubs while leaving true orphans behind, and a
   reordered `generate-code` → `cleanup` run silently deleted the entire just-generated tree**
   (cmd_450, building on cmd_469's earlier fix that pointed cleanup at the Stage-4 built schema):

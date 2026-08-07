@@ -3153,7 +3153,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      <NumberField\n"
             f"        label={{tf('{fk}')}}\n"
             f"        inputRef={{{p}Ref}}\n"
-            f"        defaultValue={{src.{p} || undefined}}\n"
+            # `??` (not `||`): build_context.py:_default_value() now seeds a
+            # real Prisma @default(N) for number fields (cmd_594), and a
+            # falsy-but-valid `0` default must still render -- `0 ||
+            # undefined` would silently blank it back out.
+            f"        defaultValue={{src.{p} ?? undefined}}\n"
             f"        {'required' if req else ''}\n"
             f"        min={{{mn}}}\n"
             f"        max={{{mx}}}{step_str}\n"
@@ -3727,6 +3731,20 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     # declared enum member so create() still receives a valid
                     # enum value.
                     return f"'{defn['enum'][0]}'"
+                if isinstance(defn.get('enum'), list) and defn['enum']:
+                    # Plain (non-nativeEnum) string-enum field -- same gap as
+                    # the nativeEnum branches above, mirrors
+                    # build_context.py:_default_value's parallel branch
+                    # (cmd_594).
+                    if 'default' in defn:
+                        return f"'{defn['default']}'"
+                    return f"'{defn['enum'][0]}'"
+                if 'default' in defn:
+                    # Plain (non-enum) string field with a Prisma
+                    # `@default(...)`: seed the writable default instead of
+                    # '' so an untouched new-row doesn't silently overwrite
+                    # it on create (cmd_594).
+                    return f"'{defn['default']}'"
                 return "''"
             if actual in ('integer', 'number'):
                 if nullable:
