@@ -4188,6 +4188,32 @@ def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
     pool_criteria_prop = pool_props.get(criteria_pool_field, {})
     pool_fk_entity = (pool_criteria_prop.get('x-relationship') or {}).get('target', '')
 
+    # cmd_602: pool_entity may carry required FKs beyond the criteria field
+    # (e.g. inventory.location_id, alongside the criteria's product_id) —
+    # without these, prisma.<pool_entity>.create() in createPool() below omits
+    # a required column and the generated helper throws at seed time. Reuse
+    # resolve_dependencies()/_get_dep_extra_required_fields() (the same
+    # machinery helper_context() uses for populateXxxDependencies) rather than
+    # hand-rolling a second resolver — this also covers transitive chains
+    # (a pool_extra_dep target that itself has a required FK) for free, since
+    # resolve_dependencies() already recurses and returns creation-order deps.
+    pool_deps_raw = resolve_dependencies(pool_entity, schema) if pool_entity else []
+    pool_entity_fk_deps = get_entity_fk_deps(pool_entity, schema, pool_deps_raw) if pool_entity else []
+    pool_extra_fk_props = [fk for fk in pool_entity_fk_deps if fk['prop_name'] != criteria_pool_field]
+    pool_extra_deps = [
+        {
+            'target': d['target'],
+            'var_name': d['var_name'],
+            'pascal': to_pascal_case(d['target']),
+            'title': to_title_case(d['target']),
+            'fk_deps': d.get('fk_deps', []),
+            'extra_required_fields': _get_dep_extra_required_fields(d['target'], schema),
+            'bridge_otos': get_all_internal_fk_deps(d['target'], schema),
+        }
+        for d in pool_deps_raw
+        if d['target'] != pool_fk_entity
+    ]
+
     # orderBy fields
     orderby_raw = policy_cfg.get('orderBy', [])
     orderby_fields = []
@@ -4271,6 +4297,10 @@ def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
         # (attachable) AND injected bridge-parent FKs (noteable). The helper must
         # create each bridge row and set its <bridge>_id, or the create rejects.
         'pool_fk_bridge_otos': get_all_internal_fk_deps(pool_fk_entity, schema) if pool_fk_entity else [],
+        # cmd_602: pool_entity's required FKs other than the criteria field
+        # (e.g. inventory.location_id) — creation-ordered, transitive-safe.
+        'pool_extra_deps':    pool_extra_deps,
+        'pool_extra_fk_props': pool_extra_fk_props,
         'pool_qty_field':     pool_cfg.get('quantityField', 'quantity'),
         'pool_res_field':     pool_cfg.get('reservedField', 'reserved_quantity'),
         'alloc_entity':       result_cfg.get('allocationEntity', ''),
