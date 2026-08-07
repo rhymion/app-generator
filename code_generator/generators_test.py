@@ -1654,6 +1654,51 @@ def _compute_flatten_test_rels(parent: str, pascal: str, definition_key: str, sc
 # Context builders (Jinja2 template contexts)
 # ---------------------------------------------------------------------------
 
+def _resolve_pool_extra_deps(
+    pool_entity: str, schema: dict, enriched_deps: list[dict], exclude_field: str | None,
+) -> tuple[list[dict], list[dict]]:
+    """cmd_602: resolve an x-reservation pool entity's required FKs other than
+    `exclude_field` (the request criteria field already handled by the caller;
+    None when there is no criteria field at all — reservation_nolines_pool_seed).
+
+    Without this, helper_context()'s reservation_lines_pool_seed/
+    reservation_nolines_pool_seed blocks only ever wired the criteria-field FK
+    into the pool entity's create() call (e.g. inventory.product_id), silently
+    omitting any OTHER required FK on the pool entity (e.g. inventory.location_id,
+    added 2026-08-06 alongside product_id) — the generated helper's Prisma call
+    then throws a missing-required-column error at seed time.
+
+    Returns (pool_extra_fk_props, pool_extra_deps):
+      - pool_extra_fk_props: [{prop_name, dep_var_name}] to wire directly into the
+        pool entity's create() data block.
+      - pool_extra_deps: [{target, var_name, pascal, fk_deps, extra_required_fields,
+        bridge_otos}] for FK targets NOT already present in enriched_deps (e.g. not
+        already pulled in by a datagrid child's own autocomplete FK resolution —
+        see purchase_per_item.inventory_id above) — these need dedicated creation
+        code emitted before the pool entity's create(). Targets already present in
+        enriched_deps are referenced directly via their existing var_name instead
+        of being created a second time.
+    """
+    pool_deps_raw = resolve_dependencies(pool_entity, schema) if pool_entity else []
+    pool_entity_fk_deps = get_entity_fk_deps(pool_entity, schema, pool_deps_raw) if pool_entity else []
+    pool_extra_fk_props = [fk for fk in pool_entity_fk_deps if fk['prop_name'] != exclude_field]
+    pool_extra_deps = []
+    for fk in pool_extra_fk_props:
+        if any(d['var_name'] == fk['dep_var_name'] for d in enriched_deps):
+            continue
+        dep_raw = next((d for d in pool_deps_raw if d['var_name'] == fk['dep_var_name']), None)
+        if dep_raw:
+            pool_extra_deps.append({
+                'target': dep_raw['target'],
+                'var_name': dep_raw['var_name'],
+                'pascal': to_pascal_case(dep_raw['target']),
+                'fk_deps': dep_raw.get('fk_deps', []),
+                'extra_required_fields': _get_dep_extra_required_fields(dep_raw['target'], schema),
+                'bridge_otos': get_all_internal_fk_deps(dep_raw['target'], schema),
+            })
+    return pool_extra_fk_props, pool_extra_deps
+
+
 def helper_context(
     parent: str,
     children: list,
@@ -2457,11 +2502,16 @@ def helper_context(
                 None
             )
             if _pool_fk_dep_var_h:
+                _pool_extra_fk_props_h, _pool_extra_deps_h = _resolve_pool_extra_deps(
+                    _pool_entity_h, schema, enriched_deps, _crit_pool_field_h
+                )
                 reservation_lines_pool_seed = {
                     'pool_entity': _pool_entity_h,
                     'pool_qty_field': _pool_qty_h,
                     'criteria_pool_field': _crit_pool_field_h,
                     'pool_fk_dep_var': _pool_fk_dep_var_h,
+                    'pool_extra_fk_props': _pool_extra_fk_props_h,
+                    'pool_extra_deps': _pool_extra_deps_h,
                 }
 
     # Detect count-mode reservation WITHOUT lines: populateDependencies must seed the pool entity
@@ -2476,11 +2526,16 @@ def helper_context(
         if _pool_entity_nolines:
             _pool_def_nolines = _raw_def(_pool_entity_nolines, schema)
             _pool_has_name_nolines = 'name' in (_pool_def_nolines.get('properties') or {})
+            _pool_extra_fk_props_nolines, _pool_extra_deps_nolines = _resolve_pool_extra_deps(
+                _pool_entity_nolines, schema, enriched_deps, None
+            )
             reservation_nolines_pool_seed = {
                 'pool_entity': _pool_entity_nolines,
                 'pool_qty_field': _pool_qty_nolines,
                 'has_name': _pool_has_name_nolines,
                 'pool_title': to_title_case(_pool_entity_nolines),
+                'pool_extra_fk_props': _pool_extra_fk_props_nolines,
+                'pool_extra_deps': _pool_extra_deps_nolines,
             }
 
     return {
