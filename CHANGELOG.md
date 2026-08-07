@@ -6,6 +6,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **The generated "3.3 edits with mixed changes" e2e test for an FK-primary entity could target a
+  fixture row already claimed by a sibling row, throwing `P2002` on save** (cmd_594, closing a gap
+  cmd_592 had identified and left unfixed): for entities whose primary FK also participates in a
+  composite `@@unique` with another field the populate loop holds constant (`asn_line`'s
+  `[asn_id, item_id]`, `purchase_order_line`'s `[purchase_order_id, item_id]`), the edit test
+  previously switched the field to the dependency helper's "second instance," which the loop's own
+  second iteration had already attached via find-or-create — colliding on update. The edit target
+  is now the dependency helper's base (un-suffixed) instance, which the populate loop never
+  produces and is therefore collision-free by construction, for every FK-primary entity (not a
+  per-entity patch). Real Cypress runs confirm both previously-failing specs now pass in full
+  (`asn_line.cy.ts` 9→10/13 passing, `purchase_order_line.cy.ts` 12→13/13 passing, both via their
+  3.3 case). See `docs/knowledge/edit-test-fk-primary-target-uniqueness.md`.
 - **`npm run cleanup`'s defaults deleted write-once stubs while leaving true orphans behind, and a
   reordered `generate-code` → `cleanup` run silently deleted the entire just-generated tree**
   (cmd_450, building on cmd_469's earlier fix that pointed cleanup at the Stage-4 built schema):
