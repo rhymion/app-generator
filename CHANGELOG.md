@@ -176,6 +176,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Internal
+- **`npm run lint` Completion gate step reordered to run before `generate-code`** (cmd_600):
+  CI's `Lint` job never runs `generate-code` (`npm ci && npm run lint` only), but four
+  `.claude/commands/*.md` gates (`update-generator`, `generate-schema`, `update-code`,
+  `add-component`) ran `npm run lint` *after* a step that triggers `generate-code`, linting a
+  much larger, uncalibrated file population (~230 additional generated files) than CI ever
+  checks. This was mistaken for a 15→93 warning regression between commits (investigated as
+  cmd_600) — independent re-measurement found no such regression: the post-generate-code count
+  was already 93 at the exact commit (`c10b1b1a`, 2026-08-04) the "15" ceiling was calibrated
+  against; "15" was itself the pre-generate-code count for that same commit, byte-for-byte
+  matching cmd_554's original per-rule breakdown. `npm run lint` is now the first Completion
+  gate step in all four affected files (and `AGENTS.md`'s generated-code-prerequisites rule is
+  corrected to name it as the one exception), guaranteeing local and CI report the same number.
+  See `docs/knowledge/lint-gate-must-match-ci-precondition.md`.
 - **`cypress/support/db-helpers.ts`/`generated-tasks.ts` were stale, missing `personal_note`**
   (cmd_560): these committed, generator-written files predate the `personal_note` entity
   (added later in the `x-self-only` Stage 1 work) and were never regenerated afterward —

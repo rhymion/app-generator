@@ -29,18 +29,44 @@ Task: $ARGUMENTS
 
 Run in this order:
 
-1. `npm run test:pytest`       — Python unit tests for code generator
-2. `npm run test:vitest`      — vitest unit/component tests
-3. `npm run test:mention-gate` — fixture-schema generate-code → tsc check (see below)
-4. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-5. `npm run check:generated`  — generated code matches templates/schema
-6. `npm run test:e2e:cy:api`  — API Cypress specs only
-7. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
-8. `npm run lint`
+1. `npm run lint`             — **must run before any of the generate-code steps below** (see note)
+2. `npm run test:pytest`       — Python unit tests for code generator
+3. `npm run test:vitest`      — vitest unit/component tests
+4. `npm run test:mention-gate` — fixture-schema generate-code → tsc check (see below)
+5. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+6. `npm run check:generated`  — generated code matches templates/schema
+7. `npm run test:e2e:cy:api`  — API Cypress specs only
+8. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
 9. `npm audit --omit=dev --audit-level=high`
 10. `pip-audit -r requirements.txt`
 
-Steps 1, 2, and 3 run unconditionally, with no "unchanged" exemption: CI's
+**Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
+not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
+run lint`, no `generate-code` step, see `.github/workflows/ci.yml`). On a
+fresh worktree this is naturally true if lint runs first. On a worktree
+where `generate-code` already ran in an earlier session, run `npm run
+cleanup` immediately before this step to remove the generated output first
+(do **not** use `git clean` — forbidden by CLAUDE.md D004).
+
+Running lint *after* generate-code silently lints ~700 additional generated
+files (Cypress specs, helpers, etc.) that CI's Lint job never sees, and
+against a totally different (much larger) warning count than the
+`--max-warnings 20` ceiling was calibrated against — this is not a
+theoretical risk: it is exactly what happened in cmd_554 (2026-08-04), whose
+gate run reported "15 warnings ≤ N=20, PASS" while `develop`'s actual
+post-generate-code warning count was already 93 at that same commit
+(verified independently, 2026-08-07, cmd_600) — the "15" cmd_554 measured is
+byte-for-byte the pre-generate-code count (7 `no-unused-expressions` + 5
+`no-img-element` + 3 `no-unused-vars`), not the post-generate-code state
+their own build step had just produced. There was never a 15→93
+*regression* between commits — the ratchet was calibrated against the wrong
+axis from the day it was introduced, and every subsequent local gate run
+that lints post-generate-code inevitably reports a "regression" against a
+number CI can never reproduce. Running lint first (matching CI's exact
+condition) makes local and CI agree on the same count by construction; see
+`docs/knowledge/lint-gate-must-match-ci-precondition.md`.
+
+Steps 2, 3, and 4 run unconditionally, with no "unchanged" exemption: CI's
 `unit-tests` (`npm run test:vitest`), `pytest` (Python Generator Tests), and
 `mention-gate-fixture` jobs run on every push/PR to `main`/`master` with no
 path filter, so a local gate that conditionally skips any of them can go
@@ -49,13 +75,13 @@ Unit Tests job to fail after cmd_493 (see
 `docs/knowledge/gate-exemption-must-be-machine-checkable.md` — cmd_498, the
 third recurrence of "gate ≠ CI").
 
-**Step 3 (`test:mention-gate`, cmd_535)**: runs a small, standalone fixture
+**Step 4 (`test:mention-gate`, cmd_535)**: runs a small, standalone fixture
 entity (commentable + comment + `x-mention: true`) through the real
 `build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline and
 type-checks just the two generated files that carry the
 `named_constants and has_commentable` branch — the branch cmd_532 found
 broken (`c.creator_id` read off a comment type that only ever declares
-`c.creator?.id`), and that this repo's own `test:e2e:build` (step 4) can
+`c.creator?.id`), and that this repo's own `test:e2e:build` (step 5) can
 never catch because no entity in this repo's own `json_schema.yaml` wires a
 `commentable` relation. ~4s. See `docs/knowledge/mention-system.md`
 "cmd_532: creator include fix and gate-blind-spot confirmation" and
@@ -73,6 +99,8 @@ to extend it to a new dark branch.
 | Test fails | 1. generated test code bug |
 | Other test fails | 1. generation logic missing a case → 2. product code bug |
 
-> **Note**: When running lint or typecheck in isolation, prefix with
-> `npm run generate-code` first. See `AGENTS.md §Generated-code prerequisites
-> for gates` for the full rule.
+> **Note**: When running typecheck (`npx tsc --noEmit`) in isolation, prefix
+> with `npm run generate-code` first. See `AGENTS.md §Generated-code
+> prerequisites for gates` for the full rule. `npm run lint` is the
+> exception — never prefix it with `generate-code` (see Completion gate
+> step 1 above).

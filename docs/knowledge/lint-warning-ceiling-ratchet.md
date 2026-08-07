@@ -28,6 +28,18 @@ count further to 15 without anyone deliberately chasing lint count —
 don't assume a warning count quoted in an old report is still current;
 remeasure with `npm run lint` before picking `N`.
 
+**cmd_600 correction (2026-08-07)**: the "15" above was always the
+*pre-generate-code* count — the only state CI's `Lint` job ever checks
+(`npm ci && npm run lint`, no `generate-code` step). Several
+`.claude/commands/*.md` Completion gates historically ran `npm run lint`
+*after* `test:e2e:build` (which runs `generate-code`), which lints a much
+larger, uncalibrated file set — measured at 93 warnings on this exact same
+commit (`c10b1b1a`), not 15. That divergence was mistaken for a 15→93
+regression between commits until re-measured; there was none. The gate
+docs now run `npm run lint` first, before any generate-code step, so `N=20`
+is guaranteed to mean what this doc says. See
+`lint-gate-must-match-ci-precondition.md` for the full investigation.
+
 ## Operating the ratchet
 
 - **Lowering `N`**: whoever's PR reduces the actual warning count below
