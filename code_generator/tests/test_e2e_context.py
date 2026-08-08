@@ -290,7 +290,7 @@ def test_helper_context_primary_fk_string_labels_are_human_readable():
     # Idempotency for repeated dep-helper invocations is handled separately at
     # the helper template level via findFirst-or-create on the dep's `name`
     # field, NOT by suffixing values with Date.now().
-    assert patient_no["prisma_val"] == "'Test Patient No'"
+    assert patient_no["prisma_val"] == "'Test Patient No A'"
     assert patient_no["prisma_val_unique"] == '`Test Patient No ${i}`'
 
 

@@ -363,7 +363,7 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     """
     if target == 'user':
         return [
-            {'prop_name': 'name', 'prisma_val': f"'Test {title}'", 'prisma_val_unique': f'`Test {title} ${{i}}`', 'prisma_val_second': f"'Test {title} 2'"},
+            {'prop_name': 'name', 'prisma_val': f"'Test {title} A'", 'prisma_val_unique': f'`Test {title} ${{i}}`', 'prisma_val_second': f"'Test {title} B'"},
             {'prop_name': 'email', 'prisma_val': f'`test-{var_name}-${{Date.now()}}@example.com`', 'prisma_val_unique': f'`test-{var_name}-${{Date.now()}}-${{i}}@example.com`', 'prisma_val_second': f'`test-{var_name}-${{Date.now()}}-2@example.com`'},
             {'prop_name': 'password', 'prisma_val': "'test-password'", 'prisma_val_unique': "'test-password'", 'prisma_val_second': "'test-password'"},
         ]
@@ -406,9 +406,9 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
         actual = next((t for t in prop_type_raw if t != 'null'), None) if isinstance(prop_type_raw, list) else prop_type_raw
         fmt = prop.get('format')
         if prop_name == 'name':
-            val = f"'Test {title}'"
+            val = f"'Test {title} A'"
             val_unique = f'`Test {title} ${{i}}`'
-            val_second = f"'Test {title} 2'"
+            val_second = f"'Test {title} B'"
         elif actual == 'string' and prop.get('x-entity-select'):
             val = val_unique = val_second = _self_ref_entity_val
         elif actual == 'string' and fmt == 'date':
@@ -427,9 +427,9 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             # test_helper template (see `dep_lookup_field` / find-or-create).
             # Within a populate(N) loop, ${i} provides intra-loop uniqueness;
             # tests assert on the exact "Test X 1" / "Test X 2" form.
-            val = f"'Test {field_title}'"
+            val = f"'Test {field_title} A'"
             val_unique = f'`Test {field_title} ${{i}}`'
-            val_second = f"'Test {field_title} 2'"
+            val_second = f"'Test {field_title} B'"
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
             val = val_unique = str(mn)
@@ -550,9 +550,9 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
         actual = next((t for t in prop_type if t != 'null'), None) if isinstance(prop_type, list) else prop_type
         fmt = prop.get('format')
         if prop_name == 'name':
-            val = f"'Test {to_title_case(dep_target)}'"
+            val = f"'Test {to_title_case(dep_target)} A'"
             val_unique = f'`Test {to_title_case(dep_target)} ${{i}}`'
-            val_second = f"'Test {to_title_case(dep_target)} 2'"
+            val_second = f"'Test {to_title_case(dep_target)} B'"
         elif actual == 'string' and prop.get('x-entity-select'):
             val = val_unique = val_second = _first_entity_val
         elif actual == 'string' and fmt == 'date':
@@ -565,9 +565,9 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
             val_second = 'new Date(2025, 0, 2).toISOString()'
         elif actual == 'string':
             field_title = to_title_case(prop_name)
-            val = f"'Test {field_title}'"
+            val = f"'Test {field_title} A'"
             val_unique = f'`Test {field_title} ${{i}}`'
-            val_second = f"'Test {field_title} 2'"
+            val_second = f"'Test {field_title} B'"
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
             val = str(mn)
