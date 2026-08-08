@@ -27,20 +27,6 @@ const eslintConfig = defineConfig([
       "@typescript-eslint/no-namespace": "off",
     },
   },
-  // cmd_607: Chai getter-style assertions (`expect(x).to.be.true`,
-  // `.to.exist`) are property accesses, not function calls — TS-ESLint's
-  // no-unused-expressions has no notion of Chai's assertion-chain side
-  // effects, so it flags every one of them as a dead expression statement.
-  // This is a well-known false positive in the eslint+chai ecosystem
-  // (normally solved with eslint-plugin-chai-friendly); the assertions
-  // themselves are correct and intentional, so the rule is disabled only
-  // for the API e2e specs where this pattern appears.
-  {
-    files: ["cypress/e2e/api/**/*.cy.ts"],
-    rules: {
-      "@typescript-eslint/no-unused-expressions": "off",
-    },
-  },
   // eslint-config-next's no-unused-vars default doesn't recognize the
   // repo-wide `_`-prefix convention for intentionally-unused bindings
   // (mock-function type params, override-hook stub args, destructuring

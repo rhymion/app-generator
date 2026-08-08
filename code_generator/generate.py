@@ -241,130 +241,6 @@ def _render(env: Environment, template_name: str, ctx: dict) -> str:
     return tmpl.render(**ctx)
 
 
-# cmd_592's exactRe() helper (test_spec.cy.ts.jinja2) is defined whenever an
-# entity has self-ref deps, but it's only *called* under several independent
-# per-relation conditions (after_create_id_is_expr, flatten_test_rels, etc.)
-# that don't all coincide for every entity with self-ref deps (e.g.
-# approval_flow: has_self_ref_deps=True but none of the call-site conditions
-# fire) — a bare `has_self_ref_deps` guard on the definition alone leaves it
-# unused (cmd_607, TS6133/no-unused-vars). Rather than duplicate every
-# call-site guard in Python to gate the definition precisely, strip the
-# helper post-render if the file ends up with no actual call — self-healing
-# as call-site conditions evolve, instead of drifting out of sync with them.
-_EXACT_RE_HELPER_RE = re.compile(
-    r'\n\n// A self-referential dependency record.*?\n'
-    r"function exactRe\(text: string\): RegExp \{\n"
-    r"  return new RegExp\('\^' \+ text\.replace\(/\[\.\*\+\?\^\$\{\}\(\)\|\[\\\]\\\\\]/g, '\\\\\$&'\) \+ '\$'\);\n"
-    r'\}\n',
-    re.DOTALL,
-)
-
-
-def _strip_unused_exact_re_helper(content: str) -> str:
-    if 'function exactRe(text: string): RegExp {' not in content:
-        return content
-    remainder = _EXACT_RE_HELPER_RE.sub('', content, count=1)
-    if remainder == content:
-        return content  # helper block didn't match the expected shape — leave as-is
-    if 'exactRe(' in remainder:
-        return content  # still called elsewhere in the file — keep the definition
-    return remainder
-
-
-# cmd_607: cypress spec templates seed dependency/record fixtures via
-# `cy.task(...).then((records) => { ... })` / `.then((deps) => { ... })`
-# hundreds of times; whether the body actually reads the callback param
-# (vs. just sequencing the task, e.g. asserting against a hardcoded seed
-# label) depends on which of many independent per-scenario Jinja branches
-# rendered — replicating every branch's condition in Python to gate the
-# param name precisely would be as much surface area as the template itself,
-# and would silently drift out of sync as scenarios are added. Instead,
-# brace-match each callback body post-render and prefix the param with `_`
-# (the repo's established `no-unused-vars` opt-out, see eslint.config.mjs)
-# when it's genuinely never referenced inside — self-healing, and immune to
-# future call-site changes in the templates.
-_THEN_CALLBACK_RE = re.compile(r'\.then\(\((\w+)\) => \{')
-
-
-def _prefix_unused_then_callback_params(content: str) -> str:
-    out = []
-    i = 0
-    n = len(content)
-    while i < n:
-        m = _THEN_CALLBACK_RE.match(content, i)
-        if not m:
-            out.append(content[i])
-            i += 1
-            continue
-        name = m.group(1)
-        body_start = m.end()
-        depth = 1
-        j = body_start
-        quote = None
-        line_comment = False
-        block_comment = False
-        while j < n and depth > 0:
-            c = content[j]
-            if line_comment:
-                if c == '\n':
-                    line_comment = False
-                j += 1
-                continue
-            if block_comment:
-                if content[j:j + 2] == '*/':
-                    block_comment = False
-                    j += 2
-                    continue
-                j += 1
-                continue
-            if quote:
-                if c == '\\':
-                    j += 2
-                    continue
-                if c == quote:
-                    quote = None
-                j += 1
-                continue
-            if c == '/' and content[j + 1:j + 2] == '/':
-                line_comment = True
-                j += 2
-                continue
-            if c == '/' and content[j + 1:j + 2] == '*':
-                block_comment = True
-                j += 2
-                continue
-            if c in ('"', "'", '`'):
-                quote = c
-                j += 1
-                continue
-            if c == '{':
-                depth += 1
-            elif c == '}':
-                depth -= 1
-            j += 1
-        if depth != 0:
-            # Unbalanced — bail out and leave the rest of the file untouched
-            # rather than risk mangling it.
-            out.append(content[i:])
-            return ''.join(out)
-        body_end = j - 1  # index of the matching '}'
-        body = content[body_start:body_end]
-        # A nested `.then((records) => {...})` reusing the same param name
-        # would shadow the outer one — its own declaration text contains
-        # `name` too, which isn't a "use" of the outer binding. Exclude it
-        # before checking, so a same-named nested callback can't mask the
-        # outer param being genuinely dead.
-        usage_check_body = body.replace(f'.then(({name}) => {{', '')
-        used = bool(re.search(rf'\b{re.escape(name)}\b', usage_check_body))
-        # Recurse so nested `.then((records) => {...})` blocks inside this
-        # body are checked independently of whether the outer param is used.
-        body = _prefix_unused_then_callback_params(body)
-        prefix = name if used else f'_{name}'
-        out.append(f'.then(({prefix}) => {{{body}}}')
-        i = j
-    return ''.join(out)
-
-
 # Records every generated file for this run; reset at the top of generate().
 _manifest = ManifestRecorder()
 
@@ -1787,8 +1663,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             # e2e spec (desktop)
             spec_ctx = spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)
             _write(cypress_e2e / f'{parent}.cy.ts',
-                   _prefix_unused_then_callback_params(_strip_unused_exact_re_helper(
-                       _render(env, 'test_spec.cy.ts.jinja2', spec_ctx))))
+                   _render(env, 'test_spec.cy.ts.jinja2', spec_ctx))
 
             # e2e spec (mobile) — separate file under cypress/e2e/mobile/.
             # The mobile list view renders CardListClient instead of the
@@ -1797,15 +1672,13 @@ def generate(schema_path: str, output_dir: str) -> None:
             # of the desktop one. Forms are responsive but currently share
             # the same FormUpsert at every viewport.
             _write(cypress_e2e / 'mobile' / f'{parent}.cy.ts',
-                   _prefix_unused_then_callback_params(
-                       _render(env, 'test_spec_mobile.cy.ts.jinja2', spec_ctx)))
+                   _render(env, 'test_spec_mobile.cy.ts.jinja2', spec_ctx))
 
             # api spec (only if api: true)
             if gen_cfg.get('api'):
                 api_ctx = api_spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)
                 _write(cypress_e2e / 'api' / f'{parent}.cy.ts',
-                       _prefix_unused_then_callback_params(
-                           _render(env, 'test_api_spec.cy.ts.jinja2', api_ctx)))
+                       _render(env, 'test_api_spec.cy.ts.jinja2', api_ctx))
 
             # reservation spec + helper (only for entities with x-reservation count mode)
             res_ctx = reservation_spec_context(parent, schema, children)

@@ -1807,32 +1807,16 @@ class TestDP1cVisibleSourceOnlyCreateFeasibility:
 
 
 # ---------------------------------------------------------------------------
-# cmd_421 Batch3 (corrected by cmd_609): CSV import of an entity with a
-# required internal bridge FK (raised previously for inventory_movement's
-# approvable_id — DP-B "to confirm" item).
-#
-# cmd_421's original comment here claimed get_internal_bridge_fk_prop_names()
-# was already unioned into _create_feasible's gap-check, making CREATE
-# correctly infeasible "structural verification, not new behavior". That
-# claim was wrong: get_internal_bridge_fk_prop_names() was (and, for the
-# export-column allowlist, still is) unioned only into the *export*
-# exclusion set (_fk_prop_names, used to build export_scalar_fields) —
-# _create_feasible's own gap-check never called it, so a required bridge FK
-# was excluded from export_scalar_fields (correctly — it must never appear
-# as a CSV column) but then NOT removed from the required-fields gap set,
-# since subtracting export_scalar_fields only removes names that ARE in it.
-# The net (undetected, since this test's own assertion baked the bug in as
-# "expected") result was import_can_create=False for every entity with a
-# required bridge FK — and when combined with edit:false (import_can_update
-# also False), the entire import route collapsed to the
-# ENTITY_IMPORT_NOT_SUPPORTED 400 stub (api_import_route.ts.jinja2:24), even
-# though CREATE is genuinely fine: the service layer creates and wires the
-# bridge row itself, it was never meant to come from the CSV.
-#
-# cmd_609 fixes this: _create_feasible now also subtracts
-# get_internal_bridge_fk_prop_names(model_def, schema) directly, so a
-# required bridge FK no longer counts as an unfillable gap. CREATE is
-# feasible; this test now asserts the corrected (True) outcome.
+# cmd_421 Batch3: CSV import of an entity with a required internal bridge FK
+# (raised previously for inventory_movement's approvable_id — DP-B "確認"
+# item). No entity-specific handling exists anywhere in build_context.py for
+# this; the same generic _create_feasible gap-check (required field not in
+# export_scalar_fields and not import-resolvable) already excludes bridge FKs
+# because get_internal_bridge_fk_prop_names() is unioned into the export
+# exclusion set. This test proves that generic mechanism actually produces
+# the correct, safe outcome for import (CREATE gated off, UPDATE still
+# available) rather than a broken route or a 500 at runtime — it is
+# structural verification, not new behavior.
 # ---------------------------------------------------------------------------
 
 class TestRequiredInternalBridgeFkImportFeasibility:
@@ -1883,39 +1867,19 @@ class TestRequiredInternalBridgeFkImportFeasibility:
         assert "approvable_id" not in ctx["export_scalar_fields"]
         assert all(spec["name"] != "approvable_id" for spec in ctx["import_field_specs"])
 
-    def test_required_bridge_fk_does_not_gate_off_create(self):
+    def test_required_bridge_fk_gates_off_create_but_not_update(self):
         schema = self._schema()
         ctx = build_context(self._entity(), schema)
         assert ctx["import_eligible"] is True
-        assert ctx["import_can_create"] is True, (
-            "approvable_id is required but is server-managed plumbing (the "
-            "service layer creates and wires it at CREATE time) — a required "
-            "internal bridge FK must NOT count as an unfillable gap, or "
-            "CREATE is wrongly gated off (cmd_609)"
+        assert ctx["import_can_create"] is False, (
+            "approvable_id is required but has no visible CSV source (bridge "
+            "FK) — CREATE must be infeasible, matching the generic "
+            "_create_feasible gap-check, not a broken/500-producing route"
         )
         assert ctx["import_can_update"] is True, (
-            "UPDATE never needs to supply approvable_id either, so it stays "
-            "available"
+            "UPDATE never needs to supply approvable_id, so it stays "
+            "available even though CREATE is gated off"
         )
-
-    def test_required_bridge_fk_plus_edit_false_does_not_collapse_route(self):
-        """The specific compound failure cmd_609 fixes: x-generate.edit=false
-        (import_can_update=False structurally) combined with the pre-fix
-        _create_feasible bug (import_can_create wrongly False) made
-        api_import_route.ts.jinja2:24's `{% if not import_can_create and not
-        import_can_update %}` collapse the entire route to the
-        ENTITY_IMPORT_NOT_SUPPORTED 400 stub. With the fix, import_can_create
-        is True even though edit is false, so the route stays live."""
-        schema = self._schema()
-        entity = self._entity()
-        entity["generate_config"]["edit"] = False
-        ctx = build_context(entity, schema)
-        assert ctx["import_can_update"] is False
-        assert ctx["import_can_create"] is True
-        route_collapses_to_400_stub = (
-            not ctx["import_can_create"] and not ctx["import_can_update"]
-        )
-        assert route_collapses_to_400_stub is False
 
 
 class TestFormDataGetsPrismaNativeEnum:

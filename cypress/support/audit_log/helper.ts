@@ -16,7 +16,7 @@
 // sentinel outright. Since audit_log matches no schema entity, carrying
 // that sentinel here would make a plain `npm run cleanup` — no schema
 // change required — delete this file today.
-import { prisma } from '../db-helpers';
+import { prisma, ALL_ENTITIES } from '../db-helpers';
 import { TEST_CREDENTIALS } from '../test-credentials';
 
 async function getTestUser() {
