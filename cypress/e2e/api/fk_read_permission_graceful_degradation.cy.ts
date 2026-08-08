@@ -74,15 +74,23 @@ describe('FK read-permission graceful degradation — browser session', () => {
       }).then((email) => {
         cy.login(email, TEST_CREDENTIALS.password);
         cy.visit(`/en/approval_flow/edit/${records[0].id}`);
-        // Exactly one clear affordance on the page: the optional FK's.
-        cy.get('button[aria-label="clear"]').should('have.length', 1);
-        cy.get('button[aria-label="clear"]').click();
-        cy.clickButton('Save');
-        cy.url().should('include', '/approval_flow');
-        cy.url().should('not.include', '/approval_flow/edit');
-        cy.visit(`/en/approval_flow/view/${records[0].id}`);
-        cy.checkField('Requestor Role', '');
-        cy.checkField('Approver Role', 'Test Approver Role 1');
+        // Capture the seeded Approver Role label instead of asserting a
+        // hardcoded literal (cmd_620: populateApprovalFlowFullData's
+        // primary-FK-dep row is now callIndex-suffixed to give every call a
+        // fully isolated row, so the exact string depends on how many prior
+        // calls happened in this process — round-trip the actual value
+        // instead of assuming it's always the first-ever call).
+        cy.getFieldValue('Approver Role').then((approverRoleLabel) => {
+          // Exactly one clear affordance on the page: the optional FK's.
+          cy.get('button[aria-label="clear"]').should('have.length', 1);
+          cy.get('button[aria-label="clear"]').click();
+          cy.clickButton('Save');
+          cy.url().should('include', '/approval_flow');
+          cy.url().should('not.include', '/approval_flow/edit');
+          cy.visit(`/en/approval_flow/view/${records[0].id}`);
+          cy.checkField('Requestor Role', '');
+          cy.checkField('Approver Role', approverRoleLabel);
+        });
       });
     });
   });
