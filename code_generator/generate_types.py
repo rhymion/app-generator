@@ -67,7 +67,6 @@ def _extract_children(defn: dict, schema: dict) -> list[dict]:
                     'type': rel_info['type'],
                     'target': rel_info.get('target', child_name),
                     'label_field': rel_info.get('labelField', 'name'),
-                    'secondary_label_field': rel_info.get('secondaryLabelField'),
                 }
             children.append({
                 'name': child_name,
