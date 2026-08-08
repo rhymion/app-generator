@@ -1624,10 +1624,26 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     #            column (invisible source). validate.py's E_IMPORT_KEY_INVISIBLE
     #            gate (DP-1a) rejects such schemas outright; this guards
     #            defense-in-depth for contexts that bypass that gate (e.g. tests).
+    #
+    # cmd_609: a required FK to an internal bridge model (e.g. approvable_id,
+    # x-relationship.type == 'one-to-one_bridge') is server-managed plumbing —
+    # the service layer creates and wires it at CREATE time, it is never a
+    # column a client is expected to fill via CSV. Before this fix, such a
+    # field fell through as an unfillable required gap (it is excluded from
+    # export_scalar_fields precisely because it's internal, but nothing then
+    # removed it from the gap set), so _create_feasible was False even though
+    # CREATE is genuinely fine. That false negative combines with edit:false
+    # (import_can_update also False) to collapse the entire import route to
+    # the ENTITY_IMPORT_NOT_SUPPORTED 400 stub (api_import_route.ts.jinja2:24)
+    # for any x-approval entity that also disallows edit. Reuse the same
+    # get_internal_bridge_fk_prop_names() helper validate.py:326 and
+    # generators_test.py:3551 already call — do not hand-maintain a parallel
+    # name list here, or this exact class of gap recurs a third time.
     _SYSTEM_AND_AUTO_IDS = {
         'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
         'organization_id', 'tenant_id',
     }
+    _internal_bridge_fk_names = get_internal_bridge_fk_prop_names(model_def, schema)
     _fk_display_col_names = {rel['display_col'] for rel in x_relationships_list}
     _import_resolvable_cols = {
         spec['result_col'] for spec in import_fk_specs
@@ -1637,6 +1653,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     _create_required_gaps   = (
         _required_by_schema
         - _SYSTEM_AND_AUTO_IDS
+        - _internal_bridge_fk_names
         - set(export_scalar_fields)
         - _import_resolvable_cols
     )

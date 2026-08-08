@@ -6,6 +6,27 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`_create_feasible` (the CSV CREATE-feasibility gate) never excluded FKs to internal bridge
+  models (e.g. `approvable_id`, `x-relationship.type: one-to-one_bridge`), wrongly counting them as
+  unfillable required columns and gating off `import_can_create`** (cmd_609): a bridge FK is
+  server-managed plumbing the service layer creates and wires at CREATE time — it was already
+  correctly excluded from CSV *export*, but nothing then removed it from the required-fields gap
+  set, so it stayed a "gap" and `import_can_create` came out `False`. Combined with
+  `x-generate.edit: false`, this collapsed the entire generated `import/route.ts` to the
+  `ENTITY_IMPORT_NOT_SUPPORTED` 400 stub (`api_import_route.ts.jinja2:24`), not just CREATE — the
+  concrete trigger is `goods_receipt_line` (cmd_610's pending edit:false ruling for that entity).
+  A prior cmd_421 test for this exact scenario asserted the buggy value as correct, under the
+  mistaken belief the exclusion already happened; that test's assertion and rationale are corrected
+  as part of this fix. `_create_feasible` now subtracts `get_internal_bridge_fk_prop_names()` —
+  the same shared helper `validate.py` and `generators_test.py` already call — rather than a
+  hand-maintained name list. A genuinely unfillable required FK to a real (non-bridge) entity is
+  unaffected and remains infeasible as before. Verified both directions via an isolated
+  `build_context()` harness (no entity in this repo's own schema combines a required bridge FK with
+  edit:false) and updated/new pytest coverage in `test_build_context.py`, including deviation
+  injection (assertions fail against the pre-fix code). Full `code_generator` pytest suite: 1131
+  passed, 0 skipped. See `docs/knowledge/create-feasible-internal-bridge-fk-fix.md`.
+
+### Fixed
 - **x-reservation test-helper generation only ever resolved the pool entity's criteria-field FK,
   silently omitting any OTHER required FK on the pool entity** (cmd_602): when a pool entity (e.g.
   `inventory`) has a required FK beyond the one named in `x-reservation.request.criteria` (e.g.
