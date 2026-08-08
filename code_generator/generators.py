@@ -2799,18 +2799,11 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             else:
                 _rel = child.get('relationship') or {}
                 _lf = _rel.get('label_field', 'name') if _rel else 'name'
-                _slf = _rel.get('secondary_label_field') if _rel else None
                 _target = _rel.get('target', child.get('name', '')) if _rel else child.get('name', '')
                 _built = build_label_expression('f', _lf, _target, schema)
                 if _built['has_format']:
                     uses_format_label_value = True
-                if _slf and isinstance(_lf, str) and '.' not in _lf:
-                    _sec_parts = _slf.split('.')
-                    _sec_rel = _sec_parts[0]
-                    _sec_field = _sec_parts[1] if len(_sec_parts) > 1 else 'name'
-                    _view_val = f"(f.{_sec_rel}?.{_sec_field} || ({_built['expression']}))"
-                else:
-                    _view_val = _built['expression']
+                _view_val = _built['expression']
                 child_view_grids.append(
                     f"      <div>\n"
                     f"        <ListWrapper\n"
@@ -3632,29 +3625,19 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             if _rel.get('type') == 'many-to-many':
                 _uc_label = _rel.get('label_field', 'name')
                 _uc_target = _rel.get('target', child_name)
-                _uc_secondary = _rel.get('secondary_label_field')
             elif child_name == model:
                 _sr = next((r for r in ctx.get('parent_rels_raw', []) if r['target'] == model), None)
                 _uc_label = _sr.get('label_field', 'name') if _sr else 'name'
                 _uc_target = model
-                _uc_secondary = None
             else:
                 _uc_label = 'name'
                 _uc_target = child_name
-                _uc_secondary = None
             # Build the label expression via the shared helper so list/dotted-
-            # path/array forms of labelField all work uniformly. The legacy
-            # secondaryLabelField is honoured only when the primary is a single
-            # field (preserves the historical " - <secondary>" suffix shape).
+            # path/array forms of labelField all work uniformly.
             built = build_label_expression('f', _uc_label, _uc_target, schema)
             if built['has_format']:
                 uses_format_label_value = True
-            if _uc_secondary and isinstance(_uc_label, str) and '.' not in _uc_label:
-                _sec_parts = _uc_secondary.split('.')
-                _sec_rel, _sec_field = _sec_parts[0], _sec_parts[1] if len(_sec_parts) > 1 else 'name'
-                _label_expr = f"{built['expression']} + (f.{_sec_rel} ? ` - ${{f.{_sec_rel}.{_sec_field}}}` : '')"
-            else:
-                _label_expr = built['expression']
+            _label_expr = built['expression']
             child_grid_setup_parts.append(
                 f"  const [localInitial{child_pascal}] = useState<EditableListWrapperItem[]>(() => src.{prop_name}.map(f => ({{\n"
                 f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
@@ -4001,25 +3984,33 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 # for optional-FK lists, look for a labelField in the child's x-relationship back to this entity,
                 # otherwise fall back to 'name'
                 ac_label_field = 'name'
-            ac_secondary = rel.get('secondary_label_field') if is_m2m else None
             target_pascal = to_pascal_case(autocomplete_target)
             self_rel = next((r for r in parent_rels_raw if r['target'] == model), None) if is_self else None
             filter_logic = f'.filter(item => !item.{self_rel["prop_name"]} || item.{self_rel["prop_name"]} === src.id)' if self_rel else ''
             ac_built = build_label_expression('item', ac_label_field, autocomplete_target, schema)
             if ac_built['has_format']:
                 uses_format_label_value = True
-            if ac_secondary and isinstance(ac_label_field, str) and '.' not in ac_label_field:
-                _sec_parts = ac_secondary.split('.')
-                _sec_rel, _sec_field = _sec_parts[0], _sec_parts[1] if len(_sec_parts) > 1 else 'name'
-                ac_label_expr = f"{ac_built['expression']} + (item.{_sec_rel} ? ` - ${{item.{_sec_rel}.{_sec_field}}}` : '')"
-            else:
-                ac_label_expr = ac_built['expression']
+            ac_label_expr = ac_built['expression']
             # Server-search variant: pass initialAutocompleteOptions (limited initial set
             # mapped to {id, label}) and a wrapped searchOptions action. Self-referential
             # filtering (avoid picking your own row) is preserved on top of the server
             # results client-side via excludeOptionIds.
             search_action_var = f'search{target_pascal}Options'
             initial_data_var  = f'initial{target_pascal}s'
+            # Self-referential searches (target === this entity) pass the record
+            # being edited through as `context.formValues` — the only case where
+            # "narrow candidates by a sibling field on the current record" is
+            # semantically meaningful, since source and candidate share the same
+            # shape. Every other entity's autocomplete_filter.ts stub still
+            # defaults to a no-op {} regardless, so this is inert unless a
+            # hand-written filter (see lib/{{ entity }}/autocomplete_filter.ts)
+            # opts in.
+            _search_call_args = 'query, includeIds'
+            if is_self:
+                _search_call_args = (
+                    "query, includeIds, undefined, "
+                    f"{{ callerEntity: '{model}', formValues: src as unknown as Record<string, unknown> }}"
+                )
             _ch_prop_def = model_def.get('properties', {}).get(prop_name, {})
             _ch_width_cols = _ui_width_cols(_ch_prop_def)
             if _ch_width_cols:
@@ -4035,7 +4026,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"        textFieldLabel=\"Name\"\n"
                 f"        textFieldPlaceholder=\"Enter name\"\n"
                 f"        searchOptions={{async (query, includeIds) => {{\n"
-                f"          const rows = (await {search_action_var}?.(query, includeIds)) ?? [];\n"
+                f"          const rows = (await {search_action_var}?.({_search_call_args})) ?? [];\n"
                 f"          return rows{filter_logic}.map(item => ({{ id: item.id, label: {ac_label_expr} }}));\n"
                 f"        }}}}\n"
                 f"        initialAutocompleteOptions={{({initial_data_var} ?? []){filter_logic}.map(item => ({{\n"

@@ -296,13 +296,11 @@ definitions:
       preceded_by:
         type: many-to-many
         target: approval_flow
-        labelField: entity_name
-        secondaryLabelField: approver_role.name
+        labelField: [entity_name, approver_role.name]
       followed_by:
         type: many-to-many
         target: approval_flow
-        labelField: entity_name
-        secondaryLabelField: approver_role.name
+        labelField: [entity_name, approver_role.name]
     x-import-key: [entity_name]
     x-display:
       table:
