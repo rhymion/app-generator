@@ -155,6 +155,8 @@ export async function POST(request: NextRequest) {
         include: {{ spec.prisma_include | tojson }},
 {% if spec.lookup_entity_filter_by_org %}
         where: { organization_id: { in: _importOrgIds } },
+{% elif spec.lookup_entity_filter_by_self_id %}
+        where: { id: { in: _importOrgIds } },
 {% endif %}
       });
       for (const c of _{{ spec.var_prefix }}_candidates) {
@@ -185,7 +187,7 @@ export async function POST(request: NextRequest) {
       {
 {% endif %}
         const _{{ spec.var_prefix }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
-          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% endif %} },
+          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% elif spec.lookup_entity_filter_by_self_id %}, id: { in: _importOrgIds }{% endif %} },
           select: { id: true },
         });
         if (_{{ spec.var_prefix }}_rows.length === 0) {
@@ -251,7 +253,7 @@ export async function POST(request: NextRequest) {
       {
 {% endif %}
         const _{{ spec.var_prefix }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
-          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% endif %} },
+          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% elif spec.lookup_entity_filter_by_self_id %}, id: { in: _importOrgIds }{% endif %} },
           select: { id: true },
         });
         if (_{{ spec.var_prefix }}_rows.length === 0) {
