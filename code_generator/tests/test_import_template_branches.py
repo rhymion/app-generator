@@ -380,3 +380,58 @@ def test_non_organization_lookup_unaffected_by_self_id_filter(env):
     assert 'where: { name: _role_csv_val },' in rendered
     assert 'id: { in: _importOrgIds }' not in rendered
     assert 'organization_id: { in: _importOrgIds }' not in rendered
+# cmd_607: generator-side lint-debt fix. `fkData` is only ever *read* by the
+# CREATE action (spread into the create payload) — declaring it and writing
+# to it unconditionally left it as a dead `const` (and dead per-spec writes)
+# on any entity with import_can_create=False and >=1 non-key FK spec (real
+# example: `user`, discovered via a real generate-code + lint run — see
+# docs/knowledge/cmd607-generator-lint-debt-fix.md). The resolved `_xxx`
+# value itself (used by updateData) must still be computed regardless.
+# ---------------------------------------------------------------------------
+
+_SIMPLE_NON_KEY_SPEC = {
+    'csv_col': 'requestor_role_name', 'is_dotted': True, 'lookup_field': 'name',
+    'var_prefix': 'requestor_role', 'lookup_entity': 'role', 'lookup_entity_pascal': 'Role',
+    'result_col': 'requestor_role_id', 'fk_nullable': True, 'raw': 'requestor_role.name',
+    'is_key': False, 'lookup_entity_filter_by_org': False,
+}
+
+
+def test_import_can_create_false_omits_dead_fkdata_const_and_writes(env):
+    ctx = _ctx(import_can_create=False, import_fk_specs=[_SIMPLE_NON_KEY_SPEC])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert 'const fkData' not in rendered
+    assert 'fkData.requestor_role_id' not in rendered
+    # The resolved value is still computed — updateData still needs it.
+    assert 'let _requestor_role_id: string | null = null;' in rendered
+    assert 'updateData.requestor_role_id = _requestor_role_id;' in rendered
+
+
+def test_import_can_create_false_omits_dead_fkdata_for_composite_spec(env):
+    ctx = _ctx(import_can_create=False, import_fk_specs=[_COMPOSITE_SPEC])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert 'const fkData' not in rendered
+    assert 'fkData.inventory_id' not in rendered
+    assert 'updateData.inventory_id = _inventory_id;' in rendered
+
+
+def test_import_can_create_true_still_declares_and_writes_fkdata(env):
+    """Non-regression companion to the two tests above."""
+    ctx = _ctx(import_can_create=True, import_fk_specs=[_SIMPLE_NON_KEY_SPEC])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert 'const fkData: Record<string, unknown> = {};' in rendered
+    assert 'fkData.requestor_role_id = _requestor_role_id;' in rendered
+
+
+def test_format_label_value_never_imported(env):
+    """formatLabelValue was imported unconditionally but never referenced
+    anywhere in this template — composite/dotted FK labels are matched via
+    import_label_expr (built in build_context.py), not this helper. Dead in
+    every entity's generated import route, regardless of branch."""
+    for ctx in (
+        _ctx(),
+        _ctx(import_can_create=False, import_can_update=False),
+        _ctx(import_fk_specs=[_COMPOSITE_SPEC]),
+    ):
+        rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+        assert 'formatLabelValue' not in rendered

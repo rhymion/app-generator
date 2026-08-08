@@ -6,7 +6,6 @@ import { getModelPermissions, assertPermission, canAccess{% if should_filter_by_
 import { handleApiError } from '@/lib/api-auth';
 import { unescapeImportValue } from '@/lib/_csv';
 import { generateImportToken, verifyImportToken } from '@/lib/_import';
-import { formatLabelValue } from '@/lib/_format';
 {% if should_filter_by_org or any_dotted_fk_needs_org_filter %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
@@ -211,7 +210,12 @@ export async function POST(request: NextRequest) {
       // cmd_530: non-key FK relations that are screen-editable — resolved the
       // same way as a dotted x-import-key, but written to fkData (CREATE and
       // UPDATE) instead of keyWhere (these never participate in row matching).
+      // cmd_607: fkData itself is only ever read by the CREATE branch below —
+      // declaring it unconditionally left it as a dead variable on
+      // create-not-supported entities (e.g. user), so it's gated the same way.
+{% if import_can_create %}
       const fkData: Record<string, unknown> = {};
+{% endif %}
 {% for spec in import_fk_specs %}
 {% if not spec.is_key %}
 {% if spec.is_composite %}
@@ -239,7 +243,9 @@ export async function POST(request: NextRequest) {
         }
         _{{ spec.result_col }} = _{{ spec.var_prefix }}_ids[0];
       }
+{% if import_can_create %}
       fkData.{{ spec.result_col }} = _{{ spec.result_col }};
+{% endif %}
 {% else %}
       // Non-key FK: {{ spec.raw }} → lookup {{ spec.lookup_entity }} by {{ spec.lookup_field }}
       let _{{ spec.result_col }}: string | null = null;
@@ -268,7 +274,9 @@ export async function POST(request: NextRequest) {
         }
         _{{ spec.result_col }} = _{{ spec.var_prefix }}_rows[0].id;
       }
+{% if import_can_create %}
       fkData.{{ spec.result_col }} = _{{ spec.result_col }};
+{% endif %}
 {% endif %}
 {% endif %}
 {% endfor %}
