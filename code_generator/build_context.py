@@ -1249,6 +1249,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     has_org_rel          = any(r['target'] == 'organization' for r in parent_rels)
     should_filter_by_org = has_org_rel and model not in ('organization', 'user')
+    # cmd_611/612: an org-scoped model whose organization relation is itself
+    # OPTIONAL (organization_id nullable) needs its read-scope filter to admit
+    # NULL rows too — `organization_id: { in: [...] }` never matches NULL in
+    # SQL, so without this an org-less row is invisible to every org-scoped
+    # actor, including its own creator, the moment organization stops being
+    # required. Harmless no-op for a required-org model: organization_id is
+    # never null there, so the extra OR branch never actually fires.
+    org_relationship_optional = should_filter_by_org and not next(
+        (r['required'] for r in parent_rels if r['target'] == 'organization'), True
+    )
 
     # is_self_only / self_only_admin_bypass: entity-level access invariant
     # ("only the record's creator can access it") that no permission setting
@@ -1474,6 +1484,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             )
             _lookup_has_org = 'organization_id' in _lookup_entity_def.get('properties', {})
             _lookup_entity_filter_by_org = _lookup_has_org and _lookup_entity not in ('organization', 'user')
+            # cmd_611/612: the org/user exclusion above is correct (neither
+            # model has its own organization_id to filter on), but when the
+            # lookup target IS 'organization' itself, that leaves the
+            # candidate search entirely unfiltered — a CSV row naming ANY
+            # organization in the system (not just one the actor belongs
+            # to) resolves and gets attached. Filter organization candidates
+            # by their OWN id being in the actor's associated-org list
+            # instead of by an organization_id column that doesn't exist
+            # on this model.
+            _lookup_entity_filter_by_self_id = _lookup_entity == 'organization'
             import_key_specs.append({
                 'raw':                  _raw,
                 'is_dotted':            True,
@@ -1485,6 +1505,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'result_col':           _fk_col,                        # e.g. 'role_id'
                 'fk_nullable':          _fk_nullable,
                 'lookup_entity_filter_by_org': _lookup_entity_filter_by_org,
+                'lookup_entity_filter_by_self_id': _lookup_entity_filter_by_self_id,
             })
         else:
             import_key_specs.append({
@@ -1496,6 +1517,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'result_col':    _raw,
                 'fk_nullable':   False,
                 'lookup_entity_filter_by_org': False,
+                'lookup_entity_filter_by_self_id': False,
             })
 
     # import_fk_specs (cmd_530): generalizes the dotted-FK lookup-by-label
@@ -1520,7 +1542,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # writable via import just because they're visible in export. Both
     # exclusion classes remain exported but become import_unimportable_columns
     # below (fail loud instead of silent drop).
-    def _fk_nullable_and_org_filter(_prop_name: str, _lookup_entity: str) -> tuple[bool, bool]:
+    def _fk_nullable_and_org_filter(_prop_name: str, _lookup_entity: str) -> tuple[bool, bool, bool]:
         _fk_prop  = model_def.get('properties', {}).get(_prop_name, {})
         _fk_types = _fk_prop.get('type', [])
         if isinstance(_fk_types, str):
@@ -1532,7 +1554,11 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         )
         _lookup_has_org = 'organization_id' in _lookup_entity_def.get('properties', {})
         _lookup_entity_filter_by_org = _lookup_has_org and _lookup_entity not in ('organization', 'user')
-        return _fk_nullable, _lookup_entity_filter_by_org
+        # cmd_611/612: see the matching comment in the dotted x-import-key
+        # block above — 'organization' as a lookup target needs a self-id
+        # filter, not an organization_id filter (it has no such column).
+        _lookup_entity_filter_by_self_id = _lookup_entity == 'organization'
+        return _fk_nullable, _lookup_entity_filter_by_org, _lookup_entity_filter_by_self_id
 
     _key_relation_names = {s['var_prefix'] for s in import_key_specs if s['is_dotted']}
     import_fk_specs = [
@@ -1544,7 +1570,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         if r['prop_name'] in readonly_fields:
             continue
         _lookup_entity = r['target']
-        _fk_nullable, _lookup_entity_filter_by_org = _fk_nullable_and_org_filter(r['prop_name'], _lookup_entity)
+        _fk_nullable, _lookup_entity_filter_by_org, _lookup_entity_filter_by_self_id = (
+            _fk_nullable_and_org_filter(r['prop_name'], _lookup_entity)
+        )
         if r['simple_label'] is None:
             import_fk_specs.append({
                 'raw':                  r['field'],
@@ -1557,6 +1585,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'result_col':           r['prop_name'],
                 'fk_nullable':          _fk_nullable,
                 'lookup_entity_filter_by_org': _lookup_entity_filter_by_org,
+                'lookup_entity_filter_by_self_id': _lookup_entity_filter_by_self_id,
                 'is_key':               False,
                 'import_label_expr':    r['import_label_expr'],
                 'prisma_include':       r['prisma_include'],
@@ -1574,6 +1603,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             'result_col':           r['prop_name'],
             'fk_nullable':          _fk_nullable,
             'lookup_entity_filter_by_org': _lookup_entity_filter_by_org,
+            'lookup_entity_filter_by_self_id': _lookup_entity_filter_by_self_id,
             'is_key':               False,
         })
 
@@ -1584,8 +1614,13 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # parent with a dotted FK into an org-scoped lookup entity). Computed
     # from import_fk_specs (superset of import_key_specs' dotted entries)
     # so newly-importable non-key FKs pull the org-scoped lookup gate in too.
+    # cmd_611/612: also fires for lookup_entity_filter_by_self_id (the
+    # 'organization' lookup-target case) — that filter needs the same
+    # _importOrgIds list, just applied to the candidate's own id instead of
+    # an organization_id column.
     any_dotted_fk_needs_org_filter = any(
-        s['lookup_entity_filter_by_org'] for s in import_fk_specs
+        s['lookup_entity_filter_by_org'] or s['lookup_entity_filter_by_self_id']
+        for s in import_fk_specs
     )
 
     # import_unimportable_columns (cmd_530): exported FK display columns with
@@ -2694,6 +2729,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         parent_rels_raw=parent_rels_raw,
         relationship_targets=relationship_targets,
         should_filter_by_org=should_filter_by_org,
+        org_relationship_optional=org_relationship_optional,
         is_self_only=is_self_only,
         self_only_admin_bypass=self_only_admin_bypass,
         # CSV export (Phase 1): natural-key columns + FK flatten metadata

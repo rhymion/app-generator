@@ -2025,3 +2025,102 @@ class TestSelfOnlyContextFlags:
         ctx = build_context(_entity("widget"), self._schema({"admin_bypass": False}))
         assert ctx["is_self_only"] is True
         assert ctx["self_only_admin_bypass"] is False
+
+
+# ---------------------------------------------------------------------------
+# cmd_611/612: org_relationship_optional. An org-scoped model whose own
+# `organization` relationship is OPTIONAL needs its read-scope filters to
+# admit NULL rows too — `organization_id: { in: [...] }` never matches NULL
+# in SQL, so without this an org-less row becomes invisible to every
+# org-scoped actor, including its own creator, the moment organization
+# stops being required. A required-org model must NOT get this OR-null
+# branch (it would be meaningless dead code — organization_id is never null
+# there).
+# ---------------------------------------------------------------------------
+
+class TestOrgRelationshipOptional:
+    @staticmethod
+    def _schema(organization_required: bool) -> dict:
+        return {
+            "definitions": {
+                "organization": {
+                    "type": "object",
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name"] + (["organization_id"] if organization_required else []),
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", nullable=not organization_required),
+                    },
+                },
+            }
+        }
+
+    def test_flag_true_when_organization_optional(self):
+        ctx = build_context(_entity("widget"), self._schema(organization_required=False))
+        assert ctx["should_filter_by_org"] is True
+        assert ctx["org_relationship_optional"] is True
+
+    def test_flag_false_when_organization_required(self):
+        ctx = build_context(_entity("widget"), self._schema(organization_required=True))
+        assert ctx["should_filter_by_org"] is True
+        assert ctx["org_relationship_optional"] is False
+
+    def test_flag_false_when_no_organization_relationship_at_all(self):
+        schema = {
+            "definitions": {
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+            }
+        }
+        ctx = build_context(_entity("widget"), schema)
+        assert ctx["should_filter_by_org"] is False
+        assert ctx["org_relationship_optional"] is False
+
+
+class TestOrgRelationshipOptionalRenderedTemplates:
+    """Deviation-injection coverage for the four templates patched to admit
+    NULL-organization rows: getters.ts.jinja2 (list + detail),
+    actions.ts.jinja2 (delete), api_detail_route.ts.jinja2 (PUT + DELETE),
+    api_import_route.ts.jinja2 (import match-by-key)."""
+
+    @staticmethod
+    def _entity_ctx(organization_required: bool):
+        schema = TestOrgRelationshipOptional._schema(organization_required)
+        return build_context(_entity("widget"), schema)
+
+    @staticmethod
+    def _env():
+        from generate import _make_env
+        return _make_env()
+
+    def test_getters_list_admits_null_when_optional(self):
+        from generators import service_context
+        ctx = self._entity_ctx(organization_required=False)
+        full_ctx = {**ctx, **service_context(ctx, TestOrgRelationshipOptional._schema(False))}
+        rendered = self._env().get_template('getters.ts.jinja2').render(**full_ctx)
+        assert 'OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }]' in rendered
+
+    def test_getters_list_stays_unfiltered_or_when_required(self):
+        from generators import service_context
+        ctx = self._entity_ctx(organization_required=True)
+        full_ctx = {**ctx, **service_context(ctx, TestOrgRelationshipOptional._schema(True))}
+        rendered = self._env().get_template('getters.ts.jinja2').render(**full_ctx)
+        assert 'and.push({ organization_id: { in: associatedOrganizationIds } });' in rendered
+        assert 'organization_id: null' not in rendered
+
+    def test_api_detail_route_admits_null_when_optional(self):
+        ctx = self._entity_ctx(organization_required=False)
+        rendered = self._env().get_template('api_detail_route.ts.jinja2').render(**ctx)
+        assert rendered.count('OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }]') == 2
+
+    def test_api_detail_route_stays_unfiltered_or_when_required(self):
+        ctx = self._entity_ctx(organization_required=True)
+        rendered = self._env().get_template('api_detail_route.ts.jinja2').render(**ctx)
+        assert 'organization_id: null' not in rendered

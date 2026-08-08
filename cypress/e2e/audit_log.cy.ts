@@ -8,7 +8,7 @@
 // replace this file with generated content. No conflict error is raised;
 // the only signal would be a diff after the next generate-code run.
 import { TEST_CREDENTIALS } from '../support/test-credentials';
-import { getDataGridRowCount, getDataGridTotalRowCount } from '../support/datagrid-helpers';
+import { getDataGridTotalRowCount } from '../support/datagrid-helpers';
 
 describe('Testing Audit Log pages and their behavior', () => {
   beforeEach(() => {
