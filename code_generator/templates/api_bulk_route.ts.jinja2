@@ -71,7 +71,14 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const { userId: actorId } = await authenticateApiKey(request);
+{% if is_self_only %}
+    // x-self-only: the call still enforces base 'update' permission as a
+    // side effect, but the richPerms breakdown itself is unused below —
+    // ownership is the sole gate (see canUpdate), so it isn't bound to a name.
+    await requireApiPermission(actorId, '{{ parent }}', 'update');
+{% else %}
     const richPerms = await requireApiPermission(actorId, '{{ parent }}', 'update');
+{% endif %}
     const body = await request.json();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bulkItems: any[] = Array.isArray(body) ? body : [body];
@@ -131,7 +138,14 @@ export async function PUT(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const { userId: actorId } = await authenticateApiKey(request);
+{% if is_self_only %}
+    // x-self-only: the call still enforces base 'delete' permission as a
+    // side effect, but the richPerms breakdown itself is unused below —
+    // ownership is the sole gate (see canDelete), so it isn't bound to a name.
+    await requireApiPermission(actorId, '{{ parent }}', 'delete');
+{% else %}
     const richPerms = await requireApiPermission(actorId, '{{ parent }}', 'delete');
+{% endif %}
     const body = await request.json();
     const bulkItems: { id: string }[] = Array.isArray(body) ? body : [body];
 

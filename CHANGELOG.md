@@ -6,24 +6,26 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
-- **nanoid HIGH CVE (GHSA-2v37-7h3g-55p8) blocking the Dependency Audit gate on 6 open PRs** (cmd_616):
-  `nanoid <3.3.17` has a DoS where custom generators can loop indefinitely when size is zero.
-  Transitive via `my-next` → `@tailwindcss/postcss` → `postcss` (`"nanoid": "^3.3.16"`) → `nanoid`;
-  not a direct dependency, so `package.json` is unchanged. Bumped the single `node_modules/nanoid`
-  lockfile entry from 3.3.16 to 3.3.18 (version/resolved/integrity only, a 3-line diff), matching
-  what npm's own resolver picks within postcss's declared range — deliberately not `npm update
-  nanoid`, which additionally re-normalized ~150 unrelated lockfile lines and silently dropped the
-  `@rolldown/binding-wasm32-wasi` → `@emnapi/core`/`@emnapi/runtime` entries (the same lockfile-drop
-  class as cmd_442/cmd_459). Verified `rm -rf node_modules && npm ci` exits 0 and `npm audit
-  --omit=dev --audit-level=high` (CI's exact Dependency Audit command) goes from 1 high to 0
-  vulnerabilities. Same fix cherry-picked onto the 6 PR branches this CVE was blocking
-  (#304/#305/#306/#307/#308/#309), each confirmed green on a fresh CI run (new run IDs, not
-  attempt-replays). `app-template`/`inventory-app` (proj_c/proj_g) carry the same vulnerable nanoid
-  in their `app-generator/package-lock.json`, but neither repo's CI runs `npm audit` in any form, so
-  the exposure there is currently undetected by automation — reported, not fixed, here (out of this
-  fix's scope).
+- **Generator-side lint debt invisible to CI (cmd_607)**: `npm run generate-code && npm run lint`
+  surfaced 83 eslint warnings (0 errors) that CI's `Lint` job — which runs before `generate-code`,
+  never after — could never see. Broken down: 48 were a Chai getter-assertion false positive
+  (`expect(x).to.be.true`/`.to.exist` read as unused expressions by
+  `@typescript-eslint/no-unused-expressions`, which has no notion of Chai's assertion-chain side
+  effects), fixed by scoping that rule off for `cypress/e2e/api/**/*.cy.ts` in `eslint.config.mjs`.
+  The remaining 30 `no-unused-vars` warnings were three unrelated dead-binding bugs in
+  `api_import_route.ts.jinja2` (`formatLabelValue` imported but never referenced; `fkData` declared
+  and written even when `import_can_create` is false and nothing reads it) and
+  `api_bulk_route.ts.jinja2` (`richPerms` bound even for `x-self-only` entities, which never read it
+  — the permission check itself still runs, just unbound), plus two ordinary stale imports in
+  hand-written (non-generated) `audit_log` test files, plus 22 warnings whose triggering condition is
+  scattered across dozens of independent scenario branches in `test_spec.cy.ts.jinja2` — fixed via two
+  new self-healing post-render helpers in `generate.py` (`_strip_unused_exact_re_helper`,
+  `_prefix_unused_then_callback_params`) that inspect the actual rendered TypeScript output rather
+  than trying to mirror every branch condition in Python. 83 → 5 warnings (the remaining 5 are an
+  unrelated, pre-existing `@next/next/no-img-element` suggestion on static `components/_standard/*`
+  files, deliberately out of scope). 15 new pytest tests, 0 regressions (1130 → 1145 passed, 0 SKIP).
+  See `docs/knowledge/cmd607-generator-lint-debt-fix.md`.
 
-### Fixed
 - **x-reservation test-helper generation only ever resolved the pool entity's criteria-field FK,
   silently omitting any OTHER required FK on the pool entity** (cmd_602): when a pool entity (e.g.
   `inventory`) has a required FK beyond the one named in `x-reservation.request.criteria` (e.g.
