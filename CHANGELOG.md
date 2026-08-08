@@ -6,6 +6,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **nanoid HIGH CVE (GHSA-2v37-7h3g-55p8) blocking the Dependency Audit gate on 6 open PRs** (cmd_616):
+  `nanoid <3.3.17` has a DoS where custom generators can loop indefinitely when size is zero.
+  Transitive via `my-next` → `@tailwindcss/postcss` → `postcss` (`"nanoid": "^3.3.16"`) → `nanoid`;
+  not a direct dependency, so `package.json` is unchanged. Bumped the single `node_modules/nanoid`
+  lockfile entry from 3.3.16 to 3.3.18 (version/resolved/integrity only, a 3-line diff), matching
+  what npm's own resolver picks within postcss's declared range — deliberately not `npm update
+  nanoid`, which additionally re-normalized ~150 unrelated lockfile lines and silently dropped the
+  `@rolldown/binding-wasm32-wasi` → `@emnapi/core`/`@emnapi/runtime` entries (the same lockfile-drop
+  class as cmd_442/cmd_459). Verified `rm -rf node_modules && npm ci` exits 0 and `npm audit
+  --omit=dev --audit-level=high` (CI's exact Dependency Audit command) goes from 1 high to 0
+  vulnerabilities. Same fix cherry-picked onto the 6 PR branches this CVE was blocking
+  (#304/#305/#306/#307/#308/#309), each confirmed green on a fresh CI run (new run IDs, not
+  attempt-replays). `app-template`/`inventory-app` (proj_c/proj_g) carry the same vulnerable nanoid
+  in their `app-generator/package-lock.json`, but neither repo's CI runs `npm audit` in any form, so
+  the exposure there is currently undetected by automation — reported, not fixed, here (out of this
+  fix's scope).
+
+### Fixed
 - **x-reservation test-helper generation only ever resolved the pool entity's criteria-field FK,
   silently omitting any OTHER required FK on the pool entity** (cmd_602): when a pool entity (e.g.
   `inventory`) has a required FK beyond the one named in `x-reservation.request.criteria` (e.g.
