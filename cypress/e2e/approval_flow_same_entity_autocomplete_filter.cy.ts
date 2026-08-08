@@ -95,7 +95,20 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
             // Edit rendered `entity_name + ' - ' + approver_role.name` (dash
             // form) — two different strings for the same row. Both must now
             // render this exact space-joined composite.
-            const expectedLabel = `permission ${deps.approverRole.name}`;
+            //
+            // The "Preceded By" entry renders the PREDECESSOR row's own
+            // composite label (its own entity_name + its own approver_role),
+            // not editTarget's — predecessor was created with
+            // approver_role_id: deps.approverRole2.id, so the expected label
+            // must reference approverRole2, not approverRole. This was
+            // previously masked: pre-cmd_618, 'Test Approver Role' (editTarget's
+            // role, no suffix) was a byte-for-byte PREFIX of 'Test Approver
+            // Role 2' (predecessor's actual rendered role via the old digit-2
+            // dep suffix), so cy.contains() partial-matched it by accident.
+            // cmd_618's letter-indexed dep suffixes ('...Role A' / '...Role B')
+            // are no longer prefixes of one another, so the wrong-variable bug
+            // this masked is now a real assertion failure — fixed here.
+            const expectedLabel = `permission ${deps.approverRole2.name}`;
             cy.visit(`/en/approval_flow/edit/${editTarget.id}`);
             cy.contains(expectedLabel).should('exist');
             cy.visit(`/en/approval_flow/view/${editTarget.id}`);

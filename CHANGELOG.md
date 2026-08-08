@@ -367,6 +367,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Internal
+- **Generated test helper dep records now use a letter-indexed name suffix(`'Test {Title} A'`/`'Test {Title} B'`) instead of `'Test {Title}'`/`'Test {Title} 2'`** (cmd_618, Phase 1): 
+  the old dep naming collided byte-for-byte with `populate*Data(n)`'s loop rows (`` `Test {Title} ${i}` ``)
+  once a loop reached `i=2`, causing find-or-create to resolve both to the same DB row. Letters and 
+  digits are disjoint at the first differing byte, so the dep and loop namespaces can never intersect. 
+  `_get_dep_populate_fields()`/`_get_dep_extra_required_fields()` in `code_generator/generators_test.py` 
+  updated across every value branch; `prisma_val_unique` (loop values) unchanged. 
+  See `docs/knowledge/cmd614-test-data-uniqueness-design.md` §3.
 - **`exactRe()` exact-match test helper widened from 2 self-referential entities to all entities;
   the two post-render cleanup helpers it exposed gaps in are now anchored on code structure
   instead of comment prose, and fail loudly instead of silently no-op'ing** (cmd_614/cmd_618):

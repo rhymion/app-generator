@@ -44,20 +44,20 @@ class TestGenAssertCommandsSelfRefFK:
         fields = [_fk_field('parent_id', 'procedure', 'Parent')]
         fk_dep_vars = {'parent_id': 'parent'}
         cmds = gen_assert_commands(fields, 'Procedure', '  ', fk_dep_vars)
-        assert cmds == ["  cy.checkField('Parent', 'Test Parent');"]
+        assert cmds == ["  cy.checkField('Parent', 'Test Parent A');"]
 
     def test_self_ref_fk_without_dep_vars_falls_back_to_entity_title(self):
         fields = [_fk_field('parent_id', 'procedure', 'Parent')]
         cmds = gen_assert_commands(fields, 'Procedure', '  ', fk_dep_vars=None)
         # fallback: to_title_case(dep_target) = 'Procedure'
-        assert cmds == ["  cy.checkField('Parent', 'Test Procedure');"]
+        assert cmds == ["  cy.checkField('Parent', 'Test Procedure A');"]
 
     def test_assignee_fk_uses_prop_stem_title(self):
-        """assignee_id → user_account, but dep var is 'assignee' → 'Test Assignee'."""
+        """assignee_id → user_account, but dep var is 'assignee' → 'Test Assignee A'."""
         fields = [_fk_field('assignee_id', 'user_account', 'Assignee')]
         fk_dep_vars = {'assignee_id': 'assignee'}
         cmds = gen_assert_commands(fields, 'Procedure', '  ', fk_dep_vars)
-        assert cmds == ["  cy.checkField('Assignee', 'Test Assignee');"]
+        assert cmds == ["  cy.checkField('Assignee', 'Test Assignee A');"]
 
 
 class TestGenAssertCommandsNormalFK:
@@ -67,17 +67,17 @@ class TestGenAssertCommandsNormalFK:
         fields = [_fk_field('product_id', 'product', 'Product')]
         fk_dep_vars = {'product_id': 'product'}
         cmds = gen_assert_commands(fields, 'Order', '  ', fk_dep_vars)
-        assert cmds == ["  cy.checkField('Product', 'Test Product');"]
+        assert cmds == ["  cy.checkField('Product', 'Test Product A');"]
 
     def test_normal_fk_without_dep_vars_uses_target_title(self):
         fields = [_fk_field('product_id', 'product', 'Product')]
         cmds = gen_assert_commands(fields, 'Order', '  ')
-        assert cmds == ["  cy.checkField('Product', 'Test Product');"]
+        assert cmds == ["  cy.checkField('Product', 'Test Product A');"]
 
     def test_snake_case_target_titlecased(self):
         fields = [_fk_field('feature_story_id', 'feature_story', 'Feature Story')]
         cmds = gen_assert_commands(fields, 'Task', '  ')
-        assert cmds == ["  cy.checkField('Feature Story', 'Test Feature Story');"]
+        assert cmds == ["  cy.checkField('Feature Story', 'Test Feature Story A');"]
 
     def test_text_field_is_unaffected(self):
         fields = [_text_field('name', 'Name')]
@@ -97,6 +97,6 @@ class TestFillAssertSymmetry:
         fk_dep_vars = {'parent_id': 'parent'}
         fill_cmds = gen_fill_commands(fields, 'Procedure', '  ', fk_dep_vars)
         assert_cmds = gen_assert_commands(fields, 'Procedure', '  ', fk_dep_vars)
-        # fill references deps.parent.name; assert expects 'Test Parent'
+        # fill references deps.parent.name; assert expects 'Test Parent A'
         assert "deps.parent.name" in fill_cmds[0]
-        assert "'Test Parent'" in assert_cmds[0]
+        assert "'Test Parent A'" in assert_cmds[0]
