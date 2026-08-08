@@ -2613,9 +2613,23 @@ def spec_context(
 
     # Collect ALL user_account FK fields (required and optional) for fill/assert commands.
     # req_ua_spec: required only (for section 2.1, 5.x); all_ua_spec: all (for section 2.2)
+    # x-server-value fields are excluded here (cmd_611/612): the field is
+    # always readonly and excluded from every form input (create and edit) —
+    # see docs/knowledge/x-server-value-actor-delegation.md — so a UI test
+    # trying to cy.selectAutocomplete() it fails outright (`Expected to find
+    # element: 'filter', but never found it`), since the form never renders
+    # that autocomplete input in the first place. The API-level test scaffold
+    # is unaffected: it supplies the value directly as a request body field,
+    # not through this UI form-fill path.
+    _server_value_prop_names = {
+        p for p, pdef in properties.items()
+        if isinstance(pdef, dict) and pdef.get('x-server-value') is not None
+    }
     req_ua_spec = []
     all_ua_spec = []
     for r in relationships:
+        if r['prop_name'] in _server_value_prop_names:
+            continue
         if r['target'] == 'user' and r['prop_name'] not in ('creator_id', 'updater_id'):
             var_name = to_camel_case(re.sub(r'_id$', '', r['prop_name']))
             field_label = to_title_case(re.sub(r'_id$', '', r['prop_name']))
