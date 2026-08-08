@@ -6,6 +6,28 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Generated test helper's find-or-create dep block gave `create()` an `include` for
+  composite-labelField resolution but not the paired `findFirst()`, a latent TS2551/TS2339 type error
+  in every affected `cypress/support/*/helper.ts`** (cmd_615a): when a many-to-one relationship's
+  `labelField` is composite (e.g. `[purchase_order.po_number, item.sku]`), the generated dep record's
+  label expression reads an included relation (`record.purchase_order?.po_number`) that only exists on
+  the `create()` branch's inferred type — the `findFirst()`-declared variable's type lacks it, since
+  `test_helper.ts.jinja2` only spliced `dep.prisma_include_str` into `create()`. Reproduced in proj_g's
+  `goods_receipt_line/helper.ts` (`purchase_order_line`/`asn_line` deps). Currently invisible to every
+  gate — `tsconfig.json` excludes `cypress/` from `next build`'s type-check scope, and `cypress run`
+  transpiles support files without type-checking — confirmed via an isolated `tsc --noEmit` pass and a
+  deviation-injection round-trip (revert → error reappears at the same 2 lines; re-apply → clean).
+  Fix: the same conditional `include` now applies to both the `findFirst()` and `create()` call in all
+  5 identically-shaped call sites in the template. proj_g's full `test:e2e:build` + `test:e2e:cy:api`
+  (30 specs / 616 tests) both pass post-fix, and an isolated `tsc --noEmit` over proj_g's entire
+  `cypress/support/**` confirms zero remaining errors of this class across all 5 composite-labelField
+  occurrences in its schema. proj_c has one dormant occurrence of the same latent bug class (not
+  exercised here — its generator pointer hasn't bumped to include this fix yet). Covered by a new
+  regression test (`test_composite_labelfield_helper_findfirst_include.py`, cmd_476 convention: render
+  the actual jinja2 template, assert the generated TypeScript). Full `code_generator` pytest suite:
+  1130 passed (+2 new), 0 regressions. See
+  `docs/knowledge/composite-labelfield-helper-findfirst-include-mismatch.md`.
+
 - **The CSV-import commit-time CREATE path built its Prisma `create()` call entirely from the
   dry-run-computed row data, bypassing the same auto-create-bridge-FK pre-create mechanism
   (`one_to_one_pre_creates` / FK-merge) that the normal `add<Entity>()` service function already
