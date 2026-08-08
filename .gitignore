@@ -123,6 +123,7 @@ lib/dashboard/getters.ts
 lib/dashboard/service.ts
 lib/dashboard/types.ts
 !lib/organization/getters_associated.ts
+!lib/approval_flow/autocomplete_filter.ts
 !lib/approval_request/actions.ts
 !lib/approval_request/actions.test.ts
 !lib/approval_request/actions_core.ts
@@ -208,6 +209,7 @@ cypress/e2e/*.cy.ts
 !cypress/e2e/audit_log.cy.ts
 !cypress/e2e/import_modal.cy.ts
 !cypress/e2e/legal_pages.cy.ts
+!cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts
 cypress/e2e/mobile/*.cy.ts
 !cypress/e2e/mobile/layout.cy.ts
 !cypress/e2e/mobile/audit_log.cy.ts

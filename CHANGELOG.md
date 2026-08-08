@@ -28,6 +28,118 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   1130 passed (+2 new), 0 regressions. See
   `docs/knowledge/composite-labelfield-helper-findfirst-include-mismatch.md`.
 
+- **The CSV-import commit-time CREATE path built its Prisma `create()` call entirely from the
+  dry-run-computed row data, bypassing the same auto-create-bridge-FK pre-create mechanism
+  (`one_to_one_pre_creates` / FK-merge) that the normal `add<Entity>()` service function already
+  uses** (cmd_614): any entity with a required internal bridge FK (e.g. `approvable_id` on an
+  `x-approval` entity) failed CSV-import row creation at commit time with a Prisma
+  `PrismaClientValidationError` for the missing FK, even after cmd_609 correctly let
+  `import_can_create` come out `true` for such entities. The dry run (which never touches the DB)
+  reported success and issued a `confirmToken`, making the failure visible only on commit — a
+  concrete trap for anyone confirming a dry run that "succeeded". Concrete trigger: `goods_receipt_line`
+  (an `x-approval` entity) importing a CSV row whose natural key doesn't match an existing row.
+  `api_import_route.ts.jinja2`'s commit-time create branch now consumes the same
+  `one_to_one_pre_creates` / `one_to_one_fk_data_lines` context vars `service.ts.jinja2` already
+  renders — not a new mechanism, not a hand-listed entity name — gated on whether the entity has
+  any auto-create one-to-one relations at all, so entities without one render byte-identical output
+  to before. `one_to_one_fk_data_lines` is now also exposed standalone in `build_context.py`'s
+  returned context dict (previously inlined only into `parent_data_obj`, unavailable to any
+  template other than `service.ts.jinja2`). Verified both directions: a non-bridge entity's
+  generated import route is unchanged, and a direct DB-level replay of the fixed
+  `goods_receipt_line` transaction (against a real Postgres instance) succeeds and correctly
+  populates `approvable_id`, while the same data without the fix reproduces the original
+  `PrismaClientValidationError`. New/updated pytest coverage in `test_import_template_branches.py`
+  and `test_auto_create_oto.py` fails against the pre-fix template (deviation injection). Full
+  `code_generator` pytest suite: 1134 passed, 0 skipped. See
+  `docs/knowledge/import-create-missing-bridge-fk-fix.md`.
+
+- **An org-scoped entity's `organization` relationship can now be declared optional without
+  breaking CREATE or making org-less rows invisible.** Two gaps, both only surfacing once an
+  entity's `organization` relationship is removed from `required`: (1) `service.ts.jinja2`'s
+  CREATE-path org-membership check called `Array.includes()` on a value that is `string | null`
+  once the relationship is optional — a real `next build` compile error, not a lint nit — fixed by
+  mirroring the guard the UPDATE path already had; (2) every generated read/write scope filter
+  (`organization_id: { in: [...] }`) never matches SQL `NULL`, so an org-less row became invisible
+  to every org-scoped actor, including its own creator — confirmed as a real, not theoretical,
+  break: a testbed entity's basic generated CRUD tests failed en masse the moment its organization
+  relationship became optional and it was added to the standard test-permission infrastructure.
+  Fixed with a new `org_relationship_optional` flag that admits `organization_id: null` alongside
+  the actor's own organizations, applied everywhere the current model's own org scoping is
+  checked (list, detail, delete action, PUT/DELETE existence check, CSV import match-by-key). A
+  required-org entity's generated output is unaffected. See
+  `docs/knowledge/org-optional-entity-support.md`.
+
+- **CSV import's dotted/composite-label FK lookup left the `organization` lookup target itself
+  completely unfiltered** — the existing `('organization', 'user')` exclusion in the org-filter
+  discriminant is correct (neither model has an `organization_id` column to filter candidates on),
+  but for `organization` specifically it meant no filter applied at all: a CSV row naming *any*
+  organization in the system, not just one the actor belongs to, would resolve and get attached.
+  Fixed with a new `lookup_entity_filter_by_self_id` flag that filters organization candidates by
+  their own `id` being in the actor's associated-org list instead. See the "Follow-up" section of
+  `docs/knowledge/csv-import-dotted-fk-org-filter.md`.
+
+- **`approval_flow.preceded_by`/`followed_by` rendered a different label on the View page than on
+  the Edit page for the same row** (cmd_613): View rendered `approver_role.name || entity_name`
+  (dropping `entity_name` entirely whenever a role was set), Edit rendered
+  `entity_name + ' - ' + approver_role.name`. The legacy `secondaryLabelField` mechanism that caused
+  this (only honored in one of the several label-rendering call sites) is removed entirely — zero
+  remaining references, grep-verified. `labelField` is now the composite list form
+  (`[entity_name, approver_role.name]`), rendered identically everywhere via the existing
+  `build_label_expression()` helper. Fixed a related crash: `generators_test.py`'s list-children
+  spec-label prediction called `.split()` directly on a labelField, assuming it was always a string
+  — list-form labelFields now route through the existing `_seed_relation_label_value()` helper.
+  Self-referential many-to-many searches (the pattern `preceded_by`/`followed_by` use) now pass the
+  record being edited through as `context.formValues`, making the previously-unreachable
+  `autocomplete_filter.ts` insertion point usable for this case; every other entity's default `{}`
+  stub is unaffected. Added `lib/approval_flow/autocomplete_filter.ts`: narrows
+  `preceded_by`/`followed_by` candidates to the same `entity_name` as the record being edited
+  (same-`entity_name` approval chains — e.g. a `purchase_order` chain's draft/manager/finance
+  stages — are an intentionally supported configuration, not test-data noise). Verified: 1130
+  pytest passing (0 skipped), full `test:e2e:cy:api` gate 236/236 passing (0 skipped), plus a new
+  hand-written `approval_flow_same_entity_autocomplete_filter.cy.ts` (2/2 passing) proving
+  same-entity_name candidates appear, different-entity_name candidates don't, and View/Edit render
+  the identical label.
+  
+- **`_create_feasible` (the CSV CREATE-feasibility gate) never excluded FKs to internal bridge
+  models (e.g. `approvable_id`, `x-relationship.type: one-to-one_bridge`), wrongly counting them as
+  unfillable required columns and gating off `import_can_create`** (cmd_609): a bridge FK is
+  server-managed plumbing the service layer creates and wires at CREATE time — it was already
+  correctly excluded from CSV *export*, but nothing then removed it from the required-fields gap
+  set, so it stayed a "gap" and `import_can_create` came out `False`. Combined with
+  `x-generate.edit: false`, this collapsed the entire generated `import/route.ts` to the
+  `ENTITY_IMPORT_NOT_SUPPORTED` 400 stub (`api_import_route.ts.jinja2:24`), not just CREATE — the
+  concrete trigger is `goods_receipt_line` (cmd_610's pending edit:false ruling for that entity).
+  A prior cmd_421 test for this exact scenario asserted the buggy value as correct, under the
+  mistaken belief the exclusion already happened; that test's assertion and rationale are corrected
+  as part of this fix. `_create_feasible` now subtracts `get_internal_bridge_fk_prop_names()` —
+  the same shared helper `validate.py` and `generators_test.py` already call — rather than a
+  hand-maintained name list. A genuinely unfillable required FK to a real (non-bridge) entity is
+  unaffected and remains infeasible as before. Verified both directions via an isolated
+  `build_context()` harness (no entity in this repo's own schema combines a required bridge FK with
+  edit:false) and updated/new pytest coverage in `test_build_context.py`, including deviation
+  injection (assertions fail against the pre-fix code). Full `code_generator` pytest suite: 1131
+  passed, 0 skipped. See `docs/knowledge/create-feasible-internal-bridge-fk-fix.md`.
+
+- **Generator-side lint debt invisible to CI (cmd_607)**: `npm run generate-code && npm run lint`
+  surfaced 83 eslint warnings (0 errors) that CI's `Lint` job — which runs before `generate-code`,
+  never after — could never see. Broken down: 48 were a Chai getter-assertion false positive
+  (`expect(x).to.be.true`/`.to.exist` read as unused expressions by
+  `@typescript-eslint/no-unused-expressions`, which has no notion of Chai's assertion-chain side
+  effects), fixed by scoping that rule off for `cypress/e2e/api/**/*.cy.ts` in `eslint.config.mjs`.
+  The remaining 30 `no-unused-vars` warnings were three unrelated dead-binding bugs in
+  `api_import_route.ts.jinja2` (`formatLabelValue` imported but never referenced; `fkData` declared
+  and written even when `import_can_create` is false and nothing reads it) and
+  `api_bulk_route.ts.jinja2` (`richPerms` bound even for `x-self-only` entities, which never read it
+  — the permission check itself still runs, just unbound), plus two ordinary stale imports in
+  hand-written (non-generated) `audit_log` test files, plus 22 warnings whose triggering condition is
+  scattered across dozens of independent scenario branches in `test_spec.cy.ts.jinja2` — fixed via two
+  new self-healing post-render helpers in `generate.py` (`_strip_unused_exact_re_helper`,
+  `_prefix_unused_then_callback_params`) that inspect the actual rendered TypeScript output rather
+  than trying to mirror every branch condition in Python. 83 → 5 warnings (the remaining 5 are an
+  unrelated, pre-existing `@next/next/no-img-element` suggestion on static `components/_standard/*`
+  files, deliberately out of scope). 15 new pytest tests, 0 regressions (1130 → 1145 passed, 0 SKIP).
+  See `docs/knowledge/cmd607-generator-lint-debt-fix.md`.
+
 - **x-reservation test-helper generation only ever resolved the pool entity's criteria-field FK,
   silently omitting any OTHER required FK on the pool entity** (cmd_602): when a pool entity (e.g.
   `inventory`) has a required FK beyond the one named in `x-reservation.request.criteria` (e.g.
@@ -62,7 +174,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `code_generator` pytest suite: 1127 passed, 0 regressions. See
   `docs/knowledge/x-reservation-pool-entity-extra-fk-fix.md`.
 
-### Fixed
 - **A field with a Prisma `@default(...)` but no schema `default:` marker (dynamic defaults like
   `now()`) or with a static default the generator ignored (number/boolean/plain-string) silently
   lost that default on the "new" page whenever the user left it untouched** (cmd_594): for
