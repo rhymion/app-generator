@@ -308,6 +308,78 @@ def test_composite_fk_written_to_fkdata_and_updatedata(env):
 
 
 # ---------------------------------------------------------------------------
+# cmd_611/612: organization-typed lookup targets need a SELF-id filter
+# (candidate.id in the actor's associated-org list), not an organization_id
+# filter (organization rows have no such column — lookup_entity_filter_by_org
+# is structurally always False when lookup_entity == 'organization', which
+# previously meant NO filter applied at all: a CSV row naming any
+# organization in the system, not just one the actor belongs to, would
+# resolve and get attached). See TestImportOrganizationLookupSelfIdFilter in
+# test_build_context.py for the Python-side spec-shape coverage; these
+# tests cover the emitted TypeScript.
+# ---------------------------------------------------------------------------
+
+_ORG_DOTTED_KEY_SPEC = {
+    'csv_col': 'organization_name', 'is_dotted': True, 'lookup_field': 'name',
+    'var_prefix': 'organization', 'lookup_entity': 'organization',
+    'result_col': 'organization_id', 'fk_nullable': False, 'raw': 'organization.name',
+    'lookup_entity_filter_by_org': False, 'lookup_entity_filter_by_self_id': True,
+}
+
+_ORG_COMPOSITE_SPEC = {
+    **_COMPOSITE_SPEC, 'lookup_entity': 'organization', 'lookup_entity_pascal': 'Organization',
+    'lookup_entity_filter_by_org': False, 'lookup_entity_filter_by_self_id': True,
+}
+
+
+def test_org_dotted_key_lookup_filtered_by_self_id_not_organization_id(env):
+    """A dotted x-import-key resolving 'Organization Name' -> organization_id
+    must restrict candidate organization rows to the actor's own associated
+    orgs via `id: { in: _importOrgIds }` — organization rows have no
+    organization_id column to filter on, so the generic org-filter clause
+    can never apply here; before this fix, that meant no filter at all and
+    a CSV row could name (and get attached to) ANY organization system-wide."""
+    ctx = _ctx(import_key_specs=[_ORG_DOTTED_KEY_SPEC], import_key_fields=[])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert 'where: { name: _organization_csv_val, id: { in: _importOrgIds } },' in rendered
+    assert 'organization_id: { in: _importOrgIds }' not in rendered
+
+
+def test_org_dotted_key_deviation_injection_unfiltered_shape_absent(env):
+    """Deviation injection: without the fix, this spec (lookup_entity_filter_by_org
+    is False because organization rows have no organization_id column) rendered
+    a completely unfiltered `where: { name: _organization_csv_val },` — any
+    organization in the system would match by name. Confirm that exact
+    unfiltered shape is no longer what's emitted."""
+    ctx = _ctx(import_key_specs=[_ORG_DOTTED_KEY_SPEC], import_key_fields=[])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert 'where: { name: _organization_csv_val },' not in rendered
+
+
+def test_org_composite_fk_candidate_query_filtered_by_self_id(env):
+    """Same self-id filter requirement for the composite/dotted-label FK
+    path (cmd_548) when the lookup target is 'organization'."""
+    ctx = _ctx(import_fk_specs=[_ORG_COMPOSITE_SPEC])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert 'where: { id: { in: _importOrgIds } },' in rendered
+    assert 'organization_id: { in: _importOrgIds }' not in rendered
+
+
+def test_non_organization_lookup_unaffected_by_self_id_filter(env):
+    """Sanity check: a lookup target that is neither org-scoped nor
+    'organization' itself (e.g. role, system-global) still renders with
+    NO filter at all — the self-id filter must not leak onto unrelated
+    lookup entities."""
+    ctx = _ctx(import_key_specs=[
+        {'csv_col': 'role_name', 'is_dotted': True, 'lookup_field': 'name',
+         'var_prefix': 'role', 'lookup_entity': 'role', 'result_col': 'role_id',
+         'fk_nullable': False, 'raw': 'role.name',
+         'lookup_entity_filter_by_org': False, 'lookup_entity_filter_by_self_id': False},
+    ], import_key_fields=[])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert 'where: { name: _role_csv_val },' in rendered
+    assert 'id: { in: _importOrgIds }' not in rendered
+    assert 'organization_id: { in: _importOrgIds }' not in rendered
 # cmd_607: generator-side lint-debt fix. `fkData` is only ever *read* by the
 # CREATE action (spread into the create payload) — declaring it and writing
 # to it unconditionally left it as a dead `const` (and dead per-spec writes)
