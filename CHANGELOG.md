@@ -6,6 +6,29 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **An org-scoped entity's `organization` relationship can now be declared optional without
+  breaking CREATE or making org-less rows invisible.** Two gaps, both only surfacing once an
+  entity's `organization` relationship is removed from `required`: (1) `service.ts.jinja2`'s
+  CREATE-path org-membership check called `Array.includes()` on a value that is `string | null`
+  once the relationship is optional — a real `next build` compile error, not a lint nit — fixed by
+  mirroring the guard the UPDATE path already had; (2) every generated read/write scope filter
+  (`organization_id: { in: [...] }`) never matches SQL `NULL`, so an org-less row became invisible
+  to every org-scoped actor, including its own creator — confirmed as a real, not theoretical,
+  break: a testbed entity's basic generated CRUD tests failed en masse the moment its organization
+  relationship became optional and it was added to the standard test-permission infrastructure.
+  Fixed with a new `org_relationship_optional` flag that admits `organization_id: null` alongside
+  the actor's own organizations, applied everywhere the current model's own org scoping is
+  checked (list, detail, delete action, PUT/DELETE existence check, CSV import match-by-key). A
+  required-org entity's generated output is unaffected. See
+  `docs/knowledge/org-optional-entity-support.md`.
+- **CSV import's dotted/composite-label FK lookup left the `organization` lookup target itself
+  completely unfiltered** — the existing `('organization', 'user')` exclusion in the org-filter
+  discriminant is correct (neither model has an `organization_id` column to filter candidates on),
+  but for `organization` specifically it meant no filter applied at all: a CSV row naming *any*
+  organization in the system, not just one the actor belongs to, would resolve and get attached.
+  Fixed with a new `lookup_entity_filter_by_self_id` flag that filters organization candidates by
+  their own `id` being in the actor's associated-org list instead. See the "Follow-up" section of
+  `docs/knowledge/csv-import-dotted-fk-org-filter.md`.
 - **`_create_feasible` (the CSV CREATE-feasibility gate) never excluded FKs to internal bridge
   models (e.g. `approvable_id`, `x-relationship.type: one-to-one_bridge`), wrongly counting them as
   unfillable required columns and gating off `import_can_create`** (cmd_609): a bridge FK is

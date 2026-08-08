@@ -49,6 +49,35 @@ return zero rows for these and break every CSV import that references them. The 
 unfiltered even when the parent entity (e.g. `permission`) is itself org-scoped, while a dotted
 FK into a genuinely org-scoped entity gets filtered.
 
+## Follow-up: the `organization` lookup target itself
+
+The `('organization', 'user')` exclusion above is correct as far as it goes — neither model has
+its own `organization_id` column to filter candidates on — but it left a real gap specifically
+for `lookup_entity == 'organization'`: a dotted FK resolving "Organization Name" to
+`organization_id` (e.g. `organization.name` on a testbed `resource`/`parent1` entity) was left
+**completely unfiltered**, not just correctly-unfiltered like `role`. A CSV row naming *any*
+organization in the system — not just one the actor belongs to — would resolve and get attached,
+the same class of leak this doc's main fix closed for every other lookup entity.
+
+The fix adds a parallel `lookup_entity_filter_by_self_id` flag
+(`_lookup_entity == 'organization'`) that filters organization candidates by their own `id` being
+in the actor's associated-org list, instead of by a nonexistent `organization_id` column:
+
+```typescript
+const _organization_rows = await prisma.organization.findMany({
+  where: { name: _organization_csv_val, id: { in: _importOrgIds } },
+  select: { id: true },
+});
+```
+
+Applied to all three `api_import_route.ts.jinja2` sites that render a lookup-entity `where`
+clause (the simple dotted-key lookup, the non-key FK lookup, and the composite/dotted-label
+candidate-map build). `role` and other genuinely system-global lookup targets are unaffected —
+`lookup_entity_filter_by_self_id` is only ever true when the target is `organization` itself.
+Covered by `test_import_template_branches.py` (rendered-output assertions, deviation-injection
+verified) and `test_build_context.py`'s `TestImportKeySpecsLookupEntityFilterByOrg`/
+`TestCompositeLabelFieldImportOrgFilter` suites.
+
 ## UPDATE path and export — no separate change needed
 
 The dotted-FK resolution loop runs once, before the CREATE/UPDATE branch, and its result
