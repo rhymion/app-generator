@@ -3040,9 +3040,15 @@ def spec_context(
         # Compute expected autocomplete label for seed index 1
         # name fields: seed uses `${entity_title} ${i}` → 'Character 1' for character
         # other string fields: seed uses `Test ${field_title} ${i}` → 'Test Title 1' for music.title
+        # list-form (composite) labelField: mirrors the UI's build_label_expression
+        # concatenation via the shared _seed_relation_label_value helper.
         _ac_lf = rel.get('label_field', 'name') or 'name'
         if not rel_target:
             _ac_label_1 = ''
+        elif isinstance(_ac_lf, list):
+            _ac_label_1 = _seed_relation_label_value(
+                rel_target, _ac_lf, rel.get('label_field_is_date', False), schema, unique_index=1,
+            )
         elif _ac_lf == 'name':
             _ac_label_1 = f'{to_title_case(rel_target)} 1'
         else:

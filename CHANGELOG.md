@@ -21,6 +21,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   checked (list, detail, delete action, PUT/DELETE existence check, CSV import match-by-key). A
   required-org entity's generated output is unaffected. See
   `docs/knowledge/org-optional-entity-support.md`.
+
 - **CSV import's dotted/composite-label FK lookup left the `organization` lookup target itself
   completely unfiltered** — the existing `('organization', 'user')` exclusion in the org-filter
   discriminant is correct (neither model has an `organization_id` column to filter candidates on),
@@ -29,6 +30,29 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Fixed with a new `lookup_entity_filter_by_self_id` flag that filters organization candidates by
   their own `id` being in the actor's associated-org list instead. See the "Follow-up" section of
   `docs/knowledge/csv-import-dotted-fk-org-filter.md`.
+
+- **`approval_flow.preceded_by`/`followed_by` rendered a different label on the View page than on
+  the Edit page for the same row** (cmd_613): View rendered `approver_role.name || entity_name`
+  (dropping `entity_name` entirely whenever a role was set), Edit rendered
+  `entity_name + ' - ' + approver_role.name`. The legacy `secondaryLabelField` mechanism that caused
+  this (only honored in one of the several label-rendering call sites) is removed entirely — zero
+  remaining references, grep-verified. `labelField` is now the composite list form
+  (`[entity_name, approver_role.name]`), rendered identically everywhere via the existing
+  `build_label_expression()` helper. Fixed a related crash: `generators_test.py`'s list-children
+  spec-label prediction called `.split()` directly on a labelField, assuming it was always a string
+  — list-form labelFields now route through the existing `_seed_relation_label_value()` helper.
+  Self-referential many-to-many searches (the pattern `preceded_by`/`followed_by` use) now pass the
+  record being edited through as `context.formValues`, making the previously-unreachable
+  `autocomplete_filter.ts` insertion point usable for this case; every other entity's default `{}`
+  stub is unaffected. Added `lib/approval_flow/autocomplete_filter.ts`: narrows
+  `preceded_by`/`followed_by` candidates to the same `entity_name` as the record being edited
+  (same-`entity_name` approval chains — e.g. a `purchase_order` chain's draft/manager/finance
+  stages — are an intentionally supported configuration, not test-data noise). Verified: 1130
+  pytest passing (0 skipped), full `test:e2e:cy:api` gate 236/236 passing (0 skipped), plus a new
+  hand-written `approval_flow_same_entity_autocomplete_filter.cy.ts` (2/2 passing) proving
+  same-entity_name candidates appear, different-entity_name candidates don't, and View/Edit render
+  the identical label.
+  
 - **`_create_feasible` (the CSV CREATE-feasibility gate) never excluded FKs to internal bridge
   models (e.g. `approvable_id`, `x-relationship.type: one-to-one_bridge`), wrongly counting them as
   unfillable required columns and gating off `import_can_create`** (cmd_609): a bridge FK is
