@@ -3138,11 +3138,19 @@ def spec_context(
 
     # Section 3.3: primary field edit command
     use_deps_in_3_3 = False
+    # cmd_611/612: a primary FK that is also x-server-value never renders as
+    # a form autocomplete (it's excluded from every form input by design —
+    # see the req_ua_spec/all_ua_spec exclusion above), so the mixed-changes
+    # edit test must not try to touch it at all, and the 2-row FK-switch
+    # populate count is meaningless for a field the UI can never edit.
+    prim_is_server_value = bool(prim_is_fk and f'{prim}_id' in _server_value_prop_names)
     # If the primary field is a FK the form renders an autocomplete picker, and the
     # populate() helper creates a fresh target row per index — so we need at least
     # two rows in the DB for the test to switch from "Test X 1" to "Test X 2".
-    populate_count_3_3 = 2 if prim_is_fk else 1
-    if has_edit_primary and edit_field_label and edit_update_value:
+    populate_count_3_3 = 2 if (prim_is_fk and not prim_is_server_value) else 1
+    if prim_is_server_value:
+        edit_primary_cmd = None
+    elif has_edit_primary and edit_field_label and edit_update_value:
         prim_edit_meta = next(
             (f for f in fields if f.get('label') == edit_field_label), None
         )

@@ -406,3 +406,62 @@ def test_spec_context_ua_field_with_server_value_dict_form_also_excluded():
     )
     assert not any("selectAutocomplete('User'" in cmd for cmd in ctx["required_fill_cmds"])
     assert not any("selectAutocomplete('User'" in cmd for cmd in ctx["all_fill_cmds"])
+
+
+def _server_value_primary_shift_schema(user_id_server_value):
+    """Same shape as leave_request: user_id is BOTH the x-display.table
+    primary field AND x-server-value -- exercises the separate
+    edit_primary_cmd code path (3.3 mixed-changes edit test), distinct from
+    req_ua_spec/all_ua_spec (create/fail-edit fill commands)."""
+    return {
+        "definitions": {
+            "user": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+            },
+            "shift": {
+                "type": "object",
+                "required": ["id", "user_id", "start_time"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "user_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "user", "labelField": "name"},
+                        "x-server-value": user_id_server_value,
+                    },
+                    "start_time": {"type": "string", "format": "date-time"},
+                },
+                "x-display": {"table": [{"user": {"primary": True}}]},
+            },
+            "shift_detail": {"allOf": [{"$ref": "#/definitions/shift"}]},
+        },
+    }
+
+
+def test_spec_context_server_value_primary_field_skips_edit_primary_cmd():
+    """cmd_611/612: when the x-display.table PRIMARY field is itself
+    x-server-value (leave_request.user_id's exact shape), the 3.3
+    mixed-changes edit test must not try to touch it via
+    cy.selectAutocomplete() either -- edit_primary_cmd must be None, not a
+    command against a form input that doesn't exist. populate_count_3_3
+    also drops back to 1 -- the 2-row FK-switch setup is meaningless for a
+    field the UI can never edit."""
+    ctx = spec_context(
+        "shift", [], _server_value_primary_shift_schema({"source": "actor", "override_permission": "delete"}),
+        "shift", "shift_detail", _entity("shift")["generate_config"],
+    )
+    assert ctx["edit_primary_cmd"] is None
+    assert ctx["populate_count_3_3"] == 1
+
+
+def test_spec_context_non_server_value_primary_field_still_gets_edit_primary_cmd():
+    """Sanity check (pre-fix baseline behavior, unaffected): a primary FK to
+    user with no x-server-value still gets the selectAutocomplete
+    edit_primary_cmd and populate_count_3_3 == 2."""
+    ctx = spec_context(
+        "shift", [], _server_value_primary_shift_schema(None), "shift", "shift_detail",
+        _entity("shift")["generate_config"],
+    )
+    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User', 'Test User');"
+    assert ctx["populate_count_3_3"] == 2
