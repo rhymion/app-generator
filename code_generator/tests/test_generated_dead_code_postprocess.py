@@ -9,8 +9,24 @@ in Python to gate the definition/param name precisely — which would silently
 drift out of sync as scenarios are added — both helpers inspect the fully
 rendered TypeScript text itself and act only when nothing in the output
 actually uses the binding. See docs/knowledge/cmd607-generator-lint-debt-fix.md.
+
+cmd_618: cmd_614 widened exactRe() past self-ref-only, which rewrote the
+comment above the function — desyncing _EXACT_RE_HELPER_RE's old
+comment-anchored regex (it silently stopped matching, so the "unused" strip
+quietly stopped firing at all, with no error and no test failure). Both
+helpers were re-anchored on JS/TS structure that doesn't depend on comment
+prose, and both now raise instead of silently no-op'ing when their input
+diverges from a recognized shape. The tests below cover: the exact scenario
+that broke (widened comment text), the real formatting variance already
+present in the templates that the old bare `.then((\\w+)) => {` never
+matched (typed params, `async`), and the loud-failure path itself.
 """
-from generate import _strip_unused_exact_re_helper, _prefix_unused_then_callback_params
+from generate import (
+    _strip_unused_exact_re_helper,
+    _prefix_unused_then_callback_params,
+    _check_then_callback_coverage,
+)
+import pytest
 
 _EXACT_RE_BLOCK = (
     "\n\n// A self-referential dependency record (e.g. a split-lineage decoy created by\n"
@@ -145,3 +161,109 @@ def test_then_callback_shadowing_with_genuine_inner_use_is_conservative():
     out = _prefix_unused_then_callback_params(content)
     assert "populateThing', 1).then((records) => {" in out  # left alone, not renamed
     assert 'cy.log(records[0].id);' in out
+
+
+# --- cmd_618: comment-anchor desync + structural-anchor regressions -------
+
+_EXACT_RE_BLOCK_WIDENED = (
+    "\n\n// A dependency record's display name can share a substring with another\n"
+    "// record (e.g. a split-lineage decoy created by populateThingDependencies(),\n"
+    "// cmd_592) — cy.contains() is substring-based, so row lookups keyed on a\n"
+    "// dep's display name need an exact-match anchor instead (cmd_614: widened\n"
+    "// from self-ref-only to all entities — partial-match collisions aren't\n"
+    "// specific to self-referential deps).\n"
+    "function exactRe(text: string): RegExp {\n"
+    "  return new RegExp('^' + text.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + '$');\n"
+    "}\n"
+)
+
+
+def test_strip_exact_re_helper_survives_cmd614_comment_rewrite():
+    """The exact regression that broke: cmd_614 widened exactRe() to every
+    entity and rewrote the explanatory comment to match (dropping "A
+    self-referential dependency record"). A comment-anchored regex would
+    silently stop matching here — this must still strip cleanly."""
+    content = "import x;" + _EXACT_RE_BLOCK_WIDENED + "\ndescribe('x', () => {});\n"
+    out = _strip_unused_exact_re_helper(content)
+    assert 'function exactRe' not in out
+    assert "describe('x', () => {});" in out
+
+
+def test_strip_exact_re_helper_keeps_widened_comment_block_when_called():
+    content = (
+        "import x;"
+        + _EXACT_RE_BLOCK_WIDENED
+        + "\n      cy.contains(exactRe(deps.thing.name)).click();\n"
+    )
+    out = _strip_unused_exact_re_helper(content)
+    assert out == content  # untouched — still called
+
+
+def test_strip_exact_re_helper_raises_on_shape_mismatch():
+    """If the signature is present but the surrounding block no longer
+    matches _EXACT_RE_HELPER_RE (e.g. the return statement was reformatted),
+    fail loudly instead of silently leaving the helper — and the lint debt
+    it exists to prevent — in place."""
+    mangled = _EXACT_RE_BLOCK_WIDENED.replace(
+        "return new RegExp('^' + text.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + '$');",
+        "return new RegExp('^' + text + '$'); // reformatted",
+    )
+    content = "import x;" + mangled + "\ndescribe('x', () => {});\n"
+    with pytest.raises(RuntimeError):
+        _strip_unused_exact_re_helper(content)
+
+
+def test_then_callback_typed_param_unused_gets_prefixed():
+    """test_reservation_spec.cy.ts.jinja2 uses TS-typed callback params
+    throughout (`.then((res: any) => {`) — the original bare `\\((\\w+)\\)`
+    never matched these at all, silently leaving every one unprocessed."""
+    content = "cy.task('x').then((res: any) => {\n  doStuff();\n});\n"
+    out = _prefix_unused_then_callback_params(content)
+    assert ".then((_res: any) => {" in out
+
+
+def test_then_callback_typed_param_used_is_left_alone():
+    content = "cy.task('x').then((res: any) => {\n  expect(res).to.eq(1);\n});\n"
+    out = _prefix_unused_then_callback_params(content)
+    assert ".then((res: any) => {" in out
+    assert '_res' not in out
+
+
+def test_then_callback_async_unused_gets_prefixed_keeping_async():
+    content = "cy.task('x').then(async (win) => {\n  doStuff();\n});\n"
+    out = _prefix_unused_then_callback_params(content)
+    assert ".then(async (_win) => {" in out
+
+
+def test_then_callback_no_param_left_untouched():
+    content = "cy.task('x').then(() => {\n  doStuff();\n});\n"
+    assert _prefix_unused_then_callback_params(content) == content
+
+
+def test_then_callback_destructured_param_left_untouched():
+    """Destructured params are a different eslint no-unused-vars shape
+    (per-key, not per-binding) — deliberately out of scope for this
+    prefix-with-underscore mechanism, not a miss."""
+    content = "cy.task('x').then(({ mentionedUserId }) => {\n  use(mentionedUserId);\n});\n"
+    assert _prefix_unused_then_callback_params(content) == content
+
+
+def test_then_callback_coverage_raises_on_unrecognized_shape():
+    """A `.then(` call whose parameter clause matches none of the three
+    recognized shapes (no-param / destructured / named-with-optional-type)
+    must fail generation loudly, not pass through silently unprocessed —
+    the exact failure mode being fixed here."""
+    content = "cy.task('x').then([a, b] => {\n  doStuff();\n});\n"
+    with pytest.raises(RuntimeError):
+        _check_then_callback_coverage(content)
+
+
+def test_then_callback_coverage_silent_on_all_recognized_shapes():
+    content = (
+        "a.then((x) => {});\n"
+        "b.then((y: any) => {});\n"
+        "c.then(async (z) => {});\n"
+        "d.then(() => {});\n"
+        "e.then(({ k }) => {});\n"
+    )
+    _check_then_callback_coverage(content)  # must not raise

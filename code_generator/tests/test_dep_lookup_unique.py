@@ -204,14 +204,14 @@ class TestHelperContextLookupWiring:
     def test_name_less_dep_with_unique_column_gets_find_or_create(self):
         dep = _deps()["purchaseOrder"]
         assert dep["lookup_field"] == "po_number"
-        assert dep["lookup_where"] == "{ po_number: 'Test Po Number' }"
-        assert dep["lookup_where_second"] == "{ po_number: 'Test Po Number 2' }"
+        assert dep["lookup_where"] == "{ po_number: 'Test Po Number A' }"
+        assert dep["lookup_where_second"] == "{ po_number: 'Test Po Number B' }"
         assert dep["lookup_where_unique"] == "{ po_number: `Test Po Number ${i}` }"
 
     def test_name_less_dep_with_composite_unique_gets_find_or_create(self):
         dep = _deps()["bin"]
         assert dep["lookup_field"] == "location_id"
-        assert dep["lookup_where"] == "{ location_id: location.id, code: 'Test Code' }"
+        assert dep["lookup_where"] == "{ location_id: location.id, code: 'Test Code A' }"
         assert dep["lookup_where_unique"] == (
             "{ location_id: deps.location.id, code: `Test Code ${i}` }"
         )
@@ -219,7 +219,7 @@ class TestHelperContextLookupWiring:
     def test_named_dep_still_looks_up_by_name(self):
         dep = _deps()["supplier"]
         assert dep["lookup_field"] == "name"
-        assert dep["lookup_where"] == "{ name: 'Test Supplier' }"
+        assert dep["lookup_where"] == "{ name: 'Test Supplier A' }"
 
 
 # ---------------------------------------------------------------------------

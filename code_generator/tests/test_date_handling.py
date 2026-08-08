@@ -262,7 +262,7 @@ class TestDepHelperIdempotency:
         )
         product_dep = next(d for d in ctx["deps"] if d["target"] == "product")
         assert product_dep["lookup_field"] == "name"
-        assert product_dep["lookup_where"] == "{ name: 'Test Product' }"
+        assert product_dep["lookup_where"] == "{ name: 'Test Product A' }"
 
     def test_dep_lookup_value_second_for_needs_second(self):
         """needs_second deps also need a deterministic name for the 2nd row's
@@ -273,7 +273,7 @@ class TestDepHelperIdempotency:
             {"list": True, "view": True, "new": True, "edit": True, "delete": True, "api": True, "test": True, "fields": None},
         )
         product_dep = next(d for d in ctx["deps"] if d["target"] == "product")
-        assert product_dep["lookup_where_second"] == "{ name: 'Test Product 2' }"
+        assert product_dep["lookup_where_second"] == "{ name: 'Test Product B' }"
 
 
 # ---------------------------------------------------------------------------

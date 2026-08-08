@@ -2848,6 +2848,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         flatten_rels=flatten_rels,                  # flatten rels: shown as accordion in detail view
         flatten_m2o_fk_props=flatten_m2o_fk_props, # FK prop names in parent for m2o flatten rels
         one_to_one_pre_creates=one_to_one_pre_creates,
+        one_to_one_fk_data_lines=one_to_one_fk_data_lines,  # cmd_614: also consumed by api_import_route's commit-time create
         one_to_one_spread=one_to_one_spread,
         one_to_one_include=one_to_one_include,
         # Page list / view / edit custom components (entity-level, plural).

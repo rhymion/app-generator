@@ -420,8 +420,19 @@ export async function POST(request: NextRequest) {
       for (const action of actions) {
         try {
           if (action.op === 'create') {
+{% if one_to_one_pre_creates %}
+{{ one_to_one_pre_creates }}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await tx.{{ model }}.create({
+              data: {
+                ...(action.data as any),
+{{ one_to_one_fk_data_lines }}
+              },
+            });
+{% else %}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await tx.{{ model }}.create({ data: action.data as any });
+{% endif %}
           } else {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await tx.{{ model }}.update({ where: { id: action.id }, data: action.data as any });

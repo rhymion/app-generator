@@ -251,12 +251,22 @@ def _render(env: Environment, template_name: str, ctx: dict) -> str:
 # call-site guard in Python to gate the definition precisely, strip the
 # helper post-render if the file ends up with no actual call — self-healing
 # as call-site conditions evolve, instead of drifting out of sync with them.
+#
+# Anchored on the function signature, not the preceding comment (cmd_618):
+# cmd_614 widened exactRe from self-ref-only to all entities and rewrote the
+# comment prose to match ("A self-referential dependency record" ->
+# "A dependency record's display name can share a substring with another"),
+# which would have silently desynced a comment-anchored regex — the strip
+# would stop matching, `remainder == content` would trip the safety
+# fallback, and the pre-cmd_607 lint debt (83 warnings) would silently
+# return with no error, no test failure, just a quietly-passing gate that
+# had stopped doing its job. The function signature is the part of this
+# block least likely to change independently of the mechanism itself.
 _EXACT_RE_HELPER_RE = re.compile(
-    r'\n\n// A self-referential dependency record.*?\n'
+    r'\n\n(?://[^\n]*\n)*'
     r"function exactRe\(text: string\): RegExp \{\n"
     r"  return new RegExp\('\^' \+ text\.replace\(/\[\.\*\+\?\^\$\{\}\(\)\|\[\\\]\\\\\]/g, '\\\\\$&'\) \+ '\$'\);\n"
-    r'\}\n',
-    re.DOTALL,
+    r'\}\n'
 )
 
 
@@ -265,7 +275,20 @@ def _strip_unused_exact_re_helper(content: str) -> str:
         return content
     remainder = _EXACT_RE_HELPER_RE.sub('', content, count=1)
     if remainder == content:
-        return content  # helper block didn't match the expected shape — leave as-is
+        # The signature literal is present but the surrounding shape (return
+        # statement formatting, comment block) diverged from what
+        # _EXACT_RE_HELPER_RE expects (cmd_618: this used to `return
+        # content` here silently — exactly how cmd_614's comment rewrite
+        # went undetected). A shape mismatch means this function has
+        # stopped doing its job; fail loudly at generate-code time instead
+        # of shipping quietly-broken output.
+        raise RuntimeError(
+            "_strip_unused_exact_re_helper: found 'function exactRe(...)' but "
+            '_EXACT_RE_HELPER_RE did not match the surrounding block — the '
+            'comment/return-statement shape has diverged from what the regex '
+            'expects. Update _EXACT_RE_HELPER_RE to match the current '
+            'test_spec.cy.ts.jinja2 output.'
+        )
     if 'exactRe(' in remainder:
         return content  # still called elsewhere in the file — keep the definition
     return remainder
@@ -283,10 +306,68 @@ def _strip_unused_exact_re_helper(content: str) -> str:
 # (the repo's established `no-unused-vars` opt-out, see eslint.config.mjs)
 # when it's genuinely never referenced inside — self-healing, and immune to
 # future call-site changes in the templates.
-_THEN_CALLBACK_RE = re.compile(r'\.then\(\((\w+)\) => \{')
+#
+# The param clause tolerates the real formatting variance already present
+# in these templates (cmd_618): optional `async`, arbitrary whitespace, and
+# an optional TS type annotation (`.then((res: any) => {`, used throughout
+# test_reservation_spec.cy.ts.jinja2) — the original bare `\((\w+)\) => \{`
+# matched none of those, so every typed callback silently passed through
+# unprocessed. Two shapes are deliberately NOT matched here and are left
+# untouched by design, not by accident: no-param `.then(() => {` (nothing
+# to prefix) and destructured `.then(({ a, b }) => {` (per-key unused-vars
+# handling, a different mechanism entirely). _check_then_callback_coverage()
+# below is what tells the difference between "deliberately skipped" and
+# "silently missed" — every `.then(` in the file must fall into one of
+# these three recognized shapes, or generation fails loudly instead of
+# shipping quietly-unprocessed output.
+_THEN_CALLBACK_RE = re.compile(
+    r'\.then\(\s*(?:async\s+)?'
+    r'\(\s*(?P<name>\w+)(?:\s*:\s*[^),]+)?\s*\)'
+    r'\s*=>\s*\{'
+)
+
+_THEN_CALL_RE = re.compile(r'\.then\(')
+_THEN_KNOWN_SHAPE_RE = re.compile(
+    r'\.then\(\s*(?:async\s+)?'
+    r'(?:'
+    r'\(\s*\)|'                                    # no-param
+    r'\(\s*\{[^{}]*\}\s*(?::\s*[^),]+)?\s*\)|'      # destructured, optional type
+    r'\(\s*\w+(?:\s*:\s*[^),]+)?\s*\)'              # named, optional type
+    r')'
+    r'\s*=>'
+)
+
+
+def _check_then_callback_coverage(content: str) -> None:
+    for m in _THEN_CALL_RE.finditer(content):
+        if _THEN_KNOWN_SHAPE_RE.match(content, m.start()):
+            continue
+        snippet = content[m.start():m.start() + 80].replace('\n', '\\n')
+        raise RuntimeError(
+            '_prefix_unused_then_callback_params: found a .then( call whose '
+            'parameter clause matches none of the recognized shapes '
+            '(no-param, destructured, or named with an optional TS type) — '
+            f'near: {snippet!r}. Extend _THEN_CALLBACK_RE / '
+            '_THEN_KNOWN_SHAPE_RE to cover this shape, or confirm it is a '
+            'genuinely new case that needs its own handling.'
+        )
+
+
+def _strip_same_name_then_decls(body: str, name: str) -> str:
+    # A nested `.then((records) => {...})` reusing the same param name would
+    # shadow the outer one — its own declaration text contains `name` too,
+    # which isn't a *use* of the outer binding. Strip every nested
+    # declaration matching this name (any async/whitespace/type variant)
+    # before checking, so a same-named nested callback can't mask the outer
+    # param being genuinely dead.
+    def repl(m: re.Match) -> str:
+        return '' if m.group('name') == name else m.group(0)
+
+    return _THEN_CALLBACK_RE.sub(repl, body)
 
 
 def _prefix_unused_then_callback_params(content: str) -> str:
+    _check_then_callback_coverage(content)
     out = []
     i = 0
     n = len(content)
@@ -296,7 +377,7 @@ def _prefix_unused_then_callback_params(content: str) -> str:
             out.append(content[i])
             i += 1
             continue
-        name = m.group(1)
+        name = m.group('name')
         body_start = m.end()
         depth = 1
         j = body_start
@@ -349,18 +430,16 @@ def _prefix_unused_then_callback_params(content: str) -> str:
             return ''.join(out)
         body_end = j - 1  # index of the matching '}'
         body = content[body_start:body_end]
-        # A nested `.then((records) => {...})` reusing the same param name
-        # would shadow the outer one — its own declaration text contains
-        # `name` too, which isn't a "use" of the outer binding. Exclude it
-        # before checking, so a same-named nested callback can't mask the
-        # outer param being genuinely dead.
-        usage_check_body = body.replace(f'.then(({name}) => {{', '')
+        usage_check_body = _strip_same_name_then_decls(body, name)
         used = bool(re.search(rf'\b{re.escape(name)}\b', usage_check_body))
         # Recurse so nested `.then((records) => {...})` blocks inside this
         # body are checked independently of whether the outer param is used.
         body = _prefix_unused_then_callback_params(body)
         prefix = name if used else f'_{name}'
-        out.append(f'.then(({prefix}) => {{{body}}}')
+        # Preserve everything matched verbatim (async/whitespace/type
+        # annotation) — only the identifier itself changes.
+        header = content[i:m.start('name')] + prefix + content[m.end('name'):m.end()]
+        out.append(header + body + '}')
         i = j
     return ''.join(out)
 

@@ -14,6 +14,54 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `x-server-value`'s design — the form never renders that autocomplete, so the generated test
   failed outright (`Expected to find element: 'filter', but never found it`). Both paths now skip
   such fields entirely. See `docs/knowledge/x-server-value-actor-delegation.md`.
+
+- **Generated test helper's find-or-create dep block gave `create()` an `include` for
+  composite-labelField resolution but not the paired `findFirst()`, a latent TS2551/TS2339 type error
+  in every affected `cypress/support/*/helper.ts`** (cmd_615a): when a many-to-one relationship's
+  `labelField` is composite (e.g. `[purchase_order.po_number, item.sku]`), the generated dep record's
+  label expression reads an included relation (`record.purchase_order?.po_number`) that only exists on
+  the `create()` branch's inferred type — the `findFirst()`-declared variable's type lacks it, since
+  `test_helper.ts.jinja2` only spliced `dep.prisma_include_str` into `create()`. Reproduced in proj_g's
+  `goods_receipt_line/helper.ts` (`purchase_order_line`/`asn_line` deps). Currently invisible to every
+  gate — `tsconfig.json` excludes `cypress/` from `next build`'s type-check scope, and `cypress run`
+  transpiles support files without type-checking — confirmed via an isolated `tsc --noEmit` pass and a
+  deviation-injection round-trip (revert → error reappears at the same 2 lines; re-apply → clean).
+  Fix: the same conditional `include` now applies to both the `findFirst()` and `create()` call in all
+  5 identically-shaped call sites in the template. proj_g's full `test:e2e:build` + `test:e2e:cy:api`
+  (30 specs / 616 tests) both pass post-fix, and an isolated `tsc --noEmit` over proj_g's entire
+  `cypress/support/**` confirms zero remaining errors of this class across all 5 composite-labelField
+  occurrences in its schema. proj_c has one dormant occurrence of the same latent bug class (not
+  exercised here — its generator pointer hasn't bumped to include this fix yet). Covered by a new
+  regression test (`test_composite_labelfield_helper_findfirst_include.py`, cmd_476 convention: render
+  the actual jinja2 template, assert the generated TypeScript). Full `code_generator` pytest suite:
+  1130 passed (+2 new), 0 regressions. See
+  `docs/knowledge/composite-labelfield-helper-findfirst-include-mismatch.md`.
+
+- **The CSV-import commit-time CREATE path built its Prisma `create()` call entirely from the
+  dry-run-computed row data, bypassing the same auto-create-bridge-FK pre-create mechanism
+  (`one_to_one_pre_creates` / FK-merge) that the normal `add<Entity>()` service function already
+  uses** (cmd_614): any entity with a required internal bridge FK (e.g. `approvable_id` on an
+  `x-approval` entity) failed CSV-import row creation at commit time with a Prisma
+  `PrismaClientValidationError` for the missing FK, even after cmd_609 correctly let
+  `import_can_create` come out `true` for such entities. The dry run (which never touches the DB)
+  reported success and issued a `confirmToken`, making the failure visible only on commit — a
+  concrete trap for anyone confirming a dry run that "succeeded". Concrete trigger: `goods_receipt_line`
+  (an `x-approval` entity) importing a CSV row whose natural key doesn't match an existing row.
+  `api_import_route.ts.jinja2`'s commit-time create branch now consumes the same
+  `one_to_one_pre_creates` / `one_to_one_fk_data_lines` context vars `service.ts.jinja2` already
+  renders — not a new mechanism, not a hand-listed entity name — gated on whether the entity has
+  any auto-create one-to-one relations at all, so entities without one render byte-identical output
+  to before. `one_to_one_fk_data_lines` is now also exposed standalone in `build_context.py`'s
+  returned context dict (previously inlined only into `parent_data_obj`, unavailable to any
+  template other than `service.ts.jinja2`). Verified both directions: a non-bridge entity's
+  generated import route is unchanged, and a direct DB-level replay of the fixed
+  `goods_receipt_line` transaction (against a real Postgres instance) succeeds and correctly
+  populates `approvable_id`, while the same data without the fix reproduces the original
+  `PrismaClientValidationError`. New/updated pytest coverage in `test_import_template_branches.py`
+  and `test_auto_create_oto.py` fails against the pre-fix template (deviation injection). Full
+  `code_generator` pytest suite: 1134 passed, 0 skipped. See
+  `docs/knowledge/import-create-missing-bridge-fk-fix.md`.
+
 - **An org-scoped entity's `organization` relationship can now be declared optional without
   breaking CREATE or making org-less rows invisible.** Two gaps, both only surfacing once an
   entity's `organization` relationship is removed from `required`: (1) `service.ts.jinja2`'s
@@ -328,6 +376,42 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Internal
+- **Generated test helper dep records now use a letter-indexed name suffix(`'Test {Title} A'`/`'Test {Title} B'`) instead of `'Test {Title}'`/`'Test {Title} 2'`** (cmd_618, Phase 1): 
+  the old dep naming collided byte-for-byte with `populate*Data(n)`'s loop rows (`` `Test {Title} ${i}` ``)
+  once a loop reached `i=2`, causing find-or-create to resolve both to the same DB row. Letters and 
+  digits are disjoint at the first differing byte, so the dep and loop namespaces can never intersect. 
+  `_get_dep_populate_fields()`/`_get_dep_extra_required_fields()` in `code_generator/generators_test.py` 
+  updated across every value branch; `prisma_val_unique` (loop values) unchanged. 
+  See `docs/knowledge/cmd614-test-data-uniqueness-design.md` §3.
+- **`exactRe()` exact-match test helper widened from 2 self-referential entities to all entities;
+  the two post-render cleanup helpers it exposed gaps in are now anchored on code structure
+  instead of comment prose, and fail loudly instead of silently no-op'ing** (cmd_614/cmd_618):
+  `test_spec.cy.ts.jinja2`'s `exactRe()` regex matcher (added by cmd_592 to stop a self-ref
+  decoy record's display name from substring-colliding with the record a spec creates) was gated
+  behind `has_self_ref_deps`, reaching only 2 of proj_c's 46 generated specs even though the
+  underlying `cy.contains()` substring problem isn't specific to self-referential deps — removed
+  the gate from the function definition and all 8 call sites. Two follow-on issues surfaced only
+  by verifying against proj_c's real schema: (1) an unscoped `cy.contains(exactRe(...))` can match
+  the header nav's own logged-in-user badge when a dependency's display name equals it (e.g.
+  `leave_request`'s `user` FK); fixed by scoping every call site to `cy.contains('.MuiDataGrid-cell',
+  exactRe(...))` — narrow enough to exclude the header, still specific enough for an exact-match
+  regex to match a single field's value rather than a whole row's concatenated text. (2) Widening
+  the gate also rewrote the comment above `exactRe()`, silently desyncing cmd_607's
+  `_strip_unused_exact_re_helper()` — its regex was anchored on that exact comment text, so the
+  "strip if unused" cleanup would have quietly stopped firing with no error and no test failure.
+  Re-anchored on the function signature instead, and it now raises when its input contains the
+  signature but the surrounding shape doesn't match, rather than returning the input unchanged.
+  The same latent-gap shape existed in `_prefix_unused_then_callback_params()`'s
+  `_THEN_CALLBACK_RE`: it matched only the exact literal spelling `.then((x) => {` — no `async`,
+  no whitespace variance, and no TS type annotation, so every `.then((res: any) => {` in
+  `test_reservation_spec.cy.ts.jinja2` had passed through unprocessed since cmd_607 landed.
+  Widened to tolerate that real variance while preserving the matched text verbatim, and added
+  `_check_then_callback_coverage()` so any `.then(` shape it doesn't recognize fails generation
+  loudly instead of shipping unprocessed. 10 new regression tests added to
+  `test_generated_dead_code_postprocess.py` (19 total, all passing). Verified end-to-end: `lint`
+  warning count on this branch matches the `develop` baseline exactly (5 warnings, both before and
+  after), and proj_c's full API + UI Cypress suites (57 + 86 specs) reproduce the same pre-existing,
+  unrelated failures before and after this change — zero new failures from any of the above.
 - **`npm run lint` Completion gate step reordered to run before `generate-code`** (cmd_600):
   CI's `Lint` job never runs `generate-code` (`npm ci && npm run lint` only), but four
   `.claude/commands/*.md` gates (`update-generator`, `generate-schema`, `update-code`,
