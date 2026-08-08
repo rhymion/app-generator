@@ -48,16 +48,22 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
 
   it('(甲)(乙) shows a same-entity_name candidate and hides a different-entity_name candidate when adding Preceded By', () => {
     cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
-      // deps.precededBy already exists with entity_name 'setting' and shares
-      // deps.approverRole — the (乙) candidate: same approver_role text (so it
-      // WOULD match the search token) but a different entity_name, isolating
-      // the entity_name filter from the free-text search behavior.
+      // deps.precededBy already exists with entity_name 'setting' — the (乙)
+      // candidate: a different entity_name than editTarget.
+      //
+      // editTarget and the (甲) candidate share entity_name 'permission' but
+      // use DIFFERENT roles (approverRole vs approverRole2): approval_flow's
+      // @@unique([entity_name, approver_role_id]) (where it exists, e.g.
+      // proj_c) would otherwise reject the second 'permission' row outright.
+      // The candidate filter only keys on entity_name, so this still proves
+      // (甲) correctly — searching by a token common to both rows (found
+      // below) isolates the entity_name filter from role identity.
       createApprovalFlow('permission', deps.approverRole.id).then((editTarget) => {
-        // (甲) candidate: same entity_name as editTarget, same approver_role.
-        createApprovalFlow('permission', deps.approverRole.id).then(() => {
+        // (甲) candidate: same entity_name as editTarget, different role.
+        createApprovalFlow('permission', deps.approverRole2.id).then(() => {
           cy.visit(`/en/approval_flow/edit/${editTarget.id}`);
           cy.clickButton('Add Preceded By');
-          cy.get('div[role="dialog"]').find('input').type(deps.approverRole.name);
+          cy.get('div[role="dialog"]').find('input').type('permission');
           cy.get('.MuiAutocomplete-popper').contains('li', 'permission').should('exist');
           cy.get('.MuiAutocomplete-popper').contains('li', 'setting').should('not.exist');
         });
@@ -67,7 +73,10 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
 
   it('View and Edit render the identical preceded_by label (entity_name + approver_role.name, space-joined)', () => {
     cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
-      createApprovalFlow('permission', deps.approverRole.id).then((predecessor) => {
+      // Different roles (approverRole vs approverRole2) so the two
+      // 'permission' rows don't trip @@unique([entity_name, approver_role_id])
+      // where it exists (e.g. proj_c) — see the (甲)(乙) test above for detail.
+      createApprovalFlow('permission', deps.approverRole2.id).then((predecessor) => {
         createApprovalFlow('permission', deps.approverRole.id).then((editTarget) => {
           cy.request({
             method: 'PUT',
