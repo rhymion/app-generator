@@ -29,6 +29,9 @@ async function _create{{ pascal }}BaseDeps() {
   let {{ dep.var_name }}Record = await prisma.{{ dep.target }}.findFirst({
     where: {{ dep.lookup_where }},
     orderBy: { created_at: 'asc' },
+{% if dep.prisma_include_str %}
+    include: { {{ dep.prisma_include_str }} },
+{% endif %}
   });
   if (!{{ dep.var_name }}Record) {
 {% for fk in dep.internal_fk_deps %}
@@ -100,6 +103,9 @@ async function _create{{ pascal }}BaseDeps() {
   let {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.findFirst({
     where: {{ dep.lookup_where_second }},
     orderBy: { created_at: 'asc' },
+{% if dep.prisma_include_str %}
+    include: { {{ dep.prisma_include_str }} },
+{% endif %}
   });
   if (!{{ dep.var_name }}2Record) {
 {% for fk in dep.internal_fk_deps %}
@@ -175,6 +181,9 @@ export async function populate{{ pascal }}Dependencies() {
   let {{ dep.var_name }}Record = await prisma.{{ dep.target }}.findFirst({
     where: {{ dep.lookup_where }},
     orderBy: { created_at: 'asc' },
+{% if dep.prisma_include_str %}
+    include: { {{ dep.prisma_include_str }} },
+{% endif %}
   });
   if (!{{ dep.var_name }}Record) {
 {% for fk in dep.internal_fk_deps %}
@@ -247,6 +256,9 @@ export async function populate{{ pascal }}Dependencies() {
   let {{ dep.var_name }}Record = await prisma.{{ dep.target }}.findFirst({
     where: {{ dep.lookup_where }},
     orderBy: { created_at: 'asc' },
+{% if dep.prisma_include_str %}
+    include: { {{ dep.prisma_include_str }} },
+{% endif %}
   });
   if (!{{ dep.var_name }}Record) {
 {% for fk in dep.internal_fk_deps %}
@@ -318,6 +330,9 @@ export async function populate{{ pascal }}Dependencies() {
   let {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.findFirst({
     where: {{ dep.lookup_where_second }},
     orderBy: { created_at: 'asc' },
+{% if dep.prisma_include_str %}
+    include: { {{ dep.prisma_include_str }} },
+{% endif %}
   });
   if (!{{ dep.var_name }}2Record) {
 {% for fk in dep.internal_fk_deps %}
