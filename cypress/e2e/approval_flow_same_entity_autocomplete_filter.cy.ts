@@ -46,20 +46,20 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
     cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
   });
 
-  it('(甲)(乙) shows a same-entity_name candidate and hides a different-entity_name candidate when adding Preceded By', () => {
+  it('(A)(B) shows a same-entity_name candidate and hides a different-entity_name candidate when adding Preceded By', () => {
     cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
-      // deps.precededBy already exists with entity_name 'setting' — the (乙)
+      // deps.precededBy already exists with entity_name 'setting' — the (B)
       // candidate: a different entity_name than editTarget.
       //
-      // editTarget and the (甲) candidate share entity_name 'permission' but
+      // editTarget and the (A) candidate share entity_name 'permission' but
       // use DIFFERENT roles (approverRole vs approverRole2): approval_flow's
       // @@unique([entity_name, approver_role_id]) (where it exists, e.g.
       // proj_c) would otherwise reject the second 'permission' row outright.
       // The candidate filter only keys on entity_name, so this still proves
-      // (甲) correctly — searching by a token common to both rows (found
+      // (A) correctly — searching by a token common to both rows (found
       // below) isolates the entity_name filter from role identity.
       createApprovalFlow('permission', deps.approverRole.id).then((editTarget) => {
-        // (甲) candidate: same entity_name as editTarget, different role.
+        // (A) candidate: same entity_name as editTarget, different role.
         createApprovalFlow('permission', deps.approverRole2.id).then(() => {
           cy.visit(`/en/approval_flow/edit/${editTarget.id}`);
           cy.clickButton('Add Preceded By');
@@ -75,7 +75,7 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
     cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
       // Different roles (approverRole vs approverRole2) so the two
       // 'permission' rows don't trip @@unique([entity_name, approver_role_id])
-      // where it exists (e.g. proj_c) — see the (甲)(乙) test above for detail.
+      // where it exists (e.g. proj_c) — see the (A)(B) test above for detail.
       createApprovalFlow('permission', deps.approverRole2.id).then((predecessor) => {
         createApprovalFlow('permission', deps.approverRole.id).then((editTarget) => {
           cy.request({
