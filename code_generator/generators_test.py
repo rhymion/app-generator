@@ -269,7 +269,7 @@ def _seed_relation_label_value(
         day = unique_index if unique_index is not None else 1
         return f'2025-01-{day:02d}'
     title = to_title_case(label_field) if isinstance(label_field, str) else 'Item'
-    return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title} A'
+    return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
 
 
 def _seed_path_part(
@@ -331,16 +331,16 @@ def _seed_path_part(
 
     if final_field == 'name':
         title = to_title_case(cursor_entity)
-        return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title} A'
+        return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
     if prop_type == 'string':
         title = to_title_case(final_field)
-        return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title} A'
+        return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
     if prop_type in ('integer', 'number'):
         return str(unique_index * 100) if unique_index is not None else str(label_prop.get('minimum', 0))
     if prop_type == 'boolean':
         return 'false'
     title = to_title_case(final_field)
-    return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title} A'
+    return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
 
 
 def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dict, is_self_ref: bool = False) -> list[dict]:
@@ -363,7 +363,7 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     """
     if target == 'user':
         return [
-            {'prop_name': 'name', 'prisma_val': f"'Test {title} A'", 'prisma_val_unique': f'`Test {title} ${{i}}`', 'prisma_val_second': f"'Test {title} B'"},
+            {'prop_name': 'name', 'prisma_val': f"'Test {title} A'", 'prisma_val_unique': f'`Test {title} ${{callIndex}}_${{i}}`', 'prisma_val_second': f"'Test {title} B'"},
             {'prop_name': 'email', 'prisma_val': f'`test-{var_name}-${{Date.now()}}@example.com`', 'prisma_val_unique': f'`test-{var_name}-${{Date.now()}}-${{i}}@example.com`', 'prisma_val_second': f'`test-{var_name}-${{Date.now()}}-2@example.com`'},
             {'prop_name': 'password', 'prisma_val': "'test-password'", 'prisma_val_unique': "'test-password'", 'prisma_val_second': "'test-password'"},
         ]
@@ -407,7 +407,7 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
         fmt = prop.get('format')
         if prop_name == 'name':
             val = f"'Test {title} A'"
-            val_unique = f'`Test {title} ${{i}}`'
+            val_unique = f'`Test {title} ${{callIndex}}_${{i}}`'
             val_second = f"'Test {title} B'"
         elif actual == 'string' and prop.get('x-entity-select'):
             val = val_unique = val_second = _self_ref_entity_val
@@ -425,10 +425,14 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             # on @unique fields (e.g. product.code) are avoided at a different
             # layer: populateXxxDependencies is rendered idempotently by the
             # test_helper template (see `dep_lookup_field` / find-or-create).
-            # Within a populate(N) loop, ${i} provides intra-loop uniqueness;
-            # tests assert on the exact "Test X 1" / "Test X 2" form.
+            # Within a populate(N) loop, ${callIndex}_${i} provides both
+            # intra-loop AND cross-call uniqueness (cmd_620 Option β — each
+            # populateXxxData/FullData call gets its own callIndex slice so two
+            # calls never reuse the same primary-FK-dep row); tests assert on
+            # the exact "Test X 0_1" / "Test X 0_2" form (callIndex is always 0
+            # for a generated spec's single call within one it()).
             val = f"'Test {field_title} A'"
-            val_unique = f'`Test {field_title} ${{i}}`'
+            val_unique = f'`Test {field_title} ${{callIndex}}_${{i}}`'
             val_second = f"'Test {field_title} B'"
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
@@ -551,7 +555,7 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
         fmt = prop.get('format')
         if prop_name == 'name':
             val = f"'Test {to_title_case(dep_target)} A'"
-            val_unique = f'`Test {to_title_case(dep_target)} ${{i}}`'
+            val_unique = f'`Test {to_title_case(dep_target)} ${{callIndex}}_${{i}}`'
             val_second = f"'Test {to_title_case(dep_target)} B'"
         elif actual == 'string' and prop.get('x-entity-select'):
             val = val_unique = val_second = _first_entity_val
@@ -566,7 +570,7 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
         elif actual == 'string':
             field_title = to_title_case(prop_name)
             val = f"'Test {field_title} A'"
-            val_unique = f'`Test {field_title} ${{i}}`'
+            val_unique = f'`Test {field_title} ${{callIndex}}_${{i}}`'
             val_second = f"'Test {field_title} B'"
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
@@ -2033,18 +2037,6 @@ def helper_context(
         lookup_where_second = (
             _render_lookup_where(lookup_columns, 'prisma_val_second') if lookup_columns else None
         )
-        # Per-iteration lookup (`Test X ${i}`) used by populateXxxData's
-        # find-or-create on the primary FK. Closes the cross-helper
-        # collision where deps create `Test X 2` and populate(2) would then
-        # try to create another `Test X 2` and trip @unique (e.g.
-        # product.code). When the row already exists, the iteration re-uses
-        # it; otherwise it creates a fresh one. Same lookup columns as the deps
-        # helper — only the dep-record accessor differs (`deps.`) — so the two
-        # helpers see the same row.
-        lookup_where_unique = (
-            _render_lookup_where(lookup_columns, 'prisma_val_unique', fk_prefix='deps.')
-            if lookup_columns else None
-        )
         label_field = dep_label_info.get('label_field', 'name') if dep_label_info else dep.get('label_field', 'name')
         label_field_is_date = dep_label_info.get('label_field_is_date', False) if dep_label_info else dep.get('label_field_is_date', False)
         # Pre-compute the TS expression and Prisma include so the template
@@ -2122,7 +2114,6 @@ def helper_context(
             'lookup_field': lookup_field,
             'lookup_where': lookup_where,
             'lookup_where_second': lookup_where_second,
-            'lookup_where_unique': lookup_where_unique,
             # True if dep entity has updater_id (user-visible entities do; leaf/bridge entities may not)
             'has_updater_id': _entity_has_updater_id(dep['target'], schema),
         })
@@ -2221,10 +2212,6 @@ def helper_context(
                 'lookup_where': _render_lookup_where(_fresh_cols, 'prisma_val') if _fresh_cols else None,
                 'lookup_where_second': (
                     _render_lookup_where(_fresh_cols, 'prisma_val_second') if _fresh_cols else None
-                ),
-                'lookup_where_unique': (
-                    _render_lookup_where(_fresh_cols, 'prisma_val_unique', fk_prefix='deps.')
-                    if _fresh_cols else None
                 ),
             }
             non_self_deps.append(_fresh_dep)
@@ -2382,37 +2369,6 @@ def helper_context(
         if _pool_field is not None and _pool_field.get('dep_var_name'):
             required_fields_prisma.append(_pool_field)
 
-    # Find-or-create key for populate{{pascal}}Data's own per-iteration record
-    # (cmd_592): when every column of the entity's own @@unique/@unique
-    # constraint resolves to a TS expression already available in the loop
-    # body — the primary (per-iteration) FK var or another dep-backed FK from
-    # required_fields_prisma — reuse an existing row with that key instead of
-    # an unconditional create(), which trips the constraint when the same
-    # populate helper (or a sibling call within the same spec) runs again
-    # (e.g. goods_receipt_line's @@unique([goods_receipt_id, item_id])).
-    # Deliberately excludes internal_fk_deps (bridge FKs like approvable_id):
-    # those are always fresh per iteration, so keying on one would always
-    # find nothing and silently defeat the lookup rather than fixing it.
-    _record_expr_by_prop = {}
-    if primary_fk_dep is not None:
-        _pfk_prop_for_lookup = next(
-            (fk['prop_name'] for fk in entity_fk_deps if fk['dep_var_name'] == primary_fk_dep['var_name']),
-            None,
-        )
-        if _pfk_prop_for_lookup:
-            _record_expr_by_prop[_pfk_prop_for_lookup] = f"{primary_fk_dep['var_name']}Item.id"
-    for _f in required_fields_prisma:
-        if _f['prop_name'] in _record_expr_by_prop:
-            continue
-        if _f['category'] == 'autocomplete' and _f.get('dep_var_name'):
-            _record_expr_by_prop[_f['prop_name']] = f"deps.{_f['dep_var_name']}.id"
-    _entity_uniques_for_record = _prisma_uniques.get(model_name) or {}
-    record_lookup_where = None
-    for _cols in _entity_uniques_for_record.get('composite') or []:
-        if all(c in _record_expr_by_prop for c in _cols):
-            record_lookup_where = '{ ' + ', '.join(f'{c}: {_record_expr_by_prop[c]}' for c in _cols) + ' }'
-            break
-
     # populateData needs deps when there are required FK fields not covered by per-iteration creation.
     primary_fk_dep_var = primary_fk_dep['var_name'] if primary_fk_dep else None
     primary_fk_is_ua = primary_fk_dep is not None and primary_fk_dep.get('is_user_account', False)
@@ -2561,7 +2517,6 @@ def helper_context(
         'datagrid_children': enriched_datagrid_children,
         'comment_children': enriched_comment_children,
         'primary_fk_dep': primary_fk_dep,
-        'record_lookup_where': record_lookup_where,
         'internal_fk_deps': internal_fk_deps,
         'has_approvable': has_approvable,
         'flatten_test_rels': flatten_test_rels,

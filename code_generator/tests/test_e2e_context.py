@@ -287,12 +287,15 @@ def test_helper_context_primary_fk_string_labels_are_human_readable():
     assert ctx["primary_fk_dep"]["target"] == "patient_rel"
     patient_no = next(f for f in ctx["primary_fk_dep"]["extra_required_fields"] if f["prop_name"] == "patient_no")
     # Values must be human-readable AND deterministic so e2e specs can assert
-    # on the rendered string (e.g. `cy.contains('Test Patient No 1')`).
-    # Idempotency for repeated dep-helper invocations is handled separately at
-    # the helper template level via findFirst-or-create on the dep's `name`
-    # field, NOT by suffixing values with Date.now().
+    # on the rendered string (e.g. `cy.contains('Test Patient No 0_1')`).
+    # Idempotency for repeated dep-helper invocations (populateXxxDependencies'
+    # base/second rows) is handled separately at the helper template level via
+    # findFirst-or-create on the dep's `name` field, NOT by suffixing values
+    # with Date.now(). The per-iteration primary-FK-dep row (prisma_val_unique)
+    # instead gets a per-call callIndex prefix (cmd_620 Option β) — no
+    # find-or-create at all, so repeat calls never collide or reuse a row.
     assert patient_no["prisma_val"] == "'Test Patient No A'"
-    assert patient_no["prisma_val_unique"] == '`Test Patient No ${i}`'
+    assert patient_no["prisma_val_unique"] == '`Test Patient No ${callIndex}_${i}`'
 
 
 def test_api_spec_context_x_relationships_list_includes_composite_label_field():
