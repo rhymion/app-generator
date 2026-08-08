@@ -367,7 +367,42 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Internal
-- **Generated test helper dep records now use a letter-indexed name suffix (`'Test {Title} A'`/`'Test {Title} B'`) instead of `'Test {Title}'`/`'Test {Title} 2'`** (cmd_618, Option 甲改 Phase 1): the old dep naming collided byte-for-byte with `populate*Data(n)`'s loop rows (`` `Test {Title} ${i}` ``) once a loop reached `i=2`, causing find-or-create to resolve both to the same DB row. Letters and digits are disjoint at the first differing byte, so the dep and loop namespaces can never intersect. `_get_dep_populate_fields()`/`_get_dep_extra_required_fields()` in `code_generator/generators_test.py` updated across every value branch; `prisma_val_unique` (loop values) unchanged. See `docs/knowledge/cmd614-test-data-uniqueness-design.md` §3.
+- **Generated test helper dep records now use a letter-indexed name suffix(`'Test {Title} A'`/`'Test {Title} B'`) instead of `'Test {Title}'`/`'Test {Title} 2'`** (cmd_618, Phase 1): 
+  the old dep naming collided byte-for-byte with `populate*Data(n)`'s loop rows (`` `Test {Title} ${i}` ``)
+  once a loop reached `i=2`, causing find-or-create to resolve both to the same DB row. Letters and 
+  digits are disjoint at the first differing byte, so the dep and loop namespaces can never intersect. 
+  `_get_dep_populate_fields()`/`_get_dep_extra_required_fields()` in `code_generator/generators_test.py` 
+  updated across every value branch; `prisma_val_unique` (loop values) unchanged. 
+  See `docs/knowledge/cmd614-test-data-uniqueness-design.md` §3.
+- **`exactRe()` exact-match test helper widened from 2 self-referential entities to all entities;
+  the two post-render cleanup helpers it exposed gaps in are now anchored on code structure
+  instead of comment prose, and fail loudly instead of silently no-op'ing** (cmd_614/cmd_618):
+  `test_spec.cy.ts.jinja2`'s `exactRe()` regex matcher (added by cmd_592 to stop a self-ref
+  decoy record's display name from substring-colliding with the record a spec creates) was gated
+  behind `has_self_ref_deps`, reaching only 2 of proj_c's 46 generated specs even though the
+  underlying `cy.contains()` substring problem isn't specific to self-referential deps — removed
+  the gate from the function definition and all 8 call sites. Two follow-on issues surfaced only
+  by verifying against proj_c's real schema: (1) an unscoped `cy.contains(exactRe(...))` can match
+  the header nav's own logged-in-user badge when a dependency's display name equals it (e.g.
+  `leave_request`'s `user` FK); fixed by scoping every call site to `cy.contains('.MuiDataGrid-cell',
+  exactRe(...))` — narrow enough to exclude the header, still specific enough for an exact-match
+  regex to match a single field's value rather than a whole row's concatenated text. (2) Widening
+  the gate also rewrote the comment above `exactRe()`, silently desyncing cmd_607's
+  `_strip_unused_exact_re_helper()` — its regex was anchored on that exact comment text, so the
+  "strip if unused" cleanup would have quietly stopped firing with no error and no test failure.
+  Re-anchored on the function signature instead, and it now raises when its input contains the
+  signature but the surrounding shape doesn't match, rather than returning the input unchanged.
+  The same latent-gap shape existed in `_prefix_unused_then_callback_params()`'s
+  `_THEN_CALLBACK_RE`: it matched only the exact literal spelling `.then((x) => {` — no `async`,
+  no whitespace variance, and no TS type annotation, so every `.then((res: any) => {` in
+  `test_reservation_spec.cy.ts.jinja2` had passed through unprocessed since cmd_607 landed.
+  Widened to tolerate that real variance while preserving the matched text verbatim, and added
+  `_check_then_callback_coverage()` so any `.then(` shape it doesn't recognize fails generation
+  loudly instead of shipping unprocessed. 10 new regression tests added to
+  `test_generated_dead_code_postprocess.py` (19 total, all passing). Verified end-to-end: `lint`
+  warning count on this branch matches the `develop` baseline exactly (5 warnings, both before and
+  after), and proj_c's full API + UI Cypress suites (57 + 86 specs) reproduce the same pre-existing,
+  unrelated failures before and after this change — zero new failures from any of the above.
 - **`npm run lint` Completion gate step reordered to run before `generate-code`** (cmd_600):
   CI's `Lint` job never runs `generate-code` (`npm ci && npm run lint` only), but four
   `.claude/commands/*.md` gates (`update-generator`, `generate-schema`, `update-code`,
