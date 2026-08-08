@@ -1608,6 +1608,80 @@ class TestCompositeLabelFieldImportOrgFilter:
 
 
 # ---------------------------------------------------------------------------
+# cmd_621: a composite labelField whose path includes a date/time-formatted
+# segment must flow has_format=True end to end — from build_label_expression()
+# through x_relationships_list['import_has_format'], into the composite
+# import_fk_specs entry's 'has_format', and up to the route-level
+# import_uses_format_label_value flag consumed by api_import_route.ts.jinja2
+# (see test_import_template_branches.py for the template-side half of this
+# guard). Mirrors the real-world break: proj_g goods_receipt_line's labelField
+# is [product.code, lot_number, expiration_date] where expiration_date is
+# `type: string, format: date` — its generated import route referenced
+# formatLabelValue with no import (PR#16, "Cannot find name 'formatLabelValue'").
+# ---------------------------------------------------------------------------
+
+class TestCompositeLabelFieldImportUsesFormatLabelValue:
+    SCHEMA = {
+        "definitions": {
+            "product": {
+                "type": "object",
+                "required": ["id", "code"],
+                "properties": {"id": _base_props()["id"], "code": {"type": "string"}},
+            },
+            "goods_receipt_line": {
+                "type": "object",
+                "required": ["id", "name", "expiration_date"],
+                "x-import-key": ["name"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "lot_number": {"type": "string"},
+                    "expiration_date": {"type": "string", "format": "date"},
+                    "product_id": _fk_field("product", label="code"),
+                },
+            },
+            "purchase_order_line": {
+                "type": "object",
+                "required": ["id", "name"],
+                "x-import-key": ["name"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "goods_receipt_line_id": _fk_field(
+                        "goods_receipt_line", nullable=True,
+                        label=["product.code", "lot_number", "expiration_date"],
+                    ),
+                },
+            },
+        }
+    }
+
+    def _ctx(self):
+        return build_context(_entity(model="purchase_order_line"), self.SCHEMA)
+
+    def test_composite_spec_with_date_segment_marked_has_format(self):
+        ctx = self._ctx()
+        specs = {s["result_col"]: s for s in ctx["import_fk_specs"]}
+        spec = specs["goods_receipt_line_id"]
+        assert spec["is_composite"] is True
+        assert spec["has_format"] is True
+
+    def test_route_level_flag_set_when_any_composite_spec_has_format(self):
+        ctx = self._ctx()
+        assert ctx["import_uses_format_label_value"] is True
+
+    def test_route_level_flag_false_when_no_composite_spec_needs_it(self):
+        """Non-regression companion: TestCompositeLabelFieldImportOrgFilter's
+        inventory_movement fixture (composite labelField, no date segment)
+        must NOT set the route-level flag."""
+        ctx = build_context(
+            _entity(model="inventory_movement"),
+            TestCompositeLabelFieldImportOrgFilter.SCHEMA,
+        )
+        assert ctx["import_uses_format_label_value"] is False
+
+
+# ---------------------------------------------------------------------------
 # DP-2 (cmd_394 §5, Option D): export display_col names the actual labelField
 # instead of always assuming "_name". Zero-breaking-change on any schema where
 # every FK labelField happens to be 'name' (true of every currently

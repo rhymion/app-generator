@@ -1367,6 +1367,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             'target': r['target'],
             'simple_label': _xrl_simple_label,
             'import_label_expr': _xrl_import_built['expression'] if _xrl_import_built else None,
+            # cmd_621: import_label_expr can itself invoke formatLabelValue
+            # (same helper/inputs as the export label_expr — see cmd_548 note
+            # above) — the import route must import it iff this is true for
+            # at least one composite/dotted labelField relation. Tracked
+            # separately from export_uses_format_label_value because the
+            # export and import code paths render in different template
+            # files (page_list/form_view/etc. vs. api_import_route) and each
+            # must only import what it actually calls.
+            'import_has_format': _xrl_import_built['has_format'] if _xrl_import_built else False,
             'prisma_include': _xrl_import_built['prisma_include'] if _xrl_import_built else None,
         })
 
@@ -1588,6 +1597,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'lookup_entity_filter_by_self_id': _lookup_entity_filter_by_self_id,
                 'is_key':               False,
                 'import_label_expr':    r['import_label_expr'],
+                'has_format':           r['import_has_format'],
                 'prisma_include':       r['prisma_include'],
             })
             continue
@@ -1622,6 +1632,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         s['lookup_entity_filter_by_org'] or s['lookup_entity_filter_by_self_id']
         for s in import_fk_specs
     )
+
+    # cmd_621: whether ANY composite-labelField import_label_expr in this
+    # route calls formatLabelValue — drives the conditional import in
+    # api_import_route.ts.jinja2. cmd_607 removed the unconditional import as
+    # dead-binding lint debt; that was correct for THAT template snapshot,
+    # but import_label_expr renders {{ }}-injected calls the jinja2 source
+    # text never spells out, so a static read of the template can't see this
+    # dependency — only s.get('has_format') (only composite-branch specs
+    # carry it) can.
+    import_uses_format_label_value = any(s.get('has_format') for s in import_fk_specs)
 
     # import_unimportable_columns (cmd_530): exported FK display columns with
     # no CSV-import write path (composite/dotted labelField, or read-only on
@@ -2746,6 +2766,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         import_can_update=import_can_update,
         import_key_specs=import_key_specs,
         import_fk_specs=import_fk_specs,
+        import_uses_format_label_value=import_uses_format_label_value,
         import_unimportable_columns=import_unimportable_columns,
         any_dotted_fk_needs_org_filter=any_dotted_fk_needs_org_filter,
         import_update_fields=import_update_fields,

@@ -32,6 +32,13 @@ _BASE_CTX = {
     'import_fk_specs': [],
     'import_unimportable_columns': [],
     'item_context_select': '{ id: true, creator_id: true }',
+    # cmd_621: whether any import_fk_specs entry's import_label_expr calls
+    # formatLabelValue — build_context.py computes this as
+    # any(s.get('has_format') for s in import_fk_specs); these tests render
+    # the template directly against a synthetic context, bypassing that
+    # aggregation, so it must be set explicitly per-test (see
+    # test_format_label_value_imported_when_composite_spec_needs_it below).
+    'import_uses_format_label_value': False,
 }
 
 
@@ -213,7 +220,30 @@ _COMPOSITE_SPEC = {
     'result_col': 'inventory_id', 'fk_nullable': True,
     'lookup_entity_filter_by_org': True, 'is_key': False,
     'import_label_expr': "`${(c.product?.name ?? '')} ${(c.location?.name ?? '')}`",
+    # cmd_621: this labelField (product.name / location.name) has no date/
+    # enum segment, so build_context.py's build_label_expression() reports
+    # has_format=False for it — matches reality, unlike the pre-cmd_621 test
+    # below which asserted formatLabelValue absent for ALL composite specs.
+    'has_format': False,
     'prisma_include': {'product': True, 'location': True},
+}
+
+# cmd_621: same shape as _COMPOSITE_SPEC but with a labelField segment that
+# needs date formatting (mirrors proj_g goods_receipt_line's real
+# product.code + lot_number + expiration_date labelField, the entity whose
+# generated import route actually failed to build — see PR#16/cmd_621).
+_COMPOSITE_SPEC_WITH_FORMAT = {
+    **_COMPOSITE_SPEC,
+    'raw': 'purchase_order_line', 'var_prefix': 'purchase_order_line',
+    'csv_col': 'purchase_order_line_name',
+    'lookup_entity': 'purchase_order_line', 'lookup_entity_pascal': 'PurchaseOrderLine',
+    'result_col': 'purchase_order_line_id',
+    'import_label_expr': (
+        "`${(c.product?.code ?? '')} ${(c.lot_number ?? '')} "
+        "${formatLabelValue(c.expiration_date, 'date')}`"
+    ),
+    'has_format': True,
+    'prisma_include': {'product': True},
 }
 
 
@@ -348,6 +378,29 @@ def test_create_with_auto_create_oto_rels_prepends_bridge_pre_create(env):
     assert "await tx.test_entity.create({ data: action.data as any });" not in rendered
     # Pre-create statement must precede the create() call it feeds.
     assert rendered.index("tx.approvable.create") < rendered.index("tx.test_entity.create({")
+
+
+def test_bridge_create_eslint_disable_immediately_precedes_as_any(env):
+    """cmd_620 QC finding (proj_c PR consolidation review, fixed here
+    alongside cmd_621 since both touch api_import_route.ts.jinja2):
+    eslint-disable-next-line only suppresses a lint rule on the line
+    immediately following it. On the one_to_one_pre_creates branch, the
+    comment previously sat above `await tx.{{ model }}.create({` — two
+    lines above the actual `as any` on `data: { ...(action.data as any), `
+    — so it silently failed to suppress anything. Must be directly above
+    the `as any` line, not merely somewhere above the statement."""
+    ctx = _ctx(
+        one_to_one_pre_creates=(
+            "    const approvable = await tx.approvable.create({ data: {} });"
+        ),
+        one_to_one_fk_data_lines="        approvable_id: approvable.id,",
+    )
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    lines = rendered.splitlines()
+    as_any_idx = next(i for i, l in enumerate(lines) if '...(action.data as any)' in l)
+    assert '// eslint-disable-next-line @typescript-eslint/no-explicit-any' in lines[as_any_idx - 1]
+
+
 # cmd_611/612: organization-typed lookup targets need a SELF-id filter
 # (candidate.id in the actor's associated-org list), not an organization_id
 # filter (organization rows have no such column — lookup_entity_filter_by_org
@@ -463,11 +516,23 @@ def test_import_can_create_true_still_declares_and_writes_fkdata(env):
     assert 'fkData.requestor_role_id = _requestor_role_id;' in rendered
 
 
-def test_format_label_value_never_imported(env):
-    """formatLabelValue was imported unconditionally but never referenced
-    anywhere in this template — composite/dotted FK labels are matched via
-    import_label_expr (built in build_context.py), not this helper. Dead in
-    every entity's generated import route, regardless of branch."""
+def test_format_label_value_not_imported_when_no_spec_needs_it(env):
+    """cmd_607 fixed a real dead-import lint warning (formatLabelValue was
+    imported unconditionally, back when import_label_expr never called it),
+    and this test's ORIGINAL form (removed here, cmd_621) asserted the
+    import absent unconditionally — including for a composite spec
+    (_COMPOSITE_SPEC) whose import_label_expr, in that fixture, happens not
+    to call formatLabelValue. cmd_613's labelField-composition feature later
+    made composite import_label_expr expressions call formatLabelValue for
+    real entities (proj_g goods_receipt_line), which the generated route
+    then referenced with no import — a TS build break the ORIGINAL form of
+    this test could never catch, because it only ever exercised specs where
+    has_format is False. See test_format_label_value_imported_when_composite_spec_needs_it
+    below for the has_format=True side this test cannot cover — the two
+    together are the actual regression guard; either alone is a blind spot.
+    import_uses_format_label_value defaults to False in _BASE_CTX (matching
+    build_context.py's any(s.get('has_format') for s in import_fk_specs) for
+    every spec list used here, since none of them set has_format=True)."""
     for ctx in (
         _ctx(),
         _ctx(import_can_create=False, import_can_update=False),
@@ -475,3 +540,48 @@ def test_format_label_value_never_imported(env):
     ):
         rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
         assert 'formatLabelValue' not in rendered
+
+
+def test_format_label_value_imported_when_composite_spec_needs_it(env):
+    """cmd_621 regression guard (甲 direction): a composite labelField whose
+    import_label_expr calls formatLabelValue (real case: proj_g
+    goods_receipt_line's product.code + lot_number + expiration_date, which
+    broke PR#16's TS build with 'Cannot find name formatLabelValue') must
+    get the import — driven by import_uses_format_label_value, which
+    build_context.py sets from any(s.get('has_format') for s in
+    import_fk_specs), not by any per-branch text match in this template
+    (import_label_expr's call to formatLabelValue arrives entirely through
+    {{ }} substitution, invisible to a static read of the .jinja2 source —
+    the exact blind spot that let cmd_607 remove this import as
+    apparently-dead code)."""
+    ctx = _ctx(
+        import_fk_specs=[_COMPOSITE_SPEC_WITH_FORMAT],
+        import_uses_format_label_value=True,
+    )
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert "import { formatLabelValue } from '@/lib/_format';" in rendered
+    # The import must precede its use (the candidate-label-map loop).
+    import_pos = rendered.index("import { formatLabelValue }")
+    use_pos = rendered.index('formatLabelValue(c.expiration_date')
+    assert import_pos < use_pos
+
+
+def test_format_label_value_import_absent_when_flag_false_even_with_composite_spec(env):
+    """乙 direction, isolating the flag itself: import_uses_format_label_value
+    is the sole gate on the IMPORT STATEMENT — a composite spec present with
+    the flag left False (e.g. a build_context.py regression that forgets to
+    set it) must still omit the import line, even though spec.import_label_expr
+    itself still renders a literal `formatLabelValue(...)` call text (that
+    call comes from the spec dict, not from this gate — the two are
+    independent inputs to the template, and build_context.py is responsible
+    for keeping them consistent; this test isolates the template's half of
+    that contract). Complements
+    test_format_label_value_not_imported_when_no_spec_needs_it, which only
+    ever exercises specs that are has_format=False by construction; this
+    test pins the gate's behavior directly regardless of spec content."""
+    ctx = _ctx(
+        import_fk_specs=[_COMPOSITE_SPEC_WITH_FORMAT],
+        import_uses_format_label_value=False,
+    )
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert "import { formatLabelValue } from '@/lib/_format';" not in rendered
