@@ -1249,6 +1249,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     has_org_rel          = any(r['target'] == 'organization' for r in parent_rels)
     should_filter_by_org = has_org_rel and model not in ('organization', 'user')
+    # cmd_611/612: an org-scoped model whose organization relation is itself
+    # OPTIONAL (organization_id nullable) needs its read-scope filter to admit
+    # NULL rows too — `organization_id: { in: [...] }` never matches NULL in
+    # SQL, so without this an org-less row is invisible to every org-scoped
+    # actor, including its own creator, the moment organization stops being
+    # required. Harmless no-op for a required-org model: organization_id is
+    # never null there, so the extra OR branch never actually fires.
+    org_relationship_optional = should_filter_by_org and not next(
+        (r['required'] for r in parent_rels if r['target'] == 'organization'), True
+    )
 
     # is_self_only / self_only_admin_bypass: entity-level access invariant
     # ("only the record's creator can access it") that no permission setting
@@ -2719,6 +2729,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         parent_rels_raw=parent_rels_raw,
         relationship_targets=relationship_targets,
         should_filter_by_org=should_filter_by_org,
+        org_relationship_optional=org_relationship_optional,
         is_self_only=is_self_only,
         self_only_admin_bypass=self_only_admin_bypass,
         # CSV export (Phase 1): natural-key columns + FK flatten metadata

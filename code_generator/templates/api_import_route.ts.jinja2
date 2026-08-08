@@ -292,13 +292,21 @@ export async function POST(request: NextRequest) {
       // Prisma findMany() overload in one step — inline spreads here can
       // hit TS7022 (self-referential implicit-any) against generic Prisma
       // args typing.
+{% if org_relationship_optional %}
+      const _matchWhere: Record<string, unknown> = { ...keyWhere, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }], creator_id: actorId };
+{% else %}
       const _matchWhere: Record<string, unknown> = { ...keyWhere, organization_id: { in: _importOrgIds }, creator_id: actorId };
+{% endif %}
       const matches = await prisma.{{ model }}.findMany({
         where: _matchWhere,
         select: {{ item_context_select }},
       });
 {% elif should_filter_by_org %}
+{% if org_relationship_optional %}
+      const _matchWhere: Record<string, unknown> = { ...keyWhere, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }] };
+{% else %}
       const _matchWhere: Record<string, unknown> = { ...keyWhere, organization_id: { in: _importOrgIds } };
+{% endif %}
       const matches = await prisma.{{ model }}.findMany({
         where: _matchWhere,
         select: {{ item_context_select }},
