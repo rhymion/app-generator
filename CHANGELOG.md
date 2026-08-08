@@ -27,6 +27,26 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   passed, 0 skipped. See `docs/knowledge/create-feasible-internal-bridge-fk-fix.md`.
 
 ### Fixed
+- **Generator-side lint debt invisible to CI (cmd_607)**: `npm run generate-code && npm run lint`
+  surfaced 83 eslint warnings (0 errors) that CI's `Lint` job — which runs before `generate-code`,
+  never after — could never see. Broken down: 48 were a Chai getter-assertion false positive
+  (`expect(x).to.be.true`/`.to.exist` read as unused expressions by
+  `@typescript-eslint/no-unused-expressions`, which has no notion of Chai's assertion-chain side
+  effects), fixed by scoping that rule off for `cypress/e2e/api/**/*.cy.ts` in `eslint.config.mjs`.
+  The remaining 30 `no-unused-vars` warnings were three unrelated dead-binding bugs in
+  `api_import_route.ts.jinja2` (`formatLabelValue` imported but never referenced; `fkData` declared
+  and written even when `import_can_create` is false and nothing reads it) and
+  `api_bulk_route.ts.jinja2` (`richPerms` bound even for `x-self-only` entities, which never read it
+  — the permission check itself still runs, just unbound), plus two ordinary stale imports in
+  hand-written (non-generated) `audit_log` test files, plus 22 warnings whose triggering condition is
+  scattered across dozens of independent scenario branches in `test_spec.cy.ts.jinja2` — fixed via two
+  new self-healing post-render helpers in `generate.py` (`_strip_unused_exact_re_helper`,
+  `_prefix_unused_then_callback_params`) that inspect the actual rendered TypeScript output rather
+  than trying to mirror every branch condition in Python. 83 → 5 warnings (the remaining 5 are an
+  unrelated, pre-existing `@next/next/no-img-element` suggestion on static `components/_standard/*`
+  files, deliberately out of scope). 15 new pytest tests, 0 regressions (1130 → 1145 passed, 0 SKIP).
+  See `docs/knowledge/cmd607-generator-lint-debt-fix.md`.
+
 - **x-reservation test-helper generation only ever resolved the pool entity's criteria-field FK,
   silently omitting any OTHER required FK on the pool entity** (cmd_602): when a pool entity (e.g.
   `inventory`) has a required FK beyond the one named in `x-reservation.request.criteria` (e.g.
