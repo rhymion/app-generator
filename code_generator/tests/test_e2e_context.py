@@ -464,5 +464,6 @@ def test_spec_context_non_server_value_primary_field_still_gets_edit_primary_cmd
         "shift", [], _server_value_primary_shift_schema(None), "shift", "shift_detail",
         _entity("shift")["generate_config"],
     )
-    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User', 'Test User');"
+    # cmd_618: base instance is now letter-indexed ('Test User A').
+    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User', 'Test User A');"
     assert ctx["populate_count_3_3"] == 2
