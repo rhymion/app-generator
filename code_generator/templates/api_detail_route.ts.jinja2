@@ -83,7 +83,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
 {% if should_filter_by_org %}
     const _assocOrgs = await getAssociatedOrganizations(actorId);
     const _assocOrgIds = _assocOrgs.map((o) => o.id);
+{% if org_relationship_optional %}
+    const existing = await prisma.{{ model }}.findFirst({ where: { id, OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] }, select: {{ item_context_select }} });
+{% else %}
     const existing = await prisma.{{ model }}.findFirst({ where: { id, organization_id: { in: _assocOrgIds } }, select: {{ item_context_select }} });
+{% endif %}
 {% else %}
     const existing = await prisma.{{ model }}.findUnique({ where: { id }, select: {{ item_context_select }} });
 {% endif %}
@@ -133,7 +137,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
 {% if should_filter_by_org %}
     const _assocOrgs = await getAssociatedOrganizations(actorId);
     const _assocOrgIds = _assocOrgs.map((o) => o.id);
+{% if org_relationship_optional %}
+    const existing = await prisma.{{ model }}.findFirst({ where: { id, OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] }, select: {{ item_context_select }} });
+{% else %}
     const existing = await prisma.{{ model }}.findFirst({ where: { id, organization_id: { in: _assocOrgIds } }, select: {{ item_context_select }} });
+{% endif %}
 {% else %}
     const existing = await prisma.{{ model }}.findUnique({ where: { id }, select: {{ item_context_select }} });
 {% endif %}

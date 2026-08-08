@@ -2,9 +2,11 @@
 {% if can_create %}
 export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string{% if server_value_override_fields %}; _server_value_overrides?: Record<string, string>{% endif %} }> {
 {% if should_filter_by_org %}
-  const _createOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
-  if (!_createOrgIds.includes(organizationId)) {
-    throw new ApiError(404, 'Not found');
+  if (organizationId) {
+    const _createOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
+    if (!_createOrgIds.includes(organizationId)) {
+      throw new ApiError(404, 'Not found');
+    }
   }
 {% endif %}
   const result = await prisma.$transaction(async (tx) => {

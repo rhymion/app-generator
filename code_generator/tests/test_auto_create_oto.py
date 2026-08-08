@@ -297,6 +297,16 @@ class TestAutoCreateOTOServiceLayer:
         assert ctx["one_to_one_pre_creates"].count("tx.approvable.create") == 1
         assert "approvable_id: approvable.id" in ctx["parent_data_obj"]
 
+    def test_approvable_fk_data_line_exposed_standalone(self):
+        """cmd_614: one_to_one_fk_data_lines must be exposed in the returned
+        context dict on its own (not only inlined into parent_data_obj) —
+        api_import_route.ts.jinja2's commit-time create branch consumes it
+        directly, alongside one_to_one_pre_creates, to wire the bridge FK
+        into a create() call built from a different data object
+        (action.data) than service.ts.jinja2's parent_data_obj."""
+        ctx = build_context(_entity("leave_request"), _approvable_schema())
+        assert "approvable_id: approvable.id" in ctx["one_to_one_fk_data_lines"]
+
     def test_approvable_fk_excluded_from_service_params(self):
         ctx = build_context(_entity("leave_request"), _approvable_schema())
         assert "approvable_id" not in ctx["parent_params_with_types"]

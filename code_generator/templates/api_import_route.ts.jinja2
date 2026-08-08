@@ -6,7 +6,6 @@ import { getModelPermissions, assertPermission, canAccess{% if should_filter_by_
 import { handleApiError } from '@/lib/api-auth';
 import { unescapeImportValue } from '@/lib/_csv';
 import { generateImportToken, verifyImportToken } from '@/lib/_import';
-import { formatLabelValue } from '@/lib/_format';
 {% if should_filter_by_org or any_dotted_fk_needs_org_filter %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
@@ -155,6 +154,8 @@ export async function POST(request: NextRequest) {
         include: {{ spec.prisma_include | tojson }},
 {% if spec.lookup_entity_filter_by_org %}
         where: { organization_id: { in: _importOrgIds } },
+{% elif spec.lookup_entity_filter_by_self_id %}
+        where: { id: { in: _importOrgIds } },
 {% endif %}
       });
       for (const c of _{{ spec.var_prefix }}_candidates) {
@@ -185,7 +186,7 @@ export async function POST(request: NextRequest) {
       {
 {% endif %}
         const _{{ spec.var_prefix }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
-          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% endif %} },
+          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% elif spec.lookup_entity_filter_by_self_id %}, id: { in: _importOrgIds }{% endif %} },
           select: { id: true },
         });
         if (_{{ spec.var_prefix }}_rows.length === 0) {
@@ -209,7 +210,12 @@ export async function POST(request: NextRequest) {
       // cmd_530: non-key FK relations that are screen-editable — resolved the
       // same way as a dotted x-import-key, but written to fkData (CREATE and
       // UPDATE) instead of keyWhere (these never participate in row matching).
+      // cmd_607: fkData itself is only ever read by the CREATE branch below —
+      // declaring it unconditionally left it as a dead variable on
+      // create-not-supported entities (e.g. user), so it's gated the same way.
+{% if import_can_create %}
       const fkData: Record<string, unknown> = {};
+{% endif %}
 {% for spec in import_fk_specs %}
 {% if not spec.is_key %}
 {% if spec.is_composite %}
@@ -237,7 +243,9 @@ export async function POST(request: NextRequest) {
         }
         _{{ spec.result_col }} = _{{ spec.var_prefix }}_ids[0];
       }
+{% if import_can_create %}
       fkData.{{ spec.result_col }} = _{{ spec.result_col }};
+{% endif %}
 {% else %}
       // Non-key FK: {{ spec.raw }} → lookup {{ spec.lookup_entity }} by {{ spec.lookup_field }}
       let _{{ spec.result_col }}: string | null = null;
@@ -251,7 +259,7 @@ export async function POST(request: NextRequest) {
       {
 {% endif %}
         const _{{ spec.var_prefix }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
-          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% endif %} },
+          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% elif spec.lookup_entity_filter_by_self_id %}, id: { in: _importOrgIds }{% endif %} },
           select: { id: true },
         });
         if (_{{ spec.var_prefix }}_rows.length === 0) {
@@ -266,7 +274,9 @@ export async function POST(request: NextRequest) {
         }
         _{{ spec.result_col }} = _{{ spec.var_prefix }}_rows[0].id;
       }
+{% if import_can_create %}
       fkData.{{ spec.result_col }} = _{{ spec.result_col }};
+{% endif %}
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -290,13 +300,21 @@ export async function POST(request: NextRequest) {
       // Prisma findMany() overload in one step — inline spreads here can
       // hit TS7022 (self-referential implicit-any) against generic Prisma
       // args typing.
+{% if org_relationship_optional %}
+      const _matchWhere: Record<string, unknown> = { ...keyWhere, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }], creator_id: actorId };
+{% else %}
       const _matchWhere: Record<string, unknown> = { ...keyWhere, organization_id: { in: _importOrgIds }, creator_id: actorId };
+{% endif %}
       const matches = await prisma.{{ model }}.findMany({
         where: _matchWhere,
         select: {{ item_context_select }},
       });
 {% elif should_filter_by_org %}
+{% if org_relationship_optional %}
+      const _matchWhere: Record<string, unknown> = { ...keyWhere, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }] };
+{% else %}
       const _matchWhere: Record<string, unknown> = { ...keyWhere, organization_id: { in: _importOrgIds } };
+{% endif %}
       const matches = await prisma.{{ model }}.findMany({
         where: _matchWhere,
         select: {{ item_context_select }},
@@ -402,8 +420,19 @@ export async function POST(request: NextRequest) {
       for (const action of actions) {
         try {
           if (action.op === 'create') {
+{% if one_to_one_pre_creates %}
+{{ one_to_one_pre_creates }}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await tx.{{ model }}.create({
+              data: {
+                ...(action.data as any),
+{{ one_to_one_fk_data_lines }}
+              },
+            });
+{% else %}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await tx.{{ model }}.create({ data: action.data as any });
+{% endif %}
           } else {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await tx.{{ model }}.update({ where: { id: action.id }, data: action.data as any });

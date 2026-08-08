@@ -44,7 +44,11 @@ async function build{{ parent_pascal }}AccessWhere(
 ): Promise<Record<string, unknown>[]> {
   const and: Record<string, unknown>[] = [];
 {% if should_filter_by_org %}
+{% if org_relationship_optional %}
+  and.push({ OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }] });
+{% else %}
   and.push({ organization_id: { in: associatedOrganizationIds } });
+{% endif %}
 {% endif %}
 {% if is_self_only %}
   // x-self-only: creator_id is unconditional — no permission setting
@@ -88,7 +92,11 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     where: {
       id,
 {% if should_filter_by_org %}
+{% if org_relationship_optional %}
+      OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }],
+{% else %}
       organization_id: { in: associatedOrganizationIds },
+{% endif %}
 {% endif %}
 {% if is_self_only %}
 {% if self_only_admin_bypass %}

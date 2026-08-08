@@ -44,7 +44,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - ロールベースアクセス制御（モデルごとの CRUD 権限）
 - 作成者/担当者ベースのアクセス制御
 - `x-self-only` — 権限設定に依存しないユーザー単位のデータ分離。作成者/担当者スコープ(権限付与で緩められる設定値)と異なり、`x-self-only` を宣言したエンティティは常に自分が作成した行のみへアクセス可能で、`admin_bypass: true` により特権ロールへ監査付きの例外アクセスを許可できます。詳細は [`docs/knowledge/self-only-entity.md`](docs/knowledge/self-only-entity.md) を参照してください
-- 組織スコープフィルタリング — organization_id を持つエンティティは、ユーザーが所属する組織に自動的にフィルタリングされます。CSV インポートのドット付き自然キー FK 解決（例: `role.name`）も、参照先エンティティ自体が組織スコープを持つ場合は同様にフィルタリングされます。詳細は [`docs/knowledge/csv-import-dotted-fk-org-filter.md`](docs/knowledge/csv-import-dotted-fk-org-filter.md) を参照してください
+- 組織スコープフィルタリング — organization_id を持つエンティティは、ユーザーが所属する組織に自動的にフィルタリングされます。CSV インポートのドット付き自然キー FK 解決（例: `role.name`）も、参照先エンティティ自体が組織スコープを持つ場合は同様にフィルタリングされます。詳細は [`docs/knowledge/csv-import-dotted-fk-org-filter.md`](docs/knowledge/csv-import-dotted-fk-org-filter.md) を参照してください。`organization` リレーション自体を必須ではなく任意（`required` から除外）として宣言することも可能です。詳細は [`docs/knowledge/org-optional-entity-support.md`](docs/knowledge/org-optional-entity-support.md) を参照してください
 - 表示ラベルが複合または複数階層（ドット区切り）のFK列に対するCSVインポート — 事前構築したルックアップマップに対しレンダリング済みラベル全文を照合して解決します（行単位の `NOT_FOUND`/`MULTI_MATCH` エラー、組織分離対応）。詳細は [`docs/knowledge/csv-import-composite-labelfield.md`](docs/knowledge/csv-import-composite-labelfield.md) を参照してください
 - FK 参照先の閲覧権限が不足している場合のグレースフルデグラデーション — あるロールがエンティティの作成・編集はできても、その FK 参照先の閲覧権限がない場合（例: `approval_flow` は管理できるが `role` は閲覧できない）、該当フィールドはページをクラッシュさせず無効化表示になります。権限付与の際は [`docs/knowledge/fk-read-permission-graceful-degradation.md`](docs/knowledge/fk-read-permission-graceful-degradation.md) を参照してください
 - `x-server-value` — 常にサーバー側で計算される値を持つフィールド（現状は `source: actor`、認証済みユーザーのID）で、クライアントからは書き込み不可、かつ自動的に読み取り専用になります。dict形式では委任機能を追加できます: `{source: actor, override_permission: <Operation>}` により、その権限を持つ actor は作成時に明示的な値を指定でき（例: 管理者が他者の代わりに申請する場合）、権限を持たぬ actor が値を送った場合はリクエスト失敗ではなく自分自身のIDへ静かに置き換えられ、この置き換えの有無はレスポンスの `_server_value_overrides` フラグで判別できます。委任を伴わぬ通常の `x-readonly`/`x-readonly-fields` フィールドは、作成時にクライアントが何らかの値を送ると即座に拒否されます — CREATE には PUT と異なり比較対象となる既存行が無いため、更新時の不一致と違い妥当な代替値が存在しないためです。詳細は [`docs/knowledge/x-server-value-actor-delegation.md`](docs/knowledge/x-server-value-actor-delegation.md) を参照してください
@@ -273,7 +273,7 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 **CSRF 保護**はすべての状態変更 API ルートに適用されます。
 
-**組織スコープフィルタリング**はクエリレイヤーで適用されます: すべてのリストクエリに自動的な `organization_id` フィルターが適用され、データを認証済みユーザーの組織にスコープします。組織スコープエンティティの更新系操作（update/delete/CSV インポートによる更新）も、ID指定での組織跨ぎアクセスを拒否します — 他組織のレコードを対象としたリクエストは、`creator_id`/`assignee_id` の権限だけでは成功せず拒否されます（API ルートは `404`、セッションアクションはサイレントに no-op）。テナントレベルの分離（クロステナントのデータ分離）はまだ実装されていません — ロードマップセクションを参照してください。
+**組織スコープフィルタリング**はクエリレイヤーで適用されます: すべてのリストクエリに自動的な `organization_id` フィルターが適用され、データを認証済みユーザーの組織にスコープします。組織スコープエンティティの更新系操作（update/delete/CSV インポートによる更新）も、ID指定での組織跨ぎアクセスを拒否します — 他組織のレコードを対象としたリクエストは、`creator_id`/`assignee_id` の権限だけでは成功せず拒否されます（API ルートは `404`、セッションアクションはサイレントに no-op）。組織スコープエンティティ自身の `organization` リレーションが任意（optional）として宣言されている場合、組織を持たない行は不可視ではなく未割当として扱われます — あらゆる読み取り/書き込みスコープフィルターにおいて、ユーザー自身の所属組織と並んで許可対象に含まれる（除外されない）ため、組織なしで作成された瞬間に孤立することなく、該当権限を持つ認証済みアクターなら誰でも到達可能なままです。テナントレベルの分離（クロステナントのデータ分離）はまだ実装されていません — ロードマップセクションを参照してください。
 
 **ロールベースアクセス制御**はスキーマでモデルごとに定義されます。`authz.ts` モジュールがすべてのリクエストに対してモデルごとの CRUD 権限を強制します。
 

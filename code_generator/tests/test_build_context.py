@@ -1807,16 +1807,32 @@ class TestDP1cVisibleSourceOnlyCreateFeasibility:
 
 
 # ---------------------------------------------------------------------------
-# cmd_421 Batch3: CSV import of an entity with a required internal bridge FK
-# (raised previously for inventory_movement's approvable_id — DP-B "確認"
-# item). No entity-specific handling exists anywhere in build_context.py for
-# this; the same generic _create_feasible gap-check (required field not in
-# export_scalar_fields and not import-resolvable) already excludes bridge FKs
-# because get_internal_bridge_fk_prop_names() is unioned into the export
-# exclusion set. This test proves that generic mechanism actually produces
-# the correct, safe outcome for import (CREATE gated off, UPDATE still
-# available) rather than a broken route or a 500 at runtime — it is
-# structural verification, not new behavior.
+# cmd_421 Batch3 (corrected by cmd_609): CSV import of an entity with a
+# required internal bridge FK (raised previously for inventory_movement's
+# approvable_id — DP-B "to confirm" item).
+#
+# cmd_421's original comment here claimed get_internal_bridge_fk_prop_names()
+# was already unioned into _create_feasible's gap-check, making CREATE
+# correctly infeasible "structural verification, not new behavior". That
+# claim was wrong: get_internal_bridge_fk_prop_names() was (and, for the
+# export-column allowlist, still is) unioned only into the *export*
+# exclusion set (_fk_prop_names, used to build export_scalar_fields) —
+# _create_feasible's own gap-check never called it, so a required bridge FK
+# was excluded from export_scalar_fields (correctly — it must never appear
+# as a CSV column) but then NOT removed from the required-fields gap set,
+# since subtracting export_scalar_fields only removes names that ARE in it.
+# The net (undetected, since this test's own assertion baked the bug in as
+# "expected") result was import_can_create=False for every entity with a
+# required bridge FK — and when combined with edit:false (import_can_update
+# also False), the entire import route collapsed to the
+# ENTITY_IMPORT_NOT_SUPPORTED 400 stub (api_import_route.ts.jinja2:24), even
+# though CREATE is genuinely fine: the service layer creates and wires the
+# bridge row itself, it was never meant to come from the CSV.
+#
+# cmd_609 fixes this: _create_feasible now also subtracts
+# get_internal_bridge_fk_prop_names(model_def, schema) directly, so a
+# required bridge FK no longer counts as an unfillable gap. CREATE is
+# feasible; this test now asserts the corrected (True) outcome.
 # ---------------------------------------------------------------------------
 
 class TestRequiredInternalBridgeFkImportFeasibility:
@@ -1867,19 +1883,39 @@ class TestRequiredInternalBridgeFkImportFeasibility:
         assert "approvable_id" not in ctx["export_scalar_fields"]
         assert all(spec["name"] != "approvable_id" for spec in ctx["import_field_specs"])
 
-    def test_required_bridge_fk_gates_off_create_but_not_update(self):
+    def test_required_bridge_fk_does_not_gate_off_create(self):
         schema = self._schema()
         ctx = build_context(self._entity(), schema)
         assert ctx["import_eligible"] is True
-        assert ctx["import_can_create"] is False, (
-            "approvable_id is required but has no visible CSV source (bridge "
-            "FK) — CREATE must be infeasible, matching the generic "
-            "_create_feasible gap-check, not a broken/500-producing route"
+        assert ctx["import_can_create"] is True, (
+            "approvable_id is required but is server-managed plumbing (the "
+            "service layer creates and wires it at CREATE time) — a required "
+            "internal bridge FK must NOT count as an unfillable gap, or "
+            "CREATE is wrongly gated off (cmd_609)"
         )
         assert ctx["import_can_update"] is True, (
-            "UPDATE never needs to supply approvable_id, so it stays "
-            "available even though CREATE is gated off"
+            "UPDATE never needs to supply approvable_id either, so it stays "
+            "available"
         )
+
+    def test_required_bridge_fk_plus_edit_false_does_not_collapse_route(self):
+        """The specific compound failure cmd_609 fixes: x-generate.edit=false
+        (import_can_update=False structurally) combined with the pre-fix
+        _create_feasible bug (import_can_create wrongly False) made
+        api_import_route.ts.jinja2:24's `{% if not import_can_create and not
+        import_can_update %}` collapse the entire route to the
+        ENTITY_IMPORT_NOT_SUPPORTED 400 stub. With the fix, import_can_create
+        is True even though edit is false, so the route stays live."""
+        schema = self._schema()
+        entity = self._entity()
+        entity["generate_config"]["edit"] = False
+        ctx = build_context(entity, schema)
+        assert ctx["import_can_update"] is False
+        assert ctx["import_can_create"] is True
+        route_collapses_to_400_stub = (
+            not ctx["import_can_create"] and not ctx["import_can_update"]
+        )
+        assert route_collapses_to_400_stub is False
 
 
 class TestFormDataGetsPrismaNativeEnum:
@@ -1989,3 +2025,102 @@ class TestSelfOnlyContextFlags:
         ctx = build_context(_entity("widget"), self._schema({"admin_bypass": False}))
         assert ctx["is_self_only"] is True
         assert ctx["self_only_admin_bypass"] is False
+
+
+# ---------------------------------------------------------------------------
+# cmd_611/612: org_relationship_optional. An org-scoped model whose own
+# `organization` relationship is OPTIONAL needs its read-scope filters to
+# admit NULL rows too — `organization_id: { in: [...] }` never matches NULL
+# in SQL, so without this an org-less row becomes invisible to every
+# org-scoped actor, including its own creator, the moment organization
+# stops being required. A required-org model must NOT get this OR-null
+# branch (it would be meaningless dead code — organization_id is never null
+# there).
+# ---------------------------------------------------------------------------
+
+class TestOrgRelationshipOptional:
+    @staticmethod
+    def _schema(organization_required: bool) -> dict:
+        return {
+            "definitions": {
+                "organization": {
+                    "type": "object",
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name"] + (["organization_id"] if organization_required else []),
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", nullable=not organization_required),
+                    },
+                },
+            }
+        }
+
+    def test_flag_true_when_organization_optional(self):
+        ctx = build_context(_entity("widget"), self._schema(organization_required=False))
+        assert ctx["should_filter_by_org"] is True
+        assert ctx["org_relationship_optional"] is True
+
+    def test_flag_false_when_organization_required(self):
+        ctx = build_context(_entity("widget"), self._schema(organization_required=True))
+        assert ctx["should_filter_by_org"] is True
+        assert ctx["org_relationship_optional"] is False
+
+    def test_flag_false_when_no_organization_relationship_at_all(self):
+        schema = {
+            "definitions": {
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+            }
+        }
+        ctx = build_context(_entity("widget"), schema)
+        assert ctx["should_filter_by_org"] is False
+        assert ctx["org_relationship_optional"] is False
+
+
+class TestOrgRelationshipOptionalRenderedTemplates:
+    """Deviation-injection coverage for the four templates patched to admit
+    NULL-organization rows: getters.ts.jinja2 (list + detail),
+    actions.ts.jinja2 (delete), api_detail_route.ts.jinja2 (PUT + DELETE),
+    api_import_route.ts.jinja2 (import match-by-key)."""
+
+    @staticmethod
+    def _entity_ctx(organization_required: bool):
+        schema = TestOrgRelationshipOptional._schema(organization_required)
+        return build_context(_entity("widget"), schema)
+
+    @staticmethod
+    def _env():
+        from generate import _make_env
+        return _make_env()
+
+    def test_getters_list_admits_null_when_optional(self):
+        from generators import service_context
+        ctx = self._entity_ctx(organization_required=False)
+        full_ctx = {**ctx, **service_context(ctx, TestOrgRelationshipOptional._schema(False))}
+        rendered = self._env().get_template('getters.ts.jinja2').render(**full_ctx)
+        assert 'OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }]' in rendered
+
+    def test_getters_list_stays_unfiltered_or_when_required(self):
+        from generators import service_context
+        ctx = self._entity_ctx(organization_required=True)
+        full_ctx = {**ctx, **service_context(ctx, TestOrgRelationshipOptional._schema(True))}
+        rendered = self._env().get_template('getters.ts.jinja2').render(**full_ctx)
+        assert 'and.push({ organization_id: { in: associatedOrganizationIds } });' in rendered
+        assert 'organization_id: null' not in rendered
+
+    def test_api_detail_route_admits_null_when_optional(self):
+        ctx = self._entity_ctx(organization_required=False)
+        rendered = self._env().get_template('api_detail_route.ts.jinja2').render(**ctx)
+        assert rendered.count('OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }]') == 2
+
+    def test_api_detail_route_stays_unfiltered_or_when_required(self):
+        ctx = self._entity_ctx(organization_required=True)
+        rendered = self._env().get_template('api_detail_route.ts.jinja2').render(**ctx)
+        assert 'organization_id: null' not in rendered
