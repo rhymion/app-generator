@@ -6,6 +6,27 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`approval_flow.preceded_by`/`followed_by` rendered a different label on the View page than on
+  the Edit page for the same row** (cmd_613): View rendered `approver_role.name || entity_name`
+  (dropping `entity_name` entirely whenever a role was set), Edit rendered
+  `entity_name + ' - ' + approver_role.name`. The legacy `secondaryLabelField` mechanism that caused
+  this (only honored in one of the several label-rendering call sites) is removed entirely — zero
+  remaining references, grep-verified. `labelField` is now the composite list form
+  (`[entity_name, approver_role.name]`), rendered identically everywhere via the existing
+  `build_label_expression()` helper. Fixed a related crash: `generators_test.py`'s list-children
+  spec-label prediction called `.split()` directly on a labelField, assuming it was always a string
+  — list-form labelFields now route through the existing `_seed_relation_label_value()` helper.
+  Self-referential many-to-many searches (the pattern `preceded_by`/`followed_by` use) now pass the
+  record being edited through as `context.formValues`, making the previously-unreachable
+  `autocomplete_filter.ts` insertion point usable for this case; every other entity's default `{}`
+  stub is unaffected. Added `lib/approval_flow/autocomplete_filter.ts`: narrows
+  `preceded_by`/`followed_by` candidates to the same `entity_name` as the record being edited
+  (same-`entity_name` approval chains — e.g. a `purchase_order` chain's draft/manager/finance
+  stages — are an intentionally supported configuration, not test-data noise). Verified: 1130
+  pytest passing (0 skipped), full `test:e2e:cy:api` gate 236/236 passing (0 skipped), plus a new
+  hand-written `approval_flow_same_entity_autocomplete_filter.cy.ts` (2/2 passing) proving
+  same-entity_name candidates appear, different-entity_name candidates don't, and View/Edit render
+  the identical label.
 - **x-reservation test-helper generation only ever resolved the pool entity's criteria-field FK,
   silently omitting any OTHER required FK on the pool entity** (cmd_602): when a pool entity (e.g.
   `inventory`) has a required FK beyond the one named in `x-reservation.request.criteria` (e.g.
