@@ -241,6 +241,26 @@ def _render(env: Environment, template_name: str, ctx: dict) -> str:
     return tmpl.render(**ctx)
 
 
+# test_spec.cy.ts.jinja2 (cmd_614) emits the exactRe() helper unconditionally
+# — the old has_self_ref_deps gate wrapped only the function definition, not
+# each of its 8 call sites, which keep their own unrelated gates
+# (after_create_id_is_expr, can_list/can_view, …). Entities whose spec never
+# reaches any call site end up with a defined-but-unused function, which
+# trips eslint's no-unused-vars and fails the lint gate. Prune the helper
+# post-render when the spec never actually calls it.
+_EXACT_RE_HELPER_PATTERN = re.compile(
+    r"\n// A dependency record's display name can share a substring with another\n"
+    r".*?\nfunction exactRe\(text: string\): RegExp \{\n.*?\n\}\n",
+    re.DOTALL,
+)
+
+
+def _prune_unused_exact_re(rendered: str) -> str:
+    if rendered.count('exactRe(') > 1:
+        return rendered
+    return _EXACT_RE_HELPER_PATTERN.sub('\n', rendered, count=1)
+
+
 # Records every generated file for this run; reset at the top of generate().
 _manifest = ManifestRecorder()
 
@@ -1663,7 +1683,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             # e2e spec (desktop)
             spec_ctx = spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)
             _write(cypress_e2e / f'{parent}.cy.ts',
-                   _render(env, 'test_spec.cy.ts.jinja2', spec_ctx))
+                   _prune_unused_exact_re(_render(env, 'test_spec.cy.ts.jinja2', spec_ctx)))
 
             # e2e spec (mobile) — separate file under cypress/e2e/mobile/.
             # The mobile list view renders CardListClient instead of the
