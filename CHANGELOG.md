@@ -6,6 +6,31 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **The CSV-import commit-time CREATE path built its Prisma `create()` call entirely from the
+  dry-run-computed row data, bypassing the same auto-create-bridge-FK pre-create mechanism
+  (`one_to_one_pre_creates` / FK-merge) that the normal `add<Entity>()` service function already
+  uses** (cmd_614): any entity with a required internal bridge FK (e.g. `approvable_id` on an
+  `x-approval` entity) failed CSV-import row creation at commit time with a Prisma
+  `PrismaClientValidationError` for the missing FK, even after cmd_609 correctly let
+  `import_can_create` come out `true` for such entities. The dry run (which never touches the DB)
+  reported success and issued a `confirmToken`, making the failure visible only on commit — a
+  concrete trap for anyone confirming a dry run that "succeeded". Concrete trigger: `goods_receipt_line`
+  (an `x-approval` entity) importing a CSV row whose natural key doesn't match an existing row.
+  `api_import_route.ts.jinja2`'s commit-time create branch now consumes the same
+  `one_to_one_pre_creates` / `one_to_one_fk_data_lines` context vars `service.ts.jinja2` already
+  renders — not a new mechanism, not a hand-listed entity name — gated on whether the entity has
+  any auto-create one-to-one relations at all, so entities without one render byte-identical output
+  to before. `one_to_one_fk_data_lines` is now also exposed standalone in `build_context.py`'s
+  returned context dict (previously inlined only into `parent_data_obj`, unavailable to any
+  template other than `service.ts.jinja2`). Verified both directions: a non-bridge entity's
+  generated import route is unchanged, and a direct DB-level replay of the fixed
+  `goods_receipt_line` transaction (against a real Postgres instance) succeeds and correctly
+  populates `approvable_id`, while the same data without the fix reproduces the original
+  `PrismaClientValidationError`. New/updated pytest coverage in `test_import_template_branches.py`
+  and `test_auto_create_oto.py` fails against the pre-fix template (deviation injection). Full
+  `code_generator` pytest suite: 1134 passed, 0 skipped. See
+  `docs/knowledge/import-create-missing-bridge-fk-fix.md`.
+
 - **An org-scoped entity's `organization` relationship can now be declared optional without
   breaking CREATE or making org-less rows invisible.** Two gaps, both only surfacing once an
   entity's `organization` relationship is removed from `required`: (1) `service.ts.jinja2`'s
