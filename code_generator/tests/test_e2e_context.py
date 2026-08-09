@@ -345,3 +345,128 @@ def test_api_spec_context_x_relationships_list_includes_composite_label_field():
     fields = [r["field"] for r in ctx["x_relationships_list"]]
     assert "from_inventory" in fields
     assert ctx["x_relationships_list"][fields.index("from_inventory")]["display_col"] == "from_inventory_name"
+
+
+def _server_value_shift_schema(user_id_server_value=None):
+    user_id_field = {
+        "type": "string",
+        "x-relationship": {"type": "many-to-one", "target": "user", "labelField": "name"},
+    }
+    if user_id_server_value is not None:
+        user_id_field["x-server-value"] = user_id_server_value
+    return {
+        "definitions": {
+            "user": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+            },
+            "shift": {
+                "type": "object",
+                "required": ["id", "user_id", "start_time"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "user_id": user_id_field,
+                    "start_time": {"type": "string", "format": "date-time"},
+                },
+            },
+            "shift_detail": {"allOf": [{"$ref": "#/definitions/shift"}]},
+        },
+    }
+
+
+def test_spec_context_ua_field_without_server_value_gets_select_autocomplete():
+    """Sanity check (pre-fix baseline behavior, unaffected): a plain FK to
+    user with no x-server-value still gets a selectAutocomplete fill command
+    — the field genuinely renders as a form autocomplete."""
+    ctx = spec_context(
+        "shift", [], _server_value_shift_schema(None), "shift", "shift_detail",
+        _entity("shift")["generate_config"],
+    )
+    assert any("selectAutocomplete('User'" in cmd for cmd in ctx["required_fill_cmds"])
+    assert any("selectAutocomplete('User'" in cmd for cmd in ctx["all_fill_cmds"])
+
+
+def test_spec_context_ua_field_with_server_value_excluded_from_fill_commands():
+    """cmd_611/612: an x-server-value field is always readonly and excluded
+    from every form input — a UI test trying cy.selectAutocomplete() on it
+    fails outright (`Expected to find element: 'filter', but never found
+    it`) because the form never renders that autocomplete in the first
+    place. The fill-command generator must not emit that command."""
+    ctx = spec_context(
+        "shift", [], _server_value_shift_schema("actor"), "shift", "shift_detail",
+        _entity("shift")["generate_config"],
+    )
+    assert not any("selectAutocomplete('User'" in cmd for cmd in ctx["required_fill_cmds"])
+    assert not any("selectAutocomplete('User'" in cmd for cmd in ctx["all_fill_cmds"])
+
+
+def test_spec_context_ua_field_with_server_value_dict_form_also_excluded():
+    """Dict form (with override_permission) is equally excluded — the field
+    is a service parameter for the API path, but still never a form input."""
+    ctx = spec_context(
+        "shift", [], _server_value_shift_schema({"source": "actor", "override_permission": "delete"}),
+        "shift", "shift_detail", _entity("shift")["generate_config"],
+    )
+    assert not any("selectAutocomplete('User'" in cmd for cmd in ctx["required_fill_cmds"])
+    assert not any("selectAutocomplete('User'" in cmd for cmd in ctx["all_fill_cmds"])
+
+
+def _server_value_primary_shift_schema(user_id_server_value):
+    """Same shape as leave_request: user_id is BOTH the x-display.table
+    primary field AND x-server-value -- exercises the separate
+    edit_primary_cmd code path (3.3 mixed-changes edit test), distinct from
+    req_ua_spec/all_ua_spec (create/fail-edit fill commands)."""
+    return {
+        "definitions": {
+            "user": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+            },
+            "shift": {
+                "type": "object",
+                "required": ["id", "user_id", "start_time"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "user_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "user", "labelField": "name"},
+                        "x-server-value": user_id_server_value,
+                    },
+                    "start_time": {"type": "string", "format": "date-time"},
+                },
+                "x-display": {"table": [{"user": {"primary": True}}]},
+            },
+            "shift_detail": {"allOf": [{"$ref": "#/definitions/shift"}]},
+        },
+    }
+
+
+def test_spec_context_server_value_primary_field_skips_edit_primary_cmd():
+    """cmd_611/612: when the x-display.table PRIMARY field is itself
+    x-server-value (leave_request.user_id's exact shape), the 3.3
+    mixed-changes edit test must not try to touch it via
+    cy.selectAutocomplete() either -- edit_primary_cmd must be None, not a
+    command against a form input that doesn't exist. populate_count_3_3
+    also drops back to 1 -- the 2-row FK-switch setup is meaningless for a
+    field the UI can never edit."""
+    ctx = spec_context(
+        "shift", [], _server_value_primary_shift_schema({"source": "actor", "override_permission": "delete"}),
+        "shift", "shift_detail", _entity("shift")["generate_config"],
+    )
+    assert ctx["edit_primary_cmd"] is None
+    assert ctx["populate_count_3_3"] == 1
+
+
+def test_spec_context_non_server_value_primary_field_still_gets_edit_primary_cmd():
+    """Sanity check (pre-fix baseline behavior, unaffected): a primary FK to
+    user with no x-server-value still gets the selectAutocomplete
+    edit_primary_cmd and populate_count_3_3 == 2."""
+    ctx = spec_context(
+        "shift", [], _server_value_primary_shift_schema(None), "shift", "shift_detail",
+        _entity("shift")["generate_config"],
+    )
+    # cmd_618: base instance is now letter-indexed ('Test User A').
+    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User', 'Test User A');"
+    assert ctx["populate_count_3_3"] == 2

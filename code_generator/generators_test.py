@@ -2568,9 +2568,23 @@ def spec_context(
 
     # Collect ALL user_account FK fields (required and optional) for fill/assert commands.
     # req_ua_spec: required only (for section 2.1, 5.x); all_ua_spec: all (for section 2.2)
+    # x-server-value fields are excluded here (cmd_611/612): the field is
+    # always readonly and excluded from every form input (create and edit) —
+    # see docs/knowledge/x-server-value-actor-delegation.md — so a UI test
+    # trying to cy.selectAutocomplete() it fails outright (`Expected to find
+    # element: 'filter', but never found it`), since the form never renders
+    # that autocomplete input in the first place. The API-level test scaffold
+    # is unaffected: it supplies the value directly as a request body field,
+    # not through this UI form-fill path.
+    _server_value_prop_names = {
+        p for p, pdef in properties.items()
+        if isinstance(pdef, dict) and pdef.get('x-server-value') is not None
+    }
     req_ua_spec = []
     all_ua_spec = []
     for r in relationships:
+        if r['prop_name'] in _server_value_prop_names:
+            continue
         if r['target'] == 'user' and r['prop_name'] not in ('creator_id', 'updater_id'):
             var_name = to_camel_case(re.sub(r'_id$', '', r['prop_name']))
             field_label = to_title_case(re.sub(r'_id$', '', r['prop_name']))
@@ -3079,11 +3093,19 @@ def spec_context(
 
     # Section 3.3: primary field edit command
     use_deps_in_3_3 = False
+    # cmd_611/612: a primary FK that is also x-server-value never renders as
+    # a form autocomplete (it's excluded from every form input by design —
+    # see the req_ua_spec/all_ua_spec exclusion above), so the mixed-changes
+    # edit test must not try to touch it at all, and the 2-row FK-switch
+    # populate count is meaningless for a field the UI can never edit.
+    prim_is_server_value = bool(prim_is_fk and f'{prim}_id' in _server_value_prop_names)
     # If the primary field is a FK the form renders an autocomplete picker, and the
     # populate() helper creates a fresh target row per index — so we need at least
     # two rows in the DB for the test to switch from "Test X 1" to "Test X 2".
-    populate_count_3_3 = 2 if prim_is_fk else 1
-    if has_edit_primary and edit_field_label and edit_update_value:
+    populate_count_3_3 = 2 if (prim_is_fk and not prim_is_server_value) else 1
+    if prim_is_server_value:
+        edit_primary_cmd = None
+    elif has_edit_primary and edit_field_label and edit_update_value:
         prim_edit_meta = next(
             (f for f in fields if f.get('label') == edit_field_label), None
         )

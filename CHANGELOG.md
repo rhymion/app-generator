@@ -6,6 +6,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Generated UI test scaffold no longer tries to fill an `x-server-value` field through the
+  form.** Two `spec_context()` code paths (create/fail-edit fill commands via
+  `req_ua_spec`/`all_ua_spec`, and the "edits with mixed changes" test's `edit_primary_cmd` when
+  the field is also the entity's `x-display.table` primary column) generated
+  `cy.selectAutocomplete()` against a field that's always excluded from every form input by
+  `x-server-value`'s design — the form never renders that autocomplete, so the generated test
+  failed outright (`Expected to find element: 'filter', but never found it`). Both paths now skip
+  such fields entirely. See `docs/knowledge/x-server-value-actor-delegation.md`.
+
 - **Generated test helper's find-or-create dep block gave `create()` an `include` for
   composite-labelField resolution but not the paired `findFirst()`, a latent TS2551/TS2339 type error
   in every affected `cypress/support/*/helper.ts`** (cmd_615a): when a many-to-one relationship's
