@@ -269,6 +269,11 @@ def _seed_relation_label_value(
         day = unique_index if unique_index is not None else 1
         return f'2025-01-{day:02d}'
     title = to_title_case(label_field) if isinstance(label_field, str) else 'Item'
+    if target == 'user' and unique_index is not None:
+        # is_user_account targets are excluded from the callIndex-prefixed
+        # `0_{i}` format (test_helper.ts.jinja2 §4.2/cmd614) — see the
+        # matching branch in `_seed_path_part` below.
+        return f'Test {title} {unique_index}'
     return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
 
 
@@ -331,6 +336,14 @@ def _seed_path_part(
 
     if final_field == 'name':
         title = to_title_case(cursor_entity)
+        if cursor_entity == 'user':
+            # is_user_account targets are excluded from Phase2's per-call
+            # callIndex namespace (test_helper.ts.jinja2 §4.2/cmd614) — the
+            # primary_fk_dep.is_user_account branch creates `Test User ${i}`
+            # (plain loop index), never `${callIndex}_${i}`. Mirroring the
+            # `0_{unique_index}` callIndex format here made every populated
+            # is_user_account row's label assertion unfindable (cmd_625b/625g).
+            return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title} A'
         return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
     if prop_type == 'string':
         title = to_title_case(final_field)
