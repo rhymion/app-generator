@@ -35,7 +35,13 @@ async function _create{{ pascal }}BaseDeps() {
 {% else %}
   const testUser = await getTestUser();
 {% for dep in non_self_deps %}
-{% if dep.lookup_field %}
+{% if dep.is_actor_delegated %}
+  // x-server-value (source: actor) always overwrites this FK with the
+  // acting test user's id on create, no matter what this helper supplies —
+  // resolve directly to the actor instead of creating an unrelated decoy
+  // row that would never match what the server actually writes (cmd_630).
+  const {{ dep.var_name }}Record = testUser;
+{% elif dep.lookup_field %}
   // Idempotent: re-use an existing row when the helper is called more than
   // once in a single test (e.g. parent populator + child populator).
   let {{ dep.var_name }}Record = await prisma.{{ dep.target }}.findFirst({
@@ -262,7 +268,13 @@ export async function populate{{ pascal }}Dependencies() {
 {% else %}
   const testUser = await getTestUser();
 {% for dep in deps %}
-{% if dep.lookup_field %}
+{% if dep.is_actor_delegated %}
+  // x-server-value (source: actor) always overwrites this FK with the
+  // acting test user's id on create, no matter what this helper supplies —
+  // resolve directly to the actor instead of creating an unrelated decoy
+  // row that would never match what the server actually writes (cmd_630).
+  const {{ dep.var_name }}Record = testUser;
+{% elif dep.lookup_field %}
   // Idempotent: re-use an existing row (created by an earlier helper call in
   // the same test) instead of creating a duplicate that would trip @unique.
   let {{ dep.var_name }}Record = await prisma.{{ dep.target }}.findFirst({
