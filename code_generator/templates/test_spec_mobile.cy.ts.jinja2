@@ -17,6 +17,9 @@ const MOBILE = { width: 375, height: 667 }; // iPhone SE
 describe('Testing {{ title }} pages and their behavior [mobile]', () => {
   beforeEach(() => {
     cy.viewport(MOBILE.width, MOBILE.height);
+{% if primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields %}
+    cy.task('db:reset{{ pascal }}CallSeq');
+{% endif %}
     cy.task('db:reset');
     cy.task('db:seed');
     cy.task('db:grantAllPermissions');
