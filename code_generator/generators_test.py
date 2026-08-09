@@ -2735,6 +2735,14 @@ def spec_context(
     # Priority: FK primary → explicit non-name primary → name → fallback.
     prim = _get_primary_display_field_name(parent_def)
     prim_is_fk = bool(prim and f'{prim}_id' in (parent_def.get('properties') or {}))
+    # cmd_611/612: a primary FK that is also x-server-value is never rendered
+    # as a form autocomplete, so 3.3's "mixed changes" edit never touches it
+    # (see edit_primary_cmd's prim_is_server_value gate below) — the row/field
+    # label after that edit must therefore stay at its as-created value, not
+    # the "as-if-edited" letter-suffixed value list_id_updated/check_field_updated
+    # would otherwise compute (cmd_625b: leave_request 3.3 asserted 'Test User A'
+    # after an edit that never changed the User field, which stayed 'Test User 0_1').
+    prim_is_server_value = bool(prim_is_fk and f'{prim}_id' in _server_value_prop_names)
     has_name = any(f['prop_name'] == 'name' for f in fields)
     prim_meta = next((f for f in fields if f['prop_name'] == prim), None) if prim else None
     # Default values; overridden in branches where the primary FK is rendered
@@ -2777,13 +2785,13 @@ def spec_context(
         # whether or not the entity actually carries this composite unique —
         # making it a safe, deterministic edit target unconditionally, not just
         # for the entities currently known to collide.
-        list_id_updated = _seed_relation_label_value(
+        list_id_updated = (_seed_relation_label_value(
             primary_rel['target'],
             primary_rel.get('label_field', 'name'),
             primary_rel.get('label_field_is_date', False),
             schema,
-        ) if primary_rel else list_id_1
-        has_edit_primary = True
+        ) if primary_rel else list_id_1) if not prim_is_server_value else list_id_1
+        has_edit_primary = not prim_is_server_value
         edit_field_label = dep_title
         edit_update_value = list_id_updated
         check_field_label = dep_title
